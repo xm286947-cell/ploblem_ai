@@ -1,0 +1,19 @@
+version: "1.0"
+
+matching:
+  extensions: [".pdf"]
+  case_sensitive: false
+  trim_whitespace: true
+  normalize_full_width: true
+  allow_extension_completion: true
+  allow_stem_match: true
+  allow_itr_fallback: true
+  recursive: true
+
+match_priority:
+  - EXACT_FILENAME
+  - NORMALIZED_FILENAME
+  - STEM_MATCH
+  - ITR_FALLBACK
+
+multiple_match_policy: MARK_AMBIGUOUS

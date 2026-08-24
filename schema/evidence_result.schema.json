@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_file",
+    "sections",
+    "unclassified_blocks",
+    "parse_warnings"
+  ],
+  "properties": {
+    "report_file": {
+      "type": "string"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "section_type",
+          "title",
+          "content",
+          "page_refs",
+          "confidence"
+        ],
+        "properties": {
+          "section_type": {
+            "type": "string",
+            "enum": [
+              "problem_description",
+              "event_replay",
+              "impact",
+              "trc_occurrence",
+              "trc_escape",
+              "mrc_occurrence",
+              "mrc_escape",
+              "five_why",
+              "root_cause",
+              "corrective_actions",
+              "preventive_actions",
+              "management_actions",
+              "technical_actions",
+              "action_status",
+              "unknown"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "page_refs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          }
+        }
+      }
+    },
+    "unclassified_blocks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "parse_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

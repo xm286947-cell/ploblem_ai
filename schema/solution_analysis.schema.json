@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M8.3 Solution Analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "similarity_reference", "analysis", "analysis_status", "warnings"],
+  "properties": {
+    "metadata": {
+      "type": "object", "additionalProperties": false,
+      "required": ["query_id", "case_id", "source_analysis_context", "source_similarity_analysis", "analyzer_version", "prompt_version", "model_provider", "model_name", "generated_at"],
+      "properties": {
+        "query_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "source_analysis_context": {"type": "string"},
+        "source_similarity_analysis": {"type": "string"},
+        "analyzer_version": {"type": "string"},
+        "prompt_version": {"type": "string"},
+        "model_provider": {"type": "string"},
+        "model_name": {"type": "string"},
+        "generated_at": {"type": "string"}
+      }
+    },
+    "similarity_reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["overall_score", "overall_level", "analysis_status"],
+      "properties": {
+        "overall_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "overall_level": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "UNKNOWN"]},
+        "analysis_status": {"type": "string"}
+      }
+    },
+    "analysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["historical_solution_summary", "corrective_actions", "preventive_actions", "verification_evidence", "closure_status", "effectiveness", "applicability", "reusable_actions", "adaptation_required", "reuse_risks", "evidence_gaps", "analysis_summary", "confidence"],
+      "properties": {
+        "historical_solution_summary": {"type": "string"},
+        "corrective_actions": {"type": "array", "items": {"type": "string"}},
+        "preventive_actions": {"type": "array", "items": {"type": "string"}},
+        "verification_evidence": {"type": "array", "items": {"type": "string"}},
+        "closure_status": {"type": "string", "enum": ["CLOSED", "PARTIAL", "NOT_CLOSED", "UNKNOWN"]},
+        "effectiveness": {"type": "string", "enum": ["EFFECTIVE", "PARTIALLY_EFFECTIVE", "INEFFECTIVE", "UNKNOWN"]},
+        "applicability": {"type": "string", "enum": ["DIRECT_REUSE", "PARTIAL_REUSE", "REFERENCE_ONLY", "NOT_APPLICABLE", "UNKNOWN"]},
+        "reusable_actions": {"type": "array", "items": {"type": "string"}},
+        "adaptation_required": {"type": "array", "items": {"type": "string"}},
+        "reuse_risks": {"type": "array", "items": {"type": "string"}},
+        "evidence_gaps": {"type": "array", "items": {"type": "string"}},
+        "analysis_summary": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "analysis_status": {"type": "string", "enum": ["SUCCESS", "SKIPPED", "AI_OUTPUT_INVALID", "AI_ANALYSIS_FAILED"]},
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {"code": {"type": "string"}, "message": {"type": "string"}}
+      }
+    }
+  }
+}

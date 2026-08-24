@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block body %}
+<div class="page-head"><div><h1>产品配置</h1><p class="muted">配置可接入的产品及其默认问题领域。产品默认值不会覆盖问题自身属性。</p></div></div>
+<section class="data-card"><form method="post" action="/settings/products" class="inline-form">
+  <input name="product_code" placeholder="产品编码，如 ROBOT" required><input name="product_name" placeholder="产品名称" required>
+  <input name="product_kind" placeholder="产品类型" value="PRODUCT"><select name="default_issue_domain"><option value="AUTO">自动判断</option><option value="SOFTWARE">软件</option><option value="HARDWARE">硬件</option><option value="MECHANICAL">机械</option><option value="EMBEDDED">嵌入式</option></select><input name="sort_order" type="number" value="10"><button class="btn btn-primary">新增 / 保存</button>
+</form></section>
+<section class="data-card"><div class="table-wrap"><table class="data-table"><thead><tr><th>编码</th><th>名称</th><th>类型</th><th>默认问题领域</th><th>字段映射</th><th>状态</th></tr></thead><tbody>{% for p in products %}<tr><td><b>{{p.product_code}}</b></td><td>{{p.product_name}}</td><td>{{p.product_kind}}</td><td>{{p.default_issue_domain}}</td><td><a href="/settings/mapping?business_type={{p.product_code}}">{% if mapping_states.get(p.product_code) %}已启用，管理 →{% else %}未初始化，去配置 →{% endif %}</a></td><td>{{'启用' if p.enabled else '停用'}}</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

@@ -1,0 +1,13 @@
+{
+  "decision": "LIKELY_REPEAT",
+  "confidence": 0.88,
+  "decision_reason": "故障对象、触发条件和TRC高度一致，但当前问题根因尚未完成实证确认。",
+  "evidence_chain": [
+    {"dimension":"trc","strength":"STRONG","query_evidence":["接收队列拥堵"],"case_evidence":["接收缓存拥塞"],"reason":"技术失效链路一致"},
+    {"dimension":"trigger_condition","strength":"STRONG","query_evidence":["总线ID过多"],"case_evidence":["高报文负载"],"reason":"触发条件一致"}
+  ],
+  "key_differences": ["当前问题根因尚未验证"],
+  "validation_required": ["复核接收队列和控制位状态"],
+  "risks": ["不得直接照搬历史措施"],
+  "recommended_actions": ["优先复用历史TRC分析路径"]
+}

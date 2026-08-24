@@ -1,0 +1,24 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp/
+.venv/
+venv/
+
+# Runtime databases and local state
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Runtime diagnostics and generated AI data
+output/logs/
+output/diagnostics/
+output/raw_ai/
+
+# Local release archives and spreadsheet inspection artifacts
+releases/*.zip
+*.inspect.ndjson
+*_preview.png
+

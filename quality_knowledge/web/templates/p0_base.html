@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}质量问题分析{% endblock %}</title>
+  {% block page_styles %}{% endblock %}
+  <link rel="stylesheet" href="/p0/static/app.css?v=p1-rc4-ued-shell">
+  <link rel="stylesheet" href="/p0/static/p0_ued_bridge.css?v=p1-rc4">
+</head>
+<body class="p0-page">
+<div class="app-shell">
+  <aside class="side-nav" aria-label="主导航">
+    <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
+    <nav class="main-nav">
+      <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/data-intake') %}active{% endif %}" href="/p0/data-intake">数据接入</a>
+      <div class="nav-divider"></div>
+      <div class="nav-label">管理</div>
+      <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
+      <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
+    </nav>
+    <div class="side-foot"><a href="/p0/issues">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a></div>
+  </aside>
+  <div class="app-main">
+    <header class="top-bar">
+      <div class="breadcrumb">质量问题分析 <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div>
+      <div class="top-actions"><a href="/p0/data-intake">导入数据</a><a href="/p0/settings">系统配置</a></div>
+    </header>
+    <main class="content">{% block body %}{% endblock %}</main>
+  </div>
+</div>
+{% block page_scripts %}{% endblock %}
+</body>
+</html>

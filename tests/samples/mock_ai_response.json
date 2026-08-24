@@ -1,0 +1,61 @@
+{
+  "standard_description": "在指定条件下，目标对象出现异常并影响业务结果。",
+  "problem_summary": "目标对象在触发条件下发生异常。",
+  "phenomenon": [
+    "运行异常"
+  ],
+  "failure_object": [
+    "目标对象"
+  ],
+  "trigger_condition": [
+    "指定条件"
+  ],
+  "failure_mechanism": [
+    "异常状态未被正确处理"
+  ],
+  "contributing_factors": [
+    "边界条件覆盖不足"
+  ],
+  "trc_occurrence_standard": "异常处理逻辑存在缺陷",
+  "trc_escape_standard": "测试未覆盖对应边界条件",
+  "mrc_occurrence_standard": "",
+  "mrc_escape_standard": "",
+  "ai_classification": {
+    "cause_level1": "软件设计",
+    "cause_level2": "异常处理",
+    "reason": "根因与异常处理逻辑相关",
+    "confidence": 0.88
+  },
+  "reusable_actions": [
+    "补充异常处理设计规则",
+    "增加边界条件测试"
+  ],
+  "case_summary": "目标对象在指定条件下发生运行异常，根因与异常处理逻辑和边界覆盖不足有关。",
+  "normalized_problem": "目标对象在指定条件下运行异常",
+  "phenomenon_tags": [
+    "运行异常"
+  ],
+  "failure_object_tags": [
+    "目标对象"
+  ],
+  "trigger_tags": [
+    "指定条件"
+  ],
+  "failure_mechanism_tags": [
+    "异常处理缺陷"
+  ],
+  "cause_tags": [
+    "设计缺陷",
+    "覆盖不足"
+  ],
+  "solution_tags": [
+    "异常处理",
+    "边界测试"
+  ],
+  "keywords": [
+    "运行异常",
+    "异常处理",
+    "边界条件"
+  ],
+  "retrieval_text": "组织 IPMT-A SPDT-A；问题：目标对象在指定条件下运行异常；TRC：异常处理逻辑缺陷；流出：边界条件测试不足；措施：补充异常处理设计与边界测试。"
+}

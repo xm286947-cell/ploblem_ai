@@ -1,0 +1,129 @@
+{
+  "metadata": {
+    "itr_id": "ITR-0001",
+    "assessment_year": "2026",
+    "assessment_month": "07",
+    "report_filename": "ITR-0001.pdf",
+    "source_excel": "input/cases.xlsx",
+    "source_report": "input/reports/ITR-0001.pdf",
+    "builder_version": "1.0.0",
+    "schema_version": "1.0",
+    "fusion_rule_version": "1.0",
+    "prompt_version": "1.0",
+    "model_version": "",
+    "source_file_version": "1.0",
+    "created_at": "2026-07-22T00:00:00Z",
+    "updated_at": "2026-07-22T00:00:00Z",
+    "generated_at": "2026-07-22T00:00:00Z",
+    "parse_status": "UNKNOWN_STATUS",
+    "evidence_status": "REPORT_NOT_PARSED"
+  },
+  "business_context": {
+    "ipmt": "示例IPMT",
+    "spdt": "示例SPDT",
+    "responsible_department_level2": "示例部门",
+    "organization_path": [
+      "示例IPMT",
+      "示例SPDT",
+      "示例部门"
+    ],
+    "product": "",
+    "domain": ""
+  },
+  "problem": {
+    "original_description": "示例问题描述",
+    "report_description": "",
+    "standard_description": "",
+    "problem_summary": "",
+    "phenomenon": [],
+    "failure_object": [],
+    "trigger_condition": [],
+    "impact": [],
+    "event_replay": []
+  },
+  "analysis": {
+    "trc": {
+      "occurrence": {
+        "original": "",
+        "report": "",
+        "standard": "",
+        "confidence": 0.0,
+        "evidence_refs": []
+      },
+      "escape": {
+        "original": "",
+        "report": "",
+        "standard": "",
+        "confidence": 0.0,
+        "evidence_refs": []
+      }
+    },
+    "mrc": {
+      "occurrence": {
+        "original": "",
+        "report": "",
+        "standard": "",
+        "confidence": 0.0,
+        "evidence_refs": []
+      },
+      "escape": {
+        "original": "",
+        "report": "",
+        "standard": "",
+        "confidence": 0.0,
+        "evidence_refs": []
+      }
+    },
+    "five_why": [],
+    "root_cause": [],
+    "failure_mechanism": [],
+    "contributing_factors": []
+  },
+  "classification": {
+    "original": {
+      "cause_level1": "",
+      "cause_level2": ""
+    },
+    "report_verified": {
+      "cause_level1": "",
+      "cause_level2": "",
+      "evidence_refs": []
+    },
+    "ai_inferred": {
+      "cause_level1": "",
+      "cause_level2": "",
+      "reason": "",
+      "confidence": 0.0
+    },
+    "classification_conflict": false,
+    "conflict_description": ""
+  },
+  "solution": {
+    "original_solution": [],
+    "corrective_actions": [],
+    "preventive_actions": [],
+    "management_actions": [],
+    "technical_actions": [],
+    "reusable_actions": [],
+    "action_status": []
+  },
+  "knowledge": {
+    "case_summary": "",
+    "normalized_problem": "",
+    "phenomenon_tags": [],
+    "failure_object_tags": [],
+    "trigger_tags": [],
+    "failure_mechanism_tags": [],
+    "cause_tags": [],
+    "solution_tags": [],
+    "keywords": [],
+    "retrieval_text": "",
+    "quality_flags": [
+      "MISSING_ROOT_CAUSE",
+      "MISSING_PREVENTIVE_ACTION"
+    ],
+    "ai_model": "",
+    "prompt_version": "1.0",
+    "generated_at": "2026-07-22T00:00:00Z"
+  }
+}

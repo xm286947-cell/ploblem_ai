@@ -1,0 +1,44 @@
+version: "1.0"
+normalization:
+  null_values: ["", "N/A", "NA", "未填写"]
+  boolean_mapping:
+    true: ["是", "有", "true", "1", "y", "yes"]
+    false: ["否", "无", "false", "0", "n", "no"]
+  list_separators: [",", "，", ";", "；", "|", "\n"]
+  product_mapping:
+    "PLC编程软件": "PLC"
+    "PLC Software": "PLC"
+    "PLC软件": "PLC"
+  organization_mapping:
+    ipmt:
+      "工业自动化IPMT": "工业自动化"
+      "工业自动化 IPMT": "工业自动化"
+    spdt:
+      "PLC SPDT": "PLC"
+      "PLC产品SPDT": "PLC"
+    responsible_department_level2: {}
+  domain_mapping: {}
+  cause_mapping:
+    level1:
+      "软件设计类": "软件设计"
+      "设计问题": "软件设计"
+    level2: {}
+    level3: {}
+    level4: {}
+  field_types:
+    query_id: string
+    itr_id: string
+    ipmt: string
+    spdt: string
+    responsible_department_level2: string
+    product: string
+    domain: string
+    problem_description: string
+    cause_description: string
+    cause_level1: string
+    cause_level2: string
+    cause_level3: string
+    cause_level4: string
+    corrective_action: string
+    preventive_action: string
+    remark: string

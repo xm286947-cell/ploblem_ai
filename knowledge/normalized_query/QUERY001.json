@@ -1,0 +1,131 @@
+{
+  "metadata": {
+    "query_id": "QUERY001",
+    "source_raw_query": "knowledge/raw_query/QUERY001.json",
+    "raw_query_version": "2.0.0-m7.1",
+    "normalizer_version": "M7.2-N1",
+    "normalization_config_version": "1.0",
+    "generated_at": "2026-07-23T16:13:58.556183+00:00"
+  },
+  "original": {
+    "itr_id": "ITR-NEW-001",
+    "ipmt": "IPMT-A",
+    "spdt": "SPDT-A",
+    "responsible_department_level2": "软件部",
+    "product": "产品A",
+    "domain": "通信",
+    "problem_description": "CAN报文过多时软件异常重启",
+    "cause_description": "接收队列拥堵导致任务阻塞",
+    "cause_level1": "软件设计",
+    "cause_level2": "资源管理",
+    "cause_level3": "消息队列",
+    "cause_level4": "CAN接收缓存",
+    "corrective_action": "增加队列水位监控",
+    "preventive_action": "增加报文限流和压力测试",
+    "remark": "M7.1示例",
+    "query_id": "QUERY001"
+  },
+  "normalized": {
+    "itr_id": "ITR-NEW-001",
+    "ipmt": "IPMT-A",
+    "spdt": "SPDT-A",
+    "responsible_department_level2": "软件部",
+    "product": "产品A",
+    "domain": "通信",
+    "problem_description": "CAN报文过多时软件异常重启",
+    "cause_description": "接收队列拥堵导致任务阻塞",
+    "cause_level1": "软件设计",
+    "cause_level2": "资源管理",
+    "cause_level3": "消息队列",
+    "cause_level4": "CAN接收缓存",
+    "corrective_action": "增加队列水位监控",
+    "preventive_action": "增加报文限流和压力测试",
+    "remark": "M7.1示例",
+    "query_id": "QUERY001"
+  },
+  "extensions": {},
+  "normalization_trace": {
+    "itr_id": {
+      "original_value": "ITR-NEW-001",
+      "normalized_value": "ITR-NEW-001",
+      "rules": []
+    },
+    "ipmt": {
+      "original_value": "IPMT-A",
+      "normalized_value": "IPMT-A",
+      "rules": []
+    },
+    "spdt": {
+      "original_value": "SPDT-A",
+      "normalized_value": "SPDT-A",
+      "rules": []
+    },
+    "responsible_department_level2": {
+      "original_value": "软件部",
+      "normalized_value": "软件部",
+      "rules": []
+    },
+    "product": {
+      "original_value": "产品A",
+      "normalized_value": "产品A",
+      "rules": []
+    },
+    "domain": {
+      "original_value": "通信",
+      "normalized_value": "通信",
+      "rules": []
+    },
+    "problem_description": {
+      "original_value": "CAN报文过多时软件异常重启",
+      "normalized_value": "CAN报文过多时软件异常重启",
+      "rules": []
+    },
+    "cause_description": {
+      "original_value": "接收队列拥堵导致任务阻塞",
+      "normalized_value": "接收队列拥堵导致任务阻塞",
+      "rules": []
+    },
+    "cause_level1": {
+      "original_value": "软件设计",
+      "normalized_value": "软件设计",
+      "rules": []
+    },
+    "cause_level2": {
+      "original_value": "资源管理",
+      "normalized_value": "资源管理",
+      "rules": []
+    },
+    "cause_level3": {
+      "original_value": "消息队列",
+      "normalized_value": "消息队列",
+      "rules": []
+    },
+    "cause_level4": {
+      "original_value": "CAN接收缓存",
+      "normalized_value": "CAN接收缓存",
+      "rules": []
+    },
+    "corrective_action": {
+      "original_value": "增加队列水位监控",
+      "normalized_value": "增加队列水位监控",
+      "rules": []
+    },
+    "preventive_action": {
+      "original_value": "增加报文限流和压力测试",
+      "normalized_value": "增加报文限流和压力测试",
+      "rules": []
+    },
+    "remark": {
+      "original_value": "M7.1示例",
+      "normalized_value": "M7.1示例",
+      "rules": []
+    },
+    "query_id": {
+      "original_value": "QUERY001",
+      "normalized_value": "QUERY001",
+      "rules": []
+    }
+  },
+  "normalization_warnings": [],
+  "normalize_status": "SUCCESS"
+}

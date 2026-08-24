@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block breadcrumb %}系统配置 / 人工分析模板 / 编辑字段{% endblock %}{% block body %}
+<div class="page-header"><div><h1>编辑人工分析字段</h1><p class="muted">字段 Key 与字段类型创建后锁定，避免已有人工分析数据发生语义漂移。</p></div><a class="button" href="/settings/human-analysis">返回字段列表</a></div>
+
+<section class="card">
+  <div class="section-title"><h2>{{field.field_name}}</h2><span>Config V{{field.config_version}}</span></div>
+  <form method="post" action="/settings/human-analysis/fields/{{field.field_id}}" class="field-edit-grid">
+    <label>字段 Key<input value="{{field.field_key}}" disabled></label>
+    <label>字段类型<input value="{{field.field_type}}" disabled></label>
+    <label>字段名称<input name="field_name" value="{{field.field_name}}" required></label>
+    <label>排序<input name="display_order" type="number" value="{{field.display_order}}"></label>
+    <label class="wide">说明<textarea name="description">{{field.description or ''}}</textarea></label>
+    <label>默认值<input name="default_value" value="{{field.default_value or ''}}"></label>
+    <label>校验规则<input name="validation_rule" value="{{field.validation_rule or ''}}" placeholder="TEXT/LONG_TEXT 可填正则"></label>
+    <label><input type="checkbox" name="required" {% if field.required %}checked{% endif %}> 必填</label>
+    <label><input type="checkbox" name="enabled" {% if field.enabled %}checked{% endif %}> 启用</label>
+    <div class="wide field-edit-actions"><button class="primary">保存字段定义</button>{% if not field.enabled %}<button type="submit" form="delete-field-form" class="danger-button">删除停用字段</button>{% endif %}</div>
+  </form>
+  {% if not field.enabled %}<form id="delete-field-form" method="post" action="/settings/human-analysis/fields/{{field.field_id}}/delete" onsubmit="return confirm('删除后该字段的人工分析值和选项将被清理，确认删除？')"></form>{% endif %}
+</section>
+
+{% if field.field_type in ['SINGLE_SELECT','MULTI_SELECT'] %}
+<section class="card">
+  <div class="section-title"><div><h2>选项管理</h2><p class="muted">选项值创建后锁定；历史数据已使用的选项请通过“停用”退出使用，不做物理删除。</p></div></div>
+  <table class="option-table">
+    <thead><tr><th>显示名称</th><th>选项值</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for o in field.options %}
+      <tr>
+        <form method="post" action="/settings/human-analysis/options/{{o.option_id}}">
+        <td><input name="option_label" value="{{o.option_label}}" required></td>
+        <td><code>{{o.option_value}}</code></td>
+        <td><input name="display_order" type="number" value="{{o.display_order}}"></td>
+        <td><label><input type="checkbox" name="enabled" {% if o.enabled %}checked{% endif %}> {{'启用' if o.enabled else '停用'}}</label></td>
+        <td><button>保存</button></td>
+        </form>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>新增选项</h2>
+  <form method="post" action="/settings/human-analysis/fields/{{field.field_id}}/options" class="option-create-grid">
+    <label>选项值<input name="option_value" required placeholder="HIGH"></label>
+    <label>显示名称<input name="option_label" required placeholder="高"></label>
+    <label>排序<input name="display_order" type="number" value="0"></label>
+    <div><button class="primary">新增选项</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

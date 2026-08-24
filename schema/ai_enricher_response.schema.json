@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Enricher Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "standard_description",
+    "problem_summary",
+    "phenomenon",
+    "failure_object",
+    "trigger_condition",
+    "failure_mechanism",
+    "contributing_factors",
+    "trc_occurrence_standard",
+    "trc_escape_standard",
+    "mrc_occurrence_standard",
+    "mrc_escape_standard",
+    "ai_classification",
+    "reusable_actions",
+    "case_summary",
+    "normalized_problem",
+    "phenomenon_tags",
+    "failure_object_tags",
+    "trigger_tags",
+    "failure_mechanism_tags",
+    "cause_tags",
+    "solution_tags",
+    "keywords",
+    "retrieval_text"
+  ],
+  "properties": {
+    "standard_description": {
+      "type": "string"
+    },
+    "problem_summary": {
+      "type": "string"
+    },
+    "trc_occurrence_standard": {
+      "type": "string"
+    },
+    "trc_escape_standard": {
+      "type": "string"
+    },
+    "mrc_occurrence_standard": {
+      "type": "string"
+    },
+    "mrc_escape_standard": {
+      "type": "string"
+    },
+    "case_summary": {
+      "type": "string"
+    },
+    "normalized_problem": {
+      "type": "string"
+    },
+    "retrieval_text": {
+      "type": "string"
+    },
+    "phenomenon": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_object": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "trigger_condition": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_mechanism": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contributing_factors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reusable_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "phenomenon_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_object_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "trigger_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure_mechanism_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cause_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "solution_tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ai_classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cause_level1",
+        "cause_level2",
+        "reason",
+        "confidence"
+      ],
+      "properties": {
+        "cause_level1": {
+          "type": "string"
+        },
+        "cause_level2": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}

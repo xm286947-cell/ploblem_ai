@@ -1,0 +1,10 @@
+version: "1.0"
+default_top_k: 10
+allow_partial_context: true
+include_embedding_vector: false
+required_sources:
+  - retrieval_document
+preferred_sources:
+  - enriched_case
+  - standard_case
+  - raw_evidence

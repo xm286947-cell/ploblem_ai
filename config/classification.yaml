@@ -1,0 +1,7 @@
+version: "1.0"
+cause_level1: []
+cause_level2: []
+normalization:
+  trim_whitespace: true
+  collapse_spaces: true
+  allow_unknown: true

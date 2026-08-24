@@ -1,0 +1,29 @@
+version: M8.4-C1
+weights:
+  similarity: 0.55
+  decision_confidence: 0.25
+  solution_applicability: 0.10
+  evidence_completeness: 0.10
+solution_applicability_scores:
+  DIRECT_REUSE: 100
+  PARTIAL_REUSE: 75
+  REFERENCE_ONLY: 45
+  NOT_APPLICABLE: 10
+  UNKNOWN: 0
+decision_priority:
+  REPEAT_CASE: 5
+  LIKELY_REPEAT: 4
+  RELATED_CASE: 3
+  NEW_CASE: 2
+  INSUFFICIENT_EVIDENCE: 1
+
+candidate_filter:
+  department:
+    enabled: true
+    mode: preferred   # strict | preferred | ignore
+
+report:
+  show_department: false
+  show_internal_score: false
+  show_rank: false
+

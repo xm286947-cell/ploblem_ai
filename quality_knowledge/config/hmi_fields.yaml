@@ -1,0 +1,111 @@
+version: "1.0"
+business_type: "HMI"
+status: "initial_from_design"
+
+detection:
+  issue_id_aliases:
+    - "TRC单号"
+    - "TRC 单号"
+    - "TRC编号"
+    - "问题单号"
+  characteristic_fields:
+    问题描述: 8
+    软件问题月份: 5
+    产品系列: 5
+    是否宕机问题: 6
+    根因分析: 6
+    流出根因说明: 6
+    流出改进措施: 5
+
+identity:
+  business_issue_id:
+    required: true
+    aliases:
+      - "TRC单号"
+      - "TRC 单号"
+      - "TRC编号"
+      - "问题单号"
+
+issue_fact:
+  month:
+    aliases: ["软件问题月份", "月份"]
+  title:
+    aliases: ["问题标题", "Bug标题", "标题"]
+  description:
+    aliases: ["问题描述"]
+  impact:
+    aliases: ["影响结果"]
+  severity:
+    aliases: ["严重程度"]
+  issue_type:
+    aliases: ["问题类型"]
+  department:
+    aliases: ["所属部门"]
+  platform:
+    aliases: ["平台", "所属平台"]
+  product:
+    aliases: ["产品分类", "产品"]
+  product_series:
+    aliases: ["产品系列"]
+  module:
+    aliases: ["模块"]
+
+product_context:
+  feature_l1:
+    aliases: ["一级特性"]
+  feature_l2:
+    aliases: ["二级特性"]
+  feature_l3:
+    aliases: ["三级特性"]
+  feature_l4:
+    aliases: ["四级特性"]
+
+occurrence:
+  original_reason:
+    aliases: ["根因分析", "问题原因定位"]
+  cause_l1:
+    aliases: ["一级分类"]
+  cause_l2:
+    aliases: ["二级分类"]
+  cause_l3:
+    aliases: ["三级分类"]
+  cause_l4:
+    aliases: ["四级分类"]
+
+escape:
+  is_escape:
+    aliases: ["是否漏测"]
+  original_reason:
+    aliases: ["流出根因说明", "流出原因补充说明"]
+  escape_l1:
+    aliases: ["流出原因分类", "流出原因一级分类"]
+  escape_l2:
+    aliases: ["流出原因二级分类"]
+  escape_l3:
+    aliases: ["流出原因三级分类"]
+  escape_l4:
+    aliases: ["流出原因四级分类"]
+
+solution:
+  corrective_action:
+    aliases: ["纠正措施"]
+  improvement_action:
+    aliases: ["改进措施"]
+  escape_improvement_action:
+    aliases: ["流出改进措施"]
+
+verification:
+  existing_case:
+    aliases: ["是否已有用例"]
+  mandatory_test:
+    aliases: ["是否为必测项"]
+  automated:
+    aliases: ["是否已自动化"]
+
+extension:
+  is_crash:
+    aliases: ["是否宕机问题"]
+  horizontal_scope:
+    aliases: ["横向影响域"]
+  vertical_scope:
+    aliases: ["纵向影响域"]

@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block body %}
+<div class="page-head"><div><span class="eyebrow">MAPPING PREVIEW</span><h1>字段映射预览</h1><p class="muted">Preview 不写正式 Knowledge。确认无误后再修改 Draft、Validate、Activate，并重新导入。</p></div><a class="button" href="/settings/mapping?business_type={{business_type}}">返回映射配置</a></div>
+{% if error %}<section class="card"><div class="error">{{error}}</div></section>{% endif %}
+{% if result %}
+<section class="coverage-grid metric-grid">
+<div class="kpi"><span>源字段</span><strong>{{result.total_source_fields}}</strong></div>
+<div class="kpi"><span>结构化</span><strong>{{result.matched_structured}}</strong></div>
+<div class="kpi"><span>扩展字段</span><strong>{{result.matched_extension}}</strong></div>
+<div class="kpi"><span>未匹配</span><strong>{{result.unmatched}}</strong></div>
+<div class="kpi"><span>冲突</span><strong>{{result.conflict}}</strong></div>
+<div class="kpi"><span>必填缺失</span><strong>{{result.required_missing}}</strong></div>
+<div class="kpi"><span>覆盖率</span><strong>{{result.coverage_percent}}%</strong></div>
+</section>
+<section class="card"><div class="section-title"><div><h2>字段去向</h2><p class="muted">{{result.source_file}} / {{result.source_sheet}}</p></div><span>Mapping V{{result.mapping_config_version}}</span></div>
+<div class="mapping-filter-note">异常优先：UNMATCHED / CONFLICT / REQUIRED MISSING</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Excel 字段</th><th>系统识别</th><th>目标位置</th><th>状态</th><th>建议操作</th></tr></thead><tbody>
+{% for f in result.fields %}<tr><td>{{f.source_header}}</td><td>{{f.canonical_header}}</td><td><b>{{f.target_field or '-'}}</b><small>{{f.target_domain or '未映射'}}</small></td><td><span class="map-status {{f.mapping_status|lower}}">{{f.mapping_status}}</span></td><td>{% if f.mapping_status in ['UNMATCHED','CONFLICT'] %}<form method="post" action="/settings/mapping/preview/add" class="inline-fix"><input type="hidden" name="business_type" value="{{business_type}}"><input type="hidden" name="source_header" value="{{f.source_header}}"><select name="target_domain"><option>PRODUCT_EXTENSION</option><option>ISSUE_FACT</option><option>PRODUCT_CONTEXT</option><option>OCCURRENCE</option><option>ESCAPE</option><option>SOLUTION</option><option>VERIFICATION</option><option>RECURRENCE</option></select><input name="target_field" placeholder="目标字段"><button>创建 Mapping</button></form>{% else %}<a href="/settings/mapping?business_type={{business_type}}">查看配置</a>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% if result.required_missing_fields %}<section class="card"><h2>Required Missing</h2>{% for x in result.required_missing_fields %}<div class="validation error">{{x.canonical_field}} → {{x.target_domain}}.{{x.target_field}}</div>{% endfor %}</section>{% endif %}
+<section class="card next-flow"><b>修正闭环：</b> Preview → 创建/修改 Draft Mapping → Validate → Activate → Re-import → Coverage 更新</section>
+{% endif %}{% endblock %}

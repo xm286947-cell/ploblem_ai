@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "standard_query.schema.json",
+  "title": "Standard Query",
+  "type": "object",
+  "required": ["metadata", "organization", "problem", "analysis", "classification", "solution", "knowledge", "extensions", "completeness", "quality_flags", "lineage", "build_status"],
+  "$defs": {
+    "layeredField": {
+      "type": "object",
+      "required": ["original", "normalized", "inferred", "effective", "effective_source"],
+      "properties": {
+        "original": {},
+        "normalized": {},
+        "inferred": {},
+        "effective": {},
+        "effective_source": {"enum": ["ORIGINAL", "NORMALIZED", "INFERRED", "EMPTY"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence_type": {"enum": ["EXPLICIT", "SUMMARIZED", "INFERRED", "UNKNOWN", ""]},
+        "inference_reason": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["query_id", "source_enriched_query", "standard_builder_version", "standard_query_schema_version", "generated_at"],
+      "properties": {
+        "query_id": {"type": "string"},
+        "source_enriched_query": {"type": "string"},
+        "standard_builder_version": {"type": "string"},
+        "standard_query_schema_version": {"type": "string"},
+        "generated_at": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "organization": {
+      "type": "object",
+      "required": ["ipmt", "spdt", "responsible_department_level2", "product", "domain"],
+      "additionalProperties": {"$ref": "#/$defs/layeredField"}
+    },
+    "problem": {
+      "type": "object",
+      "required": ["query_id", "itr_id", "problem_description", "problem_summary", "standard_problem_description", "failure_objects", "phenomena", "trigger_conditions", "impacts", "operating_context"],
+      "additionalProperties": {"$ref": "#/$defs/layeredField"}
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["cause_description", "trc", "mrc", "root_causes", "failure_mechanisms", "contributing_factors"],
+      "additionalProperties": {"$ref": "#/$defs/layeredField"}
+    },
+    "classification": {
+      "type": "object",
+      "required": ["cause_level1", "cause_level2", "cause_level3", "cause_level4"],
+      "additionalProperties": {"$ref": "#/$defs/layeredField"}
+    },
+    "solution": {
+      "type": "object",
+      "required": ["corrective_action", "preventive_action", "current_solution", "solution_object", "solution_mechanism", "expected_effect"],
+      "additionalProperties": {"$ref": "#/$defs/layeredField"}
+    },
+    "knowledge": {
+      "type": "object",
+      "required": ["keywords", "tags", "information_gaps", "overall_confidence"],
+      "properties": {
+        "keywords": {"type": "array", "items": {"type": "string"}},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "information_gaps": {"type": "array", "items": {"type": "object"}},
+        "overall_confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "extensions": {"type": "object"},
+    "completeness": {
+      "type": "object",
+      "required": ["input_completeness", "analysis_completeness", "input_fields_present", "input_fields_total", "analysis_fields_present", "analysis_fields_total"],
+      "properties": {
+        "input_completeness": {"type": "number", "minimum": 0, "maximum": 1},
+        "analysis_completeness": {"type": "number", "minimum": 0, "maximum": 1},
+        "input_fields_present": {"type": "integer", "minimum": 0},
+        "input_fields_total": {"type": "integer", "minimum": 1},
+        "analysis_fields_present": {"type": "integer", "minimum": 0},
+        "analysis_fields_total": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "quality_flags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "lineage": {
+      "type": "object",
+      "required": ["raw_query_version", "field_mapping_config_version", "normalizer_version", "normalization_config_version", "ai_enricher_version", "prompt_version", "model_provider", "model_name", "standard_builder_version", "standard_query_schema_version"],
+      "additionalProperties": {"type": "string"}
+    },
+    "build_status": {"enum": ["SUCCESS", "PARTIAL_SUCCESS", "STANDARD_QUERY_BUILD_FAILED"]}
+  },
+  "additionalProperties": false
+}

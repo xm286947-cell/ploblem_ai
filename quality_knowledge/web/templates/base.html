@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{ title or '质量问题分析' }}</title>
+<link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=p3-mapping-difference-entry2-ued-common-gap-closure-rc2">
+<!-- legacy css cache markers: app.css?v=ued2 ; ?v=ued-r4v2-cg-fix01 -->
+</head>
+<body>
+<div class="app-shell">
+<aside class="side-nav" aria-label="主导航">
+  <a class="brand" href="/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
+  <nav class="main-nav">
+    <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
+    <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
+    <div class="nav-divider"></div>
+    <div class="nav-label">管理</div>
+    <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
+  </nav>
+  <div class="side-foot"><a href="/analysis">批量 AI 分析</a><a href="/export">数据导出</a></div>
+</aside>
+<div class="app-main">
+<header class="top-bar"><div class="breadcrumb">质量问题分析 <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div><div class="top-actions"><a href="/import">导入数据</a><a href="/export">导出</a></div></header>
+<main class="content">{% block body %}{% endblock %}</main>
+</div>
+</div>
+<script>document.addEventListener('change',function(e){if(e.target.closest('.human-form,.human-compact-form')){var s=document.querySelector('#human-save-state');if(s)s.textContent='已修改未保存';}});</script>
+</body></html>

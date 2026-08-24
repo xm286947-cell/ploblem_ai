@@ -1,0 +1,28 @@
+app:
+  name: repeat_case_engine
+  version: 2.4.0-m6-local-batch
+  schema_version: '1.0'
+  builder_version: 2.4.0-m6-local-batch
+  fusion_rule_version: '1.1'
+  source_file_version: '1.0'
+paths:
+  input_excel: input/cases.xlsx
+  reports_dir: input/reports
+  raw_excel_dir: knowledge/raw_excel
+  raw_evidence_dir: knowledge/raw_evidence
+  standard_case_dir: knowledge/standard_case
+  embeddings_dir: knowledge/embeddings
+  index_dir: knowledge/index
+  manifests_dir: knowledge/manifests
+  reports_output_dir: output/reports
+  retrieval_output_dir: output/retrieval_results
+  logs_dir: output/logs
+  runs_dir: output/runs
+  enriched_case_dir: knowledge/enriched_case
+  retrieval_docs_dir: knowledge/retrieval_docs
+runtime:
+  continue_on_case_error: true
+  write_pretty_json: true
+  log_level: INFO
+  case_id_prefix: CASE
+  case_id_width: 6

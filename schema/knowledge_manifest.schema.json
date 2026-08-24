@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Knowledge Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "builder_version",
+    "embedding_model",
+    "dimensions",
+    "document_count",
+    "documents",
+    "generated_at"
+  ],
+  "properties": {
+    "manifest_version": {
+      "type": "string"
+    },
+    "builder_version": {
+      "type": "string"
+    },
+    "embedding_model": {
+      "type": "string"
+    },
+    "dimensions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "document_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "document_id",
+          "case_id",
+          "retrieval_doc_path",
+          "embedding_path",
+          "content_hash"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "case_id": {
+            "type": "string"
+          },
+          "retrieval_doc_path": {
+            "type": "string"
+          },
+          "embedding_path": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "generated_at": {
+      "type": "string"
+    }
+  }
+}

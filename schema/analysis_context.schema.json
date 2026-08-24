@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M8.1 Analysis Context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context_version", "query_id", "case_id", "query", "candidate", "case", "evidence", "source_paths", "quality", "generated_at"],
+  "properties": {
+    "context_version": {"type": "string"},
+    "query_id": {"type": "string", "minLength": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "query": {
+      "type": "object",
+      "required": ["standard_query", "retrieval_profile"],
+      "properties": {
+        "standard_query": {"type": "object"},
+        "retrieval_profile": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "candidate": {"type": "object"},
+    "case": {
+      "type": "object",
+      "required": ["standard_case", "enriched_case", "retrieval_document", "raw_evidence", "embedding_metadata"],
+      "properties": {
+        "standard_case": {"type": ["object", "null"]},
+        "enriched_case": {"type": ["object", "null"]},
+        "retrieval_document": {"type": ["object", "null"]},
+        "raw_evidence": {"type": ["object", "null"]},
+        "embedding_metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["available_sources", "retrieval_text", "report_filename", "matched_report_path", "sections", "unclassified_blocks"],
+      "properties": {
+        "available_sources": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "retrieval_text": {"type": "string"},
+        "report_filename": {"type": "string"},
+        "matched_report_path": {"type": "string"},
+        "sections": {"type": "array"},
+        "unclassified_blocks": {"type": "array"}
+      },
+      "additionalProperties": false
+    },
+    "source_paths": {"type": "object", "additionalProperties": {"type": "string"}},
+    "quality": {
+      "type": "object",
+      "required": ["status", "missing_sources", "quality_flags"],
+      "properties": {
+        "status": {"type": "string", "enum": ["COMPLETE", "PARTIAL"]},
+        "missing_sources": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "quality_flags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "generated_at": {"type": "string"}
+  }
+}

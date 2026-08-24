@@ -1,0 +1,253 @@
+{% extends 'base.html' %}
+{% block body %}
+{% set occ=results.occurrence or {} %}
+{% set esc=results.escape or {} %}
+{% set rec=results.recurrence or {} %}
+{% set hv = human_analysis['values'] if human_analysis and 'values' in human_analysis else {} %}
+
+<div class="compact-hero">
+  <div class="compact-hero-main">
+    <div class="eyebrow"><span class="tag business">{{issue.business_type}}</span> {{issue.business_issue_id}}</div>
+    <h1>{{issue.title or '质量问题分析'}}</h1>
+    <p class="compact-desc">{{issue.description or '-'}}</p>
+    <div class="compact-meta">
+      <span>产品 {{issue.product or '-'}}</span><span>平台 {{issue.platform or '-'}}</span>
+      <span>月份 {{issue.month or '-'}}</span><span>严重度 {{issue.severity or '-'}}</span><span>V{{issue.version_no}}</span>
+      <span class="badge status-{{latest_run.status|lower if latest_run else 'not_analyzed'}}">AI {% if latest_run %}{{latest_run.status}}{% else %}未分析{% endif %}</span>
+      <span class="badge {% if human_analysis %}badge-success{% else %}badge-neutral{% endif %}">人工 {{'已填写' if human_analysis else '未填写'}}</span>
+    </div>
+  </div>
+  <div class="compact-hero-actions">
+    <div class="issue-sequence-nav">
+      {% if previous_issue %}<a class="button" href="/issues/{{previous_issue.knowledge_id}}" title="{{previous_issue.business_issue_id}}">← 上一条</a>{% else %}<span class="button disabled" aria-disabled="true">← 上一条</span>{% endif %}
+      {% if issue_position %}<span class="issue-sequence-position">{{issue_position}} / {{issue_total}}</span>{% endif %}
+      {% if next_issue %}<a class="button" href="/issues/{{next_issue.knowledge_id}}" title="{{next_issue.business_issue_id}}">下一条 →</a>{% else %}<span class="button disabled" aria-disabled="true">下一条 →</span>{% endif %}
+    </div>
+    <form id="analysis-normal-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><button class="primary">分析未完成项</button></form>
+    <form id="analysis-force-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}" onsubmit="return confirm('将强制重新分析已完成阶段，确认继续？')"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><input type="hidden" name="force" value="1"><button>强制重新分析</button></form>
+    <a class="button" href="#human-analysis">人工分析</a>
+  </div>
+</div>
+
+<section class="analysis-context-card">
+  <div class="analysis-context-head"><div><strong>分析上下文</strong><span>可选预选，用于校准四阶段 AI 分析</span></div><span class="tag">本次运行生效</span></div>
+  <div class="analysis-context-grid">
+    <label>产品领域<select data-profile-field="domain_profile">{% for x in domain_profiles %}<option value="{{x}}">{{domain_labels[x]}}</option>{% endfor %}</select></label>
+    <label>生命周期阶段<select data-profile-field="lifecycle_phase">{% for x in lifecycle_phases %}<option value="{{x}}">{{lifecycle_labels[x]}}</option>{% endfor %}</select></label>
+    <fieldset><legend>问题主题（可多选）</legend><div class="analysis-choice-grid">{% for x in issue_types %}<label class="check"><input type="checkbox" data-profile-issue-type value="{{x}}">{{issue_type_labels[x]}}</label>{% endfor %}</div></fieldset>
+  </div>
+  <small class="analysis-context-note">不选择时由 AI 自动判断；如果修改了预选，建议使用“强制重新分析”刷新已有结果。</small>
+</section>
+
+<nav class="compact-tabs">
+  <a href="#overview">概览</a><a href="#causes">原因</a><a href="#prevention">防控</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">记录 / 技术详情</a>
+</nav>
+
+<section id="overview" class="compact-grid top-workbench single">
+  <article class="compact-card">
+    <div class="compact-card-head"><h2>问题事实</h2><span>FACT</span></div>
+    <div class="fact-summary-grid">
+      <div><label>影响结果</label><p>{{issue.impact or '-'}}</p></div>
+      <div><label>问题类型</label><p>{{issue.issue_type or '-'}}</p></div>
+      <div><label>问题领域</label><p>{{issue.issue_domain or 'AUTO'}} <small>{{issue.issue_domain_source or 'AI'}}</small></p></div>
+      <div><label>行业 / 客户</label><p>{{issue.industry or '-'}} / {{issue.customer or '-'}}</p></div>
+      <div><label>部门 / 业务组</label><p>{{issue.department or '-'}} / {{issue.business_group or '-'}}</p></div>
+    </div>
+    <details class="compact-detail"><summary>查看完整问题描述</summary><p>{{issue.description or '-'}}</p></details>
+  </article>
+
+
+</section>
+
+<section id="causes" class="compact-section">
+  <div class="compact-section-head"><div><h2>为什么发生 / 为什么流出</h2><p>Occurrence 与 Escape 并排，首屏即可完成核心原因判断。</p></div></div>
+  <div class="compact-grid causes-grid">
+    <article class="compact-card cause-card occurrence">
+      <div class="compact-card-head"><h3>为什么发生</h3><span>{{occ.occurrence_category or '未分类'}}</span></div>
+      <div class="cause-core"><label>根因摘要</label><p>{{ev(occ.root_cause_summary) or '未分析'}}</p></div>
+      <div class="cause-secondary"><div><label>失效机制</label><p>{{ev(occ.failure_mechanism) or '-'}}</p></div><div><label>Confidence</label><p>{{'%.0f'|format((occ.confidence or 0)*100)}}%</p></div></div>
+      {% if occ.introduced_phase or occ.system_scope %}<details class="compact-detail"><summary>质量阶段与系统边界</summary><p><strong>引入阶段：</strong>{{occ.introduced_phase or 'UNKNOWN'}}</p>{% for k,v in (occ.system_scope or {}).items() if v %}<p><strong>{{k}}：</strong>{{v}}</p>{% endfor %}</details>{% endif %}
+      {% if occ.contributing_factors %}<details class="compact-detail"><summary>贡献因素（{{occ.contributing_factors|length}}）</summary><ul>{% for x in occ.contributing_factors %}<li>{{ev(x)}}</li>{% endfor %}</ul></details>{% endif %}
+    </article>
+    <article class="compact-card cause-card escape">
+      <div class="compact-card-head"><h3>为什么流出</h3><span>{{esc.escape_category or '未分类'}}</span></div>
+      <div class="cause-core"><label>流出原因</label><p>{{ev(esc.escape_cause_summary) or '未分析'}}</p></div>
+      <div class="cause-secondary"><div><label>验证缺口</label><p>{{ev(esc.verification_gap) or '-'}}</p></div><div><label>Confidence</label><p>{{'%.0f'|format((esc.confidence or 0)*100)}}%</p></div></div>
+      {% if esc.expected_detection_stage or esc.missing_control %}<details class="compact-detail"><summary>应拦截阶段与控制失效</summary><p><strong>应发现：</strong>{{esc.expected_detection_stage or 'UNKNOWN'}}　<strong>实际发现：</strong>{{esc.actual_detection_stage or 'UNKNOWN'}}</p><p><strong>缺失控制：</strong>{{esc.missing_control or '-'}}</p><p><strong>失效类型：</strong>{{esc.control_failure_type or 'UNKNOWN'}}</p></details>{% endif %}
+      {% if ev(esc.process_gap) %}<details class="compact-detail"><summary>过程缺口</summary><p>{{ev(esc.process_gap)}}</p></details>{% endif %}
+    </article>
+  </div>
+</section>
+
+<section id="prevention" class="compact-section">
+  <div class="compact-section-head"><div><h2>再发防控</h2><p>把最终判断压缩为一行指标 + 三个核心结论。</p></div></div>
+  <div class="risk-strip risk-bg-{{recurrence_level|lower}}">
+    <div><span>再发风险</span><strong>{{recurrence_level}}</strong></div>
+    <div><span>共性问题</span><strong>{{'是' if is_common_issue else '否'}}</strong></div>
+    <div><span>横向治理</span><strong>{{'需要' if horizontal_action_needed else '暂不需要'}}</strong></div>
+    <div><span>潜在影响产品</span><strong>{{(rec.potential_affected_products or [])|join(' / ') or '-'}}</strong></div>
+  </div>
+  <div class="compact-grid prevention-summary">
+    <article class="compact-card mini-conclusion"><label>再发风险理由</label><p>{{ev(rec.recurrence_risk_reason) or '未分析'}}</p></article>
+    <article class="compact-card mini-conclusion"><label>现有控制覆盖</label><p>{{ev(rec.existing_control_coverage) or '-'}}</p></article>
+    <article class="compact-card mini-conclusion"><label>残余风险</label><p>{{ev(rec.residual_risk) or '-'}}</p></article>
+  </div>
+  {% if rec.customer_impact %}<article class="compact-card customer-impact-card"><div class="compact-card-head"><h3>客户影响</h3><span>{{rec.customer_impact.impact_level or 'UNKNOWN'}}</span></div><div class="fact-summary-grid"><div><label>客户可见现象</label><p>{{rec.customer_impact.visible_symptom or '-'}}</p></div><div><label>受影响流程</label><p>{{rec.customer_impact.affected_workflow or '-'}}</p></div><div><label>服务中断</label><p>{{rec.customer_impact.service_interruption or '-'}}</p></div><div><label>安全 / 数据风险</label><p>{{rec.customer_impact.safety_or_data_risk or '-'}}</p></div><div><label>影响范围</label><p>{{rec.customer_impact.impact_scope or '-'}}</p></div><div><label>临时规避</label><p>{% if rec.customer_impact.workaround_available is sameas true %}有{% elif rec.customer_impact.workaround_available is sameas false %}无{% else %}未知{% endif %}</p></div></div></article>{% endif %}
+</section>
+
+<section id="gaps" class="compact-section">
+  <div class="compact-section-head"><div><h2>能力缺口与建议建设</h2><p>默认只展示摘要；点击具体条目展开建设对象、预防效果和证据。</p></div></div>
+  <div class="compact-grid gap-summary-grid">
+    {% for dim,title in [('TECHNICAL','技术能力缺口'),('MANAGEMENT','管理能力缺口'),('GOVERNANCE','横向治理需求')] %}
+    <article class="compact-card gap-summary-column">
+      <div class="compact-card-head"><h3>{{title}}</h3><b>{{gaps_grouped.get(dim,[])|length}}</b></div>
+      {% for g in gaps_grouped.get(dim,[]) %}
+      <details class="gap-row" {% if loop.first %}open{% endif %}>
+        <summary><span><em>{{g.category}}</em>{{g.description}}</span><b>{{'%.0f'|format((g.confidence or 0)*100)}}%</b></summary>
+        <div class="gap-row-body">
+          {% if g.recommended_action or g.recommended_control %}<p><strong>建议建设：</strong>{{g.recommended_action or g.recommended_control}}</p>{% endif %}
+          {% if g.action_target %}<p><strong>建设对象：</strong>{{g.action_target}}</p>{% endif %}
+          {% if g.expected_prevention_effect %}<p><strong>预防效果：</strong>{{g.expected_prevention_effect}}</p>{% endif %}
+          {% if g.first_action %}<p><strong>首个动作：</strong>{{g.first_action}}</p>{% endif %}
+          {% if g.verification_metric %}<p><strong>验证指标：</strong>{{g.verification_metric}}</p>{% endif %}
+          {% if g.why_needed %}<p><strong>为什么需要：</strong>{{g.why_needed}}</p>{% endif %}
+        </div>
+      </details>
+      {% else %}<div class="compact-empty">暂无 {{title}}</div>{% endfor %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="compact-section human-section" id="human-analysis">
+  <div class="compact-section-head">
+    <div><h2>人工分析</h2><p>参考问题事实、标准化信息与 AI 摘要，形成独立人工判断并保存记录。</p></div>
+    <span id="human-save-state" class="save-state {{'saved' if human_analysis else ''}}">{{'已保存' if human_analysis else '未填写'}}</span>
+  </div>
+
+  <article class="compact-card human-reference-tabs" data-reference-tabs>
+    <div class="reference-tab-head">
+      <div class="reference-tab-list" role="tablist" aria-label="人工分析参考">
+        <button type="button" class="reference-tab active" role="tab" aria-selected="true" data-reference-tab="original">原始问题</button>
+        <button type="button" class="reference-tab" role="tab" aria-selected="false" data-reference-tab="normalized">标准化数据</button>
+        <button type="button" class="reference-tab" role="tab" aria-selected="false" data-reference-tab="ai">AI 分析摘要</button>
+      </div>
+      <span class="reference-tab-hint">按需切换参考信息</span>
+    </div>
+
+    <div class="reference-panel active" role="tabpanel" data-reference-panel="original">
+      <div class="compact-card-head"><h3>原始问题</h3><span>业务原始信息</span></div>
+      <div class="readable-table-wrap">
+        <table class="readable-kv"><tbody>
+        {% for r in original_rows[:8] %}<tr><th>{{r.label}}</th><td><div class="clamp-text">{{r.value}}</div></td></tr>{% else %}<tr><td class="compact-empty">暂无原始数据</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      {% if original_rows|length > 8 %}<details class="reference-more"><summary>查看全部字段（{{original_rows|length}}）</summary><table class="readable-kv"><tbody>{% for r in original_rows[8:] %}<tr><th>{{r.label}}</th><td>{{r.value}}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
+    </div>
+
+    <div class="reference-panel" role="tabpanel" data-reference-panel="normalized" hidden>
+      <div class="compact-card-head"><h3>标准化数据</h3><span>Knowledge 业务信息</span></div>
+      <div class="readable-table-wrap">
+        <table class="readable-kv"><tbody>
+        {% for r in normalized_rows[:8] %}<tr><th>{{r.label}}</th><td><div class="clamp-text">{{r.value}}</div></td></tr>{% else %}<tr><td class="compact-empty">暂无标准化数据</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      {% if normalized_rows|length > 8 %}<details class="reference-more"><summary>查看全部字段（{{normalized_rows|length}}）</summary><table class="readable-kv"><tbody>{% for r in normalized_rows[8:] %}<tr><th>{{r.label}}</th><td>{{r.value}}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
+    </div>
+
+    <div class="reference-panel" role="tabpanel" data-reference-panel="ai" hidden>
+      <div class="compact-card-head"><h3>AI 分析摘要</h3><a href="#causes">查看完整 AI 分析 →</a></div>
+      <table class="readable-kv ai-summary"><tbody>{% for r in ai_summary %}<tr><th>{{r.label}}</th><td>{{r.value}}</td></tr>{% endfor %}</tbody></table>
+    </div>
+  </article>
+
+  {% if open_questions %}
+  <article class="compact-card ai-confirmation-card">
+    <div class="compact-card-head"><div><h3>AI 待确认事项</h3><small>只保留会影响根因、流出、客户风险或措施的关键疑问</small></div><span>{{open_questions|selectattr('status','equalto','PENDING')|list|length}} 项待确认</span></div>
+    <form method="post" action="/issues/{{issue.knowledge_id}}/analysis-confirmations" class="ai-confirmation-form">
+      {% for q in open_questions %}{% set item=q.question %}
+      <fieldset class="ai-question priority-{{item.priority|lower}}">
+        <legend><span>{{item.priority}}</span> {{item.question}}</legend>
+        {% if item.why_it_matters %}<p>{{item.why_it_matters}}</p>{% endif %}
+        <div class="ai-question-fields">
+          <label>确认状态<select name="status_{{q.question_id}}"><option value="PENDING" {% if q.status=='PENDING' %}selected{% endif %}>待确认</option><option value="CONFIRMED" {% if q.status=='CONFIRMED' %}selected{% endif %}>确认 AI 判断</option><option value="CORRECTED" {% if q.status=='CORRECTED' %}selected{% endif %}>修正 AI 判断</option><option value="UNRESOLVED" {% if q.status=='UNRESOLVED' %}selected{% endif %}>暂时无法确认</option><option value="NOT_APPLICABLE" {% if q.status=='NOT_APPLICABLE' %}selected{% endif %}>不适用</option></select></label>
+          <label>人工回答<textarea name="answer_{{q.question_id}}" rows="2" placeholder="填写确认事实或修正内容">{{q.answer or ''}}</textarea></label>
+          <label>证据 / 说明<textarea name="evidence_{{q.question_id}}" rows="2" placeholder="现场记录、测试结果、版本信息等">{{q.evidence or ''}}</textarea></label>
+        </div>
+      </fieldset>
+      {% endfor %}
+      <div class="human-save-row"><button class="button" type="submit">仅保存人工确认</button><button class="primary" type="submit" name="reanalyze" value="1" onclick="return confirm('保存人工确认并强制重新分析，确认继续？')">保存并重新分析</button></div>
+    </form>
+  </article>
+  {% endif %}
+
+  <article class="compact-card human-form-card human-analysis-compact">
+    <div class="compact-card-head"><div><h3>人工判断与复盘记录</h3><small>人工结果独立保存，不覆盖 AI 分析</small></div><a href="/settings/human-analysis">配置字段</a></div>
+    {% if human_fields %}
+    <form method="post" action="/issues/{{issue.knowledge_id}}/human-analysis" class="human-compact-form human-form" id="human-analysis-form">
+      {% for f in human_fields %}
+      <label class="human-field {% if f.field_type=='LONG_TEXT' %}wide{% endif %}">
+        <span>{{f.field_name}}{% if f.required %} *{% endif %}</span>
+        {% if f.field_type=='LONG_TEXT' %}
+        <textarea name="human_{{f.field_id}}" rows="4">{{hv.get(f.field_id,'') or ''}}</textarea>
+        {% elif f.field_type=='SINGLE_SELECT' %}
+        <select name="human_{{f.field_id}}"><option value="">请选择</option>{% for o in f.options if o.enabled %}<option value="{{o.option_value}}" {% if hv.get(f.field_id)==o.option_value %}selected{% endif %}>{{o.option_label}}</option>{% endfor %}</select>
+        {% elif f.field_type=='MULTI_SELECT' %}
+        <details class="multi-select" data-multi>
+          <summary><span class="multi-tags" data-tags>{% for o in f.options if o.enabled and o.option_value in (hv.get(f.field_id) or []) %}<i>{{o.option_label}}</i>{% endfor %}<em>请选择</em></span><b>⌄</b></summary>
+          <div class="multi-menu">{% for o in f.options if o.enabled %}<label><input type="checkbox" name="human_{{f.field_id}}" value="{{o.option_value}}" data-label="{{o.option_label}}" {% if o.option_value in (hv.get(f.field_id) or []) %}checked{% endif %}> {{o.option_label}}</label>{% endfor %}</div>
+        </details>
+        {% elif f.field_type=='BOOLEAN' %}
+        <select name="human_{{f.field_id}}"><option value="">请选择</option><option value="true" {% if hv.get(f.field_id) is sameas true %}selected{% endif %}>是</option><option value="false" {% if hv.get(f.field_id) is sameas false %}selected{% endif %}>否</option></select>
+        {% elif f.field_type=='NUMBER' %}<input type="number" step="any" name="human_{{f.field_id}}" value="{{hv.get(f.field_id,'') if hv.get(f.field_id) is not none else ''}}">
+        {% elif f.field_type=='DATE' %}<input type="date" name="human_{{f.field_id}}" value="{{hv.get(f.field_id,'') or ''}}">
+        {% else %}<input name="human_{{f.field_id}}" value="{{hv.get(f.field_id,'') or ''}}">{% endif %}
+      </label>
+      {% endfor %}
+      <div class="wide human-save-row"><span class="save-hint" data-save-hint>{{'最近更新 '+human_analysis['updated_at'] if human_analysis else '填写后请保存'}}</span><button class="primary">保存人工分析</button></div>
+    </form>
+    {% else %}<div class="empty compact-empty">尚未配置人工分析字段。<a href="/settings/human-analysis">前往配置</a></div>{% endif %}
+  </article>
+</section>
+
+<section id="trace" class="compact-section">
+  <div class="compact-section-head"><div><h2>记录 / 技术详情</h2><p>Analysis Run、Evidence、Version、Original 与 Normalized 默认折叠，仅在追溯时展开。</p></div></div>
+  <div class="trace-compact-list">
+    <details class="trace-card"><summary>数据源与标准化 · Original · 原始 Excel 数据</summary><div class="trace-meta">{{d.raw.source_file if d.raw else '-'}} / {{d.raw.source_sheet if d.raw else '-'}} / Row {{d.raw.source_row if d.raw else '-'}}</div><pre>{{d.raw.raw_json if d.raw else 'No raw source'}}</pre></details>
+    <details class="trace-card"><summary>数据源与标准化 · Normalized · 数据库标准化数据</summary><pre>{{issue.normalized_json}}</pre></details>
+    <details class="trace-card"><summary>Issue Version History · {{d.history|length}} 个版本</summary><table><tr><th>Version</th><th>Hash</th><th>Created</th></tr>{% for v in d.history %}<tr><td>V{{v.version_no}} {% if v.issue_version_id==issue.current_version_id %}<span class="tag">Current</span>{% endif %}</td><td class="mono">{{v.normalized_source_hash}}</td><td>{{v.created_at}}</td></tr>{% endfor %}</table></details>
+    <details class="trace-card"><summary>AI Analysis Run History · {{analysis_history|length}} 次</summary><table><tr><th>Run</th><th>Type</th><th>Status</th><th>Model</th><th>Started</th><th>Error</th></tr>{% for r in analysis_history %}<tr><td class="mono">{{r.analysis_run_id}}</td><td>{{r.analysis_type}}</td><td><span class="status status-{{r.status|lower}}">{{r.status}}</span></td><td>{{r.model_name or '-'}}</td><td>{{r.started_at}}</td><td>{{r.error_message or '-'}}</td></tr>{% endfor %}</table></details>
+    {% if debug %}<details class="trace-card debug"><summary>AI Debug · 仅调试使用</summary><h4>Raw Response</h4><pre>{{debug.raw_response or '-'}}</pre><h4>Normalized JSON</h4><pre>{{debug.normalized_json or '-'}}</pre>{% if debug.validation_error %}<h4>Validation Error</h4><pre>{{debug.validation_error}}</pre>{% endif %}</details>{% endif %}
+  </div>
+</section>
+<script>
+(function(){
+  const profileFields=[...document.querySelectorAll('[data-profile-field]')];
+  const profileIssues=[...document.querySelectorAll('[data-profile-issue-type]')];
+  document.querySelectorAll('form[data-analysis-submit]').forEach(target=>target.addEventListener('submit',()=>{
+    profileFields.forEach(field=>{
+      const input=target.querySelector(`input[name="${field.dataset.profileField}"]`);
+      if(input) input.value=field.value;
+    });
+    target.querySelectorAll('input[name="issue_types"]').forEach(input=>input.remove());
+    profileIssues.filter(input=>input.checked).forEach(input=>{
+      const forwarded=document.createElement('input');
+      forwarded.type='hidden'; forwarded.name='issue_types'; forwarded.value=input.value;
+      target.appendChild(forwarded);
+    });
+  }));
+  const form=document.getElementById('human-analysis-form'), state=document.getElementById('human-save-state');
+  function refreshMulti(box){const tags=box.querySelector('[data-tags]'), checked=[...box.querySelectorAll('input:checked')]; tags.querySelectorAll('i').forEach(x=>x.remove()); checked.forEach(x=>{const i=document.createElement('i');i.textContent=x.dataset.label;tags.insertBefore(i,tags.querySelector('em'));}); tags.querySelector('em').style.display=checked.length?'none':'inline';}
+  document.querySelectorAll('[data-multi]').forEach(box=>{refreshMulti(box);box.addEventListener('change',()=>refreshMulti(box));});
+  document.querySelectorAll('[data-reference-tabs]').forEach(box=>{
+    const tabs=[...box.querySelectorAll('[data-reference-tab]')], panels=[...box.querySelectorAll('[data-reference-panel]')];
+    tabs.forEach(tab=>tab.addEventListener('click',()=>{
+      const key=tab.dataset.referenceTab;
+      tabs.forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',active?'true':'false');});
+      panels.forEach(panel=>{const active=panel.dataset.referencePanel===key;panel.classList.toggle('active',active);panel.hidden=!active;});
+    }));
+  });
+  if(form){form.addEventListener('input',()=>{state.textContent='已修改未保存';state.classList.remove('saved');state.classList.add('dirty');});form.addEventListener('submit',()=>{state.textContent='保存中';state.classList.remove('dirty');state.classList.add('saving');});}
+})();
+</script>
+{% endblock %}

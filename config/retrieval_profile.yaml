@@ -1,0 +1,64 @@
+version: "1.0"
+profile_builder_version: "M7.3-P1"
+defaults:
+  confidence_floor: 0.35
+  inferred_confidence_factor: 0.85
+  normalized_source_factor: 1.0
+  original_source_factor: 0.95
+  inferred_source_factor: 0.80
+  completeness_floor: 0.50
+  groups:
+    filter:
+      - field: organization.product
+        mode: SOFT
+        weight: 1.00
+      - field: organization.ipmt
+        mode: PREFER
+        weight: 0.80
+      - field: organization.spdt
+        mode: PREFER
+        weight: 0.90
+      - field: organization.responsible_department_level2
+        mode: PREFER
+        weight: 0.60
+      - field: organization.domain
+        mode: SOFT
+        weight: 0.70
+      - field: classification.cause_level1
+        mode: EXPANDABLE
+        weight: 0.55
+      - field: classification.cause_level2
+        mode: EXPANDABLE
+        weight: 0.45
+    high_weight:
+      - field: problem.failure_objects
+        weight: 1.00
+      - field: problem.phenomena
+        weight: 1.00
+      - field: problem.trigger_conditions
+        weight: 0.90
+      - field: problem.standard_problem_description
+        weight: 0.95
+      - field: problem.problem_description
+        weight: 0.85
+    medium_weight:
+      - field: analysis.failure_mechanisms
+        weight: 0.80
+      - field: analysis.trc
+        weight: 0.70
+      - field: analysis.root_causes
+        weight: 0.65
+      - field: analysis.cause_description
+        weight: 0.60
+      - field: problem.impacts
+        weight: 0.50
+    low_weight:
+      - field: knowledge.keywords
+        weight: 0.35
+      - field: knowledge.tags
+        weight: 0.25
+      - field: solution.solution_object
+        weight: 0.20
+      - field: solution.solution_mechanism
+        weight: 0.20
+products: {}

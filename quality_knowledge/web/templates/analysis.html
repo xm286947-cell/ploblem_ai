@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block breadcrumb %}问题工作台 / 批量 AI 分析{% endblock %}
+{% block body %}
+<div class="page-header"><div><span class="eyebrow">ADVANCED</span><h1>批量 AI 分析</h1><p>分析前可预选产品领域、问题主题和生命周期；选择会随本次分析记录。</p></div><a class="btn btn-secondary" href="/issues">返回问题工作台</a></div>
+<section class="card"><div class="section-head"><h2>批量任务</h2><span class="muted">不选择时由 AI 自动判断</span></div>
+<form method="post" action="/analysis-batch" class="analysis-profile-form">
+  <div class="analysis-profile-grid">
+    <label>产品领域<select name="domain_profile">{% for x in domain_profiles %}<option value="{{x}}">{{domain_labels[x]}}</option>{% endfor %}</select></label>
+    <label>生命周期阶段<select name="lifecycle_phase">{% for x in lifecycle_phases %}<option value="{{x}}">{{lifecycle_labels[x]}}</option>{% endfor %}</select></label>
+    <fieldset><legend>问题主题（可多选）</legend><div class="analysis-choice-grid">{% for x in issue_types %}<label class="check"><input type="checkbox" name="issue_types" value="{{x}}">{{issue_type_labels[x]}}</label>{% endfor %}</div></fieldset>
+  </div>
+  <div class="inline-form"><label>业务类型<select name="business_type"><option value="">全部业务</option>{% for p in products or [] %}<option value="{{p.product_code}}">{{p.product_name}}（{{p.product_code}}）</option>{% endfor %}</select></label><label class="check"><input type="checkbox" name="only_missing" value="1" checked>仅分析未完成项</label><label class="check danger-text"><input type="checkbox" name="force" value="1">强制重新分析已完成项</label><button class="btn btn-primary">开始批量分析</button></div>
+</form></section>
+<div class="data-card"><table class="data-table"><thead><tr><th>业务 / 编号</th><th>问题</th><th>最新状态</th><th>操作</th></tr></thead><tbody>{% for x in items %}<tr><td>{{x.business_type}}<small>{{x.business_issue_id}}</small></td><td><a href="/issues/{{x.knowledge_id}}">{{x.title or x.description}}</a></td><td><span class="badge status-{{statuses.get(x.knowledge_id,'not_analyzed')|lower}}">{{statuses.get(x.knowledge_id,'未分析')}}</span></td><td><form method="post" action="/analysis/{{x.knowledge_id}}"><button class="btn btn-secondary">分析未完成项</button></form></td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

@@ -1,0 +1,3 @@
+﻿rank,case_id,title,score,ipmt,spdt,cause_level1,cause_level2,problem_score,cause_score,classification_score,solution_score,organization_score,reasons
+1,CASE-000001,CAN接收拥堵导致软件保护重启,0.591369,传动IPMT,低压变频器SPDT,软件设计,资源处理,0.54029,0.0,0.0,0.0,1.0,问题现象高度相似；问题共同词：can、拥堵、接收、软件、重启；IPMT一致；SPDT一致
+2,CASE-000002,界面按钮颜色显示异常,0.0,控制IPMT,HMI SPDT,软件设计,资源处理,0.0,0.0,0.0,0.0,0.0,综合召回命中

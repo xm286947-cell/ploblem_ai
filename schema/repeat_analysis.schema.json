@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M8.4 Repeat Analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "final_decision",
+    "best_case",
+    "candidates",
+    "analysis_status",
+    "warnings"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "decision_version",
+        "prompt_version",
+        "model_provider",
+        "model_name",
+        "generated_at"
+      ],
+      "properties": {
+        "query_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decision_version": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "model_provider": {
+          "type": "string"
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "final_decision": {
+      "type": "string",
+      "enum": [
+        "REPEAT_CASE",
+        "LIKELY_REPEAT",
+        "RELATED_CASE",
+        "NEW_CASE",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "overall_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "best_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "final_rank",
+        "final_score",
+        "decision",
+        "confidence",
+        "decision_reason"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "final_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "decision": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "decision_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
+    },
+    "analysis_status": {
+      "type": "string",
+      "enum": [
+        "SUCCESS",
+        "PARTIAL_SUCCESS",
+        "SKIPPED",
+        "FAILED"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension",
+        "strength",
+        "query_evidence",
+        "case_evidence",
+        "reason"
+      ],
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "strength": {
+          "type": "string",
+          "enum": [
+            "STRONG",
+            "MEDIUM",
+            "WEAK"
+          ]
+        },
+        "query_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "case_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "retrieval_rank",
+        "final_rank",
+        "final_score",
+        "decision",
+        "confidence",
+        "decision_reason",
+        "evidence_chain",
+        "key_differences",
+        "validation_required",
+        "risks",
+        "recommended_actions",
+        "similarity",
+        "solution",
+        "comparison_context",
+        "confidence_details",
+        "similarity_score",
+        "dimension_scores",
+        "context_applicability",
+        "recommendation_level",
+        "recommendation_reasons"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retrieval_rank": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "final_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "REPEAT_CASE",
+            "LIKELY_REPEAT",
+            "RELATED_CASE",
+            "NEW_CASE",
+            "INSUFFICIENT_EVIDENCE"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "decision_reason": {
+          "type": "string"
+        },
+        "evidence_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "key_differences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "validation_required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recommended_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "similarity": {
+          "type": "object"
+        },
+        "solution": {
+          "type": "object"
+        },
+        "comparison_context": {
+          "type": "object"
+        },
+        "confidence_details": {
+          "type": "object"
+        },
+        "similarity_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "dimension_scores": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "context_applicability": {
+          "type": "object"
+        },
+        "recommendation_level": {
+          "type": "string"
+        },
+        "recommendation_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

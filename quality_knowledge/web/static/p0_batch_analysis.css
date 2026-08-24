@@ -1,0 +1,15 @@
+.p0-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  background: #f8fbff;
+  border-bottom: 1px solid var(--line);
+}
+.p0-batch-bar label { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.p0-batch-bar select { height: 34px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; padding: 0 8px; }
+.p0-batch-bar .p0-primary:disabled { opacity: .45; cursor: not-allowed; }
+.p0-batch-result { color: var(--muted); }
+.p0-check-column { width: 54px; text-align: center !important; }
+.p0-check-column input { width: 17px; height: 17px; cursor: pointer; }

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Case Embedding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_id",
+    "case_id",
+    "model",
+    "dimensions",
+    "vector",
+    "content_hash",
+    "generated_at"
+  ],
+  "properties": {
+    "document_id": {
+      "type": "string"
+    },
+    "case_id": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "dimensions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "vector": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    }
+  }
+}
