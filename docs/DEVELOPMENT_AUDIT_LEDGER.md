@@ -145,3 +145,14 @@
 - E2E 结果：人工确认 HTTP 201；洞察 HTTP 200；MRC×能力矩阵 3 个单元，生命周期×能力矩阵 1 个单元；精确下钻 HTTP 200、total=5、返回 5 条；风险案例发布 HTTP 201；正向评估 HTTP 201。
 - 是否影响既有结论：否。
 - 下一步：执行 P0/P1 相关全量回归并形成可交付包。
+
+### 2026-08-25：恢复批量 AI 分析页面与过程可视化
+
+- 范围：批量 AI 分析独立入口、后台任务进度、四阶段状态和结果查看。
+- 触发原因：导航中的“批量 AI 分析”错误指向问题工作台；同步批量接口只能等待最终计数，无法查看每条问题的分析过程和结果入口。
+- 确认结论：新增独立 `/p0/batch-analysis` 页面；分析任务显示排队、运行、发生、流出、再发、能力缺口和最终状态；刷新页面可恢复当前任务；完成后直接进入问题分析结果。
+- 附加修复：补齐再发风险等级、潜在影响产品/版本、横向行动等持久化投影，结果页不再把已完成的再发分析显示为“未分析”。
+- 修改文件：`quality_knowledge/services/v2_batch_job_service.py`、`quality_knowledge/services/v2_analysis_service.py`、`quality_knowledge/web/api_v2.py`、`quality_knowledge/web/p0_pages.py`、`quality_knowledge/web/templates/p0_base.html`、`quality_knowledge/web/templates/p0_batch_analysis.html`、`quality_knowledge/web/static/p0_batch_analysis.js`、`quality_knowledge/web/static/p0_batch_analysis.css`、`quality_knowledge/web/static/p0_issue_detail.js`、相关测试。
+- 验证：浏览器实际完成 3 条问题、并发 2 的四阶段批量分析，进度表全部显示 COMPLETED，三个结果链接均可用；进入详情后可查看 MRC、能力缺口、证据和人工确认。P0/P1 相关回归 113 passed；JavaScript 语法检查通过。
+- 是否影响既有结论：否。
+- 下一步：在用户真实模型配置和真实问题数据下进行现场验收。

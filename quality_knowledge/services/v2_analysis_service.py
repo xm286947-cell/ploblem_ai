@@ -58,9 +58,15 @@ class V2StageRunner(Protocol):
 
 
 class V2AnalysisService:
-    def __init__(self, repository: Any, stage_runner: V2StageRunner | Any | None = None):
+    def __init__(
+        self,
+        repository: Any,
+        stage_runner: V2StageRunner | Any | None = None,
+        progress_callback: Any | None = None,
+    ):
         self.repository = repository
         self.stage_runner = stage_runner
+        self.progress_callback = progress_callback
 
     def run(
         self,
@@ -90,6 +96,7 @@ class V2AnalysisService:
         warnings: list[str] = []
 
         for stage in STAGES:
+            self._notify_progress(stage, "RUNNING")
             context = StageRunContext(
                 analysis_set_id=analysis_set_id,
                 stage=stage,
@@ -111,6 +118,7 @@ class V2AnalysisService:
                 raw_result = execution["payload"]
                 parsed = normalize_stage_v2(stage, raw_result)
                 parsed_stages[stage] = parsed
+                self._notify_progress(stage, "COMPLETED")
                 stage_rows.append(
                     {
                         "stage": stage,
@@ -125,6 +133,7 @@ class V2AnalysisService:
                 )
             except Exception as error:  # A later stage may still produce useful evidence.
                 message = str(error)
+                self._notify_progress(stage, "FAILED", error=message)
                 warnings.append(f"{stage}:{message}")
                 debug = getattr(error, "debug", {"retry_errors": [message]})
                 stage_rows.append(
@@ -163,6 +172,15 @@ class V2AnalysisService:
         }
         self.repository.save_analysis_set(analysis)
         return self._make_envelope(analysis, parsed_stages, warnings)
+
+    def _notify_progress(self, stage: str, status: str, **details: Any) -> None:
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback({"stage": stage, "status": status, **details})
+        except Exception:
+            # UI progress must never change the analysis outcome.
+            return
 
     def get(self, knowledge_id: str) -> IssueAnalysisV2Envelope:
         """Read only a native P0 V2 Analysis Set for an issue."""
@@ -326,8 +344,12 @@ class V2AnalysisService:
 
         recurrence = stages.get("recurrence")
         if recurrence is not None:
+            self._add_value(values, evidence, "recurrence", "recurrence_risk_level", recurrence.recurrence_risk_level)
             self._add_value(values, evidence, "recurrence", "existing_control_coverage", recurrence.existing_control_coverage)
             self._add_value(values, evidence, "recurrence", "residual_risk", recurrence.residual_risk)
+            self._add_value(values, evidence, "recurrence", "potential_affected_products", recurrence.potential_affected_products)
+            self._add_value(values, evidence, "recurrence", "potential_affected_versions", recurrence.potential_affected_versions)
+            self._add_value(values, evidence, "recurrence", "horizontal_action_needed", recurrence.horizontal_action_needed)
             self._add_value(values, evidence, "recurrence", "customer_impact", recurrence.customer_impact)
             self._add_questions(questions, "recurrence", recurrence.open_questions)
 

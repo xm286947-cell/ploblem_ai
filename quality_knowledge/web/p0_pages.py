@@ -48,6 +48,14 @@ def create_p0_insights_router(
             {"api_prefix": api_prefix.rstrip("/"), "page_title": "问题工作台 · 质量能力"},
         )
 
+    @router.get("/p0/batch-analysis", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_batch_analysis(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_batch_analysis.html",
+            {"api_prefix": api_prefix.rstrip("/"), "page_title": "批量 AI 分析 · 质量能力"},
+        )
+
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
         return templates.TemplateResponse(

@@ -15,6 +15,7 @@
     <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
     <nav class="main-nav">
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/batch-analysis') %}active{% endif %}" href="/p0/batch-analysis">批量 AI 分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/data-intake') %}active{% endif %}" href="/p0/data-intake">数据接入</a>
       <div class="nav-divider"></div>
@@ -22,7 +23,7 @@
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
     </nav>
-    <div class="side-foot"><a href="/p0/issues">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a></div>
+    <div class="side-foot"><a href="/p0/batch-analysis">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a></div>
   </aside>
   <div class="app-main">
     <header class="top-bar">

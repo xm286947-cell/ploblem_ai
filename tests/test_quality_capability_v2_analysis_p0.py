@@ -127,6 +127,13 @@ def test_four_stages_share_one_analysis_set_and_persist_projections(tmp_path):
     assert saved["mrc"][0]["mrc_code"] == "RELEASE_GATE_FAILED"
     assert saved["capability_gaps"][0]["capability_axis"] == "QUALITY_ENGINEERING"
     assert saved["evidence"]
+    recurrence_values = {
+        row["value_path"]: row["value_json"] for row in saved["values"]
+        if row["stage"] == "recurrence"
+    }
+    assert recurrence_values["recurrence.recurrence_risk_level"] == "HIGH"
+    assert recurrence_values["recurrence.potential_affected_products"] == ["PLC"]
+    assert recurrence_values["recurrence.horizontal_action_needed"] is True
 
 
 def test_single_stage_failure_is_partial_and_never_becomes_empty_completed(tmp_path):

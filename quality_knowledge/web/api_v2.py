@@ -15,6 +15,7 @@ from quality_knowledge.p0.repository import P0RepositoryError
 from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
+from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
 from quality_knowledge.standard_fields.repository import StandardFieldCatalogError, StandardFieldRepository
 from quality_knowledge.standard_fields.service import StandardFieldService
 
@@ -22,7 +23,7 @@ from quality_knowledge.standard_fields.service import StandardFieldService
 def _http_error(error: Exception) -> HTTPException:
     code = str(error)
     if code in {
-        "ISSUE_NOT_FOUND", "V2_ANALYSIS_NOT_AVAILABLE", "ANALYSIS_SET_NOT_FOUND",
+        "ISSUE_NOT_FOUND", "V2_ANALYSIS_NOT_AVAILABLE", "ANALYSIS_SET_NOT_FOUND", "ANALYSIS_JOB_NOT_FOUND",
         "RISK_CASE_SOURCE_ISSUE_NOT_FOUND", "RISK_CASE_MERGE_TARGET_NOT_FOUND", "ASSESSMENT_NOT_FOUND",
         "ASSESSMENT_VERSION_NOT_FOUND", "RISK_RESULT_NOT_FOUND",
     }:
@@ -51,6 +52,7 @@ def create_v2_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
     fields = StandardFieldRepository(repository.db_path)
+    analysis_jobs = V2BatchAnalysisJobManager(repository, stage_runner)
 
     def _issue_summary(row: Any) -> dict[str, Any]:
         snapshot = json.loads(row["snapshot_json"] or "{}")
@@ -293,6 +295,24 @@ def create_v2_router(
                 payload.get("knowledge_ids") or [], concurrency=payload.get("concurrency", 2),
                 request={"force": bool(payload.get("force"))},
             )
+        except V2BatchAnalysisError as error:
+            raise _http_error(error) from error
+
+    @router.post("/analysis-jobs", status_code=202)
+    def start_analysis_job(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return analysis_jobs.start(
+                payload.get("knowledge_ids") or [],
+                concurrency=payload.get("concurrency", 2),
+                request={"force": bool(payload.get("force"))},
+            )
+        except V2BatchAnalysisError as error:
+            raise _http_error(error) from error
+
+    @router.get("/analysis-jobs/{job_id}")
+    def analysis_job(job_id: str) -> dict[str, Any]:
+        try:
+            return analysis_jobs.get(job_id)
         except V2BatchAnalysisError as error:
             raise _http_error(error) from error
 
