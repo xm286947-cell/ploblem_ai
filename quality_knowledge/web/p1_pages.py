@@ -22,4 +22,8 @@ def create_p1_router(*, api_prefix: str = "/api/v2") -> APIRouter:
             {"page_title": "正向质量风险评估 · P1", "api_prefix": api_prefix.rstrip("/")},
         )
 
+    @router.get("/p1/product-reports", response_class=HTMLResponse, include_in_schema=False)
+    async def product_reports(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request, "p1_product_reports.html", {"page_title": "产品质量综合报告", "api_prefix": api_prefix.rstrip("/")})
+
     return router

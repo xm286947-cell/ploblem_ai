@@ -20,6 +20,7 @@
       "priority": "P0|P1|P2",
       "first_action": "...",
       "verification_metric": "...",
+      "source_type": "SOURCE_DATA|AI_STANDARDIZED|AI_INFERRED|HUMAN_CONFIRMED|UNKNOWN",
       "confidence": 0.0,
       "evidence": [{"source_type":"FIELD","source_id":"...","field_path":"...","excerpt":"..."}]
     }

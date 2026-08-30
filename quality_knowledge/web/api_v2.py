@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
 from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
+from quality_knowledge.product_report import ProductQualityReportService, ProductReportError
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
 from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
@@ -26,6 +27,7 @@ def _http_error(error: Exception) -> HTTPException:
         "ISSUE_NOT_FOUND", "V2_ANALYSIS_NOT_AVAILABLE", "ANALYSIS_SET_NOT_FOUND", "ANALYSIS_JOB_NOT_FOUND",
         "RISK_CASE_SOURCE_ISSUE_NOT_FOUND", "RISK_CASE_MERGE_TARGET_NOT_FOUND", "ASSESSMENT_NOT_FOUND",
         "ASSESSMENT_VERSION_NOT_FOUND", "RISK_RESULT_NOT_FOUND",
+        "REPORT_NOT_FOUND",
     }:
         return HTTPException(404, code)
     if code in {"HUMAN_CONFIRMATION_STALE", "HUMAN_CONFIRMATION_VERSION_CONFLICT", "INSIGHT_SCOPE_CHANGED",
@@ -53,6 +55,37 @@ def create_v2_router(
     router = APIRouter(prefix="/api/v2")
     fields = StandardFieldRepository(repository.db_path)
     analysis_jobs = V2BatchAnalysisJobManager(repository, stage_runner)
+    reports = ProductQualityReportService(repository)
+
+    @router.get("/product-reports/precheck")
+    def report_precheck(product_code: str, start_month: str, end_month: str) -> dict[str, Any]:
+        return reports.precheck(product_code, start_month, end_month)
+
+    @router.get("/product-reports")
+    def product_reports() -> dict[str, Any]:
+        items = reports.list(); return {"items": items, "total": len(items)}
+
+    @router.post("/product-reports", status_code=201)
+    def create_product_report(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return reports.create(str(payload.get("product_code") or ""), str(payload.get("start_month") or ""), str(payload.get("end_month") or ""), str(payload.get("created_by") or ""))
+        except ProductReportError as error:
+            raise _http_error(error) from error
+
+    @router.get("/product-reports/{report_id}")
+    def product_report(report_id: str) -> dict[str, Any]:
+        try: return reports.get(report_id)
+        except ProductReportError as error: raise _http_error(error) from error
+
+    @router.post("/product-reports/{report_id}/publish")
+    def publish_product_report(report_id: str) -> dict[str, Any]:
+        try: return reports.publish(report_id)
+        except ProductReportError as error: raise _http_error(error) from error
+
+    @router.delete("/product-reports/{report_id}")
+    def delete_product_report(report_id: str) -> dict[str, Any]:
+        try: return reports.delete(report_id)
+        except ProductReportError as error: raise HTTPException(409 if str(error) == "PUBLISHED_REPORT_CANNOT_BE_DELETED" else 404, str(error)) from error
 
     def _issue_summary(row: Any) -> dict[str, Any]:
         snapshot = json.loads(row["snapshot_json"] or "{}")
@@ -402,6 +435,16 @@ def create_v2_router(
         with fields.connect() as connection:
             errors = StandardFieldService(fields, "unused").validate_catalog_for_activation(catalog_id, connection)
         return {"catalog_version_id": catalog_id, "valid": not errors, "errors": errors}
+
+    @router.post("/standard-fields/change-requests/{change_request_id}/approve")
+    def approve_standard_field(change_request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return fields.approve_change_request(
+                change_request_id,
+                str(payload.get("approved_by") or ""),
+            )
+        except StandardFieldCatalogError as error:
+            raise _http_error(error) from error
 
     @router.post("/standard-field-catalogs/{catalog_id}/activate")
     def activate_catalog(catalog_id: str, payload: dict[str, Any]) -> dict[str, Any]:

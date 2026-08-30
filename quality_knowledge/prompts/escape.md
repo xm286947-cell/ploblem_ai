@@ -8,6 +8,8 @@
   "verification_gap":{"value":"...","confidence":0.0,"evidence_type":"EXPLICIT|SUMMARIZED|INFERRED|UNKNOWN","reason":"...","source_refs":[]},
   "process_gap":{"value":"...","confidence":0.0,"evidence_type":"EXPLICIT|SUMMARIZED|INFERRED|UNKNOWN","reason":"...","source_refs":[]},
   "escape_category":"REQUIREMENT_REVIEW|DESIGN_REVIEW|UNIT_TEST|INTEGRATION_TEST|SYSTEM_TEST|HARDWARE_TEST|ASSEMBLY_INSPECTION|RELEASE_GATE|DELIVERY_VALIDATION|MONITORING|UNKNOWN",
+  "mrc":{"code":"...","label_zh":"...","control_status":"DEFINED_EFFECTIVE|DEFINED_INEFFECTIVE|NOT_DEFINED|NOT_EXECUTED|INSUFFICIENT_INFO|UNKNOWN","source_type":"SOURCE_DATA|AI_STANDARDIZED|AI_INFERRED|HUMAN_CONFIRMED|UNKNOWN","confidence":0.0,"rationale":"...","evidence":[]},
+  "lifecycle_tags":[{"code":"REQUIREMENT|DESIGN|DEVELOPMENT|ASSEMBLY|INTEGRATION|RELEASE|DELIVERY|OPERATION","label_zh":"...","source_type":"...","confidence":0.0,"evidence":[]}],
   "expected_detection_stage":"...",
   "actual_detection_stage":"...",
   "missing_control":"...",
@@ -17,4 +19,4 @@
   "evidence":[]
 }
 
-规则：证据必须来自输入字段。无证据不得下确定结论；INFERRED confidence 不高于 0.60。open_questions 最多 3 条，只保留会改变流出机制或控制措施的问题。human_confirmations 优先于推断。
+规则：流出 MRC 表示控制为何未建立、未执行或未奏效，不得只写“漏测”。已知问题漏合、分支合入遗漏、发布版本错误、门禁未阻断等必须区分。证据必须来自输入字段。无证据不得下确定结论；INFERRED confidence 不高于 0.60。open_questions 最多 3 条，只保留会改变流出机制或控制措施的问题。human_confirmations 优先于推断。

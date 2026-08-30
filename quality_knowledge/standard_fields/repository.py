@@ -180,7 +180,42 @@ class StandardFieldRepository:
                 (code,),
             ).fetchone()
             if existing:
-                return {**self.get_mapping(existing["config_id"]), "outcome": "ALREADY_EXISTS"}
+                # A controlled standard field may have been activated after this
+                # product draft was created.  Keep the draft and its aliases, but
+                # append any newly approved catalog targets so users do not have
+                # to discard or rebuild their work.
+                present = {
+                    (row["target_domain"], row["target_field"])
+                    for row in connection.execute(
+                        "SELECT target_domain,target_field FROM mapping_item WHERE config_id = ?",
+                        (existing["config_id"],),
+                    ).fetchall()
+                }
+                next_order = connection.execute(
+                    "SELECT COALESCE(MAX(display_order), -1) + 1 FROM mapping_item WHERE config_id = ?",
+                    (existing["config_id"],),
+                ).fetchone()[0]
+                added = 0
+                for target in starter["targets"]:
+                    key = (target["target_domain"], target["target_field"])
+                    if key in present:
+                        continue
+                    connection.execute(
+                        """INSERT INTO mapping_item(
+                               mapping_item_id, config_id, canonical_field, target_domain,
+                               target_field, required, enabled, description_zh, display_order
+                           ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                        (f"MI-{uuid.uuid4().hex}", existing["config_id"], target["canonical_field"],
+                         target["target_domain"], target["target_field"], int(target["required"]),
+                         target["display_name"], next_order + added),
+                    )
+                    added += 1
+                connection.commit()
+                return {
+                    **self.get_mapping(existing["config_id"]),
+                    "outcome": "SYNCHRONIZED" if added else "ALREADY_EXISTS",
+                    "added_fields": added,
+                }
             base = connection.execute(
                 """SELECT config_id FROM mapping_config
                     WHERE business_type = ? AND status = 'ACTIVE'

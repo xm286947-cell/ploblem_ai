@@ -1,9 +1,9 @@
-<!-- 兼容名称：质量问题统计分析 -->
+<!-- 兼容名称：质量问题统计分析；旧 product-context-strip 已收敛为默认折叠的范围背景 -->
 {% extends "base.html" %}
 {% block breadcrumb %}质量洞察{% endblock %}{% block body %}
 <div class="page-header">
   <div><div class="eyebrow">质量问题知识 · 统计分析</div><h1>质量洞察</h1><p>从问题规模、发生/流出原因、再发风险和能力缺口中发现值得治理的重点。</p></div>
-  <form class="dashboard-filter" method="get"><select name="business_type"><option value="">全部业务类型</option>{% for p in products or [] %}<option value="{{p.product_code}}" {% if business_type==p.product_code %}selected{% endif %}>{{p.product_name}}（{{p.product_code}}）</option>{% endfor %}</select><button>查询</button><a class="btn secondary" href="/statistics">重置</a><a class="btn secondary" href="/export{% if business_type %}?business_type={{business_type}}{% endif %}">导出报表（问题明细）</a></form>
+  <form class="dashboard-filter" method="get"><select name="business_type"><option value="">全部产品/业务</option>{% for p in products or [] %}<option value="{{p.product_code}}" {% if business_type==p.product_code %}selected{% endif %}>{{p.product_name}}（{{p.product_code}}）</option>{% endfor %}</select><select name="month"><option value="">全部月份</option>{% for x in available_months %}<option value="{{x}}" {% if month==x %}selected{% endif %}>{{x}}</option>{% endfor %}</select><select name="issue_domain"><option value="">全部问题领域</option>{% for x,label in [('SOFTWARE','软件'),('EMBEDDED','嵌入式/软硬协同'),('HARDWARE','硬件'),('MECHANICAL','机械'),('AUTO','待判断')] %}<option value="{{x}}" {% if issue_domain==x %}selected{% endif %}>{{label}}</option>{% endfor %}</select><select name="lifecycle"><option value="">全部生命周期</option>{% for x in lifecycle_phases %}{% if x!='AUTO' %}<option value="{{x}}" {% if lifecycle==x %}selected{% endif %}>{{lifecycle_labels.get(x,x)}}</option>{% endif %}{% endfor %}</select><button>查询</button><a class="btn secondary" href="/statistics">重置</a><a class="btn secondary" href="/export{% if business_type %}?business_type={{business_type}}{% endif %}">导出报表（问题明细）</a></form>
 </div>
 {% set sm=statistics_view.summary %}
 <section class="dashboard-section overview"><div class="dashboard-title"><h2>总体概览</h2><a href="/issues{% if business_type %}?business_type={{business_type}}{% endif %}">查看问题明细 →</a></div>
@@ -11,20 +11,21 @@
   <a class="metric-card blue" href="/issues{% if business_type %}?business_type={{business_type}}{% endif %}"><span>问题总数</span><strong>{{sm.issue_count}}</strong><small>当前筛选范围</small></a>
   <a class="metric-card green" href="/issues?{% if business_type %}business_type={{business_type}}&{% endif %}analysis_status=COMPLETED"><span>AI 分析完成</span><strong>{{sm.analyzed_count}}</strong><small>{{sm.ai_completion_rate}}% 完成率</small></a><a class="metric-card" href="/issues?{% if business_type %}business_type={{business_type}}&{% endif %}human_status=DONE"><span>人工分析完成</span><strong>{{sm.human_analyzed_count}}</strong><small>{{sm.human_completion_rate}}% 完成率</small></a>
   <a class="metric-card orange" href="/issues?{% if business_type %}business_type={{business_type}}&{% endif %}recurrence_risk=HIGH"><span>高再发风险问题</span><strong>{{sm.high_risk_count}}</strong><small>建议优先关注</small></a>
-  <a class="metric-card purple" href="#capability"><span>技术能力缺口</span><strong>{{sm.technical_gap_types}}</strong><small>缺口类型</small></a>
-  <a class="metric-card cyan" href="#capability"><span>管理能力缺口</span><strong>{{sm.management_gap_types}}</strong><small>缺口类型</small></a>
-  <a class="metric-card red" href="#capability"><span>治理能力缺口</span><strong>{{sm.governance_gap_types}}</strong><small>缺口类型</small></a>
+  <a class="metric-card purple" href="#capability"><span>质量工程能力矛盾</span><strong>{{sm.technical_gap_types}}</strong><small>需求、设计、实现、测试等工程能力</small></a>
+  <a class="metric-card cyan" href="#capability"><span>质量管理能力矛盾</span><strong>{{sm.management_gap_types}}</strong><small>流程、变更、门禁与闭环机制</small></a>
+  <a class="metric-card red" href="#capability"><span>横向治理能力矛盾</span><strong>{{sm.governance_gap_types}}</strong><small>跨产品标准与公共能力</small></a>
   <a class="metric-card indigo" href="#common"><span>共性能力缺口</span><strong>{{sm.common_gap_count}}</strong><small>跨产品/业务聚合</small></a>
 </div></section>
+{% if statistics_view.product_chart %}<details class="product-context-details"><summary><span><b>范围背景</b> · 覆盖 {{sm.product_count}} 个产品</span><small>展开查看产品分布</small></summary><div class="product-context-items">{% for r in statistics_view.product_chart[:8] %}<div title="{{r.category}}：{{r.count}} 个问题，占 {{r.percent}}%"><span>{{r.category}}</span><i><em style="width:{{r.percent}}%"></em></i><b>{{r.count}}</b><small>{{r.percent}}%</small></div>{% endfor %}</div></details>{% endif %}
 {% set section_map = {} %}{% for s in statistics_view.sections %}{% set _=section_map.update({s.key:s}) %}{% endfor %}
 <section class="dashboard-section"><div class="dashboard-title"><h2>问题分布与原因分析</h2><a href="/issues{% if business_type %}?business_type={{business_type}}{% endif %}">查看问题列表 →</a></div>
-<div class="report-grid four">
-{% for key in ['top_occurrence_causes','top_escape_causes'] %}{% set s=section_map.get(key) %}<article class="report-card"><div class="report-head"><h3>{{s.title}}</h3><span>TOP {{[s.rows|length,5]|min}}</span></div>{% if s.rows %}<div class="bar-report">{% set maxc=s.rows[0].get('count',1)|int %}{% for r in s.rows[:5] %}<div class="bar-item"><div><span title="{{r.category}}">{{r.category}}</span><b>{{r.count}}</b></div><i><em style="width:{{((r.count|int)*100/(maxc if maxc else 1))|round}}%"></em></i></div>{% endfor %}</div>{% else %}<div class="dashboard-empty">暂无数据</div>{% endif %}</article>{% endfor %}
-<article class="report-card"><div class="report-head"><h3>产品分布</h3><span>{{sm.product_count}} 个产品</span></div>{% if statistics_view.product_chart %}<div class="distribution-list">{% for r in statistics_view.product_chart[:6] %}<div><i class="dot d{{loop.index}}"></i><span>{{r.category}}</span><b>{{r.count}}</b><small>{{r.percent}}%</small></div>{% endfor %}</div>{% else %}<div class="dashboard-empty">暂无数据</div>{% endif %}</article>
-<article class="report-card"><div class="report-head"><h3>再发风险分布</h3><a href="/analysis">查看分析 →</a></div>{% if statistics_view.risk_chart %}<div class="risk-report">{% for r in statistics_view.risk_chart %}<div class="risk-stat risk-{{r.category|lower}}"><strong>{{r.count}}</strong><span>{{r.category}}</span><small>{{r.percent}}%</small></div>{% endfor %}</div>{% else %}<div class="dashboard-empty">暂无 AI 再发风险数据</div>{% endif %}</article>
-</div></section>
-<section class="dashboard-section" id="capability"><div class="dashboard-title"><h2>能力缺口分析</h2><span>基于已完成 AI 分析结果聚合</span></div><div class="report-grid three">
-{% for key in ['top_technical_gaps','top_management_gaps','top_governance_gaps'] %}{% set s=section_map.get(key) %}{% set dim=key.replace('top_','').replace('_gaps','')|upper %}<article class="report-card table-card"><div class="report-head"><h3>{{s.title}}</h3><a href="/insights/capability-gaps?dimension={{dim}}">查看详情 →</a></div>{% if s.rows %}<table class="compact-table"><thead><tr><th>能力缺口类型</th><th>问题数</th><th>占比</th></tr></thead><tbody>{% set total=namespace(v=0) %}{% for r in s.rows %}{% set total.v=total.v+(r.count|int) %}{% endfor %}{% for r in s.rows[:5] %}<tr><td>{{r.category}}</td><td><b>{{r.count}}</b></td><td>{{(((r.count|int)*100/(total.v if total.v else 1)))|round(1)}}%</td></tr>{% endfor %}</tbody></table>{% else %}<div class="dashboard-empty">暂无能力缺口数据</div>{% endif %}</article>{% endfor %}
+<div class="report-grid three insight-causal-grid">
+{% for key in ['top_occurrence_causes','top_escape_causes'] %}{% set s=section_map.get(key) %}<article class="report-card insight-dimension-card {{'dimension-occurrence' if key=='top_occurrence_causes' else 'dimension-escape'}}"><div class="report-head"><h3>{{s.title}}</h3><span>TOP {{[s.rows|length,5]|min}}</span></div>{% if s.rows %}<div class="bar-report">{% set maxc=s.rows[0].get('count',1)|int %}{% for r in s.rows[:5] %}<div class="bar-item"><div><span title="{{r.category}}">{{r.category}}</span><b>{{r.count}}</b></div><i><em style="width:{{((r.count|int)*100/(maxc if maxc else 1))|round}}%"></em></i></div>{% endfor %}</div>{% else %}<div class="dashboard-empty">暂无数据</div>{% endif %}</article>{% endfor %}
+<article class="report-card insight-dimension-card dimension-recurrence"><div class="report-head"><h3>再发风险分布</h3><a href="/analysis">查看分析 →</a></div>{% if statistics_view.risk_chart %}<div class="risk-report">{% for r in statistics_view.risk_chart %}<div class="risk-stat risk-{{r.category|lower}}"><strong>{{r.count}}</strong><span>{{r.category}}</span><small>{{r.percent}}%</small></div>{% endfor %}</div>{% else %}<div class="dashboard-empty">暂无 AI 再发风险数据</div>{% endif %}</article>
+</div>
+</section>
+<section class="dashboard-section" id="capability"><div class="dashboard-title"><h2>质量能力关键矛盾</h2><span>能力缺口分析升级：沿用现有 AI 分析结果，分别从质量工程、质量管理和横向治理聚合</span></div><div class="report-grid three">
+{% for key in ['top_technical_gaps','top_management_gaps','top_governance_gaps'] %}{% set s=section_map.get(key) %}{% set dim=key.replace('top_','').replace('_gaps','')|upper %}<article class="report-card table-card capability-dimension-card capability-{{dim|lower}}"><div class="report-head"><h3>{{s.title}}</h3><a href="/insights/capability-gaps?dimension={{dim}}">查看详情 →</a></div>{% if s.rows %}<table class="compact-table"><thead><tr><th>能力缺口类型</th><th>问题数</th><th>占比</th></tr></thead><tbody>{% set total=namespace(v=0) %}{% for r in s.rows %}{% set total.v=total.v+(r.count|int) %}{% endfor %}{% for r in s.rows[:5] %}<tr><td>{{r.category}}</td><td><b>{{r.count}}</b></td><td>{{(((r.count|int)*100/(total.v if total.v else 1)))|round(1)}}%</td></tr>{% endfor %}</tbody></table>{% else %}<div class="dashboard-empty">暂无能力缺口数据</div>{% endif %}</article>{% endfor %}
 </div></section>
 <section class="dashboard-section cg2-section" id="common">
   <div class="cg2-pagehead">
@@ -39,9 +40,9 @@
       </select>
       <select name="gap_dimension" aria-label="能力维度筛选">
         <option value="">全部能力维度</option>
-        <option value="TECHNICAL" {% if gap_dimension=='TECHNICAL' %}selected{% endif %}>技术能力</option>
-        <option value="MANAGEMENT" {% if gap_dimension=='MANAGEMENT' %}selected{% endif %}>管理能力</option>
-        <option value="GOVERNANCE" {% if gap_dimension=='GOVERNANCE' %}selected{% endif %}>治理能力</option>
+        <option value="TECHNICAL" {% if gap_dimension=='TECHNICAL' %}selected{% endif %}>质量工程能力</option>
+        <option value="MANAGEMENT" {% if gap_dimension=='MANAGEMENT' %}selected{% endif %}>质量管理能力</option>
+        <option value="GOVERNANCE" {% if gap_dimension=='GOVERNANCE' %}selected{% endif %}>横向治理能力</option>
       </select>
       <input type="hidden" name="common_scope" value="{{common_scope or 'all'}}">
       <button type="submit">筛选</button>
@@ -123,6 +124,40 @@
     </div>
     {% else %}<div class="cg2-empty">当前没有覆盖 ≥ 2 个产品的共性能力缺口</div>{% endif %}
   </section>
+</section>
+
+{% if capability_matrices.mrc_x_capability or capability_matrices.lifecycle_x_capability %}
+<section class="dashboard-section" id="quality-capability-matrices">
+  <div class="dashboard-title"><h2>关键矛盾交叉验证</h2><span>直接使用原问题、原 AI 结果和原能力缺口数据计算</span></div>
+  <div class="report-grid two">
+    <article class="report-card table-card"><div class="report-head"><h3>MRC × 质量能力</h3></div><table class="compact-table"><thead><tr><th>MRC</th><th>能力轴</th><th>能力缺口</th><th>问题数</th></tr></thead><tbody>{% for r in capability_matrices.mrc_x_capability[:10] %}<tr><td>{{zh_value(r.mrc_code)}}<small>{{r.mrc_code}}</small></td><td>{{zh_value(r.capability_axis)}}</td><td>{{zh_value(r.capability_code)}}</td><td><a href="/issues?matrix_axis=MRC&matrix_code={{r.mrc_code}}&gap_dimension={{r.capability_axis}}&gap_category={{r.capability_code}}{% if business_type %}&business_type={{business_type}}{% endif %}{% if month %}&month={{month}}{% endif %}{% if issue_domain %}&issue_domain={{issue_domain}}{% endif %}"><b>{{r.issue_count}}</b> →</a></td></tr>{% endfor %}</tbody></table></article>
+    <article class="report-card table-card"><div class="report-head"><h3>生命周期 × 质量能力</h3></div><table class="compact-table"><thead><tr><th>生命周期</th><th>能力轴</th><th>能力缺口</th><th>问题数</th></tr></thead><tbody>{% for r in capability_matrices.lifecycle_x_capability[:10] %}<tr><td>{{zh_value(r.lifecycle_code)}}<small>{{r.lifecycle_code}}</small></td><td>{{zh_value(r.capability_axis)}}</td><td>{{zh_value(r.capability_code)}}</td><td><a href="/issues?matrix_axis=LIFECYCLE&matrix_code={{r.lifecycle_code}}&gap_dimension={{r.capability_axis}}&gap_category={{r.capability_code}}{% if business_type %}&business_type={{business_type}}{% endif %}{% if month %}&month={{month}}{% endif %}{% if issue_domain %}&issue_domain={{issue_domain}}{% endif %}"><b>{{r.issue_count}}</b> →</a></td></tr>{% endfor %}</tbody></table></article>
+  </div>
+</section>
+{% endif %}
+{% set qcov=quality_insight_summary.coverage %}
+<section class="dashboard-section" id="quality-data-coverage">
+  <div class="dashboard-title"><h2>分析口径与数据覆盖</h2><span>当前筛选范围 · 原数据与 AI/人工结论分开计数</span></div>
+  <div class="metric-grid">
+    <div class="metric-card"><span>问题总数</span><strong>{{qcov.total_issues}}</strong><small>当前版本</small></div>
+    <div class="metric-card blue"><span>已生成质量投影</span><strong>{{qcov.projection_rate}}%</strong><small>{{qcov.projected_issues}} 个问题</small></div>
+    <div class="metric-card green"><span>MRC 分类覆盖</span><strong>{{qcov.classification_rate}}%</strong><small>{{qcov.classified_issues}} 个问题</small></div>
+    <div class="metric-card purple"><span>人工确认覆盖</span><strong>{{qcov.human_confirmation_rate}}%</strong><small>{{qcov.human_confirmed_issues}} 个问题</small></div>
+  </div>
+</section>
+{% if quality_insight_summary.hardware_categories or quality_insight_summary.hardware_failure_causes %}
+<section class="dashboard-section" id="hardware-quality-insights">
+  <div class="dashboard-title"><h2>软件问题中的硬件关联</h2><span>仅统计已识别或人工确认的器件与失效信息</span></div>
+  <div class="report-grid two">
+    <article class="report-card table-card"><div class="report-head"><h3>主要器件类别</h3></div><table class="compact-table"><thead><tr><th>器件类别</th><th>问题数</th></tr></thead><tbody>{% for r in quality_insight_summary.hardware_categories %}<tr><td>{{r.category}}</td><td><b>{{r.issue_count}}</b></td></tr>{% endfor %}</tbody></table></article>
+    <article class="report-card table-card"><div class="report-head"><h3>主要失效原因/模式</h3></div><table class="compact-table"><thead><tr><th>失效原因或模式</th><th>问题数</th></tr></thead><tbody>{% for r in quality_insight_summary.hardware_failure_causes %}<tr><td>{{r.category}}</td><td><b>{{r.issue_count}}</b></td></tr>{% endfor %}</tbody></table></article>
+  </div>
+</section>
+{% endif %}
+<section class="dashboard-section" id="classification-comparison">
+  <div class="dashboard-title"><h2>原始 L1–L4 与当前分类对照</h2><span>直接标准码对照，不猜测语义等价；冲突需进入人工确认</span></div>
+  <div class="report-grid two">{% for side,label in [('OCCURRENCE','根因 L1–L4 × 发生 MRC'),('ESCAPE','测试/流出 L1–L4 × 流出 MRC')] %}{% set x=classification_comparison.sides[side] %}<article class="report-card table-card"><div class="report-head"><h3>{{label}}</h3><span>{{x.total}} 个问题</span></div><table class="compact-table"><tbody><tr><td>编码直接一致</td><td><b>{{x.CONSISTENT}}</b></td></tr><tr><td>原始与当前分类冲突</td><td><b>{{x.CONFLICT}}</b></td></tr><tr><td>仅 AI/人工补充</td><td><b>{{x.AI_SUPPLEMENT}}</b></td></tr><tr><td>仅原始分类</td><td><b>{{x.SOURCE_ONLY}}</b></td></tr><tr><td>双方均缺失</td><td><b>{{x.MISSING}}</b></td></tr></tbody></table></article>{% endfor %}</div>
+  {% if classification_comparison.examples %}<article class="report-card table-card"><div class="report-head"><h3>需处理的对照样例</h3><span>最多 12 条</span></div><table class="compact-table"><thead><tr><th>问题</th><th>侧</th><th>状态</th><th>原始 L1–L4</th><th>当前 MRC</th></tr></thead><tbody>{% for x in classification_comparison.examples %}<tr><td><a href="/issues/{{x.knowledge_id}}">{{x.knowledge_id}}</a></td><td>{{'发生' if x.side=='OCCURRENCE' else '流出'}}</td><td>{{{'CONSISTENT':'一致','CONFLICT':'冲突','AI_SUPPLEMENT':'AI/人工补充','SOURCE_ONLY':'仅原始分类'}.get(x.state,x.state)}}</td><td>{{x.source or '-'}}</td><td>{{zh_value(x.ai) if x.ai else '-'}}</td></tr>{% endfor %}</tbody></table></article>{% endif %}
 </section>
 <div class="dashboard-foot">统计范围：Current Issue Version + Latest Valid COMPLETED Analysis <span>·</span> <a href="/export{% if business_type %}?business_type={{business_type}}{% endif %}">导出当前统计报表</a></div>
 {% endblock %}

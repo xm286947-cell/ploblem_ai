@@ -18,7 +18,14 @@ output/diagnostics/
 output/raw_ai/
 
 # Local release archives and spreadsheet inspection artifacts
-releases/*.zip
+releases/
 *.inspect.ndjson
 *_preview.png
 
+# Generated baseline delivery artifacts
+baseline_release/
+
+# Runtime evidence and generated outputs are local state, not source baseline
+knowledge/raw_evidence/*.json
+knowledge/raw_excel/*.json
+output/retrieval_results/*.json

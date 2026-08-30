@@ -19,13 +19,14 @@ class StageAnalysisError(RuntimeError):
 
 
 class StageAnalyzer:
-    def __init__(self, root: str|Path, stage: str, dto: Type[BaseModel], *, client=None):
+    def __init__(self, root: str|Path, stage: str, dto: Type[BaseModel], *, client=None, agent_id=''):
         self.root=Path(root); self.stage=stage; self.dto=dto
-        self.ai_cfg, self.model_config_path = load_quality_issue_ai_config(self.root)
+        self.ai_cfg, self.model_config_path = load_quality_issue_ai_config(self.root,agent_id=agent_id,stage=stage)
+        self.agent_id=self.ai_cfg.get('_agent_id','DEFAULT')
         stage_runtime = dict((self.ai_cfg.get('stage_runtime') or {}).get(stage) or {})
         self.ai_cfg = {**self.ai_cfg, **stage_runtime}
         if client is None:
-            check = validate_quality_issue_ai_config(self.root, require_enabled=True)
+            check = validate_quality_issue_ai_config(self.root, require_enabled=True,agent_id=agent_id,stage=stage)
             if not check['ok']:
                 raise ModelConfigError('; '.join(check['errors']) + f"; config={check['config_path']}")
         self.prompt_path=self.root/f'quality_knowledge/prompts/{stage}.md'
@@ -77,10 +78,10 @@ class StageAnalyzer:
         raise StageAnalysisError(self.stage,last or RuntimeError('unknown error'),last_debug)
 
 class OccurrenceAnalyzer(StageAnalyzer):
-    def __init__(self,root,client=None): super().__init__(root,'occurrence',OccurrenceAnalysisDTO,client=client)
+    def __init__(self,root,client=None,agent_id=''): super().__init__(root,'occurrence',OccurrenceAnalysisDTO,client=client,agent_id=agent_id)
 class EscapeAnalyzer(StageAnalyzer):
-    def __init__(self,root,client=None): super().__init__(root,'escape',EscapeAnalysisDTO,client=client)
+    def __init__(self,root,client=None,agent_id=''): super().__init__(root,'escape',EscapeAnalysisDTO,client=client,agent_id=agent_id)
 class RecurrenceAnalyzer(StageAnalyzer):
-    def __init__(self,root,client=None): super().__init__(root,'recurrence',RecurrenceRiskDTO,client=client)
+    def __init__(self,root,client=None,agent_id=''): super().__init__(root,'recurrence',RecurrenceRiskDTO,client=client,agent_id=agent_id)
 class CapabilityGapAnalyzer(StageAnalyzer):
-    def __init__(self,root,client=None): super().__init__(root,'capability_gap',CapabilityGapDTO,client=client)
+    def __init__(self,root,client=None,agent_id=''): super().__init__(root,'capability_gap',CapabilityGapDTO,client=client,agent_id=agent_id)

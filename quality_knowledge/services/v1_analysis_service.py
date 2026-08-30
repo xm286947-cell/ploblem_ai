@@ -1,8 +1,10 @@
 from __future__ import annotations
-import hashlib,json,uuid
+import hashlib,json,uuid,time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from quality_knowledge.analyzers import OccurrenceAnalyzer,EscapeAnalyzer,RecurrenceAnalyzer,CapabilityGapAnalyzer,StageAnalysisError
 from quality_knowledge.analysis_profiles import normalize_analysis_profile
+from quality_knowledge.model_config import choose_quality_issue_agent,load_quality_issue_ai_config
 ENGINE_VERSION='KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.0_ADDENDUM01_AI_PATCH03'
 
 STAGES=('occurrence','escape','recurrence','capability_gap')
@@ -33,16 +35,22 @@ def _slim_issue_context(c, stage):
     return out
 
 class KnowledgeIssueAnalysisService:
-    def __init__(self,repository,root: str|Path,client=None):
-        self.repository=repository
-        self.analyzers={'occurrence':OccurrenceAnalyzer(root,client),'escape':EscapeAnalyzer(root,client),'recurrence':RecurrenceAnalyzer(root,client),'capability_gap':CapabilityGapAnalyzer(root,client)}
-        self.stage_timeouts={k:int(v.ai_cfg.get('timeout_seconds',120)) for k,v in self.analyzers.items()}
+    def __init__(self,repository,root: str|Path,client=None,agent_id=''):
+        self.repository=repository;self.root=Path(root);self.client=client
+        self.agent_id=str(agent_id or '')
+        self.analyzers={} if not self.agent_id else {'occurrence':OccurrenceAnalyzer(root,client,agent_id=self.agent_id),'escape':EscapeAnalyzer(root,client,agent_id=self.agent_id),'recurrence':RecurrenceAnalyzer(root,client,agent_id=self.agent_id),'capability_gap':CapabilityGapAnalyzer(root,client,agent_id=self.agent_id)}
+        if self.analyzers:
+            self.stage_timeouts={k:int(v.ai_cfg.get('timeout_seconds',120)) for k,v in self.analyzers.items()}
+        else:
+            cfg,_=load_quality_issue_ai_config(root,agent_id='DEFAULT')
+            self.stage_timeouts={stage:int(dict((cfg.get('stage_runtime') or {}).get(stage) or {}).get('timeout_seconds',cfg.get('timeout_seconds',120))) for stage in STAGES}
         if hasattr(self.repository,'expire_stale_analysis_runs'):
             self.repository.expire_stale_analysis_runs(self.stage_timeouts,buffer_seconds=60)
 
     def _run(self,kid,vid,stage,payload,analysis_profile):
         a=self.analyzers[stage];rid='QAR-'+uuid.uuid4().hex;raw=json.dumps(payload,ensure_ascii=False,sort_keys=True,default=str)
-        self.repository.start_analysis_run({'analysis_run_id':rid,'knowledge_id':kid,'issue_version_id':vid,'analysis_type':stage,'model_provider':a.ai_cfg.get('provider','openai_compatible'),'prompt_name':a.prompt_path.name,'prompt_version':a.prompt_version,'schema_version':'1.0.0','engine_version':ENGINE_VERSION,'analysis_profile':analysis_profile,'status':'RUNNING','input_hash':hashlib.sha256(raw.encode()).hexdigest()})
+        audit_profile={**analysis_profile,'analysis_agent':a.agent_id}
+        self.repository.start_analysis_run({'analysis_run_id':rid,'knowledge_id':kid,'issue_version_id':vid,'analysis_type':stage,'model_provider':a.ai_cfg.get('provider','openai_compatible'),'prompt_name':a.prompt_path.name,'prompt_version':a.prompt_version,'schema_version':'1.0.0','engine_version':ENGINE_VERSION,'analysis_profile':audit_profile,'status':'RUNNING','input_hash':hashlib.sha256(raw.encode()).hexdigest()})
         try:
             result,model,debug=a.analyze(payload)
             self.repository.save_analysis_debug(rid,stage,debug)
@@ -58,6 +66,9 @@ class KnowledgeIssueAnalysisService:
             self.repository.finish_analysis_run(rid,'FAILED',error_message=str(e));raise
 
     def run_issue_analysis(self,kid,only_missing=None,force=False,analysis_profile=None):
+        if not self.agent_id:
+            selected=choose_quality_issue_agent(self.root,kid)
+            return KnowledgeIssueAnalysisService(self.repository,self.root,self.client,agent_id=selected).run_issue_analysis(kid,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
         c=self.repository.get_analysis_context(kid)
         if not c:raise KeyError(kid)
         requested=dict(analysis_profile or {})
@@ -68,7 +79,7 @@ class KnowledgeIssueAnalysisService:
             requested.setdefault('selection_source', 'ISSUE_ATTRIBUTE')
         profile=normalize_analysis_profile(requested);vid=c['issue_version_id'];prior={}
         human_confirmations=self.repository.get_human_confirmations(kid) if hasattr(self.repository,'get_human_confirmations') else []
-        out={'knowledge_id':kid,'issue_version_id':vid,'status':'COMPLETED','force':bool(force),'analysis_profile':profile,'human_confirmation_count':len(human_confirmations),'stages':{}}
+        out={'knowledge_id':kid,'issue_version_id':vid,'status':'COMPLETED','force':bool(force),'analysis_profile':profile,'analysis_agent':self.agent_id or 'DYNAMIC','human_confirmation_count':len(human_confirmations),'stages':{}}
         for stage in STAGES:
             old=self.repository.get_latest_analysis(kid,stage)
             # New default: completed result for current Issue Version is reusable.
@@ -96,9 +107,41 @@ class KnowledgeIssueAnalysisService:
                 out['status']='FAILED';out['stages'][stage]={'status':'FAILED','error':str(e),'timeout_seconds':self.stage_timeouts.get(stage)};break
         return out
 
-    def run_batch_analysis(self,ids,only_missing=None,force=False,analysis_profile=None):
-        items=[]
-        for kid in ids:
-            try:items.append(self.run_issue_analysis(kid,only_missing=only_missing,force=force,analysis_profile=analysis_profile))
-            except Exception as e:items.append({'knowledge_id':kid,'status':'FAILED','error':str(e)})
-        return {'total':len(items),'completed':sum(x['status']=='COMPLETED' for x in items),'failed':sum(x['status']=='FAILED' for x in items),'force':bool(force),'analysis_profile':normalize_analysis_profile(analysis_profile),'items':items}
+    def incomplete_issue_ids(self,ids):
+        """Return only issues missing at least one completed stage for the current version."""
+        unique_ids=list(dict.fromkeys(str(kid) for kid in ids if kid))
+        return [kid for kid in unique_ids if any(
+            not self.repository.get_latest_analysis(kid,stage) for stage in STAGES
+        )]
+
+    def run_batch_analysis(self,ids,only_missing=None,force=False,analysis_profile=None,concurrency=1,progress_callback=None):
+        requested_ids=list(dict.fromkeys(str(kid) for kid in ids if kid))
+        ids=(self.incomplete_issue_ids(requested_ids) if only_missing and not force else requested_ids)
+        skipped_completed=len(requested_ids)-len(ids)
+        workers=max(1,min(int(concurrency or 1),4))
+        def analyze(index_and_kid):
+            index,kid=index_and_kid
+            started=time.monotonic()
+            try:
+                if getattr(self,'agent_id','') or not hasattr(self,'root'):
+                    item=self.run_issue_analysis(kid,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
+                else:
+                    selected=choose_quality_issue_agent(self.root,kid,slot=index)
+                    item=KnowledgeIssueAnalysisService(self.repository,self.root,self.client,agent_id=selected).run_issue_analysis(kid,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
+            except Exception as error:
+                item={'knowledge_id':kid,'status':'FAILED','error':str(error)}
+            item['duration_ms']=round((time.monotonic()-started)*1000)
+            if item.get('status')=='FAILED' and not item.get('error'):
+                failed_stage=next((name for name,value in (item.get('stages') or {}).items() if value.get('status')=='FAILED'),None)
+                if failed_stage:
+                    item['failed_stage']=failed_stage
+                    item['error']=((item.get('stages') or {}).get(failed_stage) or {}).get('error')
+            if progress_callback:
+                progress_callback(item)
+            return item
+        if workers == 1:
+            items=[analyze(pair) for pair in enumerate(ids)]
+        else:
+            with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='quality-ai') as executor:
+                items=list(executor.map(analyze,enumerate(ids)))
+        return {'total':len(items),'requested_total':len(requested_ids),'skipped_completed':skipped_completed,'completed':sum(x['status']=='COMPLETED' for x in items),'failed':sum(x['status']=='FAILED' for x in items),'force':bool(force),'concurrency':workers,'analysis_agent':getattr(self,'agent_id','') or 'DYNAMIC','analysis_profile':normalize_analysis_profile(analysis_profile),'items':items}

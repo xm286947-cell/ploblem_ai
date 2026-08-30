@@ -105,12 +105,18 @@ class KnowledgeIssueService:
     def query_issues(self,filters=None,limit=100,offset=0):return self.repository.query_current_issues(filters,limit,offset)
     def count_issues(self,filters=None):return self.repository.count_current_issues(filters)
 
-    def run_issue_analysis(self,knowledge_id,root,client=None,only_missing=None,force=False,analysis_profile=None):
+    def run_issue_analysis(self,knowledge_id,root,client=None,only_missing=None,force=False,analysis_profile=None,agent_id=''):
         from .v1_analysis_service import KnowledgeIssueAnalysisService
-        return KnowledgeIssueAnalysisService(self.repository,root,client).run_issue_analysis(knowledge_id,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
-    def run_batch_analysis(self,knowledge_ids,root,client=None,only_missing=None,force=False,analysis_profile=None):
+        return KnowledgeIssueAnalysisService(self.repository,root,client,agent_id=agent_id).run_issue_analysis(knowledge_id,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
+    def run_batch_analysis(self,knowledge_ids,root,client=None,only_missing=None,force=False,analysis_profile=None,concurrency=1,progress_callback=None,agent_id=''):
         from .v1_analysis_service import KnowledgeIssueAnalysisService
-        return KnowledgeIssueAnalysisService(self.repository,root,client).run_batch_analysis(knowledge_ids,only_missing=only_missing,force=force,analysis_profile=analysis_profile)
+        return KnowledgeIssueAnalysisService(self.repository,root,client,agent_id=agent_id).run_batch_analysis(knowledge_ids,only_missing=only_missing,force=force,analysis_profile=analysis_profile,concurrency=concurrency,progress_callback=progress_callback)
+    def incomplete_analysis_ids(self,knowledge_ids):
+        from .v1_analysis_service import STAGES
+        unique_ids=list(dict.fromkeys(str(kid) for kid in knowledge_ids if kid))
+        return [kid for kid in unique_ids if any(
+            not self.repository.get_latest_analysis(kid,stage) for stage in STAGES
+        )]
     def get_analysis_status(self,run_id):return self.repository.get_analysis_run(run_id)
     def get_latest_analysis(self,knowledge_id,analysis_type):return self.repository.get_latest_analysis(knowledge_id,analysis_type)
     def get_analysis_history(self,knowledge_id):return self.repository.get_analysis_history(knowledge_id)
@@ -119,12 +125,12 @@ class KnowledgeIssueService:
             return self.repository.query_current_capability_gaps(filters,limit)
         return self.repository.list_capability_gaps(knowledge_id)
 
-    def get_statistics(self,business_type=None,limit=20):
-        data=self.repository.statistics(business_type,limit)
-        data['common_capability_analysis']=self.repository.aggregate_common_capability_gaps(business_type=business_type,min_issues=2,limit=limit)
+    def get_statistics(self,business_type=None,limit=20,knowledge_ids=None):
+        data=self.repository.statistics(business_type,limit,knowledge_ids)
+        data['common_capability_analysis']=self.repository.aggregate_common_capability_gaps(business_type=business_type,min_issues=2,limit=limit,knowledge_ids=knowledge_ids)
         return data
-    def get_common_capability_gaps(self,*,business_type=None,dimension=None,min_issues=2,limit=50):return self.repository.aggregate_common_capability_gaps(business_type=business_type,dimension=dimension,min_issues=min_issues,limit=limit)
-    def get_workspace_metrics(self,business_type=None):return self.repository.workspace_metrics(business_type)
+    def get_common_capability_gaps(self,*,business_type=None,dimension=None,min_issues=2,limit=50,knowledge_ids=None):return self.repository.aggregate_common_capability_gaps(business_type=business_type,dimension=dimension,min_issues=min_issues,limit=limit,knowledge_ids=knowledge_ids)
+    def get_workspace_metrics(self,business_type=None,knowledge_ids=None):return self.repository.workspace_metrics(business_type,knowledge_ids)
     def export_issues(self,path,*,format='xlsx',filters=None,dataset='issues'):
         from .v1_export_service import KnowledgeIssueExportService
         svc=KnowledgeIssueExportService(self.repository)

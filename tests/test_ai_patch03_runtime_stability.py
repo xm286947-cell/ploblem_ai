@@ -5,6 +5,7 @@ from builder.ai_client import AIResponse
 from quality_knowledge.repositories import IssueKnowledgeRepository
 from quality_knowledge.services import KnowledgeIssueService
 from quality_knowledge.services.v1_analysis_service import KnowledgeIssueAnalysisService
+from quality_knowledge.model_config import load_quality_issue_ai_config, list_quality_issue_agents,choose_quality_issue_agent
 
 ROOT=Path(__file__).parents[1]
 
@@ -48,6 +49,17 @@ def test_completed_is_skipped_by_default_and_force_reanalyzes(tmp_path):
     forced=svc.run_issue_analysis(kid,ROOT,client=client,force=True)
     assert forced['status']=='COMPLETED'
     assert len(repo.get_analysis_history(kid))==8
+
+def test_only_missing_batch_excludes_fully_completed_issues(tmp_path):
+    repo,svc,kid=seed(tmp_path);client=FixedClient()
+    svc.run_issue_analysis(kid,ROOT,client=client)
+    history_count=len(repo.get_analysis_history(kid))
+    result=svc.run_batch_analysis([kid],ROOT,client=client,only_missing=True,concurrency=2)
+    assert result['requested_total']==1
+    assert result['total']==0
+    assert result['skipped_completed']==1
+    assert result['items']==[]
+    assert len(repo.get_analysis_history(kid))==history_count
 
 def test_repeated_llm_gap_ids_do_not_collide(tmp_path):
     repo,svc,kid=seed(tmp_path);client=FixedClient()
@@ -95,3 +107,32 @@ def test_analysis_profile_is_injected_and_audited(tmp_path):
     # A changed user selection invalidates reuse for the current version.
     rerun=svc.run_issue_analysis(kid,ROOT,client=client,analysis_profile={'domain_profile':'MECHANICAL'})
     assert rerun['stages']['occurrence']['status']=='COMPLETED'
+
+def test_multiple_agents_support_explicit_and_dynamic_stage_routing():
+    agents=list_quality_issue_agents(ROOT)
+    assert {'quality','fast'} <= {x['agent_id'] for x in agents['items']}
+    explicit,_=load_quality_issue_ai_config(ROOT,agent_id='fast',stage='occurrence')
+    assert explicit['_agent_id']=='fast'
+    assert choose_quality_issue_agent(ROOT,'K-1') in {'quality','fast'}
+
+def test_selected_agent_is_audited_per_analysis_run(tmp_path):
+    repo,svc,kid=seed(tmp_path)
+    out=svc.run_issue_analysis(kid,ROOT,client=FixedClient(),agent_id='fast')
+    run=repo.get_analysis_run(out['stages']['occurrence']['run_id'])
+    assert json.loads(run['analysis_profile_json'])['analysis_agent']=='fast'
+    assert repo.get_analysis_history(kid)[0]['analysis_agent']=='fast'
+
+def test_dynamic_assignment_uses_one_agent_per_issue_and_round_robins_batch(tmp_path):
+    config=tmp_path/'config';config.mkdir()
+    (config/'model.yaml').write_text('''
+ai: {enabled: true, provider: openai_compatible, base_url: http://localhost/v1, api_key_env: TEST_KEY, model: base}
+quality_issue_agents:
+  deep: {label: 深度, model: model-deep}
+  fast: {label: 快速, model: model-fast}
+''',encoding='utf-8')
+    summary=list_quality_issue_agents(tmp_path)
+    assert choose_quality_issue_agent(tmp_path,'K1',slot=0)=='deep'
+    assert choose_quality_issue_agent(tmp_path,'K2',slot=1)=='fast'
+    assert choose_quality_issue_agent(tmp_path,'K3',slot=2)=='deep'
+    assert summary['distinct_model_count']==2
+    assert summary['assignment_strategy']=='ROUND_ROBIN_BY_ISSUE'

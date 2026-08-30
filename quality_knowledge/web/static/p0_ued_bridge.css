@@ -44,3 +44,8 @@
   .content > .console,
   .content > .risk-shell { padding: 0; }
 }
+
+/* Quality insights keeps a readable analysis width on large displays. */
+.content > .p0-shell[data-p0-insights] { max-width: 1280px; margin: 0 auto; }
+.p0-shell[data-p0-insights] .p0-table th,
+.p0-shell[data-p0-insights] .p0-table td { padding: 6px 7px; }

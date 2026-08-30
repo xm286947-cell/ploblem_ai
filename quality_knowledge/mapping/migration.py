@@ -51,8 +51,12 @@ class LegacyYamlMappingMigrator:
         for i in items:
             if not i.target_field:
                 results.append({'level':'ERROR','code':'TARGET_FIELD_MISSING','message':f'{i.canonical_field}: target_field missing','mapping_id':i.mapping_id})
+            item_aliases=[]; item_seen=set()
             for a in i.source_headers+i.aliases:
                 k=' '.join(a.split()).casefold()
+                if k in item_seen: continue
+                item_seen.add(k); item_aliases.append((a,k))
+            for a,k in item_aliases:
                 prev=seen.get(k)
                 if prev and prev!=i.canonical_field:
                     results.append({'level':'WARNING','code':'ALIAS_AMBIGUITY','message':f'alias {a!r} maps to {prev} and {i.canonical_field}; review before activation','mapping_id':i.mapping_id})

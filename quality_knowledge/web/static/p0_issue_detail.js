@@ -1,1 +1,295 @@
-(function(){'use strict';const SOURCE_TYPES=['SOURCE_DATA','AI_STANDARDIZED','AI_INFERRED','HUMAN_CONFIRMED'];const root=document.querySelector('[data-p0-issue-detail]');if(!root)return;const api=(window.P0_ISSUES_API||root.dataset.apiPrefix||'/api/v2').replace(/\/$/,'');const id=root.dataset.knowledgeId;const qs=new URLSearchParams(location.search);const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const obj=v=>v&&typeof v==='object'?v:{};const arr=v=>Array.isArray(v)?v:[];const ev=v=>{if(v==null)return '';if(Array.isArray(v))return v.join('、');if(typeof v==='string')return v;if(typeof v==='object')return v.value||v.description||v.text||v.gap_description||v.excerpt||'';return String(v)};function url(path,p){const q=new URLSearchParams(Object.entries(p||{}).filter(([,v])=>v!==''&&v!=null));return api+path+(q.toString()?'?'+q:'')}async function get(path,p){const r=await fetch(url(path,p),{headers:{Accept:'application/json'}});if(!r.ok){const e=new Error('HTTP_'+r.status);e.status=r.status;throw e}return r.json()}function setState(n,v){const x=root.querySelector('[data-state="'+n+'"]');if(x)x.hidden=!v}function sourceLabel(s){const x=String(s||'AI_INFERRED').toUpperCase();return '<span class="p0-source p0-source-'+x.toLowerCase()+'">'+esc(x)+'</span>'}function rawRows(v,prefix,rows){if(v==null||typeof v!=='object'){if(v!==''&&v!=null)rows.push('<div class="p0-raw-row"><dt>'+esc(prefix)+'</dt><dd>'+esc(v)+'</dd></div>');return rows}Object.entries(v).forEach(([k,x])=>rawRows(x,prefix?prefix+' · '+k:k,rows));return rows}function renderFacts(issue){const n=obj(issue.normalized_snapshot),f=obj(n.ISSUE_FACT||n.issue_fact||n),rows=[['问题编号',issue.business_issue_id||f.business_issue_id],['产品',f.product||issue.product_code],['业务',issue.business_type||'-'],['平台',f.platform],['月份',f.month],['严重度',f.severity],['问题类型',f.issue_type]];root.querySelector('[data-title]').textContent=f.title||f.description||issue.business_issue_id||id;root.querySelector('[data-badges]').innerHTML='<span class="p0-badge">'+esc(issue.business_type||'-')+'</span><span class="p0-badge">'+esc(f.month||'-')+'</span><span class="p0-badge">'+esc(f.severity||'-')+'</span>';root.querySelector('[data-facts]').innerHTML=rows.map(x=>'<div class="p0-fact"><label>'+esc(x[0])+'</label><strong>'+esc(x[1]||'-')+'</strong></div>').join('');root.querySelector('[data-raw]').innerHTML='<dl>'+rawRows(issue.raw_json||{},'',[]).join('')+'</dl>'}function renderMrc(a,effective){const m=arr(a.mrc),occ=m.filter(x=>String(x.side||'').toUpperCase()==='OCCURRENCE'),escapes=m.filter(x=>String(x.side||'').toUpperCase()==='ESCAPE'),values=obj(effective&&effective.values),currentOccurrence=ev(values['occurrence.mrc.primary']),currentEscape=ev(values['escape.mrc.primary']);const block=(title,items,current,empty)=>'<section><label>'+title+'</label><p>'+((current?'<span class="p0-mrc">'+esc(current)+'</span><small class="p0-effective-label">当前有效结论（人工修订优先）</small>':items.length?items.map(x=>'<span class="p0-mrc">'+esc(x.mrc_code||x.code||'-')+'</span>').join(''):'<span>'+empty+'</span>'))+'</p></section>';root.querySelector('[data-mrc]').innerHTML=block('发生 MRC',occ,currentOccurrence,'原始数据未提供')+block('流出 MRC',escapes,currentEscape,'原始数据未提供')}function renderRecurrence(a){const values=arr(a.values).filter(x=>String(x.stage||'').toLowerCase()==='recurrence');const data=values.reduce((z,x)=>{const key=String(x.value_path||x.key||'value').replace(/^recurrence\./,'');z[key]=x.value_json||x.value||'';return z},{});root.querySelector('[data-recurrence]').innerHTML='<section><label>再发风险</label><p>'+esc(ev(data.recurrence_risk_level)||'未分析')+'</p></section><section><label>残余风险</label><p>'+esc(ev(data.residual_risk)||'—')+'</p></section><section><label>客户影响</label><p>'+esc(ev(data.customer_impact)||'—')+'</p></section><section><label>潜在影响范围</label><p>'+esc([ev(data.potential_affected_products),ev(data.potential_affected_versions)].filter(Boolean).join(' / ')||'—')+'</p></section><section><label>需要横向行动</label><p>'+esc(data.horizontal_action_needed===true?'是':data.horizontal_action_needed===false?'否':'—')+'</p></section>'}function renderGaps(a){const gaps=arr(a.capability_gaps);root.querySelector('[data-gaps]').hidden=false;root.querySelector('[data-gap-list]').innerHTML=gaps.length?gaps.map(x=>'<article class="p0-gap"><strong>'+esc(x.capability_code||'-')+'</strong><span class="p0-badge">'+esc(x.capability_axis||'-')+'</span><p>'+esc(ev(x.gap_description||x.details_json||x.details)||'暂无缺口说明')+'</p><small>'+sourceLabel(x.source_type||'AI_INFERRED')+' · '+esc(x.control_status||'UNKNOWN')+'</small></article>').join(''):'<div class="p0-loading">尚未识别能力缺口。</div>'}function renderEvidence(a){const e=arr(a.evidence);root.querySelector('[data-evidence]').hidden=false;root.querySelector('[data-evidence-list]').innerHTML=e.length?e.map(x=>'<div class="p0-evidence"><b>'+esc(x.target_path||x.stage||'证据')+'</b> '+sourceLabel(x.source_type)+'<p>'+esc(ev(x.excerpt||x.content_json||x.evidence||x.value)||'—')+'</p><small>置信度 '+esc(x.confidence??'-')+'</small></div>').join(''):'<div class="p0-loading">暂无结构化证据。</div>'}function renderQuestions(a){const qsx=arr(a.open_questions);if(!qsx.length){root.querySelector('[data-confirmations]').hidden=true;return}root.querySelector('[data-confirmations]').hidden=false;root.querySelector('[data-question-list]').innerHTML=qsx.map((x,i)=>'<div class="p0-question"><label>'+esc(x.question_text||x.question||x.question_key||'待确认事项')+' · target_path: '+esc(x.target_path||'-')+'</label><select name="status_'+i+'"><option value="PENDING">待确认</option><option value="CONFIRMED">确认</option><option value="CORRECTED">修正</option><option value="UNRESOLVED">无法确认</option><option value="NOT_APPLICABLE">不适用</option></select><textarea name="answer_'+i+'" rows="2" placeholder="MRC 请填写分类 code；能力缺口请填写修正后的缺口说明"></textarea><input type="hidden" name="target_'+i+'" value="'+esc(x.target_path||x.question_key||'')+'"><input type="hidden" name="question_'+i+'" value="'+esc(x.question_key||x.question||'')+'"></div>').join('')}function renderAnalysis(a){if(!a){setState('empty',true);return}setState('empty',false);setState('running',false);const eff=obj(a.effective_analysis||a),raw=obj(a.analysis||a);root.querySelector('[data-analysis-grid]').hidden=false;renderMrc(raw,eff);renderRecurrence(raw);renderGaps(raw);renderEvidence(raw);renderQuestions(raw);const revision=eff.human_revision_id?'<span class="p0-badge">已应用人工修订 · '+esc(eff.human_revision_id)+'</span>':'';root.querySelector('[data-scope-status]').innerHTML='分析状态：'+esc(raw.status||'COMPLETED')+' · Analysis Set '+esc(raw.analysis_set_id||'-')+' '+revision}async function load(){try{const d=await get('/issues/'+encodeURIComponent(id));renderFacts(d.issue||{});renderAnalysis(d.analysis?{analysis:d.analysis,effective_analysis:d.effective_analysis}:null);const nav=await get('/issues/'+encodeURIComponent(id)+'/navigation',Object.fromEntries(qs.entries()));root.querySelector('[data-position]').textContent='第 '+esc(nav.position||'-')+' / '+esc(nav.total||'-');const prev=root.querySelector('[data-previous]'),next=root.querySelector('[data-next]');prev.disabled=!nav.previous_id;next.disabled=!nav.next_id;prev.onclick=()=>location.href='/p0/issues/'+encodeURIComponent(nav.previous_id)+'?'+qs;next.onclick=()=>location.href='/p0/issues/'+encodeURIComponent(nav.next_id)+'?'+qs;root.querySelector('[data-back]').href='/p0/issues'+(qs.toString()?'?'+qs:'')}catch(e){if(e.status===409)setState('stale',true);else{setState('error',true);root.querySelector('[data-error-message]').textContent='读取失败：'+e.message}}}async function analyze(){setState('running',true);try{const r=await fetch(url('/issues/'+encodeURIComponent(id)+'/analysis'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw new Error('HTTP_'+r.status);location.reload()}catch(e){setState('running',false);setState('error',true);root.querySelector('[data-error-message]').textContent='分析失败：'+e.message}}async function confirm(e){e.preventDefault();const form=e.currentTarget,answers=[];[...form.querySelectorAll('[name^="status_"]')].forEach((s,i)=>{const questionKey=form.querySelector('[name="question_'+i+'"]')?.value||'',targetPath=form.querySelector('[name="target_'+i+'"]')?.value||'',answer=form.querySelector('[name="answer_'+i+'"]')?.value.trim()||'',effective=['CONFIRMED','CORRECTED'].includes(s.value);answers.push({target_path:targetPath,question_key:questionKey,confirmation_status:s.value,original_value:null,confirmed_value:effective?answer:null,evidence:[],changes_insight:effective&&(targetPath==='occurrence.mrc.primary'||targetPath==='escape.mrc.primary'||targetPath.startsWith('capability_gaps.'))})});const a=await get('/issues/'+encodeURIComponent(id));const data=obj(a.analysis);const payload={base_analysis_set_id:data.analysis_set_id,base_input_hash:data.input_hash,confirmed_by:'web',answers};root.querySelector('[data-save-status]').textContent='保存中…';try{const r=await fetch(url('/issues/'+encodeURIComponent(id)+'/human-confirmations'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});if(r.status===409){setState('stale',true);return}if(!r.ok){const detail=await r.json().catch(()=>({}));throw new Error(detail.detail||'HTTP_'+r.status)}root.querySelector('[data-save-status]').textContent='已保存并应用有效修订';location.reload()}catch(x){root.querySelector('[data-save-status]').textContent='保存失败：'+x.message}}root.querySelector('[data-analyze]').addEventListener('click',analyze);root.querySelector('[data-reload]').addEventListener('click',()=>location.reload());root.querySelector('[data-confirm-form]').addEventListener('submit',confirm);load()})();
+(function () {
+  'use strict';
+
+  const root = document.querySelector('[data-p0-issue-detail]');
+  if (!root) return;
+
+  const SOURCE_TYPES = ['SOURCE_DATA', 'AI_STANDARDIZED', 'AI_INFERRED', 'HUMAN_CONFIRMED'];
+  const api = (window.P0_ISSUES_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '');
+  const knowledgeId = root.dataset.knowledgeId;
+  const query = new URLSearchParams(location.search);
+  const obj = value => value && typeof value === 'object' ? value : {};
+  const arr = value => Array.isArray(value) ? value : [];
+  const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+  const text = value => {
+    if (value == null) return '';
+    if (Array.isArray(value)) return value.map(text).filter(Boolean).join('、');
+    if (typeof value === 'object') {
+      return value.value || value.description || value.text || value.gap_description || value.excerpt || '';
+    }
+    return String(value);
+  };
+
+  function url(path, params) {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== '' && value != null));
+    return api + path + (qs.toString() ? '?' + qs : '');
+  }
+
+  async function get(path, params) {
+    const response = await fetch(url(path, params), { headers: { Accept: 'application/json' } });
+    if (!response.ok) {
+      const error = new Error('HTTP_' + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  function setState(name, visible) {
+    const element = root.querySelector('[data-state="' + name + '"]');
+    if (element) element.hidden = !visible;
+  }
+
+  function sourceLabel(source) {
+    const value = String(source || 'AI_INFERRED').toUpperCase();
+    return '<span class="p0-source p0-source-' + value.toLowerCase() + '">' + esc(value) + '</span>';
+  }
+
+  function flatten(value, prefix, rows) {
+    if (value == null || typeof value !== 'object') {
+      if (value !== '' && value != null) {
+        rows.push('<div class="p0-raw-row"><dt>' + esc(prefix) + '</dt><dd>' + esc(value) + '</dd></div>');
+      }
+      return rows;
+    }
+    Object.entries(value).forEach(([key, nested]) => flatten(nested, prefix ? prefix + ' · ' + key : key, rows));
+    return rows;
+  }
+
+  function renderFacts(issue) {
+    const normalized = obj(issue.normalized_snapshot);
+    const fact = obj(normalized.ISSUE_FACT || normalized.issue_fact || normalized.fact || normalized);
+    const fields = [
+      ['问题编号', issue.business_issue_id || fact.business_issue_id],
+      ['产品', fact.product || issue.product_code],
+      ['业务', issue.business_type],
+      ['平台', fact.platform],
+      ['月份', fact.month],
+      ['严重度', fact.severity],
+      ['问题类型', fact.issue_type]
+    ];
+    root.querySelector('[data-title]').textContent = fact.title || fact.description || issue.business_issue_id || knowledgeId;
+    root.querySelector('[data-badges]').innerHTML = [issue.business_type, fact.month, fact.severity]
+      .map(value => '<span class="p0-badge">' + esc(value || '-') + '</span>').join('');
+    root.querySelector('[data-facts]').innerHTML = fields.map(([label, value]) =>
+      '<div class="p0-fact"><label>' + esc(label) + '</label><strong>' + esc(value || '-') + '</strong></div>'
+    ).join('');
+    root.querySelector('[data-raw]').innerHTML = '<dl>' + flatten(issue.raw_json || {}, '', []).join('') + '</dl>';
+    root.querySelector('[data-normalized]').innerHTML = '<dl>' + flatten(normalized, '', []).join('') + '</dl>';
+  }
+
+  function renderDiagnostics(analysis) {
+    const mount = root.querySelector('[data-analysis-diagnostic]');
+    const stages = arr(analysis.stages);
+    if (!stages.length) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    mount.innerHTML = '<div class="p0-card-head"><div><span class="p0-kicker">ANALYSIS TRACE</span>' +
+      '<h2>AI 分析过程与结果</h2><p>逐阶段显示执行状态、模型结果和失败原因。</p></div></div>' +
+      '<div class="p0-stage-list">' + stages.map(stage => {
+        const item = obj(stage);
+        const status = String(item.status || 'UNKNOWN').toUpperCase();
+        const error = item.validation_error || item.error || item.error_message || '';
+        const result = text(item.parsed_result_json || item.result || item.value);
+        return '<div class="p0-stage"><strong>' + esc(item.stage || '未命名阶段') + '</strong>' +
+          '<span class="p0-badge p0-stage-' + status.toLowerCase() + '">' + esc(status) + '</span>' +
+          (error ? '<p>' + esc(error) + '</p>' : result ? '<p>' + esc(result) + '</p>' : '<small>阶段已完成</small>') + '</div>';
+      }).join('') + '</div>';
+  }
+
+  function renderMrc(analysis, effective) {
+    const mrc = arr(analysis.mrc);
+    const effectiveValues = obj(effective.values);
+    const block = (title, side, path) => {
+      const current = text(effectiveValues[path]);
+      const values = mrc.filter(item => String(item.side || '').toUpperCase() === side);
+      const body = current
+        ? '<span class="p0-mrc">' + esc(current) + '</span><small class="p0-effective-label">当前有效结论（人工修订优先）</small>'
+        : values.length
+          ? values.map(item => '<span class="p0-mrc">' + esc(item.mrc_code || item.code || '-') + '</span>').join('')
+          : '<span>原始数据未提供</span>';
+      return '<section><label>' + title + '</label><p>' + body + '</p></section>';
+    };
+    root.querySelector('[data-mrc]').innerHTML =
+      block('发生 MRC', 'OCCURRENCE', 'occurrence.mrc.primary') +
+      block('流出 MRC', 'ESCAPE', 'escape.mrc.primary');
+  }
+
+  function renderRecurrence(analysis) {
+    const values = arr(analysis.values).filter(item => String(item.stage || '').toLowerCase() === 'recurrence');
+    const data = values.reduce((result, item) => {
+      const key = String(item.value_path || item.key || 'value').replace(/^recurrence\./, '');
+      result[key] = item.value_json || item.value || '';
+      return result;
+    }, {});
+    const fields = [
+      ['再发风险', text(data.recurrence_risk_level) || '未分析'],
+      ['残余风险', text(data.residual_risk) || '—'],
+      ['客户影响', text(data.customer_impact) || '—'],
+      ['潜在影响范围', [text(data.potential_affected_products), text(data.potential_affected_versions)].filter(Boolean).join(' / ') || '—'],
+      ['需要横向行动', data.horizontal_action_needed === true ? '是' : data.horizontal_action_needed === false ? '否' : '—']
+    ];
+    root.querySelector('[data-recurrence]').innerHTML = fields.map(([label, value]) =>
+      '<section><label>' + esc(label) + '</label><p>' + esc(value) + '</p></section>'
+    ).join('');
+  }
+
+  function renderGaps(analysis) {
+    const gaps = arr(analysis.capability_gaps);
+    root.querySelector('[data-gaps]').hidden = false;
+    root.querySelector('[data-gap-list]').innerHTML = gaps.length ? gaps.map(gap =>
+      '<article class="p0-gap"><strong>' + esc(gap.capability_code || '-') + '</strong>' +
+      '<span class="p0-badge">' + esc(gap.capability_axis || '-') + '</span>' +
+      '<p>' + esc(text(gap.gap_description || gap.details_json || gap.details) || '暂无缺口说明') + '</p>' +
+      '<small>' + sourceLabel(gap.source_type || 'AI_INFERRED') + ' · ' + esc(gap.control_status || 'UNKNOWN') + '</small></article>'
+    ).join('') : '<div class="p0-loading">尚未识别能力缺口。</div>';
+  }
+
+  function renderEvidence(analysis) {
+    const evidence = arr(analysis.evidence);
+    root.querySelector('[data-evidence]').hidden = false;
+    root.querySelector('[data-evidence-list]').innerHTML = evidence.length ? evidence.map(item =>
+      '<div class="p0-evidence"><b>' + esc(item.target_path || item.stage || '证据') + '</b> ' +
+      sourceLabel(item.source_type) + '<p>' + esc(text(item.excerpt || item.content_json || item.evidence || item.value) || '—') +
+      '</p><small>置信度 ' + esc(item.confidence == null ? '-' : item.confidence) + '</small></div>'
+    ).join('') : '<div class="p0-loading">暂无结构化证据。</div>';
+  }
+
+  function questionRow(item, index) {
+    const path = item.target_path || item.question_key || '';
+    return '<div class="p0-question"><label>' + esc(item.question_text || item.question || item.question_key || '待确认事项') +
+      ' · target_path: ' + esc(path || '-') + '</label>' +
+      '<select name="status_' + index + '"><option value="PENDING">待确认</option><option value="CONFIRMED">确认</option>' +
+      '<option value="CORRECTED">修正</option><option value="UNRESOLVED">无法确认</option><option value="NOT_APPLICABLE">不适用</option></select>' +
+      '<textarea name="answer_' + index + '" rows="2" placeholder="填写人工判断或修正内容"></textarea>' +
+      '<input type="hidden" name="target_' + index + '" value="' + esc(path) + '">' +
+      '<input type="hidden" name="question_' + index + '" value="' + esc(item.question_key || item.question || '') + '"></div>';
+  }
+
+  function renderHumanAnalysis(analysis) {
+    const questions = arr(analysis.open_questions);
+    const defaults = [
+      { question_text: '发生原因 / 工程与管理判断', target_path: 'occurrence.root_cause', question_key: 'manual_occurrence_root_cause' },
+      { question_text: '发生 MRC', target_path: 'occurrence.mrc.primary', question_key: 'manual_occurrence_mrc' },
+      { question_text: '流出 MRC', target_path: 'escape.mrc.primary', question_key: 'manual_escape_mrc' },
+      { question_text: '客户影响与防控建议', target_path: 'recurrence.customer_impact', question_key: 'manual_customer_impact' }
+    ];
+    const rows = questions.length ? questions : defaults;
+    root.querySelector('[data-confirmations]').hidden = false;
+    root.querySelector('[data-question-list]').innerHTML = rows.map(questionRow).join('');
+  }
+
+  function renderAnalysis(analysis, effective) {
+    if (!analysis) {
+      setState('empty', true);
+      return;
+    }
+    setState('empty', false);
+    setState('running', false);
+    root.querySelector('[data-analysis-grid]').hidden = false;
+    renderDiagnostics(analysis);
+    renderMrc(analysis, obj(effective));
+    renderRecurrence(analysis);
+    renderGaps(analysis);
+    renderEvidence(analysis);
+    renderHumanAnalysis(analysis);
+    const revision = effective && effective.human_revision_id
+      ? '<span class="p0-badge">已应用人工修订 · ' + esc(effective.human_revision_id) + '</span>' : '';
+    root.querySelector('[data-scope-status]').innerHTML = '分析状态：' + esc(analysis.status || 'COMPLETED') +
+      ' · Analysis Set ' + esc(analysis.analysis_set_id || '-') + ' ' + revision;
+  }
+
+  async function load() {
+    try {
+      const detail = await get('/issues/' + encodeURIComponent(knowledgeId));
+      renderFacts(detail.issue || {});
+      renderAnalysis(detail.analysis || null, detail.effective_analysis || null);
+      const navigation = await get('/issues/' + encodeURIComponent(knowledgeId) + '/navigation', Object.fromEntries(query.entries()));
+      root.querySelector('[data-position]').textContent = '第 ' + esc(navigation.position || '-') + ' / ' + esc(navigation.total || '-');
+      const previous = root.querySelector('[data-previous]');
+      const next = root.querySelector('[data-next]');
+      previous.disabled = !navigation.previous_id;
+      next.disabled = !navigation.next_id;
+      previous.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.previous_id) + '?' + query;
+      next.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.next_id) + '?' + query;
+      root.querySelector('[data-back]').href = '/p0/issues' + (query.toString() ? '?' + query : '');
+    } catch (error) {
+      if (error.status === 409) setState('stale', true);
+      else {
+        setState('error', true);
+        root.querySelector('[data-error-message]').textContent = '读取失败：' + error.message;
+      }
+    }
+  }
+
+  async function analyze() {
+    setState('running', true);
+    try {
+      const response = await fetch(url('/issues/' + encodeURIComponent(knowledgeId) + '/analysis'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      });
+      if (!response.ok) throw new Error('HTTP_' + response.status);
+      location.reload();
+    } catch (error) {
+      setState('running', false);
+      setState('error', true);
+      root.querySelector('[data-error-message]').textContent = '分析失败：' + error.message;
+    }
+  }
+
+  async function confirm(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const answers = [];
+    [...form.querySelectorAll('[name^="status_"]')].forEach((status, index) => {
+      const targetPath = form.querySelector('[name="target_' + index + '"]')?.value || '';
+      const questionKey = form.querySelector('[name="question_' + index + '"]')?.value || '';
+      const answer = form.querySelector('[name="answer_' + index + '"]')?.value.trim() || '';
+      const effective = ['CONFIRMED', 'CORRECTED'].includes(status.value);
+      answers.push({
+        target_path: targetPath,
+        question_key: questionKey,
+        confirmation_status: status.value,
+        original_value: null,
+        confirmed_value: effective ? answer : null,
+        evidence: [],
+        changes_insight: effective && (targetPath === 'occurrence.mrc.primary' || targetPath === 'escape.mrc.primary' || targetPath.startsWith('capability_gaps.'))
+      });
+    });
+    const detail = await get('/issues/' + encodeURIComponent(knowledgeId));
+    const analysis = obj(detail.analysis);
+    const payload = {
+      base_analysis_set_id: analysis.analysis_set_id,
+      base_input_hash: analysis.input_hash,
+      confirmed_by: 'web',
+      answers
+    };
+    root.querySelector('[data-save-status]').textContent = '保存中…';
+    try {
+      const response = await fetch(url('/issues/' + encodeURIComponent(knowledgeId) + '/human-confirmations'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (response.status === 409) {
+        setState('stale', true);
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || 'HTTP_' + response.status);
+      }
+      root.querySelector('[data-save-status]').textContent = '已保存并应用有效修订';
+      location.reload();
+    } catch (error) {
+      root.querySelector('[data-save-status]').textContent = '保存失败：' + error.message;
+    }
+  }
+
+  root.querySelectorAll('[data-analyze]').forEach(button => button.addEventListener('click', analyze));
+  root.querySelector('[data-reload]').addEventListener('click', () => location.reload());
+  root.querySelector('[data-confirm-form]').addEventListener('submit', confirm);
+  load();
+})();

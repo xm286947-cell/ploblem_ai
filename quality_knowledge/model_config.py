@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ def resolve_model_config_path(root: str | Path) -> Path:
     return (root / "config" / "model.yaml").resolve()
 
 
-def load_quality_issue_ai_config(root: str | Path) -> tuple[dict[str, Any], Path]:
+def load_quality_issue_ai_config(root: str | Path, *, agent_id: str = "", stage: str = "") -> tuple[dict[str, Any], Path]:
     path = resolve_model_config_path(root)
     if not path.exists():
         raise ModelConfigError(f"model.yaml不存在: {path}")
@@ -31,12 +32,20 @@ def load_quality_issue_ai_config(root: str | Path) -> tuple[dict[str, Any], Path
     base = dict(data.get("ai") or {})
     override = dict(data.get("quality_issue_ai") or {})
     cfg = {**base, **override}
+    agents = dict(data.get("quality_issue_agents") or {})
+    explicit = str(agent_id or "").strip()
+    selected = "" if explicit.upper() == "DEFAULT" else explicit
+    if selected:
+        if selected not in agents:
+            raise ModelConfigError(f"智能体不存在: {selected}; config={path}")
+        cfg.update(dict(agents[selected] or {}))
+    cfg["_agent_id"] = selected or "DEFAULT"
     cfg["_config_path"] = str(path)
     return cfg, path
 
 
-def validate_quality_issue_ai_config(root: str | Path, *, require_enabled: bool = True) -> dict[str, Any]:
-    cfg, path = load_quality_issue_ai_config(root)
+def validate_quality_issue_ai_config(root: str | Path, *, require_enabled: bool = True, agent_id: str = "", stage: str = "") -> dict[str, Any]:
+    cfg, path = load_quality_issue_ai_config(root, agent_id=agent_id, stage=stage)
     errors: list[str] = []
     enabled = bool(cfg.get("enabled", False))
     if require_enabled and not enabled:
@@ -56,6 +65,7 @@ def validate_quality_issue_ai_config(root: str | Path, *, require_enabled: bool 
             errors.append(f"环境变量{api_key_env}未设置")
     return {
         "config_path": str(path),
+        "agent_id": cfg.get("_agent_id", "DEFAULT"),
         "enabled": enabled,
         "provider": provider,
         "base_url": base_url,
@@ -69,3 +79,37 @@ def validate_quality_issue_ai_config(root: str | Path, *, require_enabled: bool 
         "errors": errors,
         "ok": not errors,
     }
+
+
+def list_quality_issue_agents(root: str | Path) -> dict[str, Any]:
+    path = resolve_model_config_path(root)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    base = {**dict(data.get("ai") or {}), **dict(data.get("quality_issue_ai") or {})}
+    configured = dict(data.get("quality_issue_agents") or {})
+    items = [{
+        "agent_id": "DEFAULT", "label": "默认智能体", "provider": base.get("provider"),
+        "model": base.get("model"), "base_url": base.get("base_url"), "enabled": bool(base.get("enabled", False)),
+    }]
+    for key, value in configured.items():
+        item = {**base, **dict(value or {})}
+        items.append({
+            "agent_id": str(key), "label": str(item.get("label") or key),
+            "provider": item.get("provider"), "model": item.get("model"), "base_url": item.get("base_url"),
+            "enabled": bool(item.get("enabled", False)),
+        })
+    enabled_agents=[x for x in items if x['agent_id']!='DEFAULT' and x['enabled']]
+    signatures = {(x.get("base_url") or base.get('base_url'), x.get("model")) for x in enabled_agents}
+    return {"items": items, "assignment_strategy": "ROUND_ROBIN_BY_ISSUE",
+            "eligible_agent_ids": [x['agent_id'] for x in enabled_agents],
+            "distinct_model_count": len(signatures), "config_path": str(path)}
+
+
+def choose_quality_issue_agent(root: str | Path, knowledge_id: str, *, slot: int | None = None) -> str:
+    """Choose one enabled agent for the whole issue; never split its four stages."""
+    ids=list_quality_issue_agents(root)["eligible_agent_ids"]
+    if not ids:
+        return "DEFAULT"
+    if slot is not None:
+        return ids[int(slot) % len(ids)]
+    digest=int(hashlib.sha256(str(knowledge_id).encode("utf-8")).hexdigest()[:16],16)
+    return ids[digest % len(ids)]

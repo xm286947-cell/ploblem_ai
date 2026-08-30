@@ -1,6 +1,6 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_insights.css">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_insights.css?v=p0-insights-patch02">{% endblock %}
 {% block breadcrumb %}质量洞察{% endblock %}
 {% block body %}<main class="p0-shell" data-p0-insights data-api-prefix="{{ api_prefix }}">
     <header class="p0-header">
@@ -56,4 +56,4 @@
   </aside>
   <div class="p0-backdrop" data-backdrop hidden></div>
 {% endblock %}
-{% block page_scripts %}<script>window.P0_INSIGHTS_API={{ api_prefix|tojson }};</script><script src="/p0/static/p0_insights.js" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.P0_INSIGHTS_API={{ api_prefix|tojson }};</script><script src="/p0/static/p0_insights.js?v=p0-insights-patch02" defer></script>{% endblock %}

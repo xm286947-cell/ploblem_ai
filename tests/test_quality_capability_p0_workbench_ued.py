@@ -130,4 +130,9 @@ def test_workbench_static_contract_preserves_filters_and_human_confirmation_payl
         assert marker in detail_js
     assert "SOURCE_DATA" in detail_js and "AI_STANDARDIZED" in detail_js and "AI_INFERRED" in detail_js and "HUMAN_CONFIRMED" in detail_js
     assert "原始数据未提供" in detail_js and "raw_json" in detail_js
+    assert "标准化入库数据" in detail_html and "data-normalized" in detail_html
+    assert "data-analysis-diagnostic" in detail_html and "AI 分析过程与结果" in detail_js
+    assert "人工分析与确认" in detail_html and "renderHumanAnalysis" in detail_js
+    assert "p0_issue_detail_restore.js" not in detail_html and "p0_manual_analysis_restore.js" not in detail_html
+    assert "p0-detail-parity01" in detail_html
     assert "loading" in detail_html.lower() and "data-state=\"stale\"" in detail_html

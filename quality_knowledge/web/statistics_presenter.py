@@ -3,8 +3,8 @@ from urllib.parse import urlencode
 
 SECTION_TITLES = {
     'top_occurrence_causes': 'TOP 发生原因', 'top_escape_causes': 'TOP 流出原因',
-    'product_distribution': '产品分布', 'top_technical_gaps': '技术能力缺口 TOP5',
-    'top_management_gaps': '管理能力缺口 TOP5', 'top_governance_gaps': '治理能力缺口 TOP5',
+    'product_distribution': '产品分布', 'top_technical_gaps': '质量工程能力关键矛盾 TOP5',
+    'top_management_gaps': '质量管理能力关键矛盾 TOP5', 'top_governance_gaps': '横向治理能力关键矛盾 TOP5',
     'cross_product_common_gaps': '跨产品共性能力缺口', 'common_capability_analysis': '跨产品共性能力分析',
 }
 FIELD_LABELS = {
@@ -16,7 +16,9 @@ FIELD_LABELS = {
     'platform': '平台', 'module': '模块/特性',
 }
 VALUE_LABELS = {
-    'TECHNICAL': '技术能力', 'MANAGEMENT': '管理能力', 'GOVERNANCE': '治理能力',
+    "MRC-EXC-TEST-001": "测试异常场景覆盖不足",
+    "MRC-DESIGN-EXCEPTION-FAULT-TOLERANCE": "异常与容错设计不足",
+    'TECHNICAL': '质量工程能力', 'MANAGEMENT': '质量管理能力', 'GOVERNANCE': '横向治理能力',
     'HIGH': '高', 'MEDIUM': '中', 'LOW': '低', 'UNKNOWN': '未知',
     'PROCESS': '流程机制', 'REVIEW': '评审', 'CHANGE_MANAGEMENT': '变更管理', 'MANDATORY_TEST': '必测机制',
     'ENTRY_EXIT_CRITERIA': '准入/准出标准', 'QUALITY_GATE': '质量门禁', 'ISSUE_CLOSURE': '问题闭环',
@@ -29,6 +31,32 @@ VALUE_LABELS = {
     'CROSS_PRODUCT_GOVERNANCE': '跨产品治理', 'COMMON_STANDARD': '公共标准',
     'COMMON_PLATFORM_CAPABILITY': '公共平台能力', 'COMMON_TEST_ASSET': '公共测试资产',
     'COMMON_CASE_LIBRARY': '公共案例库', 'COMMON_METRIC': '公共度量', 'ORGANIZATION_MECHANISM': '组织机制',
+    'DOMAIN': '问题领域', 'LIFECYCLE': '生命周期', 'ISSUE_TYPE': '问题类型',
+    'SOFTWARE': '软件', 'EMBEDDED': '嵌入式/软硬协同', 'HARDWARE': '硬件', 'MECHANICAL': '机械',
+    'SYSTEM_SOLUTION': '系统解决方案', 'AUTO': '自动识别',
+    'REQUIREMENT': '需求阶段', 'SOLUTION_DESIGN': '方案设计', 'PRODUCT_COMBINATION': '产品组合设计',
+    'DESIGN': '设计阶段', 'DEVELOPMENT': '开发实现', 'IMPLEMENTATION': '实现阶段',
+    'UNIT_TEST': '单元测试', 'INTEGRATION_TEST': '集成测试', 'SYSTEM_TEST': '系统测试',
+    'SOLUTION_INTEGRATION': '解决方案联调', 'RELEASE': '版本发布', 'DELIVERY': '交付部署',
+    'UPGRADE': '升级迁移', 'OPERATION': '运行维护',
+    'CHANGE': '变更引入', 'CHANGE_IMPACT': '变更影响评估不足',
+    'CHANGE_IMPACT_NOT_ASSESSED': '未充分评估变更影响',
+    'CONFIGURATION': '配置问题', 'INTERFACE': '接口/协同问题',
+    'VERSION_COMPATIBILITY': '版本兼容性问题', 'ENVIRONMENT': '环境因素', 'SUPPLIER': '供应商因素',
+    'HARDWARE_DESIGN': '硬件设计问题', 'MECHANICAL_DESIGN': '机械设计问题', 'ASSEMBLY': '装配问题',
+    'REQUIREMENT_REVIEW': '需求评审未拦截', 'DESIGN_REVIEW': '设计评审未拦截',
+    'HARDWARE_TEST': '硬件测试未拦截', 'ASSEMBLY_INSPECTION': '装配检验未拦截',
+    'RELEASE_GATE': '发布门禁未拦截', 'RELEASE_GATE_FAILED': '发布门禁失效',
+    'DELIVERY_VALIDATION': '交付验证未拦截', 'MONITORING': '运行监控未发现',
+    'TEST_GAP': '测试覆盖缺口', 'UNKNOWN': '待确认',
+}
+
+TOKEN_LABELS = {
+    'REQUIREMENT':'需求','DESIGN':'设计','IMPLEMENTATION':'实现','DEVELOPMENT':'开发','TEST':'测试',
+    'RELEASE':'发布','DELIVERY':'交付','CHANGE':'变更','IMPACT':'影响','GATE':'门禁',
+    'FAILED':'失效','MISSING':'缺失','NOT':'未','ASSESSED':'评估','REVIEW':'评审','CONTROL':'控制',
+    'BRANCH':'分支','MERGED':'合入','KNOWN':'已知','ISSUE':'问题','CONFIGURATION':'配置',
+    'COMPATIBILITY':'兼容性','HARDWARE':'硬件','SOFTWARE':'软件','MECHANICAL':'机械',
 }
 ORDER = ['top_occurrence_causes','top_escape_causes','product_distribution','top_technical_gaps','top_management_gaps','top_governance_gaps','cross_product_common_gaps','common_capability_analysis']
 
@@ -36,7 +64,12 @@ def zh_value(value):
     if value is None or value == '': return '暂无'
     if isinstance(value, bool): return '是' if value else '否'
     if isinstance(value, (list, tuple)): return '、'.join(zh_value(x) for x in value)
-    return VALUE_LABELS.get(str(value), str(value))
+    text=str(value)
+    if text in VALUE_LABELS:return VALUE_LABELS[text]
+    if text and text.upper()==text and '_' in text:
+        translated=[TOKEN_LABELS.get(x,x) for x in text.split('_')]
+        if any(a!=b for a,b in zip(translated,text.split('_'))):return '·'.join(translated)
+    return text
 
 def _pct(rows):
     total=sum(int(x.get('count') or 0) for x in rows if isinstance(x,dict)) or 1

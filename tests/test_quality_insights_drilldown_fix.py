@@ -16,8 +16,8 @@ def _seed_issue(db, *, kid, issue_id, category, escape_category, gap_category=No
             (kid, 'PLC', issue_id, f'{kid}-V1'),
         )
         normalized = {
-            'occurrence': {'cause_l1': category},
-            'escape': {'escape_l1': escape_category},
+            'occurrence': {'cause_l1': '一级根因', 'cause_l4': category},
+            'escape': {'escape_l1': '一级流出', 'escape_l3': escape_category},
         }
         c.execute(
             "INSERT INTO quality_issue_version(issue_version_id,knowledge_id,version_no,normalized_source_hash,normalized_json,title,product,platform) VALUES(?,?,?,?,?,?,?,?)",
@@ -41,6 +41,15 @@ def test_statistics_reads_actual_source_cause_fields_and_does_not_fake_missing_r
     stats = repo.statistics()
     assert stats['top_occurrence_causes'] == [{'category': '设计防护', 'count': 1}]
     assert stats['top_escape_causes'] == [{'category': '测试方法', 'count': 1}]
+
+
+def test_statistics_top_causes_use_cause_l4_and_escape_l3_only(tmp_path):
+    db = tmp_path / 'quality.db'
+    repo = _seed_issue(db, kid='K1', issue_id='I-1', category='四级根因', escape_category='三级流出')
+    stats = repo.statistics()
+    assert stats['top_occurrence_causes'] == [{'category': '四级根因', 'count': 1}]
+    assert stats['top_escape_causes'] == [{'category': '三级流出', 'count': 1}]
+    assert '一级根因' not in str(stats) and '一级流出' not in str(stats)
 
 
 def test_capability_details_are_html_and_common_gap_link_keeps_exact_issue_ids(tmp_path):

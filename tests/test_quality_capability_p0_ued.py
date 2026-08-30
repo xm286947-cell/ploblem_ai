@@ -31,11 +31,14 @@ def test_p0_page_uses_dynamic_products_and_frozen_api_contract():
     html = (WEB / "templates" / "p0_insights.html").read_text(encoding="utf-8")
     js = (WEB / "static" / "p0_insights.js").read_text(encoding="utf-8")
     assert "data-products" in html
-    assert "/products" in js and "/taxonomies" in js
+    assert "/products" in js and "/taxonomies" in js and "/issues/facets" in js
     assert "/insights/business-contradictions" in js
     assert "business-contradictions/" in js and "/issues" in js
     assert "product_code" in js and "product_name" in js
     assert "taxonomy_type" in js and "label_zh" in js
+    assert "taxonomyItems(items,'DOMAIN')" in js
+    assert "taxonomyItems(items,'LIFECYCLE')" in js
+    assert "const gap=obj(x.gap)" in js and "const details=obj(x.details)" in js
     assert "HMI" not in html and "PLC" not in html and "IFA" not in html
 
 

@@ -32,6 +32,21 @@ ai:
       validation_retries: 1
       max_tokens: 4096
       max_items_per_dimension: 3
+
+# 可配置多个质量分析智能体。未填写的参数继承上面的 ai 配置；密钥只引用环境变量。
+quality_issue_agents:
+  quality:
+    label: 质量深度分析智能体
+    enabled: true
+    provider: openai_compatible
+    model: dtcoder
+  fast:
+    label: 快速分析智能体
+    enabled: true
+    provider: openai_compatible
+    model: dtcoder
+
+# 页面选择“动态分配”时，系统按问题轮询分配智能体；同一问题的四阶段始终使用同一智能体。
 embedding:
   enabled: false
   provider: local_hash

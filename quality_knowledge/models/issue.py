@@ -26,6 +26,7 @@ class IssueFact(VersionedDTO):
     issue_type: str = ""
     is_defect: str = ""
     month: str = ""
+    year: str = ""
     industry: str = ""
     customer: str = ""
     department: str = ""

@@ -12,7 +12,21 @@
   </section>
 
   <section class="card" data-settings {% if mode!='settings' %}hidden{% endif %}>
-    <div class="card-head"><div><h2>② 字段映射</h2><p>统一字段当前基线为 59 个。正式版本只读；点击按钮可基于当前正式版创建可编辑 Draft，并保留已有源表头。</p></div><div><select data-mapping-product><option value="">选择产品</option></select><button type="button" data-create-draft>创建/打开可编辑 Draft</button></div></div>
+    <div class="card-head"><div><h2>② 新增统一标准字段</h2><p>新增字段经过 Draft、审批、校验和激活，全程留痕；激活后可同步到产品 Mapping Draft。</p></div><span data-field-total></span></div>
+    <form class="inline-form" data-standard-field-form>
+      <input name="label_zh" required placeholder="中文名，如 固件版本">
+      <select name="proposed_domain" required><option value="ISSUE_FACT">问题事实</option><option value="PRODUCT_CONTEXT">产品上下文</option><option value="OCCURRENCE">发生原因</option><option value="ESCAPE">流出原因</option><option value="SOLUTION">解决措施</option><option value="VERIFICATION">验证信息</option><option value="PRODUCT_EXTENSION">产品扩展</option></select>
+      <input name="proposed_field" required pattern="[a-z][a-z0-9_]*" placeholder="英文 Key，如 firmware_version">
+      <input name="definition_zh" required placeholder="字段定义">
+      <select name="data_type"><option value="string">文本</option><option value="integer">整数</option><option value="number">数值</option><option value="boolean">布尔</option><option value="date">日期</option></select>
+      <select name="product_code" data-field-product><option value="">同步到产品（可选）</option></select>
+      <button>新增并激活</button>
+    </form>
+    <p class="muted" data-field-result>适用于所有产品；选择产品后会同时创建或同步该产品的 Mapping Draft。</p>
+  </section>
+
+  <section class="card" data-settings {% if mode!='settings' %}hidden{% endif %}>
+    <div class="card-head"><div><h2>③ 字段映射</h2><p>统一字段初始基线为 59 个，实际数量动态读取；正式版本只读，点击按钮可基于当前正式版创建可编辑 Draft，并保留已有源表头。</p></div><div><select data-mapping-product><option value="">选择产品</option></select><button type="button" data-create-draft>创建/打开可编辑 Draft</button></div></div>
     <div class="mapping-toolbar" data-mapping-toolbar hidden><input data-field-search placeholder="搜索中文名、Key、Domain、源表头"><span data-mapping-status></span><button type="button" data-save-mapping>保存 Draft</button><button type="button" data-validate-mapping>Validate</button><button type="button" data-activate-mapping>Activate</button></div>
     <div class="table-wrap"><table data-mapping-table hidden><thead><tr><th>统一标准字段</th><th>目标路径</th><th>Excel 源表头</th><th>必填</th><th>启用</th></tr></thead><tbody data-mapping-rows></tbody></table></div>
     <div class="empty" data-mapping-empty>选择产品后查看 Mapping；没有版本时创建 Starter Draft。</div>

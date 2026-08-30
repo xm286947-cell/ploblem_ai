@@ -12,7 +12,7 @@
     <p class="compact-desc">{{issue.description or '-'}}</p>
     <div class="compact-meta">
       <span>产品 {{issue.product or '-'}}</span><span>平台 {{issue.platform or '-'}}</span>
-      <span>月份 {{issue.month or '-'}}</span><span>严重度 {{issue.severity or '-'}}</span><span>V{{issue.version_no}}</span>
+      <span>归属 {{issue.year or '-'}}年 {{issue.month or '-'}}</span><span>严重度 {{issue.severity or '-'}}</span><span>V{{issue.version_no}}</span>
       <span class="badge status-{{latest_run.status|lower if latest_run else 'not_analyzed'}}">AI {% if latest_run %}{{latest_run.status}}{% else %}未分析{% endif %}</span>
       <span class="badge {% if human_analysis %}badge-success{% else %}badge-neutral{% endif %}">人工 {{'已填写' if human_analysis else '未填写'}}</span>
     </div>
@@ -23,8 +23,8 @@
       {% if issue_position %}<span class="issue-sequence-position">{{issue_position}} / {{issue_total}}</span>{% endif %}
       {% if next_issue %}<a class="button" href="/issues/{{next_issue.knowledge_id}}" title="{{next_issue.business_issue_id}}">下一条 →</a>{% else %}<span class="button disabled" aria-disabled="true">下一条 →</span>{% endif %}
     </div>
-    <form id="analysis-normal-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><button class="primary">分析未完成项</button></form>
-    <form id="analysis-force-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}" onsubmit="return confirm('将强制重新分析已完成阶段，确认继续？')"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><input type="hidden" name="force" value="1"><button>强制重新分析</button></form>
+    <form id="analysis-normal-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}"><input type="hidden" name="analysis_agent" value="DYNAMIC"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><button class="primary">分析未完成项</button></form>
+    <form id="analysis-force-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}" onsubmit="return confirm('将强制重新分析已完成阶段，确认继续？')"><input type="hidden" name="analysis_agent" value="DYNAMIC"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><input type="hidden" name="force" value="1"><button>强制重新分析</button></form>
     <a class="button" href="#human-analysis">人工分析</a>
   </div>
 </div>
@@ -32,6 +32,7 @@
 <section class="analysis-context-card">
   <div class="analysis-context-head"><div><strong>分析上下文</strong><span>可选预选，用于校准四阶段 AI 分析</span></div><span class="tag">本次运行生效</span></div>
   <div class="analysis-context-grid">
+    <label>分析智能体<select data-profile-field="analysis_agent"><option value="DYNAMIC">按问题动态分配（推荐）</option>{% for a in analysis_agents['items'] or [] %}<option value="{{a.agent_id}}">{{a.label}} · {{a.model or '-'}}</option>{% endfor %}</select></label>
     <label>产品领域<select data-profile-field="domain_profile">{% for x in domain_profiles %}<option value="{{x}}">{{domain_labels[x]}}</option>{% endfor %}</select></label>
     <label>生命周期阶段<select data-profile-field="lifecycle_phase">{% for x in lifecycle_phases %}<option value="{{x}}">{{lifecycle_labels[x]}}</option>{% endfor %}</select></label>
     <fieldset><legend>问题主题（可多选）</legend><div class="analysis-choice-grid">{% for x in issue_types %}<label class="check"><input type="checkbox" data-profile-issue-type value="{{x}}">{{issue_type_labels[x]}}</label>{% endfor %}</div></fieldset>
@@ -46,6 +47,12 @@
 <section id="overview" class="compact-grid top-workbench single">
   <article class="compact-card">
     <div class="compact-card-head"><h2>问题事实</h2><span>FACT</span></div>
+    <form id="issue-period" method="post" action="/issues/{{issue.knowledge_id}}/period" class="inline-form period-form">
+      <label>归属年份<input name="year" value="{{issue.year or ''}}" inputmode="numeric" maxlength="4" required></label>
+      <label>归属月份<select name="month" required>{% for n in range(1,13) %}<option value="{{n}}月" {% if issue.month==(n|string)+'月' %}selected{% endif %}>{{n}}月</option>{% endfor %}</select></label>
+      <button class="btn btn-secondary" type="submit">修改归属时间</button>
+      <small>默认从 ITR 编号解析；人工修改用于跨年结算，不会清空现有 AI 分析。</small>
+    </form>
     <div class="fact-summary-grid">
       <div><label>影响结果</label><p>{{issue.impact or '-'}}</p></div>
       <div><label>问题类型</label><p>{{issue.issue_type or '-'}}</p></div>
@@ -63,20 +70,48 @@
   <div class="compact-section-head"><div><h2>为什么发生 / 为什么流出</h2><p>Occurrence 与 Escape 并排，首屏即可完成核心原因判断。</p></div></div>
   <div class="compact-grid causes-grid">
     <article class="compact-card cause-card occurrence">
-      <div class="compact-card-head"><h3>为什么发生</h3><span>{{occ.occurrence_category or '未分类'}}</span></div>
+      <div class="compact-card-head"><h3>为什么发生</h3><span>{{zh_value(occ.occurrence_category) if occ.occurrence_category else '未分类'}}</span></div>
       <div class="cause-core"><label>根因摘要</label><p>{{ev(occ.root_cause_summary) or '未分析'}}</p></div>
       <div class="cause-secondary"><div><label>失效机制</label><p>{{ev(occ.failure_mechanism) or '-'}}</p></div><div><label>Confidence</label><p>{{'%.0f'|format((occ.confidence or 0)*100)}}%</p></div></div>
-      {% if occ.introduced_phase or occ.system_scope %}<details class="compact-detail"><summary>质量阶段与系统边界</summary><p><strong>引入阶段：</strong>{{occ.introduced_phase or 'UNKNOWN'}}</p>{% for k,v in (occ.system_scope or {}).items() if v %}<p><strong>{{k}}：</strong>{{v}}</p>{% endfor %}</details>{% endif %}
+      {% if occ.introduced_phase or occ.system_scope %}<details class="compact-detail"><summary>质量阶段与系统边界</summary><p><strong>引入阶段：</strong>{{zh_value(occ.introduced_phase) if occ.introduced_phase else '未知'}}</p>{% for k,v in (occ.system_scope or {}).items() if v %}<p><strong>{{k}}：</strong>{{v}}</p>{% endfor %}</details>{% endif %}
       {% if occ.contributing_factors %}<details class="compact-detail"><summary>贡献因素（{{occ.contributing_factors|length}}）</summary><ul>{% for x in occ.contributing_factors %}<li>{{ev(x)}}</li>{% endfor %}</ul></details>{% endif %}
     </article>
     <article class="compact-card cause-card escape">
-      <div class="compact-card-head"><h3>为什么流出</h3><span>{{esc.escape_category or '未分类'}}</span></div>
+      <div class="compact-card-head"><h3>为什么流出</h3><span>{{zh_value(esc.escape_category) if esc.escape_category else '未分类'}}</span></div>
       <div class="cause-core"><label>流出原因</label><p>{{ev(esc.escape_cause_summary) or '未分析'}}</p></div>
       <div class="cause-secondary"><div><label>验证缺口</label><p>{{ev(esc.verification_gap) or '-'}}</p></div><div><label>Confidence</label><p>{{'%.0f'|format((esc.confidence or 0)*100)}}%</p></div></div>
       {% if esc.expected_detection_stage or esc.missing_control %}<details class="compact-detail"><summary>应拦截阶段与控制失效</summary><p><strong>应发现：</strong>{{esc.expected_detection_stage or 'UNKNOWN'}}　<strong>实际发现：</strong>{{esc.actual_detection_stage or 'UNKNOWN'}}</p><p><strong>缺失控制：</strong>{{esc.missing_control or '-'}}</p><p><strong>失效类型：</strong>{{esc.control_failure_type or 'UNKNOWN'}}</p></details>{% endif %}
       {% if ev(esc.process_gap) %}<details class="compact-detail"><summary>过程缺口</summary><p>{{ev(esc.process_gap)}}</p></details>{% endif %}
     </article>
   </div>
+</section>
+
+{% if quality_capability.projection %}
+<section class="compact-section" id="quality-capability-evidence">
+  <div class="compact-section-head"><div><h2>质量能力标准化结论</h2><p>由现有分析结果生成的增量投影；原 AI 结果和人工分析均未被覆盖。</p></div><span class="tag">QC-EXT-V1</span></div>
+  <div class="compact-grid causes-grid">
+    <article class="compact-card"><div class="compact-card-head"><h3>发生 / 流出 MRC</h3><span>当前有效结论</span></div>
+      {% for side in ['OCCURRENCE','ESCAPE'] %}{% set x=quality_capability.effective_mrc.get(side) %}{% if x %}<div class="gap-row-body"><label>{{'发生 MRC' if side=='OCCURRENCE' else '流出 MRC'}}</label><p><strong>{{zh_value(x.mrc_code)}}</strong></p><small>{{x.source_label}} · 置信度 {{'%.0f'|format((x.confidence or 0)*100)}}%{% if x.human_revision_id %} · 已人工修订{% endif %}</small>{% if zh_value(x.mrc_code)!=x.mrc_code %}<details class="compact-detail"><summary>查看技术编码</summary><p class="mono">{{x.mrc_code}}</p></details>{% endif %}</div>{% endif %}{% else %}<div class="compact-empty">暂无可标准化 MRC</div>{% endfor %}
+    </article>
+    <article class="compact-card"><div class="compact-card-head"><h3>问题领域与生命周期</h3><span>主结论优先</span></div>
+      {% for axis,title in [('DOMAIN','问题领域'),('ISSUE_TYPE','问题类型'),('LIFECYCLE','主要生命周期')] %}{% set group=quality_capability.get('effective_tags',{}).get(axis) %}{% if group %}<div class="gap-row-body"><label>{{title}}</label><p><strong>{{zh_value(group.primary.tag_code)}}</strong>{% for x in group.related %} <span class="tag">{{zh_value(x.tag_code)}}</span>{% endfor %}</p><small>{{group.primary.source_label}} · 置信度 {{'%.0f'|format((group.primary.confidence or 0)*100)}}%</small></div>{% endif %}{% else %}<div class="compact-empty">暂无标准标签</div>{% endfor %}
+      {% if quality_capability.get('pending_tags',[]) %}<details class="compact-detail"><summary>待确认标签（{{quality_capability.get('pending_tags',[])|length}}）</summary>{% for x in quality_capability.get('pending_tags',[]) %}<p>{{zh_value(x.axis)}}：{{x.tag_code}} <small>· {{x.pending_reason}} · {{x.source_label}}</small></p>{% endfor %}</details>{% endif %}
+    </article>
+  </div>
+  {% if quality_capability.evidence %}<article class="compact-card"><div class="compact-card-head"><h3>结论证据</h3><span>{{quality_capability.evidence|length}} 条</span></div>{% for x in quality_capability.evidence %}<div class="gap-row-body"><p><strong>{{'发生' if x.stage=='OCCURRENCE' else '流出' if x.stage=='ESCAPE' else x.stage}}：</strong>{{x.excerpt}}</p><small>{{x.source_label}} · {{'%.0f'|format((x.confidence or 0)*100)}}%</small></div>{% endfor %}</article>{% endif %}
+  <article class="compact-card"><div class="compact-card-head"><h3>人工确认当前有效 MRC</h3><span>不会覆盖 AI 原值</span></div>
+    <form method="post" action="/issues/{{issue.knowledge_id}}/quality-confirmations" class="human-compact-form">
+      <div class="human-fields-grid"><label>发生 MRC<input name="occurrence_mrc" value="{{quality_capability.effective_mrc.get('OCCURRENCE',{}).get('mrc_code','')}}"></label><label>流出 MRC<input name="escape_mrc" value="{{quality_capability.effective_mrc.get('ESCAPE',{}).get('mrc_code','')}}"></label><label>修订原因<input name="reason" placeholder="为何确认或修订"></label><label>证据<input name="evidence" placeholder="现场记录、评审或测试证据"></label><input type="hidden" name="confirmed_by" value="web"></div>
+      <div class="human-save-row"><button class="primary">保存质量结论</button></div>
+    </form>
+  </article>
+</section>
+{% endif %}
+
+<section class="compact-section" id="hardware-components">
+  <div class="compact-section-head"><div><h2>硬件关联与器件失效</h2><p>当前用于记录软件问题中的硬件、器件、板卡、接口和软硬协同因素。</p></div><span>{{quality_capability.hardware_components|length}} 个器件</span></div>
+  {% if quality_capability.hardware_components %}<div class="compact-grid causes-grid">{% for x in quality_capability.hardware_components %}<article class="compact-card"><div class="compact-card-head"><h3>{{x.component_name or x.component_category or '未命名器件'}}</h3><span>{{x.relevance}} · {{x.source_type}}</span></div><div class="gap-row-body"><p><strong>厂家/型号：</strong>{{x.manufacturer or '-'}} / {{x.model_part_number or '-'}}</p><p><strong>板卡/位置：</strong>{{x.board_module or '-'}} / {{x.reference_designator or x.installation_location or '-'}}</p><p><strong>失效模式：</strong>{{x.failure_mode or '待确认'}}</p><p><strong>失效机理：</strong>{{x.failure_mechanism or '待确认'}}</p><p><strong>失效原因：</strong>{{x.failure_cause or '待确认'}}</p><p><strong>检测/处置：</strong>{{x.detection_method or '-'}} / {{x.disposition or '-'}}</p></div></article>{% endfor %}</div>{% else %}<div class="compact-empty">当前未识别硬件关联；如软件问题涉及器件或软硬协同，可由人工补充。</div>{% endif %}
+  <article class="compact-card"><div class="compact-card-head"><h3>人工补充器件与失效信息</h3><span>证据优先</span></div><form method="post" action="/issues/{{issue.knowledge_id}}/hardware-components" class="human-compact-form"><div class="human-fields-grid"><label>相关性<select name="relevance"><option value="CONFIRMED">确认相关</option><option value="POSSIBLE">可能相关</option></select></label><label>器件类别<input name="component_category"></label><label>器件名称<input name="component_name"></label><label>厂家<input name="manufacturer"></label><label>型号/料号<input name="model_part_number"></label><label>批次/Lot<input name="lot_batch"></label><label>板卡/模块<input name="board_module"></label><label>位号/位置<input name="reference_designator"></label><label>硬件版本<input name="hardware_version"></label><label>失效模式<input name="failure_mode"></label><label>失效机理<input name="failure_mechanism"></label><label>失效原因<input name="failure_cause"></label><label>检测方法<input name="detection_method"></label><label>处置措施<input name="disposition"></label><label>证据<input name="evidence"></label><input type="hidden" name="confirmed_by" value="web"></div><div class="human-save-row"><button class="primary">保存器件信息</button></div></form></article>
 </section>
 
 <section id="prevention" class="compact-section">
@@ -216,7 +251,7 @@
     <details class="trace-card"><summary>数据源与标准化 · Original · 原始 Excel 数据</summary><div class="trace-meta">{{d.raw.source_file if d.raw else '-'}} / {{d.raw.source_sheet if d.raw else '-'}} / Row {{d.raw.source_row if d.raw else '-'}}</div><pre>{{d.raw.raw_json if d.raw else 'No raw source'}}</pre></details>
     <details class="trace-card"><summary>数据源与标准化 · Normalized · 数据库标准化数据</summary><pre>{{issue.normalized_json}}</pre></details>
     <details class="trace-card"><summary>Issue Version History · {{d.history|length}} 个版本</summary><table><tr><th>Version</th><th>Hash</th><th>Created</th></tr>{% for v in d.history %}<tr><td>V{{v.version_no}} {% if v.issue_version_id==issue.current_version_id %}<span class="tag">Current</span>{% endif %}</td><td class="mono">{{v.normalized_source_hash}}</td><td>{{v.created_at}}</td></tr>{% endfor %}</table></details>
-    <details class="trace-card"><summary>AI Analysis Run History · {{analysis_history|length}} 次</summary><table><tr><th>Run</th><th>Type</th><th>Status</th><th>Model</th><th>Started</th><th>Error</th></tr>{% for r in analysis_history %}<tr><td class="mono">{{r.analysis_run_id}}</td><td>{{r.analysis_type}}</td><td><span class="status status-{{r.status|lower}}">{{r.status}}</span></td><td>{{r.model_name or '-'}}</td><td>{{r.started_at}}</td><td>{{r.error_message or '-'}}</td></tr>{% endfor %}</table></details>
+    <details class="trace-card"><summary>AI Analysis Run History · {{analysis_history|length}} 次</summary><table><tr><th>Run</th><th>Type</th><th>Status</th><th>智能体 / 模型</th><th>Started</th><th>Error</th></tr>{% for r in analysis_history %}<tr><td class="mono">{{r.analysis_run_id}}</td><td>{{r.analysis_type}}</td><td><span class="status status-{{r.status|lower}}">{{r.status}}</span></td><td><b>{{r.analysis_agent or 'DEFAULT'}}</b><small>{{r.model_name or '-'}}</small></td><td>{{r.started_at}}</td><td>{{r.error_message or '-'}}</td></tr>{% endfor %}</table></details>
     {% if debug %}<details class="trace-card debug"><summary>AI Debug · 仅调试使用</summary><h4>Raw Response</h4><pre>{{debug.raw_response or '-'}}</pre><h4>Normalized JSON</h4><pre>{{debug.normalized_json or '-'}}</pre>{% if debug.validation_error %}<h4>Validation Error</h4><pre>{{debug.validation_error}}</pre>{% endif %}</details>{% endif %}
   </div>
 </section>

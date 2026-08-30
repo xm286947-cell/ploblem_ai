@@ -26,7 +26,12 @@ from quality_knowledge.human_analysis import HumanAnalysisRepository, HumanAnaly
 from quality_knowledge.analysis_profiles import DOMAIN_PROFILES, ISSUE_TYPES, LIFECYCLE_PHASES, DOMAIN_LABELS, ISSUE_TYPE_LABELS, LIFECYCLE_LABELS, normalize_analysis_profile
 from quality_knowledge.product_config import ProductConfigRepository
 from quality_knowledge.adapters import register_product_adapter
-from .statistics_presenter import present_statistics, present_common_gaps
+from quality_knowledge.capability_extension import QualityCapabilityExtension
+from quality_knowledge.batch_analysis_jobs import BatchAnalysisJobManager
+from quality_knowledge.model_config import list_quality_issue_agents
+from .statistics_presenter import present_statistics, present_common_gaps, zh_value
+from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
+from quality_knowledge.product_report.service import ProductReportError
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -105,7 +110,7 @@ def _readable_rows(obj, prefix=''):
     return rows
 
 
-def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str):
+def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_extension=None):
     d = svc.get_issue_detail(knowledge_id)
     if not d:
         return None
@@ -123,6 +128,18 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str):
     if latest_run and hasattr(svc.repository, 'get_analysis_debug'):
         debug = svc.repository.get_analysis_debug(latest_run['analysis_run_id'])
     recurrence = results.get('recurrence') or {}
+    capability_view = capability_extension.project_issue(issue, analysis) if capability_extension else {
+        'projection': None, 'tags': [], 'mrc': [], 'evidence': []
+    }
+    capability_view.setdefault('effective_mrc', {})
+    capability_view.setdefault('pending_tags', [])
+    if not capability_view.get('effective_tags'):
+        source_labels={'HUMAN_CONFIRMED':'人工确认','SOURCE_DATA':'原始数据','AI_STANDARDIZED':'AI 标准化','AI_INFERRED':'AI 推断'}
+        tag_groups={}
+        for raw in capability_view.get('tags') or []:
+            tag=dict(raw);tag['source_label']=source_labels.get(tag.get('source_type'),tag.get('source_type') or '未知来源')
+            tag_groups.setdefault(tag.get('axis') or 'OTHER',[]).append(tag)
+        capability_view['effective_tags']={axis:{'primary':values[0],'related':values[1:4]} for axis,values in tag_groups.items() if values}
     return {
         'd': d,
         'issue': issue,
@@ -134,6 +151,7 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str):
         'analysis_history': history,
         'latest_run': latest_run,
         'debug': debug,
+        'quality_capability': capability_view,
         'open_questions': svc.repository.list_open_questions(knowledge_id,5) if hasattr(svc.repository,'list_open_questions') else [],
         'recurrence_level': recurrence.get('recurrence_risk_level') or 'UNKNOWN',
         'horizontal_action_needed': bool(recurrence.get('horizontal_action_needed')),
@@ -153,12 +171,30 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str):
 def create_app(db_path):
     app = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
     svc = KnowledgeIssueService(IssueKnowledgeRepository(db_path))
+    capability_extension = QualityCapabilityExtension(db_path)
+    app.state.quality_capability_extension = capability_extension
+    batch_jobs = BatchAnalysisJobManager(db_path)
+    app.state.batch_analysis_jobs = batch_jobs
+
+    def project_capability(knowledge_id):
+        issue = svc.get_issue(knowledge_id)
+        if not issue:
+            return None
+        analyses = {stage: svc.get_latest_analysis(knowledge_id, stage) for stage in ('occurrence','escape','recurrence','capability_gap')}
+        return capability_extension.project_issue(issue, analyses)
+
+    def run_batch_with_projection(selected_ids, **kwargs):
+        result = svc.run_batch_analysis(selected_ids, BASE.parent.parent, **kwargs)
+        for knowledge_id in selected_ids:
+            project_capability(knowledge_id)
+        return result
     product_repo = ProductConfigRepository(db_path)
     for product in product_repo.list(False):
         register_product_adapter(product['product_code'])
     mapping_svc = MappingConfigurationService(MappingConfigurationRepository(db_path))
     app.state.mapping_configuration_service = mapping_svc
     human_svc = HumanAnalysisService(HumanAnalysisRepository(db_path))
+    report_svc = LegacyProductQualityReportService(svc, BASE.parent.parent)
     app.state.human_analysis_service = human_svc
     app.state.knowledge_issue_service = svc
     app.state.product_config_repository = product_repo
@@ -168,9 +204,10 @@ def create_app(db_path):
     tpl = Jinja2Templates(directory=BASE / 'templates')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
+    tpl.env.globals['zh_value'] = zh_value
 
     def filters(req):
-        return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'month'] if (v := req.query_params.get(k))}
+        return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}
 
     def analysis_profile_from_form(domain_profile='', issue_types=None, lifecycle_phase=''):
         return normalize_analysis_profile({'domain_profile': domain_profile, 'issue_types': issue_types or [], 'lifecycle_phase': lifecycle_phase})
@@ -286,6 +323,16 @@ def create_app(db_path):
             f['gap_dimension'] = gap_dimension
         if gap_category:
             f['gap_category'] = gap_category
+        matrix_axis=(request.query_params.get('matrix_axis') or '').upper()
+        matrix_code=(request.query_params.get('matrix_code') or '').strip()
+        if matrix_axis and matrix_code and gap_dimension and gap_category:
+            try:
+                matrix_ids=capability_extension.matrix_issue_ids(
+                    matrix_axis=matrix_axis,axis_code=matrix_code,capability_axis=gap_dimension,
+                    capability_code=gap_category,business_type=f.get('business_type',''))
+                f['knowledge_ids']=matrix_ids or ['__NO_MATRIX_MATCH__']
+            except ValueError as error:
+                raise HTTPException(400,str(error)) from error
         # Keep the old limit parameter compatible, but make paging explicit.  The
         # candidate set is complete before UI-only filters are applied, so totals
         # and semantic drill-downs are no longer silently capped at 100 rows.
@@ -332,6 +379,9 @@ def create_app(db_path):
         total_pages = max(1, (filtered_total + page_size - 1) // page_size)
         page = min(page, total_pages)
         page_items = items[(page - 1) * page_size:page * page_size]
+        for row in page_items:
+            if row.get('year'):
+                row['month'] = f"{row['year']}年 {row.get('month') or '-'}"
         base_params = [(k, v) for k, v in request.query_params.multi_items() if k not in {'page','limit','page_size'}]
         base_params.append(('page_size', str(page_size)))
         def page_url(target):
@@ -345,11 +395,12 @@ def create_app(db_path):
         }
         all_issue_count = svc.count_issues({})
         month_options = sorted({str(x.get('month')).strip() for x in svc.query_issues({}, max(all_issue_count, 1)) if str(x.get('month') or '').strip()})
-        return tpl.TemplateResponse(request, 'issues.html', {'items': page_items, 'filtered_total': filtered_total, 'pagination': pagination, 'metrics':metrics, 'filters': f, 'q':q, 'recurrence_risk':recurrence_risk, 'analysis_status':analysis_status, 'human_status':human_status, 'human_fields': human_svc.list_field_definitions(True), 'human_field_id': human_field_id, 'human_value': human_value, 'products': product_repo.list(), 'month_options': month_options})
+        year_options = sorted({str(x.get('year')).strip() for x in svc.query_issues({}, max(all_issue_count, 1)) if str(x.get('year') or '').strip()}, reverse=True)
+        return tpl.TemplateResponse(request, 'issues.html', {'items': page_items, 'filtered_total': filtered_total, 'pagination': pagination, 'metrics':metrics, 'filters': f, 'q':q, 'recurrence_risk':recurrence_risk, 'analysis_status':analysis_status, 'human_status':human_status, 'human_fields': human_svc.list_field_definitions(True), 'human_field_id': human_field_id, 'human_value': human_value, 'products': product_repo.list(), 'year_options': year_options, 'month_options': month_options})
 
     @app.get('/issues/{knowledge_id}', response_class=HTMLResponse, include_in_schema=False)
     def issue_detail(request: Request, knowledge_id: str):
-        vm = _build_issue_view(svc, knowledge_id)
+        vm = _build_issue_view(svc, knowledge_id, capability_extension)
         if not vm:
             raise HTTPException(404, 'NOT_FOUND')
         issue = svc.get_issue(knowledge_id)
@@ -361,8 +412,18 @@ def create_app(db_path):
         vm['issue_total'] = len(sequence)
         vm['human_fields'] = human_svc.list_field_definitions(True)
         vm['human_analysis'] = human_svc.get_analysis(knowledge_id, issue['issue_version_id']) if issue else None
-        vm.update({'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
+        vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
+
+    @app.post('/issues/{knowledge_id}/period', include_in_schema=False)
+    def issue_period_save(knowledge_id: str, year: str = Form(...), month: str = Form(...)):
+        try:
+            svc.repository.update_issue_period(knowledge_id, year, month, 'web')
+        except KeyError:
+            raise HTTPException(404, 'issue not found')
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return RedirectResponse(f'/issues/{knowledge_id}#issue-period', 303)
 
     @app.post('/api/import/preview')
     def api_import_preview(file: UploadFile = File(...), business_type: str = Form(''), issue_domain: str = Form('AUTO')):
@@ -436,24 +497,57 @@ def create_app(db_path):
         return d
 
     @app.get('/analysis', response_class=HTMLResponse, include_in_schema=False)
-    def analysis_page(request: Request):
+    def analysis_page(request: Request, job_id: str = ''):
         items = svc.query_issues({}, 1000)
         statuses = {}
         for x in items:
             h = svc.get_analysis_history(x['knowledge_id'])
             statuses[x['knowledge_id']] = h[0]['status'] if h else '未分析'
-        return tpl.TemplateResponse(request, 'analysis.html', {'items': items, 'statuses': statuses, 'products': product_repo.list(), 'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
+        return tpl.TemplateResponse(request, 'analysis.html', {'items': items, 'statuses': statuses, 'products': product_repo.list(), 'analysis_agents': list_quality_issue_agents(BASE.parent.parent), 'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS, 'batch_job_id': job_id, 'batch_job': batch_jobs.get(job_id) if job_id else None})
+
+    @app.get('/api/analysis-agents')
+    def api_analysis_agents():
+        """Expose effective routing without secrets for deployment diagnostics."""
+        return list_quality_issue_agents(BASE.parent.parent)
 
     @app.post('/analysis/{knowledge_id}', include_in_schema=False)
-    def analysis_one_page(knowledge_id: str, force: str = Form(''), domain_profile: str = Form('AUTO'), issue_types: list[str] = Form([]), lifecycle_phase: str = Form('AUTO')):
-        svc.run_issue_analysis(knowledge_id, BASE.parent.parent, force=force.lower() in {'1','true','on','yes'}, analysis_profile=analysis_profile_from_form(domain_profile, issue_types, lifecycle_phase))
+    def analysis_one_page(knowledge_id: str, force: str = Form(''), analysis_agent: str = Form(''), domain_profile: str = Form('AUTO'), issue_types: list[str] = Form([]), lifecycle_phase: str = Form('AUTO')):
+        svc.run_issue_analysis(knowledge_id, BASE.parent.parent, force=force.lower() in {'1','true','on','yes'}, analysis_profile=analysis_profile_from_form(domain_profile, issue_types, lifecycle_phase),agent_id='' if analysis_agent in {'','DYNAMIC'} else analysis_agent)
+        project_capability(knowledge_id)
         return RedirectResponse('/issues/' + knowledge_id, 303)
 
     @app.post('/analysis-batch', include_in_schema=False)
-    def analysis_batch_page(business_type: str = Form(''), only_missing: str = Form(''), force: str = Form(''), domain_profile: str = Form('AUTO'), issue_types: list[str] = Form([]), lifecycle_phase: str = Form('AUTO')):
+    def analysis_batch_page(business_type: str = Form(''), only_missing: str = Form(''), force: str = Form(''), concurrency: int = Form(2), analysis_agent: str = Form(''), domain_profile: str = Form('AUTO'), issue_types: list[str] = Form([]), lifecycle_phase: str = Form('AUTO')):
         ids = [x['knowledge_id'] for x in svc.query_issues({'business_type': business_type} if business_type else {}, 100000)]
-        svc.run_batch_analysis(ids, BASE.parent.parent, only_missing=True, force=force.lower() in {'1','true','on','yes'}, analysis_profile=analysis_profile_from_form(domain_profile, issue_types, lifecycle_phase))
-        return RedirectResponse('/analysis', 303)
+        only_missing_flag=only_missing.lower() in {'1','true','on','yes'}
+        force_flag=force.lower() in {'1','true','on','yes'}
+        if only_missing_flag and not force_flag:
+            ids=svc.incomplete_analysis_ids(ids)
+        job = batch_jobs.start(
+            ids, run_batch_with_projection,
+            only_missing=only_missing_flag,
+            force=force_flag,
+            analysis_profile=analysis_profile_from_form(domain_profile, issue_types, lifecycle_phase),
+            agent_id='' if analysis_agent in {'','DYNAMIC'} else analysis_agent,
+            concurrency=concurrency,
+        )
+        return RedirectResponse('/analysis?job_id=' + job['job_id'], 303)
+
+    @app.post('/analysis-batch/{job_id}/retry-failed', include_in_schema=False)
+    def analysis_batch_retry_failed(job_id: str, concurrency: int = Form(2)):
+        prior=batch_jobs.get(job_id)
+        if not prior: raise HTTPException(404,'BATCH_ANALYSIS_JOB_NOT_FOUND')
+        ids=[x.get('knowledge_id') for x in prior.get('items',[]) if x.get('status')=='FAILED' and x.get('knowledge_id')]
+        if not ids: raise HTTPException(409,'BATCH_ANALYSIS_HAS_NO_FAILED_ITEMS')
+        job=batch_jobs.start(ids,run_batch_with_projection,only_missing=False,force=True,analysis_profile=None,concurrency=concurrency)
+        return RedirectResponse('/analysis?job_id='+job['job_id'],303)
+
+    @app.get('/api/analysis-batch-jobs/{job_id}')
+    def analysis_batch_job(job_id: str):
+        job = batch_jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, 'BATCH_ANALYSIS_JOB_NOT_FOUND')
+        return job
 
     @app.get('/api/issues/{knowledge_id}/versions')
     def api_versions(knowledge_id: str):
@@ -461,12 +555,14 @@ def create_app(db_path):
 
     @app.post('/api/issues/{knowledge_id}/analyze')
     def api_analyze(knowledge_id: str, force: bool = False, payload: dict | None = None):
-        return svc.run_issue_analysis(knowledge_id, BASE.parent.parent, force=force, analysis_profile=(payload or {}).get('analysis_profile'))
+        result = svc.run_issue_analysis(knowledge_id, BASE.parent.parent, force=force, analysis_profile=(payload or {}).get('analysis_profile'),agent_id=(payload or {}).get('analysis_agent') or '')
+        project_capability(knowledge_id)
+        return result
 
     @app.post('/api/issues/analyze-batch')
     def api_analyze_batch(payload: dict):
         ids = payload.get('knowledge_ids') or [x['knowledge_id'] for x in svc.query_issues({k: v for k, v in {'business_type': payload.get('business_type')}.items() if v}, 100000)]
-        return svc.run_batch_analysis(ids, BASE.parent.parent, only_missing=True, force=bool(payload.get('force')), analysis_profile=payload.get('analysis_profile'))
+        return svc.run_batch_analysis(ids, BASE.parent.parent, only_missing=bool(payload.get('only_missing',True)), force=bool(payload.get('force')), analysis_profile=payload.get('analysis_profile'), concurrency=payload.get('concurrency',2),agent_id=payload.get('analysis_agent') or '')
 
     @app.get('/api/analysis/{run_id}')
     def api_analysis(run_id: str):
@@ -481,13 +577,26 @@ def create_app(db_path):
 
     @app.get('/statistics', response_class=HTMLResponse, include_in_schema=False)
     def statistics_page(request: Request, business_type: str = '', gap_dimension: str = '', common_scope: str = 'all'):
-        stats = svc.get_statistics(business_type or None, 50)
-        runtime = svc.get_workspace_metrics(business_type or None)
+        # Deterministic, idempotent backfill for analysis completed before the
+        # extension was installed. It does not alter any V1 source row.
+        month=(request.query_params.get('month') or '').strip()
+        issue_domain=(request.query_params.get('issue_domain') or '').strip().upper()
+        lifecycle=(request.query_params.get('lifecycle') or '').strip().upper()
+        scope_filters={k:v for k,v in {'business_type':business_type,'month':month,'issue_domain':issue_domain}.items() if v}
+        scoped = svc.query_issues(scope_filters, 100000)
+        for row in scoped:
+            project_capability(row['knowledge_id'])
+        scope_ids=[row['knowledge_id'] for row in scoped]
+        if lifecycle:
+            scope_ids=capability_extension.filter_issue_ids_by_lifecycle(scope_ids,lifecycle)
+        stats = svc.get_statistics(business_type or None, 50, scope_ids)
+        runtime = svc.get_workspace_metrics(business_type or None, scope_ids)
         common_rows = svc.get_common_capability_gaps(
             business_type=business_type or None,
             dimension=gap_dimension or None,
             min_issues=2,
             limit=50,
+            knowledge_ids=scope_ids if (month or issue_domain or lifecycle) else None,
         )
         common_gap_view = present_common_gaps(
             common_rows, business_type=business_type, dimension=gap_dimension, scope=common_scope
@@ -496,6 +605,8 @@ def create_app(db_path):
             params=[]
             if business_type:
                 params.append(('business_type', business_type))
+            for key,value in (('month',month),('issue_domain',issue_domain),('lifecycle',lifecycle)):
+                if value: params.append((key,value))
             selected_scope = common_scope if scope is None else scope
             selected_dimension = '' if clear_dimension else (gap_dimension if dimension is None else dimension)
             if selected_dimension:
@@ -513,7 +624,47 @@ def create_app(db_path):
             'stats': stats, 'statistics_view': present_statistics(stats, runtime), 'business_type': business_type,
             'gap_dimension': gap_dimension, 'common_scope': common_scope, 'common_gap_view': common_gap_view,
             'common_urls': common_urls, 'products': product_repo.list(),
+            'capability_matrices': capability_extension.matrices(business_type,scope_ids),
+            'quality_insight_summary': capability_extension.insight_summary(business_type,scope_ids),
+            'classification_comparison': capability_extension.classification_comparison(business_type,scope_ids),
+            'month':month,'issue_domain':issue_domain,'lifecycle':lifecycle,
+            'available_months':sorted({str(x.get('month') or '') for x in svc.query_issues({},100000) if x.get('month')}),
+            'lifecycle_phases':sorted(set(LIFECYCLE_PHASES)|{x.get('lifecycle_code') for x in capability_extension.matrices(business_type).get('lifecycle_x_capability',[]) if x.get('lifecycle_code')}),
+            'lifecycle_labels':LIFECYCLE_LABELS,
         })
+
+    @app.get('/product-reports', response_class=HTMLResponse, include_in_schema=False)
+    def product_reports_page(request: Request):
+        return tpl.TemplateResponse(request,'p1_product_reports.html',{'api_prefix':'/api','report_base':'base.html','asset_prefix':'/static'})
+
+    @app.get('/api/product-reports/precheck')
+    def product_report_precheck(product_code: str,start_month: str,end_month: str):
+        return report_svc.precheck(product_code,start_month,end_month)
+
+    @app.get('/api/product-reports')
+    def product_reports_api():
+        items=report_svc.list();return {'items':items,'total':len(items)}
+
+    @app.post('/api/product-reports',status_code=201)
+    async def product_report_create(request: Request):
+        payload=await request.json()
+        try:return report_svc.create(str(payload.get('product_code') or ''),str(payload.get('start_month') or ''),str(payload.get('end_month') or ''),str(payload.get('created_by') or ''))
+        except ProductReportError as error:raise HTTPException(400,str(error))
+
+    @app.get('/api/product-reports/{report_id}')
+    def product_report_get(report_id: str):
+        try:return report_svc.get(report_id)
+        except ProductReportError as error:raise HTTPException(404,str(error))
+
+    @app.post('/api/product-reports/{report_id}/publish')
+    def product_report_publish(report_id: str):
+        try:return report_svc.publish(report_id)
+        except ProductReportError as error:raise HTTPException(404,str(error))
+
+    @app.delete('/api/product-reports/{report_id}')
+    def product_report_delete(report_id: str):
+        try:return report_svc.delete(report_id)
+        except ProductReportError as error:raise HTTPException(409 if str(error)=='PUBLISHED_REPORT_CANNOT_BE_DELETED' else 404,str(error))
 
     @app.get('/export/common-gaps', include_in_schema=False)
     def export_common_gaps(business_type: str = '', gap_dimension: str = '', common_scope: str = 'all'):
@@ -799,6 +950,50 @@ def create_app(db_path):
         if str(form.get('reanalyze') or '').lower() in {'1','true','on','yes'}:
             svc.run_issue_analysis(knowledge_id,BASE.parent.parent,force=True)
         return RedirectResponse(f'/issues/{knowledge_id}#human-analysis',303)
+
+    @app.post('/issues/{knowledge_id}/quality-confirmations', include_in_schema=False)
+    def quality_confirmations_save(
+        knowledge_id: str, occurrence_mrc: str = Form(''), escape_mrc: str = Form(''),
+        reason: str = Form(''), evidence: str = Form(''), confirmed_by: str = Form('web')
+    ):
+        issue=svc.get_issue(knowledge_id)
+        if not issue: raise HTTPException(404,'issue not found')
+        current=project_capability(knowledge_id) or {}
+        effective=current.get('effective_mrc') or {}
+        try:
+            for side,code in (('OCCURRENCE',occurrence_mrc),('ESCAPE',escape_mrc)):
+                code=code.strip().upper()
+                if not code: continue
+                original=(effective.get(side) or {}).get('mrc_code')
+                capability_extension.save_human_revision(
+                    knowledge_id=knowledge_id,issue_version_id=issue['issue_version_id'],
+                    target_path=f"{side.lower()}.mrc.primary",original_value=original,
+                    confirmed_value={'code':code},status='CONFIRMED' if original==code else 'CORRECTED',
+                    reason=reason,evidence=evidence,confirmed_by=confirmed_by,
+                )
+        except ValueError as error:
+            raise HTTPException(400,str(error)) from error
+        return RedirectResponse(f'/issues/{knowledge_id}#quality-capability-evidence',303)
+
+    @app.post('/issues/{knowledge_id}/hardware-components', include_in_schema=False)
+    async def hardware_component_save(request: Request, knowledge_id: str):
+        issue=svc.get_issue(knowledge_id)
+        if not issue: raise HTTPException(404,'issue not found')
+        form=await request.form()
+        values={key:str(form.get(key) or '').strip() for key in (
+            'relevance','component_category','component_name','manufacturer','model_part_number','lot_batch',
+            'serial_number','board_module','reference_designator','installation_location','hardware_version',
+            'failure_mode','failure_mechanism','failure_cause','customer_impact','reproduction_condition',
+            'detection_method','disposition','evidence')}
+        if not values['component_name'] and not values['model_part_number'] and not values['component_category']:
+            raise HTTPException(400,'HARDWARE_COMPONENT_IDENTITY_REQUIRED')
+        try:
+            capability_extension.add_hardware_component(
+                knowledge_id=knowledge_id,issue_version_id=issue['issue_version_id'],values=values,
+                actor=str(form.get('confirmed_by') or 'web'))
+        except ValueError as error:
+            raise HTTPException(400,str(error)) from error
+        return RedirectResponse(f'/issues/{knowledge_id}#hardware-components',303)
 
     @app.get('/api/issues/{knowledge_id}/analysis-confirmations')
     def api_analysis_confirmations(knowledge_id: str):

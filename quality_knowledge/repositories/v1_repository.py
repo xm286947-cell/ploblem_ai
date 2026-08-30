@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib, json, sqlite3, uuid
 from pathlib import Path
 from typing import Any
+from quality_knowledge.issue_period import normalize_month, normalize_year, parse_itr_period
 
 SCHEMA='''
 PRAGMA foreign_keys=ON;
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS issue_capability_gap(gap_id TEXT PRIMARY KEY,analysis
 CREATE INDEX IF NOT EXISTS idx_v1_analysis_issue ON analysis_run(knowledge_id,issue_version_id,analysis_type,started_at);
 CREATE INDEX IF NOT EXISTS idx_v1_gap ON issue_capability_gap(knowledge_id,dimension,category);
 CREATE TABLE IF NOT EXISTS issue_domain_audit(audit_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,old_domain TEXT,new_domain TEXT,source TEXT NOT NULL,changed_by TEXT,changed_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS issue_period_audit(audit_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,issue_version_id TEXT NOT NULL,old_year TEXT,old_month TEXT,new_year TEXT,new_month TEXT,changed_by TEXT,changed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS analysis_open_question(
  question_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,issue_version_id TEXT NOT NULL,analysis_run_id TEXT NOT NULL,stage TEXT NOT NULL,question_key TEXT,
  question_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',answer TEXT,evidence TEXT,confirmed_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -59,6 +61,16 @@ class IssueKnowledgeRepository:
             if 'mapping_config_version' not in vcols: c.execute('ALTER TABLE quality_issue_version ADD COLUMN mapping_config_version INTEGER')
             if 'issue_domain' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain TEXT DEFAULT 'AUTO'")
             if 'issue_domain_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain_source TEXT DEFAULT 'AI'")
+            if 'year' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year TEXT DEFAULT ''")
+            if 'year_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year_source TEXT DEFAULT 'ISSUE_ID'")
+            if 'month_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN month_source TEXT DEFAULT 'SOURCE_DATA'")
+            rows=c.execute("SELECT v.issue_version_id,q.business_issue_id,v.year,v.month FROM quality_issue_version v JOIN quality_issue q ON q.knowledge_id=v.knowledge_id").fetchall()
+            for row in rows:
+                parsed_year,parsed_month=parse_itr_period(row['business_issue_id'])
+                if not str(row['year'] or '').strip() and parsed_year:
+                    c.execute("UPDATE quality_issue_version SET year=?,year_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_year,row['issue_version_id']))
+                if not str(row['month'] or '').strip() and parsed_month:
+                    c.execute("UPDATE quality_issue_version SET month=?,month_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_month,row['issue_version_id']))
             acols={r['name'] for r in c.execute('PRAGMA table_info(analysis_run)').fetchall()}
             if 'analysis_profile_json' not in acols: c.execute('ALTER TABLE analysis_run ADD COLUMN analysis_profile_json TEXT')
     def connect(self):
@@ -85,8 +97,12 @@ class IssueKnowledgeRepository:
                 c.execute('INSERT INTO quality_issue(knowledge_id,business_type,business_issue_id) VALUES(?,?,?)',(knowledge_id,bt,bid))
             vid=f'{knowledge_id}-V{version_no}'
             f=q.issue_fact
+            parsed_year,parsed_month=parse_itr_period(bid)
+            f.year=parsed_year
+            month_from_source=bool(str(f.month or '').strip())
+            if not month_from_source and parsed_month: f.month=parsed_month
             normalized={'issue_fact':f.model_dump(),'product_context':q.product_context.model_dump(),'occurrence':q.occurrence.model_dump(),'escape':q.escape.model_dump(),'solution':q.solution.model_dump(),'verification':q.verification.model_dump(),'product_extension':q.product_extension}
-            c.execute('''INSERT INTO quality_issue_version(issue_version_id,knowledge_id,version_no,normalized_source_hash,mapping_config_id,mapping_config_version,title,description,impact,severity,issue_type,is_defect,industry,customer,month,product,platform,department,business_group,issue_domain,issue_domain_source,normalized_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(vid,knowledge_id,version_no,normalized_hash,mapping_config_id,mapping_config_version,f.title,f.description,f.impact,f.severity,f.issue_type,f.is_defect,f.industry,f.customer,f.month,f.product,f.platform,f.department,f.business_group,f.issue_domain,f.issue_domain_source,_dump(normalized)))
+            c.execute('''INSERT INTO quality_issue_version(issue_version_id,knowledge_id,version_no,normalized_source_hash,mapping_config_id,mapping_config_version,title,description,impact,severity,issue_type,is_defect,industry,customer,month,year,year_source,month_source,product,platform,department,business_group,issue_domain,issue_domain_source,normalized_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(vid,knowledge_id,version_no,normalized_hash,mapping_config_id,mapping_config_version,f.title,f.description,f.impact,f.severity,f.issue_type,f.is_defect,f.industry,f.customer,f.month,f.year,'ISSUE_ID','SOURCE_DATA' if month_from_source else 'ISSUE_ID',f.product,f.platform,f.department,f.business_group,f.issue_domain,f.issue_domain_source,_dump(normalized)))
             c.execute('INSERT INTO issue_source_raw_v1(issue_version_id,source_file,source_sheet,source_row,raw_json,source_hash,import_batch_id) VALUES(?,?,?,?,?,?,?)',(vid,q.source.source_file,q.source.source_sheet,q.source.source_row,_dump(q.raw_record),q.source.source_hash,q.source.source_import_batch))
             for table,obj in [('issue_product_context_v1',q.product_context.model_dump()),('issue_occurrence_v1',q.occurrence.model_dump()),('issue_escape_v1',q.escape.model_dump()),('issue_solution_v1',q.solution.model_dump()),('issue_verification_v1',q.verification.model_dump()),('issue_product_extension_v1',q.product_extension)]:
                 c.execute(f'INSERT INTO {table}(issue_version_id,data_json) VALUES(?,?)',(vid,_dump(obj)))
@@ -100,7 +116,7 @@ class IssueKnowledgeRepository:
     @staticmethod
     def _current_issue_filter_sql(filters=None):
         filters=dict(filters or {})
-        allowed={'business_type':'q.business_type','business_issue_id':'q.business_issue_id','product':'v.product','platform':'v.platform','severity':'v.severity','issue_type':'v.issue_type','issue_domain':'v.issue_domain','month':'v.month'}
+        allowed={'business_type':'q.business_type','business_issue_id':'q.business_issue_id','product':'v.product','platform':'v.platform','severity':'v.severity','issue_type':'v.issue_type','issue_domain':'v.issue_domain','month':'v.month','year':'v.year'}
         where=[]; vals=[]
         for key,column in (('business_issue_ids','q.business_issue_id'),('knowledge_ids','q.knowledge_id')):
             values=filters.pop(key,None)
@@ -123,7 +139,7 @@ class IssueKnowledgeRepository:
 
     def query_current_issues(self,filters=None,limit=100,offset=0):
         where,vals=self._current_issue_filter_sql(filters)
-        sql='''SELECT q.knowledge_id,q.business_type,q.business_issue_id,q.current_version_id,q.status,v.version_no,v.title,v.description,v.product,v.platform,v.severity,v.issue_type,v.issue_domain,v.issue_domain_source,v.month,q.updated_at FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id'''
+        sql='''SELECT q.knowledge_id,q.business_type,q.business_issue_id,q.current_version_id,q.status,v.version_no,v.title,v.description,v.product,v.platform,v.severity,v.issue_type,v.issue_domain,v.issue_domain_source,v.year,v.year_source,v.month,v.month_source,q.updated_at FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id'''
         if where: sql+=' WHERE '+' AND '.join(where)
         sql+=' ORDER BY q.updated_at DESC,q.knowledge_id LIMIT ? OFFSET ?'; vals.extend([max(1,int(limit)),max(0,int(offset))])
         with self.connect() as c:return [dict(r) for r in c.execute(sql,vals).fetchall()]
@@ -140,6 +156,19 @@ class IssueKnowledgeRepository:
         with self.connect() as c:
             raw=c.execute('SELECT * FROM issue_source_raw_v1 WHERE issue_version_id=? ORDER BY id DESC LIMIT 1',(issue['current_version_id'],)).fetchone()
         return {'issue':issue,'raw':dict(raw) if raw else None,'history':self.get_issue_history(knowledge_id)}
+
+    def update_issue_period(self,knowledge_id,year,month,changed_by='web'):
+        year=normalize_year(year); month=normalize_month(month)
+        with self.connect() as c:
+            row=c.execute('''SELECT q.current_version_id,v.year,v.month,v.normalized_json FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id WHERE q.knowledge_id=?''',(knowledge_id,)).fetchone()
+            if not row: raise KeyError(knowledge_id)
+            normalized=json.loads(row['normalized_json'] or '{}')
+            fact=normalized.setdefault('issue_fact',{})
+            fact['year']=year; fact['month']=month
+            c.execute("UPDATE quality_issue_version SET year=?,month=?,year_source='HUMAN_OVERRIDE',month_source='HUMAN_OVERRIDE',normalized_json=? WHERE issue_version_id=?",(year,month,_dump(normalized),row['current_version_id']))
+            c.execute('''INSERT INTO issue_period_audit(audit_id,knowledge_id,issue_version_id,old_year,old_month,new_year,new_month,changed_by) VALUES(?,?,?,?,?,?,?,?)''',('IPA-'+uuid.uuid4().hex,knowledge_id,row['current_version_id'],row['year'],row['month'],year,month,changed_by))
+            c.execute('UPDATE quality_issue SET updated_at=CURRENT_TIMESTAMP WHERE knowledge_id=?',(knowledge_id,))
+        return self.get_current_issue(knowledge_id)
     def get_import_batch(self,batch_id):
         with self.connect() as c:
             b=c.execute('SELECT * FROM import_batch_v1 WHERE batch_id=?',(batch_id,)).fetchone(); errs=c.execute('SELECT * FROM import_error WHERE batch_id=? ORDER BY id',(batch_id,)).fetchall();return {'batch':dict(b) if b else None,'errors':[dict(x) for x in errs]}
@@ -216,7 +245,11 @@ def _v1_latest(self,kid,atype):
 IssueKnowledgeRepository.get_latest_analysis=_v1_latest
 
 def _v1_history(self,kid):
-    with self.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM analysis_run WHERE knowledge_id=? ORDER BY started_at DESC',(kid,)).fetchall()]
+    with self.connect() as c: rows=[dict(r) for r in c.execute('SELECT * FROM analysis_run WHERE knowledge_id=? ORDER BY started_at DESC',(kid,)).fetchall()]
+    for row in rows:
+        try: row['analysis_agent']=(json.loads(row.get('analysis_profile_json') or '{}').get('analysis_agent') or 'DEFAULT')
+        except (TypeError,ValueError): row['analysis_agent']='DEFAULT'
+    return rows
 IssueKnowledgeRepository.get_analysis_history=_v1_history
 
 def _v1_run(self,rid):
@@ -269,38 +302,26 @@ def _v1_gaps(self,kid=None):
 IssueKnowledgeRepository.list_capability_gaps=_v1_gaps
 
 # M4 Statistics / Export repository methods (Current Version + latest valid analysis only)
-def _v1_statistics(self,business_type=None,limit=20):
+def _v1_statistics(self,business_type=None,limit=20,knowledge_ids=None):
     bt_sql=' AND q.business_type=?' if business_type else ''
     vals=[business_type] if business_type else []
+    if knowledge_ids is not None:
+        knowledge_ids=list(knowledge_ids) or ['__NO_SCOPE_MATCH__']
+        bt_sql+=' AND q.knowledge_id IN ('+','.join('?' for _ in knowledge_ids)+')'
+        vals.extend(knowledge_ids)
     def rows(sql, params=()):
         with self.connect() as c:return [dict(r) for r in c.execute(sql,params).fetchall()]
-    # Cause data has existed in several contracts: source facts use cause_l1/l2 or
-    # original_reason, while completed AI runs use occurrence_category/escape_category.
-    # The old query read $.occurrence.classification[0], a path that is not written by
-    # the importer or the analysis normalizer, collapsing every row into “未分类”.
-    def cause_expr(fact, analysis_type, category_key):
-        ai = ','.join([
-            f"NULLIF(json_extract(ai.result_json,'$.{category_key}'),'')",
-            f"NULLIF(json_extract(ai.result_json,'$.result.{category_key}'),'')",
-        ])
-        source_keys = ['cause_l1','cause_l2','original_reason','root_cause_original'] if fact == 'occurrence' else ['escape_l1','escape_l2','original_reason','root_cause_original']
-        source = ','.join(f"NULLIF(json_extract(v.normalized_json,'$.{fact}.{key}'),'')" for key in source_keys)
-        return f"COALESCE({ai},{source})"
-    occ_value = cause_expr('occurrence', 'occurrence', 'occurrence_category')
-    esc_value = cause_expr('escape', 'escape', 'escape_category')
-    analysis_join = lambda kind: f'''LEFT JOIN issue_ai_analysis ai ON ai.knowledge_id=q.knowledge_id
-      AND ai.issue_version_id=q.current_version_id AND ai.analysis_type='{kind}'
-      AND ai.id=(SELECT MAX(ai2.id) FROM issue_ai_analysis ai2 JOIN analysis_run ar2 ON ar2.analysis_run_id=ai2.analysis_run_id
-                 WHERE ai2.knowledge_id=q.knowledge_id AND ai2.issue_version_id=q.current_version_id
-                   AND ai2.analysis_type='{kind}' AND ar2.status='COMPLETED')'''
+    # Quality management requires the original detailed classifications here:
+    # occurrence uses cause_l4 and escape uses escape_l3. AI MRC is presented in
+    # its own matrix and must not overwrite these source-data rankings.
+    occ_value = "NULLIF(json_extract(v.normalized_json,'$.occurrence.cause_l4'),'')"
+    esc_value = "NULLIF(json_extract(v.normalized_json,'$.escape.escape_l3'),'')"
     occ=rows(f'''SELECT COALESCE({occ_value},'未分类') category,COUNT(*) count
       FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id
-      {analysis_join('occurrence')}
       WHERE 1=1 {bt_sql} AND ({occ_value}) IS NOT NULL AND TRIM(CAST(({occ_value}) AS TEXT))<>''
       GROUP BY category ORDER BY count DESC LIMIT ?''',tuple(vals+[limit]))
     esc=rows(f'''SELECT COALESCE({esc_value},'未分类') category,COUNT(*) count
       FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id
-      {analysis_join('escape')}
       WHERE 1=1 {bt_sql} AND ({esc_value}) IS NOT NULL AND TRIM(CAST(({esc_value}) AS TEXT))<>''
       GROUP BY category ORDER BY count DESC LIMIT ?''',tuple(vals+[limit]))
     products=rows(f'''SELECT COALESCE(v.product,'未分类') category,COUNT(*) count FROM quality_issue q JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id WHERE 1=1 {bt_sql} GROUP BY category ORDER BY count DESC LIMIT ?''',tuple(vals+[limit]))
@@ -360,9 +381,12 @@ def _v1_get_analysis_debug(self,run_id):
 IssueKnowledgeRepository.get_analysis_debug=_v1_get_analysis_debug
 
 
-def _v1_common_capability_gaps(self, *, business_type=None, dimension=None, min_issues=2, limit=50):
+def _v1_common_capability_gaps(self, *, business_type=None, dimension=None, min_issues=2, limit=50, knowledge_ids=None):
     where=["g.issue_version_id=q.current_version_id","r.status='COMPLETED'"]; vals=[]
     if dimension: where.append('g.dimension=?'); vals.append(dimension)
+    if knowledge_ids is not None:
+        knowledge_ids=list(knowledge_ids) or ['__NO_SCOPE_MATCH__']
+        where.append('q.knowledge_id IN ('+','.join('?' for _ in knowledge_ids)+')'); vals.extend(knowledge_ids)
     having=['COUNT(DISTINCT g.knowledge_id)>=?']; vals.append(min_issues)
     # Product filtering means “gaps involving this product”.  Coverage breadth is
     # still calculated from the global group so cross-product relationships remain.
@@ -385,9 +409,13 @@ def _v1_common_capability_gaps(self, *, business_type=None, dimension=None, min_
 IssueKnowledgeRepository.aggregate_common_capability_gaps=_v1_common_capability_gaps
 
 
-def _v1_workspace_metrics(self, business_type=None):
+def _v1_workspace_metrics(self, business_type=None, knowledge_ids=None):
     where='WHERE q.business_type=?' if business_type else ''
     params=[business_type] if business_type else []
+    if knowledge_ids is not None:
+        knowledge_ids=list(knowledge_ids) or ['__NO_SCOPE_MATCH__']
+        where+=(' AND ' if where else 'WHERE ')+'q.knowledge_id IN ('+','.join('?' for _ in knowledge_ids)+')'
+        params.extend(knowledge_ids)
     with self.connect() as c:
         human_exists=bool(c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='human_analysis'").fetchone())
         human_metric=("SUM(CASE WHEN EXISTS(SELECT 1 FROM human_analysis h WHERE h.knowledge_id=q.knowledge_id AND h.issue_version_id=q.current_version_id) THEN 1 ELSE 0 END)" if human_exists else "0")

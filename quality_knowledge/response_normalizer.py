@@ -79,6 +79,41 @@ def normalize_open_questions(value: Any) -> list[dict[str, Any]]:
         out.append({'question_key':str(item.get('question_key') or f'QUESTION_{i+1}'),'question':str(item['question']).strip(),'why_it_matters':str(item.get('why_it_matters') or ''),'priority':priority,'answer_type':answer_type,'suggested_options':[str(x) for x in options[:6]]})
     return out
 
+def normalize_classified_term(value: Any, *, fallback_code: str = '', confidence: Any = 0.0) -> dict[str, Any]:
+    if isinstance(value, str): value={'code':value}
+    value=value if isinstance(value,dict) else {}
+    source_type=str(value.get('source_type') or ('AI_STANDARDIZED' if value.get('code') or fallback_code else 'UNKNOWN')).upper()
+    if source_type not in {'SOURCE_DATA','AI_STANDARDIZED','AI_INFERRED','HUMAN_CONFIRMED','UNKNOWN'}: source_type='UNKNOWN'
+    return {'code':str(value.get('code') or fallback_code or '').upper(),'label_zh':str(value.get('label_zh') or value.get('label') or ''),'source_type':source_type,'confidence':_clamp_confidence(value.get('confidence',confidence)),'evidence':normalize_evidence_list(value.get('evidence',value.get('source_refs',[])))}
+
+def normalize_term_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value,(str,dict)): value=[value]
+    if not isinstance(value,list): return []
+    return [term for raw in value if (term:=normalize_classified_term(raw)).get('code')]
+
+def normalize_mrc(value: Any, *, fallback_code: str = '', confidence: Any = 0.0) -> dict[str, Any]:
+    term=normalize_classified_term(value,fallback_code=fallback_code,confidence=confidence)
+    raw=value if isinstance(value,dict) else {}
+    status=str(raw.get('control_status') or 'UNKNOWN').upper()
+    if status not in {'DEFINED_EFFECTIVE','DEFINED_INEFFECTIVE','NOT_DEFINED','NOT_EXECUTED','INSUFFICIENT_INFO','UNKNOWN'}: status='UNKNOWN'
+    return {**term,'control_status':status,'rationale':str(raw.get('rationale') or raw.get('reason') or '')}
+
+def normalize_hardware_components(value: Any, relevance: str = 'NOT_RELATED') -> list[dict[str, Any]]:
+    if isinstance(value,dict): value=[value]
+    if not isinstance(value,list): return []
+    fields=('component_category','component_name','manufacturer','model_part_number','lot_batch','serial_number','board_module','reference_designator','installation_location','hardware_version','failure_mode','failure_mechanism','failure_cause','customer_impact','reproduction_condition','detection_method','disposition')
+    out=[]
+    for raw in value:
+        if not isinstance(raw,dict): continue
+        item={key:str(raw.get(key) or '') for key in fields}
+        item_relevance=str(raw.get('relevance') or relevance or 'POSSIBLE').upper()
+        if item_relevance not in {'NOT_RELATED','POSSIBLE','CONFIRMED'}: item_relevance='POSSIBLE'
+        source=str(raw.get('source_type') or 'AI_INFERRED').upper()
+        if source not in {'SOURCE_DATA','AI_STANDARDIZED','AI_INFERRED','HUMAN_CONFIRMED','UNKNOWN'}: source='UNKNOWN'
+        item.update({'relevance':item_relevance,'source_type':source,'confidence':_clamp_confidence(raw.get('confidence',0)),'evidence':normalize_evidence_list(raw.get('evidence',[]))})
+        if any(item[key] for key in fields): out.append(item)
+    return out
+
 
 def normalize_occurrence(obj: dict[str, Any]) -> dict[str, Any]:
     confidence = obj.get('confidence', 0.0)
@@ -88,11 +123,18 @@ def normalize_occurrence(obj: dict[str, Any]) -> dict[str, Any]:
     factors = obj.get('contributing_factors', obj.get('factors', [])) or []
     if not isinstance(factors, list):
         factors = [factors]
+    hardware_relevance=str(obj.get('hardware_relevance') or 'NOT_RELATED').upper()
+    if hardware_relevance not in {'NOT_RELATED','POSSIBLE','CONFIRMED'}: hardware_relevance='POSSIBLE'
     return {
         'root_cause_summary': normalize_evidence_value(root, confidence=confidence, evidence=evidence),
         'failure_mechanism': normalize_evidence_value(mechanism, confidence=confidence, evidence=evidence),
         'contributing_factors': [normalize_evidence_value(x, confidence=confidence, evidence=evidence) for x in factors],
         'occurrence_category': str(obj.get('occurrence_category') or obj.get('category') or ''),
+        'mrc': normalize_mrc(obj.get('mrc'),fallback_code=str(obj.get('occurrence_category') or obj.get('category') or ''),confidence=confidence),
+        'lifecycle_tags': normalize_term_list(obj.get('lifecycle_tags') or ([obj.get('introduced_phase')] if obj.get('introduced_phase') else [])),
+        'issue_type_tags': normalize_term_list(obj.get('issue_type_tags') or obj.get('problem_type_tags') or []),
+        'hardware_relevance': hardware_relevance,
+        'hardware_components': normalize_hardware_components(obj.get('hardware_components'),hardware_relevance),
         'introduced_phase': str(obj.get('introduced_phase') or 'UNKNOWN').upper(),
         'system_scope': obj.get('system_scope') if isinstance(obj.get('system_scope'),dict) else {},
         'open_questions': normalize_open_questions(obj.get('open_questions')),
@@ -109,6 +151,8 @@ def normalize_escape(obj: dict[str, Any]) -> dict[str, Any]:
         'verification_gap': normalize_evidence_value(obj.get('verification_gap', ''), confidence=confidence, evidence=evidence),
         'process_gap': normalize_evidence_value(obj.get('process_gap', ''), confidence=confidence, evidence=evidence),
         'escape_category': str(obj.get('escape_category') or obj.get('category') or ''),
+        'mrc': normalize_mrc(obj.get('mrc'),fallback_code=str(obj.get('escape_category') or obj.get('category') or ''),confidence=confidence),
+        'lifecycle_tags': normalize_term_list(obj.get('lifecycle_tags') or [x for x in (obj.get('expected_detection_stage'),obj.get('actual_detection_stage')) if x]),
         'expected_detection_stage': str(obj.get('expected_detection_stage') or 'UNKNOWN').upper(),
         'actual_detection_stage': str(obj.get('actual_detection_stage') or 'UNKNOWN').upper(),
         'missing_control': str(obj.get('missing_control') or ''),
@@ -166,6 +210,7 @@ def normalize_capability_gap_item(x: dict[str, Any]) -> dict[str, Any]:
         'priority': str(x.get('priority') or 'P2').upper() if str(x.get('priority') or 'P2').upper() in {'P0','P1','P2'} else 'P2',
         'first_action': str(x.get('first_action') or ''),
         'verification_metric': str(x.get('verification_metric') or ''),
+        'source_type': str(x.get('source_type') or 'AI_INFERRED').upper() if str(x.get('source_type') or 'AI_INFERRED').upper() in {'SOURCE_DATA','AI_STANDARDIZED','AI_INFERRED','HUMAN_CONFIRMED','UNKNOWN'} else 'UNKNOWN',
         'confidence': _clamp_confidence(x.get('confidence', 0.0)),
         'evidence': normalize_evidence_list(x.get('evidence', x.get('evidence_refs', []))),
     }
