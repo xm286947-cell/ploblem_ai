@@ -29,6 +29,7 @@
 | REQ-011 | 附件/报告/证据独立存储、备份与生命周期管理 | TRIAGED | P2 | 上线前 | 待细化 |
 | REQ-012 | 模型成本、Token、耗时、失败率和分析质量监控 | TRIAGED | P2 | 运营期 | 待细化 |
 | REQ-013 | 低质量批量问题的数据集隔离、独立分析与人工纳入 | TRIAGED | P1 | 近期 | `REQ-013_BATCH_ISSUE_DATASET_ISOLATION.md` |
+| REQ-014 | 批量市场问题驱动的软件质量标准化识别与建设闭环 | TRIAGED | P1 | 近期专项 | `REQ-014_BATCH_ISSUE_STANDARDIZATION.md` |
 
 ## 已明确但暂不实施
 
