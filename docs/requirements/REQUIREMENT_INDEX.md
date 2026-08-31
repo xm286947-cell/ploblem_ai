@@ -1,6 +1,6 @@
 # QUALITY ENGINE 需求池
 
-最后更新：2026-08-30
+最后更新：2026-08-31
 
 ## 当前路线
 
@@ -31,6 +31,8 @@
 | REQ-013 | 低质量批量问题的数据集隔离、独立分析与人工纳入 | TRIAGED | P1 | 近期 | `REQ-013_BATCH_ISSUE_DATASET_ISOLATION.md` |
 | REQ-014 | 批量市场问题驱动的软件质量标准化识别与建设闭环 | TRIAGED | P1 | 近期专项 | `REQ-014_BATCH_ISSUE_STANDARDIZATION.md` |
 | REQ-015 | 多类质量问题数据分层、关联、可信度和分析边界 | TRIAGED | P0 | 数据治理 | `REQ-015_QUALITY_DATA_CLASSIFICATION_AND_GOVERNANCE.md` |
+| REQ-016 | ITR质量运行指标、MTTR分段与薄弱环节识别 | READY | P0 | 第二阶段 | `REQ-016_ITR_QUALITY_OPERATION_AND_MTTR.md` |
+| REQ-017 | 问题分析驱动的标准识别、固化与效果验证闭环 | TRIAGED | P1 | 第三阶段 | `REQ-017_ANALYSIS_TO_STANDARDIZATION_CLOSED_LOOP.md` |
 
 ## 已明确但暂不实施
 
