@@ -30,6 +30,7 @@
 | REQ-012 | 模型成本、Token、耗时、失败率和分析质量监控 | TRIAGED | P2 | 运营期 | 待细化 |
 | REQ-013 | 低质量批量问题的数据集隔离、独立分析与人工纳入 | TRIAGED | P1 | 近期 | `REQ-013_BATCH_ISSUE_DATASET_ISOLATION.md` |
 | REQ-014 | 批量市场问题驱动的软件质量标准化识别与建设闭环 | TRIAGED | P1 | 近期专项 | `REQ-014_BATCH_ISSUE_STANDARDIZATION.md` |
+| REQ-015 | 多类质量问题数据分层、关联、可信度和分析边界 | TRIAGED | P0 | 数据治理 | `REQ-015_QUALITY_DATA_CLASSIFICATION_AND_GOVERNANCE.md` |
 
 ## 已明确但暂不实施
 
