@@ -33,6 +33,7 @@
 | REQ-015 | 多类质量问题数据分层、关联、可信度和分析边界 | TRIAGED | P0 | 数据治理 | `REQ-015_QUALITY_DATA_CLASSIFICATION_AND_GOVERNANCE.md` |
 | REQ-016 | ITR质量运行指标、MTTR分段与薄弱环节识别 | READY | P0 | 第二阶段 | `REQ-016_ITR_QUALITY_OPERATION_AND_MTTR.md` |
 | REQ-017 | 问题分析驱动的标准识别、固化与效果验证闭环 | TRIAGED | P1 | 第三阶段 | `REQ-017_ANALYSIS_TO_STANDARDIZATION_CLOSED_LOOP.md` |
+| REQ-018 | ITR与彻底解决单接入、自动关联和统一问题视图 | READY | P0 | 短期MVP | `REQ-018_ITR_AND_CS_INTAKE_MVP.md` |
 
 ## 已明确但暂不实施
 
