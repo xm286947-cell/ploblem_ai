@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 from openpyxl import Workbook
 from fastapi.testclient import TestClient
@@ -25,6 +26,31 @@ def operations_workbook(path, key):
 def test_two_row_headers_and_itr_normalization():
     assert combine_headers(("问题信息", None), ("ITR单号", "产品类型")) == ["问题信息_ITR单号", "问题信息_产品类型"]
     assert normalize_itr(" itr20260605084cs ") == "ITR20260605084"
+
+
+def test_material_import_always_closes_excel_workbook(tmp_path, monkeypatch):
+    import quality_knowledge.materials as materials_module
+
+    source=tmp_path/"itr.xlsx";workbook(source,"ITR_SOURCE","ITR20260605084")
+    real_loader=materials_module.load_workbook
+    closed=[]
+
+    def tracked_loader(*args,**kwargs):
+        book=real_loader(*args,**kwargs)
+        real_close=book.close
+        def tracked_close():
+            closed.append(True)
+            real_close()
+        book.close=tracked_close
+        return book
+
+    monkeypatch.setattr(materials_module,"load_workbook",tracked_loader)
+    repository=MaterialRepository(tmp_path/"app.db")
+    with repository.connect() as connection:
+        connection.execute("CREATE TABLE quality_issue(knowledge_id TEXT PRIMARY KEY,business_issue_id TEXT)")
+    MaterialImportService(repository).import_file(source,"ITR",2)
+    assert closed == [True]
+    Path(source).unlink()
 
 
 def test_group_isolation_versioning_and_linking(tmp_path):

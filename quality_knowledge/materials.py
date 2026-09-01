@@ -180,23 +180,26 @@ class MaterialImportService:
         group=self.repository.group(group_code)
         if not group: raise ValueError("DATA_GROUP_NOT_FOUND")
         if group["material_type"] not in {"ITR_SOURCE","ITR_CS","SOFTWARE_OPERATION"}: raise ValueError("MATERIAL_IMPORT_NOT_ENABLED")
-        workbook=load_workbook(path,read_only=True,data_only=True)
-        sheets=[sheet_name] if sheet_name else workbook.sheetnames
         stats={"total":0,"new":0,"updated":0,"skipped":0,"failed":0,"errors":[]}
-        for name in sheets:
-            sheet=workbook[name]
-            rows=sheet.iter_rows(values_only=True)
-            first=next(rows,())
-            if int(header_rows)==2:
-                second=next(rows,());headers=combine_headers(first,second);start=3
-            else:
-                headers=[_clean(x) or f"未命名字段{i+1}" for i,x in enumerate(first)];start=2
-            for row_number,values in enumerate(rows,start=start):
-                if not any(_clean(x) for x in values):continue
-                raw={headers[i]:values[i] for i in range(min(len(headers),len(values)))};stats["total"]+=1
-                key=next((_clean(raw.get(alias)) for alias in self.KEY_ALIASES[group["material_type"]] if _clean(raw.get(alias))),"")
-                if not key:
-                    stats["failed"]+=1;stats["errors"].append({"sheet":name,"row":row_number,"error":"BUSINESS_KEY_MISSING"});continue
-                _,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
+        workbook=load_workbook(path,read_only=True,data_only=True)
+        try:
+            sheets=[sheet_name] if sheet_name else workbook.sheetnames
+            for name in sheets:
+                sheet=workbook[name]
+                rows=sheet.iter_rows(values_only=True)
+                first=next(rows,())
+                if int(header_rows)==2:
+                    second=next(rows,());headers=combine_headers(first,second);start=3
+                else:
+                    headers=[_clean(x) or f"未命名字段{i+1}" for i,x in enumerate(first)];start=2
+                for row_number,values in enumerate(rows,start=start):
+                    if not any(_clean(x) for x in values):continue
+                    raw={headers[i]:values[i] for i in range(min(len(headers),len(values)))};stats["total"]+=1
+                    key=next((_clean(raw.get(alias)) for alias in self.KEY_ALIASES[group["material_type"]] if _clean(raw.get(alias))),"")
+                    if not key:
+                        stats["failed"]+=1;stats["errors"].append({"sheet":name,"row":row_number,"error":"BUSINESS_KEY_MISSING"});continue
+                    _,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
+        finally:
+            workbook.close()
         self.repository.refresh_links()
         return stats
