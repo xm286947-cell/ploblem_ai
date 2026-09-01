@@ -5,7 +5,7 @@
 {% if result %}<div class="di-alert"><b>导入完成</b><span>共 {{result.total}} 条；新增 {{result.new}}；更新 {{result.updated}}；跳过 {{result.skipped}}；失败 {{result.failed}}</span></div>{% endif %}
 <section class="di-card"><div class="di-cardhead"><div><h2>导入原始材料</h2><p>支持原Excel两级表头；导入后不会进入现有AI分析和质量洞察。</p></div></div>
 <form method="post" action="/materials/import" enctype="multipart/form-data" class="di-upload-form"><div class="di-formrow">
-<label><span>数据分组</span><select name="group_code" required>{% for group in groups if group.material_type in ['ITR_SOURCE','ITR_CS'] %}<option value="{{group.group_code}}" {% if group_code==group.group_code %}selected{% endif %}>{{group.group_name}}</option>{% endfor %}</select></label>
+<label><span>数据分组</span><select name="group_code" required>{% for group in groups if group.material_type in ['ITR_SOURCE','ITR_CS','SOFTWARE_OPERATION'] %}<option value="{{group.group_code}}" {% if group_code==group.group_code %}selected{% endif %}>{{group.group_name}}</option>{% endfor %}</select></label>
 <label><span>表头行数</span><select name="header_rows"><option value="2">两级表头</option><option value="1">单行表头</option></select></label>
 <label><span>Excel文件</span><input type="file" name="file" accept=".xlsx,.xlsm" required></label></div><div class="di-actions"><button class="btn btn-primary">导入并自动关联</button></div></form></section>
 <section class="di-card"><div class="di-cardhead"><div><h2>已导入材料</h2><p>当前共 {{items|length}} 条，ITR与CS分别保存。</p></div></div>

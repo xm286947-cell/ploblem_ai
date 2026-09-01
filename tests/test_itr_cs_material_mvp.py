@@ -15,6 +15,13 @@ def workbook(path, material_type, key):
     sheet.append([key, "PLC", "测试问题"]);book.save(path)
 
 
+def operations_workbook(path, key):
+    book=Workbook();sheet=book.active
+    sheet.append(["数据运营","数据运营","问题信息","问题信息","技术根因分析与纠正"])
+    sheet.append(["审核状态","KPI计入月份","彻底解决单号","问题描述","软件模块"])
+    sheet.append(["已审核","2026-06",key,"软件异常","通信模块"]);book.save(path)
+
+
 def test_two_row_headers_and_itr_normalization():
     assert combine_headers(("问题信息", None), ("ITR单号", "产品类型")) == ["问题信息_ITR单号", "问题信息_产品类型"]
     assert normalize_itr(" itr20260605084cs ") == "ITR20260605084"
@@ -45,6 +52,7 @@ def test_default_groups_do_not_enter_ai_or_insight(tmp_path):
     assert groups["ESCAPE_ANALYSIS"]["include_ai"] == 1
     assert groups["ITR_SOURCE"]["include_ai"] == 0
     assert groups["ITR_CS"]["include_insight"] == 0
+    assert groups["SOFTWARE_OPERATION"]["include_report"] == 0
 
 
 def test_material_web_import_and_navigation(tmp_path):
@@ -72,3 +80,17 @@ def test_disabled_rule_stops_automatic_link_but_keeps_other_type(tmp_path):
     service=MaterialImportService(repo);service.import_file(itr,"ITR",2);service.import_file(cs,"ITR-CS",2)
     repo.update_rule("RULE-CS-ITR",source_field="问题信息_彻底解决单号",target_field="问题信息_ITR单号",transform="STRIP_CS",status="INACTIVE");repo.refresh_links()
     assert {x["material_type"] for x in repo.materials_for_issue("K-1")}=={"ITR_SOURCE"}
+
+
+def test_software_operation_is_isolated_and_links_by_cs_number(tmp_path):
+    db=tmp_path/"ops.db";repo=MaterialRepository(db)
+    with repo.connect() as c:
+        c.execute("CREATE TABLE quality_issue(knowledge_id TEXT PRIMARY KEY,business_issue_id TEXT)")
+        c.execute("INSERT INTO quality_issue VALUES('K-OPS','ITR20260605084')")
+    source=tmp_path/"ops.xlsx";operations_workbook(source,"ITR20260605084CS")
+    stats=MaterialImportService(repo).import_file(source,"SW-OPS",2)
+    assert stats["new"]==1
+    material=repo.list_materials("SW-OPS")[0]
+    assert material["material_type"]=="SOFTWARE_OPERATION" and material["canonical_itr"]=="ITR20260605084"
+    linked=repo.materials_for_issue("K-OPS")
+    assert linked[0]["raw"]["数据运营_KPI计入月份"]=="2026-06"

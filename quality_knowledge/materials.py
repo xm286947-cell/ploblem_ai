@@ -11,11 +11,12 @@ from typing import Any
 from openpyxl import load_workbook
 
 
-MATERIAL_TYPES = {"ESCAPE_ANALYSIS", "ITR_SOURCE", "ITR_CS", "BATCH_ISSUE", "TEST_ISSUE"}
+MATERIAL_TYPES = {"ESCAPE_ANALYSIS", "ITR_SOURCE", "ITR_CS", "SOFTWARE_OPERATION", "BATCH_ISSUE", "TEST_ISSUE"}
 DEFAULT_GROUPS = (
     ("DG-ESCAPE", "ESCAPE_ANALYSIS", "漏测分析", 1, 1, 1),
     ("DG-ITR", "ITR_SOURCE", "ITR原始问题", 0, 0, 0),
     ("DG-ITR-CS", "ITR_CS", "ITR彻底解决单", 0, 0, 0),
+    ("DG-SW-OPS", "SOFTWARE_OPERATION", "软件问题运营数据", 0, 0, 0),
     ("DG-BATCH", "BATCH_ISSUE", "批量问题", 0, 0, 0),
     ("DG-TEST", "TEST_ISSUE", "测试问题", 0, 0, 0),
 )
@@ -82,6 +83,7 @@ class MaterialRepository:
             defaults = (
                 ("RULE-ESCAPE-ITR", "漏测分析关联ITR", "ESCAPE_ANALYSIS", "ITR_SOURCE", "ITR单号", "问题信息_ITR单号", "NORMALIZE_ITR", 10),
                 ("RULE-CS-ITR", "彻底解决单关联ITR", "ITR_CS", "ITR_SOURCE", "问题信息_彻底解决单号", "问题信息_ITR单号", "STRIP_CS", 20),
+                ("RULE-SWOPS-ITR", "软件运营数据关联ITR", "SOFTWARE_OPERATION", "ITR_SOURCE", "问题信息_彻底解决单号", "问题信息_ITR单号", "STRIP_CS", 30),
             )
             for row in defaults:
                 connection.execute("INSERT OR IGNORE INTO association_rule(rule_id,rule_name,source_type,target_type,source_field,target_field,transform,priority) VALUES(?,?,?,?,?,?,?,?)", row)
@@ -168,6 +170,7 @@ class MaterialImportService:
     KEY_ALIASES = {
         "ITR_SOURCE": ("问题信息_ITR单号", "ITR单号"),
         "ITR_CS": ("问题信息_彻底解决单号", "彻底解决单号"),
+        "SOFTWARE_OPERATION": ("问题信息_彻底解决单号", "彻底解决单号"),
     }
 
     def __init__(self, repository: MaterialRepository):
@@ -176,7 +179,7 @@ class MaterialImportService:
     def import_file(self, path, group_code, header_rows=2, sheet_name=""):
         group=self.repository.group(group_code)
         if not group: raise ValueError("DATA_GROUP_NOT_FOUND")
-        if group["material_type"] not in {"ITR_SOURCE","ITR_CS"}: raise ValueError("MATERIAL_IMPORT_NOT_ENABLED")
+        if group["material_type"] not in {"ITR_SOURCE","ITR_CS","SOFTWARE_OPERATION"}: raise ValueError("MATERIAL_IMPORT_NOT_ENABLED")
         workbook=load_workbook(path,read_only=True,data_only=True)
         sheets=[sheet_name] if sheet_name else workbook.sheetnames
         stats={"total":0,"new":0,"updated":0,"skipped":0,"failed":0,"errors":[]}
