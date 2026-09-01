@@ -18,9 +18,11 @@
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials') %}active{% endif %}" href="/materials">ITR原始数据</a>
     <div class="nav-divider"></div>
     <div class="nav-label">管理</div>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/associations') %}active{% endif %}" href="/settings/associations">数据关联配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
   </nav>

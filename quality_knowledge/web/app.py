@@ -32,6 +32,7 @@ from quality_knowledge.model_config import list_quality_issue_agents
 from .statistics_presenter import present_statistics, present_common_gaps, zh_value
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
+from quality_knowledge.materials import MaterialRepository, MaterialImportService
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -199,6 +200,9 @@ def create_app(db_path):
     app.state.knowledge_issue_service = svc
     app.state.product_config_repository = product_repo
     intake_svc = IntakeSessionService()
+    material_repo = MaterialRepository(db_path)
+    material_svc = MaterialImportService(material_repo)
+    app.state.material_repository = material_repo
     app.state.intake_session_service = intake_svc
     app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
     tpl = Jinja2Templates(directory=BASE / 'templates')
@@ -227,6 +231,38 @@ def create_app(db_path):
     @app.get('/import', response_class=HTMLResponse, include_in_schema=False)
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
+
+    @app.get('/materials', response_class=HTMLResponse, include_in_schema=False)
+    def materials_page(request: Request, group_code: str = ''):
+        return tpl.TemplateResponse(request, 'materials.html', {
+            'groups': material_repo.groups(False), 'items': material_repo.list_materials(group_code),
+            'group_code': group_code, 'result': None,
+        })
+
+    @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
+    def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2)):
+        if Path(file.filename or '').suffix.lower() not in ALLOWED:
+            raise HTTPException(400, '仅支持 .xlsx / .xlsm')
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/Path(file.filename or 'upload.xlsx').name;path.write_bytes(file.file.read())
+            try: result=material_svc.import_file(path,group_code,header_rows)
+            except ValueError as error: raise HTTPException(400,str(error)) from error
+        return tpl.TemplateResponse(request, 'materials.html', {
+            'groups': material_repo.groups(False), 'items': material_repo.list_materials(group_code),
+            'group_code': group_code, 'result': result,
+        })
+
+    @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)
+    def association_settings(request: Request):
+        return tpl.TemplateResponse(request,'association_settings.html',{'rules':material_repo.rules(),'preview':material_repo.link_preview()})
+
+    @app.post('/settings/associations/{rule_id}', include_in_schema=False)
+    def association_rule_save(rule_id: str, source_field: str = Form(...), target_field: str = Form(...), transform: str = Form(...), status: str = Form(...)):
+        try:material_repo.update_rule(rule_id,source_field=source_field,target_field=target_field,transform=transform,status=status)
+        except KeyError:raise HTTPException(404,'RULE_NOT_FOUND')
+        except ValueError as error:raise HTTPException(400,str(error)) from error
+        material_repo.refresh_links()
+        return RedirectResponse('/settings/associations',303)
 
     def _build_intake_preview(file: UploadFile, business_type: str = '', issue_domain: str = 'AUTO', mapping_config_id: str = ''):
         if Path(file.filename or '').suffix.lower() not in ALLOWED:
@@ -412,6 +448,8 @@ def create_app(db_path):
         vm['issue_total'] = len(sequence)
         vm['human_fields'] = human_svc.list_field_definitions(True)
         vm['human_analysis'] = human_svc.get_analysis(knowledge_id, issue['issue_version_id']) if issue else None
+        material_repo.refresh_links()
+        vm['linked_materials'] = material_repo.materials_for_issue(knowledge_id)
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
 
