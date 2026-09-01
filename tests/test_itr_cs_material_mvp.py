@@ -57,13 +57,16 @@ def test_default_groups_do_not_enter_ai_or_insight(tmp_path):
 
 def test_material_web_import_and_navigation(tmp_path):
     db=tmp_path/"web.db";client=TestClient(create_app(db))
-    page=client.get("/materials")
-    assert page.status_code==200 and "ITR原始数据" in page.text and "两级表头" in page.text
+    assert client.get("/materials",follow_redirects=False).headers["location"]=="/materials/itr"
+    page=client.get("/materials/itr")
+    assert page.status_code==200 and "ITR问题工作台" in page.text and "两级表头" in page.text
+    assert "软件 / 硬件 / 机械 / 跨领域" in page.text
+    assert "仅软件" in client.get("/materials/software-operations").text
     itr=tmp_path/"itr.xlsx";workbook(itr,"ITR_SOURCE","ITR20260605084")
     with itr.open("rb") as stream:
-        result=client.post("/materials/import",data={"group_code":"ITR","header_rows":"2"},files={"file":("itr.xlsx",stream,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+        result=client.post("/materials/import",data={"workbench":"itr","group_code":"ITR","header_rows":"2"},files={"file":("itr.xlsx",stream,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert result.status_code==200 and "ITR20260605084" in result.text and "新增 1" in result.text
-    assert "ITR原始数据" in client.get("/issues").text
+    assert "ITR工作台" in client.get("/issues").text
     settings=client.get("/settings/associations")
     assert settings.status_code==200 and "关联预检" in settings.text and "移除末尾CS" in settings.text
     saved=client.post("/settings/associations/RULE-CS-ITR",data={"source_field":"问题信息_彻底解决单号","target_field":"问题信息_ITR单号","transform":"STRIP_CS","status":"INACTIVE"},follow_redirects=False)

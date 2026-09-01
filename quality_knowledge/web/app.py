@@ -232,15 +232,29 @@ def create_app(db_path):
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
 
-    @app.get('/materials', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, group_code: str = ''):
+    material_workbenches={
+        'itr':{'group_code':'ITR','title':'ITR问题工作台','description':'现场问题、客户影响、发生阶段与处理过程','scope':'软件 / 硬件 / 机械 / 跨领域'},
+        'cs':{'group_code':'ITR-CS','title':'ITR彻底解决工作台','description':'责任认定、技术根因、永久措施、MRC与标准化','scope':'软件 / 硬件 / 机械 / 跨领域'},
+        'software-operations':{'group_code':'SW-OPS','title':'软件问题考核工作台','description':'软件问题KPI、审核状态、责任单位与运营考核','scope':'仅软件'},
+    }
+
+    @app.get('/materials', include_in_schema=False)
+    def materials_root():
+        return RedirectResponse('/materials/itr',303)
+
+    @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
+    def materials_page(request: Request, workbench: str):
+        workspace=material_workbenches.get(workbench)
+        if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
         return tpl.TemplateResponse(request, 'materials.html', {
-            'groups': material_repo.groups(False), 'items': material_repo.list_materials(group_code),
-            'group_code': group_code, 'result': None,
+            'groups': material_repo.groups(False), 'items': material_repo.list_materials(workspace['group_code']),
+            'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
         })
 
     @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
-    def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2)):
+    def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2), workbench: str = Form(...)):
+        workspace=material_workbenches.get(workbench)
+        if not workspace or workspace['group_code']!=group_code:raise HTTPException(400,'WORKBENCH_GROUP_MISMATCH')
         if Path(file.filename or '').suffix.lower() not in ALLOWED:
             raise HTTPException(400, '仅支持 .xlsx / .xlsm')
         with tempfile.TemporaryDirectory() as td:
@@ -249,7 +263,7 @@ def create_app(db_path):
             except ValueError as error: raise HTTPException(400,str(error)) from error
         return tpl.TemplateResponse(request, 'materials.html', {
             'groups': material_repo.groups(False), 'items': material_repo.list_materials(group_code),
-            'group_code': group_code, 'result': result,
+            'group_code': group_code, 'result': result, 'workbench':workbench, 'workspace':workspace,
         })
 
     @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)

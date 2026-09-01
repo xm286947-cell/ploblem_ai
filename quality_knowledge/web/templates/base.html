@@ -18,7 +18,9 @@
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
-    <a class="nav-item {% if request.url.path.startswith('/materials') %}active{% endif %}" href="/materials">ITR原始数据</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials/itr') %}active{% endif %}" href="/materials/itr">ITR工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials/cs') %}active{% endif %}" href="/materials/cs">彻底解决工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials/software-operations') %}active{% endif %}" href="/materials/software-operations">软件考核工作台</a>
     <div class="nav-divider"></div>
     <div class="nav-label">管理</div>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
