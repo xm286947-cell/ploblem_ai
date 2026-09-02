@@ -1,6 +1,6 @@
 # QUALITY ENGINE 需求池
 
-最后更新：2026-08-31
+最后更新：2026-09-02
 
 ## 当前路线
 
@@ -34,6 +34,7 @@
 | REQ-016 | ITR质量运行指标、MTTR分段与薄弱环节识别 | READY | P0 | 第二阶段 | `REQ-016_ITR_QUALITY_OPERATION_AND_MTTR.md` |
 | REQ-017 | 问题分析驱动的标准识别、固化与效果验证闭环 | TRIAGED | P1 | 第三阶段 | `REQ-017_ANALYSIS_TO_STANDARDIZATION_CLOSED_LOOP.md` |
 | REQ-018 | ITR与彻底解决单接入、自动关联和统一问题视图 | READY | P0 | 短期MVP | `REQ-018_ITR_AND_CS_INTAKE_MVP.md` |
+| REQ-019 | 客户问题逆向推理与产品质量场景库 | PLANNED | P1 | 第三阶段 | `REQ-019_PRODUCT_QUALITY_SCENARIO_WORKFLOW.md` |
 
 ## 已明确但暂不实施
 
