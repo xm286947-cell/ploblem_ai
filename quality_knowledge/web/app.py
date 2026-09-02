@@ -33,6 +33,7 @@ from .statistics_presenter import present_statistics, present_common_gaps, zh_va
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
+from quality_knowledge.scenarios import ScenarioRepository
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -202,7 +203,9 @@ def create_app(db_path):
     intake_svc = IntakeSessionService()
     material_repo = MaterialRepository(db_path)
     material_svc = MaterialImportService(material_repo)
+    scenario_repo = ScenarioRepository(db_path)
     app.state.material_repository = material_repo
+    app.state.scenario_repository = scenario_repo
     app.state.intake_session_service = intake_svc
     app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
     tpl = Jinja2Templates(directory=BASE / 'templates')
@@ -297,6 +300,43 @@ def create_app(db_path):
         except ValueError as error:raise HTTPException(400,str(error)) from error
         material_repo.refresh_links()
         return RedirectResponse('/settings/associations',303)
+
+    @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', q: str = '', status: str = ''):
+        taxonomy=scenario_repo.taxonomy()
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status},'taxonomy':taxonomy})
+
+    @app.get('/quality-scenarios/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
+    @app.get('/quality-scenarios/new', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_edit(request: Request, scenario_id: str = ''):
+        item=scenario_repo.scenario(scenario_id) if scenario_id else None
+        if scenario_id and not item:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
+        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','experience_requirement':'','concern_points':'','quality_attribute':'','applicable_boundary':'','validation_direction':'','status':'DRAFT','scopes':{}},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
+
+    @app.post('/quality-scenarios/save', include_in_schema=False)
+    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([])):
+        saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model})
+        return RedirectResponse(f'/quality-scenarios/{saved}',303)
+
+    @app.get('/settings/scenario-taxonomy', response_class=HTMLResponse, include_in_schema=False)
+    def scenario_taxonomy_settings(request: Request):
+        return tpl.TemplateResponse(request,'scenario_taxonomy.html',{'taxonomy':scenario_repo.taxonomy(),'versions':scenario_repo.versions()})
+
+    @app.post('/settings/scenario-taxonomy/draft', include_in_schema=False)
+    def scenario_taxonomy_draft():
+        scenario_repo.create_draft();return RedirectResponse('/settings/scenario-taxonomy',303)
+
+    @app.post('/settings/scenario-taxonomy/lifecycle', include_in_schema=False)
+    def scenario_lifecycle_save(version_id: str = Form(...), lifecycle_code: str = Form(...), label_zh: str = Form(...), description: str = Form(''), enabled: str = Form('')):
+        scenario_repo.save_lifecycle(version_id,lifecycle_code,label_zh,description,enabled=='on');return RedirectResponse('/settings/scenario-taxonomy',303)
+
+    @app.post('/settings/scenario-taxonomy/activity', include_in_schema=False)
+    def scenario_activity_save(version_id: str = Form(...), lifecycle_code: str = Form(...), activity_code: str = Form(...), label_zh: str = Form(...), chain_text: str = Form(''), description: str = Form(''), enabled: str = Form('')):
+        scenario_repo.save_activity(version_id,lifecycle_code,activity_code,label_zh,chain_text,description,enabled=='on');return RedirectResponse('/settings/scenario-taxonomy',303)
+
+    @app.post('/settings/scenario-taxonomy/{version_id}/activate', include_in_schema=False)
+    def scenario_taxonomy_activate(version_id: str):
+        scenario_repo.activate(version_id);return RedirectResponse('/settings/scenario-taxonomy',303)
 
     def _build_intake_preview(file: UploadFile, business_type: str = '', issue_domain: str = 'AUTO', mapping_config_id: str = ''):
         if Path(file.filename or '').suffix.lower() not in ALLOWED:

@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+
+
+LIFECYCLES = (
+    ("ENGINEERING_CONFIGURATION", "工程配置", "把控制需求转化为可执行、可调试的PLC工程"),
+    ("SOFTWARE_DEBUGGING", "软件调试", "把能编译的工程调成能正确工作的工程"),
+    ("RUNTIME_EXECUTION", "运行执行", "保证PLC控制逻辑实时、正确、稳定地执行"),
+    ("SYSTEM_INTEGRATION", "系统联动", "保证PLC与其他设备、控制系统共同完成完整业务过程"),
+    ("LONG_TERM_OPERATION", "长稳运行", "保证系统在长时间、高频、复杂条件下持续稳定"),
+    ("VERSION_MAINTENANCE", "版本维护", "保证已交付系统在持续变化中安全、兼容、可恢复"),
+)
+
+ACTIVITIES = (
+    ("ENGINEERING_CONFIGURATION","PROJECT_INIT","工程创建与初始化","新建工程 → 选择PLC → 初始化工程环境 → 进入工程配置"),
+    ("ENGINEERING_CONFIGURATION","HARDWARE_CONFIGURATION","硬件与设备组态","工程创建 → PLC配置 → IO配置 → 设备资源建立"),
+    ("ENGINEERING_CONFIGURATION","NETWORK_CONFIGURATION","网络与通信配置","设备组态 → 网络拓扑 → 通信参数 → 通信关系"),
+    ("ENGINEERING_CONFIGURATION","CONTROL_PARAMETER_CONFIGURATION","设备与控制参数配置","设备组态 → 参数设置 → 参数检查 → 配置完成"),
+    ("ENGINEERING_CONFIGURATION","VARIABLE_DATA_MODELING","变量与数据建模","设备配置 → IO映射 → 变量定义 → 数据结构 → 程序使用"),
+    ("ENGINEERING_CONFIGURATION","CONTROL_PROGRAMMING","控制程序开发","控制需求 → 程序架构 → 逻辑开发 → 功能块调用"),
+    ("ENGINEERING_CONFIGURATION","BUILD_VALIDATION","工程编译与校验","配置编程 → 编译 → 错误检查 → 修改 → 编译通过"),
+    ("SOFTWARE_DEBUGGING","PLC_DISCOVERY_CONNECTION","PLC发现与连接","工程准备 → 查找PLC → 网络连接 → 在线建立"),
+    ("SOFTWARE_DEBUGGING","DOWNLOAD_START","工程下载与启动","PLC连接 → 下载配置/程序 → 初始化 → RUN"),
+    ("SOFTWARE_DEBUGGING","ONLINE_MONITORING","程序在线监控与调试","下载运行 → 在线监控 → 变量观察 → 状态分析 → 调整"),
+    ("SOFTWARE_DEBUGGING","VARIABLE_IO_DEBUG","变量与IO调试","在线运行 → 变量监控/写值 → IO检查 → 功能验证"),
+    ("SOFTWARE_DEBUGGING","CONTROL_FUNCTION_DEBUG","控制功能调试","单点验证 → 功能动作 → 顺序验证 → 参数调整"),
+    ("SOFTWARE_DEBUGGING","PROBLEM_DIAGNOSIS","运行问题分析与诊断","发现异常 → 信息采集 → Trace/诊断 → 定位 → 验证"),
+    ("RUNTIME_EXECUTION","CONTROL_PROGRAM_EXECUTION","PLC控制程序执行","输入采集 → 程序执行 → 逻辑计算 → 输出更新"),
+    ("RUNTIME_EXECUTION","TASK_CYCLE_EXECUTION","任务与周期执行","任务触发 → 程序调度 → 执行 → 周期完成"),
+    ("RUNTIME_EXECUTION","STATE_DATA_PROCESSING","设备状态与数据处理","数据采集 → 状态判断 → 运算 → 状态更新"),
+    ("RUNTIME_EXECUTION","RUNTIME_EXCEPTION_HANDLING","运行异常处理","运行 → 异常触发 → 识别 → 安全逻辑 → 恢复/停机"),
+    ("SYSTEM_INTEGRATION","FIELD_DEVICE_INTEGRATION","PLC与现场设备联动","PLC逻辑 → IO/驱动指令 → 设备动作 → 状态反馈"),
+    ("SYSTEM_INTEGRATION","MULTI_DEVICE_SEQUENCE","多设备顺序联动","设备A完成 → 状态握手 → PLC判断 → 设备B启动"),
+    ("SYSTEM_INTEGRATION","PLC_SYSTEM_INTEGRATION","PLC与PLC/控制系统联动","PLC A状态 → 通信交换 → PLC B判断 → 联动动作"),
+    ("SYSTEM_INTEGRATION","HMI_HOST_INTEGRATION","PLC与HMI/上位系统联动","操作指令 → PLC接收 → 执行 → 状态反馈 → 界面更新"),
+    ("SYSTEM_INTEGRATION","INTERLOCK_RECOVERY","异常联锁与协同恢复","设备异常 → 联锁传播 → 相关响应 → 处理 → 联动恢复"),
+    ("LONG_TERM_OPERATION","CONTINUOUS_PRODUCTION","连续生产运行","启动生产 → 周期执行 → 重复业务 → 持续运行"),
+    ("LONG_TERM_OPERATION","HIGH_LOAD_OPERATION","高频/高负载持续运行","高频输入/通信 → 高频执行 → 大量数据 → 持续输出"),
+    ("LONG_TERM_OPERATION","LONG_TERM_COMMUNICATION","长期通信与设备交互","建链 → 数据交互 → 波动/断连 → 自动恢复"),
+    ("LONG_TERM_OPERATION","RESOURCE_STATE_RETENTION","长期资源与状态保持","持续运行 → 资源使用 → 数据/状态累计 → 长周期检查"),
+    ("VERSION_MAINTENANCE","INSTALL_ENVIRONMENT","iFA Evolution安装与运行环境构建","安装包 → 软件安装 → 环境配置 → 启动验证"),
+    ("VERSION_MAINTENANCE","UPGRADE_DOWNGRADE","软件升级/降级","当前版本 → 升降级 → 环境更新 → 工程打开 → 验证"),
+    ("VERSION_MAINTENANCE","PROJECT_MIGRATION","工程版本迁移","老工程 → 新版本转换 → 差异处理 → 编译下载"),
+    ("VERSION_MAINTENANCE","FIRMWARE_MAINTENANCE","PLC/固件版本维护","固件升级 → 工程匹配 → 下载 → 功能验证"),
+    ("VERSION_MAINTENANCE","DEVICE_CHANGE","硬件/外围设备变更","设备变更 → 配置修改 → 程序适配 → 调试验证"),
+    ("VERSION_MAINTENANCE","BACKUP_RESTORE","工程备份与恢复","正常工程 → 备份 → 异常/换机 → 恢复验证"),
+    ("VERSION_MAINTENANCE","FUNCTION_CHANGE_RELEASE","程序功能变更与再发布","新需求/问题 → 修改 → 编译 → 下载 → 回归"),
+    ("VERSION_MAINTENANCE","VERSION_ROLLBACK","版本回退","新版本异常 → 回退判断 → 恢复旧版 → 验证"),
+)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
+CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,lifecycle_code));
+CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
+CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,applicable_boundary TEXT,validation_direction TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
+"""
+
+
+class ScenarioRepository:
+    def __init__(self, db_path):
+        self.db_path=str(db_path)
+        with self.connect() as c:
+            c.executescript(SCHEMA)
+            if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
+                version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
+                for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
+                for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,"",order))
+
+    def connect(self):
+        c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");return c
+
+    def versions(self):
+        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM scenario_taxonomy_version ORDER BY version_no DESC")]
+
+    def working_version(self):
+        with self.connect() as c:
+            row=c.execute("SELECT * FROM scenario_taxonomy_version ORDER BY CASE status WHEN 'DRAFT' THEN 0 ELSE 1 END,version_no DESC LIMIT 1").fetchone();return dict(row)
+
+    def taxonomy(self, version_id=""):
+        version=self.working_version() if not version_id else next((x for x in self.versions() if x['version_id']==version_id),None)
+        if not version:return None
+        with self.connect() as c:
+            version['lifecycles']=[dict(x) for x in c.execute("SELECT * FROM scenario_lifecycle WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
+            version['activities']=[dict(x) for x in c.execute("SELECT * FROM scenario_activity WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
+        return version
+
+    def create_draft(self):
+        with self.connect() as c:
+            draft=c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE status='DRAFT' ORDER BY version_no DESC LIMIT 1").fetchone()
+            if draft:return draft[0]
+            active=c.execute("SELECT version_id,version_no FROM scenario_taxonomy_version WHERE status='ACTIVE' ORDER BY version_no DESC LIMIT 1").fetchone()
+            version_id=f"STV-{uuid.uuid4().hex}";version_no=(active['version_no'] if active else 0)+1
+            c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status) VALUES(?,?,'DRAFT')",(version_id,version_no))
+            if active:
+                c.execute("INSERT INTO scenario_lifecycle SELECT ?,lifecycle_code,label_zh,description,enabled,sort_order FROM scenario_lifecycle WHERE version_id=?",(version_id,active['version_id']))
+                c.execute("INSERT INTO scenario_activity SELECT ?,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order FROM scenario_activity WHERE version_id=?",(version_id,active['version_id']))
+            return version_id
+
+    def save_lifecycle(self, version_id, code, label, description, enabled=True):
+        with self.connect() as c:
+            version=c.execute("SELECT status FROM scenario_taxonomy_version WHERE version_id=?",(version_id,)).fetchone()
+            if not version or version['status']!='DRAFT':raise ValueError("TAXONOMY_NOT_EDITABLE")
+            order=c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_lifecycle WHERE version_id=?",(version_id,)).fetchone()[0]
+            c.execute("""INSERT INTO scenario_lifecycle VALUES(?,?,?,?,?,?) ON CONFLICT(version_id,lifecycle_code) DO UPDATE SET label_zh=excluded.label_zh,description=excluded.description,enabled=excluded.enabled""",(version_id,code.strip().upper(),label.strip(),description.strip(),int(enabled),order))
+
+    def save_activity(self, version_id, lifecycle_code, code, label, chain, description, enabled=True):
+        with self.connect() as c:
+            version=c.execute("SELECT status FROM scenario_taxonomy_version WHERE version_id=?",(version_id,)).fetchone()
+            if not version or version['status']!='DRAFT':raise ValueError("TAXONOMY_NOT_EDITABLE")
+            if not c.execute("SELECT 1 FROM scenario_lifecycle WHERE version_id=? AND lifecycle_code=?",(version_id,lifecycle_code)).fetchone():raise ValueError("LIFECYCLE_NOT_FOUND")
+            order=c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_activity WHERE version_id=?",(version_id,)).fetchone()[0]
+            c.execute("""INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(version_id,activity_code) DO UPDATE SET lifecycle_code=excluded.lifecycle_code,label_zh=excluded.label_zh,chain_text=excluded.chain_text,description=excluded.description,enabled=excluded.enabled""",(version_id,code.strip().upper(),lifecycle_code,label.strip(),chain.strip(),description.strip(),int(enabled),order))
+
+    def activate(self, version_id):
+        with self.connect() as c:
+            if not c.execute("SELECT 1 FROM scenario_taxonomy_version WHERE version_id=? AND status='DRAFT'",(version_id,)).fetchone():raise ValueError("DRAFT_NOT_FOUND")
+            c.execute("UPDATE scenario_taxonomy_version SET status='RETIRED' WHERE status='ACTIVE'")
+            c.execute("UPDATE scenario_taxonomy_version SET status='ACTIVE',activated_at=CURRENT_TIMESTAMP WHERE version_id=?",(version_id,))
+
+    def scope_options(self):
+        values={"IPMT":set(),"SPDT":set(),"PRODUCT_MODEL":set()}
+        aliases={"IPMT":("问题信息_IPMT","IPMT"),"SPDT":("问题信息_SPDT","SPDT"),"PRODUCT_MODEL":("问题信息_产品型号","产品型号")}
+        with self.connect() as c:
+            try:rows=c.execute("SELECT raw_json FROM source_material WHERE material_type='ITR_CS'").fetchall()
+            except sqlite3.OperationalError:rows=[]
+            for row in rows:
+                raw=json.loads(row[0] or "{}")
+                for kind,names in aliases.items():
+                    for name in names:
+                        value=str(raw.get(name) or "").strip()
+                        if value:values[kind].add(value);break
+            for row in c.execute("SELECT scope_type,scope_value FROM quality_scenario_scope"):
+                values.setdefault(row['scope_type'],set()).add(row['scope_value'])
+        return {key:sorted(items) for key,items in values.items()}
+
+    def scenarios(self, *, ipmt="", spdt="", product_model="", q="", status=""):
+        with self.connect() as c:
+            rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
+            scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
+        by_id={}
+        for row in scopes:by_id.setdefault(row['scenario_id'],{}).setdefault(row['scope_type'],[]).append(row['scope_value'])
+        for item in rows:item['scopes']=by_id.get(item['scenario_id'],{})
+        def matches(item):
+            s=item['scopes']
+            return (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[]))
+        return [item for item in rows if matches(item)]
+
+    def scenario(self, scenario_id):
+        return next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
+
+    def save_scenario(self, scenario_id, payload, scopes):
+        scenario_id=scenario_id or f"QSC-{uuid.uuid4().hex}"
+        status=payload.get('status','DRAFT')
+        if status not in {'DRAFT','IN_REVIEW','PUBLISHED','RETIRED'}:raise ValueError('INVALID_SCENARIO_STATUS')
+        with self.connect() as c:
+            existing=c.execute("SELECT version_no FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing[0]+1 if existing else 1)
+            c.execute("""INSERT INTO quality_scenario VALUES(?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
+             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),status,version))
+            c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
+            for kind,items in scopes.items():
+                for value in items:
+                    if value.strip():c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(scenario_id,kind,value.strip()))
+        return scenario_id

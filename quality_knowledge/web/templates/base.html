@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>{{ title or '质量问题分析' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=product-report-ai-synthesis-patch16">
+<link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=quality-scenario-patch01">
 {% block page_styles %}{% endblock %}
 <!-- legacy css cache markers: app.css?v=ued2 ; ?v=ued-r4v2-cg-fix01 ; ?v=p3-mapping-difference-entry2 -->
 </head>
@@ -17,6 +17,7 @@
     <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
+    <a class="nav-item {% if request.url.path.startswith('/quality-scenarios') %}active{% endif %}" href="/quality-scenarios">质量场景库</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
     <a class="nav-item {% if request.url.path.startswith('/materials/itr') %}active{% endif %}" href="/materials/itr">ITR工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/materials/cs') %}active{% endif %}" href="/materials/cs">彻底解决工作台</a>
@@ -25,6 +26,7 @@
     <div class="nav-label">管理</div>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/associations') %}active{% endif %}" href="/settings/associations">数据关联配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/scenario-taxonomy') %}active{% endif %}" href="/settings/scenario-taxonomy">场景词典配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
   </nav>

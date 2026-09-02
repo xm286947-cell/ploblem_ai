@@ -1,0 +1,55 @@
+from fastapi.testclient import TestClient
+
+from quality_knowledge.scenarios import ScenarioRepository
+from quality_knowledge.web.app import create_app
+
+
+def test_default_plc_taxonomy_and_independent_pages(tmp_path):
+    client=TestClient(create_app(tmp_path/"app.db"))
+    repository=client.app.state.scenario_repository
+    taxonomy=repository.taxonomy()
+    assert taxonomy["status"]=="ACTIVE"
+    assert len(taxonomy["lifecycles"])==6
+    assert len(taxonomy["activities"])==34
+    page=client.get("/quality-scenarios")
+    assert page.status_code==200 and "质量场景库" in page.text and "全部IPMT" in page.text and "全部SPDT" in page.text and "全部产品型号" in page.text
+    settings=client.get("/settings/scenario-taxonomy")
+    assert settings.status_code==200 and "场景词典配置" in settings.text and "基于当前版本创建草稿" in settings.text
+
+
+def test_taxonomy_changes_use_new_draft_version(tmp_path):
+    repository=ScenarioRepository(tmp_path/"taxonomy.db")
+    active=repository.taxonomy()
+    draft_id=repository.create_draft()
+    assert draft_id!=active["version_id"]
+    repository.save_lifecycle(draft_id,"SOFTWARE_DEBUGGING","软件联调","修改后的定义",True)
+    draft=repository.taxonomy()
+    assert draft["status"]=="DRAFT"
+    assert next(x for x in draft["lifecycles"] if x["lifecycle_code"]=="SOFTWARE_DEBUGGING")["label_zh"]=="软件联调"
+    original=repository.taxonomy(active["version_id"])
+    assert next(x for x in original["lifecycles"] if x["lifecycle_code"]=="SOFTWARE_DEBUGGING")["label_zh"]=="软件调试"
+    repository.activate(draft_id)
+    assert next(x for x in repository.versions() if x["version_id"]==draft_id)["status"]=="ACTIVE"
+
+
+def test_scenario_scope_filters_ipmt_spdt_and_product_model(tmp_path):
+    client=TestClient(create_app(tmp_path/"scenario.db"))
+    response=client.post("/quality-scenarios/save",data={
+        "scenario_id":"","scenario_code":"PLC-DEBUG-001","name":"大型PLC工程在线监控流畅性",
+        "lifecycle_code":"SOFTWARE_DEBUGGING","activity_code":"ONLINE_MONITORING",
+        "experience_requirement":"持续流畅","concern_points":"卡顿","quality_attribute":"性能效率",
+        "applicable_boundary":"大型工程","validation_direction":"P95响应时间","status":"PUBLISHED",
+        "ipmt":["控制产品IPMT"],"spdt":["PLC SPDT"],"product_model":["AM600"],
+    },follow_redirects=False)
+    assert response.status_code==303
+    matched=client.get("/quality-scenarios?ipmt=控制产品IPMT&spdt=PLC%20SPDT&product_model=AM600")
+    assert matched.status_code==200 and "大型PLC工程在线监控流畅性" in matched.text
+    missing=client.get("/quality-scenarios?product_model=H3U")
+    assert "大型PLC工程在线监控流畅性" not in missing.text
+    assert "场景资产" in matched.text
+
+
+def test_new_scenario_route_is_not_swallowed_by_dynamic_detail(tmp_path):
+    client=TestClient(create_app(tmp_path/"route.db"))
+    page=client.get("/quality-scenarios/new")
+    assert page.status_code==200 and "新建质量场景" in page.text

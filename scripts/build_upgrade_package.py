@@ -9,18 +9,22 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH01_20260902"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH02_20260902"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/materials.py",
+    "quality_knowledge/scenarios.py",
     "quality_knowledge/web/app.py",
     "quality_knowledge/web/static/app.css",
     "quality_knowledge/web/templates/base.html",
     "quality_knowledge/web/templates/materials.html",
     "quality_knowledge/web/templates/material_detail.html",
+    "quality_knowledge/web/templates/quality_scenarios.html",
+    "quality_knowledge/web/templates/quality_scenario_edit.html",
+    "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
 
@@ -60,7 +64,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH01 升级说明
+    readme = """# PATCH02 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -68,12 +72,15 @@ def main() -> None:
 - 修复 Windows 导入 ITR Excel 后文件句柄未释放的问题。
 - 将 ITR、彻底解决单和软件考核页升级为可检索、筛选、分页和查看详情的工作台。
 - 增加完整原始字段、同 ITR 关联数据、漏测分析跳转和独立人工分析。
-- 归档产品质量场景库设计，尚未开发独立 AI 场景推理。
+- 新增独立质量场景库，支持新增、编辑、查阅，并按 IPMT、SPDT、产品型号和状态筛选。
+- 新增场景词典配置，内置六个生命周期阶段和 PLC 业务活动场景；采用草稿修改、激活生效，避免直接污染在用版本。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`
 - ITR彻底解决工作台：`/materials/cs`
 - 软件问题考核工作台：`/materials/software-operations`
+- 质量场景库：`/quality-scenarios`
+- 场景词典配置：`/settings/scenario-taxonomy`
 
 本包已显式包含上述三个工作台所需的侧边栏入口、路由、数据服务、列表页、详情页和样式文件。
 
@@ -82,7 +89,7 @@ def main() -> None:
 2. 备份当前程序目录和正在使用的 SQLite 数据库文件。
 3. 将本升级包内容覆盖到原程序根目录，保持目录结构不变。
 4. 使用原 BAT 重新启动。
-5. 依次打开 ITR工作台、彻底解决工作台和软件考核工作台验证。
+5. 依次打开三个数据工作台、质量场景库和场景词典配置验证。
 
 升级包不包含、不覆盖数据库、原始Excel、日志和运行输出。新增数据表在启动工作台时自动创建。
 """
