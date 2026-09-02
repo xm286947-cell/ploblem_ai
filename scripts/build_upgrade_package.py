@@ -14,6 +14,14 @@ OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
+REQUIRED_WORKBENCH_FILES = {
+    "quality_knowledge/materials.py",
+    "quality_knowledge/web/app.py",
+    "quality_knowledge/web/static/app.css",
+    "quality_knowledge/web/templates/base.html",
+    "quality_knowledge/web/templates/materials.html",
+    "quality_knowledge/web/templates/material_detail.html",
+}
 
 
 def changed_files() -> list[Path]:
@@ -24,8 +32,9 @@ def changed_files() -> list[Path]:
         capture_output=True,
         text=True,
     )
+    names = set(result.stdout.splitlines()) | REQUIRED_WORKBENCH_FILES
     files = []
-    for name in result.stdout.splitlines():
+    for name in names:
         if not name or name.startswith(EXCLUDED_PREFIXES) or name.endswith(EXCLUDED_SUFFIXES):
             continue
         path = ROOT / name
@@ -60,6 +69,13 @@ def main() -> None:
 - 将 ITR、彻底解决单和软件考核页升级为可检索、筛选、分页和查看详情的工作台。
 - 增加完整原始字段、同 ITR 关联数据、漏测分析跳转和独立人工分析。
 - 归档产品质量场景库设计，尚未开发独立 AI 场景推理。
+
+升级后工作台入口：
+- ITR问题工作台：`/materials/itr`
+- ITR彻底解决工作台：`/materials/cs`
+- 软件问题考核工作台：`/materials/software-operations`
+
+本包已显式包含上述三个工作台所需的侧边栏入口、路由、数据服务、列表页、详情页和样式文件。
 
 升级步骤：
 1. 停止 BAT 启动的服务。
