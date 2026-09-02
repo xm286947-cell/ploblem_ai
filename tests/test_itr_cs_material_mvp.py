@@ -92,6 +92,16 @@ def test_material_web_import_and_navigation(tmp_path):
     with itr.open("rb") as stream:
         result=client.post("/materials/import",data={"workbench":"itr","group_code":"ITR","header_rows":"2"},files={"file":("itr.xlsx",stream,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert result.status_code==200 and "ITR20260605084" in result.text and "新增 1" in result.text
+    assert "搜索编号、问题描述、产品" in result.text and "查看 / 分析" in result.text
+    material_id=client.app.state.material_repository.list_materials("ITR")[0]["material_id"]
+    detail=client.get(f"/materials/itr/{material_id}")
+    assert detail.status_code==200 and "完整原始字段" in detail.text and "同一 ITR 的相关数据" in detail.text and "本工作台独立分析" in detail.text
+    saved_review=client.post(f"/materials/itr/{material_id}/review",data={"review_status":"COMPLETED","analysis_summary":"客户停机","root_cause":"变更管理不足","improvement_action":"补充准入规则","reviewer":"质量组"},follow_redirects=False)
+    assert saved_review.status_code==303
+    reviewed=client.get(f"/materials/itr/{material_id}")
+    assert "客户停机" in reviewed.text and "变更管理不足" in reviewed.text and "已完成" in reviewed.text
+    filtered=client.get("/materials/itr?q=ITR20260605084")
+    assert filtered.status_code==200 and "测试问题" in filtered.text
     assert "ITR工作台" in client.get("/issues").text
     settings=client.get("/settings/associations")
     assert settings.status_code==200 and "关联预检" in settings.text and "移除末尾CS" in settings.text

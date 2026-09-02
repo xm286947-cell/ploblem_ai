@@ -243,13 +243,31 @@ def create_app(db_path):
         return RedirectResponse('/materials/itr',303)
 
     @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, workbench: str):
+    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', page: int = 1):
         workspace=material_workbenches.get(workbench)
         if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
+        result=material_repo.search_materials(workspace['group_code'],q=q,domain=domain,month=month,page=page)
         return tpl.TemplateResponse(request, 'materials.html', {
-            'groups': material_repo.groups(False), 'items': material_repo.list_materials(workspace['group_code']),
-            'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
+            'groups': material_repo.groups(False), 'items': result['items'], 'listing':result,
+            'filters':{'q':q,'domain':domain,'month':month},'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
         })
+
+    @app.get('/materials/{workbench}/{material_id}', response_class=HTMLResponse, include_in_schema=False)
+    def material_detail(request: Request, workbench: str, material_id: str):
+        workspace=material_workbenches.get(workbench)
+        if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
+        item=material_repo.material(material_id)
+        if not item or item['group_code']!=workspace['group_code']:raise HTTPException(404,'MATERIAL_NOT_FOUND')
+        return tpl.TemplateResponse(request,'material_detail.html',{'item':item,'workspace':workspace,'workbench':workbench,'related':material_repo.related_materials(item['canonical_itr'],material_id)})
+
+    @app.post('/materials/{workbench}/{material_id}/review', include_in_schema=False)
+    def material_review_save(workbench: str, material_id: str, review_status: str = Form('DRAFT'), analysis_summary: str = Form(''), root_cause: str = Form(''), improvement_action: str = Form(''), reviewer: str = Form('')):
+        workspace=material_workbenches.get(workbench)
+        item=material_repo.material(material_id)
+        if not workspace or not item or item['group_code']!=workspace['group_code']:raise HTTPException(404,'MATERIAL_NOT_FOUND')
+        try:material_repo.save_review(material_id,review_status=review_status,analysis_summary=analysis_summary,root_cause=root_cause,improvement_action=improvement_action,reviewer=reviewer)
+        except ValueError as error:raise HTTPException(400,str(error)) from error
+        return RedirectResponse(f'/materials/{workbench}/{material_id}#independent-review',303)
 
     @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
     def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2), workbench: str = Form(...)):
@@ -261,8 +279,10 @@ def create_app(db_path):
             path=Path(td)/Path(file.filename or 'upload.xlsx').name;path.write_bytes(file.file.read())
             try: result=material_svc.import_file(path,group_code,header_rows)
             except ValueError as error: raise HTTPException(400,str(error)) from error
+        listing=material_repo.search_materials(group_code)
         return tpl.TemplateResponse(request, 'materials.html', {
-            'groups': material_repo.groups(False), 'items': material_repo.list_materials(group_code),
+            'groups': material_repo.groups(False), 'items': listing['items'],
+            'listing':listing,'filters':{'q':'','domain':'','month':''},
             'group_code': group_code, 'result': result, 'workbench':workbench, 'workspace':workspace,
         })
 

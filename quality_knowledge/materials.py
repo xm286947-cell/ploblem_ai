@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS issue_material_link(
  link_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,material_id TEXT NOT NULL REFERENCES source_material(material_id),
  rule_id TEXT REFERENCES association_rule(rule_id),link_status TEXT NOT NULL,match_value TEXT,
  created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(knowledge_id,material_id));
+CREATE TABLE IF NOT EXISTS material_review(
+ material_id TEXT PRIMARY KEY REFERENCES source_material(material_id),review_status TEXT NOT NULL DEFAULT 'DRAFT',
+ analysis_summary TEXT,root_cause TEXT,improvement_action TEXT,reviewer TEXT,
+ updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
 
@@ -68,6 +72,27 @@ def combine_headers(parent_row, child_row) -> list[str]:
         else:
             result.append(child or parent or f"未命名字段{index + 1}")
     return result
+
+
+def _first(raw: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = _clean(raw.get(name))
+        if value:
+            return value
+    return ""
+
+
+def _material_view(row: dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    raw = json.loads(item.pop("raw_json", "{}") or "{}")
+    item["raw"] = raw
+    item["title"] = _first(raw, "问题信息_问题主题", "问题信息_问题描述", "问题主题", "问题描述") or "未提供问题描述"
+    item["month"] = _first(raw, "数据运营_KPI计入月份", "问题信息_创建月份", "创建月份") or "-"
+    item["product"] = _first(raw, "问题信息_产品型号", "问题信息_产品类型", "产品型号", "产品类型") or "-"
+    item["domain"] = _first(raw, "问题信息_问题领域", "问题领域", "问题信息_产品类型", "产品类型") or "未分类"
+    item["severity"] = _first(raw, "问题信息_问题等级", "问题等级") or "-"
+    item["process_status"] = _first(raw, "过程信息_当前状态", "数据运营_审核状态", "当前状态", "审核状态") or "-"
+    return item
 
 
 class MaterialRepository:
@@ -147,6 +172,48 @@ class MaterialRepository:
         if group_code: sql+=" WHERE g.group_code=?";values.append(group_code)
         sql+=" ORDER BY m.created_at DESC LIMIT ?";values.append(limit)
         with self.connect() as c:return [dict(x) for x in c.execute(sql,values)]
+
+    def search_materials(self, group_code, *, q="", domain="", month="", page=1, page_size=20):
+        rows = self.list_materials(group_code, 100000)
+        items = [_material_view(row) for row in rows]
+        if q:
+            keyword = q.strip().lower()
+            items = [item for item in items if keyword in (item["business_key"] + " " + item["canonical_itr"] + " " + item["title"] + " " + item["product"]).lower()]
+        if domain:
+            items = [item for item in items if domain.lower() in item["domain"].lower()]
+        if month:
+            items = [item for item in items if item["month"] == month]
+        total = len(items); page=max(1,int(page));page_size=max(1,min(100,int(page_size)))
+        start=(page-1)*page_size
+        return {"items":items[start:start+page_size],"total":total,"page":page,"page_size":page_size,
+                "pages":max(1,(total+page_size-1)//page_size),
+                "domains":sorted({item["domain"] for item in [_material_view(row) for row in rows] if item["domain"]}),
+                "months":sorted({item["month"] for item in [_material_view(row) for row in rows] if item["month"]!="-"},reverse=True)}
+
+    def material(self, material_id):
+        with self.connect() as c:
+            row=c.execute("SELECT m.*,g.group_code,g.group_name FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_id=?",(material_id,)).fetchone()
+            if not row:return None
+            item=_material_view(dict(row))
+            link=c.execute("SELECT knowledge_id,link_status FROM issue_material_link WHERE material_id=? ORDER BY created_at DESC LIMIT 1",(material_id,)).fetchone()
+            item["linked_issue"]=dict(link) if link else None
+            review=c.execute("SELECT * FROM material_review WHERE material_id=?",(material_id,)).fetchone()
+            item["review"]=dict(review) if review else {"review_status":"DRAFT","analysis_summary":"","root_cause":"","improvement_action":"","reviewer":""}
+            return item
+
+    def save_review(self, material_id, *, review_status, analysis_summary, root_cause, improvement_action, reviewer):
+        if review_status not in {"DRAFT","COMPLETED"}:raise ValueError("INVALID_REVIEW_STATUS")
+        with self.connect() as c:
+            if not c.execute("SELECT 1 FROM source_material WHERE material_id=?",(material_id,)).fetchone():raise KeyError(material_id)
+            c.execute("""INSERT INTO material_review(material_id,review_status,analysis_summary,root_cause,improvement_action,reviewer,updated_at)
+              VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(material_id) DO UPDATE SET review_status=excluded.review_status,
+              analysis_summary=excluded.analysis_summary,root_cause=excluded.root_cause,improvement_action=excluded.improvement_action,
+              reviewer=excluded.reviewer,updated_at=CURRENT_TIMESTAMP""",(material_id,review_status,analysis_summary.strip(),root_cause.strip(),improvement_action.strip(),reviewer.strip()))
+
+    def related_materials(self, canonical_itr, exclude_material_id=""):
+        with self.connect() as c:
+            rows=c.execute("SELECT m.*,g.group_code,g.group_name FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.canonical_itr=? AND m.material_id<>? ORDER BY m.created_at DESC",(canonical_itr,exclude_material_id)).fetchall()
+            return [_material_view(dict(row)) for row in rows]
 
     def rules(self):
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM association_rule ORDER BY priority,rule_name")]
