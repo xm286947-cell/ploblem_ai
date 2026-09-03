@@ -53,7 +53,7 @@ def test_generate_candidates_are_review_only_and_traceable(tmp_path):
     assert repository.generations()[0]['model_name']=='scenario-model'
     assert repository.generations()[0]['linked_candidate_count']==1
     assert [x['scenario_id'] for x in repository.scenarios(generation_id=result['generation_id'])]==result['scenario_ids']
-    assert item['scenario_chain'].startswith('下载运行')
+    assert item['scenario_chain']=='下载运行 → 在线监控 → 变量观察 → 状态分析 → 调整'
     assert item['quality_subcharacteristic']=='时间特性、资源利用率'
     assert '计算P95' in item['measurement_suggestion']
 
@@ -75,7 +75,7 @@ def test_generation_page_is_not_swallowed_by_scenario_detail_route(tmp_path):
 
 def test_selected_issue_scope_and_itr_cs_context_are_used(tmp_path):
     db=tmp_path/'scenario.db';repository=ScenarioRepository(db);MaterialRepository(db)
-    raw={'问题信息_IPMT':'控制IPMT','问题信息_SPDT':'PLC SPDT','问题信息_产品型号':'AM600','技术根因分析与纠正_TRC纠正信息':'修复刷新调度'}
+    raw={'问题信息_IPMT':'控制IPMT','问题信息_SPDT':'PLC SPDT','问题信息_产品型号':'AM600','问题信息_客户行业':'锂电','问题信息_客户名称':'示例客户','问题信息_客户分级':'战略客户','问题信息_当前客户状态':'复位可恢复','问题信息_问题发生阶段':'现场调试','技术根因分析与纠正_TRC纠正信息':'修复刷新调度'}
     with repository.connect() as c:
         c.execute("INSERT INTO source_material(material_id,group_id,material_type,business_key,canonical_itr,version_no,source_hash,raw_json) VALUES('MAT-CS','DG-ITR-CS','ITR_CS','ITR001CS','ITR001',1,'H',?)",(json.dumps(raw,ensure_ascii=False),))
         c.execute("INSERT INTO issue_material_link(link_id,knowledge_id,material_id,link_status) VALUES('L1','QK-1','MAT-CS','LINKED')")
@@ -84,8 +84,11 @@ def test_selected_issue_scope_and_itr_cs_context_are_used(tmp_path):
     assert len(records)==1 and records[0]['itr_cs_context']['trc_correction']=='修复刷新调度'
     result=service.generate('PLC','1月','12月',selected_ids=['QK-1'])
     item=repository.scenario(result['scenario_ids'][0])
-    assert item['scopes']=={'IPMT':['控制IPMT'],'SPDT':['PLC SPDT'],'PRODUCT_MODEL':['AM600']}
+    assert item['scopes']=={'IPMT':['控制IPMT'],'SPDT':['PLC SPDT'],'PRODUCT_MODEL':['AM600'],'INDUSTRY':['锂电'],'CUSTOMER_NAME':['示例客户'],'CUSTOMER_LEVEL':['战略客户'],'CUSTOMER_STATUS':['复位可恢复'],'OCCURRENCE_PHASE':['现场调试']}
     assert [x['knowledge_id'] for x in item['evidence']]==['QK-1']
+    with repository.connect() as c:c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(item['scenario_id'],))
+    reloaded=ScenarioRepository(db).scenario(item['scenario_id'])
+    assert reloaded['scopes']['INDUSTRY']==['锂电'] and reloaded['scopes']['CUSTOMER_STATUS']==['复位可恢复']
 
 
 def test_generated_candidate_warns_when_published_scenario_is_similar(tmp_path):

@@ -13,8 +13,8 @@ from quality_knowledge.model_config import load_quality_issue_ai_config
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
-输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","scenario_chain":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：只能使用给定词典编码；每项必须有来源问题；scenario_chain 要描述“前置条件→关键操作→触发条件→异常表现→业务影响”；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
+要求：只能使用给定词典编码；每项必须有来源问题；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -49,7 +49,7 @@ class ScenarioGenerationService:
         aliases={
             'ipmt':('问题信息_IPMT','IPMT'),'spdt':('问题信息_SPDT','SPDT'),'product_model':('问题信息_产品型号','产品型号'),
             'customer_industry':('问题信息_客户行业','客户行业'),'customer_name':('问题信息_客户名称','客户名称'),
-            'customer_level':('问题信息_客户分级','客户分级'),'customer_status':('问题信息_当前客户状态','当前客户状态'),
+            'customer_level':('问题信息_客户分级','客户分级'),'customer_status':('问题信息_当前客户状态','问题信息_当前问题状态','问题信息_问题状态','当前客户状态','当前问题状态'),
             'occurrence_phase':('问题信息_问题发生阶段','问题发生阶段'),'root_cause':('问题信息_问题原因定位','问题原因定位'),
             'trc_correction':('技术根因分析与纠正_TRC纠正信息','TRC纠正信息')}
         try:
@@ -99,9 +99,9 @@ class ScenarioGenerationService:
             if not evidence or not activity: continue
             if not lifecycle:lifecycle=activity[1]
             if activity[1]!=lifecycle:continue
-            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','scenario_chain','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
+            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
-            item['scenario_chain']=item['scenario_chain'] or activity[2]
+            item['scenario_chain']=activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
             if item['name']: items.append(item)
         return items,response.model
@@ -132,7 +132,8 @@ class ScenarioGenerationService:
         for index,item in enumerate(mapped,1):
             code=f"AI-{hashlib.sha1((generation_id+str(index)).encode()).hexdigest()[:10].upper()}"
             source_records=[x for x in records if x['knowledge_id'] in item.get('evidence_issue_ids',[])]
-            scopes={'IPMT':sorted({x['itr_cs_context'].get('ipmt','') for x in source_records}-{''}),'SPDT':sorted({x['itr_cs_context'].get('spdt','') for x in source_records}-{''}),'PRODUCT_MODEL':sorted({x['itr_cs_context'].get('product_model','') for x in source_records}-{''})}
+            scope_fields={'IPMT':'ipmt','SPDT':'spdt','PRODUCT_MODEL':'product_model','INDUSTRY':'customer_industry','CUSTOMER_NAME':'customer_name','CUSTOMER_LEVEL':'customer_level','CUSTOMER_STATUS':'customer_status','OCCURRENCE_PHASE':'occurrence_phase'}
+            scopes={kind:sorted({x['itr_cs_context'].get(field,'') for x in source_records}-{''}) for kind,field in scope_fields.items()}
             scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model)
             created.append(scenario_id)
         self.scenarios.update_generation(generation_id,status='COMPLETED',progress_text='生成完成，等待人工审核',candidate_count=len(created),model_name=model,error_message='')

@@ -37,16 +37,19 @@ def test_scenario_scope_filters_ipmt_spdt_and_product_model(tmp_path):
     response=client.post("/quality-scenarios/save",data={
         "scenario_id":"","scenario_code":"PLC-DEBUG-001","name":"大型PLC工程在线监控流畅性",
         "lifecycle_code":"SOFTWARE_DEBUGGING","activity_code":"ONLINE_MONITORING",
-        "scenario_chain":"连接→下载→在线监控→卡顿→调试效率下降","experience_requirement":"持续流畅","concern_points":"卡顿","quality_attribute":"性能效率","quality_subcharacteristic":"时间特性",
+        "experience_requirement":"持续流畅","concern_points":"卡顿","quality_attribute":"性能效率","quality_subcharacteristic":"时间特性",
         "applicable_boundary":"大型工程","validation_direction":"性能回归","measurement_suggestion":"记录响应时间并计算P95","status":"PUBLISHED",
-        "ipmt":["控制产品IPMT"],"spdt":["PLC SPDT"],"product_model":["AM600"],
+        "ipmt":["控制产品IPMT"],"spdt":["PLC SPDT"],"product_model":["AM600"],"industry":["锂电"],"customer_name":["示例客户"],"customer_level":["A级"],"customer_status":["复位可恢复"],"occurrence_phase":["现场调试"],
     },follow_redirects=False)
     assert response.status_code==303
     matched=client.get("/quality-scenarios?ipmt=控制产品IPMT&spdt=PLC%20SPDT&product_model=AM600")
     assert matched.status_code==200 and "大型PLC工程在线监控流畅性" in matched.text
-    assert "连接→下载→在线监控" in matched.text and "时间特性" in matched.text and "计算P95" in matched.text
+    assert "下载运行 → 在线监控 → 变量观察" in matched.text and "时间特性" in matched.text and "计算P95" in matched.text
+    assert "锂电" in matched.text and "示例客户" in matched.text and "复位可恢复" in matched.text and "现场调试" in matched.text
     detail=client.get(response.headers['location'])
-    assert 'name="scenario_chain"' in detail.text and 'name="quality_subcharacteristic"' in detail.text and 'name="measurement_suggestion"' in detail.text
+    assert '场景链路（由业务活动配置决定）' in detail.text and 'name="scenario_chain"' not in detail.text
+    assert 'name="quality_subcharacteristic"' in detail.text and 'name="measurement_suggestion"' in detail.text and '原始问题发生阶段（仅参考）' in detail.text
+    assert "大型PLC工程在线监控流畅性" in client.get("/quality-scenarios?industry=锂电&customer_name=示例客户").text
     missing=client.get("/quality-scenarios?product_model=H3U")
     assert "大型PLC工程在线监控流畅性" not in missing.text
     assert "场景资产" in matched.text

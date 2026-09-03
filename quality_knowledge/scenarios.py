@@ -85,7 +85,22 @@ class ScenarioRepository:
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
                 for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,"",order))
-            c.execute("""UPDATE quality_scenario SET scenario_chain=COALESCE((SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code ORDER BY v.version_no DESC LIMIT 1),'') WHERE COALESCE(scenario_chain,'')=''""")
+            c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code ORDER BY v.version_no DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code)""")
+            self._backfill_context_scopes(c)
+
+    @staticmethod
+    def _backfill_context_scopes(c):
+        aliases={"IPMT":("问题信息_IPMT","IPMT"),"SPDT":("问题信息_SPDT","SPDT"),"PRODUCT_MODEL":("问题信息_产品型号","产品型号"),"INDUSTRY":("问题信息_客户行业","客户行业"),"CUSTOMER_NAME":("问题信息_客户名称","客户名称"),"CUSTOMER_LEVEL":("问题信息_客户分级","客户分级"),"CUSTOMER_STATUS":("问题信息_当前客户状态","问题信息_当前问题状态","问题信息_问题状态","当前客户状态","当前问题状态"),"OCCURRENCE_PHASE":("问题信息_问题发生阶段","问题发生阶段")}
+        try:
+            rows=c.execute("""SELECT DISTINCT e.scenario_id,m.raw_json FROM quality_scenario_evidence e JOIN issue_material_link l ON l.knowledge_id=e.knowledge_id JOIN source_material m ON m.material_id=l.material_id WHERE m.material_type='ITR_CS'""").fetchall()
+        except sqlite3.OperationalError:
+            return
+        for row in rows:
+            try:raw=json.loads(row['raw_json'] or '{}')
+            except (TypeError,json.JSONDecodeError):continue
+            for kind,names in aliases.items():
+                value=next((str(raw.get(name) or '').strip() for name in names if str(raw.get(name) or '').strip()),'')
+                if value:c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(row['scenario_id'],kind,value))
 
     def connect(self):
         c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");return c
@@ -141,10 +156,11 @@ class ScenarioRepository:
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version WHERE version_id=? AND status='DRAFT'",(version_id,)).fetchone():raise ValueError("DRAFT_NOT_FOUND")
             c.execute("UPDATE scenario_taxonomy_version SET status='RETIRED' WHERE status='ACTIVE'")
             c.execute("UPDATE scenario_taxonomy_version SET status='ACTIVE',activated_at=CURRENT_TIMESTAMP WHERE version_id=?",(version_id,))
+            c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT chain_text FROM scenario_activity WHERE version_id=? AND activity_code=quality_scenario.activity_code) WHERE EXISTS(SELECT 1 FROM scenario_activity WHERE version_id=? AND activity_code=quality_scenario.activity_code)""",(version_id,version_id))
 
     def scope_options(self):
-        values={"IPMT":set(),"SPDT":set(),"PRODUCT_MODEL":set()}
-        aliases={"IPMT":("问题信息_IPMT","IPMT"),"SPDT":("问题信息_SPDT","SPDT"),"PRODUCT_MODEL":("问题信息_产品型号","产品型号")}
+        values={key:set() for key in ("IPMT","SPDT","PRODUCT_MODEL","INDUSTRY","CUSTOMER_NAME","CUSTOMER_LEVEL","CUSTOMER_STATUS","OCCURRENCE_PHASE")}
+        aliases={"IPMT":("问题信息_IPMT","IPMT"),"SPDT":("问题信息_SPDT","SPDT"),"PRODUCT_MODEL":("问题信息_产品型号","产品型号"),"INDUSTRY":("问题信息_客户行业","客户行业"),"CUSTOMER_NAME":("问题信息_客户名称","客户名称"),"CUSTOMER_LEVEL":("问题信息_客户分级","客户分级"),"CUSTOMER_STATUS":("问题信息_当前客户状态","问题信息_当前问题状态","问题信息_问题状态","当前客户状态","当前问题状态"),"OCCURRENCE_PHASE":("问题信息_问题发生阶段","问题发生阶段")}
         with self.connect() as c:
             try:rows=c.execute("SELECT raw_json FROM source_material WHERE material_type='ITR_CS'").fetchall()
             except sqlite3.OperationalError:rows=[]
@@ -158,7 +174,7 @@ class ScenarioRepository:
                 values.setdefault(row['scope_type'],set()).add(row['scope_value'])
         return {key:sorted(items) for key,items in values.items()}
 
-    def scenarios(self, *, ipmt="", spdt="", product_model="", q="", status="", generation_id=""):
+    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id=""):
         with self.connect() as c:
             rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
             scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
@@ -168,7 +184,7 @@ class ScenarioRepository:
         for item in rows:item['scopes']=by_id.get(item['scenario_id'],{})
         def matches(item):
             s=item['scopes']
-            return (not generation_id or item['scenario_id'] in generated) and (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[]))
+            return (not generation_id or item['scenario_id'] in generated) and (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[])) and (not industry or industry in s.get('INDUSTRY',[])) and (not customer_name or customer_name in s.get('CUSTOMER_NAME',[]))
         return [item for item in rows if matches(item)]
 
     def scenario(self, scenario_id):
@@ -233,10 +249,12 @@ class ScenarioRepository:
         if status not in {'DRAFT','IN_REVIEW','PUBLISHED','RETIRED'}:raise ValueError('INVALID_SCENARIO_STATUS')
         with self.connect() as c:
             existing=c.execute("SELECT version_no FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing[0]+1 if existing else 1)
+            chain=c.execute("""SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=? ORDER BY v.version_no DESC LIMIT 1""",(payload.get('activity_code',''),)).fetchone()
+            scenario_chain=(chain[0] if chain else '') or ''
             c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,status,version_no,created_at,updated_at)
              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
              ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
-             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),payload.get('scenario_chain',''),payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),status,version))
+             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),status,version))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:
