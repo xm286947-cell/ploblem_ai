@@ -260,3 +260,15 @@ class ScenarioRepository:
                 for value in items:
                     if value.strip():c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(scenario_id,kind,value.strip()))
         return scenario_id
+
+    def delete_scenario(self, scenario_id):
+        with self.connect() as c:
+            if not c.execute("SELECT 1 FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone():raise KeyError(scenario_id)
+            generation_ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))]
+            c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=? OR existing_id=?",(scenario_id,scenario_id))
+            c.execute("DELETE FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,))
+            c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
+            c.execute("DELETE FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))
+            c.execute("DELETE FROM quality_scenario WHERE scenario_id=?",(scenario_id,))
+            for generation_id in generation_ids:
+                c.execute("UPDATE quality_scenario_generation SET candidate_count=(SELECT COUNT(*) FROM quality_scenario_generation_candidate WHERE generation_id=?) WHERE generation_id=?",(generation_id,generation_id))

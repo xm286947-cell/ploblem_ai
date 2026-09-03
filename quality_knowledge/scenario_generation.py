@@ -35,7 +35,7 @@ class ScenarioGenerationService:
         scoped = [row for row in rows if lo <= self._month(row.get('month')) <= hi]
         analysed = [row for row in scoped if any(self.issues.get_latest_analysis(row['knowledge_id'], stage) for stage in ('occurrence','escape','recurrence','capability_gap'))]
         return {'issue_count': len(scoped), 'analysed_count': len(analysed), 'ready': bool(analysed), 'coverage_rate': round(len(analysed)*100/len(scoped),1) if scoped else 0,
-                'items':[{'knowledge_id':x['knowledge_id'],'business_issue_id':x.get('business_issue_id'),'title':x.get('title'),'month':x.get('month'),'severity':x.get('severity')} for x in analysed]}
+                'items':[{'knowledge_id':x['knowledge_id'],'business_issue_id':x.get('business_issue_id'),'title':x.get('title') or x.get('description') or '未提供问题描述','month':x.get('month'),'severity':x.get('severity')} for x in analysed]}
 
     @staticmethod
     def _value(data, *names):

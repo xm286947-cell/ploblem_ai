@@ -59,3 +59,12 @@ def test_new_scenario_route_is_not_swallowed_by_dynamic_detail(tmp_path):
     client=TestClient(create_app(tmp_path/"route.db"))
     page=client.get("/quality-scenarios/new")
     assert page.status_code==200 and "新建质量场景" in page.text
+
+
+def test_scenario_can_be_deleted_from_listing(tmp_path):
+    client=TestClient(create_app(tmp_path/'delete.db'));repository=client.app.state.scenario_repository
+    scenario_id=repository.save_scenario('',{'scenario_code':'DELETE-1','name':'待删除场景','activity_code':'ONLINE_MONITORING','status':'DRAFT'}, {})
+    page=client.get('/quality-scenarios')
+    assert f'/quality-scenarios/{scenario_id}/delete' in page.text
+    response=client.post(f'/quality-scenarios/{scenario_id}/delete',follow_redirects=False)
+    assert response.status_code==303 and repository.scenario(scenario_id) is None

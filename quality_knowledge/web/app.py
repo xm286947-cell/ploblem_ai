@@ -342,6 +342,12 @@ def create_app(db_path):
         saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model,'INDUSTRY':industry,'CUSTOMER_NAME':customer_name,'CUSTOMER_LEVEL':customer_level,'CUSTOMER_STATUS':customer_status,'OCCURRENCE_PHASE':occurrence_phase})
         return RedirectResponse(f'/quality-scenarios/{saved}',303)
 
+    @app.post('/quality-scenarios/{scenario_id}/delete', include_in_schema=False)
+    def quality_scenario_delete(scenario_id: str):
+        try:scenario_repo.delete_scenario(scenario_id)
+        except KeyError:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
+        return RedirectResponse('/quality-scenarios',303)
+
     @app.get('/settings/scenario-taxonomy', response_class=HTMLResponse, include_in_schema=False)
     def scenario_taxonomy_settings(request: Request):
         return tpl.TemplateResponse(request,'scenario_taxonomy.html',{'taxonomy':scenario_repo.taxonomy(),'versions':scenario_repo.versions()})

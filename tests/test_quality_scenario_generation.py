@@ -65,6 +65,14 @@ def test_generation_precheck_requires_existing_analysis(tmp_path):
     assert len(check['items'])==2
 
 
+def test_generation_precheck_uses_description_when_title_is_empty(tmp_path):
+    class EmptyTitleIssues(FakeIssues):
+        def query_issues(self,filters,limit):
+            rows=super().query_issues(filters,limit);rows[0]['title']='';return rows
+    check=ScenarioGenerationService(EmptyTitleIssues(),ScenarioRepository(tmp_path/'scenario.db'),tmp_path,FakeClient()).precheck('PLC','1月','12月')
+    assert check['items'][0]['title']=='变量较多时卡顿'
+
+
 def test_generation_page_is_not_swallowed_by_scenario_detail_route(tmp_path):
     client=TestClient(create_app(tmp_path/'web.db'))
     page=client.get('/quality-scenarios/generate')
