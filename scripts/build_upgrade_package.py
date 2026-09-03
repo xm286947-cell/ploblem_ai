@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH08_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH09_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -66,7 +66,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH08 累计升级说明
+    readme = """# PATCH09 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -89,6 +89,10 @@ def main() -> None:
 - 场景模型输出额度从 4096 提升到至少 8192，并要求 Qwen 关闭思考过程、只返回短JSON。
 - 历史“COMPLETED但0候选”自动纠正为FAILED并提示重新生成，禁止空结果假成功。
 - 修复候选入口不明显或消失：有候选时始终显示醒目的“查看本批候选”按钮，无候选时显示“查看任务详情”。
+- 质量场景新增“场景链路、质量子特性、指标与度量方式建议”三个正式字段。
+- AI生成候选同步生成上述内容；指标建议包含建议指标、计算方法和观测条件，证据不足时不虚构阈值。
+- 候选审核页支持人工修改三个新字段；场景清单直接展示中文生命周期/业务活动、链路、质量子特性和度量建议。
+- 旧数据库启动时自动增加新字段，并按业务活动词典回填已有场景的基础链路；原有场景、筛选和发布状态不受影响。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

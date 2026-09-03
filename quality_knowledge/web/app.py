@@ -309,7 +309,7 @@ def create_app(db_path):
     @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', q: str = '', status: str = '', generation_id: str = ''):
         taxonomy=scenario_repo.taxonomy()
-        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status,generation_id=generation_id),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status,'generation_id':generation_id},'taxonomy':taxonomy,'generation':scenario_repo.generation(generation_id) if generation_id else None})
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status,generation_id=generation_id),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status,'generation_id':generation_id},'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None})
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
@@ -335,10 +335,10 @@ def create_app(db_path):
     def quality_scenario_edit(request: Request, scenario_id: str = ''):
         item=scenario_repo.scenario(scenario_id) if scenario_id else None
         if scenario_id and not item:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
-        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','experience_requirement':'','concern_points':'','quality_attribute':'','applicable_boundary':'','validation_direction':'','status':'DRAFT','scopes':{}},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
+        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','quality_attribute':'','quality_subcharacteristic':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{}},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
 
     @app.post('/quality-scenarios/save', include_in_schema=False)
-    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([])):
+    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), scenario_chain: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([])):
         saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model})
         return RedirectResponse(f'/quality-scenarios/{saved}',303)
 

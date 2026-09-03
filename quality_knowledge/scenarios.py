@@ -55,7 +55,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
 CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,lifecycle_code));
 CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
-CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,applicable_boundary TEXT,validation_direction TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
@@ -69,6 +69,9 @@ class ScenarioRepository:
         self.db_path=str(db_path)
         with self.connect() as c:
             c.executescript(SCHEMA)
+            scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
+            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion'):
+                if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
@@ -82,6 +85,7 @@ class ScenarioRepository:
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
                 for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,"",order))
+            c.execute("""UPDATE quality_scenario SET scenario_chain=COALESCE((SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code ORDER BY v.version_no DESC LIMIT 1),'') WHERE COALESCE(scenario_chain,'')=''""")
 
     def connect(self):
         c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");return c
@@ -229,9 +233,10 @@ class ScenarioRepository:
         if status not in {'DRAFT','IN_REVIEW','PUBLISHED','RETIRED'}:raise ValueError('INVALID_SCENARIO_STATUS')
         with self.connect() as c:
             existing=c.execute("SELECT version_no FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing[0]+1 if existing else 1)
-            c.execute("""INSERT INTO quality_scenario VALUES(?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
-             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),status,version))
+            c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,status,version_no,created_at,updated_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
+             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),payload.get('scenario_chain',''),payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),status,version))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:

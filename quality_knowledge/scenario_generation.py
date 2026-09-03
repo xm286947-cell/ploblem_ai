@@ -13,8 +13,8 @@ from quality_knowledge.model_config import load_quality_issue_ai_config
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
-输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","applicable_boundary":"","validation_direction":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：只能使用给定词典编码；每项必须有来源问题；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过120个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","scenario_chain":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
+要求：只能使用给定词典编码；每项必须有来源问题；scenario_chain 要描述“前置条件→关键操作→触发条件→异常表现→业务影响”；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -90,7 +90,7 @@ class ScenarioGenerationService:
         parsed,_=parse_json_object(response.content,allow_repair=True)
         if not isinstance(parsed,dict) or not isinstance(parsed.get('items'),list): raise ValueError('SCENARIO_AI_SCHEMA_INVALID')
         life={x['lifecycle_code']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']};life.update({x['label_zh']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']})
-        activities={x['activity_code']:(x['activity_code'],x['lifecycle_code']) for x in taxonomy['activities'] if x['enabled']};activities.update({x['label_zh']:(x['activity_code'],x['lifecycle_code']) for x in taxonomy['activities'] if x['enabled']})
+        activities={x['activity_code']:(x['activity_code'],x['lifecycle_code'],x.get('chain_text') or '') for x in taxonomy['activities'] if x['enabled']};activities.update({x['label_zh']:(x['activity_code'],x['lifecycle_code'],x.get('chain_text') or '') for x in taxonomy['activities'] if x['enabled']})
         items=[]
         for raw in parsed['items'][:5]:
             if not isinstance(raw,dict): continue
@@ -99,8 +99,9 @@ class ScenarioGenerationService:
             if not evidence or not activity: continue
             if not lifecycle:lifecycle=activity[1]
             if activity[1]!=lifecycle:continue
-            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','applicable_boundary','validation_direction','evidence_summary')}
+            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','scenario_chain','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
+            item['scenario_chain']=item['scenario_chain'] or activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
             if item['name']: items.append(item)
         return items,response.model

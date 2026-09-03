@@ -32,8 +32,10 @@ class FakeClient:
         self.calls+=1
         payload={"items":[{
             "name":"大型PLC工程在线监控流畅性","lifecycle_code":"SOFTWARE_DEBUGGING","activity_code":"ONLINE_MONITORING",
-            "experience_requirement":"在线调试持续流畅","concern_points":"卡顿、响应慢","quality_attribute":"性能效率",
+            "scenario_chain":"下载运行→在线监控→大量变量刷新→界面卡顿→调试效率下降",
+            "experience_requirement":"在线调试持续流畅","concern_points":"卡顿、响应慢","quality_attribute":"性能效率","quality_subcharacteristic":"时间特性、资源利用率",
             "applicable_boundary":"大型工程、大量变量、持续监控","validation_direction":"验证P95响应时间和长稳退化",
+            "measurement_suggestion":"记录操作响应时间，计算P95；固定变量数量连续观测2小时",
             "evidence_issue_ids":["QK-1","QK-2"],"evidence_summary":"两条问题均指向大变量监控性能退化","confidence":0.88,
             "confirmation_questions":["变量数量边界是多少"]
         }]}
@@ -51,6 +53,9 @@ def test_generate_candidates_are_review_only_and_traceable(tmp_path):
     assert repository.generations()[0]['model_name']=='scenario-model'
     assert repository.generations()[0]['linked_candidate_count']==1
     assert [x['scenario_id'] for x in repository.scenarios(generation_id=result['generation_id'])]==result['scenario_ids']
+    assert item['scenario_chain'].startswith('下载运行')
+    assert item['quality_subcharacteristic']=='时间特性、资源利用率'
+    assert '计算P95' in item['measurement_suggestion']
 
 
 def test_generation_precheck_requires_existing_analysis(tmp_path):
@@ -101,6 +106,17 @@ def test_ai_chinese_taxonomy_and_business_issue_id_are_normalized(tmp_path):
     item=repository.scenario(result['scenario_ids'][0])
     assert item['lifecycle_code']=='SOFTWARE_DEBUGGING' and item['activity_code']=='ONLINE_MONITORING'
     assert item['evidence'][0]['knowledge_id']=='QK-1'
+    assert item['scenario_chain']=='下载运行 → 在线监控 → 变量观察 → 状态分析 → 调整'
+
+
+def test_existing_database_adds_new_scenario_fields_and_backfills_chain(tmp_path):
+    db=tmp_path/'legacy.db'
+    with __import__('sqlite3').connect(db) as c:
+        c.execute("CREATE TABLE quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT UNIQUE,name TEXT,lifecycle_code TEXT,activity_code TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,applicable_boundary TEXT,validation_direction TEXT,status TEXT,version_no INTEGER,created_at TEXT,updated_at TEXT)")
+        c.execute("INSERT INTO quality_scenario VALUES('OLD','OLD-1','旧场景','SOFTWARE_DEBUGGING','ONLINE_MONITORING','','','','','','DRAFT',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+    repository=ScenarioRepository(db);item=repository.scenario('OLD')
+    assert item['scenario_chain']=='下载运行 → 在线监控 → 变量观察 → 状态分析 → 调整'
+    assert item['quality_subcharacteristic'] is None and item['measurement_suggestion'] is None
 
 
 def test_generation_status_endpoint_exposes_progress_and_failure(tmp_path):

@@ -37,13 +37,16 @@ def test_scenario_scope_filters_ipmt_spdt_and_product_model(tmp_path):
     response=client.post("/quality-scenarios/save",data={
         "scenario_id":"","scenario_code":"PLC-DEBUG-001","name":"大型PLC工程在线监控流畅性",
         "lifecycle_code":"SOFTWARE_DEBUGGING","activity_code":"ONLINE_MONITORING",
-        "experience_requirement":"持续流畅","concern_points":"卡顿","quality_attribute":"性能效率",
-        "applicable_boundary":"大型工程","validation_direction":"P95响应时间","status":"PUBLISHED",
+        "scenario_chain":"连接→下载→在线监控→卡顿→调试效率下降","experience_requirement":"持续流畅","concern_points":"卡顿","quality_attribute":"性能效率","quality_subcharacteristic":"时间特性",
+        "applicable_boundary":"大型工程","validation_direction":"性能回归","measurement_suggestion":"记录响应时间并计算P95","status":"PUBLISHED",
         "ipmt":["控制产品IPMT"],"spdt":["PLC SPDT"],"product_model":["AM600"],
     },follow_redirects=False)
     assert response.status_code==303
     matched=client.get("/quality-scenarios?ipmt=控制产品IPMT&spdt=PLC%20SPDT&product_model=AM600")
     assert matched.status_code==200 and "大型PLC工程在线监控流畅性" in matched.text
+    assert "连接→下载→在线监控" in matched.text and "时间特性" in matched.text and "计算P95" in matched.text
+    detail=client.get(response.headers['location'])
+    assert 'name="scenario_chain"' in detail.text and 'name="quality_subcharacteristic"' in detail.text and 'name="measurement_suggestion"' in detail.text
     missing=client.get("/quality-scenarios?product_model=H3U")
     assert "大型PLC工程在线监控流畅性" not in missing.text
     assert "场景资产" in matched.text
