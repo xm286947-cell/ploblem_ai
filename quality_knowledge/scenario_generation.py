@@ -85,18 +85,23 @@ class ScenarioGenerationService:
         response=client.complete([{'role':'system','content':PROMPT},{'role':'user','content':json.dumps({'taxonomy':taxonomy,'records':payload},ensure_ascii=False,default=str)}])
         parsed,_=parse_json_object(response.content,allow_repair=True)
         if not isinstance(parsed,dict) or not isinstance(parsed.get('items'),list): raise ValueError('SCENARIO_AI_SCHEMA_INVALID')
-        life={x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']};activities={x['activity_code']:x['lifecycle_code'] for x in taxonomy['activities'] if x['enabled']}
+        life={x['lifecycle_code']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']};life.update({x['label_zh']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']})
+        activities={x['activity_code']:(x['activity_code'],x['lifecycle_code']) for x in taxonomy['activities'] if x['enabled']};activities.update({x['label_zh']:(x['activity_code'],x['lifecycle_code']) for x in taxonomy['activities'] if x['enabled']})
         items=[]
         for raw in parsed['items'][:5]:
             if not isinstance(raw,dict): continue
-            evidence=[str(x) for x in raw.get('evidence_issue_ids',[]) if str(x) in allowed][:30]
-            if not evidence or raw.get('lifecycle_code') not in life or activities.get(raw.get('activity_code'))!=raw.get('lifecycle_code'): continue
+            evidence=list(dict.fromkeys(allowed[str(x)] for x in raw.get('evidence_issue_ids',[]) if str(x) in allowed))[:30]
+            lifecycle=life.get(raw.get('lifecycle_code'));activity=activities.get(raw.get('activity_code'))
+            if not evidence or not activity: continue
+            if not lifecycle:lifecycle=activity[1]
+            if activity[1]!=lifecycle:continue
             item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','applicable_boundary','validation_direction','evidence_summary')}
+            item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
             if item['name']: items.append(item)
         return items,response.model
 
-    def generate(self, product, start_month, end_month, created_by='WEB_USER',selected_ids=None):
+    def generate(self, product, start_month, end_month, created_by='WEB_USER',selected_ids=None,generation_id=''):
         records=self._records(product,start_month,end_month,selected_ids)
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
         taxonomy=self.scenarios.taxonomy_active()
@@ -106,14 +111,18 @@ class ScenarioGenerationService:
             cfg,_=load_quality_issue_ai_config(self.root,agent_id='DEFAULT')
         client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':max(4096,int(cfg.get('scenario_generation_max_tokens') or 4096)),'temperature':0})
         batch_size=max(5,min(30,int(cfg.get('scenario_generation_batch_size') or 15)))
+        generation_id=generation_id or f"QSG-{uuid.uuid4().hex}"
+        if not self.scenarios.generation(generation_id):self.scenarios.create_generation(generation_id,product,start_month,end_month,len(records),created_by)
+        self.scenarios.update_generation(generation_id,status='RUNNING',progress_text=f'正在分批分析 {len(records)} 个问题')
         mapped=[];model=str(cfg.get('model') or getattr(client,'model',''))
         for start in range(0,len(records),batch_size):
-            chunk=records[start:start+batch_size];items,model=self._complete(client,chunk,{x['knowledge_id'] for x in chunk},compact_taxonomy);mapped.extend(items)
+            chunk=records[start:start+batch_size];allowed={str(x['knowledge_id']):x['knowledge_id'] for x in chunk};allowed.update({str(x.get('business_issue_id')):x['knowledge_id'] for x in chunk if x.get('business_issue_id')});items,model=self._complete(client,chunk,allowed,compact_taxonomy);mapped.extend(items)
+            self.scenarios.update_generation(generation_id,progress_text=f'已完成 {min(start+len(chunk),len(records))}/{len(records)} 个问题')
         if len(records)>batch_size and mapped:
             reduced_input=[{**x,'source_count':len(x['evidence_issue_ids'])} for x in mapped]
-            reduced,model=self._complete(client,reduced_input,{i for x in mapped for i in x['evidence_issue_ids']},compact_taxonomy)
+            reduced_allowed={str(i):i for x in mapped for i in x['evidence_issue_ids']};reduced,model=self._complete(client,reduced_input,reduced_allowed,compact_taxonomy)
             if reduced:mapped=reduced
-        generation_id=f"QSG-{uuid.uuid4().hex}"
+        if not mapped:raise ValueError('AI未生成有效候选：请检查模型输出的场景名称、生命周期、业务活动和来源问题')
         created=[]
         for index,item in enumerate(mapped,1):
             code=f"AI-{hashlib.sha1((generation_id+str(index)).encode()).hexdigest()[:10].upper()}"
@@ -121,5 +130,10 @@ class ScenarioGenerationService:
             scopes={'IPMT':sorted({x['itr_cs_context'].get('ipmt','') for x in source_records}-{''}),'SPDT':sorted({x['itr_cs_context'].get('spdt','') for x in source_records}-{''}),'PRODUCT_MODEL':sorted({x['itr_cs_context'].get('product_model','') for x in source_records}-{''})}
             scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model)
             created.append(scenario_id)
-        self.scenarios.save_generation(generation_id,product,start_month,end_month,len(records),len(created),model,created_by)
+        self.scenarios.update_generation(generation_id,status='COMPLETED',progress_text='生成完成，等待人工审核',candidate_count=len(created),model_name=model,error_message='')
         return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(created),'scenario_ids':created,'model':model}
+
+    def run_job(self,generation_id,product,start_month,end_month,selected_ids,created_by='WEB_USER'):
+        try:return self.generate(product,start_month,end_month,created_by,selected_ids,generation_id)
+        except Exception as error:
+            self.scenarios.update_generation(generation_id,status='FAILED',progress_text='生成失败',error_message=str(error));return None

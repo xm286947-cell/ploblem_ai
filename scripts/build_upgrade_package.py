@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH04_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH05_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -66,7 +66,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH04 累计升级说明
+    readme = """# PATCH05 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -81,6 +81,8 @@ def main() -> None:
 - 生成前增加问题范围预览，可人工勾选或排除具体问题。
 - 自动读取已关联的 ITR 彻底解决单，补充 IPMT、SPDT、产品型号、客户状态、问题根因和 TRC 纠正信息。
 - 候选生成后自动检查已发布及待审核场景，显示相似度和合并提醒。
+- 修复 AI 生成候选无结果且无状态的问题：任务改为后台运行，页面显示等待、运行进度、完成或失败原因。
+- 兼容模型返回中文生命周期/活动名称及 ITR 业务编号，避免有效候选被静默过滤。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

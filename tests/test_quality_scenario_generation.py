@@ -87,3 +87,25 @@ def test_generated_candidate_warns_when_published_scenario_is_similar(tmp_path):
     result=ScenarioGenerationService(FakeIssues(),repository,tmp_path,FakeClient()).generate('PLC','1月','12月')
     candidate=repository.scenario(result['scenario_ids'][0])
     assert candidate['duplicates'] and candidate['duplicates'][0]['status']=='PUBLISHED'
+
+
+def test_ai_chinese_taxonomy_and_business_issue_id_are_normalized(tmp_path):
+    class AliasClient:
+        def complete(self,messages):
+            item={"items":[{"name":"在线监控流畅性","lifecycle_code":"软件调试","activity_code":"程序在线监控与调试","experience_requirement":"流畅","concern_points":"卡顿","quality_attribute":"性能效率","applicable_boundary":"大型工程","validation_direction":"长稳性能","evidence_issue_ids":["ITR001"],"evidence_summary":"来源明确","confidence":0.8,"confirmation_questions":[]}]}
+            return AIResponse(json.dumps(item,ensure_ascii=False),'alias-model',{})
+    repository=ScenarioRepository(tmp_path/'scenario.db')
+    result=ScenarioGenerationService(FakeIssues(),repository,tmp_path,AliasClient()).generate('PLC','1月','12月',selected_ids=['QK-1'])
+    item=repository.scenario(result['scenario_ids'][0])
+    assert item['lifecycle_code']=='SOFTWARE_DEBUGGING' and item['activity_code']=='ONLINE_MONITORING'
+    assert item['evidence'][0]['knowledge_id']=='QK-1'
+
+
+def test_generation_status_endpoint_exposes_progress_and_failure(tmp_path):
+    client=TestClient(create_app(tmp_path/'web.db'));repository=client.app.state.scenario_repository
+    repository.create_generation('QSG-STATUS','PLC','1月','12月',10,'TEST')
+    repository.update_generation('QSG-STATUS',status='FAILED',progress_text='生成失败',error_message='模型响应格式错误')
+    status=client.get('/api/quality-scenario-generations/QSG-STATUS').json()
+    assert status['status']=='FAILED' and status['error_message']=='模型响应格式错误'
+    page=client.get('/quality-scenarios/generate?job_id=QSG-STATUS')
+    assert 'scenario-job-status' in page.text and '状态查询失败' in page.text

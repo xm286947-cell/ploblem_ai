@@ -68,6 +68,9 @@ class ScenarioRepository:
         self.db_path=str(db_path)
         with self.connect() as c:
             c.executescript(SCHEMA)
+            columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
+            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT"}.items():
+                if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
@@ -166,8 +169,19 @@ class ScenarioRepository:
             with self.connect() as c:item['duplicates']=[dict(x) for x in c.execute("SELECT d.*,s.name,s.status FROM quality_scenario_duplicate d JOIN quality_scenario s ON s.scenario_id=d.existing_id WHERE d.candidate_id=? ORDER BY d.similarity DESC",(item['scenario_id'],))]
         return item
 
-    def save_generation(self,generation_id,product,start,end,source_count,candidate_count,model,created_by):
-        with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by) VALUES(?,?,?,?,?,?,?,?)",(generation_id,product,start,end,source_count,candidate_count,model,created_by))
+    def create_generation(self,generation_id,product,start,end,source_count,created_by):
+        with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by,status,progress_text) VALUES(?,?,?,?,?,0,'',?,'QUEUED','等待开始')",(generation_id,product,start,end,source_count,created_by))
+
+    def update_generation(self,generation_id,**values):
+        allowed={'status','progress_text','error_message','candidate_count','model_name'};data={k:v for k,v in values.items() if k in allowed}
+        if not data:return
+        assignments=','.join(f'{key}=?' for key in data)
+        finished=",finished_at=CURRENT_TIMESTAMP" if data.get('status') in {'COMPLETED','FAILED'} else ''
+        with self.connect() as c:c.execute(f"UPDATE quality_scenario_generation SET {assignments}{finished} WHERE generation_id=?",(*data.values(),generation_id))
+
+    def generation(self,generation_id):
+        with self.connect() as c:
+            row=c.execute("SELECT * FROM quality_scenario_generation WHERE generation_id=?",(generation_id,)).fetchone();return dict(row) if row else None
 
     def generations(self):
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_generation ORDER BY created_at DESC LIMIT 30")]

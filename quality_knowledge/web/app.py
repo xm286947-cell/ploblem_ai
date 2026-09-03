@@ -5,6 +5,8 @@ import html
 import json
 import logging
 import tempfile
+import threading
+import uuid
 from urllib.parse import urlencode
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -310,18 +312,23 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status},'taxonomy':taxonomy})
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0):
+    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
         scope=scenario_generation_svc.precheck(product_code,start_month,end_month) if preview and product_code and start_month and end_month else None
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}})
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'job':scenario_repo.generation(job_id) if job_id else None,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...), selected_ids: list[str] = Form([])):
-        try:
-            if not selected_ids:raise ValueError('SCENARIO_SOURCE_SELECTION_REQUIRED')
-            result=scenario_generation_svc.generate(product_code,start_month,end_month,selected_ids=selected_ids);error=''
-        except Exception as caught:
-            result=None;error=str(caught)
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result,'error':error,'scope':None,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}},status_code=400 if error else 200)
+        if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')
+        generation_id=f'QSG-{uuid.uuid4().hex}'
+        scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')
+        threading.Thread(target=scenario_generation_svc.run_job,args=(generation_id,product_code,start_month,end_month,list(selected_ids)),daemon=True,name=f'scenario-{generation_id[-8:]}').start()
+        return RedirectResponse(f'/quality-scenarios/generate?job_id={generation_id}',303)
+
+    @app.get('/api/quality-scenario-generations/{generation_id}')
+    def quality_scenario_generation_status(generation_id: str):
+        job=scenario_repo.generation(generation_id)
+        if not job:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
+        return job
 
     @app.get('/quality-scenarios/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
     @app.get('/quality-scenarios/new', response_class=HTMLResponse, include_in_schema=False)
