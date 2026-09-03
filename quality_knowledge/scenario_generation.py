@@ -11,9 +11,10 @@ from builder.json_response import parse_json_object
 from quality_knowledge.model_config import load_quality_issue_ai_config
 
 
-PROMPT = """你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。
+PROMPT = """/no_think
+你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
 输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","applicable_boundary":"","validation_direction":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：只能使用给定词典编码；每项必须有来源问题；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多5项；中文输出。"""
+要求：只能使用给定词典编码；每项必须有来源问题；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过120个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -72,11 +73,14 @@ class ScenarioGenerationService:
             analyses={stage:self.issues.get_latest_analysis(row['knowledge_id'],stage) for stage in ('occurrence','escape','recurrence','capability_gap')}
             if not any(analyses.values()): continue
             results={stage:(analyses[stage] or {}).get('result') or {} for stage in analyses}
+            occurrence=results['occurrence'];escape=results['escape'];recurrence=results['recurrence'];raw_gaps=results['capability_gap'].get('capability_gaps') or []
             records.append({
                 'knowledge_id':row['knowledge_id'],'business_issue_id':row.get('business_issue_id'),'title':row.get('title'),
-                'description':str(row.get('description') or '')[:500],'month':row.get('month'),'severity':row.get('severity'),
-                'occurrence':results['occurrence'],'escape':results['escape'],'recurrence':results['recurrence'],
-                'capability_gaps':(results['capability_gap'].get('capability_gaps') or [])[:6],
+                'description':str(row.get('description') or '')[:300],'month':row.get('month'),'severity':row.get('severity'),
+                'occurrence':{'root_cause':str(self._value(occurrence,'root_cause_summary','root_cause'))[:240],'failure_mechanism':str(self._value(occurrence,'failure_mechanism'))[:240],'category':str(self._value(occurrence,'occurrence_category'))[:80]},
+                'escape':{'reason':str(self._value(escape,'escape_cause_summary','escape_reason'))[:240],'verification_gap':str(self._value(escape,'verification_gap'))[:240],'missing_control':str(self._value(escape,'missing_control'))[:160]},
+                'recurrence':{'risk':str(self._value(recurrence,'recurrence_risk_level'))[:40],'customer_impact':str(self._value(recurrence,'customer_impact'))[:200]},
+                'capability_gaps':[{'dimension':str(gap.get('dimension') or '')[:40],'category':str(gap.get('category') or '')[:80],'description':str(gap.get('description') or gap.get('gap_description') or '')[:200]} for gap in raw_gaps[:4] if isinstance(gap,dict)],
                 'itr_cs_context':self._cs_context(row['knowledge_id']),
             })
         return records
@@ -109,7 +113,7 @@ class ScenarioGenerationService:
         cfg={}
         if self.ai_client is None:
             cfg,_=load_quality_issue_ai_config(self.root,agent_id='DEFAULT')
-        client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':max(4096,int(cfg.get('scenario_generation_max_tokens') or 4096)),'temperature':0})
+        client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':max(8192,int(cfg.get('scenario_generation_max_tokens') or 8192)),'temperature':0})
         batch_size=max(5,min(30,int(cfg.get('scenario_generation_batch_size') or 15)))
         generation_id=generation_id or f"QSG-{uuid.uuid4().hex}"
         if not self.scenarios.generation(generation_id):self.scenarios.create_generation(generation_id,product,start_month,end_month,len(records),created_by)

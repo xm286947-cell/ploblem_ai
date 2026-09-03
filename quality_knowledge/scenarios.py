@@ -76,6 +76,8 @@ class ScenarioRepository:
                 try:generation_id=json.loads(row['evidence_summary'] or '{}').get('generation_id')
                 except (TypeError,json.JSONDecodeError):generation_id=''
                 if generation_id:c.execute("INSERT OR IGNORE INTO quality_scenario_generation_candidate(generation_id,scenario_id) VALUES(?,?)",(generation_id,row['scenario_id']))
+            c.execute("""UPDATE quality_scenario_generation SET status='FAILED',progress_text='历史任务未生成有效候选',error_message='本次AI输出没有形成可用场景，请使用新版本重新生成',finished_at=COALESCE(finished_at,CURRENT_TIMESTAMP)
+                       WHERE status='COMPLETED' AND COALESCE(candidate_count,0)=0 AND NOT EXISTS(SELECT 1 FROM quality_scenario_generation_candidate x WHERE x.generation_id=quality_scenario_generation.generation_id)""")
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))

@@ -130,3 +130,22 @@ def test_generation_without_candidate_still_has_task_detail_button(tmp_path):
     repository.update_generation('QSG-EMPTY',status='FAILED',error_message='没有有效候选')
     page=client.get('/quality-scenarios/generate')
     assert '/quality-scenarios/generate?job_id=QSG-EMPTY' in page.text and '查看任务详情' in page.text
+
+
+def test_ai_input_uses_compact_analysis_instead_of_full_stage_payload(tmp_path):
+    class HugeIssues(FakeIssues):
+        def get_latest_analysis(self,knowledge_id,stage):
+            result=super().get_latest_analysis(knowledge_id,stage)
+            result['result']['unused_large_field']='X'*50000
+            return result
+    records=ScenarioGenerationService(HugeIssues(),ScenarioRepository(tmp_path/'scenario.db'),tmp_path,FakeClient())._records('PLC','1月','12月',['QK-1'])
+    encoded=json.dumps(records,ensure_ascii=False)
+    assert 'unused_large_field' not in encoded and len(encoded)<5000
+
+
+def test_legacy_completed_zero_candidate_is_migrated_to_failed(tmp_path):
+    db=tmp_path/'scenario.db';repository=ScenarioRepository(db)
+    repository.create_generation('QSG-OLD','IFA','1月','7月',1,'TEST')
+    repository.update_generation('QSG-OLD',status='COMPLETED',candidate_count=0,model_name='old-model')
+    migrated=ScenarioRepository(db).generation('QSG-OLD')
+    assert migrated['status']=='FAILED' and '重新生成' in migrated['error_message']
