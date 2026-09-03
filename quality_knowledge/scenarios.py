@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scop
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL,existing_id TEXT NOT NULL,similarity REAL NOT NULL,reason TEXT,PRIMARY KEY(candidate_id,existing_id));
+CREATE TABLE IF NOT EXISTS quality_scenario_generation_candidate(generation_id TEXT NOT NULL,scenario_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,scenario_id));
 """
 
 
@@ -71,6 +72,10 @@ class ScenarioRepository:
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
+            for row in c.execute("SELECT scenario_id,evidence_summary FROM quality_scenario_evidence").fetchall():
+                try:generation_id=json.loads(row['evidence_summary'] or '{}').get('generation_id')
+                except (TypeError,json.JSONDecodeError):generation_id=''
+                if generation_id:c.execute("INSERT OR IGNORE INTO quality_scenario_generation_candidate(generation_id,scenario_id) VALUES(?,?)",(generation_id,row['scenario_id']))
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
@@ -147,16 +152,17 @@ class ScenarioRepository:
                 values.setdefault(row['scope_type'],set()).add(row['scope_value'])
         return {key:sorted(items) for key,items in values.items()}
 
-    def scenarios(self, *, ipmt="", spdt="", product_model="", q="", status=""):
+    def scenarios(self, *, ipmt="", spdt="", product_model="", q="", status="", generation_id=""):
         with self.connect() as c:
             rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
             scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
+            generated={x[0] for x in c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=?",(generation_id,))} if generation_id else set()
         by_id={}
         for row in scopes:by_id.setdefault(row['scenario_id'],{}).setdefault(row['scope_type'],[]).append(row['scope_value'])
         for item in rows:item['scopes']=by_id.get(item['scenario_id'],{})
         def matches(item):
             s=item['scopes']
-            return (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[]))
+            return (not generation_id or item['scenario_id'] in generated) and (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[]))
         return [item for item in rows if matches(item)]
 
     def scenario(self, scenario_id):
@@ -184,7 +190,7 @@ class ScenarioRepository:
             row=c.execute("SELECT * FROM quality_scenario_generation WHERE generation_id=?",(generation_id,)).fetchone();return dict(row) if row else None
 
     def generations(self):
-        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_generation ORDER BY created_at DESC LIMIT 30")]
+        with self.connect() as c:return [dict(x) for x in c.execute("SELECT g.*,(SELECT COUNT(*) FROM quality_scenario_generation_candidate x WHERE x.generation_id=g.generation_id) linked_candidate_count FROM quality_scenario_generation g ORDER BY g.created_at DESC LIMIT 30")]
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
         payload={**item,'scenario_code':code,'status':'IN_REVIEW','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
@@ -192,6 +198,7 @@ class ScenarioRepository:
         summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[])},ensure_ascii=False)
         with self.connect() as c:
             for knowledge_id in item.get('evidence_issue_ids',[]):c.execute("INSERT OR IGNORE INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,knowledge_id,summary))
+            c.execute("INSERT OR IGNORE INTO quality_scenario_generation_candidate(generation_id,scenario_id) VALUES(?,?)",(generation_id,scenario_id))
         self._detect_duplicates(scenario_id)
         return scenario_id
 

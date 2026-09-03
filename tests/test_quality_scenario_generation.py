@@ -49,6 +49,8 @@ def test_generate_candidates_are_review_only_and_traceable(tmp_path):
     assert item['status']=='IN_REVIEW'
     assert {x['knowledge_id'] for x in item['evidence']}=={'QK-1','QK-2'}
     assert repository.generations()[0]['model_name']=='scenario-model'
+    assert repository.generations()[0]['linked_candidate_count']==1
+    assert [x['scenario_id'] for x in repository.scenarios(generation_id=result['generation_id'])]==result['scenario_ids']
 
 
 def test_generation_precheck_requires_existing_analysis(tmp_path):
@@ -109,3 +111,14 @@ def test_generation_status_endpoint_exposes_progress_and_failure(tmp_path):
     assert status['status']=='FAILED' and status['error_message']=='模型响应格式错误'
     page=client.get('/quality-scenarios/generate?job_id=QSG-STATUS')
     assert 'scenario-job-status' in page.text and '状态查询失败' in page.text
+
+
+def test_generation_batch_has_direct_candidate_entry(tmp_path):
+    db=tmp_path/'web.db';client=TestClient(create_app(db));repository=client.app.state.scenario_repository
+    repository.create_generation('QSG-LINK','PLC','1月','12月',2,'TEST')
+    repository.save_generated_candidate('AI-LINK',{'name':'在线监控流畅性','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','experience_requirement':'流畅','concern_points':'卡顿','quality_attribute':'性能效率','applicable_boundary':'大型工程','validation_direction':'性能验证','evidence_summary':'证据','confidence':0.8,'confirmation_questions':[],'evidence_issue_ids':['QK-1']},{},'QSG-LINK','PLC','1月','12月','model-x')
+    repository.update_generation('QSG-LINK',status='COMPLETED',candidate_count=1,model_name='model-x')
+    history=client.get('/quality-scenarios/generate').text
+    assert '/quality-scenarios?generation_id=QSG-LINK' in history and '已关联 1' in history
+    listing=client.get('/quality-scenarios?generation_id=QSG-LINK')
+    assert listing.status_code==200 and '在线监控流畅性' in listing.text and '本次生成候选' in listing.text

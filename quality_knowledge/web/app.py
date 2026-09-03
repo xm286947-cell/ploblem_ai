@@ -307,9 +307,9 @@ def create_app(db_path):
         return RedirectResponse('/settings/associations',303)
 
     @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', q: str = '', status: str = ''):
+    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', q: str = '', status: str = '', generation_id: str = ''):
         taxonomy=scenario_repo.taxonomy()
-        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status},'taxonomy':taxonomy})
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status,generation_id=generation_id),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status,'generation_id':generation_id},'taxonomy':taxonomy,'generation':scenario_repo.generation(generation_id) if generation_id else None})
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
