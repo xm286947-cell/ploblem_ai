@@ -112,6 +112,7 @@ class MaterialRepository:
             )
             for row in defaults:
                 connection.execute("INSERT OR IGNORE INTO association_rule(rule_id,rule_name,source_type,target_type,source_field,target_field,transform,priority) VALUES(?,?,?,?,?,?,?,?)", row)
+        self.refresh_links()
 
     def connect(self):
         connection = sqlite3.connect(self.db_path)
@@ -149,14 +150,18 @@ class MaterialRepository:
             for rule in rules:
                 if rule["source_type"]=="ESCAPE_ANALYSIS":allowed[rule["target_type"]]=rule
                 else:allowed[rule["source_type"]]=rule
+            try:issue_rows=c.execute("SELECT knowledge_id,business_issue_id FROM quality_issue").fetchall()
+            except sqlite3.OperationalError:issue_rows=[]
+            issues_by_itr={}
+            for issue in issue_rows:issues_by_itr.setdefault(normalize_itr(issue['business_issue_id']),[]).append(issue['knowledge_id'])
             materials = c.execute("SELECT material_id,material_type,canonical_itr FROM source_material WHERE canonical_itr<>''").fetchall()
             for material in materials:
                 rule=allowed.get(material["material_type"])
                 if not rule:continue
-                issues = c.execute("SELECT knowledge_id FROM quality_issue WHERE UPPER(REPLACE(business_issue_id,' ',''))=?", (material["canonical_itr"],)).fetchall()
+                issues=issues_by_itr.get(normalize_itr(material['canonical_itr']),[])
                 status = "LINKED" if len(issues) == 1 else ("CONFLICT" if len(issues) > 1 else "ITR_NOT_FOUND")
                 if len(issues) == 1:
-                    c.execute("INSERT OR IGNORE INTO issue_material_link(link_id,knowledge_id,material_id,rule_id,link_status,match_value) VALUES(?,?,?,?,?,?)", (f"LNK-{uuid.uuid4().hex}", issues[0][0], material["material_id"], rule["rule_id"], status, material["canonical_itr"]))
+                    c.execute("INSERT OR IGNORE INTO issue_material_link(link_id,knowledge_id,material_id,rule_id,link_status,match_value) VALUES(?,?,?,?,?,?)", (f"LNK-{uuid.uuid4().hex}", issues[0], material["material_id"], rule["rule_id"], status, material["canonical_itr"]))
 
     def materials_for_issue(self, knowledge_id):
         with self.connect() as c:
@@ -228,8 +233,13 @@ class MaterialRepository:
     def link_preview(self):
         with self.connect() as c:
             candidates=c.execute("SELECT COUNT(DISTINCT canonical_itr) FROM source_material WHERE canonical_itr<>''").fetchone()[0]
-            matched=c.execute("SELECT COUNT(DISTINCT m.canonical_itr) FROM source_material m JOIN quality_issue q ON UPPER(REPLACE(q.business_issue_id,' ',''))=m.canonical_itr WHERE m.canonical_itr<>''").fetchone()[0]
-            conflicts=c.execute("SELECT COUNT(*) FROM (SELECT m.canonical_itr FROM source_material m JOIN quality_issue q ON UPPER(REPLACE(q.business_issue_id,' ',''))=m.canonical_itr GROUP BY m.canonical_itr HAVING COUNT(DISTINCT q.knowledge_id)>1)").fetchone()[0]
+            material_itrs={normalize_itr(row[0]) for row in c.execute("SELECT canonical_itr FROM source_material WHERE canonical_itr<>''")}
+            issues_by_itr={}
+            try:issue_rows=c.execute("SELECT knowledge_id,business_issue_id FROM quality_issue").fetchall()
+            except sqlite3.OperationalError:issue_rows=[]
+            for row in issue_rows:issues_by_itr.setdefault(normalize_itr(row['business_issue_id']),set()).add(row['knowledge_id'])
+            matched=sum(1 for value in material_itrs if issues_by_itr.get(value))
+            conflicts=sum(1 for value in material_itrs if len(issues_by_itr.get(value,set()))>1)
             return {"candidates":candidates,"matched":matched,"unmatched":max(0,candidates-matched),"conflicts":conflicts}
 
 

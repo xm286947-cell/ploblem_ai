@@ -72,6 +72,17 @@ def test_group_isolation_versioning_and_linking(tmp_path):
     assert json.dumps(linked,ensure_ascii=False).find("测试问题") >= 0
 
 
+def test_cs_suffixed_analysis_issue_links_to_resolution_record(tmp_path):
+    db=tmp_path/'cs-issue.db';repo=MaterialRepository(db)
+    with repo.connect() as c:
+        c.execute("CREATE TABLE quality_issue(knowledge_id TEXT PRIMARY KEY,business_issue_id TEXT)")
+        c.execute("INSERT INTO quality_issue VALUES('K-CS','ITR20260605084CS')")
+    source=tmp_path/'cs.xlsx';workbook(source,'ITR_CS','ITR20260605084CS')
+    MaterialImportService(repo).import_file(source,'ITR-CS',2)
+    assert [x['material_type'] for x in repo.materials_for_issue('K-CS')]==['ITR_CS']
+    assert repo.link_preview()['matched']==1
+
+
 def test_default_groups_do_not_enter_ai_or_insight(tmp_path):
     repo=MaterialRepository(tmp_path/"app.db")
     groups={x["material_type"]:x for x in repo.groups(False)}
