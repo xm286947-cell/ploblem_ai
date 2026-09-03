@@ -316,6 +316,10 @@ def create_app(db_path):
         scope=scenario_generation_svc.precheck(product_code,start_month,end_month) if preview and product_code and start_month and end_month else None
         return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'job':scenario_repo.generation(job_id) if job_id else None,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}})
 
+    @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_insights(request: Request, status: str = ''):
+        return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status})
+
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...), selected_ids: list[str] = Form([])):
         if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')

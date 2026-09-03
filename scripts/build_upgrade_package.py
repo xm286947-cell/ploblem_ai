@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH13_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH14_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -26,6 +26,7 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/templates/quality_scenarios.html",
     "quality_knowledge/web/templates/quality_scenario_edit.html",
     "quality_knowledge/web/templates/quality_scenario_generate.html",
+    "quality_knowledge/web/templates/quality_scenario_insights.html",
     "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
@@ -66,7 +67,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH13 累计升级说明
+    readme = """# PATCH14 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -105,6 +106,10 @@ def main() -> None:
 - 在“运行执行”阶段新增独立业务活动“掉电数据保持与上电恢复”，包含完整场景链路、价值描述和质量目标；已有场景词典自动增量升级，无需重新初始化。
 - AI候选增加分类硬校验：掉电、断电、保持变量丢失、上电恢复异常等证据强制归入该业务活动，不再依赖模型自由选择。
 - 原始阶段为“终端正常使用”且没有明确配置操作证据时，禁止候选落入“工程配置”，自动回到运行类活动并增加人工确认提示。
+- 批量场景生成新增逐问题覆盖账本，明确显示已处理、已识别、待确认、失败和未处理数量；未覆盖问题不再被静默标记为完成。
+- 每批AI未返回的问题会自动单条补跑；仍无法识别的记录进入待人工确认或失败状态，完整保留问题编号和错误原因。
+- 取消最终再次压缩候选造成的问题丢失；跨批次仅合并业务活动、质量子特性和场景名称一致的基础场景，并保留行业、客户和产品差异范围。
+- 新增“行业与质量场景看板”，支持从业务活动查看行业分布，以及从行业反查主要业务活动和来源问题规模。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`
@@ -113,6 +118,7 @@ def main() -> None:
 - 质量场景库：`/quality-scenarios`
 - AI生成候选：`/quality-scenarios/generate`
 - 场景词典配置：`/settings/scenario-taxonomy`
+- 行业与质量场景看板：`/quality-scenarios/insights`
 
 本包已显式包含上述三个工作台所需的侧边栏入口、路由、数据服务、列表页、详情页和样式文件。
 

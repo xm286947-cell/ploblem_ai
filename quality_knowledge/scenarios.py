@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMAR
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL,existing_id TEXT NOT NULL,similarity REAL NOT NULL,reason TEXT,PRIMARY KEY(candidate_id,existing_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation_candidate(generation_id TEXT NOT NULL,scenario_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,scenario_id));
+CREATE TABLE IF NOT EXISTS quality_scenario_issue_classification(generation_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,business_issue_id TEXT,status TEXT NOT NULL DEFAULT 'PENDING',scenario_id TEXT,activity_code TEXT,lifecycle_code TEXT,error_message TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,knowledge_id));
 """
 
 
@@ -78,7 +79,7 @@ class ScenarioRepository:
             for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
-            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT"}.items():
+            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
             for row in c.execute("SELECT scenario_id,evidence_summary FROM quality_scenario_evidence").fetchall():
                 try:generation_id=json.loads(row['evidence_summary'] or '{}').get('generation_id')
@@ -215,13 +216,33 @@ class ScenarioRepository:
         return item
 
     def create_generation(self,generation_id,product,start,end,source_count,created_by):
-        with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by,status,progress_text) VALUES(?,?,?,?,?,0,'',?,'QUEUED','等待开始')",(generation_id,product,start,end,source_count,created_by))
+        with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by,status,progress_text,unprocessed_count) VALUES(?,?,?,?,?,0,'',?,'QUEUED','等待开始',?)",(generation_id,product,start,end,source_count,created_by,source_count))
+
+    def initialize_issue_classifications(self,generation_id,records):
+        with self.connect() as c:
+            for row in records:
+                c.execute("INSERT OR IGNORE INTO quality_scenario_issue_classification(generation_id,knowledge_id,business_issue_id,status) VALUES(?,?,?,'PENDING')",(generation_id,row['knowledge_id'],row.get('business_issue_id')))
+        self.refresh_generation_coverage(generation_id)
+
+    def mark_issue_classification(self,generation_id,knowledge_id,status,*,scenario_id='',activity_code='',lifecycle_code='',error_message=''):
+        with self.connect() as c:
+            c.execute("""UPDATE quality_scenario_issue_classification SET status=?,scenario_id=?,activity_code=?,lifecycle_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE generation_id=? AND knowledge_id=?""",(status,scenario_id or None,activity_code or None,lifecycle_code or None,error_message or None,generation_id,knowledge_id))
+
+    def refresh_generation_coverage(self,generation_id):
+        with self.connect() as c:
+            counts={row['status']:row['n'] for row in c.execute("SELECT status,COUNT(*) n FROM quality_scenario_issue_classification WHERE generation_id=? GROUP BY status",(generation_id,))}
+            total=sum(counts.values());classified=counts.get('CLASSIFIED',0);review=counts.get('REVIEW_REQUIRED',0);failed=counts.get('FAILED',0);unprocessed=counts.get('PENDING',0)
+            c.execute("UPDATE quality_scenario_generation SET processed_count=?,classified_count=?,review_required_count=?,failed_count=?,unprocessed_count=? WHERE generation_id=?",(classified+review+failed,classified,review,failed,unprocessed,generation_id))
+        return {'total':total,'processed_count':classified+review+failed,'classified_count':classified,'review_required_count':review,'failed_count':failed,'unprocessed_count':unprocessed}
+
+    def issue_classifications(self,generation_id):
+        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_issue_classification WHERE generation_id=? ORDER BY knowledge_id",(generation_id,))]
 
     def update_generation(self,generation_id,**values):
-        allowed={'status','progress_text','error_message','candidate_count','model_name'};data={k:v for k,v in values.items() if k in allowed}
+        allowed={'status','progress_text','error_message','candidate_count','model_name','processed_count','classified_count','review_required_count','failed_count','unprocessed_count'};data={k:v for k,v in values.items() if k in allowed}
         if not data:return
         assignments=','.join(f'{key}=?' for key in data)
-        finished=",finished_at=CURRENT_TIMESTAMP" if data.get('status') in {'COMPLETED','FAILED'} else ''
+        finished=",finished_at=CURRENT_TIMESTAMP" if data.get('status') in {'COMPLETED','PARTIAL','FAILED'} else ''
         with self.connect() as c:c.execute(f"UPDATE quality_scenario_generation SET {assignments}{finished} WHERE generation_id=?",(*data.values(),generation_id))
 
     def generation(self,generation_id):
@@ -230,6 +251,29 @@ class ScenarioRepository:
 
     def generations(self):
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT g.*,(SELECT COUNT(*) FROM quality_scenario_generation_candidate x WHERE x.generation_id=g.generation_id) linked_candidate_count FROM quality_scenario_generation g ORDER BY g.created_at DESC LIMIT 30")]
+
+    def insights(self, *, status=''):
+        items=self.scenarios(status=status)
+        taxonomy=self.taxonomy_active() or {'activities':[],'lifecycles':[]}
+        activity_labels={x['activity_code']:x['label_zh'] for x in taxonomy['activities']}
+        lifecycle_labels={x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']}
+        activity_rows={};industry_rows={}
+        for item in items:
+            industries=item.get('scopes',{}).get('INDUSTRY') or ['未提供行业']
+            evidence_count=len((self.scenario(item['scenario_id']) or {}).get('evidence',[]))
+            activity=item.get('activity_code') or 'UNCLASSIFIED'
+            a=activity_rows.setdefault(activity,{'activity_code':activity,'activity_label':activity_labels.get(activity,activity),'lifecycle_label':lifecycle_labels.get(item.get('lifecycle_code'),item.get('lifecycle_code') or '未分类'),'scenario_ids':set(),'issue_count':0,'industries':{}})
+            a['scenario_ids'].add(item['scenario_id']);a['issue_count']+=evidence_count
+            for industry in industries:
+                a['industries'][industry]=a['industries'].get(industry,0)+evidence_count
+                i=industry_rows.setdefault(industry,{'industry':industry,'scenario_ids':set(),'issue_count':0,'activities':{}})
+                i['scenario_ids'].add(item['scenario_id']);i['issue_count']+=evidence_count;i['activities'][activity_labels.get(activity,activity)]=i['activities'].get(activity_labels.get(activity,activity),0)+evidence_count
+        def finish(rows):
+            result=[]
+            for row in rows.values():
+                row['scenario_count']=len(row.pop('scenario_ids'));result.append(row)
+            return sorted(result,key=lambda x:(-x['issue_count'],str(x.get('activity_label') or x.get('industry'))))
+        return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(len((self.scenario(x['scenario_id']) or {}).get('evidence',[])) for x in items)}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
         payload={**item,'scenario_code':code,'status':'IN_REVIEW','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}

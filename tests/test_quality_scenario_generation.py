@@ -195,3 +195,42 @@ def test_legacy_completed_zero_candidate_is_migrated_to_failed(tmp_path):
     repository.update_generation('QSG-OLD',status='COMPLETED',candidate_count=0,model_name='old-model')
     migrated=ScenarioRepository(db).generation('QSG-OLD')
     assert migrated['status']=='FAILED' and '重新生成' in migrated['error_message']
+
+
+def test_missing_issue_is_retried_and_coverage_is_complete(tmp_path):
+    class RetryClient(FakeClient):
+        def complete(self,messages):
+            self.calls+=1
+            records=json.loads(messages[-1]['content'])['records']
+            ids=[x['knowledge_id'] for x in records]
+            evidence=ids[:1] if len(ids)>1 else ids
+            payload={'items':[{'name':'监控场景-'+evidence[0],'lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','quality_subcharacteristic':'时间特性','evidence_issue_ids':evidence,'confidence':0.8}]}
+            return AIResponse(json.dumps(payload,ensure_ascii=False),'retry-model',{})
+    repository=ScenarioRepository(tmp_path/'coverage.db');client=RetryClient()
+    result=ScenarioGenerationService(FakeIssues(),repository,tmp_path,client).generate('PLC','1月','12月')
+    assert client.calls==2
+    assert result['status']=='COMPLETED' and result['classified_count']==2 and result['unprocessed_count']==0
+    ledger=repository.issue_classifications(result['generation_id'])
+    assert {x['knowledge_id'] for x in ledger}=={'QK-1','QK-2'} and {x['status'] for x in ledger}=={'CLASSIFIED'}
+
+
+def test_unclassified_issue_makes_generation_partial(tmp_path):
+    class PartialClient(FakeClient):
+        def complete(self,messages):
+            records=json.loads(messages[-1]['content'])['records']
+            if len(records)==1 and records[0]['knowledge_id']=='QK-2':return AIResponse('{"items":[]}','partial-model',{})
+            payload={'items':[{'name':'监控场景','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','evidence_issue_ids':['QK-1'],'confidence':0.8}]}
+            return AIResponse(json.dumps(payload,ensure_ascii=False),'partial-model',{})
+    repository=ScenarioRepository(tmp_path/'partial.db')
+    result=ScenarioGenerationService(FakeIssues(),repository,tmp_path,PartialClient()).generate('PLC','1月','12月')
+    assert result['status']=='PARTIAL' and result['review_required_count']==1 and result['classified_count']==1
+    assert repository.generation(result['generation_id'])['status']=='PARTIAL'
+
+
+def test_scenario_insights_show_activity_and_industry_views(tmp_path):
+    client=TestClient(create_app(tmp_path/'insights.db'));repository=client.app.state.scenario_repository
+    scenario_id=repository.save_scenario('',{'scenario_code':'INS-1','name':'掉电恢复','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY','status':'PUBLISHED'},{'INDUSTRY':['锂电']})
+    with repository.connect() as c:c.execute("INSERT INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,'QK-1','{}'))
+    page=client.get('/quality-scenarios/insights')
+    assert page.status_code==200 and '业务活动 → 行业差异' in page.text and '行业 → 问题场景' in page.text
+    assert '掉电数据保持与上电恢复' in page.text and '锂电' in page.text
