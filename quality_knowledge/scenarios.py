@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenari
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
+CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL,existing_id TEXT NOT NULL,similarity REAL NOT NULL,reason TEXT,PRIMARY KEY(candidate_id,existing_id));
 """
 
 
@@ -162,6 +163,7 @@ class ScenarioRepository:
             for evidence in item['evidence']:
                 try:evidence['meta']=json.loads(evidence.get('evidence_summary') or '{}')
                 except (TypeError,json.JSONDecodeError):evidence['meta']={'summary':evidence.get('evidence_summary')}
+            with self.connect() as c:item['duplicates']=[dict(x) for x in c.execute("SELECT d.*,s.name,s.status FROM quality_scenario_duplicate d JOIN quality_scenario s ON s.scenario_id=d.existing_id WHERE d.candidate_id=? ORDER BY d.similarity DESC",(item['scenario_id'],))]
         return item
 
     def save_generation(self,generation_id,product,start,end,source_count,candidate_count,model,created_by):
@@ -176,7 +178,27 @@ class ScenarioRepository:
         summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[])},ensure_ascii=False)
         with self.connect() as c:
             for knowledge_id in item.get('evidence_issue_ids',[]):c.execute("INSERT OR IGNORE INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,knowledge_id,summary))
+        self._detect_duplicates(scenario_id)
         return scenario_id
+
+    @staticmethod
+    def _grams(value):
+        text=''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
+        return {text[i:i+2] for i in range(max(1,len(text)-1))} if text else set()
+
+    def _detect_duplicates(self,candidate_id):
+        candidate=self.scenario(candidate_id)
+        if not candidate:return
+        a=self._grams(candidate['name']+' '+candidate.get('concern_points','')+' '+candidate.get('quality_attribute',''))
+        with self.connect() as c:
+            c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=?",(candidate_id,))
+            rows=c.execute("SELECT * FROM quality_scenario WHERE scenario_id<>? AND status IN ('IN_REVIEW','PUBLISHED')",(candidate_id,)).fetchall()
+            for row in rows:
+                other=dict(row);b=self._grams(other['name']+' '+other.get('concern_points','')+' '+other.get('quality_attribute',''))
+                lexical=len(a&b)/len(a|b) if a|b else 0
+                same_activity=bool(candidate.get('activity_code') and candidate.get('activity_code')==other.get('activity_code'))
+                score=min(1,lexical+(0.25 if same_activity else 0))
+                if score>=0.55:c.execute("INSERT INTO quality_scenario_duplicate VALUES(?,?,?,?)",(candidate_id,other['scenario_id'],round(score,3),'业务活动一致且场景语义相近' if same_activity else '场景语义相近'))
 
     def save_scenario(self, scenario_id, payload, scopes):
         scenario_id=scenario_id or f"QSC-{uuid.uuid4().hex}"

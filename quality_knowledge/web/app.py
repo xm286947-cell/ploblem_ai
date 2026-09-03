@@ -310,16 +310,18 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status},'taxonomy':taxonomy})
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate_page(request: Request, result: str = ''):
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result})
+    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0):
+        scope=scenario_generation_svc.precheck(product_code,start_month,end_month) if preview and product_code and start_month and end_month else None
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...)):
+    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...), selected_ids: list[str] = Form([])):
         try:
-            result=scenario_generation_svc.generate(product_code,start_month,end_month);error=''
+            if not selected_ids:raise ValueError('SCENARIO_SOURCE_SELECTION_REQUIRED')
+            result=scenario_generation_svc.generate(product_code,start_month,end_month,selected_ids=selected_ids);error=''
         except Exception as caught:
             result=None;error=str(caught)
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result,'error':error},status_code=400 if error else 200)
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result,'error':error,'scope':None,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}},status_code=400 if error else 200)
 
     @app.get('/quality-scenarios/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
     @app.get('/quality-scenarios/new', response_class=HTMLResponse, include_in_schema=False)

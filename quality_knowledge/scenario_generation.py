@@ -33,7 +33,8 @@ class ScenarioGenerationService:
         rows = self.issues.query_issues({'business_type': product} if product else {}, 100000)
         scoped = [row for row in rows if lo <= self._month(row.get('month')) <= hi]
         analysed = [row for row in scoped if any(self.issues.get_latest_analysis(row['knowledge_id'], stage) for stage in ('occurrence','escape','recurrence','capability_gap'))]
-        return {'issue_count': len(scoped), 'analysed_count': len(analysed), 'ready': bool(analysed), 'coverage_rate': round(len(analysed)*100/len(scoped),1) if scoped else 0}
+        return {'issue_count': len(scoped), 'analysed_count': len(analysed), 'ready': bool(analysed), 'coverage_rate': round(len(analysed)*100/len(scoped),1) if scoped else 0,
+                'items':[{'knowledge_id':x['knowledge_id'],'business_issue_id':x.get('business_issue_id'),'title':x.get('title'),'month':x.get('month'),'severity':x.get('severity')} for x in analysed]}
 
     @staticmethod
     def _value(data, *names):
@@ -43,12 +44,31 @@ class ScenarioGenerationService:
             if value not in (None, '', [], {}): return value
         return ''
 
-    def _records(self, product, start_month, end_month):
+    def _cs_context(self,knowledge_id):
+        aliases={
+            'ipmt':('问题信息_IPMT','IPMT'),'spdt':('问题信息_SPDT','SPDT'),'product_model':('问题信息_产品型号','产品型号'),
+            'customer_industry':('问题信息_客户行业','客户行业'),'customer_name':('问题信息_客户名称','客户名称'),
+            'customer_level':('问题信息_客户分级','客户分级'),'customer_status':('问题信息_当前客户状态','当前客户状态'),
+            'occurrence_phase':('问题信息_问题发生阶段','问题发生阶段'),'root_cause':('问题信息_问题原因定位','问题原因定位'),
+            'trc_correction':('技术根因分析与纠正_TRC纠正信息','TRC纠正信息')}
+        try:
+            with self.scenarios.connect() as c:
+                row=c.execute("SELECT m.raw_json FROM issue_material_link l JOIN source_material m ON m.material_id=l.material_id WHERE l.knowledge_id=? AND m.material_type='ITR_CS' ORDER BY m.version_no DESC LIMIT 1",(knowledge_id,)).fetchone()
+        except Exception:return {}
+        if not row:return {}
+        raw=json.loads(row[0] or '{}');result={}
+        for key,names in aliases.items():
+            result[key]=next((str(raw.get(name) or '').strip() for name in names if str(raw.get(name) or '').strip()),'')
+        return {key:value for key,value in result.items() if value}
+
+    def _records(self, product, start_month, end_month, selected_ids=None):
         lo, hi = self._month(start_month), self._month(end_month)
         rows = self.issues.query_issues({'business_type': product} if product else {}, 100000)
         records=[]
+        selected=set(selected_ids or [])
         for row in rows:
             if not lo <= self._month(row.get('month')) <= hi: continue
+            if selected and row['knowledge_id'] not in selected:continue
             analyses={stage:self.issues.get_latest_analysis(row['knowledge_id'],stage) for stage in ('occurrence','escape','recurrence','capability_gap')}
             if not any(analyses.values()): continue
             results={stage:(analyses[stage] or {}).get('result') or {} for stage in analyses}
@@ -57,6 +77,7 @@ class ScenarioGenerationService:
                 'description':str(row.get('description') or '')[:500],'month':row.get('month'),'severity':row.get('severity'),
                 'occurrence':results['occurrence'],'escape':results['escape'],'recurrence':results['recurrence'],
                 'capability_gaps':(results['capability_gap'].get('capability_gaps') or [])[:6],
+                'itr_cs_context':self._cs_context(row['knowledge_id']),
             })
         return records
 
@@ -75,8 +96,8 @@ class ScenarioGenerationService:
             if item['name']: items.append(item)
         return items,response.model
 
-    def generate(self, product, start_month, end_month, created_by='WEB_USER'):
-        records=self._records(product,start_month,end_month)
+    def generate(self, product, start_month, end_month, created_by='WEB_USER',selected_ids=None):
+        records=self._records(product,start_month,end_month,selected_ids)
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
         taxonomy=self.scenarios.taxonomy_active()
         compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities']}
@@ -96,7 +117,9 @@ class ScenarioGenerationService:
         created=[]
         for index,item in enumerate(mapped,1):
             code=f"AI-{hashlib.sha1((generation_id+str(index)).encode()).hexdigest()[:10].upper()}"
-            scenario_id=self.scenarios.save_generated_candidate(code,item,{'PRODUCT_MODEL':[]},generation_id,product,start_month,end_month,model)
+            source_records=[x for x in records if x['knowledge_id'] in item.get('evidence_issue_ids',[])]
+            scopes={'IPMT':sorted({x['itr_cs_context'].get('ipmt','') for x in source_records}-{''}),'SPDT':sorted({x['itr_cs_context'].get('spdt','') for x in source_records}-{''}),'PRODUCT_MODEL':sorted({x['itr_cs_context'].get('product_model','') for x in source_records}-{''})}
+            scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model)
             created.append(scenario_id)
         self.scenarios.save_generation(generation_id,product,start_month,end_month,len(records),len(created),model,created_by)
         return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(created),'scenario_ids':created,'model':model}
