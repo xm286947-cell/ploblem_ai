@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH06_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH07_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -66,7 +66,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH06 累计升级说明
+    readme = """# PATCH07 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -85,6 +85,7 @@ def main() -> None:
 - 兼容模型返回中文生命周期/活动名称及 ITR 业务编号，避免有效候选被静默过滤。
 - 修复生成记录存在但场景清单为空：新增生成批次与候选场景显式关联，并自动回填旧候选关系。
 - 最近生成记录可直接查看本批候选，同时展示任务状态、失败原因、记录候选数和实际关联数。
+- 修复候选入口不明显或消失：有候选时始终显示醒目的“查看本批候选”按钮，无候选时显示“查看任务详情”。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

@@ -119,6 +119,14 @@ def test_generation_batch_has_direct_candidate_entry(tmp_path):
     repository.save_generated_candidate('AI-LINK',{'name':'在线监控流畅性','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','experience_requirement':'流畅','concern_points':'卡顿','quality_attribute':'性能效率','applicable_boundary':'大型工程','validation_direction':'性能验证','evidence_summary':'证据','confidence':0.8,'confirmation_questions':[],'evidence_issue_ids':['QK-1']},{},'QSG-LINK','PLC','1月','12月','model-x')
     repository.update_generation('QSG-LINK',status='COMPLETED',candidate_count=1,model_name='model-x')
     history=client.get('/quality-scenarios/generate').text
-    assert '/quality-scenarios?generation_id=QSG-LINK' in history and '已关联 1' in history
+    assert '/quality-scenarios?generation_id=QSG-LINK' in history and '已关联 1' in history and '查看本批候选' in history
     listing=client.get('/quality-scenarios?generation_id=QSG-LINK')
     assert listing.status_code==200 and '在线监控流畅性' in listing.text and '本次生成候选' in listing.text
+
+
+def test_generation_without_candidate_still_has_task_detail_button(tmp_path):
+    client=TestClient(create_app(tmp_path/'web.db'));repository=client.app.state.scenario_repository
+    repository.create_generation('QSG-EMPTY','PLC','1月','12月',2,'TEST')
+    repository.update_generation('QSG-EMPTY',status='FAILED',error_message='没有有效候选')
+    page=client.get('/quality-scenarios/generate')
+    assert '/quality-scenarios/generate?job_id=QSG-EMPTY' in page.text and '查看任务详情' in page.text
