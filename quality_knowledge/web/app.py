@@ -334,15 +334,31 @@ def create_app(db_path):
         if not job:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
         return job
 
+    @app.get('/quality-scenarios/generations/{generation_id}/issues', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_generation_issues(request: Request, generation_id: str):
+        job=scenario_repo.generation(generation_id)
+        if not job:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
+        return tpl.TemplateResponse(request,'quality_scenario_generation_issues.html',{'job':job,'items':scenario_repo.issue_classifications(generation_id)})
+
+    @app.post('/quality-scenarios/generations/{generation_id}/retry', include_in_schema=False)
+    def quality_scenario_generation_retry(generation_id: str, selected_ids: list[str] = Form([])):
+        job=scenario_repo.generation(generation_id)
+        if not job:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
+        if not selected_ids:selected_ids=[x['knowledge_id'] for x in scenario_repo.issue_classifications(generation_id) if x['status'] in {'FAILED','REVIEW_REQUIRED','PENDING'}]
+        if not selected_ids:raise HTTPException(400,'NO_RETRYABLE_SCENARIO_ISSUES')
+        new_id=f'QSG-{uuid.uuid4().hex}';scenario_repo.create_generation(new_id,job['product_code'],job['start_month'],job['end_month'],len(selected_ids),'WEB_RETRY')
+        threading.Thread(target=scenario_generation_svc.run_job,args=(new_id,job['product_code'],job['start_month'],job['end_month'],selected_ids),daemon=True,name=f'scenario-{new_id[-8:]}').start()
+        return RedirectResponse(f'/quality-scenarios/generate?job_id={new_id}',303)
+
     @app.get('/quality-scenarios/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
     @app.get('/quality-scenarios/new', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_edit(request: Request, scenario_id: str = ''):
         item=scenario_repo.scenario(scenario_id) if scenario_id else None
         if scenario_id and not item:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
-        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','quality_attribute':'','quality_subcharacteristic':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{}},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
+        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','quality_attribute':'','quality_subcharacteristic':'','failure_mode':'','failure_mechanism':'','trigger_conditions':'','preconditions':'','affected_object':'','business_impact':'','recovery_method':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{},'industry_variants':[]},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
 
     @app.post('/quality-scenarios/save', include_in_schema=False)
-    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
+    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), failure_mode: str = Form(''), failure_mechanism: str = Form(''), trigger_conditions: str = Form(''), preconditions: str = Form(''), affected_object: str = Form(''), business_impact: str = Form(''), recovery_method: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
         saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model,'INDUSTRY':industry,'CUSTOMER_NAME':customer_name,'CUSTOMER_LEVEL':customer_level,'CUSTOMER_STATUS':customer_status,'OCCURRENCE_PHASE':occurrence_phase})
         return RedirectResponse(f'/quality-scenarios/{saved}',303)
 

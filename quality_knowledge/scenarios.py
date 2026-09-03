@@ -60,13 +60,14 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
 CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,lifecycle_code));
 CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
-CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,failure_mode TEXT,failure_mechanism TEXT,trigger_conditions TEXT,preconditions TEXT,affected_object TEXT,business_impact TEXT,recovery_method TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL,existing_id TEXT NOT NULL,similarity REAL NOT NULL,reason TEXT,PRIMARY KEY(candidate_id,existing_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation_candidate(generation_id TEXT NOT NULL,scenario_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,scenario_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_issue_classification(generation_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,business_issue_id TEXT,status TEXT NOT NULL DEFAULT 'PENDING',scenario_id TEXT,activity_code TEXT,lifecycle_code TEXT,error_message TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,knowledge_id));
+CREATE TABLE IF NOT EXISTS quality_scenario_industry_variant(variant_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,industry TEXT NOT NULL,product_models TEXT,trigger_conditions TEXT,business_impact TEXT,recovery_method TEXT,evidence_count INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(scenario_id,industry));
 """
 
 
@@ -76,7 +77,7 @@ class ScenarioRepository:
         with self.connect() as c:
             c.executescript(SCHEMA)
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
-            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion'):
+            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','affected_object','business_impact','recovery_method'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0"}.items():
@@ -213,6 +214,10 @@ class ScenarioRepository:
                 try:evidence['meta']=json.loads(evidence.get('evidence_summary') or '{}')
                 except (TypeError,json.JSONDecodeError):evidence['meta']={'summary':evidence.get('evidence_summary')}
             with self.connect() as c:item['duplicates']=[dict(x) for x in c.execute("SELECT d.*,s.name,s.status FROM quality_scenario_duplicate d JOIN quality_scenario s ON s.scenario_id=d.existing_id WHERE d.candidate_id=? ORDER BY d.similarity DESC",(item['scenario_id'],))]
+            with self.connect() as c:item['industry_variants']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_industry_variant WHERE scenario_id=? ORDER BY evidence_count DESC,industry",(item['scenario_id'],))]
+            for variant in item['industry_variants']:
+                try:variant['product_model_values']=json.loads(variant.get('product_models') or '[]')
+                except (TypeError,json.JSONDecodeError):variant['product_model_values']=[]
         return item
 
     def create_generation(self,generation_id,product,start,end,source_count,created_by):
@@ -285,6 +290,12 @@ class ScenarioRepository:
         self._detect_duplicates(scenario_id)
         return scenario_id
 
+    def save_industry_variants(self,scenario_id,variants):
+        with self.connect() as c:
+            c.execute("DELETE FROM quality_scenario_industry_variant WHERE scenario_id=?",(scenario_id,))
+            for row in variants:
+                c.execute("""INSERT INTO quality_scenario_industry_variant(variant_id,scenario_id,industry,product_models,trigger_conditions,business_impact,recovery_method,evidence_count) VALUES(?,?,?,?,?,?,?,?)""",(f"QSV-{uuid.uuid4().hex}",scenario_id,row['industry'],json.dumps(row.get('product_models',[]),ensure_ascii=False),row.get('trigger_conditions',''),row.get('business_impact',''),row.get('recovery_method',''),int(row.get('evidence_count') or 0)))
+
     @staticmethod
     def _grams(value):
         text=''.join(ch.lower() for ch in str(value or '') if ch.isalnum())
@@ -312,10 +323,10 @@ class ScenarioRepository:
             existing=c.execute("SELECT version_no FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing[0]+1 if existing else 1)
             chain=c.execute("""SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=? ORDER BY v.version_no DESC LIMIT 1""",(payload.get('activity_code',''),)).fetchone()
             scenario_chain=(chain[0] if chain else '') or ''
-            c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,status,version_no,created_at,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
-             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),status,version))
+            c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,failure_mode,failure_mechanism,trigger_conditions,preconditions,affected_object,business_impact,recovery_method,status,version_no,created_at,updated_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,failure_mode=excluded.failure_mode,failure_mechanism=excluded.failure_mechanism,trigger_conditions=excluded.trigger_conditions,preconditions=excluded.preconditions,affected_object=excluded.affected_object,business_impact=excluded.business_impact,recovery_method=excluded.recovery_method,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
+             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),payload.get('failure_mode',''),payload.get('failure_mechanism',''),payload.get('trigger_conditions',''),payload.get('preconditions',''),payload.get('affected_object',''),payload.get('business_impact',''),payload.get('recovery_method',''),status,version))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:
@@ -328,6 +339,7 @@ class ScenarioRepository:
             generation_ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))]
             c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=? OR existing_id=?",(scenario_id,scenario_id))
             c.execute("DELETE FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,))
+            c.execute("DELETE FROM quality_scenario_industry_variant WHERE scenario_id=?",(scenario_id,))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             c.execute("DELETE FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))
             c.execute("DELETE FROM quality_scenario WHERE scenario_id=?",(scenario_id,))

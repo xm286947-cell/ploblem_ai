@@ -234,3 +234,18 @@ def test_scenario_insights_show_activity_and_industry_views(tmp_path):
     page=client.get('/quality-scenarios/insights')
     assert page.status_code==200 and '业务活动 → 行业差异' in page.text and '行业 → 问题场景' in page.text
     assert '掉电数据保持与上电恢复' in page.text and '锂电' in page.text
+
+
+def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):
+    db=tmp_path/'structured.db';repository=ScenarioRepository(db)
+    item={'name':'掉电保持场景','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY','failure_mode':'保持变量丢失','failure_mechanism':'存储提交未完成','trigger_conditions':'运行中异常掉电','preconditions':'存在保持变量','affected_object':'PLC运行数据','business_impact':'计数状态丢失','recovery_method':'重新写入参数并重启','evidence_issue_ids':['QK-1'],'confidence':0.9}
+    scenario_id=repository.save_generated_candidate('AI-STRUCT',item,{'INDUSTRY':['锂电'],'PRODUCT_MODEL':['AM600']},'QSG-STRUCT','PLC','1月','12月','model-x')
+    repository.save_industry_variants(scenario_id,[{'industry':'锂电','product_models':['AM600'],'trigger_conditions':'运行中异常掉电','business_impact':'产线状态丢失','recovery_method':'恢复参数','evidence_count':1}])
+    saved=repository.scenario(scenario_id)
+    assert saved['failure_mode']=='保持变量丢失' and saved['industry_variants'][0]['product_model_values']==['AM600']
+    repository.create_generation('QSG-LEDGER','PLC','1月','12月',1,'TEST')
+    repository.initialize_issue_classifications('QSG-LEDGER',[{'knowledge_id':'QK-X','business_issue_id':'ITR-X'}])
+    repository.mark_issue_classification('QSG-LEDGER','QK-X','REVIEW_REQUIRED',error_message='需要人工确认')
+    repository.refresh_generation_coverage('QSG-LEDGER')
+    page=TestClient(create_app(db)).get('/quality-scenarios/generations/QSG-LEDGER/issues')
+    assert page.status_code==200 and '问题识别覆盖明细' in page.text and 'ITR-X' in page.text and '重试选中问题' in page.text

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH14_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH15_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -27,6 +27,7 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/templates/quality_scenario_edit.html",
     "quality_knowledge/web/templates/quality_scenario_generate.html",
     "quality_knowledge/web/templates/quality_scenario_insights.html",
+    "quality_knowledge/web/templates/quality_scenario_generation_issues.html",
     "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
@@ -67,7 +68,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH14 累计升级说明
+    readme = """# PATCH15 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -110,6 +111,10 @@ def main() -> None:
 - 每批AI未返回的问题会自动单条补跑；仍无法识别的记录进入待人工确认或失败状态，完整保留问题编号和错误原因。
 - 取消最终再次压缩候选造成的问题丢失；跨批次仅合并业务活动、质量子特性和场景名称一致的基础场景，并保留行业、客户和产品差异范围。
 - 新增“行业与质量场景看板”，支持从业务活动查看行业分布，以及从行业反查主要业务活动和来源问题规模。
+- 基础质量场景新增失效模式、失效机理、触发条件、前置条件、影响对象、业务影响和恢复方式等结构化字段，支持AI生成及人工修改。
+- 在基础场景下自动生成行业变体，按彻底解决单中的行业和产品型号保留来源问题数量、触发条件、业务影响和恢复差异。
+- 新增生成任务问题明细页，每条来源问题显示已识别、待确认、失败或未处理状态，并可回到问题详情或已生成场景。
+- 支持只重试勾选的问题；不勾选时自动重试当前批次全部待确认、失败和未处理项，无需重跑已成功问题。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`
