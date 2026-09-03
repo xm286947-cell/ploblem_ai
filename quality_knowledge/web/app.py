@@ -34,6 +34,7 @@ from quality_knowledge.product_report.legacy_service import LegacyProductQuality
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
 from quality_knowledge.scenarios import ScenarioRepository
+from quality_knowledge.scenario_generation import ScenarioGenerationService
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -204,8 +205,10 @@ def create_app(db_path):
     material_repo = MaterialRepository(db_path)
     material_svc = MaterialImportService(material_repo)
     scenario_repo = ScenarioRepository(db_path)
+    scenario_generation_svc = ScenarioGenerationService(svc,scenario_repo,BASE.parent.parent)
     app.state.material_repository = material_repo
     app.state.scenario_repository = scenario_repo
+    app.state.scenario_generation_service = scenario_generation_svc
     app.state.intake_session_service = intake_svc
     app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
     tpl = Jinja2Templates(directory=BASE / 'templates')
@@ -305,6 +308,18 @@ def create_app(db_path):
     def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', q: str = '', status: str = ''):
         taxonomy=scenario_repo.taxonomy()
         return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,q=q,status=status),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'q':q,'status':status},'taxonomy':taxonomy})
+
+    @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_generate_page(request: Request, result: str = ''):
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result})
+
+    @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...)):
+        try:
+            result=scenario_generation_svc.generate(product_code,start_month,end_month);error=''
+        except Exception as caught:
+            result=None;error=str(caught)
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':result,'error':error},status_code=400 if error else 200)
 
     @app.get('/quality-scenarios/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
     @app.get('/quality-scenarios/new', response_class=HTMLResponse, include_in_schema=False)

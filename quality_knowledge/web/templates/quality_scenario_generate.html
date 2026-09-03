@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}质量场景库 / AI生成候选{% endblock %}
+{% block body %}
+<div class="di-pagehead"><div><a class="mw-back" href="/quality-scenarios">← 返回质量场景库</a><h1>AI生成质量场景候选</h1><p>选择产品和时间范围，系统从已有单问题AI分析中分批提炼场景。生成结果必须人工审核。</p></div></div>
+<section class="di-card"><form class="qs-generate" method="post"><label><span>产品 / 业务</span><select name="product_code" required><option value="">请选择</option>{% for p in products %}<option value="{{p.product_code}}">{{p.product_name}}（{{p.product_code}}）</option>{% endfor %}</select></label><label><span>开始月份</span><input name="start_month" placeholder="例如 1月" required></label><label><span>结束月份</span><input name="end_month" placeholder="例如 12月" required></label><button class="btn btn-primary">开始生成候选</button></form><div class="di-alert"><b>生成规则</b><span>只读取已完成的单问题AI分析；大量问题按批次分析后合并；AI不直接发布。</span></div></section>
+{% if error %}<section class="di-alert error"><b>生成失败</b><span>{{error}}</span></section>{% endif %}
+{% if result %}<section class="qs-result"><h2>生成完成</h2><div><b>{{result.source_issue_count}}</b><span>参与分析的问题</span></div><div><b>{{result.candidate_count}}</b><span>待审核候选</span></div><div><b>{{result.model}}</b><span>使用模型</span></div><a class="btn btn-primary" href="/quality-scenarios?status=IN_REVIEW">审核候选 →</a></section>{% endif %}
+<section class="di-card"><div class="di-cardhead"><div><h2>最近生成记录</h2></div></div><div class="table-wrap"><table class="qs-table"><thead><tr><th>产品</th><th>时间范围</th><th>来源问题</th><th>候选</th><th>模型</th><th>生成时间</th></tr></thead><tbody>{% for row in generations %}<tr><td>{{row.product_code}}</td><td>{{row.start_month}}—{{row.end_month}}</td><td>{{row.source_issue_count}}</td><td>{{row.candidate_count}}</td><td>{{row.model_name}}</td><td>{{row.created_at}}</td></tr>{% else %}<tr><td colspan="6" class="di-empty">还没有生成记录。</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

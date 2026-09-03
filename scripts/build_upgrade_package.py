@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH02_20260902"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH03_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -17,6 +17,7 @@ EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
+    "quality_knowledge/scenario_generation.py",
     "quality_knowledge/web/app.py",
     "quality_knowledge/web/static/app.css",
     "quality_knowledge/web/templates/base.html",
@@ -24,6 +25,7 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/templates/material_detail.html",
     "quality_knowledge/web/templates/quality_scenarios.html",
     "quality_knowledge/web/templates/quality_scenario_edit.html",
+    "quality_knowledge/web/templates/quality_scenario_generate.html",
     "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
@@ -64,7 +66,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH02 累计升级说明
+    readme = """# PATCH03 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -74,12 +76,15 @@ def main() -> None:
 - 增加完整原始字段、同 ITR 关联数据、漏测分析跳转和独立人工分析。
 - 新增独立质量场景库，支持新增、编辑、查阅，并按 IPMT、SPDT、产品型号和状态筛选。
 - 新增场景词典配置，内置六个生命周期阶段和 PLC 业务活动场景；采用草稿修改、激活生效，避免直接污染在用版本。
+- 新增 AI 场景候选生成：人工选择产品和月份范围，系统读取单问题 AI 分析，按批次提炼并合并场景。
+- AI 候选只能进入待审核状态；详情保留来源问题、证据摘要、置信度、模型和人工待确认项。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`
 - ITR彻底解决工作台：`/materials/cs`
 - 软件问题考核工作台：`/materials/software-operations`
 - 质量场景库：`/quality-scenarios`
+- AI生成候选：`/quality-scenarios/generate`
 - 场景词典配置：`/settings/scenario-taxonomy`
 
 本包已显式包含上述三个工作台所需的侧边栏入口、路由、数据服务、列表页、详情页和样式文件。

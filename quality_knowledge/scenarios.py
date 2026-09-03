@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle
 CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
 CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,applicable_boundary TEXT,validation_direction TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
+CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
 """
 
 
@@ -87,6 +89,10 @@ class ScenarioRepository:
             version['lifecycles']=[dict(x) for x in c.execute("SELECT * FROM scenario_lifecycle WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
             version['activities']=[dict(x) for x in c.execute("SELECT * FROM scenario_activity WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
         return version
+
+    def taxonomy_active(self):
+        active=next((x for x in self.versions() if x['status']=='ACTIVE'),None)
+        return self.taxonomy(active['version_id']) if active else self.taxonomy()
 
     def create_draft(self):
         with self.connect() as c:
@@ -150,7 +156,27 @@ class ScenarioRepository:
         return [item for item in rows if matches(item)]
 
     def scenario(self, scenario_id):
-        return next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
+        item=next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
+        if item:
+            with self.connect() as c:item['evidence']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_evidence WHERE scenario_id=?",(item['scenario_id'],))]
+            for evidence in item['evidence']:
+                try:evidence['meta']=json.loads(evidence.get('evidence_summary') or '{}')
+                except (TypeError,json.JSONDecodeError):evidence['meta']={'summary':evidence.get('evidence_summary')}
+        return item
+
+    def save_generation(self,generation_id,product,start,end,source_count,candidate_count,model,created_by):
+        with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by) VALUES(?,?,?,?,?,?,?,?)",(generation_id,product,start,end,source_count,candidate_count,model,created_by))
+
+    def generations(self):
+        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_generation ORDER BY created_at DESC LIMIT 30")]
+
+    def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
+        payload={**item,'scenario_code':code,'status':'IN_REVIEW','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
+        scenario_id=self.save_scenario('',payload,scopes)
+        summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[])},ensure_ascii=False)
+        with self.connect() as c:
+            for knowledge_id in item.get('evidence_issue_ids',[]):c.execute("INSERT OR IGNORE INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,knowledge_id,summary))
+        return scenario_id
 
     def save_scenario(self, scenario_id, payload, scopes):
         scenario_id=scenario_id or f"QSC-{uuid.uuid4().hex}"
