@@ -10,7 +10,10 @@ def test_default_plc_taxonomy_and_independent_pages(tmp_path):
     taxonomy=repository.taxonomy()
     assert taxonomy["status"]=="ACTIVE"
     assert len(taxonomy["lifecycles"])==6
-    assert len(taxonomy["activities"])==34
+    assert len(taxonomy["activities"])==35
+    power_loss=next(x for x in taxonomy['activities'] if x['activity_code']=='POWER_LOSS_RETENTION_RECOVERY')
+    assert power_loss['lifecycle_code']=='RUNTIME_EXECUTION' and power_loss['label_zh']=='掉电数据保持与上电恢复'
+    assert '掉电 → 数据保持 → 重新上电' in power_loss['chain_text'] and '掉电不丢关键数据' in power_loss['description']
     page=client.get("/quality-scenarios")
     assert page.status_code==200 and "质量场景库" in page.text and "全部IPMT" in page.text and "全部SPDT" in page.text and "全部产品型号" in page.text
     settings=client.get("/settings/scenario-taxonomy")
@@ -30,6 +33,13 @@ def test_taxonomy_changes_use_new_draft_version(tmp_path):
     assert next(x for x in original["lifecycles"] if x["lifecycle_code"]=="SOFTWARE_DEBUGGING")["label_zh"]=="软件调试"
     repository.activate(draft_id)
     assert next(x for x in repository.versions() if x["version_id"]==draft_id)["status"]=="ACTIVE"
+
+
+def test_existing_taxonomy_gets_power_loss_activity_without_reinitialization(tmp_path):
+    db=tmp_path/'taxonomy-upgrade.db';repository=ScenarioRepository(db);version_id=repository.taxonomy_active()['version_id']
+    with repository.connect() as c:c.execute("DELETE FROM scenario_activity WHERE version_id=? AND activity_code='POWER_LOSS_RETENTION_RECOVERY'",(version_id,))
+    upgraded=ScenarioRepository(db).taxonomy_active()
+    assert any(x['activity_code']=='POWER_LOSS_RETENTION_RECOVERY' for x in upgraded['activities'])
 
 
 def test_scenario_scope_filters_ipmt_spdt_and_product_model(tmp_path):

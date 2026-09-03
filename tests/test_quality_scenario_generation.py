@@ -130,6 +130,25 @@ def test_existing_database_adds_new_scenario_fields_and_backfills_chain(tmp_path
     assert item['quality_subcharacteristic'] is None and item['measurement_suggestion'] is None
 
 
+def test_business_rules_correct_power_loss_and_terminal_use_misclassification(tmp_path):
+    class WrongClassificationClient:
+        def complete(self,messages):
+            payload={'items':[
+                {'name':'掉电保持异常','lifecycle_code':'ENGINEERING_CONFIGURATION','activity_code':'STATE_DATA_PROCESSING','evidence_issue_ids':['QK-P']},
+                {'name':'正常使用状态异常','lifecycle_code':'ENGINEERING_CONFIGURATION','activity_code':'CONTROL_PROGRAMMING','evidence_issue_ids':['QK-N']},
+            ]}
+            return AIResponse(json.dumps(payload,ensure_ascii=False),'rule-model',{})
+    repository=ScenarioRepository(tmp_path/'rules.db');service=ScenarioGenerationService(FakeIssues(),repository,tmp_path,WrongClassificationClient())
+    records=[
+        {'knowledge_id':'QK-P','description':'设备掉电后保持变量丢失，重新上电计数清零','itr_cs_context':{'occurrence_phase':'终端正常使用'}},
+        {'knowledge_id':'QK-N','description':'设备正常运行时状态显示异常','itr_cs_context':{'occurrence_phase':'终端正常使用'}},
+    ]
+    items,_=service._complete(WrongClassificationClient(),records,{'QK-P':'QK-P','QK-N':'QK-N'},repository.taxonomy_active())
+    assert items[0]['lifecycle_code']=='RUNTIME_EXECUTION' and items[0]['activity_code']=='POWER_LOSS_RETENTION_RECOVERY'
+    assert items[1]['lifecycle_code']=='RUNTIME_EXECUTION' and items[1]['activity_code']=='STATE_DATA_PROCESSING'
+    assert '请确认实际业务活动' in items[1]['confirmation_questions'][0]
+
+
 def test_generation_status_endpoint_exposes_progress_and_failure(tmp_path):
     client=TestClient(create_app(tmp_path/'web.db'));repository=client.app.state.scenario_repository
     repository.create_generation('QSG-STATUS','PLC','1月','12月',10,'TEST')

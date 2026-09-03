@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH12_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH13_20260903"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -66,7 +66,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH12 累计升级说明
+    readme = """# PATCH13 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -102,6 +102,9 @@ def main() -> None:
 - AI生成范围的问题摘要增加兜底：问题标题为空时显示问题描述，两者都为空时明确显示“未提供问题描述”。
 - 修复漏测分析问题编号带 `CS` 时无法关联彻底解决单的问题：问题编号和材料编号统一规范化后再匹配。
 - 服务启动时自动重建材料关联，因此已有质量场景可回填彻底解决单事实，不需要重新导入数据或重新生成候选。
+- 在“运行执行”阶段新增独立业务活动“掉电数据保持与上电恢复”，包含完整场景链路、价值描述和质量目标；已有场景词典自动增量升级，无需重新初始化。
+- AI候选增加分类硬校验：掉电、断电、保持变量丢失、上电恢复异常等证据强制归入该业务活动，不再依赖模型自由选择。
+- 原始阶段为“终端正常使用”且没有明确配置操作证据时，禁止候选落入“工程配置”，自动回到运行类活动并增加人工确认提示。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

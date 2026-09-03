@@ -31,6 +31,7 @@ ACTIVITIES = (
     ("RUNTIME_EXECUTION","CONTROL_PROGRAM_EXECUTION","PLC控制程序执行","输入采集 → 程序执行 → 逻辑计算 → 输出更新"),
     ("RUNTIME_EXECUTION","TASK_CYCLE_EXECUTION","任务与周期执行","任务触发 → 程序调度 → 执行 → 周期完成"),
     ("RUNTIME_EXECUTION","STATE_DATA_PROCESSING","设备状态与数据处理","数据采集 → 状态判断 → 运算 → 状态更新"),
+    ("RUNTIME_EXECUTION","POWER_LOSS_RETENTION_RECOVERY","掉电数据保持与上电恢复","正常运行 → 关键数据/状态产生 → 掉电 → 数据保持 → 重新上电 → 数据恢复 → 程序继续运行"),
     ("RUNTIME_EXECUTION","RUNTIME_EXCEPTION_HANDLING","运行异常处理","运行 → 异常触发 → 识别 → 安全逻辑 → 恢复/停机"),
     ("SYSTEM_INTEGRATION","FIELD_DEVICE_INTEGRATION","PLC与现场设备联动","PLC逻辑 → IO/驱动指令 → 设备动作 → 状态反馈"),
     ("SYSTEM_INTEGRATION","MULTI_DEVICE_SEQUENCE","多设备顺序联动","设备A完成 → 状态握手 → PLC判断 → 设备B启动"),
@@ -50,6 +51,10 @@ ACTIVITIES = (
     ("VERSION_MAINTENANCE","FUNCTION_CHANGE_RELEASE","程序功能变更与再发布","新需求/问题 → 修改 → 编译 → 下载 → 回归"),
     ("VERSION_MAINTENANCE","VERSION_ROLLBACK","版本回退","新版本异常 → 回退判断 → 恢复旧版 → 验证"),
 )
+
+ACTIVITY_DESCRIPTIONS = {
+    "POWER_LOSS_RETENTION_RECOVERY": "保证PLC在异常掉电或正常断电后，关键运行数据、参数、计数值和状态能够按预期保持，并在重新上电后正确恢复，避免业务状态丢失或设备行为异常。目标：掉电不丢关键数据，上电后恢复正确、及时、一致。",
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
@@ -84,9 +89,21 @@ class ScenarioRepository:
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
-                for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,"",order))
+                for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,ACTIVITY_DESCRIPTIONS.get(code,""),order))
+            self._ensure_power_loss_activity(c)
             c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code ORDER BY v.version_no DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code)""")
             self._backfill_context_scopes(c)
+
+    @staticmethod
+    def _ensure_power_loss_activity(c):
+        code="POWER_LOSS_RETENTION_RECOVERY"
+        for version in c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE status IN ('ACTIVE','DRAFT')").fetchall():
+            version_id=version['version_id']
+            if c.execute("SELECT 1 FROM scenario_activity WHERE version_id=? AND activity_code=?",(version_id,code)).fetchone():continue
+            next_row=c.execute("SELECT sort_order FROM scenario_activity WHERE version_id=? AND activity_code='RUNTIME_EXCEPTION_HANDLING'",(version_id,)).fetchone()
+            order=next_row[0] if next_row else c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_activity WHERE version_id=?",(version_id,)).fetchone()[0]
+            c.execute("UPDATE scenario_activity SET sort_order=sort_order+1 WHERE version_id=? AND sort_order>=?",(version_id,order))
+            c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,"RUNTIME_EXECUTION","掉电数据保持与上电恢复","正常运行 → 关键数据/状态产生 → 掉电 → 数据保持 → 重新上电 → 数据恢复 → 程序继续运行",ACTIVITY_DESCRIPTIONS[code],order))
 
     @staticmethod
     def _backfill_context_scopes(c):

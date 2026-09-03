@@ -14,7 +14,7 @@ from quality_knowledge.model_config import load_quality_issue_ai_config
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
 输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：只能使用给定词典编码；每项必须有来源问题；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+要求：只能使用给定词典编码；每项必须有来源问题；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、客户体验和失效表现应合并；最多3项；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -91,6 +91,12 @@ class ScenarioGenerationService:
         if not isinstance(parsed,dict) or not isinstance(parsed.get('items'),list): raise ValueError('SCENARIO_AI_SCHEMA_INVALID')
         life={x['lifecycle_code']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']};life.update({x['label_zh']:x['lifecycle_code'] for x in taxonomy['lifecycles'] if x['enabled']})
         activities={x['activity_code']:(x['activity_code'],x['lifecycle_code'],x.get('chain_text') or '') for x in taxonomy['activities'] if x['enabled']};activities.update({x['label_zh']:(x['activity_code'],x['lifecycle_code'],x.get('chain_text') or '') for x in taxonomy['activities'] if x['enabled']})
+        def evidence_text(evidence_ids):
+            related=[]
+            for record in payload:
+                record_ids={str(record.get('knowledge_id') or ''),str(record.get('business_issue_id') or '')}|{str(x) for x in record.get('evidence_issue_ids',[]) if x}
+                if record_ids.intersection(str(x) for x in evidence_ids):related.append(record)
+            return json.dumps(related,ensure_ascii=False,default=str)
         items=[]
         for raw in parsed['items'][:5]:
             if not isinstance(raw,dict): continue
@@ -98,11 +104,18 @@ class ScenarioGenerationService:
             lifecycle=life.get(raw.get('lifecycle_code'));activity=activities.get(raw.get('activity_code'))
             if not evidence or not activity: continue
             if not lifecycle:lifecycle=activity[1]
+            context=evidence_text(evidence);terminal_override=False
+            if re.search(r'掉电|断电|重新上电|上电恢复|保持变量|数据保持|保持数据|计数清零',context):
+                activity=activities.get('POWER_LOSS_RETENTION_RECOVERY') or activity;lifecycle=activity[1]
+            elif lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context) and not re.search(r'用户.{0,6}(配置|组态|编程|编译)|执行.{0,4}(配置|组态|编程|编译)',context):
+                activity=activities.get('STATE_DATA_PROCESSING') or activity;lifecycle=activity[1];terminal_override=True
             if activity[1]!=lifecycle:continue
             item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item['scenario_chain']=activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
+            if terminal_override:
+                item['confirmation_questions']=(item['confirmation_questions']+['原始阶段为终端正常使用，请确认实际业务活动是否属于设备状态与数据处理'])[:5]
             if item['name']: items.append(item)
         return items,response.model
 
