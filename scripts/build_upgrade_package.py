@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH16_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH17_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -68,7 +68,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH16 累计升级说明
+    readme = """# PATCH17 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -120,6 +120,8 @@ def main() -> None:
 - AI生成场景时只读取所选产品的ACTIVE词典；未配置或未激活时直接阻止生成，不再静默复用PLC词典。
 - 生成任务和质量场景同时保存产品编码及词典版本，保证历史结论可追溯；新词典激活后不会反向改写历史场景链路。
 - 场景词典配置页增加产品切换、无词典空态、复制来源选择和产品级激活入口。
+- 质量场景新增“参与系统/设备对象、系统规模、用户类型”三个正式字段，区别于故障影响对象。
+- 三个字段已贯通AI候选生成、数据库持久化、人工审核编辑及旧数据库自动增量升级。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

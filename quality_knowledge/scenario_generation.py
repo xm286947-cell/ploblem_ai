@@ -13,7 +13,7 @@ from quality_knowledge.model_config import load_quality_issue_ai_config
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
-输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
+输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
 要求：只能使用给定词典编码；每一个输入问题必须且只能出现在一个场景的 evidence_issue_ids 中，不得遗漏；每项必须有来源问题；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、质量子特性和失效表现可合并；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
@@ -110,7 +110,7 @@ class ScenarioGenerationService:
             elif lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context) and not re.search(r'用户.{0,6}(配置|组态|编程|编译)|执行.{0,4}(配置|组态|编程|编译)',context):
                 activity=activities.get('STATE_DATA_PROCESSING') or activity;lifecycle=activity[1];terminal_override=True
             if activity[1]!=lifecycle:continue
-            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
+            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item['scenario_chain']=activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
