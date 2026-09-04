@@ -16,8 +16,8 @@ from quality_knowledge.model_config import choose_quality_issue_agent, load_qual
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
-输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[],"experience_requirement":"","concern_points":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
+要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；客户质量体验、使用质量要素、产品质量特性和质量子特性只能使用 quality_models 中给定的 code，禁止自由造词；质量子特性必须属于已选择的主要或次要产品质量特性；customer_perception 填客户直接感知的负向表现；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -113,7 +113,17 @@ class ScenarioGenerationService:
             elif lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context) and not re.search(r'用户.{0,6}(配置|组态|编程|编译)|执行.{0,4}(配置|组态|编程|编译)',context):
                 activity=activities.get('STATE_DATA_PROCESSING') or activity;lifecycle=activity[1];terminal_override=True
             if activity[1]!=lifecycle:continue
-            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
+            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','customer_perception','primary_experience_code','primary_quality_characteristic_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
+            quality_models=taxonomy.get('quality_models') or {};groups=('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics')
+            allowed_quality={x['term_code'] if 'term_code' in x else x['code']:x for group in groups for x in quality_models.get(group,[])}
+            for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
+                item[key]=list(dict.fromkeys(str(x) for x in raw.get(key,[]) if str(x) in allowed_quality))
+            if item['primary_experience_code'] not in allowed_quality:item['primary_experience_code']=''
+            if item['primary_quality_characteristic_code'] not in allowed_quality:item['primary_quality_characteristic_code']=''
+            parents={x.get('term_code') or x.get('code'):x.get('parent_code') for x in quality_models.get('product_subcharacteristics',[])}
+            selected_parents={item['primary_quality_characteristic_code'],*item['secondary_quality_characteristic_codes']}
+            item['quality_subcharacteristic_codes']=[x for x in item['quality_subcharacteristic_codes'] if parents.get(x) in selected_parents]
+            item['quality_classification_status']='PENDING_CONFIRMATION'
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item['scenario_chain']=activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
@@ -127,7 +137,7 @@ class ScenarioGenerationService:
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
         taxonomy=self.scenarios.taxonomy_active(product)
         if not taxonomy:raise ValueError(f'SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:{product}')
-        compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities']}
+        compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities'],'quality_models':self.scenarios.quality_models()}
         parallel={'enabled':True,'max_workers':4}
         if self.ai_client is None:
             config_path=resolve_model_config_path(self.root)

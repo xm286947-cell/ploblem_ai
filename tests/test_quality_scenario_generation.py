@@ -238,6 +238,19 @@ def test_scenario_insights_show_activity_and_industry_views(tmp_path):
     assert '掉电数据保持与上电恢复' in page.text and '锂电' in page.text
 
 
+def test_scenario_insights_show_four_standard_quality_matrices(tmp_path):
+    client=TestClient(create_app(tmp_path/'matrix.db'));repository=client.app.state.scenario_repository
+    scenario_id=repository.save_scenario('',{'scenario_code':'MATRIX-1','name':'在线监控卡顿','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','status':'PUBLISHED','primary_experience_code':'EFFICIENT_SMOOTH','quality_in_use_codes':['EFFICIENCY','SATISFACTION'],'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY','quality_subcharacteristic_codes':['TIME_BEHAVIOUR'],'quality_classification_status':'CONFIRMED'}, {})
+    with repository.connect() as c:c.execute("INSERT INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,'QK-1','{}'))
+    insights=repository.insights(status='PUBLISHED')
+    assert insights['standardized_rate']==100.0
+    row=next(x for x in insights['activity_experience_matrix']['rows'] if x['code']=='ONLINE_MONITORING')
+    assert row['cells']['EFFICIENT_SMOOTH']['issue_count']==1
+    page=client.get('/quality-scenarios/insights?status=PUBLISHED')
+    for title in ('业务活动场景 × 客户质量体验','业务活动场景 × 使用质量要素','使用质量要素 × 产品质量特性','业务活动场景 × 产品质量特性'):
+        assert title in page.text
+
+
 def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):
     db=tmp_path/'structured.db';repository=ScenarioRepository(db)
     item={'name':'掉电保持场景','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY','participating_systems':'PLC、HMI、伺服驱动器','system_scale':'1台PLC、128个IO点','user_type':'设备调试工程师','failure_mode':'保持变量丢失','failure_mechanism':'存储提交未完成','trigger_conditions':'运行中异常掉电','preconditions':'存在保持变量','affected_object':'PLC运行数据','business_impact':'计数状态丢失','recovery_method':'重新写入参数并重启','evidence_issue_ids':['QK-1'],'confidence':0.9}
@@ -285,3 +298,18 @@ def test_one_issue_one_candidate_and_agents_round_robin(tmp_path,monkeypatch):
     assert {x['model_name'] for x in ledger}=={'model-deep','model-fast'}
     assert all(x['attempt_count']==1 and x['started_at'] and x['finished_at'] for x in ledger)
     assert all(len(repository.scenario(x['scenario_id'])['evidence'])==1 for x in ledger)
+
+
+def test_ai_quality_classification_accepts_only_standard_codes(tmp_path):
+    class StandardClient:
+        def complete(self,messages):
+            payload={'items':[{'name':'监控流畅性','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','customer_perception':'响应慢',
+                'primary_experience_code':'EFFICIENT_SMOOTH','secondary_experience_codes':['NOT_A_TERM'],'quality_in_use_codes':['EFFICIENCY'],
+                'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY','secondary_quality_characteristic_codes':['RELIABILITY'],
+                'quality_subcharacteristic_codes':['TIME_BEHAVIOUR','RECOVERABILITY','CONFIDENTIALITY'],'evidence_issue_ids':['QK-1'],'confidence':0.9}]}
+            return AIResponse(json.dumps(payload,ensure_ascii=False),'standard-model',{})
+    repository=ScenarioRepository(tmp_path/'standard-ai.db');service=ScenarioGenerationService(FakeIssues(),repository,tmp_path,StandardClient())
+    result=service.generate('PLC','1月','12月',selected_ids=['QK-1']);item=repository.scenario(result['scenario_ids'][0])
+    assert item['primary_experience_code']=='EFFICIENT_SMOOTH' and item['secondary_experience_codes']==[]
+    assert item['quality_subcharacteristic_codes']==['TIME_BEHAVIOUR','RECOVERABILITY']
+    assert item['quality_classification_status']=='PENDING_CONFIRMATION'

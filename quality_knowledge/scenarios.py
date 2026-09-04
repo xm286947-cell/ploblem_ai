@@ -7,6 +7,7 @@ import sqlite3
 import uuid
 
 from openpyxl import load_workbook
+from quality_knowledge.quality_models import CUSTOMER_EXPERIENCE_MODEL, PRODUCT_QUALITY_MODEL, QUALITY_IN_USE_MODEL, model_payload
 
 
 LIFECYCLES = (
@@ -72,6 +73,9 @@ CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS quality_scenario_generation_candidate(generation_id TEXT NOT NULL,scenario_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,scenario_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_issue_classification(generation_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,business_issue_id TEXT,status TEXT NOT NULL DEFAULT 'PENDING',scenario_id TEXT,activity_code TEXT,lifecycle_code TEXT,error_message TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_industry_variant(variant_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,industry TEXT NOT NULL,product_models TEXT,trigger_conditions TEXT,business_impact TEXT,recovery_method TEXT,evidence_count INTEGER NOT NULL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(scenario_id,industry));
+CREATE TABLE IF NOT EXISTS quality_model_version(model_code TEXT PRIMARY KEY,label_zh TEXT NOT NULL,status TEXT NOT NULL,standard_ref TEXT NOT NULL,activated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_model_term(model_code TEXT NOT NULL,term_code TEXT NOT NULL,parent_code TEXT,label_zh TEXT NOT NULL,sort_order INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(model_code,term_code));
+CREATE TABLE IF NOT EXISTS customer_experience_quality_map(experience_code TEXT NOT NULL,target_model_code TEXT NOT NULL,target_term_code TEXT NOT NULL,PRIMARY KEY(experience_code,target_model_code,target_term_code));
 """
 
 
@@ -89,8 +93,9 @@ class ScenarioRepository:
             for name in ('participating_systems','objective'):
                 if name not in activity_columns:c.execute(f"ALTER TABLE scenario_activity ADD COLUMN {name} TEXT")
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
-            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id'):
+            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id','customer_perception','primary_experience_code','secondary_experience_codes','quality_in_use_codes','primary_quality_characteristic_code','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','quality_classification_status','quality_model_version'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
+            self._seed_quality_models(c)
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
@@ -112,6 +117,28 @@ class ScenarioRepository:
             c.execute("""UPDATE quality_scenario SET taxonomy_version_id=(SELECT version_id FROM scenario_taxonomy_version WHERE product_code=quality_scenario.product_code AND status='ACTIVE' ORDER BY version_no DESC LIMIT 1) WHERE COALESCE(taxonomy_version_id,'')=''""")
             c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT chain_text FROM scenario_activity WHERE version_id=quality_scenario.taxonomy_version_id AND activity_code=quality_scenario.activity_code) WHERE COALESCE(scenario_chain,'')='' AND EXISTS(SELECT 1 FROM scenario_activity WHERE version_id=quality_scenario.taxonomy_version_id AND activity_code=quality_scenario.activity_code)""")
             self._backfill_context_scopes(c)
+
+    @staticmethod
+    def _seed_quality_models(c):
+        payload=model_payload();versions=payload['versions']
+        for code,label,ref in ((PRODUCT_QUALITY_MODEL,'产品质量模型','ISO/IEC 25010:2023'),(QUALITY_IN_USE_MODEL,'使用质量模型','ISO/IEC 25010:2011'),(CUSTOMER_EXPERIENCE_MODEL,'客户质量体验词典','公司词典 V1')):
+            c.execute("INSERT OR REPLACE INTO quality_model_version(model_code,label_zh,status,standard_ref,activated_at) VALUES(?,?,'ACTIVE',?,COALESCE((SELECT activated_at FROM quality_model_version WHERE model_code=?),CURRENT_TIMESTAMP))",(code,label,ref,code))
+        groups=((PRODUCT_QUALITY_MODEL,payload['product_characteristics']+payload['product_subcharacteristics']),(QUALITY_IN_USE_MODEL,payload['quality_in_use']),(CUSTOMER_EXPERIENCE_MODEL,payload['customer_experiences']))
+        for model_code,items in groups:
+            for order,item in enumerate(items,1):c.execute("INSERT OR REPLACE INTO quality_model_term(model_code,term_code,parent_code,label_zh,sort_order,enabled) VALUES(?,?,?,?,?,1)",(model_code,item['code'],item.get('parent_code'),item['label_zh'],order))
+        c.execute("DELETE FROM customer_experience_quality_map")
+        for item in payload['customer_experiences']:
+            for code in item['quality_in_use_codes']:c.execute("INSERT INTO customer_experience_quality_map VALUES(?,?,?)",(item['code'],QUALITY_IN_USE_MODEL,code))
+            for code in item['product_characteristic_codes']:c.execute("INSERT INTO customer_experience_quality_map VALUES(?,?,?)",(item['code'],PRODUCT_QUALITY_MODEL,code))
+
+    def quality_models(self):
+        with self.connect() as c:
+            versions={x['model_code']:dict(x) for x in c.execute("SELECT * FROM quality_model_version WHERE status='ACTIVE'")}
+            terms=[dict(x) for x in c.execute("SELECT * FROM quality_model_term WHERE enabled=1 ORDER BY model_code,sort_order")]
+            mappings=[dict(x) for x in c.execute("SELECT * FROM customer_experience_quality_map")]
+        by_model={}
+        for row in terms:by_model.setdefault(row['model_code'],[]).append(row)
+        return {'versions':versions,'product_characteristics':[x for x in by_model.get(PRODUCT_QUALITY_MODEL,[]) if not x['parent_code']], 'product_subcharacteristics':[x for x in by_model.get(PRODUCT_QUALITY_MODEL,[]) if x['parent_code']], 'quality_in_use':by_model.get(QUALITY_IN_USE_MODEL,[]), 'customer_experiences':by_model.get(CUSTOMER_EXPERIENCE_MODEL,[]), 'mappings':mappings}
 
     @staticmethod
     def _ensure_power_loss_activity(c):
@@ -272,6 +299,11 @@ class ScenarioRepository:
     def scenario(self, scenario_id):
         item=next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
         if item:
+            for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
+                try:item[key]=json.loads(item.get(key) or '[]')
+                except (TypeError,json.JSONDecodeError):item[key]=[]
+            models=self.quality_models();labels={x['term_code']:x['label_zh'] for group in ('product_characteristics','product_subcharacteristics','quality_in_use','customer_experiences') for x in models[group]}
+            item['quality_labels']={key:labels.get(key,key) for key in [item.get('primary_experience_code'),*item['secondary_experience_codes'],*item['quality_in_use_codes'],item.get('primary_quality_characteristic_code'),*item['secondary_quality_characteristic_codes'],*item['quality_subcharacteristic_codes']] if key}
             with self.connect() as c:item['evidence']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_evidence WHERE scenario_id=?",(item['scenario_id'],))]
             for evidence in item['evidence']:
                 try:evidence['meta']=json.loads(evidence.get('evidence_summary') or '{}')
@@ -341,7 +373,29 @@ class ScenarioRepository:
             for row in rows.values():
                 row['scenario_count']=len(row.pop('scenario_ids'));result.append(row)
             return sorted(result,key=lambda x:(-x['issue_count'],str(x.get('activity_label') or x.get('industry'))))
-        return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(len((self.scenario(x['scenario_id']) or {}).get('evidence',[])) for x in items)}
+        models=self.quality_models();labels={x['term_code']:x['label_zh'] for group in ('customer_experiences','quality_in_use','product_characteristics') for x in models[group]}
+        detailed=[]
+        for row in items:
+            item=self.scenario(row['scenario_id']) or row;item['_issue_count']=len(item.get('evidence',[]));detailed.append(item)
+        activities=[{'code':x['activity_code'],'label':x['label_zh']} for x in taxonomy['activities'] if x['enabled'] and any(y.get('activity_code')==x['activity_code'] for y in detailed)]
+        def matrix(row_terms,column_terms,row_codes,column_codes):
+            rows=[]
+            for row_term in row_terms:
+                cells={}
+                matching=[x for x in detailed if row_term['code'] in row_codes(x)]
+                for column in column_terms:
+                    selected=[x for x in matching if column['term_code'] in column_codes(x)]
+                    cells[column['term_code']]={'scenario_count':len(selected),'issue_count':sum(x['_issue_count'] for x in selected)}
+                rows.append({'code':row_term['code'],'label':row_term['label'],'cells':cells})
+            return {'columns':[{'code':x['term_code'],'label':x['label_zh']} for x in column_terms],'rows':rows}
+        experiences=models['customer_experiences'];qiu=models['quality_in_use'];qualities=models['product_characteristics']
+        activity_codes=lambda x:[x.get('activity_code')] if x.get('activity_code') else []
+        experience_codes=lambda x:[x.get('primary_experience_code'),*(x.get('secondary_experience_codes') or [])]
+        qiu_codes=lambda x:x.get('quality_in_use_codes') or []
+        quality_codes=lambda x:[x.get('primary_quality_characteristic_code'),*(x.get('secondary_quality_characteristic_codes') or [])]
+        standardized=sum(1 for x in detailed if x.get('primary_experience_code') and x.get('primary_quality_characteristic_code'))
+        return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(x['_issue_count'] for x in detailed),'standardized_count':standardized,'standardized_rate':round(standardized*100/len(items),1) if items else 0,
+                'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes)}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
         taxonomy=self.taxonomy_active(product)
@@ -395,6 +449,22 @@ class ScenarioRepository:
              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
              ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,product_code=excluded.product_code,taxonomy_version_id=excluded.taxonomy_version_id,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,failure_mode=excluded.failure_mode,failure_mechanism=excluded.failure_mechanism,trigger_conditions=excluded.trigger_conditions,preconditions=excluded.preconditions,participating_systems=excluded.participating_systems,system_scale=excluded.system_scale,user_type=excluded.user_type,affected_object=excluded.affected_object,business_impact=excluded.business_impact,recovery_method=excluded.recovery_method,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
              (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),product_code,taxonomy_version_id,payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),payload.get('failure_mode',''),payload.get('failure_mechanism',''),payload.get('trigger_conditions',''),payload.get('preconditions',''),payload.get('participating_systems',''),payload.get('system_scale',''),payload.get('user_type',''),payload.get('affected_object',''),payload.get('business_impact',''),payload.get('recovery_method',''),status,version))
+            def codes(name):
+                value=payload.get(name,[])
+                if isinstance(value,str):
+                    try:value=json.loads(value) if value.strip().startswith('[') else [x.strip() for x in value.split(',') if x.strip()]
+                    except json.JSONDecodeError:value=[]
+                return list(dict.fromkeys(str(x) for x in value if str(x).strip()))
+            experience=payload.get('primary_experience_code','');secondary_experiences=codes('secondary_experience_codes');qiu=codes('quality_in_use_codes')
+            primary_quality=payload.get('primary_quality_characteristic_code','');secondary_quality=codes('secondary_quality_characteristic_codes');subqualities=codes('quality_subcharacteristic_codes')
+            allowed={row[0]:(row[1],row[2]) for row in c.execute("SELECT term_code,label_zh,parent_code FROM quality_model_term WHERE enabled=1")}
+            for code in [experience,*secondary_experiences,*qiu,primary_quality,*secondary_quality,*subqualities]:
+                if code and code not in allowed:raise ValueError(f'QUALITY_MODEL_TERM_INVALID:{code}')
+            if any(allowed[code][1] not in {primary_quality,*secondary_quality} for code in subqualities):raise ValueError('QUALITY_SUBCHARACTERISTIC_PARENT_MISMATCH')
+            quality_labels=[allowed[x][0] for x in [primary_quality,*secondary_quality] if x in allowed]
+            subquality_labels=[allowed[x][0] for x in subqualities if x in allowed]
+            c.execute("""UPDATE quality_scenario SET customer_perception=?,primary_experience_code=?,secondary_experience_codes=?,quality_in_use_codes=?,primary_quality_characteristic_code=?,secondary_quality_characteristic_codes=?,quality_subcharacteristic_codes=?,quality_classification_status=?,quality_model_version=?,quality_attribute=CASE WHEN ?<>'' THEN ? ELSE quality_attribute END,quality_subcharacteristic=CASE WHEN ?<>'' THEN ? ELSE quality_subcharacteristic END WHERE scenario_id=?""",
+                      (payload.get('customer_perception',''),experience,json.dumps(secondary_experiences,ensure_ascii=False),json.dumps(qiu,ensure_ascii=False),primary_quality,json.dumps(secondary_quality,ensure_ascii=False),json.dumps(subqualities,ensure_ascii=False),payload.get('quality_classification_status') or ('CONFIRMED' if status=='PUBLISHED' else 'PENDING_CONFIRMATION'),PRODUCT_QUALITY_MODEL,'、'.join(quality_labels),'、'.join(quality_labels),'、'.join(subquality_labels),'、'.join(subquality_labels),scenario_id))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:

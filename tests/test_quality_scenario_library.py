@@ -128,3 +128,22 @@ def test_taxonomy_activities_can_be_saved_in_one_request_and_returns_to_section(
     assert rows['POWER_LOSS_RETENTION_RECOVERY']['participating_systems']=='PLC / 存储'
     page=client.get(f'/settings/scenario-taxonomy?product_code=PLC')
     assert '保存全部业务活动' in page.text and '从 Excel 模板导入' in page.text and '定义/价值描述' in page.text
+
+
+def test_quality_models_are_versioned_and_scenario_uses_standard_codes(tmp_path):
+    client=TestClient(create_app(tmp_path/'quality-model.db'));repository=client.app.state.scenario_repository
+    models=repository.quality_models()
+    assert models['versions']['ISO_IEC_25010_2023_PRODUCT']['standard_ref']=='ISO/IEC 25010:2023'
+    assert len(models['product_characteristics'])==9
+    assert {x['label_zh'] for x in models['quality_in_use']}=={'有效性','效率','满意度','免除风险','情境覆盖'}
+    response=client.post('/quality-scenarios/save',data={
+        'scenario_code':'STD-1','name':'在线监控流畅性','status':'IN_REVIEW','activity_code':'ONLINE_MONITORING',
+        'customer_perception':'页面卡顿、响应慢','primary_experience_code':'EFFICIENT_SMOOTH',
+        'quality_in_use_codes':['EFFICIENCY','SATISFACTION'],'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY',
+        'quality_subcharacteristic_codes':['TIME_BEHAVIOUR','RESOURCE_UTILIZATION'],'quality_classification_status':'CONFIRMED',
+    },follow_redirects=False)
+    item=repository.scenario(response.headers['location'].rsplit('/',1)[-1])
+    assert item['primary_experience_code']=='EFFICIENT_SMOOTH' and item['quality_in_use_codes']==['EFFICIENCY','SATISFACTION']
+    assert item['quality_attribute']=='性能效率' and item['quality_subcharacteristic']=='时间特性、资源利用率'
+    page=client.get(response.headers['location'])
+    assert 'ISO/IEC 25010:2023' in page.text and '主要客户质量体验' in page.text and '使用质量要素' in page.text

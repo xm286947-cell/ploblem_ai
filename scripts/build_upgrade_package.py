@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH19_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH20_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -68,11 +68,16 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH19 累计升级说明
+    readme = """# PATCH20 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
 升级内容：
+- 新增三套版本化质量词典：公司客户质量体验、ISO/IEC 25010:2011 使用质量要素、ISO/IEC 25010:2023 产品质量特性与子特性。
+- 场景新增客户负向感知、主要/次要客户体验、使用质量要素、主要/次要产品质量特性、质量子特性及人工确认状态。
+- 场景审核页改为标准词典联动选择；质量子特性只能选择所选产品质量特性下的合法项。
+- AI 场景生成改为只输出词典编码，非法编码自动过滤，子特性父级不匹配时不入库；所有 AI 分类默认待人工确认。
+- 保留历史自由文本质量特性作为原始结果，结构化确认后同步生成统一中文展示值。
 - 场景词典业务活动改为表内连续编辑、一次性批量保存，保存后返回业务活动区域，不再逐条保存并跳回页首。
 - 生命周期补充阶段价值、阶段定义和阶段目标；业务活动补充参与对象、定义/价值描述和目标，均可人工维护。
 - 新增 Excel 场景词典模板导入，兼容“使用生命周期”和“业务活动场景_重构”工作表；导入只更新草稿版本。
