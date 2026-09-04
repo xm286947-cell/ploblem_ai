@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from quality_knowledge.scenarios import ScenarioRepository
 from quality_knowledge.web.app import create_app
@@ -96,3 +97,34 @@ def test_scenario_can_be_deleted_from_listing(tmp_path):
     assert f'/quality-scenarios/{scenario_id}/delete' in page.text
     response=client.post(f'/quality-scenarios/{scenario_id}/delete',follow_redirects=False)
     assert response.status_code==303 and repository.scenario(scenario_id) is None
+
+
+def test_taxonomy_template_import_preserves_definition_participants_and_goal(tmp_path):
+    source=tmp_path/'taxonomy.xlsx';book=Workbook();life=book.active;life.title='使用生命周期'
+    life.append(['标题']);life.append(['说明']);life.append(['使用生命周期阶段','阶段价值','阶段描述','阶段目标'])
+    life.append(['软件调试','把系统调通','在线验证和调整控制功能','局部功能正确工作'])
+    activity=book.create_sheet('业务活动场景_重构');activity.append(['标题']);activity.append(['说明']);activity.append(['阶段','业务活动场景','场景链路','参与对象','价值与描述','目标'])
+    activity.append(['软件调试','运动控制调试','轴上线 → 点动 → 定位 → 验证','iFA / PLC / 伺服','验证运动控制链路','运动准确且稳定'])
+    book.save(source)
+    repository=ScenarioRepository(tmp_path/'import.db');draft=repository.create_draft()
+    result=repository.import_taxonomy_workbook(draft,source)
+    taxonomy=repository.taxonomy(draft);life_row=next(x for x in taxonomy['lifecycles'] if x['label_zh']=='软件调试');row=next(x for x in taxonomy['activities'] if x['label_zh']=='运动控制调试')
+    assert result=={'lifecycle_count':1,'activity_count':1}
+    assert life_row['value_statement']=='把系统调通' and life_row['objective']=='局部功能正确工作'
+    assert row['description']=='验证运动控制链路' and row['participating_systems']=='iFA / PLC / 伺服' and row['objective']=='运动准确且稳定'
+
+
+def test_taxonomy_activities_can_be_saved_in_one_request_and_returns_to_section(tmp_path):
+    client=TestClient(create_app(tmp_path/'bulk.db'));repository=client.app.state.scenario_repository;draft=repository.create_draft()
+    response=client.post('/settings/scenario-taxonomy/activities/bulk',data={
+        'version_id':draft,'activity_code':['ONLINE_MONITORING','POWER_LOSS_RETENTION_RECOVERY'],
+        'lifecycle_code':['SOFTWARE_DEBUGGING','RUNTIME_EXECUTION'],'label_zh':['在线监控与调试','掉电恢复'],
+        'chain_text':['连接 → 监控 → 分析','运行 → 掉电 → 上电 → 恢复'],'participating_systems':['iFA / PLC','PLC / 存储'],
+        'description':['在线观察与诊断','保持关键数据并恢复'],'objective':['调试过程流畅','数据正确恢复'],'enabled_code':['ONLINE_MONITORING','POWER_LOSS_RETENTION_RECOVERY'],
+    },follow_redirects=False)
+    assert response.status_code==303 and response.headers['location'].endswith('#business-activities')
+    rows={x['activity_code']:x for x in repository.taxonomy(draft)['activities']}
+    assert rows['ONLINE_MONITORING']['description']=='在线观察与诊断'
+    assert rows['POWER_LOSS_RETENTION_RECOVERY']['participating_systems']=='PLC / 存储'
+    page=client.get(f'/settings/scenario-taxonomy?product_code=PLC')
+    assert '保存全部业务活动' in page.text and '从 Excel 模板导入' in page.text and '定义/价值描述' in page.text

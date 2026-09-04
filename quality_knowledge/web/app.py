@@ -380,12 +380,32 @@ def create_app(db_path):
         scenario_repo.create_draft(product_code,source_product_code);return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product_code}',303)
 
     @app.post('/settings/scenario-taxonomy/lifecycle', include_in_schema=False)
-    def scenario_lifecycle_save(version_id: str = Form(...), lifecycle_code: str = Form(...), label_zh: str = Form(...), description: str = Form(''), enabled: str = Form('')):
-        scenario_repo.save_lifecycle(version_id,lifecycle_code,label_zh,description,enabled=='on');product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}',303)
+    def scenario_lifecycle_save(version_id: str = Form(...), lifecycle_code: str = Form(...), label_zh: str = Form(...), description: str = Form(''), value_statement: str = Form(''), objective: str = Form(''), enabled: str = Form('')):
+        scenario_repo.save_lifecycle(version_id,lifecycle_code,label_zh,description,enabled=='on',value_statement,objective);product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}#lifecycles',303)
 
     @app.post('/settings/scenario-taxonomy/activity', include_in_schema=False)
-    def scenario_activity_save(version_id: str = Form(...), lifecycle_code: str = Form(...), activity_code: str = Form(...), label_zh: str = Form(...), chain_text: str = Form(''), description: str = Form(''), enabled: str = Form('')):
-        scenario_repo.save_activity(version_id,lifecycle_code,activity_code,label_zh,chain_text,description,enabled=='on');product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}',303)
+    def scenario_activity_save(version_id: str = Form(...), lifecycle_code: str = Form(...), activity_code: str = Form(...), label_zh: str = Form(...), chain_text: str = Form(''), description: str = Form(''), participating_systems: str = Form(''), objective: str = Form(''), enabled: str = Form('')):
+        scenario_repo.save_activity(version_id,lifecycle_code,activity_code,label_zh,chain_text,description,enabled=='on',participating_systems,objective);product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}#business-activities',303)
+
+    @app.post('/settings/scenario-taxonomy/activities/bulk', include_in_schema=False)
+    async def scenario_activities_bulk(request: Request):
+        form=await request.form();version_id=str(form.get('version_id') or '')
+        codes=[str(x) for x in form.getlist('activity_code')];enabled=set(str(x) for x in form.getlist('enabled_code'))
+        fields={name:[str(x) for x in form.getlist(name)] for name in ('lifecycle_code','label_zh','chain_text','description','participating_systems','objective')}
+        items=[]
+        for index,code in enumerate(codes):
+            items.append({'activity_code':code,'enabled':code in enabled,**{name:(values[index] if index<len(values) else '') for name,values in fields.items()}})
+        scenario_repo.save_activities(version_id,items);product=scenario_repo.taxonomy(version_id).get('product_code','PLC')
+        return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}&saved={len(items)}#business-activities',303)
+
+    @app.post('/settings/scenario-taxonomy/import', include_in_schema=False)
+    def scenario_taxonomy_import(file: UploadFile = File(...), product_code: str = Form(...)):
+        if Path(file.filename or '').suffix.lower() not in ALLOWED:raise HTTPException(400,'仅支持 .xlsx 或 .xlsm 模板')
+        version_id=scenario_repo.create_draft(product_code)
+        try:result=scenario_repo.import_taxonomy_workbook(version_id,file.file)
+        except (KeyError,ValueError) as error:raise HTTPException(400,f'场景词典模板校验失败：{error}') from error
+        finally:file.file.close()
+        return RedirectResponse(f"/settings/scenario-taxonomy?product_code={product_code}&imported={result['activity_count']}#business-activities",303)
 
     @app.post('/settings/scenario-taxonomy/{version_id}/activate', include_in_schema=False)
     def scenario_taxonomy_activate(version_id: str):

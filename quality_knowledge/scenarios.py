@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import sqlite3
 import uuid
+
+from openpyxl import load_workbook
 
 
 LIFECYCLES = (
@@ -78,6 +82,12 @@ class ScenarioRepository:
             c.executescript(SCHEMA)
             taxonomy_columns={row['name'] for row in c.execute("PRAGMA table_info(scenario_taxonomy_version)")}
             if 'product_code' not in taxonomy_columns:c.execute("ALTER TABLE scenario_taxonomy_version ADD COLUMN product_code TEXT NOT NULL DEFAULT 'PLC'")
+            lifecycle_columns={row['name'] for row in c.execute("PRAGMA table_info(scenario_lifecycle)")}
+            for name in ('value_statement','objective'):
+                if name not in lifecycle_columns:c.execute(f"ALTER TABLE scenario_lifecycle ADD COLUMN {name} TEXT")
+            activity_columns={row['name'] for row in c.execute("PRAGMA table_info(scenario_activity)")}
+            for name in ('participating_systems','objective'):
+                if name not in activity_columns:c.execute(f"ALTER TABLE scenario_activity ADD COLUMN {name} TEXT")
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
             for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
@@ -95,8 +105,8 @@ class ScenarioRepository:
                        WHERE status='COMPLETED' AND COALESCE(candidate_count,0)=0 AND NOT EXISTS(SELECT 1 FROM quality_scenario_generation_candidate x WHERE x.generation_id=quality_scenario_generation.generation_id)""")
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
                 version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,product_code,status,activated_at) VALUES(?,1,'PLC','ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
-                for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
-                for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,ACTIVITY_DESCRIPTIONS.get(code,""),order))
+                for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle(version_id,lifecycle_code,label_zh,description,enabled,sort_order) VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
+                for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity(version_id,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order) VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,ACTIVITY_DESCRIPTIONS.get(code,""),order))
             self._ensure_power_loss_activity(c)
             c.execute("UPDATE quality_scenario SET product_code='PLC' WHERE COALESCE(product_code,'')='' ")
             c.execute("""UPDATE quality_scenario SET taxonomy_version_id=(SELECT version_id FROM scenario_taxonomy_version WHERE product_code=quality_scenario.product_code AND status='ACTIVE' ORDER BY version_no DESC LIMIT 1) WHERE COALESCE(taxonomy_version_id,'')=''""")
@@ -112,7 +122,7 @@ class ScenarioRepository:
             next_row=c.execute("SELECT sort_order FROM scenario_activity WHERE version_id=? AND activity_code='RUNTIME_EXCEPTION_HANDLING'",(version_id,)).fetchone()
             order=next_row[0] if next_row else c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_activity WHERE version_id=?",(version_id,)).fetchone()[0]
             c.execute("UPDATE scenario_activity SET sort_order=sort_order+1 WHERE version_id=? AND sort_order>=?",(version_id,order))
-            c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,"RUNTIME_EXECUTION","掉电数据保持与上电恢复","正常运行 → 关键数据/状态产生 → 掉电 → 数据保持 → 重新上电 → 数据恢复 → 程序继续运行",ACTIVITY_DESCRIPTIONS[code],order))
+            c.execute("INSERT INTO scenario_activity(version_id,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order) VALUES(?,?,?,?,?,?,1,?)",(version_id,code,"RUNTIME_EXECUTION","掉电数据保持与上电恢复","正常运行 → 关键数据/状态产生 → 掉电 → 数据保持 → 重新上电 → 数据恢复 → 程序继续运行",ACTIVITY_DESCRIPTIONS[code],order))
 
     @staticmethod
     def _backfill_context_scopes(c):
@@ -161,24 +171,67 @@ class ScenarioRepository:
             version_id=f"STV-{uuid.uuid4().hex}";version_no=c.execute("SELECT COALESCE(MAX(version_no),0)+1 FROM scenario_taxonomy_version").fetchone()[0]
             c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,product_code,status) VALUES(?,?,?,'DRAFT')",(version_id,version_no,product_code))
             if source:
-                c.execute("INSERT INTO scenario_lifecycle SELECT ?,lifecycle_code,label_zh,description,enabled,sort_order FROM scenario_lifecycle WHERE version_id=?",(version_id,source['version_id']))
-                c.execute("INSERT INTO scenario_activity SELECT ?,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order FROM scenario_activity WHERE version_id=?",(version_id,source['version_id']))
+                c.execute("INSERT INTO scenario_lifecycle(version_id,lifecycle_code,label_zh,description,enabled,sort_order,value_statement,objective) SELECT ?,lifecycle_code,label_zh,description,enabled,sort_order,value_statement,objective FROM scenario_lifecycle WHERE version_id=?",(version_id,source['version_id']))
+                c.execute("INSERT INTO scenario_activity(version_id,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order,participating_systems,objective) SELECT ?,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order,participating_systems,objective FROM scenario_activity WHERE version_id=?",(version_id,source['version_id']))
             return version_id
 
-    def save_lifecycle(self, version_id, code, label, description, enabled=True):
+    def save_lifecycle(self, version_id, code, label, description, enabled=True, value_statement='', objective=''):
         with self.connect() as c:
             version=c.execute("SELECT status FROM scenario_taxonomy_version WHERE version_id=?",(version_id,)).fetchone()
             if not version or version['status']!='DRAFT':raise ValueError("TAXONOMY_NOT_EDITABLE")
             order=c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_lifecycle WHERE version_id=?",(version_id,)).fetchone()[0]
-            c.execute("""INSERT INTO scenario_lifecycle VALUES(?,?,?,?,?,?) ON CONFLICT(version_id,lifecycle_code) DO UPDATE SET label_zh=excluded.label_zh,description=excluded.description,enabled=excluded.enabled""",(version_id,code.strip().upper(),label.strip(),description.strip(),int(enabled),order))
+            c.execute("""INSERT INTO scenario_lifecycle(version_id,lifecycle_code,label_zh,description,enabled,sort_order,value_statement,objective) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(version_id,lifecycle_code) DO UPDATE SET label_zh=excluded.label_zh,description=excluded.description,enabled=excluded.enabled,value_statement=excluded.value_statement,objective=excluded.objective""",(version_id,code.strip().upper(),label.strip(),description.strip(),int(enabled),order,value_statement.strip(),objective.strip()))
 
-    def save_activity(self, version_id, lifecycle_code, code, label, chain, description, enabled=True):
+    def save_activity(self, version_id, lifecycle_code, code, label, chain, description, enabled=True, participating_systems='', objective=''):
         with self.connect() as c:
             version=c.execute("SELECT status FROM scenario_taxonomy_version WHERE version_id=?",(version_id,)).fetchone()
             if not version or version['status']!='DRAFT':raise ValueError("TAXONOMY_NOT_EDITABLE")
             if not c.execute("SELECT 1 FROM scenario_lifecycle WHERE version_id=? AND lifecycle_code=?",(version_id,lifecycle_code)).fetchone():raise ValueError("LIFECYCLE_NOT_FOUND")
             order=c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM scenario_activity WHERE version_id=?",(version_id,)).fetchone()[0]
-            c.execute("""INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(version_id,activity_code) DO UPDATE SET lifecycle_code=excluded.lifecycle_code,label_zh=excluded.label_zh,chain_text=excluded.chain_text,description=excluded.description,enabled=excluded.enabled""",(version_id,code.strip().upper(),lifecycle_code,label.strip(),chain.strip(),description.strip(),int(enabled),order))
+            c.execute("""INSERT INTO scenario_activity(version_id,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order,participating_systems,objective) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(version_id,activity_code) DO UPDATE SET lifecycle_code=excluded.lifecycle_code,label_zh=excluded.label_zh,chain_text=excluded.chain_text,description=excluded.description,enabled=excluded.enabled,participating_systems=excluded.participating_systems,objective=excluded.objective""",(version_id,code.strip().upper(),lifecycle_code,label.strip(),chain.strip(),description.strip(),int(enabled),order,participating_systems.strip(),objective.strip()))
+
+    def save_activities(self,version_id,items):
+        for item in items:
+            self.save_activity(version_id,item['lifecycle_code'],item['activity_code'],item['label_zh'],item.get('chain_text',''),item.get('description',''),item.get('enabled',True),item.get('participating_systems',''),item.get('objective',''))
+
+    @staticmethod
+    def _import_code(prefix,label):
+        text=re.sub(r'[^A-Z0-9]+','_',str(label or '').upper()).strip('_')
+        digest=hashlib.sha1(str(label).encode('utf-8')).hexdigest()[:10].upper()
+        return f"{prefix}_{text[:32]}_{digest}" if text else f"{prefix}_{digest}"
+
+    def import_taxonomy_workbook(self,version_id,source):
+        taxonomy=self.taxonomy(version_id)
+        if not taxonomy or taxonomy['status']!='DRAFT':raise ValueError('TAXONOMY_NOT_EDITABLE')
+        workbook=load_workbook(source,read_only=True,data_only=True)
+        try:
+            lifecycle_sheet=workbook['使用生命周期'];activity_sheet=workbook['业务活动场景_重构']
+            life_by_label={x['label_zh']:x['lifecycle_code'] for x in taxonomy['lifecycles']}
+            lifecycle_count=0
+            for row in lifecycle_sheet.iter_rows(min_row=4,values_only=True):
+                if len(row)<4:continue
+                label=str(row[0] or '').strip()
+                if not label:continue
+                code=life_by_label.get(label) or self._import_code('LIFE',label)
+                self.save_lifecycle(version_id,code,label,str(row[2] or ''),True,str(row[1] or ''),str(row[3] or ''))
+                life_by_label[label]=code;lifecycle_count+=1
+            existing={(x['lifecycle_code'],x['label_zh']):x['activity_code'] for x in self.taxonomy(version_id)['activities']}
+            activity_rows=[]
+            for row in activity_sheet.iter_rows(min_row=4,values_only=True):
+                if len(row)<6:continue
+                lifecycle_label=str(row[0] or '').strip();label=str(row[1] or '').strip()
+                if not lifecycle_label or not label:continue
+                lifecycle_code=life_by_label.get(lifecycle_label)
+                if not lifecycle_code:raise ValueError(f'IMPORT_LIFECYCLE_NOT_FOUND:{lifecycle_label}')
+                activity_rows.append((row,lifecycle_code,label))
+            with self.connect() as c:c.execute("DELETE FROM scenario_activity WHERE version_id=?",(version_id,))
+            activity_count=0
+            for row,lifecycle_code,label in activity_rows:
+                code=existing.get((lifecycle_code,label)) or self._import_code('ACT',f'{lifecycle_code}_{label}')
+                self.save_activity(version_id,lifecycle_code,code,label,str(row[2] or ''),str(row[4] or ''),True,str(row[3] or ''),str(row[5] or ''))
+                activity_count+=1
+            return {'lifecycle_count':lifecycle_count,'activity_count':activity_count}
+        finally:workbook.close()
 
     def activate(self, version_id):
         with self.connect() as c:
