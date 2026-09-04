@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH17_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH18_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -68,11 +68,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH17 累计升级说明
+    readme = """# PATCH18 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
 升级内容：
+- 质量场景改为一个问题一次独立 AI 识别，不再按批次合并问题或自动汇聚候选。
+- 场景识别复用问题分析的多 Agent 配置，按问题轮询分配并并发执行；同一问题全程只使用一个 Agent/模型。
+- 问题识别账本记录实际 Agent、模型、开始时间、完成时间和尝试次数；单条失败不再中断整批任务。
 - 修复 Windows 导入 ITR Excel 后文件句柄未释放的问题。
 - 将 ITR、彻底解决单和软件考核页升级为可检索、筛选、分页和查看详情的工作台。
 - 增加完整原始字段、同 ITR 关联数据、漏测分析跳转和独立人工分析。

@@ -4,17 +4,20 @@ import hashlib
 import json
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+import yaml
 
 from builder.ai_client import OpenAICompatibleClient
 from builder.json_response import parse_json_object
-from quality_knowledge.model_config import load_quality_issue_ai_config
+from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
 
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
 输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","experience_requirement":"","concern_points":"","quality_attribute":"","quality_subcharacteristic":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：只能使用给定词典编码；每一个输入问题必须且只能出现在一个场景的 evidence_issue_ids 中，不得遗漏；每项必须有来源问题；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；相同阶段、业务活动、质量子特性和失效表现可合并；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；quality_attribute 填质量特性，quality_subcharacteristic 填更具体的质量子特性；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
 
 
 class ScenarioGenerationService:
@@ -125,65 +128,64 @@ class ScenarioGenerationService:
         taxonomy=self.scenarios.taxonomy_active(product)
         if not taxonomy:raise ValueError(f'SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:{product}')
         compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities']}
-        cfg={}
+        parallel={'enabled':True,'max_workers':4}
         if self.ai_client is None:
-            cfg,_=load_quality_issue_ai_config(self.root,agent_id='DEFAULT')
-        client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':max(8192,int(cfg.get('scenario_generation_max_tokens') or 8192)),'temperature':0})
-        batch_size=max(5,min(30,int(cfg.get('scenario_generation_batch_size') or 15)))
+            config_path=resolve_model_config_path(self.root)
+            config_data=yaml.safe_load(config_path.read_text(encoding='utf-8')) or {}
+            parallel.update(config_data.get('parallel_ai') or {})
+        max_workers=max(1,min(16,int(parallel.get('max_workers') or 1))) if parallel.get('enabled',True) else 1
         generation_id=generation_id or f"QSG-{uuid.uuid4().hex}"
         if not self.scenarios.generation(generation_id):self.scenarios.create_generation(generation_id,product,start_month,end_month,len(records),created_by)
         self.scenarios.initialize_issue_classifications(generation_id,records)
-        self.scenarios.update_generation(generation_id,status='RUNNING',taxonomy_version_id=taxonomy['version_id'],progress_text=f"正在按 {product} 场景词典 V{taxonomy['version_no']} 分批分析 {len(records)} 个问题")
-        mapped=[];model=str(cfg.get('model') or getattr(client,'model',''))
-        for start in range(0,len(records),batch_size):
-            chunk=records[start:start+batch_size];allowed={str(x['knowledge_id']):x['knowledge_id'] for x in chunk};allowed.update({str(x.get('business_issue_id')):x['knowledge_id'] for x in chunk if x.get('business_issue_id')});items,model=self._complete(client,chunk,allowed,compact_taxonomy);mapped.extend(items)
-            covered={kid for item in items for kid in item.get('evidence_issue_ids',[])}
-            missing=[row for row in chunk if row['knowledge_id'] not in covered]
-            for row in missing:
-                one_allowed={str(row['knowledge_id']):row['knowledge_id']}
-                if row.get('business_issue_id'):one_allowed[str(row['business_issue_id'])]=row['knowledge_id']
+        self.scenarios.update_generation(generation_id,status='RUNNING',taxonomy_version_id=taxonomy['version_id'],progress_text=f"正在按 {product} 场景词典 V{taxonomy['version_no']} 逐问题识别；并发数 {max_workers}")
+
+        def analyse(index,row):
+            agent_id='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,row['knowledge_id'],slot=index)
+            cfg={}
+            if self.ai_client is None:cfg,_=load_quality_issue_ai_config(self.root,agent_id=agent_id)
+            client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':max(8192,int(cfg.get('scenario_generation_max_tokens') or 8192)),'temperature':0})
+            allowed={str(row['knowledge_id']):row['knowledge_id']}
+            if row.get('business_issue_id'):allowed[str(row['business_issue_id'])]=row['knowledge_id']
+            items,model=self._complete(client,[row],allowed,compact_taxonomy)
+            return row,items[0] if items else None,agent_id,str(model or cfg.get('model') or getattr(client,'model',''))
+
+        created=[];models=set()
+        futures={}
+        with ThreadPoolExecutor(max_workers=max_workers,thread_name_prefix='scenario-ai') as executor:
+            for index,row in enumerate(records):
+                agent_id='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,row['knowledge_id'],slot=index)
+                cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent_id)[0]
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'RUNNING',agent_id=agent_id,model_name=str(cfg.get('model') or getattr(self.ai_client,'model','')),started=True)
+                futures[executor.submit(analyse,index,row)]=row
+            for future in as_completed(futures):
+                row=futures[future]
                 try:
-                    retry,model=self._complete(client,[row],one_allowed,compact_taxonomy)
+                    source_row,item,agent_id,model=future.result();models.add(model)
+                    if not item:
+                        self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',agent_id=agent_id,model_name=model,error_message='AI未返回该问题的有效场景，请人工确认',finished=True)
+                        raise StopIteration
+                    code=f"AI-{hashlib.sha1((generation_id+row['knowledge_id']).encode()).hexdigest()[:10].upper()}"
+                    source_records=[source_row]
+                    scope_fields={'IPMT':'ipmt','SPDT':'spdt','PRODUCT_MODEL':'product_model','INDUSTRY':'customer_industry','CUSTOMER_NAME':'customer_name','CUSTOMER_LEVEL':'customer_level','CUSTOMER_STATUS':'customer_status','OCCURRENCE_PHASE':'occurrence_phase'}
+                    scopes={kind:sorted({x['itr_cs_context'].get(field,'') for x in source_records}-{''}) for kind,field in scope_fields.items()}
+                    scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model)
+                    industries=sorted({x['itr_cs_context'].get('customer_industry','') for x in source_records}-{''})
+                    variants=[{'industry':industry,'product_models':sorted({x['itr_cs_context'].get('product_model','') for x in source_records if x['itr_cs_context'].get('customer_industry')==industry}-{''}),'trigger_conditions':item.get('trigger_conditions',''),'business_impact':item.get('business_impact',''),'recovery_method':item.get('recovery_method',''),'evidence_count':1} for industry in industries]
+                    self.scenarios.save_industry_variants(scenario_id,variants)
+                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'CLASSIFIED',scenario_id=scenario_id,activity_code=item.get('activity_code',''),lifecycle_code=item.get('lifecycle_code',''),agent_id=agent_id,model_name=model,finished=True)
+                    created.append(scenario_id)
+                except StopIteration:
+                    pass
                 except Exception as error:
-                    retry=[];self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'FAILED',error_message=str(error))
-                if retry:mapped.extend(retry);covered.update(k for item in retry for k in item.get('evidence_issue_ids',[]))
-            for row in chunk:
-                if row['knowledge_id'] in covered:self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'CLASSIFIED')
-                elif not any(x['knowledge_id']==row['knowledge_id'] and x['status']=='FAILED' for x in self.scenarios.issue_classifications(generation_id)):
-                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',error_message='AI未返回该问题的有效场景，请人工确认')
-            coverage=self.scenarios.refresh_generation_coverage(generation_id)
-            self.scenarios.update_generation(generation_id,progress_text=f"已处理 {coverage['processed_count']}/{len(records)}；已识别 {coverage['classified_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}")
-        if not mapped:raise ValueError('AI未生成有效候选：请检查模型输出的场景名称、生命周期、业务活动和来源问题')
-        # 跨批次只合并语义完全一致的基础场景，行业、客户和产品差异保留在来源范围中。
-        merged={}
-        for item in mapped:
-            key=(item.get('activity_code',''),item.get('quality_subcharacteristic',''),re.sub(r'\s+','',item.get('name','')).lower())
-            if key not in merged:merged[key]=item;continue
-            target=merged[key];target['evidence_issue_ids']=list(dict.fromkeys(target.get('evidence_issue_ids',[])+item.get('evidence_issue_ids',[])))
-            target['confirmation_questions']=list(dict.fromkeys(target.get('confirmation_questions',[])+item.get('confirmation_questions',[])))[:5]
-            target['confidence']=min(float(target.get('confidence') or 0),float(item.get('confidence') or 0))
-        mapped=list(merged.values())
-        created=[]
-        for index,item in enumerate(mapped,1):
-            code=f"AI-{hashlib.sha1((generation_id+str(index)).encode()).hexdigest()[:10].upper()}"
-            source_records=[x for x in records if x['knowledge_id'] in item.get('evidence_issue_ids',[])]
-            scope_fields={'IPMT':'ipmt','SPDT':'spdt','PRODUCT_MODEL':'product_model','INDUSTRY':'customer_industry','CUSTOMER_NAME':'customer_name','CUSTOMER_LEVEL':'customer_level','CUSTOMER_STATUS':'customer_status','OCCURRENCE_PHASE':'occurrence_phase'}
-            scopes={kind:sorted({x['itr_cs_context'].get(field,'') for x in source_records}-{''}) for kind,field in scope_fields.items()}
-            scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model)
-            variants=[]
-            industries=sorted({x['itr_cs_context'].get('customer_industry','') for x in source_records}-{''})
-            for industry in industries:
-                related=[x for x in source_records if x['itr_cs_context'].get('customer_industry')==industry]
-                variants.append({'industry':industry,'product_models':sorted({x['itr_cs_context'].get('product_model','') for x in related}-{''}),'trigger_conditions':item.get('trigger_conditions',''),'business_impact':item.get('business_impact',''),'recovery_method':item.get('recovery_method',''),'evidence_count':len(related)})
-            self.scenarios.save_industry_variants(scenario_id,variants)
-            for knowledge_id in item.get('evidence_issue_ids',[]):
-                self.scenarios.mark_issue_classification(generation_id,knowledge_id,'CLASSIFIED',scenario_id=scenario_id,activity_code=item.get('activity_code',''),lifecycle_code=item.get('lifecycle_code',''))
-            created.append(scenario_id)
+                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'FAILED',error_message=str(error),finished=True)
+                coverage=self.scenarios.refresh_generation_coverage(generation_id)
+                self.scenarios.update_generation(generation_id,progress_text=f"已处理 {coverage['processed_count']}/{len(records)}；已识别 {coverage['classified_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}")
         coverage=self.scenarios.refresh_generation_coverage(generation_id)
         final_status='COMPLETED' if coverage['unprocessed_count']==0 and coverage['failed_count']==0 and coverage['review_required_count']==0 else 'PARTIAL'
         text=f"覆盖 {coverage['classified_count']}/{len(records)}；待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}"
-        self.scenarios.update_generation(generation_id,status=final_status,progress_text=text,candidate_count=len(created),model_name=model,error_message='' if final_status=='COMPLETED' else '部分问题未形成有效场景，请处理待确认或失败项')
-        return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(created),'scenario_ids':created,'model':model,**coverage,'status':final_status}
+        model_text='、'.join(sorted(x for x in models if x))
+        self.scenarios.update_generation(generation_id,status=final_status,progress_text=text,candidate_count=len(created),model_name=model_text,error_message='' if final_status=='COMPLETED' else '部分问题未形成有效场景，请处理待确认或失败项')
+        return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(created),'scenario_ids':created,'model':model_text,**coverage,'status':final_status}
 
     def run_job(self,generation_id,product,start_month,end_month,selected_ids,created_by='WEB_USER'):
         try:return self.generate(product,start_month,end_month,created_by,selected_ids,generation_id)

@@ -46,12 +46,14 @@ def test_generate_candidates_are_review_only_and_traceable(tmp_path):
     repository=ScenarioRepository(tmp_path/'scenario.db');client=FakeClient()
     service=ScenarioGenerationService(FakeIssues(),repository,tmp_path,client)
     result=service.generate('PLC','1月','12月')
-    assert result['candidate_count']==1 and result['source_issue_count']==2
-    item=repository.scenario(result['scenario_ids'][0])
-    assert item['status']=='IN_REVIEW'
-    assert {x['knowledge_id'] for x in item['evidence']}=={'QK-1','QK-2'}
+    assert result['candidate_count']==2 and result['source_issue_count']==2
+    items=[repository.scenario(x) for x in result['scenario_ids']]
+    assert {x['status'] for x in items}=={'IN_REVIEW'}
+    assert {tuple(x['evidence'][0]['knowledge_id'] for _ in [0]) for x in items}=={('QK-1',),('QK-2',)}
+    assert all(len(x['evidence'])==1 for x in items)
+    item=items[0]
     assert repository.generations()[0]['model_name']=='scenario-model'
-    assert repository.generations()[0]['linked_candidate_count']==1
+    assert repository.generations()[0]['linked_candidate_count']==2
     assert [x['scenario_id'] for x in repository.scenarios(generation_id=result['generation_id'])]==result['scenario_ids']
     assert item['scenario_chain']=='下载运行 → 在线监控 → 变量观察 → 状态分析 → 调整'
     assert item['quality_subcharacteristic']=='时间特性、资源利用率'
@@ -264,3 +266,22 @@ def test_generation_requires_active_taxonomy_for_selected_product(tmp_path):
     item=repository.scenario(result['scenario_ids'][0])
     assert item['product_code']=='HMI' and item['taxonomy_version_id']==draft
     assert repository.generation(result['generation_id'])['taxonomy_version_id']==draft
+
+
+def test_one_issue_one_candidate_and_agents_round_robin(tmp_path,monkeypatch):
+    config=tmp_path/'config';config.mkdir()
+    (config/'model.yaml').write_text('''ai:\n  enabled: true\n  provider: openai_compatible\n  base_url: http://example/v1\n  model: base-model\nquality_issue_agents:\n  deep:\n    enabled: true\n    model: model-deep\n  fast:\n    enabled: true\n    model: model-fast\nparallel_ai:\n  enabled: true\n  max_workers: 2\n''',encoding='utf-8')
+    class AgentClient:
+        def __init__(self,cfg):self.cfg=cfg;self.model=cfg['model']
+        def complete(self,messages):
+            row=json.loads(messages[-1]['content'])['records'][0]
+            payload={'items':[{'name':'独立场景-'+row['knowledge_id'],'lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','evidence_issue_ids':[row['knowledge_id']],'confidence':0.8}]}
+            return AIResponse(json.dumps(payload,ensure_ascii=False),self.model,{})
+    monkeypatch.setattr('quality_knowledge.scenario_generation.OpenAICompatibleClient',AgentClient)
+    repository=ScenarioRepository(tmp_path/'agents.db')
+    result=ScenarioGenerationService(FakeIssues(),repository,tmp_path).generate('PLC','1月','12月')
+    ledger=repository.issue_classifications(result['generation_id'])
+    assert result['candidate_count']==2 and {x['agent_id'] for x in ledger}=={'deep','fast'}
+    assert {x['model_name'] for x in ledger}=={'model-deep','model-fast'}
+    assert all(x['attempt_count']==1 and x['started_at'] and x['finished_at'] for x in ledger)
+    assert all(len(repository.scenario(x['scenario_id'])['evidence'])==1 for x in ledger)

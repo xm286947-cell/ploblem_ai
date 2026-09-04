@@ -84,6 +84,9 @@ class ScenarioRepository:
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
+            ledger_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_issue_classification)")}
+            for name,definition in {'agent_id':"TEXT",'model_name':"TEXT",'started_at':"TEXT",'finished_at':"TEXT",'attempt_count':"INTEGER NOT NULL DEFAULT 0"}.items():
+                if name not in ledger_columns:c.execute(f"ALTER TABLE quality_scenario_issue_classification ADD COLUMN {name} {definition}")
             for row in c.execute("SELECT scenario_id,evidence_summary FROM quality_scenario_evidence").fetchall():
                 try:generation_id=json.loads(row['evidence_summary'] or '{}').get('generation_id')
                 except (TypeError,json.JSONDecodeError):generation_id=''
@@ -126,7 +129,7 @@ class ScenarioRepository:
                 if value:c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(row['scenario_id'],kind,value))
 
     def connect(self):
-        c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");return c
+        c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");c.execute("PRAGMA busy_timeout=5000");return c
 
     def versions(self, product_code=''):
         with self.connect() as c:
@@ -236,14 +239,14 @@ class ScenarioRepository:
                 c.execute("INSERT OR IGNORE INTO quality_scenario_issue_classification(generation_id,knowledge_id,business_issue_id,status) VALUES(?,?,?,'PENDING')",(generation_id,row['knowledge_id'],row.get('business_issue_id')))
         self.refresh_generation_coverage(generation_id)
 
-    def mark_issue_classification(self,generation_id,knowledge_id,status,*,scenario_id='',activity_code='',lifecycle_code='',error_message=''):
+    def mark_issue_classification(self,generation_id,knowledge_id,status,*,scenario_id='',activity_code='',lifecycle_code='',error_message='',agent_id='',model_name='',started=False,finished=False):
         with self.connect() as c:
-            c.execute("""UPDATE quality_scenario_issue_classification SET status=?,scenario_id=?,activity_code=?,lifecycle_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE generation_id=? AND knowledge_id=?""",(status,scenario_id or None,activity_code or None,lifecycle_code or None,error_message or None,generation_id,knowledge_id))
+            c.execute("""UPDATE quality_scenario_issue_classification SET status=?,scenario_id=COALESCE(?,scenario_id),activity_code=COALESCE(?,activity_code),lifecycle_code=COALESCE(?,lifecycle_code),error_message=?,agent_id=COALESCE(?,agent_id),model_name=COALESCE(?,model_name),started_at=CASE WHEN ? THEN COALESCE(started_at,CURRENT_TIMESTAMP) ELSE started_at END,finished_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE finished_at END,attempt_count=attempt_count+CASE WHEN ? THEN 1 ELSE 0 END,updated_at=CURRENT_TIMESTAMP WHERE generation_id=? AND knowledge_id=?""",(status,scenario_id or None,activity_code or None,lifecycle_code or None,error_message or None,agent_id or None,model_name or None,int(started),int(finished),int(started),generation_id,knowledge_id))
 
     def refresh_generation_coverage(self,generation_id):
         with self.connect() as c:
             counts={row['status']:row['n'] for row in c.execute("SELECT status,COUNT(*) n FROM quality_scenario_issue_classification WHERE generation_id=? GROUP BY status",(generation_id,))}
-            total=sum(counts.values());classified=counts.get('CLASSIFIED',0);review=counts.get('REVIEW_REQUIRED',0);failed=counts.get('FAILED',0);unprocessed=counts.get('PENDING',0)
+            total=sum(counts.values());classified=counts.get('CLASSIFIED',0);review=counts.get('REVIEW_REQUIRED',0);failed=counts.get('FAILED',0);unprocessed=counts.get('PENDING',0)+counts.get('RUNNING',0)
             c.execute("UPDATE quality_scenario_generation SET processed_count=?,classified_count=?,review_required_count=?,failed_count=?,unprocessed_count=? WHERE generation_id=?",(classified+review+failed,classified,review,failed,unprocessed,generation_id))
         return {'total':total,'processed_count':classified+review+failed,'classified_count':classified,'review_required_count':review,'failed_count':failed,'unprocessed_count':unprocessed}
 
