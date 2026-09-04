@@ -249,6 +249,29 @@ def test_scenario_insights_show_four_standard_quality_matrices(tmp_path):
     page=client.get('/quality-scenarios/insights?status=PUBLISHED')
     for title in ('业务活动场景 × 客户质量体验','业务活动场景 × 使用质量要素','使用质量要素 × 产品质量特性','业务活动场景 × 产品质量特性'):
         assert title in page.text
+    assert '/quality-scenarios?activity_code=ONLINE_MONITORING&amp;experience_code=EFFICIENT_SMOOTH' in page.text
+    filtered=repository.scenarios(activity_code='ONLINE_MONITORING',experience_code='EFFICIENT_SMOOTH')
+    assert [x['scenario_id'] for x in filtered]==[scenario_id]
+
+
+def test_historical_scenario_standardization_is_reviewable_and_preserves_publication(tmp_path):
+    class StandardClient:
+        model='quality-standard-model'
+        def complete(self,messages):
+            return AIResponse(json.dumps({'customer_perception':'操作卡顿','primary_experience_code':'EFFICIENT_SMOOTH','secondary_experience_codes':[],'quality_in_use_codes':['EFFICIENCY'],'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY','secondary_quality_characteristic_codes':[],'quality_subcharacteristic_codes':['TIME_BEHAVIOUR']},ensure_ascii=False),self.model,{})
+    db=tmp_path/'standard.db';repository=ScenarioRepository(db)
+    scenario_id=repository.save_scenario('',{'scenario_code':'OLD-1','name':'在线监控性能','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','status':'PUBLISHED'}, {})
+    with repository.connect() as c:c.execute("UPDATE quality_scenario SET quality_classification_status=NULL WHERE scenario_id=?",(scenario_id,))
+    result=ScenarioGenerationService(FakeIssues(),repository,tmp_path,StandardClient()).standardize_existing([scenario_id])
+    saved=repository.scenario(scenario_id)
+    assert result=={'completed':1,'failed':0,'skipped':0}
+    assert saved['status']=='PUBLISHED' and saved['quality_classification_status']=='PENDING_CONFIRMATION'
+    assert saved['primary_experience_code']=='EFFICIENT_SMOOTH' and saved['quality_subcharacteristic_codes']==['TIME_BEHAVIOUR']
+    page=TestClient(create_app(db)).get('/quality-scenarios/standardize')
+    assert page.status_code==200 and '历史场景标准化' in page.text and 'quality-standard-model' in page.text
+    repository.mark_standardization(scenario_id,'CONFIRMED')
+    skipped=ScenarioGenerationService(FakeIssues(),repository,tmp_path,StandardClient()).standardize_existing([scenario_id])
+    assert skipped['skipped']==1
 
 
 def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):

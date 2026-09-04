@@ -307,9 +307,22 @@ def create_app(db_path):
         return RedirectResponse('/settings/associations',303)
 
     @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = ''):
+    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = '', activity_code: str = '', experience_code: str = '', qiu_code: str = '', quality_code: str = ''):
         taxonomy=scenario_repo.taxonomy()
-        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(ipmt=ipmt,spdt=spdt,product_model=product_model,industry=industry,customer_name=customer_name,q=q,status=status,generation_id=generation_id),'options':scenario_repo.scope_options(),'filters':{'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id},'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None})
+        filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code}
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(**filters),'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None})
+
+    @app.get('/quality-scenarios/standardize', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_standardize_page(request: Request):
+        items=scenario_repo.standardization_items()
+        counts={key:sum(1 for x in items if x['quality_classification_status']==key) for key in ('NOT_ANALYZED','RUNNING','PENDING_CONFIRMATION','CONFIRMED','FAILED')}
+        return tpl.TemplateResponse(request,'quality_scenario_standardize.html',{'items':items,'counts':counts,'running':bool(counts['RUNNING'])})
+
+    @app.post('/quality-scenarios/standardize', include_in_schema=False)
+    def quality_scenario_standardize(selected_ids: list[str] = Form([])):
+        if not selected_ids:raise HTTPException(400,'QUALITY_SCENARIO_SELECTION_REQUIRED')
+        threading.Thread(target=scenario_generation_svc.standardize_existing,args=(list(selected_ids),),daemon=True,name='scenario-standardize').start()
+        return RedirectResponse('/quality-scenarios/standardize',303)
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):

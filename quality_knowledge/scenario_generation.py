@@ -14,6 +14,11 @@ from builder.json_response import parse_json_object
 from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
 
 
+STANDARDIZATION_PROMPT = """/no_think
+你是资深质量工程专家。对一个既有质量场景补齐标准化分类，不改变场景名称、业务活动、发布状态和来源证据。只输出严格JSON：
+{"customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[]}
+所有code只能从quality_models中选择；质量子特性必须属于已选择的主要或次要产品质量特性。禁止输出解释、Markdown或新增字段。"""
+
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
 输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[],"experience_requirement":"","concern_points":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
@@ -201,3 +206,46 @@ class ScenarioGenerationService:
         try:return self.generate(product,start_month,end_month,created_by,selected_ids,generation_id)
         except Exception as error:
             self.scenarios.update_generation(generation_id,status='FAILED',progress_text='生成失败',error_message=str(error));return None
+
+    def standardize_existing(self,scenario_ids):
+        models=self.scenarios.quality_models()
+        allowed={x['term_code']:x for group in ('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics') for x in models[group]}
+        parents={x['term_code']:x.get('parent_code') for x in models['product_subcharacteristics']}
+        outcome={'completed':0,'failed':0,'skipped':0}
+        def analyse(index,scenario_id):
+            item=self.scenarios.scenario(scenario_id)
+            if not item:raise ValueError('QUALITY_SCENARIO_NOT_FOUND')
+            if item.get('quality_classification_status')=='CONFIRMED':return None
+            agent='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,scenario_id,slot=index)
+            cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent)[0]
+            client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':4096,'temperature':0})
+            model=str(cfg.get('model') or getattr(client,'model',''))
+            self.scenarios.mark_standardization(scenario_id,'RUNNING',agent=agent,model=model)
+            fields=('name','scenario_chain','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','validation_direction','measurement_suggestion')
+            response=client.complete([{'role':'system','content':STANDARDIZATION_PROMPT},{'role':'user','content':json.dumps({'scenario':{k:item.get(k) for k in fields},'quality_models':models},ensure_ascii=False)}])
+            parsed,_=parse_json_object(response.content,allow_repair=True)
+            if not isinstance(parsed,dict):raise ValueError('QUALITY_STANDARDIZATION_SCHEMA_INVALID')
+            result={'customer_perception':str(parsed.get('customer_perception') or '')[:160]}
+            for key in ('primary_experience_code','primary_quality_characteristic_code'):
+                code=str(parsed.get(key) or '');result[key]=code if code in allowed else ''
+            for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
+                result[key]=list(dict.fromkeys(str(x) for x in parsed.get(key,[]) if str(x) in allowed))
+            selected={result['primary_quality_characteristic_code'],*result['secondary_quality_characteristic_codes']}
+            result['quality_subcharacteristic_codes']=[x for x in result['quality_subcharacteristic_codes'] if parents.get(x) in selected]
+            if not result['primary_experience_code'] or not result['primary_quality_characteristic_code']:raise ValueError('QUALITY_STANDARDIZATION_REQUIRED_CODE_MISSING')
+            return scenario_id,agent,str(response.model or model),result
+        ids=list(dict.fromkeys(scenario_ids))
+        with ThreadPoolExecutor(max_workers=min(8,max(1,len(ids))),thread_name_prefix='scenario-standardize') as executor:
+            futures={executor.submit(analyse,index,sid):sid for index,sid in enumerate(ids)}
+            for future in as_completed(futures):
+                sid=futures[future]
+                try:
+                    result=future.result()
+                    if result is None:outcome['skipped']+=1;continue
+                    scenario_id,agent,model,payload=result
+                    self.scenarios.save_standardization(scenario_id,payload,agent=agent,model=model);outcome['completed']+=1
+                except Exception as error:
+                    try:self.scenarios.mark_standardization(sid,'FAILED',error=str(error))
+                    except Exception:pass
+                    outcome['failed']+=1
+        return outcome

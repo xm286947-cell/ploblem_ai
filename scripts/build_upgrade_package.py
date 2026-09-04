@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH20_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH21_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -28,6 +28,7 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/templates/quality_scenario_generate.html",
     "quality_knowledge/web/templates/quality_scenario_insights.html",
     "quality_knowledge/web/templates/quality_scenario_generation_issues.html",
+    "quality_knowledge/web/templates/quality_scenario_standardize.html",
     "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
@@ -68,11 +69,15 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH20 累计升级说明
+    readme = """# PATCH21 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
 升级内容：
+- 新增历史场景标准化工作台：可批量选择已有场景，后台逐条调用AI补齐三层质量分类，并实时显示未分析、运行中、待确认、已确认和失败状态。
+- 历史标准化复用多Agent轮询；单场景只由一个模型完成，单条失败不影响整批，已人工确认场景不会被覆盖。
+- AI标准化只修改客户质量体验、使用质量要素、产品质量特性与子特性，不改变场景名称、业务活动、来源证据和发布状态。
+- 四类质量矩阵支持点击单元格精确下钻，场景清单按矩阵两个维度同时过滤，不再只能看汇总数字。
 - 新增三套版本化质量词典：公司客户质量体验、ISO/IEC 25010:2011 使用质量要素、ISO/IEC 25010:2023 产品质量特性与子特性。
 - 场景新增客户负向感知、主要/次要客户体验、使用质量要素、主要/次要产品质量特性、质量子特性及人工确认状态。
 - 场景审核页改为标准词典联动选择；质量子特性只能选择所选产品质量特性下的合法项。
