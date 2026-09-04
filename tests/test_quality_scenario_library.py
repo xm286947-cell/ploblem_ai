@@ -20,6 +20,24 @@ def test_default_plc_taxonomy_and_independent_pages(tmp_path):
     assert settings.status_code==200 and "场景词典配置" in settings.text and "基于当前版本创建草稿" in settings.text
 
 
+def test_product_taxonomy_is_independent_and_can_copy_plc(tmp_path):
+    repository=ScenarioRepository(tmp_path/'product-taxonomy.db')
+    assert repository.taxonomy_active('HMI') is None
+    draft_id=repository.create_draft('HMI','PLC')
+    draft=repository.taxonomy(draft_id)
+    assert draft['product_code']=='HMI' and len(draft['activities'])==len(repository.taxonomy_active('PLC')['activities'])
+    repository.save_lifecycle(draft_id,'SOFTWARE_DEBUGGING','HMI软件调试','HMI画面、通信和交互调试价值',True)
+    repository.activate(draft_id)
+    assert repository.taxonomy_active('HMI')['lifecycles'][1]['description']=='HMI画面、通信和交互调试价值'
+    assert repository.taxonomy_active('PLC')['lifecycles'][1]['description']!='HMI画面、通信和交互调试价值'
+
+
+def test_product_taxonomy_page_shows_missing_state_and_copy_entry(tmp_path):
+    client=TestClient(create_app(tmp_path/'product-page.db'))
+    page=client.get('/settings/scenario-taxonomy?product_code=HMI')
+    assert page.status_code==200 and 'HMI 尚未配置场景词典' in page.text and '复制 PLC' in page.text
+
+
 def test_taxonomy_changes_use_new_draft_version(tmp_path):
     repository=ScenarioRepository(tmp_path/"taxonomy.db")
     active=repository.taxonomy()

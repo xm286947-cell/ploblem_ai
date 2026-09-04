@@ -4,6 +4,8 @@ cd /d "%~dp0"
 echo Starting Quality Issue Analysis Engine (integrated stable UI)...
 echo Open http://127.0.0.1:8080/issues after startup.
 set "QUALITY_DB=knowledge\quality_issue_v1.db"
+if not defined QUALITY_ISSUE_PROXY_URL set "QUALITY_ISSUE_PROXY_URL=http://127.0.0.1:7897"
+echo AI proxy: %QUALITY_ISSUE_PROXY_URL%
 where py >nul 2>nul
 if %errorlevel%==0 (
   py main.py knowledge-web --db "%QUALITY_DB%" %*

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH15_20260903"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH16_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -68,7 +68,7 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH15 累计升级说明
+    readme = """# PATCH16 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
@@ -115,6 +115,12 @@ def main() -> None:
 - 在基础场景下自动生成行业变体，按彻底解决单中的行业和产品型号保留来源问题数量、触发条件、业务影响和恢复差异。
 - 新增生成任务问题明细页，每条来源问题显示已识别、待确认、失败或未处理状态，并可回到问题详情或已生成场景。
 - 支持只重试勾选的问题；不勾选时自动重试当前批次全部待确认、失败和未处理项，无需重跑已成功问题。
+- 场景词典升级为产品级版本：每个产品独立维护生效、草稿和历史版本，生命周期名称、价值说明、业务活动与场景链路均可不同。
+- 新产品可从PLC或其他已有产品复制词典形成独立草稿；后续修改和激活不会影响来源产品。
+- AI生成场景时只读取所选产品的ACTIVE词典；未配置或未激活时直接阻止生成，不再静默复用PLC词典。
+- 生成任务和质量场景同时保存产品编码及词典版本，保证历史结论可追溯；新词典激活后不会反向改写历史场景链路。
+- 场景词典配置页增加产品切换、无词典空态、复制来源选择和产品级激活入口。
+- 模型调用显式支持本地代理，默认通过 `http://127.0.0.1:7897`；BAT启动时自动设置 `QUALITY_ISSUE_PROXY_URL`，可由用户环境变量覆盖。
 
 升级后工作台入口：
 - ITR问题工作台：`/materials/itr`

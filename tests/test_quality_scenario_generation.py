@@ -249,3 +249,16 @@ def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):
     repository.refresh_generation_coverage('QSG-LEDGER')
     page=TestClient(create_app(db)).get('/quality-scenarios/generations/QSG-LEDGER/issues')
     assert page.status_code==200 and '问题识别覆盖明细' in page.text and 'ITR-X' in page.text and '重试选中问题' in page.text
+
+
+def test_generation_requires_active_taxonomy_for_selected_product(tmp_path):
+    repository=ScenarioRepository(tmp_path/'product-generation.db')
+    service=ScenarioGenerationService(FakeIssues(),repository,tmp_path,FakeClient())
+    import pytest
+    with pytest.raises(ValueError,match='SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:HMI'):
+        service.generate('HMI','1月','12月')
+    draft=repository.create_draft('HMI','PLC');repository.activate(draft)
+    result=service.generate('HMI','1月','12月')
+    item=repository.scenario(result['scenario_ids'][0])
+    assert item['product_code']=='HMI' and item['taxonomy_version_id']==draft
+    assert repository.generation(result['generation_id'])['taxonomy_version_id']==draft

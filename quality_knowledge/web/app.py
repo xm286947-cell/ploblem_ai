@@ -323,6 +323,7 @@ def create_app(db_path):
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...), selected_ids: list[str] = Form([])):
         if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')
+        if not scenario_repo.taxonomy_active(product_code):raise HTTPException(400,f'产品 {product_code} 尚未配置并激活场景词典，请先到场景词典配置中创建并激活')
         generation_id=f'QSG-{uuid.uuid4().hex}'
         scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')
         threading.Thread(target=scenario_generation_svc.run_job,args=(generation_id,product_code,start_month,end_month,list(selected_ids)),daemon=True,name=f'scenario-{generation_id[-8:]}').start()
@@ -355,10 +356,11 @@ def create_app(db_path):
     def quality_scenario_edit(request: Request, scenario_id: str = ''):
         item=scenario_repo.scenario(scenario_id) if scenario_id else None
         if scenario_id and not item:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
-        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','quality_attribute':'','quality_subcharacteristic':'','failure_mode':'','failure_mechanism':'','trigger_conditions':'','preconditions':'','affected_object':'','business_impact':'','recovery_method':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{},'industry_variants':[]},'taxonomy':scenario_repo.taxonomy(),'options':scenario_repo.scope_options()})
+        product_code=(item or {}).get('product_code') or 'PLC';taxonomy=scenario_repo.taxonomy(product_code=product_code) or scenario_repo.taxonomy(product_code='PLC')
+        return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','product_code':product_code,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','quality_attribute':'','quality_subcharacteristic':'','failure_mode':'','failure_mechanism':'','trigger_conditions':'','preconditions':'','affected_object':'','business_impact':'','recovery_method':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{},'industry_variants':[]},'taxonomy':taxonomy,'options':scenario_repo.scope_options()})
 
     @app.post('/quality-scenarios/save', include_in_schema=False)
-    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), failure_mode: str = Form(''), failure_mechanism: str = Form(''), trigger_conditions: str = Form(''), preconditions: str = Form(''), affected_object: str = Form(''), business_impact: str = Form(''), recovery_method: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
+    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), product_code: str = Form('PLC'), taxonomy_version_id: str = Form(''), lifecycle_code: str = Form(''), activity_code: str = Form(''), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), failure_mode: str = Form(''), failure_mechanism: str = Form(''), trigger_conditions: str = Form(''), preconditions: str = Form(''), affected_object: str = Form(''), business_impact: str = Form(''), recovery_method: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
         saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model,'INDUSTRY':industry,'CUSTOMER_NAME':customer_name,'CUSTOMER_LEVEL':customer_level,'CUSTOMER_STATUS':customer_status,'OCCURRENCE_PHASE':occurrence_phase})
         return RedirectResponse(f'/quality-scenarios/{saved}',303)
 
@@ -369,24 +371,25 @@ def create_app(db_path):
         return RedirectResponse('/quality-scenarios',303)
 
     @app.get('/settings/scenario-taxonomy', response_class=HTMLResponse, include_in_schema=False)
-    def scenario_taxonomy_settings(request: Request):
-        return tpl.TemplateResponse(request,'scenario_taxonomy.html',{'taxonomy':scenario_repo.taxonomy(),'versions':scenario_repo.versions()})
+    def scenario_taxonomy_settings(request: Request, product_code: str = 'PLC'):
+        taxonomy=scenario_repo.taxonomy(product_code=product_code)
+        return tpl.TemplateResponse(request,'scenario_taxonomy.html',{'taxonomy':taxonomy,'versions':scenario_repo.versions(product_code),'products':product_repo.list(),'product_code':product_code})
 
     @app.post('/settings/scenario-taxonomy/draft', include_in_schema=False)
-    def scenario_taxonomy_draft():
-        scenario_repo.create_draft();return RedirectResponse('/settings/scenario-taxonomy',303)
+    def scenario_taxonomy_draft(product_code: str = Form(...), source_product_code: str = Form('')):
+        scenario_repo.create_draft(product_code,source_product_code);return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product_code}',303)
 
     @app.post('/settings/scenario-taxonomy/lifecycle', include_in_schema=False)
     def scenario_lifecycle_save(version_id: str = Form(...), lifecycle_code: str = Form(...), label_zh: str = Form(...), description: str = Form(''), enabled: str = Form('')):
-        scenario_repo.save_lifecycle(version_id,lifecycle_code,label_zh,description,enabled=='on');return RedirectResponse('/settings/scenario-taxonomy',303)
+        scenario_repo.save_lifecycle(version_id,lifecycle_code,label_zh,description,enabled=='on');product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}',303)
 
     @app.post('/settings/scenario-taxonomy/activity', include_in_schema=False)
     def scenario_activity_save(version_id: str = Form(...), lifecycle_code: str = Form(...), activity_code: str = Form(...), label_zh: str = Form(...), chain_text: str = Form(''), description: str = Form(''), enabled: str = Form('')):
-        scenario_repo.save_activity(version_id,lifecycle_code,activity_code,label_zh,chain_text,description,enabled=='on');return RedirectResponse('/settings/scenario-taxonomy',303)
+        scenario_repo.save_activity(version_id,lifecycle_code,activity_code,label_zh,chain_text,description,enabled=='on');product=scenario_repo.taxonomy(version_id).get('product_code','PLC');return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}',303)
 
     @app.post('/settings/scenario-taxonomy/{version_id}/activate', include_in_schema=False)
     def scenario_taxonomy_activate(version_id: str):
-        scenario_repo.activate(version_id);return RedirectResponse('/settings/scenario-taxonomy',303)
+        product=scenario_repo.taxonomy(version_id).get('product_code','PLC');scenario_repo.activate(version_id);return RedirectResponse(f'/settings/scenario-taxonomy?product_code={product}',303)
 
     def _build_intake_preview(file: UploadFile, business_type: str = '', issue_domain: str = 'AUTO', mapping_config_id: str = ''):
         if Path(file.filename or '').suffix.lower() not in ALLOWED:

@@ -122,7 +122,8 @@ class ScenarioGenerationService:
     def generate(self, product, start_month, end_month, created_by='WEB_USER',selected_ids=None,generation_id=''):
         records=self._records(product,start_month,end_month,selected_ids)
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
-        taxonomy=self.scenarios.taxonomy_active()
+        taxonomy=self.scenarios.taxonomy_active(product)
+        if not taxonomy:raise ValueError(f'SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:{product}')
         compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities']}
         cfg={}
         if self.ai_client is None:
@@ -132,7 +133,7 @@ class ScenarioGenerationService:
         generation_id=generation_id or f"QSG-{uuid.uuid4().hex}"
         if not self.scenarios.generation(generation_id):self.scenarios.create_generation(generation_id,product,start_month,end_month,len(records),created_by)
         self.scenarios.initialize_issue_classifications(generation_id,records)
-        self.scenarios.update_generation(generation_id,status='RUNNING',progress_text=f'正在分批分析 {len(records)} 个问题')
+        self.scenarios.update_generation(generation_id,status='RUNNING',taxonomy_version_id=taxonomy['version_id'],progress_text=f"正在按 {product} 场景词典 V{taxonomy['version_no']} 分批分析 {len(records)} 个问题")
         mapped=[];model=str(cfg.get('model') or getattr(client,'model',''))
         for start in range(0,len(records),batch_size):
             chunk=records[start:start+batch_size];allowed={str(x['knowledge_id']):x['knowledge_id'] for x in chunk};allowed.update({str(x.get('business_issue_id')):x['knowledge_id'] for x in chunk if x.get('business_issue_id')});items,model=self._complete(client,chunk,allowed,compact_taxonomy);mapped.extend(items)

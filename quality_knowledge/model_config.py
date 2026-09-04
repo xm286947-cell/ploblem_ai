@@ -76,6 +76,7 @@ def validate_quality_issue_ai_config(root: str | Path, *, require_enabled: bool 
         "max_tokens": cfg.get("max_tokens", 4096),
         "timeout_seconds": cfg.get("timeout_seconds", 120),
         "max_retries": cfg.get("max_retries", 2),
+        "proxy_url": cfg.get("proxy_url") or os.getenv("QUALITY_ISSUE_PROXY_URL", ""),
         "errors": errors,
         "ok": not errors,
     }

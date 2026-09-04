@@ -57,10 +57,10 @@ ACTIVITY_DESCRIPTIONS = {
 }
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
+CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,product_code TEXT NOT NULL DEFAULT 'PLC',status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
 CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,lifecycle_code));
 CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
-CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,failure_mode TEXT,failure_mechanism TEXT,trigger_conditions TEXT,preconditions TEXT,affected_object TEXT,business_impact TEXT,recovery_method TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,product_code TEXT NOT NULL DEFAULT '',taxonomy_version_id TEXT,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,failure_mode TEXT,failure_mechanism TEXT,trigger_conditions TEXT,preconditions TEXT,affected_object TEXT,business_impact TEXT,recovery_method TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
@@ -76,11 +76,13 @@ class ScenarioRepository:
         self.db_path=str(db_path)
         with self.connect() as c:
             c.executescript(SCHEMA)
+            taxonomy_columns={row['name'] for row in c.execute("PRAGMA table_info(scenario_taxonomy_version)")}
+            if 'product_code' not in taxonomy_columns:c.execute("ALTER TABLE scenario_taxonomy_version ADD COLUMN product_code TEXT NOT NULL DEFAULT 'PLC'")
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
-            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','affected_object','business_impact','recovery_method'):
+            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
-            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0"}.items():
+            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
             for row in c.execute("SELECT scenario_id,evidence_summary FROM quality_scenario_evidence").fetchall():
                 try:generation_id=json.loads(row['evidence_summary'] or '{}').get('generation_id')
@@ -89,11 +91,13 @@ class ScenarioRepository:
             c.execute("""UPDATE quality_scenario_generation SET status='FAILED',progress_text='历史任务未生成有效候选',error_message='本次AI输出没有形成可用场景，请使用新版本重新生成',finished_at=COALESCE(finished_at,CURRENT_TIMESTAMP)
                        WHERE status='COMPLETED' AND COALESCE(candidate_count,0)=0 AND NOT EXISTS(SELECT 1 FROM quality_scenario_generation_candidate x WHERE x.generation_id=quality_scenario_generation.generation_id)""")
             if not c.execute("SELECT 1 FROM scenario_taxonomy_version").fetchone():
-                version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status,activated_at) VALUES(?,1,'ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
+                version_id="STV-1";c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,product_code,status,activated_at) VALUES(?,1,'PLC','ACTIVE',CURRENT_TIMESTAMP)",(version_id,))
                 for order,(code,label,description) in enumerate(LIFECYCLES,1):c.execute("INSERT INTO scenario_lifecycle VALUES(?,?,?,?,1,?)",(version_id,code,label,description,order))
                 for order,(lifecycle,code,label,chain) in enumerate(ACTIVITIES,1):c.execute("INSERT INTO scenario_activity VALUES(?,?,?,?,?,?,1,?)",(version_id,code,lifecycle,label,chain,ACTIVITY_DESCRIPTIONS.get(code,""),order))
             self._ensure_power_loss_activity(c)
-            c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code ORDER BY v.version_no DESC LIMIT 1) WHERE EXISTS(SELECT 1 FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=quality_scenario.activity_code)""")
+            c.execute("UPDATE quality_scenario SET product_code='PLC' WHERE COALESCE(product_code,'')='' ")
+            c.execute("""UPDATE quality_scenario SET taxonomy_version_id=(SELECT version_id FROM scenario_taxonomy_version WHERE product_code=quality_scenario.product_code AND status='ACTIVE' ORDER BY version_no DESC LIMIT 1) WHERE COALESCE(taxonomy_version_id,'')=''""")
+            c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT chain_text FROM scenario_activity WHERE version_id=quality_scenario.taxonomy_version_id AND activity_code=quality_scenario.activity_code) WHERE COALESCE(scenario_chain,'')='' AND EXISTS(SELECT 1 FROM scenario_activity WHERE version_id=quality_scenario.taxonomy_version_id AND activity_code=quality_scenario.activity_code)""")
             self._backfill_context_scopes(c)
 
     @staticmethod
@@ -124,35 +128,38 @@ class ScenarioRepository:
     def connect(self):
         c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");return c
 
-    def versions(self):
-        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM scenario_taxonomy_version ORDER BY version_no DESC")]
-
-    def working_version(self):
+    def versions(self, product_code=''):
         with self.connect() as c:
-            row=c.execute("SELECT * FROM scenario_taxonomy_version ORDER BY CASE status WHEN 'DRAFT' THEN 0 ELSE 1 END,version_no DESC LIMIT 1").fetchone();return dict(row)
+            if product_code:return [dict(x) for x in c.execute("SELECT * FROM scenario_taxonomy_version WHERE product_code=? ORDER BY version_no DESC",(product_code,))]
+            return [dict(x) for x in c.execute("SELECT * FROM scenario_taxonomy_version ORDER BY product_code,version_no DESC")]
 
-    def taxonomy(self, version_id=""):
-        version=self.working_version() if not version_id else next((x for x in self.versions() if x['version_id']==version_id),None)
+    def working_version(self, product_code='PLC'):
+        with self.connect() as c:
+            row=c.execute("SELECT * FROM scenario_taxonomy_version WHERE product_code=? ORDER BY CASE status WHEN 'DRAFT' THEN 0 ELSE 1 END,version_no DESC LIMIT 1",(product_code,)).fetchone();return dict(row) if row else None
+
+    def taxonomy(self, version_id="", product_code='PLC'):
+        version=self.working_version(product_code) if not version_id else next((x for x in self.versions() if x['version_id']==version_id),None)
         if not version:return None
         with self.connect() as c:
             version['lifecycles']=[dict(x) for x in c.execute("SELECT * FROM scenario_lifecycle WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
             version['activities']=[dict(x) for x in c.execute("SELECT * FROM scenario_activity WHERE version_id=? ORDER BY sort_order",(version['version_id'],))]
         return version
 
-    def taxonomy_active(self):
-        active=next((x for x in self.versions() if x['status']=='ACTIVE'),None)
-        return self.taxonomy(active['version_id']) if active else self.taxonomy()
+    def taxonomy_active(self, product_code='PLC'):
+        active=next((x for x in self.versions(product_code) if x['status']=='ACTIVE'),None)
+        return self.taxonomy(active['version_id'],product_code) if active else None
 
-    def create_draft(self):
+    def create_draft(self, product_code='PLC', source_product_code=''):
         with self.connect() as c:
-            draft=c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE status='DRAFT' ORDER BY version_no DESC LIMIT 1").fetchone()
+            draft=c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE product_code=? AND status='DRAFT' ORDER BY version_no DESC LIMIT 1",(product_code,)).fetchone()
             if draft:return draft[0]
-            active=c.execute("SELECT version_id,version_no FROM scenario_taxonomy_version WHERE status='ACTIVE' ORDER BY version_no DESC LIMIT 1").fetchone()
-            version_id=f"STV-{uuid.uuid4().hex}";version_no=(active['version_no'] if active else 0)+1
-            c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,status) VALUES(?,?,'DRAFT')",(version_id,version_no))
-            if active:
-                c.execute("INSERT INTO scenario_lifecycle SELECT ?,lifecycle_code,label_zh,description,enabled,sort_order FROM scenario_lifecycle WHERE version_id=?",(version_id,active['version_id']))
-                c.execute("INSERT INTO scenario_activity SELECT ?,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order FROM scenario_activity WHERE version_id=?",(version_id,active['version_id']))
+            active=c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE product_code=? AND status='ACTIVE' ORDER BY version_no DESC LIMIT 1",(product_code,)).fetchone()
+            source=active or (c.execute("SELECT version_id FROM scenario_taxonomy_version WHERE product_code=? AND status='ACTIVE' ORDER BY version_no DESC LIMIT 1",(source_product_code,)).fetchone() if source_product_code else None)
+            version_id=f"STV-{uuid.uuid4().hex}";version_no=c.execute("SELECT COALESCE(MAX(version_no),0)+1 FROM scenario_taxonomy_version").fetchone()[0]
+            c.execute("INSERT INTO scenario_taxonomy_version(version_id,version_no,product_code,status) VALUES(?,?,?,'DRAFT')",(version_id,version_no,product_code))
+            if source:
+                c.execute("INSERT INTO scenario_lifecycle SELECT ?,lifecycle_code,label_zh,description,enabled,sort_order FROM scenario_lifecycle WHERE version_id=?",(version_id,source['version_id']))
+                c.execute("INSERT INTO scenario_activity SELECT ?,activity_code,lifecycle_code,label_zh,chain_text,description,enabled,sort_order FROM scenario_activity WHERE version_id=?",(version_id,source['version_id']))
             return version_id
 
     def save_lifecycle(self, version_id, code, label, description, enabled=True):
@@ -172,10 +179,10 @@ class ScenarioRepository:
 
     def activate(self, version_id):
         with self.connect() as c:
-            if not c.execute("SELECT 1 FROM scenario_taxonomy_version WHERE version_id=? AND status='DRAFT'",(version_id,)).fetchone():raise ValueError("DRAFT_NOT_FOUND")
-            c.execute("UPDATE scenario_taxonomy_version SET status='RETIRED' WHERE status='ACTIVE'")
+            version=c.execute("SELECT product_code FROM scenario_taxonomy_version WHERE version_id=? AND status='DRAFT'",(version_id,)).fetchone()
+            if not version:raise ValueError("DRAFT_NOT_FOUND")
+            c.execute("UPDATE scenario_taxonomy_version SET status='RETIRED' WHERE product_code=? AND status='ACTIVE'",(version['product_code'],))
             c.execute("UPDATE scenario_taxonomy_version SET status='ACTIVE',activated_at=CURRENT_TIMESTAMP WHERE version_id=?",(version_id,))
-            c.execute("""UPDATE quality_scenario SET scenario_chain=(SELECT chain_text FROM scenario_activity WHERE version_id=? AND activity_code=quality_scenario.activity_code) WHERE EXISTS(SELECT 1 FROM scenario_activity WHERE version_id=? AND activity_code=quality_scenario.activity_code)""",(version_id,version_id))
 
     def scope_options(self):
         values={key:set() for key in ("IPMT","SPDT","PRODUCT_MODEL","INDUSTRY","CUSTOMER_NAME","CUSTOMER_LEVEL","CUSTOMER_STATUS","OCCURRENCE_PHASE")}
@@ -244,7 +251,7 @@ class ScenarioRepository:
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_issue_classification WHERE generation_id=? ORDER BY knowledge_id",(generation_id,))]
 
     def update_generation(self,generation_id,**values):
-        allowed={'status','progress_text','error_message','candidate_count','model_name','processed_count','classified_count','review_required_count','failed_count','unprocessed_count'};data={k:v for k,v in values.items() if k in allowed}
+        allowed={'status','progress_text','error_message','candidate_count','model_name','processed_count','classified_count','review_required_count','failed_count','unprocessed_count','taxonomy_version_id'};data={k:v for k,v in values.items() if k in allowed}
         if not data:return
         assignments=','.join(f'{key}=?' for key in data)
         finished=",finished_at=CURRENT_TIMESTAMP" if data.get('status') in {'COMPLETED','PARTIAL','FAILED'} else ''
@@ -281,7 +288,8 @@ class ScenarioRepository:
         return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(len((self.scenario(x['scenario_id']) or {}).get('evidence',[])) for x in items)}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
-        payload={**item,'scenario_code':code,'status':'IN_REVIEW','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
+        taxonomy=self.taxonomy_active(product)
+        payload={**item,'scenario_code':code,'status':'IN_REVIEW','product_code':product,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
         scenario_id=self.save_scenario('',payload,scopes)
         summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[])},ensure_ascii=False)
         with self.connect() as c:
@@ -320,13 +328,17 @@ class ScenarioRepository:
         status=payload.get('status','DRAFT')
         if status not in {'DRAFT','IN_REVIEW','PUBLISHED','RETIRED'}:raise ValueError('INVALID_SCENARIO_STATUS')
         with self.connect() as c:
-            existing=c.execute("SELECT version_no FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing[0]+1 if existing else 1)
-            chain=c.execute("""SELECT a.chain_text FROM scenario_activity a JOIN scenario_taxonomy_version v ON v.version_id=a.version_id WHERE v.status='ACTIVE' AND a.activity_code=? ORDER BY v.version_no DESC LIMIT 1""",(payload.get('activity_code',''),)).fetchone()
+            existing=c.execute("SELECT version_no,product_code,taxonomy_version_id FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing['version_no']+1 if existing else 1)
+            product_code=payload.get('product_code') or (existing['product_code'] if existing else '') or 'PLC'
+            taxonomy_version_id=payload.get('taxonomy_version_id') or (existing['taxonomy_version_id'] if existing else '')
+            if not taxonomy_version_id:
+                active=self.taxonomy_active(product_code);taxonomy_version_id=active['version_id'] if active else ''
+            chain=c.execute("SELECT chain_text FROM scenario_activity WHERE version_id=? AND activity_code=?",(taxonomy_version_id,payload.get('activity_code',''))).fetchone()
             scenario_chain=(chain[0] if chain else '') or ''
-            c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,failure_mode,failure_mechanism,trigger_conditions,preconditions,affected_object,business_impact,recovery_method,status,version_no,created_at,updated_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,failure_mode=excluded.failure_mode,failure_mechanism=excluded.failure_mechanism,trigger_conditions=excluded.trigger_conditions,preconditions=excluded.preconditions,affected_object=excluded.affected_object,business_impact=excluded.business_impact,recovery_method=excluded.recovery_method,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
-             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),payload.get('failure_mode',''),payload.get('failure_mechanism',''),payload.get('trigger_conditions',''),payload.get('preconditions',''),payload.get('affected_object',''),payload.get('business_impact',''),payload.get('recovery_method',''),status,version))
+            c.execute("""INSERT INTO quality_scenario(scenario_id,scenario_code,name,product_code,taxonomy_version_id,lifecycle_code,activity_code,scenario_chain,experience_requirement,concern_points,quality_attribute,quality_subcharacteristic,applicable_boundary,validation_direction,measurement_suggestion,failure_mode,failure_mechanism,trigger_conditions,preconditions,affected_object,business_impact,recovery_method,status,version_no,created_at,updated_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+             ON CONFLICT(scenario_id) DO UPDATE SET name=excluded.name,product_code=excluded.product_code,taxonomy_version_id=excluded.taxonomy_version_id,lifecycle_code=excluded.lifecycle_code,activity_code=excluded.activity_code,scenario_chain=excluded.scenario_chain,experience_requirement=excluded.experience_requirement,concern_points=excluded.concern_points,quality_attribute=excluded.quality_attribute,quality_subcharacteristic=excluded.quality_subcharacteristic,applicable_boundary=excluded.applicable_boundary,validation_direction=excluded.validation_direction,measurement_suggestion=excluded.measurement_suggestion,failure_mode=excluded.failure_mode,failure_mechanism=excluded.failure_mechanism,trigger_conditions=excluded.trigger_conditions,preconditions=excluded.preconditions,affected_object=excluded.affected_object,business_impact=excluded.business_impact,recovery_method=excluded.recovery_method,status=excluded.status,version_no=excluded.version_no,updated_at=CURRENT_TIMESTAMP""",
+             (scenario_id,payload['scenario_code'].strip(),payload['name'].strip(),product_code,taxonomy_version_id,payload.get('lifecycle_code',''),payload.get('activity_code',''),scenario_chain,payload.get('experience_requirement',''),payload.get('concern_points',''),payload.get('quality_attribute',''),payload.get('quality_subcharacteristic',''),payload.get('applicable_boundary',''),payload.get('validation_direction',''),payload.get('measurement_suggestion',''),payload.get('failure_mode',''),payload.get('failure_mechanism',''),payload.get('trigger_conditions',''),payload.get('preconditions',''),payload.get('affected_object',''),payload.get('business_impact',''),payload.get('recovery_method',''),status,version))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:
