@@ -514,7 +514,6 @@ class ScenarioRepository:
     def save_industry_variants(self,scenario_id,variants):
         with self.connect() as c:
             c.execute("DELETE FROM quality_scenario_industry_variant WHERE scenario_id=?",(scenario_id,))
-            c.execute("DELETE FROM quality_scenario_capability_gap WHERE scenario_id=?",(scenario_id,))
             for row in variants:
                 c.execute("""INSERT INTO quality_scenario_industry_variant(variant_id,scenario_id,industry,product_models,trigger_conditions,business_impact,recovery_method,evidence_count) VALUES(?,?,?,?,?,?,?,?)""",(f"QSV-{uuid.uuid4().hex}",scenario_id,row['industry'],json.dumps(row.get('product_models',[]),ensure_ascii=False),row.get('trigger_conditions',''),row.get('business_impact',''),row.get('recovery_method',''),int(row.get('evidence_count') or 0)))
 
@@ -584,6 +583,12 @@ class ScenarioRepository:
     def delete_scenario(self, scenario_id):
         with self.connect() as c:
             if not c.execute("SELECT 1 FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone():raise KeyError(scenario_id)
+            tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'scenario_asset_member' in tables:
+                c.execute("DELETE FROM scenario_asset_member WHERE member_id=? OR asset_id=?",(scenario_id,scenario_id))
+            for table in ('scenario_asset_context','scenario_asset_metric'):
+                if table in tables:
+                    c.execute(f"DELETE FROM {table} WHERE scenario_id=?",(scenario_id,))
             generation_ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))]
             c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=? OR existing_id=?",(scenario_id,scenario_id))
             c.execute("DELETE FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,))

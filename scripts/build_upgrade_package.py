@@ -9,12 +9,17 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH23_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH24_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
+    "quality_knowledge/scenario_assets.py",
+    "quality_knowledge/web/scenario_asset_pages.py",
+    "quality_knowledge/web/templates/scenario_asset_overview.html",
+    "quality_knowledge/web/templates/scenario_asset_detail.html",
+    "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
     "quality_knowledge/scenario_generation.py",
@@ -70,7 +75,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH23 累计升级说明
+    readme = """# PATCH24 累计升级说明
+
+本轮以质量场景库第一阶段交接为准：原有逐问题AI结果作为候选，正式质量场景支持人工多问题归集和撤销。
+新增入口：侧边栏“场景资产与业务洞察” /quality-scenario-assets。
+提供行业、客户、产品、规模、工况等交叉矩阵，季度/半年度/年度场景问题趋势，场景上下文和一场景多指标消费链路。
+所有问题统计去重；未知事实和时间明确保留。指标为建议，不表示已经实测达标。
+治理闭环和现场简易录入暂缓，具体口径见 docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md。
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
