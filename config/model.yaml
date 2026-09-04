@@ -8,7 +8,6 @@ ai:
   max_tokens: 4096
   timeout_seconds: 120
   max_retries: 2
-  proxy_url: http://127.0.0.1:7897
   prompt_version: '1.0'
   mock_response_file: tests/samples/mock_ai_response.json
   stage_runtime:

@@ -39,8 +39,6 @@ class OpenAICompatibleClient:
         self.api_key_env = str(config.get("api_key_env", "REPEAT_CASE_API_KEY"))
         self.timeout = int(config.get("timeout_seconds", 120))
         self.max_retries = int(config.get("max_retries", 2))
-        self.proxy_url = str(config.get("proxy_url") or os.getenv("QUALITY_ISSUE_PROXY_URL", "")).strip()
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": self.proxy_url, "https": self.proxy_url})) if self.proxy_url else urllib.request.build_opener()
 
     def complete(self, messages: List[dict]) -> AIResponse:
         if not self.base_url:
@@ -72,7 +70,7 @@ class OpenAICompatibleClient:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                with self.opener.open(request, timeout=self.timeout) as response:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 choice = raw["choices"][0]
                 content = choice["message"]["content"]
