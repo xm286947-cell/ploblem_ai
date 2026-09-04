@@ -274,6 +274,23 @@ def test_historical_scenario_standardization_is_reviewable_and_preserves_publica
     assert skipped['skipped']==1
 
 
+def test_standardization_batch_progress_and_confirmation_audit(tmp_path):
+    class StandardClient:
+        model='standard-model'
+        def complete(self,messages):
+            return AIResponse(json.dumps({'customer_perception':'卡顿','primary_experience_code':'EFFICIENT_SMOOTH','secondary_experience_codes':[],'quality_in_use_codes':['EFFICIENCY'],'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY','secondary_quality_characteristic_codes':[],'quality_subcharacteristic_codes':['TIME_BEHAVIOUR']}),self.model,{})
+    repository=ScenarioRepository(tmp_path/'batch.db')
+    sid=repository.save_scenario('',{'scenario_code':'BATCH-1','name':'性能场景','status':'DRAFT'}, {})
+    batch_id='QSB-TEST';repository.create_standardization_batch(batch_id,[sid])
+    ScenarioGenerationService(FakeIssues(),repository,tmp_path,StandardClient()).standardize_existing([sid],batch_id)
+    batch=repository.standardization_batch(batch_id)
+    assert batch['status']=='COMPLETED' and batch['completed_count']==1 and batch['items'][0]['model_name']=='standard-model'
+    item=repository.scenario(sid);item['quality_classification_status']='CONFIRMED';item['confirmed_by']='QUALITY_OWNER'
+    repository.save_scenario(sid,item,item['scopes'])
+    confirmation=repository.scenario(sid)['confirmations'][0]
+    assert confirmation['confirmed_by']=='QUALITY_OWNER' and confirmation['new_status']=='CONFIRMED'
+
+
 def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):
     db=tmp_path/'structured.db';repository=ScenarioRepository(db)
     item={'name':'掉电保持场景','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY','participating_systems':'PLC、HMI、伺服驱动器','system_scale':'1台PLC、128个IO点','user_type':'设备调试工程师','failure_mode':'保持变量丢失','failure_mechanism':'存储提交未完成','trigger_conditions':'运行中异常掉电','preconditions':'存在保持变量','affected_object':'PLC运行数据','business_impact':'计数状态丢失','recovery_method':'重新写入参数并重启','evidence_issue_ids':['QK-1'],'confidence':0.9}

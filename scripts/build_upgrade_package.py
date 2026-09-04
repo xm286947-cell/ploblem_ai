@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH21_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH22_20260904"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -69,11 +69,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH21 累计升级说明
+    readme = """# PATCH22 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
 升级内容：
+- 历史场景标准化增加独立批次账本，记录总数、成功、失败、跳过、Agent、模型和单条错误，刷新页面不会丢失进度。
+- 支持仅重试失败场景，已成功和已确认场景不会重复消耗模型额度。
+- 人工确认增加确认审计记录，保存确认人、确认时间、确认前状态以及标准分类前后快照。
 - 新增历史场景标准化工作台：可批量选择已有场景，后台逐条调用AI补齐三层质量分类，并实时显示未分析、运行中、待确认、已确认和失败状态。
 - 历史标准化复用多Agent轮询；单场景只由一个模型完成，单条失败不影响整批，已人工确认场景不会被覆盖。
 - AI标准化只修改客户质量体验、使用质量要素、产品质量特性与子特性，不改变场景名称、业务活动、来源证据和发布状态。

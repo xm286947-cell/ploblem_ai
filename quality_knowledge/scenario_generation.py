@@ -207,7 +207,7 @@ class ScenarioGenerationService:
         except Exception as error:
             self.scenarios.update_generation(generation_id,status='FAILED',progress_text='生成失败',error_message=str(error));return None
 
-    def standardize_existing(self,scenario_ids):
+    def standardize_existing(self,scenario_ids,batch_id=''):
         models=self.scenarios.quality_models()
         allowed={x['term_code']:x for group in ('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics') for x in models[group]}
         parents={x['term_code']:x.get('parent_code') for x in models['product_subcharacteristics']}
@@ -220,6 +220,7 @@ class ScenarioGenerationService:
             cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent)[0]
             client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':4096,'temperature':0})
             model=str(cfg.get('model') or getattr(client,'model',''))
+            if batch_id:self.scenarios.mark_standardization_item(batch_id,scenario_id,'RUNNING',agent=agent,model=model)
             self.scenarios.mark_standardization(scenario_id,'RUNNING',agent=agent,model=model)
             fields=('name','scenario_chain','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','validation_direction','measurement_suggestion')
             response=client.complete([{'role':'system','content':STANDARDIZATION_PROMPT},{'role':'user','content':json.dumps({'scenario':{k:item.get(k) for k in fields},'quality_models':models},ensure_ascii=False)}])
@@ -243,9 +244,16 @@ class ScenarioGenerationService:
                     result=future.result()
                     if result is None:outcome['skipped']+=1;continue
                     scenario_id,agent,model,payload=result
-                    self.scenarios.save_standardization(scenario_id,payload,agent=agent,model=model);outcome['completed']+=1
+                    self.scenarios.save_standardization(scenario_id,payload,agent=agent,model=model)
+                    if batch_id:self.scenarios.mark_standardization_item(batch_id,scenario_id,'COMPLETED',agent=agent,model=model)
+                    outcome['completed']+=1
                 except Exception as error:
                     try:self.scenarios.mark_standardization(sid,'FAILED',error=str(error))
                     except Exception:pass
+                    if batch_id:self.scenarios.mark_standardization_item(batch_id,sid,'FAILED',error=str(error))
                     outcome['failed']+=1
+        if batch_id:
+            for sid in ids:
+                item=next((x for x in self.scenarios.standardization_batch(batch_id)['items'] if x['scenario_id']==sid),None)
+                if item and item['status']=='PENDING':self.scenarios.mark_standardization_item(batch_id,sid,'SKIPPED')
         return outcome

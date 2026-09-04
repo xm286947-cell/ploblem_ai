@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS quality_scenario_industry_variant(variant_id TEXT PRI
 CREATE TABLE IF NOT EXISTS quality_model_version(model_code TEXT PRIMARY KEY,label_zh TEXT NOT NULL,status TEXT NOT NULL,standard_ref TEXT NOT NULL,activated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_model_term(model_code TEXT NOT NULL,term_code TEXT NOT NULL,parent_code TEXT,label_zh TEXT NOT NULL,sort_order INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(model_code,term_code));
 CREATE TABLE IF NOT EXISTS customer_experience_quality_map(experience_code TEXT NOT NULL,target_model_code TEXT NOT NULL,target_term_code TEXT NOT NULL,PRIMARY KEY(experience_code,target_model_code,target_term_code));
+CREATE TABLE IF NOT EXISTS quality_scenario_standardization_batch(batch_id TEXT PRIMARY KEY,status TEXT NOT NULL,total_count INTEGER NOT NULL,completed_count INTEGER NOT NULL DEFAULT 0,failed_count INTEGER NOT NULL DEFAULT 0,skipped_count INTEGER NOT NULL DEFAULT 0,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,finished_at TEXT);
+CREATE TABLE IF NOT EXISTS quality_scenario_standardization_item(batch_id TEXT NOT NULL,scenario_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',error_message TEXT,agent_id TEXT,model_name TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(batch_id,scenario_id));
+CREATE TABLE IF NOT EXISTS quality_scenario_confirmation(confirmation_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,confirmed_by TEXT NOT NULL,previous_status TEXT,new_status TEXT,before_json TEXT,after_json TEXT,confirmed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
 
@@ -311,6 +314,35 @@ class ScenarioRepository:
         for item in items:item['quality_classification_status']=item.get('quality_classification_status') or 'NOT_ANALYZED'
         return items
 
+    def create_standardization_batch(self,batch_id,scenario_ids,created_by='WEB_USER'):
+        ids=list(dict.fromkeys(scenario_ids))
+        with self.connect() as c:
+            c.execute("INSERT INTO quality_scenario_standardization_batch(batch_id,status,total_count,created_by) VALUES(?,'QUEUED',?,?)",(batch_id,len(ids),created_by))
+            for sid in ids:c.execute("INSERT INTO quality_scenario_standardization_item(batch_id,scenario_id,status) VALUES(?,?,'PENDING')",(batch_id,sid))
+
+    def mark_standardization_item(self,batch_id,scenario_id,status,*,error='',agent='',model=''):
+        with self.connect() as c:
+            c.execute("UPDATE quality_scenario_standardization_item SET status=?,error_message=?,agent_id=COALESCE(NULLIF(?,''),agent_id),model_name=COALESCE(NULLIF(?,''),model_name),updated_at=CURRENT_TIMESTAMP WHERE batch_id=? AND scenario_id=?",(status,error,agent,model,batch_id,scenario_id))
+        self.refresh_standardization_batch(batch_id)
+
+    def refresh_standardization_batch(self,batch_id):
+        with self.connect() as c:
+            counts={x['status']:x['n'] for x in c.execute("SELECT status,COUNT(*) n FROM quality_scenario_standardization_item WHERE batch_id=? GROUP BY status",(batch_id,))}
+            total=sum(counts.values());completed=counts.get('COMPLETED',0);failed=counts.get('FAILED',0);skipped=counts.get('SKIPPED',0);pending=counts.get('PENDING',0)+counts.get('RUNNING',0)
+            status='RUNNING' if pending else ('COMPLETED' if not failed else 'PARTIAL')
+            c.execute("UPDATE quality_scenario_standardization_batch SET status=?,completed_count=?,failed_count=?,skipped_count=?,finished_at=CASE WHEN ?=0 THEN CURRENT_TIMESTAMP ELSE finished_at END WHERE batch_id=?",(status,completed,failed,skipped,pending,batch_id))
+        return {'status':status,'total_count':total,'completed_count':completed,'failed_count':failed,'skipped_count':skipped,'pending_count':pending}
+
+    def standardization_batch(self,batch_id):
+        with self.connect() as c:
+            row=c.execute("SELECT * FROM quality_scenario_standardization_batch WHERE batch_id=?",(batch_id,)).fetchone()
+            if not row:return None
+            result=dict(row);result['items']=[dict(x) for x in c.execute("SELECT i.*,s.name,s.scenario_code FROM quality_scenario_standardization_item i JOIN quality_scenario s ON s.scenario_id=i.scenario_id WHERE i.batch_id=? ORDER BY i.updated_at DESC",(batch_id,))]
+            return result
+
+    def standardization_batches(self):
+        with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_standardization_batch ORDER BY created_at DESC LIMIT 20")]
+
     def mark_standardization(self,scenario_id,status,*,error='',agent='',model=''):
         if status not in {'NOT_ANALYZED','RUNNING','PENDING_CONFIRMATION','CONFIRMED','FAILED'}:raise ValueError('INVALID_QUALITY_CLASSIFICATION_STATUS')
         with self.connect() as c:
@@ -341,6 +373,7 @@ class ScenarioRepository:
             for variant in item['industry_variants']:
                 try:variant['product_model_values']=json.loads(variant.get('product_models') or '[]')
                 except (TypeError,json.JSONDecodeError):variant['product_model_values']=[]
+            with self.connect() as c:item['confirmations']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_confirmation WHERE scenario_id=? ORDER BY confirmed_at DESC",(item['scenario_id'],))]
         return item
 
     def create_generation(self,generation_id,product,start,end,source_count,created_by):
@@ -467,7 +500,7 @@ class ScenarioRepository:
         status=payload.get('status','DRAFT')
         if status not in {'DRAFT','IN_REVIEW','PUBLISHED','RETIRED'}:raise ValueError('INVALID_SCENARIO_STATUS')
         with self.connect() as c:
-            existing=c.execute("SELECT version_no,product_code,taxonomy_version_id FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing['version_no']+1 if existing else 1)
+            existing=c.execute("SELECT * FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone();version=(existing['version_no']+1 if existing else 1)
             product_code=payload.get('product_code') or (existing['product_code'] if existing else '') or 'PLC'
             taxonomy_version_id=payload.get('taxonomy_version_id') or (existing['taxonomy_version_id'] if existing else '')
             if not taxonomy_version_id:
@@ -498,6 +531,12 @@ class ScenarioRepository:
             for kind,items in scopes.items():
                 for value in items:
                     if value.strip():c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(scenario_id,kind,value.strip()))
+            new_classification=payload.get('quality_classification_status') or ('CONFIRMED' if status=='PUBLISHED' else 'PENDING_CONFIRMATION')
+            old_classification=(existing['quality_classification_status'] if existing else '') or ''
+            if new_classification=='CONFIRMED' and old_classification!='CONFIRMED':
+                keys=('customer_perception','primary_experience_code','secondary_experience_codes','quality_in_use_codes','primary_quality_characteristic_code','secondary_quality_characteristic_codes','quality_subcharacteristic_codes')
+                before={key:(existing[key] if existing else None) for key in keys};after={key:payload.get(key) for key in keys}
+                c.execute("INSERT INTO quality_scenario_confirmation(confirmation_id,scenario_id,confirmed_by,previous_status,new_status,before_json,after_json) VALUES(?,?,?,?,?,?,?)",(f"QCF-{uuid.uuid4().hex}",scenario_id,payload.get('confirmed_by') or 'WEB_USER',old_classification,'CONFIRMED',json.dumps(before,ensure_ascii=False),json.dumps(after,ensure_ascii=False)))
         return scenario_id
 
     def delete_scenario(self, scenario_id):

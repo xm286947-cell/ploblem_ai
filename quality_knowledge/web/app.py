@@ -313,16 +313,28 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(**filters),'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None})
 
     @app.get('/quality-scenarios/standardize', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_standardize_page(request: Request):
+    def quality_scenario_standardize_page(request: Request, batch_id: str = ''):
         items=scenario_repo.standardization_items()
         counts={key:sum(1 for x in items if x['quality_classification_status']==key) for key in ('NOT_ANALYZED','RUNNING','PENDING_CONFIRMATION','CONFIRMED','FAILED')}
-        return tpl.TemplateResponse(request,'quality_scenario_standardize.html',{'items':items,'counts':counts,'running':bool(counts['RUNNING'])})
+        batch=scenario_repo.standardization_batch(batch_id) if batch_id else None
+        return tpl.TemplateResponse(request,'quality_scenario_standardize.html',{'items':items,'counts':counts,'running':bool(counts['RUNNING']) or bool(batch and batch['status'] in {'QUEUED','RUNNING'}),'batch':batch,'batches':scenario_repo.standardization_batches()})
 
     @app.post('/quality-scenarios/standardize', include_in_schema=False)
     def quality_scenario_standardize(selected_ids: list[str] = Form([])):
         if not selected_ids:raise HTTPException(400,'QUALITY_SCENARIO_SELECTION_REQUIRED')
-        threading.Thread(target=scenario_generation_svc.standardize_existing,args=(list(selected_ids),),daemon=True,name='scenario-standardize').start()
-        return RedirectResponse('/quality-scenarios/standardize',303)
+        batch_id=f'QSB-{uuid.uuid4().hex}';scenario_repo.create_standardization_batch(batch_id,list(selected_ids))
+        threading.Thread(target=scenario_generation_svc.standardize_existing,args=(list(selected_ids),batch_id),daemon=True,name=f'scenario-standardize-{batch_id[-8:]}').start()
+        return RedirectResponse(f'/quality-scenarios/standardize?batch_id={batch_id}',303)
+
+    @app.post('/quality-scenarios/standardize/{batch_id}/retry', include_in_schema=False)
+    def quality_scenario_standardize_retry(batch_id: str):
+        batch=scenario_repo.standardization_batch(batch_id)
+        if not batch:raise HTTPException(404,'QUALITY_STANDARDIZATION_BATCH_NOT_FOUND')
+        ids=[x['scenario_id'] for x in batch['items'] if x['status']=='FAILED']
+        if not ids:raise HTTPException(400,'NO_FAILED_STANDARDIZATION_ITEMS')
+        new_id=f'QSB-{uuid.uuid4().hex}';scenario_repo.create_standardization_batch(new_id,ids,'WEB_RETRY')
+        threading.Thread(target=scenario_generation_svc.standardize_existing,args=(ids,new_id),daemon=True,name=f'scenario-standardize-{new_id[-8:]}').start()
+        return RedirectResponse(f'/quality-scenarios/standardize?batch_id={new_id}',303)
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
@@ -373,7 +385,7 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenario_edit.html',{'item':item or {'scenario_id':'','scenario_code':'','name':'','product_code':product_code,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','lifecycle_code':'','activity_code':'','scenario_chain':'','experience_requirement':'','concern_points':'','customer_perception':'','primary_experience_code':'','secondary_experience_codes':[],'quality_in_use_codes':[],'primary_quality_characteristic_code':'','secondary_quality_characteristic_codes':[],'quality_subcharacteristic_codes':[],'quality_classification_status':'PENDING_CONFIRMATION','quality_attribute':'','quality_subcharacteristic':'','failure_mode':'','failure_mechanism':'','trigger_conditions':'','preconditions':'','participating_systems':'','system_scale':'','user_type':'','affected_object':'','business_impact':'','recovery_method':'','applicable_boundary':'','validation_direction':'','measurement_suggestion':'','status':'DRAFT','scopes':{},'industry_variants':[]},'taxonomy':taxonomy,'options':scenario_repo.scope_options(),'quality_models':scenario_repo.quality_models()})
 
     @app.post('/quality-scenarios/save', include_in_schema=False)
-    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), product_code: str = Form('PLC'), taxonomy_version_id: str = Form(''), lifecycle_code: str = Form(''), activity_code: str = Form(''), customer_perception: str = Form(''), primary_experience_code: str = Form(''), secondary_experience_codes: list[str] = Form([]), quality_in_use_codes: list[str] = Form([]), primary_quality_characteristic_code: str = Form(''), secondary_quality_characteristic_codes: list[str] = Form([]), quality_subcharacteristic_codes: list[str] = Form([]), quality_classification_status: str = Form('PENDING_CONFIRMATION'), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), failure_mode: str = Form(''), failure_mechanism: str = Form(''), trigger_conditions: str = Form(''), preconditions: str = Form(''), participating_systems: str = Form(''), system_scale: str = Form(''), user_type: str = Form(''), affected_object: str = Form(''), business_impact: str = Form(''), recovery_method: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
+    def quality_scenario_save(scenario_id: str = Form(''), scenario_code: str = Form(...), name: str = Form(...), product_code: str = Form('PLC'), taxonomy_version_id: str = Form(''), lifecycle_code: str = Form(''), activity_code: str = Form(''), customer_perception: str = Form(''), primary_experience_code: str = Form(''), secondary_experience_codes: list[str] = Form([]), quality_in_use_codes: list[str] = Form([]), primary_quality_characteristic_code: str = Form(''), secondary_quality_characteristic_codes: list[str] = Form([]), quality_subcharacteristic_codes: list[str] = Form([]), quality_classification_status: str = Form('PENDING_CONFIRMATION'), confirmed_by: str = Form('WEB_USER'), experience_requirement: str = Form(''), concern_points: str = Form(''), quality_attribute: str = Form(''), quality_subcharacteristic: str = Form(''), failure_mode: str = Form(''), failure_mechanism: str = Form(''), trigger_conditions: str = Form(''), preconditions: str = Form(''), participating_systems: str = Form(''), system_scale: str = Form(''), user_type: str = Form(''), affected_object: str = Form(''), business_impact: str = Form(''), recovery_method: str = Form(''), applicable_boundary: str = Form(''), validation_direction: str = Form(''), measurement_suggestion: str = Form(''), status: str = Form('DRAFT'), ipmt: list[str] = Form([]), spdt: list[str] = Form([]), product_model: list[str] = Form([]), industry: list[str] = Form([]), customer_name: list[str] = Form([]), customer_level: list[str] = Form([]), customer_status: list[str] = Form([]), occurrence_phase: list[str] = Form([])):
         saved=scenario_repo.save_scenario(scenario_id,locals(),{'IPMT':ipmt,'SPDT':spdt,'PRODUCT_MODEL':product_model,'INDUSTRY':industry,'CUSTOMER_NAME':customer_name,'CUSTOMER_LEVEL':customer_level,'CUSTOMER_STATUS':customer_status,'OCCURRENCE_PHASE':occurrence_phase})
         return RedirectResponse(f'/quality-scenarios/{saved}',303)
 
