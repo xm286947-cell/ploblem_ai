@@ -291,6 +291,21 @@ def test_standardization_batch_progress_and_confirmation_audit(tmp_path):
     assert confirmation['confirmed_by']=='QUALITY_OWNER' and confirmation['new_status']=='CONFIRMED'
 
 
+def test_scenario_capability_gap_workbench_and_insight_ranking(tmp_path):
+    db=tmp_path/'capability.db';repository=ScenarioRepository(db)
+    sid=repository.save_scenario('',{'scenario_code':'CAP-1','name':'掉电恢复场景','status':'PUBLISHED','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY'}, {})
+    with repository.connect() as c:c.execute("INSERT INTO quality_scenario_evidence VALUES(?,?,?)",(sid,'QK-1','{}'))
+    gap_id=repository.save_scenario_capability_gap(sid,{'capability_axis':'TEST','capability_code':'SCENARIO_COVERAGE','gap_description':'未覆盖反复掉电恢复','source_basis':'来源问题QK-1流出分析','improvement_action':'增加掉电组合测试','verification_metric':'覆盖三种掉电时序并通过','priority':'P0','status':'OPEN'})
+    item=repository.scenario(sid)
+    assert item['capability_gaps'][0]['gap_id']==gap_id and item['capability_gaps'][0]['priority']=='P0'
+    insights=repository.insights(status='PUBLISHED')
+    assert insights['capability_rows'][0]['axis_label']=='测试验证' and insights['capability_rows'][0]['p0_count']==1
+    client=TestClient(create_app(db));page=client.get(f'/quality-scenarios/{sid}/capabilities')
+    assert page.status_code==200 and '为什么未拦截' in page.text and '未覆盖反复掉电恢复' in page.text
+    dashboard=client.get('/quality-scenarios/insights?status=PUBLISHED')
+    assert '场景能力关键矛盾' in dashboard.text and '场景覆盖' in dashboard.text
+
+
 def test_structured_fields_industry_variants_and_issue_ledger_page(tmp_path):
     db=tmp_path/'structured.db';repository=ScenarioRepository(db)
     item={'name':'掉电保持场景','lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY','participating_systems':'PLC、HMI、伺服驱动器','system_scale':'1台PLC、128个IO点','user_type':'设备调试工程师','failure_mode':'保持变量丢失','failure_mechanism':'存储提交未完成','trigger_conditions':'运行中异常掉电','preconditions':'存在保持变量','affected_object':'PLC运行数据','business_impact':'计数状态丢失','recovery_method':'重新写入参数并重启','evidence_issue_ids':['QK-1'],'confidence':0.9}

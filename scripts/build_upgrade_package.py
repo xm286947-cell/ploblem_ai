@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH22_20260904"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH23_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -29,6 +29,7 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/templates/quality_scenario_insights.html",
     "quality_knowledge/web/templates/quality_scenario_generation_issues.html",
     "quality_knowledge/web/templates/quality_scenario_standardize.html",
+    "quality_knowledge/web/templates/quality_scenario_capabilities.html",
     "quality_knowledge/web/templates/scenario_taxonomy.html",
 }
 
@@ -69,11 +70,15 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH22 累计升级说明
+    readme = """# PATCH23 累计升级说明
 
 适用基线：V1.1_P2_RC2_FULL_20260901
 
 升级内容：
+- 质量场景新增研发质量工程、测试验证、质量管理三类能力缺口关联工作台。
+- 每项能力缺口记录分类、缺口描述、来源依据、改进措施、验证指标、优先级和治理状态。
+- 同一场景允许同时关联多类能力缺口；场景清单显示缺口数量并提供直接入口。
+- 质量场景矩阵看板新增能力关键矛盾排名，优先显示P0及关联问题规模。
 - 历史场景标准化增加独立批次账本，记录总数、成功、失败、跳过、Agent、模型和单条错误，刷新页面不会丢失进度。
 - 支持仅重试失败场景，已成功和已确认场景不会重复消耗模型额度。
 - 人工确认增加确认审计记录，保存确认人、确认时间、确认前状态以及标准分类前后快照。

@@ -61,6 +61,12 @@ ACTIVITY_DESCRIPTIONS = {
     "POWER_LOSS_RETENTION_RECOVERY": "保证PLC在异常掉电或正常断电后，关键运行数据、参数、计数值和状态能够按预期保持，并在重新上电后正确恢复，避免业务状态丢失或设备行为异常。目标：掉电不丢关键数据，上电后恢复正确、及时、一致。",
 }
 
+SCENARIO_CAPABILITIES = {
+    "ENGINEERING": (("REQUIREMENT_ENGINEERING","需求工程"),("ARCHITECTURE_DESIGN","架构与方案设计"),("DETAILED_DESIGN","详细设计"),("SOFTWARE_IMPLEMENTATION","软件实现"),("HW_SW_CO_DESIGN","软硬协同设计"),("SYSTEM_INTEGRATION","系统集成"),("BUILD_RELEASE","构建与发布工程")),
+    "TEST": (("TEST_STRATEGY","测试策略"),("TEST_METHOD","测试方法"),("SCENARIO_COVERAGE","场景覆盖"),("TEST_ENVIRONMENT","测试环境"),("TEST_DATA","测试数据"),("AUTOMATION","测试自动化"),("OBSERVABILITY","可观测与诊断")),
+    "MANAGEMENT": (("REVIEW","评审机制"),("BASELINE_MANAGEMENT","基线管理"),("CHANGE_MANAGEMENT","变更管理"),("CONFIGURATION_MANAGEMENT","配置管理"),("KNOWN_ISSUE_CONTROL","已知问题控制"),("RELEASE_GATE","发布门禁"),("RISK_APPROVAL","风险批准"),("HORIZONTAL_GOVERNANCE","横向治理")),
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scenario_taxonomy_version(version_id TEXT PRIMARY KEY,version_no INTEGER NOT NULL UNIQUE,product_code TEXT NOT NULL DEFAULT 'PLC',status TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,activated_at TEXT);
 CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,lifecycle_code));
@@ -79,6 +85,7 @@ CREATE TABLE IF NOT EXISTS customer_experience_quality_map(experience_code TEXT 
 CREATE TABLE IF NOT EXISTS quality_scenario_standardization_batch(batch_id TEXT PRIMARY KEY,status TEXT NOT NULL,total_count INTEGER NOT NULL,completed_count INTEGER NOT NULL DEFAULT 0,failed_count INTEGER NOT NULL DEFAULT 0,skipped_count INTEGER NOT NULL DEFAULT 0,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,finished_at TEXT);
 CREATE TABLE IF NOT EXISTS quality_scenario_standardization_item(batch_id TEXT NOT NULL,scenario_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',error_message TEXT,agent_id TEXT,model_name TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(batch_id,scenario_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_confirmation(confirmation_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,confirmed_by TEXT NOT NULL,previous_status TEXT,new_status TEXT,before_json TEXT,after_json TEXT,confirmed_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS quality_scenario_capability_gap(gap_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,capability_axis TEXT NOT NULL,capability_code TEXT NOT NULL,gap_description TEXT NOT NULL,source_basis TEXT,improvement_action TEXT,verification_metric TEXT,priority TEXT NOT NULL DEFAULT 'P1',status TEXT NOT NULL DEFAULT 'OPEN',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
 
@@ -142,6 +149,11 @@ class ScenarioRepository:
         by_model={}
         for row in terms:by_model.setdefault(row['model_code'],[]).append(row)
         return {'versions':versions,'product_characteristics':[x for x in by_model.get(PRODUCT_QUALITY_MODEL,[]) if not x['parent_code']], 'product_subcharacteristics':[x for x in by_model.get(PRODUCT_QUALITY_MODEL,[]) if x['parent_code']], 'quality_in_use':by_model.get(QUALITY_IN_USE_MODEL,[]), 'customer_experiences':by_model.get(CUSTOMER_EXPERIENCE_MODEL,[]), 'mappings':mappings}
+
+    @staticmethod
+    def capability_dictionary():
+        axis_labels={'ENGINEERING':'研发质量工程','TEST':'测试验证','MANAGEMENT':'质量管理'}
+        return {'axis_labels':axis_labels,'items':{axis:[{'code':code,'label_zh':label} for code,label in rows] for axis,rows in SCENARIO_CAPABILITIES.items()}}
 
     @staticmethod
     def _ensure_power_loss_activity(c):
@@ -290,10 +302,13 @@ class ScenarioRepository:
         with self.connect() as c:
             rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
             scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
+            capability_gaps=c.execute("SELECT * FROM quality_scenario_capability_gap ORDER BY priority,updated_at DESC").fetchall()
             generated={x[0] for x in c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=?",(generation_id,))} if generation_id else set()
         by_id={}
         for row in scopes:by_id.setdefault(row['scenario_id'],{}).setdefault(row['scope_type'],[]).append(row['scope_value'])
-        for item in rows:item['scopes']=by_id.get(item['scenario_id'],{})
+        gaps_by_id={}
+        for row in capability_gaps:gaps_by_id.setdefault(row['scenario_id'],[]).append(dict(row))
+        for item in rows:item['scopes']=by_id.get(item['scenario_id'],{});item['capability_gaps']=gaps_by_id.get(item['scenario_id'],[])
         def matches(item):
             s=item['scopes']
             return (not generation_id or item['scenario_id'] in generated) and (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[])) and (not industry or industry in s.get('INDUSTRY',[])) and (not customer_name or customer_name in s.get('CUSTOMER_NAME',[]))
@@ -374,7 +389,24 @@ class ScenarioRepository:
                 try:variant['product_model_values']=json.loads(variant.get('product_models') or '[]')
                 except (TypeError,json.JSONDecodeError):variant['product_model_values']=[]
             with self.connect() as c:item['confirmations']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_confirmation WHERE scenario_id=? ORDER BY confirmed_at DESC",(item['scenario_id'],))]
+            with self.connect() as c:item['capability_gaps']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_capability_gap WHERE scenario_id=? ORDER BY capability_axis,priority,updated_at DESC",(item['scenario_id'],))]
         return item
+
+    def save_scenario_capability_gap(self,scenario_id,payload):
+        if not self.scenario(scenario_id):raise KeyError(scenario_id)
+        axis=str(payload.get('capability_axis') or '')
+        valid={code for code,_ in SCENARIO_CAPABILITIES.get(axis,())};code=str(payload.get('capability_code') or '')
+        if code not in valid:raise ValueError('SCENARIO_CAPABILITY_CODE_INVALID')
+        gap_id=payload.get('gap_id') or f"QCG-{uuid.uuid4().hex}"
+        priority=payload.get('priority') if payload.get('priority') in {'P0','P1','P2'} else 'P1'
+        status=payload.get('status') if payload.get('status') in {'OPEN','IN_PROGRESS','VERIFIED','CLOSED'} else 'OPEN'
+        with self.connect() as c:c.execute("""INSERT INTO quality_scenario_capability_gap(gap_id,scenario_id,capability_axis,capability_code,gap_description,source_basis,improvement_action,verification_metric,priority,status) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(gap_id) DO UPDATE SET capability_axis=excluded.capability_axis,capability_code=excluded.capability_code,gap_description=excluded.gap_description,source_basis=excluded.source_basis,improvement_action=excluded.improvement_action,verification_metric=excluded.verification_metric,priority=excluded.priority,status=excluded.status,updated_at=CURRENT_TIMESTAMP""",(gap_id,scenario_id,axis,code,str(payload.get('gap_description') or '').strip(),str(payload.get('source_basis') or '').strip(),str(payload.get('improvement_action') or '').strip(),str(payload.get('verification_metric') or '').strip(),priority,status))
+        return gap_id
+
+    def delete_scenario_capability_gap(self,scenario_id,gap_id):
+        with self.connect() as c:
+            result=c.execute("DELETE FROM quality_scenario_capability_gap WHERE scenario_id=? AND gap_id=?",(scenario_id,gap_id))
+            if not result.rowcount:raise KeyError(gap_id)
 
     def create_generation(self,generation_id,product,start,end,source_count,created_by):
         with self.connect() as c:c.execute("INSERT INTO quality_scenario_generation(generation_id,product_code,start_month,end_month,source_issue_count,candidate_count,model_name,created_by,status,progress_text,unprocessed_count) VALUES(?,?,?,?,?,0,'',?,'QUEUED','等待开始',?)",(generation_id,product,start,end,source_count,created_by,source_count))
@@ -456,8 +488,17 @@ class ScenarioRepository:
         qiu_codes=lambda x:x.get('quality_in_use_codes') or []
         quality_codes=lambda x:[x.get('primary_quality_characteristic_code'),*(x.get('secondary_quality_characteristic_codes') or [])]
         standardized=sum(1 for x in detailed if x.get('primary_experience_code') and x.get('primary_quality_characteristic_code'))
+        capability_dict=self.capability_dictionary();capability_counts={}
+        for item in detailed:
+            for gap in item.get('capability_gaps') or []:
+                key=(gap['capability_axis'],gap['capability_code']);entry=capability_counts.setdefault(key,{'capability_axis':gap['capability_axis'],'capability_code':gap['capability_code'],'scenario_ids':set(),'issue_count':0,'p0_count':0})
+                entry['scenario_ids'].add(item['scenario_id']);entry['issue_count']+=item['_issue_count'];entry['p0_count']+=int(gap.get('priority')=='P0')
+        capability_rows=[]
+        for (axis,code),entry in capability_counts.items():
+            labels={x['code']:x['label_zh'] for x in capability_dict['items'].get(axis,[])};entry['scenario_count']=len(entry.pop('scenario_ids'));entry['axis_label']=capability_dict['axis_labels'].get(axis,axis);entry['capability_label']=labels.get(code,code);capability_rows.append(entry)
+        capability_rows.sort(key=lambda x:(-x['p0_count'],-x['issue_count'],-x['scenario_count']))
         return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(x['_issue_count'] for x in detailed),'standardized_count':standardized,'standardized_rate':round(standardized*100/len(items),1) if items else 0,
-                'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code')}
+                'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code'),'capability_rows':capability_rows}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
         taxonomy=self.taxonomy_active(product)
@@ -473,6 +514,7 @@ class ScenarioRepository:
     def save_industry_variants(self,scenario_id,variants):
         with self.connect() as c:
             c.execute("DELETE FROM quality_scenario_industry_variant WHERE scenario_id=?",(scenario_id,))
+            c.execute("DELETE FROM quality_scenario_capability_gap WHERE scenario_id=?",(scenario_id,))
             for row in variants:
                 c.execute("""INSERT INTO quality_scenario_industry_variant(variant_id,scenario_id,industry,product_models,trigger_conditions,business_impact,recovery_method,evidence_count) VALUES(?,?,?,?,?,?,?,?)""",(f"QSV-{uuid.uuid4().hex}",scenario_id,row['industry'],json.dumps(row.get('product_models',[]),ensure_ascii=False),row.get('trigger_conditions',''),row.get('business_impact',''),row.get('recovery_method',''),int(row.get('evidence_count') or 0)))
 

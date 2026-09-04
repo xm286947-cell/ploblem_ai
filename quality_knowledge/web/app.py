@@ -336,6 +336,25 @@ def create_app(db_path):
         threading.Thread(target=scenario_generation_svc.standardize_existing,args=(ids,new_id),daemon=True,name=f'scenario-standardize-{new_id[-8:]}').start()
         return RedirectResponse(f'/quality-scenarios/standardize?batch_id={new_id}',303)
 
+    @app.get('/quality-scenarios/{scenario_id}/capabilities', response_class=HTMLResponse, include_in_schema=False)
+    def quality_scenario_capabilities(request: Request, scenario_id: str):
+        item=scenario_repo.scenario(scenario_id)
+        if not item:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
+        return tpl.TemplateResponse(request,'quality_scenario_capabilities.html',{'item':item,'dictionary':scenario_repo.capability_dictionary()})
+
+    @app.post('/quality-scenarios/{scenario_id}/capabilities', include_in_schema=False)
+    def quality_scenario_capability_save(scenario_id: str, capability_axis: str = Form(...), capability_code: str = Form(...), gap_description: str = Form(...), source_basis: str = Form(''), improvement_action: str = Form(''), verification_metric: str = Form(''), priority: str = Form('P1'), status: str = Form('OPEN')):
+        try:scenario_repo.save_scenario_capability_gap(scenario_id,locals())
+        except KeyError:raise HTTPException(404,'QUALITY_SCENARIO_NOT_FOUND')
+        except ValueError as error:raise HTTPException(400,str(error)) from error
+        return RedirectResponse(f'/quality-scenarios/{scenario_id}/capabilities',303)
+
+    @app.post('/quality-scenarios/{scenario_id}/capabilities/{gap_id}/delete', include_in_schema=False)
+    def quality_scenario_capability_delete(scenario_id: str,gap_id: str):
+        try:scenario_repo.delete_scenario_capability_gap(scenario_id,gap_id)
+        except KeyError:raise HTTPException(404,'SCENARIO_CAPABILITY_GAP_NOT_FOUND')
+        return RedirectResponse(f'/quality-scenarios/{scenario_id}/capabilities',303)
+
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
         scope=scenario_generation_svc.precheck(product_code,start_month,end_month) if preview and product_code and start_month and end_month else None
