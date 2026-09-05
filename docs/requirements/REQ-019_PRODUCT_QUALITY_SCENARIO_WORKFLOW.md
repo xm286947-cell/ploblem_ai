@@ -1,5 +1,7 @@
 # REQ-019 客户问题逆向推理与产品质量场景库
 
+> 历史方案保留。2026-09-05 起，当前阶段、逐问题识别/资产归纳、CS/ITR 复用及客户画像规则以 [REQ-020 基线](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md) 为准。下列 PLANNED 为历史状态，不代表目前尚无实现。
+
 状态：PLANNED  
 优先级：P1  
 阶段：第三阶段  

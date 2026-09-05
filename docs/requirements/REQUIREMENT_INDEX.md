@@ -1,16 +1,19 @@
 # QUALITY ENGINE 需求池
 
-最后更新：2026-09-02
+最后更新：2026-09-05
 
 ## 当前路线
 
 ```text
 稳定基线
-→ 真实数据 E2E 与分析质量评估
-→ 质量治理闭环
-→ 正向风险保证
-→ Docker/Linux/MySQL 规模化部署
+→ 现有实现核对与合成数据回归
+→ CS/ITR 多源证据与同问题复用
+→ 软件/硬件客户与行业质量场景画像（验证价值）
+→ 人机协同补全（后续）
+→ 场景消费与治理闭环（后续，当前不开发）
 ```
+
+当前执行基线：[REQ-020](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md)。后续由 GPT-5.6 Sol 按 [开发交接台账](SOL_DEVELOPMENT_HANDOFF.md) 执行。部署演进保留为独立长期需求。
 
 ## 需求目录
 
@@ -34,10 +37,13 @@
 | REQ-016 | ITR质量运行指标、MTTR分段与薄弱环节识别 | READY | P0 | 第二阶段 | `REQ-016_ITR_QUALITY_OPERATION_AND_MTTR.md` |
 | REQ-017 | 问题分析驱动的标准识别、固化与效果验证闭环 | TRIAGED | P1 | 第三阶段 | `REQ-017_ANALYSIS_TO_STANDARDIZATION_CLOSED_LOOP.md` |
 | REQ-018 | ITR与彻底解决单接入、自动关联和统一问题视图 | READY | P0 | 短期MVP | `REQ-018_ITR_AND_CS_INTAKE_MVP.md` |
-| REQ-019 | 客户问题逆向推理与产品质量场景库 | PLANNED | P1 | 第三阶段 | `REQ-019_PRODUCT_QUALITY_SCENARIO_WORKFLOW.md` |
+| REQ-019 | 客户问题逆向推理与产品质量场景库 | PARTIAL（已有实现，增量按020验收） | P1 | 当前 | `REQ-019_PRODUCT_QUALITY_SCENARIO_WORKFLOW.md` |
+| REQ-020 | 多源去重、软件/硬件客户与行业质量场景画像 | READY_FOR_SOL | P0 | 第一阶段价值验证 | [方案基线](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md) / [执行台账](SOL_DEVELOPMENT_HANDOFF.md) |
 
 ## 已明确但暂不实施
 
+- 治理闭环、现场多人协作机制及版本质量评价暂不开发；不要按旧路线自动进入实施。
+- MTTR 计算口径待用户明确；REQ-016 的历史 READY 不代表公式已批准。
 - 当前 Win10 本地开发继续使用 SQLite 和 BAT，暂不强制使用 Docker/MySQL。
 - 当前不把飞书数据库作为正式数据库替换方案。
 - 上线后不再采用覆盖源码或叠加零散 Patch 的升级方式。
