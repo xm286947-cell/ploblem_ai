@@ -366,9 +366,13 @@ def create_app(db_path):
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = '', source: str = 'cs_itr', ipmt: str = '', spdt: str = '', product_model: str = '', year: str = ''):
         from quality_knowledge.scenario_sources import scene_source_records
-        filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':source,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year}
+        group_choices=[g for g in material_repo.groups() if g['material_type'] in {'ITR_CS','ITR_SOURCE'}]
+        requested_groups=request.query_params.getlist('group_ids')
+        default_groups=[g['group_id'] for g in group_choices if g['group_code'] in {'ITR','ITR-CS'}]
+        selected_groups=requested_groups or default_groups
+        filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':source,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year,'group_ids':selected_groups}
         effective_source=source if source in {'operations','cs_itr'} else 'operations'
-        options=scene_source_records(scenario_generation_svc,effective_source,{'product_code':product_code},metadata_only=True)
+        options=scene_source_records(scenario_generation_svc,effective_source,{'product_code':product_code,'group_ids':selected_groups},metadata_only=True)
         choices={key:sorted({x[key] for x in options if x.get(key)}) for key in ('ipmt','spdt','product_model','year')}
         scope=None
         if preview and source in {'operations','cs_itr'}:
@@ -377,7 +381,7 @@ def create_app(db_path):
             scope={'items':rows,'issue_count':len(rows),'analysed_count':analysed,'coverage_rate':round(analysed*100/len(rows),1) if rows else 0}
         elif preview and product_code and start_month and end_month:
             scope=scenario_generation_svc.precheck(product_code,start_month,end_month)
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters})
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters,'group_choices':group_choices})
 
     @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_insights(request: Request, status: str = ''):
@@ -387,13 +391,13 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status,'decision':decision})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), source: str = Form('cs_itr'), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), year: str = Form('')):
+    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), source: str = Form('cs_itr'), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), year: str = Form(''), group_ids: list[str] = Form([])):
         if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')
         if not scenario_repo.taxonomy_active(product_code):raise HTTPException(400,f'产品 {product_code} 尚未配置并激活场景词典，请先到场景词典配置中创建并激活')
         generation_id=f'QSG-{uuid.uuid4().hex}'
         if source in {'operations','cs_itr'}:
             from quality_knowledge.scenario_sources import scene_source_records
-            rows=scene_source_records(scenario_generation_svc,source,{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year,'start_month':start_month,'end_month':end_month},selected_ids)
+            rows=scene_source_records(scenario_generation_svc,source,{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year,'start_month':start_month,'end_month':end_month,'group_ids':group_ids},selected_ids)
             if {x['knowledge_id'] for x in rows}!=set(selected_ids):raise HTTPException(409,'选中数据已变化或不属于当前筛选范围，请重新预览')
             scenario_generation_svc.save_source_snapshot(generation_id,rows)
         scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')
@@ -410,7 +414,13 @@ def create_app(db_path):
     def quality_scenario_generation_issues(request: Request, generation_id: str):
         job=scenario_repo.generation(generation_id)
         if not job:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
-        return tpl.TemplateResponse(request,'quality_scenario_generation_issues.html',{'job':job,'items':scenario_repo.issue_classifications(generation_id)})
+        snapshot={row['knowledge_id']:row for row in scenario_generation_svc.source_snapshot(generation_id)}
+        items=[]
+        for row in scenario_repo.issue_classifications(generation_id):
+            source=snapshot.get(row['knowledge_id'],{})
+            items.append({**row,'source_workbench':source.get('source_workbench') or '',
+                          'source_material_id':source.get('source_material_id') or ''})
+        return tpl.TemplateResponse(request,'quality_scenario_generation_issues.html',{'job':job,'items':items})
 
     @app.post('/quality-scenarios/generations/{generation_id}/retry', include_in_schema=False)
     def quality_scenario_generation_retry(generation_id: str, selected_ids: list[str] = Form([])):

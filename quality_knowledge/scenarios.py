@@ -112,7 +112,7 @@ class ScenarioRepository:
             self._seed_quality_models(c)
             self._seed_semantic_terms(c)
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
-            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'reused_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
+            for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'reused_count':"INTEGER NOT NULL DEFAULT 0",'updated_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
             ledger_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_issue_classification)")}
             for name,definition in {'agent_id':"TEXT",'model_name':"TEXT",'started_at':"TEXT",'finished_at':"TEXT",'attempt_count':"INTEGER NOT NULL DEFAULT 0"}.items():
@@ -492,6 +492,14 @@ class ScenarioRepository:
             row=c.execute("""SELECT a.*,s.lifecycle_code,s.activity_code FROM quality_scenario_analysis_cache a JOIN quality_scenario s ON s.scenario_id=a.scenario_id WHERE a.input_key=? AND a.status='COMPLETED'""",(input_key,)).fetchone()
             return dict(row) if row else None
 
+    def latest_scenario_analysis(self,canonical_itr,task_type,taxonomy_version_id):
+        with self.connect() as c:
+            row=c.execute("""SELECT a.*,s.status scenario_status,s.quality_classification_status,s.scenario_code
+                FROM quality_scenario_analysis_cache a JOIN quality_scenario s ON s.scenario_id=a.scenario_id
+                WHERE a.canonical_itr=? AND a.task_type=? AND a.taxonomy_version_id=? AND a.status='COMPLETED'
+                ORDER BY a.updated_at DESC,a.created_at DESC LIMIT 1""",(canonical_itr,task_type,taxonomy_version_id)).fetchone()
+            return dict(row) if row else None
+
     def claim_scenario_analysis(self,input_key,generation_id,knowledge_id):
         with self.connect() as c:
             c.execute("DELETE FROM quality_scenario_analysis_claim WHERE claimed_at<datetime('now','-1 hour')")
@@ -512,15 +520,16 @@ class ScenarioRepository:
     def refresh_generation_coverage(self,generation_id):
         with self.connect() as c:
             counts={row['status']:row['n'] for row in c.execute("SELECT status,COUNT(*) n FROM quality_scenario_issue_classification WHERE generation_id=? GROUP BY status",(generation_id,))}
-            total=sum(counts.values());classified=counts.get('CLASSIFIED',0);reused=counts.get('REUSED',0);review=counts.get('REVIEW_REQUIRED',0);failed=counts.get('FAILED',0);unprocessed=counts.get('PENDING',0)+counts.get('RUNNING',0)
-            c.execute("UPDATE quality_scenario_generation SET processed_count=?,classified_count=?,reused_count=?,review_required_count=?,failed_count=?,unprocessed_count=? WHERE generation_id=?",(classified+reused+review+failed,classified,reused,review,failed,unprocessed,generation_id))
-        return {'total':total,'processed_count':classified+reused+review+failed,'classified_count':classified,'reused_count':reused,'review_required_count':review,'failed_count':failed,'unprocessed_count':unprocessed}
+            total=sum(counts.values());classified=counts.get('CLASSIFIED',0);reused=counts.get('REUSED',0);updated=counts.get('UPDATED',0);review=counts.get('REVIEW_REQUIRED',0);failed=counts.get('FAILED',0);unprocessed=counts.get('PENDING',0)+counts.get('RUNNING',0)
+            processed=classified+reused+updated+review+failed
+            c.execute("UPDATE quality_scenario_generation SET processed_count=?,classified_count=?,reused_count=?,updated_count=?,review_required_count=?,failed_count=?,unprocessed_count=? WHERE generation_id=?",(processed,classified,reused,updated,review,failed,unprocessed,generation_id))
+        return {'total':total,'processed_count':processed,'classified_count':classified,'reused_count':reused,'updated_count':updated,'review_required_count':review,'failed_count':failed,'unprocessed_count':unprocessed}
 
     def issue_classifications(self,generation_id):
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT * FROM quality_scenario_issue_classification WHERE generation_id=? ORDER BY knowledge_id",(generation_id,))]
 
     def update_generation(self,generation_id,**values):
-        allowed={'status','progress_text','error_message','candidate_count','model_name','processed_count','classified_count','reused_count','review_required_count','failed_count','unprocessed_count','taxonomy_version_id'};data={k:v for k,v in values.items() if k in allowed}
+        allowed={'status','progress_text','error_message','candidate_count','model_name','processed_count','classified_count','reused_count','updated_count','review_required_count','failed_count','unprocessed_count','taxonomy_version_id'};data={k:v for k,v in values.items() if k in allowed}
         if not data:return
         assignments=','.join(f'{key}=?' for key in data)
         finished=",finished_at=CURRENT_TIMESTAMP" if data.get('status') in {'COMPLETED','PARTIAL','FAILED'} else ''
@@ -599,13 +608,17 @@ class ScenarioRepository:
         return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(x['_issue_count'] for x in detailed),'standardized_count':standardized,'standardized_rate':round(standardized*100/len(items),1) if items else 0,
                 'activity_typical_problem_matrix':matrix(activities,typical,activity_codes,typical_codes,'activity_code','typical_problem_code'),'environment_typical_problem_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in conditions],typical,condition_codes,typical_codes,'environment_code','typical_problem_code'),'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code'),'capability_rows':capability_rows}
 
-    def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
+    def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model,scenario_id=''):
         taxonomy=self.taxonomy_active(product)
-        payload={**item,'scenario_code':code,'status':'IN_REVIEW','product_code':product,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
+        existing=self.scenario(scenario_id) if scenario_id else None
+        payload={**item,'scenario_code':existing['scenario_code'] if existing else code,
+                 'status':existing['status'] if existing else 'IN_REVIEW','product_code':product,
+                 'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '',
+                 'applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
         for proposed in item.get('proposed_semantic_terms',[]):
             if not isinstance(proposed,dict):continue
             self.save_semantic_term({**proposed,'product_code':product,'status':'CANDIDATE','source_scenario_id':code})
-        scenario_id=self.save_scenario('',payload,scopes)
+        scenario_id=self.save_scenario(scenario_id,payload,scopes)
         summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[]),
                             **{k:item.get(k) for k in ('source_status','source_label','field_sources','field_evidence','source_warnings','source_material_id','source_material_ids','source_workbench','cs_material_id','itr_material_id','linked_knowledge_id','year','month','missing_leakage','lifecycle_assessment','lifecycle_reason','operating_conditions')}},ensure_ascii=False)
         with self.connect() as c:

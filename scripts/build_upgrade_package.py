@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH31_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH32_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -35,6 +35,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md",
     "docs/requirements/SOL_DEVELOPMENT_HANDOFF.md",
     "docs/requirements/QUALITY_SCENARIO_PORTRAIT_PATCH31_DELIVERY.md",
+    "docs/requirements/QUALITY_SCENARIO_INCREMENTAL_UPDATE_PATCH32_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
@@ -98,7 +99,16 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH31 累计升级说明
+    readme = """# PATCH32 累计升级说明
+
+本轮补齐 ITR 到彻底解决单的增量增强流程：只有 ITR 时可先形成候选；同号彻底解决单后续到达，
+人工再次生成会增强原候选、保留同一场景编号和前后证据，并在任务账本显示“已增强原候选”。
+已发布或人工确认场景不会被自动覆盖，而是进入待人工评审。
+
+场景生成页新增允许数据组选择。CS 与 ITR 只在勾选的数据组内关联；同一类型跨组选出多条时
+进入来源冲突，不静默任取数据。默认勾选三个标准工作台中的 ITR 与彻底解决单组。
+
+以下为 PATCH31 及更早累计内容：
 
 本轮完成质量场景画像第一阶段核心增量：场景候选默认从“彻底解决单 + ITR”受控取数，
 同一标准 ITR 合并为一个分析输入；彻底解决单提供基础事实，ITR 仅补空项，漏测分析存在时优先复用。

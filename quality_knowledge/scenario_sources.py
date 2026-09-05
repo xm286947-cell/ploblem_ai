@@ -103,7 +103,12 @@ def _analyses(service, matches, product_code=''):
 def material_scene_records(service, filters=None, selected_ids=None, metadata_only=False):
     """One controlled scene input per canonical ITR; CS facts win, ITR only fills gaps."""
     filters=filters or {};selected=set(selected_ids or [])
-    rows=_latest_materials(service,('ITR_CS','ITR_SOURCE'));by_itr=defaultdict(lambda:defaultdict(list))
+    rows=_latest_materials(service,('ITR_CS','ITR_SOURCE'))
+    group_ids=filters.get('group_ids') or []
+    if isinstance(group_ids,str):group_ids=[x for x in group_ids.split(',') if x]
+    if group_ids:
+        allowed_groups=set(group_ids);rows=[row for row in rows if row['group_id'] in allowed_groups]
+    by_itr=defaultdict(lambda:defaultdict(list))
     for row in rows:by_itr[normalize_itr(row['canonical_itr'] or row['business_key'])][row['material_type']].append(row)
     issue_index=_issue_index(service);records=[]
     for canonical,bucket in sorted(by_itr.items()):

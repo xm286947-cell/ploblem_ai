@@ -119,3 +119,34 @@ def test_cs_itr_portrait_period_is_not_erased_by_kpi_enrichment(tmp_path):
     facts=ScenarioAssets(service.scenarios).facts()
     assert facts[mid]['year']=='2026' and facts[mid]['month']=='6'
     assert facts[mid]['period_source']=='彻底解决单/ITR事实时间'
+
+
+def test_itr_only_candidate_is_enhanced_in_place_when_cs_arrives(tmp_path):
+    db=tmp_path/'late-cs.db';scenes=ScenarioRepository(db);materials=MaterialRepository(db);client=CountingClient()
+    itr,_=materials.add_material(materials.group('ITR'),'ITR20260605086',{
+        '问题信息_ITR单号':'ITR20260605086','问题信息_问题描述':'设备连续运行后状态异常'},'itr.xlsx','sheet',2)
+    service=ScenarioGenerationService(NoAnalyses(),scenes,tmp_path,client)
+    first=service.generate('PLC','1','12',selected_ids=[itr])
+    original_id=first['scenario_ids'][0]
+    cs,_=materials.add_material(materials.group('ITR-CS'),'ITR20260605086CS',{
+        '问题信息_彻底解决单号':'ITR20260605086CS','问题信息_问题描述':'连续运行后资源未释放',
+        '技术根因分析与纠正_TRC根因':'缓存未释放','技术根因分析与纠正_TRC纠正信息':'修复资源释放'},'cs.xlsx','sheet',2)
+    second=service.generate('PLC','1','12',selected_ids=[cs])
+    assert second['updated_count']==1 and second['scenario_ids']==[original_id]
+    assert len(scenes.scenarios())==1 and scenes.scenario(original_id)['version_no']==2
+    assert {x['knowledge_id'] for x in scenes.scenario(original_id)['evidence']}=={itr,cs}
+    assert scenes.issue_classifications(second['generation_id'])[0]['status']=='UPDATED'
+
+
+def test_selected_groups_prevent_cross_group_arbitrary_choice(tmp_path):
+    db=tmp_path/'groups.db';scenes=ScenarioRepository(db);materials=MaterialRepository(db)
+    base=materials.group('ITR-CS')
+    materials.add_material(base,'ITR20260605087CS',{'问题信息_问题描述':'标准组记录'},'base.xlsx','sheet',2)
+    with materials.connect() as c:
+        c.execute("INSERT INTO data_group(group_id,group_code,group_name,material_type) VALUES('DG-CS-LOW','CS-LOW','低质量批量组','ITR_CS')")
+    custom=materials.group('CS-LOW')
+    materials.add_material(custom,'ITR20260605087CS',{'问题信息_问题描述':'低质量组记录'},'low.xlsx','sheet',2)
+    service=ScenarioGenerationService(NoAnalyses(),scenes,tmp_path,CountingClient())
+    assert material_scene_records(service)[0]['source_status']=='CONFLICT'
+    selected=material_scene_records(service,{'group_ids':[base['group_id']]})
+    assert len(selected)==1 and selected[0]['description']=='标准组记录'
