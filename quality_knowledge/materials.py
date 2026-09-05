@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS material_review(
  material_id TEXT PRIMARY KEY REFERENCES source_material(material_id),review_status TEXT NOT NULL DEFAULT 'DRAFT',
  analysis_summary TEXT,root_cause TEXT,improvement_action TEXT,reviewer TEXT,
  updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS source_material_reporting_year(
+ material_id TEXT PRIMARY KEY REFERENCES source_material(material_id) ON DELETE CASCADE,
+ reporting_year TEXT NOT NULL,year_source TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 """
 
 
@@ -57,6 +60,18 @@ def _clean(value: Any) -> str:
 def normalize_itr(value: Any) -> str:
     text = re.sub(r"\s+", "", _clean(value)).upper()
     return text[:-2] if text.endswith("CS") else text
+
+
+def year_from_itr(value: Any) -> str:
+    match = re.match(r"^ITR(20\d{2})", normalize_itr(value))
+    return match.group(1) if match else ""
+
+
+def validate_reporting_year(value: Any) -> str:
+    year = _clean(value)
+    if not re.fullmatch(r"20\d{2}", year) or not 2000 <= int(year) <= 2099:
+        raise ValueError("考核年份必须为2000—2099之间的四位年份")
+    return year
 
 
 def combine_headers(parent_row, child_row) -> list[str]:
@@ -88,6 +103,11 @@ def _material_view(row: dict[str, Any]) -> dict[str, Any]:
     item["raw"] = raw
     item["title"] = _first(raw, "问题信息_问题主题", "问题信息_问题描述", "问题主题", "问题描述") or "未提供问题描述"
     item["month"] = _first(raw, "数据运营_KPI计入月份", "问题信息_创建月份", "创建月份") or "-"
+    file_year = _first(raw, "数据运营_KPI计入年份", "数据运营_KPI计入年度", "KPI计入年份", "考核年份")
+    itr_year = year_from_itr(item.get("business_key"))
+    item["year"] = _clean(item.get("reporting_year")) or itr_year or file_year or "-"
+    source_labels={"BATCH_MANUAL":"批量人工设置","IMPORT_MANUAL":"导入时人工设置","IMPORT_FILE":"原始文件","AUTO_ITR":"ITR编号默认"}
+    item["year_source"] = source_labels.get(_clean(item.get("year_source")),_clean(item.get("year_source"))) or ("ITR编号默认" if itr_year else "原始文件" if file_year else "未设置")
     item["product"] = _first(raw, "问题信息_产品型号", "问题信息_产品类型", "产品型号", "产品类型") or "-"
     item["domain"] = _first(raw, "问题信息_问题领域", "问题领域", "问题信息_产品类型", "产品类型") or "未分类"
     item["severity"] = _first(raw, "问题信息_问题等级", "问题等级") or "-"
@@ -172,13 +192,13 @@ class MaterialRepository:
             return result
 
     def list_materials(self, group_code="", limit=200):
-        sql="SELECT m.*,g.group_code,g.group_name FROM source_material m JOIN data_group g ON g.group_id=m.group_id"
+        sql="SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
         values=[]
         if group_code: sql+=" WHERE g.group_code=?";values.append(group_code)
         sql+=" ORDER BY m.created_at DESC LIMIT ?";values.append(limit)
         with self.connect() as c:return [dict(x) for x in c.execute(sql,values)]
 
-    def search_materials(self, group_code, *, q="", domain="", month="", page=1, page_size=20):
+    def search_materials(self, group_code, *, q="", domain="", month="", year="", page=1, page_size=20):
         rows = self.list_materials(group_code, 100000)
         items = [_material_view(row) for row in rows]
         if q:
@@ -188,16 +208,19 @@ class MaterialRepository:
             items = [item for item in items if domain.lower() in item["domain"].lower()]
         if month:
             items = [item for item in items if item["month"] == month]
+        if year:
+            items = [item for item in items if item["year"] == year]
         total = len(items); page=max(1,int(page));page_size=max(1,min(100,int(page_size)))
         start=(page-1)*page_size
         return {"items":items[start:start+page_size],"total":total,"page":page,"page_size":page_size,
                 "pages":max(1,(total+page_size-1)//page_size),
                 "domains":sorted({item["domain"] for item in [_material_view(row) for row in rows] if item["domain"]}),
-                "months":sorted({item["month"] for item in [_material_view(row) for row in rows] if item["month"]!="-"},reverse=True)}
+                "months":sorted({item["month"] for item in [_material_view(row) for row in rows] if item["month"]!="-"},reverse=True),
+                "years":sorted({item["year"] for item in [_material_view(row) for row in rows] if item["year"]!="-"},reverse=True)}
 
     def material(self, material_id):
         with self.connect() as c:
-            row=c.execute("SELECT m.*,g.group_code,g.group_name FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_id=?",(material_id,)).fetchone()
+            row=c.execute("SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id WHERE m.material_id=?",(material_id,)).fetchone()
             if not row:return None
             item=_material_view(dict(row))
             link=c.execute("SELECT knowledge_id,link_status FROM issue_material_link WHERE material_id=? ORDER BY created_at DESC LIMIT 1",(material_id,)).fetchone()
@@ -205,6 +228,18 @@ class MaterialRepository:
             review=c.execute("SELECT * FROM material_review WHERE material_id=?",(material_id,)).fetchone()
             item["review"]=dict(review) if review else {"review_status":"DRAFT","analysis_summary":"","root_cause":"","improvement_action":"","reviewer":""}
             return item
+
+    def set_reporting_year(self, material_ids, year, *, source="BATCH_MANUAL", preserve_manual=False):
+        year=validate_reporting_year(year);ids=list(dict.fromkeys(material_ids or []))
+        if not ids:raise ValueError("请至少选择一条软件考核问题")
+        with self.connect() as c:
+            rows=c.execute("SELECT m.material_id,g.group_code FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_id IN ("+','.join('?' for _ in ids)+")",ids).fetchall()
+            if len(rows)!=len(ids) or any(row['group_code']!='SW-OPS' for row in rows):raise ValueError("只能修改软件考核工作台中的问题年份")
+            for material_id in ids:
+                current=c.execute('SELECT year_source FROM source_material_reporting_year WHERE material_id=?',(material_id,)).fetchone()
+                if preserve_manual and current and current[0] in ('BATCH_MANUAL','IMPORT_MANUAL'):continue
+                c.execute("INSERT INTO source_material_reporting_year(material_id,reporting_year,year_source,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(material_id) DO UPDATE SET reporting_year=excluded.reporting_year,year_source=excluded.year_source,updated_at=CURRENT_TIMESTAMP",(material_id,year,source))
+        return len(ids)
 
     def save_review(self, material_id, *, review_status, analysis_summary, root_cause, improvement_action, reviewer):
         if review_status not in {"DRAFT","COMPLETED"}:raise ValueError("INVALID_REVIEW_STATUS")
@@ -253,10 +288,11 @@ class MaterialImportService:
     def __init__(self, repository: MaterialRepository):
         self.repository = repository
 
-    def import_file(self, path, group_code, header_rows=2, sheet_name=""):
+    def import_file(self, path, group_code, header_rows=2, sheet_name="", reporting_year=""):
         group=self.repository.group(group_code)
         if not group: raise ValueError("DATA_GROUP_NOT_FOUND")
         if group["material_type"] not in {"ITR_SOURCE","ITR_CS","SOFTWARE_OPERATION"}: raise ValueError("MATERIAL_IMPORT_NOT_ENABLED")
+        if reporting_year:validate_reporting_year(reporting_year)
         stats={"total":0,"new":0,"updated":0,"skipped":0,"failed":0,"errors":[]}
         workbook=load_workbook(path,read_only=True,data_only=True)
         try:
@@ -275,7 +311,11 @@ class MaterialImportService:
                     key=next((_clean(raw.get(alias)) for alias in self.KEY_ALIASES[group["material_type"]] if _clean(raw.get(alias))),"")
                     if not key:
                         stats["failed"]+=1;stats["errors"].append({"sheet":name,"row":row_number,"error":"BUSINESS_KEY_MISSING"});continue
-                    _,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
+                    material_id,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
+                    if group["material_type"]=="SOFTWARE_OPERATION":
+                        file_year=_first(raw,"数据运营_KPI计入年份","数据运营_KPI计入年度","KPI计入年份","考核年份")
+                        itr_year=year_from_itr(key);effective=reporting_year or itr_year or file_year
+                        if effective:self.repository.set_reporting_year([material_id],effective,source="IMPORT_MANUAL" if reporting_year else "AUTO_ITR" if itr_year else "IMPORT_FILE",preserve_manual=not bool(reporting_year))
         finally:
             workbook.close()
         self.repository.refresh_links()

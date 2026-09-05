@@ -253,13 +253,13 @@ def create_app(db_path):
         return RedirectResponse('/materials/itr',303)
 
     @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', page: int = 1):
+    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', year: str = '', page: int = 1):
         workspace=material_workbenches.get(workbench)
         if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
-        result=material_repo.search_materials(workspace['group_code'],q=q,domain=domain,month=month,page=page)
+        result=material_repo.search_materials(workspace['group_code'],q=q,domain=domain,month=month,year=year,page=page)
         return tpl.TemplateResponse(request, 'materials.html', {
             'groups': material_repo.groups(False), 'items': result['items'], 'listing':result,
-            'filters':{'q':q,'domain':domain,'month':month},'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
+            'filters':{'q':q,'domain':domain,'month':month,'year':year},'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
         })
 
     @app.get('/materials/{workbench}/{material_id}', response_class=HTMLResponse, include_in_schema=False)
@@ -280,21 +280,27 @@ def create_app(db_path):
         return RedirectResponse(f'/materials/{workbench}/{material_id}#independent-review',303)
 
     @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
-    def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2), workbench: str = Form(...)):
+    def materials_import(request: Request, file: UploadFile = File(...), group_code: str = Form(...), header_rows: int = Form(2), workbench: str = Form(...), reporting_year: str = Form('')):
         workspace=material_workbenches.get(workbench)
         if not workspace or workspace['group_code']!=group_code:raise HTTPException(400,'WORKBENCH_GROUP_MISMATCH')
         if Path(file.filename or '').suffix.lower() not in ALLOWED:
             raise HTTPException(400, '仅支持 .xlsx / .xlsm')
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/Path(file.filename or 'upload.xlsx').name;path.write_bytes(file.file.read())
-            try: result=material_svc.import_file(path,group_code,header_rows)
+            try: result=material_svc.import_file(path,group_code,header_rows,reporting_year=reporting_year)
             except ValueError as error: raise HTTPException(400,str(error)) from error
         listing=material_repo.search_materials(group_code)
         return tpl.TemplateResponse(request, 'materials.html', {
             'groups': material_repo.groups(False), 'items': listing['items'],
-            'listing':listing,'filters':{'q':'','domain':'','month':''},
+            'listing':listing,'filters':{'q':'','domain':'','month':'','year':''},
             'group_code': group_code, 'result': result, 'workbench':workbench, 'workspace':workspace,
         })
+
+    @app.post('/materials/software-operations/batch-year', include_in_schema=False)
+    def software_operation_batch_year(material_ids: list[str] = Form(default=[]), reporting_year: str = Form(...)):
+        try:material_repo.set_reporting_year(material_ids,reporting_year)
+        except ValueError as error:raise HTTPException(400,str(error)) from error
+        return RedirectResponse(f'/materials/software-operations?year={reporting_year}',303)
 
     @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)
     def association_settings(request: Request):

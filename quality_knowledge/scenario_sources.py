@@ -14,14 +14,14 @@ def period(raw):
     value=first(raw,'数据运营_KPI计入月份','KPI计入月份')
     year=first(raw,'数据运营_KPI计入年份','数据运营_KPI计入年度','KPI计入年份','考核年份')
     dated=re.search(r'(20\d{2})\s*(?:年|[-/.])\s*(\d{1,2})',value)
-    if dated:return dated[1],str(int(dated[2]))
+    if dated:return year or dated[1],str(int(dated[2]))
     month=re.fullmatch(r'\s*(\d{1,2})\s*月?\s*',value)
     return year or '未知', str(int(month[1])) if month and 1<=int(month[1])<=12 else '未知'
 
 def operation_records(service, filters=None, selected_ids=None, metadata_only=False):
     filters=filters or {}; selected=set(selected_ids or [])
     with service.scenarios.connect() as c:
-        materials=[dict(r) for r in c.execute("SELECT m.* FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_type='ITR_CS' OR (m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS') ORDER BY m.version_no DESC,m.created_at DESC,m.material_id")]
+        materials=[dict(r) for r in c.execute("SELECT m.*,y.reporting_year FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id WHERE m.material_type='ITR_CS' OR (m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS') ORDER BY m.version_no DESC,m.created_at DESC,m.material_id")]
         issues=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
     latest={}; cs=defaultdict(list); index=defaultdict(list)
     for row in materials:latest.setdefault((row['material_type'],row['group_id'],normalize_itr(row['business_key'])),row)
@@ -31,7 +31,9 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
     records=[]
     for material in latest.values():
         if material['material_type']!='SOFTWARE_OPERATION' or (selected and material['material_id'] not in selected):continue
-        raw=json.loads(material['raw_json']);year,month=period(raw)
+        raw=json.loads(material['raw_json'])
+        if material.get('reporting_year'):raw['数据运营_KPI计入年份']=material['reporting_year']
+        year,month=period(raw)
         values={'ipmt':first(raw,'问题信息_IPMT','IPMT'),'spdt':first(raw,'问题信息_SPDT','SPDT'),
                 'product_model':first(raw,'问题信息_产品型号','产品型号'),'year':year,'month':month}
         if any(filters.get(k) and filters[k]!=v for k,v in values.items()):continue

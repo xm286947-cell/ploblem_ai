@@ -7,7 +7,7 @@ from quality_knowledge.scenario_sources import period, first
 def enrich_facts(connection, facts):
     tables={r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if 'source_material' not in tables:return facts
-    materials=[dict(r) for r in connection.execute('SELECT * FROM source_material ORDER BY version_no DESC,created_at DESC,material_id')]
+    materials=[dict(r) for r in connection.execute('SELECT m.*,y.reporting_year FROM source_material m LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id ORDER BY m.version_no DESC,m.created_at DESC,m.material_id')]
     latest={};by_id={m['material_id']:m for m in materials}
     for m in materials:latest.setdefault((m['group_id'],normalize_itr(m['business_key'])),m)
     ops=defaultdict(list);cs=defaultdict(list);issues=defaultdict(list)
@@ -27,7 +27,9 @@ def enrich_facts(connection, facts):
         candidates=ops[canonical]
         f.update(year='',month='',period_status='未关联考核记录',period_source='KPI计入月份')
         if len(candidates)==1:
-            m=candidates[0];raw=json.loads(m['raw_json']);year,month=period(raw)
+            m=candidates[0];raw=json.loads(m['raw_json'])
+            if m.get('reporting_year'):raw['数据运营_KPI计入年份']=m['reporting_year']
+            year,month=period(raw)
             f.update(year=year,month=month,kpi_material_id=m['material_id'],kpi_raw=first(raw,'数据运营_KPI计入月份','KPI计入月份'),
                      period_status='月份缺失' if month=='未知' else '月份已知、年份缺失' if year=='未知' else '年月完整')
         elif len(candidates)>1:f['period_status']='考核关联冲突'

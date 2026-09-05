@@ -9,12 +9,13 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH28_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH29_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
+    "docs/requirements/SOFTWARE_OPERATION_YEAR_PATCH29.md",
     "quality_knowledge/scenario_evidence.py",
     "quality_knowledge/scenario_interpretation.py",
     "quality_knowledge/web/templates/scenario_interpretation.html",
@@ -91,7 +92,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH28 累计升级说明
+    readme = """# PATCH29 累计升级说明
+
+软件考核工作台新增考核年份管理：导入时可人工指定；留空时默认从标准 ITR 的
+ITRYYYY 前缀解析，不能解析时才读取文件年份。清单支持年份筛选、勾选问题批量修改，
+并显示年份来源。人工修正独立保存，不修改 ITR 编号和原始 Excel，重复导入不会覆盖人工修正。
+场景候选、场景资产趋势及综合解读统一读取修正后的有效年份。
+详细规则见 docs/requirements/SOFTWARE_OPERATION_YEAR_PATCH29.md。
 
 修复累计升级包遗漏数据关联配置页面的问题。打包程序现在自动包含全部网页模板，
 避免新页面源码存在但升级后出现 TemplateNotFound。关联配置入口及业务逻辑不变。
