@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH27_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH28_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -56,7 +56,14 @@ def changed_files() -> list[Path]:
         capture_output=True,
         text=True,
     )
-    names = set(result.stdout.splitlines()) | REQUIRED_WORKBENCH_FILES
+    # Templates are runtime dependencies selected by name. Include the complete
+    # template directory so a newly added route cannot produce a partial patch
+    # that passes source tests but fails after installation with TemplateNotFound.
+    all_templates = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "quality_knowledge" / "web" / "templates").glob("*.html")
+    }
+    names = set(result.stdout.splitlines()) | REQUIRED_WORKBENCH_FILES | all_templates
     files = []
     for name in names:
         if not name or name.startswith(EXCLUDED_PREFIXES) or name.endswith(EXCLUDED_SUFFIXES):
@@ -84,7 +91,10 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH27 累计升级说明
+    readme = """# PATCH28 累计升级说明
+
+修复累计升级包遗漏数据关联配置页面的问题。打包程序现在自动包含全部网页模板，
+避免新页面源码存在但升级后出现 TemplateNotFound。关联配置入口及业务逻辑不变。
 
 本轮新增手动触发“本范围综合解读”：默认模型读取已有场景、漏测分析与彻底解决单证据，
 分批分析后归并，验证来源问题覆盖，保存状态和结果；刷新不调用模型，不重跑单问题分析。
