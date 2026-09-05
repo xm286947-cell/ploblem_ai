@@ -40,6 +40,7 @@ PROMPT += """
 新增JSON字段：lifecycle_assessment（对象，键为上述三个阶段代码、值为证据说明）、lifecycle_reason（字符串）、operating_conditions（字符串）。
 必须匹配当前产品启用词典中的生命周期和业务活动，活动必须属于选择的阶段。原始发生阶段仅供参考。若词典不支持所需活动，提出待确认，不要硬匹配。
 存在 leakage_analysis 时优先使用其有效结论，缺失字段由 itr_cs_context 中根因、TRC纠正信息及解决方案补充。field_sources 是系统提供的来源事实，不得改写。缺少漏测流出原因不能虚构测试漏测结论。
+硬件器件、机械和软件失效字段只能作为当前问题的证据；不要把器件更换后恢复等同于已经证明器件根因，也不要把一个设备的环境工况推广到同客户其他产品。
 """
 
 
@@ -60,6 +61,18 @@ class ScenarioGenerationService:
         with self.scenarios.connect() as c:
             row=c.execute('SELECT records_json FROM scenario_generation_source WHERE generation_id=?',(generation_id,)).fetchone()
         return json.loads(row[0]) if row else []
+
+    @staticmethod
+    def analysis_identity(row,taxonomy_version_id,product):
+        evidence={'canonical_itr':row.get('canonical_itr') or row.get('business_issue_id') or row.get('knowledge_id'),
+                  'source_hashes':row.get('source_hashes') or [],'description':row.get('description') or '',
+                  'leakage_analysis':row.get('leakage_analysis') or {},'occurrence':row.get('occurrence') or {},
+                  'escape':row.get('escape') or {},'itr_cs_context':row.get('itr_cs_context') or {},
+                  'supplemental_context':row.get('supplemental_context') or {}}
+        evidence_hash=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True,default=str).encode()).hexdigest()
+        identity={'task_type':'QUALITY_SCENARIO_V1','product':product,'taxonomy_version_id':taxonomy_version_id,
+                  'prompt_version':hashlib.sha256(PROMPT.encode()).hexdigest(),'evidence_hash':evidence_hash}
+        return hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest(),evidence_hash
 
     @staticmethod
     def _month(value):
@@ -175,10 +188,15 @@ class ScenarioGenerationService:
             item['operating_conditions']=str(raw.get('operating_conditions') or '')
             if not item['lifecycle_reason'] or len(item['lifecycle_assessment'])<3:
                 item['confirmation_questions'].append('阶段比较证据不足，请核对运行执行、系统联动及长稳运行')
-            if lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context):
-                item['confirmation_questions'].append('原始阶段与工程配置可能冲突，请核对实际操作，不自动改为运行执行')
             source=next((x for x in payload if x.get('knowledge_id') in evidence),{})
-            for key in ('source_status','source_label','field_sources','source_warnings','source_material_id','cs_material_id','linked_knowledge_id','year','month','missing_leakage'):
+            operation_text=' '.join(str(source.get(key) or '') for key in ('title','description'))+' '+str((source.get('itr_cs_context') or {}).get('symptom') or '')+' '+str((source.get('itr_cs_context') or {}).get('field_record') or '')
+            if lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context) and not re.search(r'配置|组态|编程|编译|工程创建|参数设置|下载工程|安装|升级|迁移',operation_text):
+                continue
+            power_activity=activities.get('POWER_LOSS_RETENTION_RECOVERY')
+            if power_activity and re.search(r'掉电|断电|失电',operation_text) and re.search(r'保持|上电|恢复|丢失|清零',operation_text):
+                item['lifecycle_code']=power_activity[1];item['activity_code']=power_activity[0];item['scenario_chain']=power_activity[2]
+                item['lifecycle_reason']=item['lifecycle_reason'] or '证据同时包含电源中断及数据保持/上电恢复过程'
+            for key in ('source_status','source_label','field_sources','field_evidence','source_warnings','source_material_id','source_material_ids','source_workbench','cs_material_id','itr_material_id','linked_knowledge_id','year','month','missing_leakage'):
                 item[key]=source.get(key)
             if item['name']: items.append(item)
         return items,response.model
@@ -210,16 +228,31 @@ class ScenarioGenerationService:
             items,model=self._complete(client,[row],allowed,compact_taxonomy)
             return row,items[0] if items else None,agent_id,str(model or cfg.get('model') or getattr(client,'model',''))
 
-        created=[];models=set()
+        created=[];reused=[];models=set();pending=[]
+        for row in records:
+            if row.get('source_status')=='CONFLICT':
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',error_message='同一问题存在来源冲突，请先确认数据范围',finished=True)
+                continue
+            input_key,evidence_hash=self.analysis_identity(row,taxonomy['version_id'],product)
+            cached=self.scenarios.cached_scenario_analysis(input_key)
+            if cached:
+                self.scenarios.link_generation_candidate(generation_id,cached['scenario_id'])
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REUSED',scenario_id=cached['scenario_id'],activity_code=cached.get('activity_code',''),lifecycle_code=cached.get('lifecycle_code',''),agent_id='CACHE',model_name=cached.get('model_name',''),error_message='相同证据和规则已分析，直接复用',finished=True)
+                reused.append(cached['scenario_id']);models.add(cached.get('model_name',''))
+                continue
+            if not self.scenarios.claim_scenario_analysis(input_key,generation_id,row['knowledge_id']):
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',error_message='相同证据正在另一个任务中分析，稍后重试即可复用',finished=True)
+                continue
+            pending.append((row,input_key,evidence_hash))
         futures={}
         with ThreadPoolExecutor(max_workers=max_workers,thread_name_prefix='scenario-ai') as executor:
-            for index,row in enumerate(records):
+            for index,(row,input_key,evidence_hash) in enumerate(pending):
                 agent_id='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,row['knowledge_id'],slot=index)
                 cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent_id)[0]
                 self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'RUNNING',agent_id=agent_id,model_name=str(cfg.get('model') or getattr(self.ai_client,'model','')),started=True)
-                futures[executor.submit(analyse,index,row)]=row
+                futures[executor.submit(analyse,index,row)]=(row,input_key,evidence_hash)
             for future in as_completed(futures):
-                row=futures[future]
+                row,input_key,evidence_hash=futures[future]
                 try:
                     source_row,item,agent_id,model=future.result();models.add(model)
                     if not item:
@@ -233,20 +266,23 @@ class ScenarioGenerationService:
                     industries=sorted({x['itr_cs_context'].get('customer_industry','') for x in source_records}-{''})
                     variants=[{'industry':industry,'product_models':sorted({x['itr_cs_context'].get('product_model','') for x in source_records if x['itr_cs_context'].get('customer_industry')==industry}-{''}),'trigger_conditions':item.get('trigger_conditions',''),'business_impact':item.get('business_impact',''),'recovery_method':item.get('recovery_method',''),'evidence_count':1} for industry in industries]
                     self.scenarios.save_industry_variants(scenario_id,variants)
+                    self.scenarios.finish_scenario_analysis(input_key,canonical_itr=row.get('canonical_itr') or row.get('business_issue_id') or row['knowledge_id'],task_type='QUALITY_SCENARIO_V1',evidence_hash=evidence_hash,taxonomy_version_id=taxonomy['version_id'],scenario_id=scenario_id,source_knowledge_id=row['knowledge_id'],model_name=model)
                     self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'CLASSIFIED',scenario_id=scenario_id,activity_code=item.get('activity_code',''),lifecycle_code=item.get('lifecycle_code',''),agent_id=agent_id,model_name=model,finished=True)
                     created.append(scenario_id)
                 except StopIteration:
-                    pass
+                    self.scenarios.release_scenario_analysis(input_key)
                 except Exception as error:
+                    self.scenarios.release_scenario_analysis(input_key)
                     self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'FAILED',error_message=str(error),finished=True)
                 coverage=self.scenarios.refresh_generation_coverage(generation_id)
                 self.scenarios.update_generation(generation_id,progress_text=f"已处理 {coverage['processed_count']}/{len(records)}；已识别 {coverage['classified_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}")
         coverage=self.scenarios.refresh_generation_coverage(generation_id)
         final_status='COMPLETED' if coverage['unprocessed_count']==0 and coverage['failed_count']==0 and coverage['review_required_count']==0 else 'PARTIAL'
-        text=f"覆盖 {coverage['classified_count']}/{len(records)}；待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}"
+        text=f"覆盖 {coverage['classified_count']+coverage['reused_count']}/{len(records)}；新识别 {coverage['classified_count']}，复用 {coverage['reused_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}"
         model_text='、'.join(sorted(x for x in models if x))
-        self.scenarios.update_generation(generation_id,status=final_status,progress_text=text,candidate_count=len(created),model_name=model_text,error_message='' if final_status=='COMPLETED' else '部分问题未形成有效场景，请处理待确认或失败项')
-        return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(created),'scenario_ids':created,'model':model_text,**coverage,'status':final_status}
+        candidate_ids=list(dict.fromkeys([*created,*reused]))
+        self.scenarios.update_generation(generation_id,status=final_status,progress_text=text,candidate_count=len(candidate_ids),model_name=model_text,error_message='' if final_status=='COMPLETED' else '部分问题未形成有效场景，请处理待确认或失败项')
+        return {'generation_id':generation_id,'source_issue_count':len(records),'candidate_count':len(candidate_ids),'scenario_ids':candidate_ids,'model':model_text,**coverage,'status':final_status}
 
     def run_job(self,generation_id,product,start_month,end_month,selected_ids,created_by='WEB_USER'):
         try:return self.generate(product,start_month,end_month,created_by,selected_ids,generation_id)
@@ -255,7 +291,6 @@ class ScenarioGenerationService:
 
     def standardize_existing(self,scenario_ids,batch_id=''):
         models=self.scenarios.quality_models()
-        semantics=self.scenarios.semantic_dictionary('',False)
         allowed={x['term_code']:x for group in ('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics') for x in models[group]}
         parents={x['term_code']:x.get('parent_code') for x in models['product_subcharacteristics']}
         outcome={'completed':0,'failed':0,'skipped':0}
@@ -263,6 +298,7 @@ class ScenarioGenerationService:
             item=self.scenarios.scenario(scenario_id)
             if not item:raise ValueError('QUALITY_SCENARIO_NOT_FOUND')
             if item.get('quality_classification_status')=='CONFIRMED':return None
+            semantics=self.scenarios.semantic_dictionary(item.get('product_code') or '',False)
             agent='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,scenario_id,slot=index)
             cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent)[0]
             client=self.ai_client or OpenAICompatibleClient({**cfg,'max_tokens':4096,'temperature':0})

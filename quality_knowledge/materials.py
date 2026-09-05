@@ -59,7 +59,7 @@ def _clean(value: Any) -> str:
 
 def normalize_itr(value: Any) -> str:
     text = re.sub(r"\s+", "", _clean(value)).upper()
-    return text[:-2] if text.endswith("CS") else text
+    return text[:-2] if re.fullmatch(r"ITR[0-9A-Z_-]+CS", text) else text
 
 
 def year_from_itr(value: Any) -> str:

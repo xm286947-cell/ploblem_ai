@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH30_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH31_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -31,6 +31,10 @@ REQUIRED_WORKBENCH_FILES = {
     "quality_knowledge/web/scenario_asset_pages.py",
     "quality_knowledge/web/templates/scenario_asset_overview.html",
     "quality_knowledge/web/templates/scenario_asset_detail.html",
+    "quality_knowledge/web/templates/scenario_customer_portrait.html",
+    "docs/requirements/REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md",
+    "docs/requirements/SOL_DEVELOPMENT_HANDOFF.md",
+    "docs/requirements/QUALITY_SCENARIO_PORTRAIT_PATCH31_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
@@ -94,7 +98,25 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH30 累计升级说明
+    readme = """# PATCH31 累计升级说明
+
+本轮完成质量场景画像第一阶段核心增量：场景候选默认从“彻底解决单 + ITR”受控取数，
+同一标准 ITR 合并为一个分析输入；彻底解决单提供基础事实，ITR 仅补空项，漏测分析存在时优先复用。
+新增跨批次证据指纹缓存和原子占用，同一有效证据不重复调用模型，并在任务台账中显示“复用”。
+新增硬件器件、机械失效及软件模块等字段级证据，保存来源材料和字段来源；无漏测分析显式标记，不虚构流出原因。
+
+阶段判定增加反例门禁：终端正常使用且没有真实配置操作证据时，不接受“工程配置”候选；
+掉电数据保持与上电恢复按“掉电/断电 + 保持/恢复结果”的完整业务证据匹配，不以代码修改位置替代业务阶段。
+场景保存改为增量合并，未提交字段不再被意外清空；产品专属语义进入资产统计。
+
+新增“客户 / 行业质量场景画像”：展示问题记录涉及的产品、业务活动、工况和典型客户质量关注点，
+并给出最多三条可追溯的研发/测试核查建议。产品并列只表示同一范围内存在问题记录，关系证据不足时不绘制系统连线。
+总览直接展示“当前能得出的结论与下一步”，不再隐藏在折叠区。CS/ITR 画像采用问题事实时间，
+软件考核采用 KPI 计入年月，两个口径不再静默混用。所有来源问题链接按实际工作台下钻。
+
+旧 BAT 启动入口和 SQLite 数据库路径保持不变。新增表和字段由启动时增量创建；升级包不包含数据库和原始数据。
+
+以下为此前 PATCH30 累计内容：
 
 质量场景新增语义收敛链路：客户原始感知、典型问题、客户语言体验、质量关注点、环境工况和标准质量模型分层保存。
 新增场景语义词典和人工候选审核；AI优先复用正式词条，无匹配项才能提出带边界说明的候选，未批准候选不进入正式矩阵。
@@ -190,8 +212,8 @@ ITRYYYY 前缀解析，不能解析时才读取文件年份。清单支持年份
 - 修复漏测分析问题编号带 `CS` 时无法关联彻底解决单的问题：问题编号和材料编号统一规范化后再匹配。
 - 服务启动时自动重建材料关联，因此已有质量场景可回填彻底解决单事实，不需要重新导入数据或重新生成候选。
 - 在“运行执行”阶段新增独立业务活动“掉电数据保持与上电恢复”，包含完整场景链路、价值描述和质量目标；已有场景词典自动增量升级，无需重新初始化。
-- AI候选增加分类硬校验：掉电、断电、保持变量丢失、上电恢复异常等证据强制归入该业务活动，不再依赖模型自由选择。
-- 原始阶段为“终端正常使用”且没有明确配置操作证据时，禁止候选落入“工程配置”，自动回到运行类活动并增加人工确认提示。
+- AI候选增加分类校验：掉电/断电与保持/恢复结果形成完整证据链时归入该业务活动，避免单关键词误判。
+- 原始阶段为“终端正常使用”且没有明确配置操作证据时，不接受“工程配置”候选并进入待确认，不替模型硬猜其他阶段。
 - 批量场景生成新增逐问题覆盖账本，明确显示已处理、已识别、待确认、失败和未处理数量；未覆盖问题不再被静默标记为完成。
 - 每批AI未返回的问题会自动单条补跑；仍无法识别的记录进入待人工确认或失败状态，完整保留问题编号和错误原因。
 - 取消最终再次压缩候选造成的问题丢失；跨批次仅合并业务活动、质量子特性和场景名称一致的基础场景，并保留行业、客户和产品差异范围。

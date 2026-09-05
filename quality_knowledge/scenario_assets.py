@@ -94,14 +94,24 @@ class ScenarioAssets:
                         context=row.get('itr_cs_context') or {}
                         facts[row['knowledge_id']]={'business_issue_id':row.get('business_issue_id'),'title':row.get('description'),
                             'industry':context.get('customer_industry'),'customer':context.get('customer_name'),
-                            'product':context.get('product_model'),'year':row.get('year'),'month':row.get('month')}
+                            'product':context.get('product_model'),'year':row.get('year'),'month':row.get('month'),
+                            'period_status':'时间缺失' if row.get('year') in ('',None,'未知') or row.get('month') in ('',None,'未知') else '年月完整',
+                            'period_source':'KPI计入月份' if row.get('source_workbench')=='software-operations' else '彻底解决单/ITR事实时间',
+                            'source_workbench':row.get('source_workbench') or '',
+                            'source_material_id':row.get('source_material_id') or '',
+                            'cs_material_id':row.get('cs_material_id') or '',
+                            'itr_material_id':row.get('itr_material_id') or '',
+                            'source_status':row.get('source_status') or '',
+                            'field_evidence':row.get('field_evidence') or {}}
             from quality_knowledge.scenario_evidence import enrich_facts
             facts=enrich_facts(c,facts)
         return facts
 
     def report(self,filters=None):
         filters=filters or {};facts=self.facts();records=[];assets=self.catalog()
-        semantic_labels={x['term_code']:x['label_zh'] for x in self.repo.semantic_dictionary('',False)['items']}
+        semantic_labels={}
+        for code in {a.get('product_code') or '' for a in assets}|{''}:
+            semantic_labels.update({x['term_code']:x['label_zh'] for x in self.repo.semantic_dictionary(code,False)['items']})
         if filters.get('grain','quarter') not in ('quarter','half','year'):
             raise ValueError('不支持的时间粒度')
         for asset in assets:
@@ -131,6 +141,7 @@ class ScenarioAssets:
                          'scale':scale,'environment':context.get('environment') or formal_environment or '；'.join(str(member.get(k) or '') for k in ('preconditions','trigger_conditions') if member.get(k)) or '未知工况',
                          'environment_source':'人工工况' if context.get('environment') else '场景结构化工况' if formal_environment else '前置/触发条件原文' if member.get('preconditions') or member.get('trigger_conditions') else '缺失',
                          'period_status':f.get('period_status','时间未完整提供'),'kpi_raw':f.get('kpi_raw',''),
+                         'period_source':f.get('period_source',''),'source_workbench':f.get('source_workbench',''),
                          'concern':concern,'quality':member.get('quality_attribute') or '未知属性','period':period}
                     if all(not filters.get(k) or row.get(k)==filters[k] for k in ('industry','customer','product','business','activity','lifecycle','scale','environment','concern','quality','period','asset_id')):records.append(row)
         visible={r['asset_id'] for r in records}
@@ -155,3 +166,30 @@ class ScenarioAssets:
                 'metric_count':sum(len(a['metrics']) for a in selected),'distributions':{k:counts(k) for k in dimensions},
                 'cells':[{'x':a,'y':b,'count':len(v)} for (a,b),v in sorted(cells.items())],
                 'unknown_time_count':len({r['issue_key'] for r in records if r['period']=='未知时间'})}
+
+    def portrait(self, filters=None):
+        """A factual customer/industry portrait; it never invents topology."""
+        filters=filters or {}
+        report=self.report(filters)
+        records=report['records']
+        def grouped(key):
+            buckets=defaultdict(lambda:{'issues':set(),'activities':set(),'lifecycles':set(),'conditions':set(),'scenarios':set()})
+            for row in records:
+                bucket=buckets[row[key]]
+                bucket['issues'].add(row['issue_key']);bucket['activities'].add(row['activity'])
+                bucket['lifecycles'].add(row['lifecycle']);bucket['conditions'].add(row['environment'])
+                bucket['scenarios'].add(row['asset_id'])
+            result=[]
+            for label,value in buckets.items():
+                result.append({'label':label,'issue_count':len(value['issues']),'scenario_count':len(value['scenarios']),
+                               'activities':sorted(value['activities']),'lifecycles':sorted(value['lifecycles']),
+                               'conditions':sorted(value['conditions'])})
+            return sorted(result,key=lambda x:(-x['issue_count'],x['label']))
+        source_counts=defaultdict(set)
+        for row in records:
+            source_counts[row.get('source_workbench') or 'unknown'].add(row['issue_key'])
+        report['product_portrait']=grouped('product')
+        report['activity_portrait']=grouped('activity')
+        report['customer_portrait']=grouped('customer')
+        report['source_counts']={key:len(value) for key,value in source_counts.items()}
+        return report

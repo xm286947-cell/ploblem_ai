@@ -74,6 +74,21 @@ def create_asset_router(repository,templates,generation=None):
         for row in report['distributions']['scenario']:row['label']=names.get(row['label'],row['label'])
         return templates.TemplateResponse(request,'scenario_asset_overview.html',{'report':report,'filters':filters,'dimensions':DIMENSIONS,'x':x,'y':y,'matrix_rows':matrix_rows,'columns':columns,'taxonomy_labels':taxonomy_labels,'interpretation':interpreter.latest(filters) if interpreter else None})
 
+    @router.get('/quality-scenario-assets/portrait')
+    def portrait(request:Request):
+        filters=dict(request.query_params)
+        try:report=service.portrait(filters)
+        except ValueError as e:raise HTTPException(400,str(e))
+        report['decision']=decision_digest(report,repository)
+        taxonomy_labels={}
+        for a in service.catalog():
+            taxonomy=repository.taxonomy(product_code=a['product_code'])
+            if taxonomy:
+                taxonomy_labels.update({r['activity_code']:r['label_zh'] for r in taxonomy['activities']})
+                taxonomy_labels.update({r['lifecycle_code']:r['label_zh'] for r in taxonomy['lifecycles']})
+        return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
+            'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels})
+
     @router.get('/quality-scenario-assets/{sid}')
     def detail(request:Request,sid:str):
         asset=next((a for a in service.catalog() if a['scenario_id']==sid),None)

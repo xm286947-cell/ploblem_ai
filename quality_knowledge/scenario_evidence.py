@@ -25,7 +25,18 @@ def enrich_facts(connection, facts):
     for kid,f in facts.items():
         canonical=normalize_itr(f.get('business_issue_id') or '')
         candidates=ops[canonical]
-        f.update(year='',month='',period_status='未关联考核记录',period_source='KPI计入月份')
+        # Software-assessment records are governed by KPI month.  CS/ITR portrait
+        # records keep their own occurrence/submission period captured at
+        # generation time; enriching a fact must not erase that evidence.
+        software_scope=f.get('source_workbench')=='software-operations' or bool(candidates)
+        if software_scope:
+            f.update(year='',month='',period_status='未关联考核记录',period_source='KPI计入月份')
+        else:
+            year=str(f.get('year') or '未知')
+            month=str(f.get('month') or '未知')
+            f.update(year=year,month=month,
+                     period_status=f.get('period_status') or ('时间缺失' if year=='未知' or month=='未知' else '年月完整'),
+                     period_source=f.get('period_source') or '彻底解决单/ITR事实时间')
         if len(candidates)==1:
             m=candidates[0];raw=json.loads(m['raw_json'])
             if m.get('reporting_year'):raw['数据运营_KPI计入年份']=m['reporting_year']
@@ -40,5 +51,8 @@ def enrich_facts(connection, facts):
             for key,names in {'industry':('问题信息_客户行业','客户行业'),'customer':('问题信息_客户名称','客户名称'),'product':('问题信息_产品型号','产品型号'),'description':('问题信息_问题描述','问题描述')}.items():
                 value=first(raw,*names)
                 if value:f[key]=value
+        if kid in by_id:
+            f.setdefault('source_workbench',{'ITR_CS':'cs','ITR_SOURCE':'itr','SOFTWARE_OPERATION':'software-operations'}.get(by_id[kid]['material_type'],''))
+            f.setdefault('source_material_id',kid)
         f['analysis_id']=kid if not kid.startswith('MAT-') else issues[canonical][0] if len(issues[canonical])==1 else ''
     return facts

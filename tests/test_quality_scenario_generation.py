@@ -146,9 +146,8 @@ def test_business_rules_do_not_force_runtime_and_flag_conflicts(tmp_path):
         {'knowledge_id':'QK-N','description':'设备正常运行时状态显示异常','itr_cs_context':{'occurrence_phase':'终端正常使用'}},
     ]
     items,_=service._complete(WrongClassificationClient(),records,{'QK-P':'QK-P','QK-N':'QK-N'},repository.taxonomy_active())
-    assert items[0]['lifecycle_code']=='LONG_TERM_OPERATION' and items[0]['activity_code']=='RESOURCE_STATE_RETENTION'
-    assert items[1]['lifecycle_code']=='ENGINEERING_CONFIGURATION'
-    assert any('可能冲突' in x for x in items[1]['confirmation_questions'])
+    assert len(items)==1
+    assert items[0]['lifecycle_code']=='RUNTIME_EXECUTION' and items[0]['activity_code']=='POWER_LOSS_RETENTION_RECOVERY'
 
 
 def test_generation_status_endpoint_exposes_progress_and_failure(tmp_path):

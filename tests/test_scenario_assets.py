@@ -56,6 +56,9 @@ def test_http_forms_and_matrix_routes(tmp_path):
     response=client.post(f'/quality-scenario-assets/{a}/group',data={'member_ids':b})
     assert response.status_code==200 and len(s.catalog())==1
     assert client.get('/quality-scenario-assets?x=period&y=scenario&grain=year').status_code==200
+    portrait=client.get('/quality-scenario-assets/portrait')
+    assert portrait.status_code==200 and '客户 / 行业质量场景画像' in portrait.text
+    assert '不虚构系统拓扑' in portrait.text
     assert client.get('/quality-scenario-assets?x=invalid').status_code==400
     response=client.post(f'/quality-scenario-assets/{a}/ungroup',data={'member_ids':b})
     assert response.status_code==200 and len(s.catalog())==2
@@ -70,3 +73,10 @@ def test_delete_root_restores_members_and_cleans_extensions(tmp_path):
         assert c.execute('SELECT COUNT(*) FROM scenario_asset_context').fetchone()[0]==0
         assert c.execute('SELECT COUNT(*) FROM scenario_asset_member').fetchone()[0]==0
     with pytest.raises(ValueError):s.report({'grain':'invalid'})
+
+
+def test_customer_portrait_keeps_products_separate_and_counts_unique_issues(tmp_path):
+    app,repo,s,a,b=setup_assets(tmp_path)
+    report=s.portrait()
+    assert [(x['label'],x['issue_count']) for x in report['product_portrait']]==[('P1',1),('P2',1)]
+    assert report['issue_count']==2
