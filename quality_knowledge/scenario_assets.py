@@ -101,6 +101,7 @@ class ScenarioAssets:
 
     def report(self,filters=None):
         filters=filters or {};facts=self.facts();records=[];assets=self.catalog()
+        semantic_labels={x['term_code']:x['label_zh'] for x in self.repo.semantic_dictionary('',False)['items']}
         if filters.get('grain','quarter') not in ('quarter','half','year'):
             raise ValueError('不支持的时间粒度')
         for asset in assets:
@@ -121,14 +122,16 @@ class ScenarioAssets:
                         period=year if grain=='year' else f'{year} H{(m-1)//6+1}' if grain=='half' else f'{year} Q{(m-1)//3+1}'
                     context=member['context']
                     scale=(context.get('scale_value','')+' '+context.get('scale_unit','')).strip() or member.get('system_scale') or '未知规模'
+                    formal_environment='；'.join(str(member.get(k) or '').strip() for k in ('operating_environment','operating_condition','duration_frequency','disturbances','extreme_conditions') if str(member.get(k) or '').strip() and str(member.get(k) or '').strip()!='未知')
+                    concern=semantic_labels.get(member.get('primary_quality_concern_code')) or member.get('concern_points') or '未知关注点'
                     row={'asset_id':asset['scenario_id'],'scenario':asset['scenario_id'],'issue_id':kid,'issue_key':issue_key,
                          'industry':str(f.get('industry') or '未知行业'),'customer':str(f.get('customer') or '未知客户'),
                          'product':str(f.get('product') or '未知产品型号'),'business':asset.get('product_code') or '未知业务',
                          'lifecycle':member.get('lifecycle_code') or '未知阶段','activity':member.get('activity_code') or '未知活动',
-                         'scale':scale,'environment':context.get('environment') or '；'.join(str(member.get(k) or '') for k in ('preconditions','trigger_conditions') if member.get(k)) or '未知工况',
-                         'environment_source':'人工工况' if context.get('environment') else '前置/触发条件原文' if member.get('preconditions') or member.get('trigger_conditions') else '缺失',
+                         'scale':scale,'environment':context.get('environment') or formal_environment or '；'.join(str(member.get(k) or '') for k in ('preconditions','trigger_conditions') if member.get(k)) or '未知工况',
+                         'environment_source':'人工工况' if context.get('environment') else '场景结构化工况' if formal_environment else '前置/触发条件原文' if member.get('preconditions') or member.get('trigger_conditions') else '缺失',
                          'period_status':f.get('period_status','时间未完整提供'),'kpi_raw':f.get('kpi_raw',''),
-                         'concern':member.get('concern_points') or '未知关注点','quality':member.get('quality_attribute') or '未知属性','period':period}
+                         'concern':concern,'quality':member.get('quality_attribute') or '未知属性','period':period}
                     if all(not filters.get(k) or row.get(k)==filters[k] for k in ('industry','customer','product','business','activity','lifecycle','scale','environment','concern','quality','period','asset_id')):records.append(row)
         visible={r['asset_id'] for r in records}
         active_filters=any(filters.get(k) for k in ('industry','customer','product','business','activity','lifecycle','scale','environment','concern','quality','period','asset_id'))

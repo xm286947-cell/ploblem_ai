@@ -8,6 +8,7 @@ import uuid
 
 from openpyxl import load_workbook
 from quality_knowledge.quality_models import CUSTOMER_EXPERIENCE_MODEL, PRODUCT_QUALITY_MODEL, QUALITY_IN_USE_MODEL, model_payload
+from quality_knowledge.scenario_semantics import DEFAULT_TERMS, SEMANTIC_PRINCIPLES, SEMANTIC_TYPES
 
 
 LIFECYCLES = (
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS quality_scenario_standardization_batch(batch_id TEXT 
 CREATE TABLE IF NOT EXISTS quality_scenario_standardization_item(batch_id TEXT NOT NULL,scenario_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',error_message TEXT,agent_id TEXT,model_name TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(batch_id,scenario_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_confirmation(confirmation_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,confirmed_by TEXT NOT NULL,previous_status TEXT,new_status TEXT,before_json TEXT,after_json TEXT,confirmed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_capability_gap(gap_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,capability_axis TEXT NOT NULL,capability_code TEXT NOT NULL,gap_description TEXT NOT NULL,source_basis TEXT,improvement_action TEXT,verification_metric TEXT,priority TEXT NOT NULL DEFAULT 'P1',status TEXT NOT NULL DEFAULT 'OPEN',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS scenario_semantic_term(term_id TEXT PRIMARY KEY,term_type TEXT NOT NULL,term_code TEXT NOT NULL,label_zh TEXT NOT NULL,definition TEXT NOT NULL,inclusion_criteria TEXT,exclusion_criteria TEXT,aliases_json TEXT,product_code TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'ACTIVE',source_scenario_id TEXT,nearest_term_code TEXT,difference_note TEXT,merged_into_code TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(term_type,term_code,product_code));
 """
 
 
@@ -103,9 +105,10 @@ class ScenarioRepository:
             for name in ('participating_systems','objective'):
                 if name not in activity_columns:c.execute(f"ALTER TABLE scenario_activity ADD COLUMN {name} TEXT")
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
-            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id','customer_perception','primary_experience_code','secondary_experience_codes','quality_in_use_codes','primary_quality_characteristic_code','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','quality_classification_status','quality_model_version','quality_classification_error','quality_classification_agent','quality_classification_model','quality_classification_updated_at'):
+            for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id','customer_perception','primary_experience_code','secondary_experience_codes','quality_in_use_codes','primary_quality_characteristic_code','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','quality_classification_status','quality_model_version','quality_classification_error','quality_classification_agent','quality_classification_model','quality_classification_updated_at','primary_typical_problem_code','secondary_typical_problem_codes','primary_quality_concern_code','secondary_quality_concern_codes','primary_customer_experience_statement','secondary_customer_experience_statements','operating_environment','operating_condition','duration_frequency','disturbances','extreme_conditions','environment_condition_codes'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
             self._seed_quality_models(c)
+            self._seed_semantic_terms(c)
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
             for name,definition in {'status':"TEXT NOT NULL DEFAULT 'COMPLETED'",'progress_text':"TEXT",'error_message':"TEXT",'finished_at':"TEXT",'processed_count':"INTEGER NOT NULL DEFAULT 0",'classified_count':"INTEGER NOT NULL DEFAULT 0",'review_required_count':"INTEGER NOT NULL DEFAULT 0",'failed_count':"INTEGER NOT NULL DEFAULT 0",'unprocessed_count':"INTEGER NOT NULL DEFAULT 0",'taxonomy_version_id':"TEXT"}.items():
                 if name not in columns:c.execute(f"ALTER TABLE quality_scenario_generation ADD COLUMN {name} {definition}")
@@ -140,6 +143,59 @@ class ScenarioRepository:
         for item in payload['customer_experiences']:
             for code in item['quality_in_use_codes']:c.execute("INSERT INTO customer_experience_quality_map VALUES(?,?,?)",(item['code'],QUALITY_IN_USE_MODEL,code))
             for code in item['product_characteristic_codes']:c.execute("INSERT INTO customer_experience_quality_map VALUES(?,?,?)",(item['code'],PRODUCT_QUALITY_MODEL,code))
+
+    @staticmethod
+    def _seed_semantic_terms(c):
+        for term_type,code,label,definition,inclusion,exclusion in DEFAULT_TERMS:
+            c.execute("""INSERT OR IGNORE INTO scenario_semantic_term(term_id,term_type,term_code,label_zh,definition,inclusion_criteria,exclusion_criteria,aliases_json,product_code,status) VALUES(?,?,?,?,?,?,?,'[]','','ACTIVE')""",
+                      (f'SST-{term_type}-{code}',term_type,code,label,definition,inclusion,exclusion))
+
+    def semantic_dictionary(self, product_code='', include_candidates=True):
+        statuses="('ACTIVE','CANDIDATE')" if include_candidates else "('ACTIVE')"
+        with self.connect() as c:
+            rows=[dict(x) for x in c.execute(f"SELECT * FROM scenario_semantic_term WHERE status IN {statuses} AND (product_code='' OR product_code=?) ORDER BY term_type,status,label_zh",(product_code,))]
+        for row in rows:
+            try:row['aliases']=json.loads(row.get('aliases_json') or '[]')
+            except (TypeError,json.JSONDecodeError):row['aliases']=[]
+        return {'principles':SEMANTIC_PRINCIPLES,'types':SEMANTIC_TYPES,'items':rows,**{key.lower():[x for x in rows if x['term_type']==key] for key in SEMANTIC_TYPES}}
+
+    def save_semantic_term(self,payload):
+        term_type=str(payload.get('term_type') or '')
+        if term_type not in SEMANTIC_TYPES:raise ValueError('SEMANTIC_TERM_TYPE_INVALID')
+        code=re.sub(r'[^A-Z0-9_]+','_',str(payload.get('term_code') or '').upper()).strip('_')
+        label=str(payload.get('label_zh') or '').strip();definition=str(payload.get('definition') or '').strip()
+        if not code or not label or not definition:raise ValueError('SEMANTIC_TERM_REQUIRED_FIELDS')
+        status=str(payload.get('status') or 'ACTIVE')
+        if status not in {'ACTIVE','CANDIDATE','REJECTED','MERGED','RETIRED'}:raise ValueError('SEMANTIC_TERM_STATUS_INVALID')
+        product=str(payload.get('product_code') or '').strip();term_id=str(payload.get('term_id') or f'SST-{uuid.uuid4().hex}')
+        aliases=payload.get('aliases') or []
+        if isinstance(aliases,str):aliases=[x.strip() for x in re.split('[,，\n]',aliases) if x.strip()]
+        with self.connect() as c:c.execute("""INSERT INTO scenario_semantic_term(term_id,term_type,term_code,label_zh,definition,inclusion_criteria,exclusion_criteria,aliases_json,product_code,status,source_scenario_id,nearest_term_code,difference_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(term_type,term_code,product_code) DO UPDATE SET label_zh=excluded.label_zh,definition=excluded.definition,inclusion_criteria=excluded.inclusion_criteria,exclusion_criteria=excluded.exclusion_criteria,aliases_json=excluded.aliases_json,status=excluded.status,nearest_term_code=excluded.nearest_term_code,difference_note=excluded.difference_note,updated_at=CURRENT_TIMESTAMP""",
+            (term_id,term_type,code,label,definition,str(payload.get('inclusion_criteria') or ''),str(payload.get('exclusion_criteria') or ''),json.dumps(aliases,ensure_ascii=False),product,status,str(payload.get('source_scenario_id') or ''),str(payload.get('nearest_term_code') or ''),str(payload.get('difference_note') or '')))
+        return code
+
+    def review_semantic_term(self,term_id,action,target_code=''):
+        if action not in {'APPROVE','MERGE','REJECT'}:raise ValueError('SEMANTIC_REVIEW_ACTION_INVALID')
+        with self.connect() as c:
+            row=c.execute("SELECT * FROM scenario_semantic_term WHERE term_id=? AND status='CANDIDATE'",(term_id,)).fetchone()
+            if not row:raise KeyError(term_id)
+            if action=='APPROVE':c.execute("UPDATE scenario_semantic_term SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE term_id=?",(term_id,));return
+            replacement=''
+            if action=='MERGE':
+                target=c.execute("SELECT 1 FROM scenario_semantic_term WHERE term_type=? AND term_code=? AND status='ACTIVE'",(row['term_type'],target_code)).fetchone()
+                if not target:raise ValueError('SEMANTIC_MERGE_TARGET_INVALID')
+                replacement=target_code
+            primary={'TYPICAL_PROBLEM':'primary_typical_problem_code','QUALITY_CONCERN':'primary_quality_concern_code'}.get(row['term_type'])
+            secondary={'TYPICAL_PROBLEM':'secondary_typical_problem_codes','QUALITY_CONCERN':'secondary_quality_concern_codes','ENVIRONMENT_CONDITION':'environment_condition_codes'}[row['term_type']]
+            if primary:c.execute(f"UPDATE quality_scenario SET {primary}=? WHERE {primary}=?",(replacement,row['term_code']))
+            for scenario in c.execute(f"SELECT scenario_id,{secondary} FROM quality_scenario").fetchall():
+                try:codes=json.loads(scenario[secondary] or '[]')
+                except (TypeError,json.JSONDecodeError):codes=[]
+                if row['term_code'] not in codes:continue
+                codes=[replacement if x==row['term_code'] else x for x in codes]
+                codes=list(dict.fromkeys(x for x in codes if x))
+                c.execute(f"UPDATE quality_scenario SET {secondary}=? WHERE scenario_id=?",(json.dumps(codes,ensure_ascii=False),scenario['scenario_id']))
+            c.execute("UPDATE scenario_semantic_term SET status=?,merged_into_code=?,updated_at=CURRENT_TIMESTAMP WHERE term_id=?",('MERGED' if action=='MERGE' else 'REJECTED',replacement,term_id))
 
     def quality_models(self):
         with self.connect() as c:
@@ -298,7 +354,7 @@ class ScenarioRepository:
                 values.setdefault(row['scope_type'],set()).add(row['scope_value'])
         return {key:sorted(items) for key,items in values.items()}
 
-    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code=""):
+    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code="", typical_problem_code="", environment_code=""):
         with self.connect() as c:
             rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
             scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
@@ -322,6 +378,8 @@ class ScenarioRepository:
         if experience_code:items=[x for x in items if experience_code in codes(x,'secondary_experience_codes','primary_experience_code')]
         if qiu_code:items=[x for x in items if qiu_code in codes(x,'quality_in_use_codes')]
         if quality_code:items=[x for x in items if quality_code in codes(x,'secondary_quality_characteristic_codes','primary_quality_characteristic_code')]
+        if typical_problem_code:items=[x for x in items if typical_problem_code in codes(x,'secondary_typical_problem_codes','primary_typical_problem_code')]
+        if environment_code:items=[x for x in items if environment_code in codes(x,'environment_condition_codes')]
         return items
 
     def standardization_items(self):
@@ -374,7 +432,7 @@ class ScenarioRepository:
     def scenario(self, scenario_id):
         item=next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
         if item:
-            for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
+            for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','secondary_typical_problem_codes','secondary_quality_concern_codes','secondary_customer_experience_statements','environment_condition_codes'):
                 try:item[key]=json.loads(item.get(key) or '[]')
                 except (TypeError,json.JSONDecodeError):item[key]=[]
             models=self.quality_models();labels={x['term_code']:x['label_zh'] for group in ('product_characteristics','product_subcharacteristics','quality_in_use','customer_experiences') for x in models[group]}
@@ -390,6 +448,12 @@ class ScenarioRepository:
                 except (TypeError,json.JSONDecodeError):variant['product_model_values']=[]
             with self.connect() as c:item['confirmations']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_confirmation WHERE scenario_id=? ORDER BY confirmed_at DESC",(item['scenario_id'],))]
             with self.connect() as c:item['capability_gaps']=[dict(x) for x in c.execute("SELECT * FROM quality_scenario_capability_gap WHERE scenario_id=? ORDER BY capability_axis,priority,updated_at DESC",(item['scenario_id'],))]
+            semantic=self.semantic_dictionary(item.get('product_code') or '')
+            semantic_labels={x['term_code']:x['label_zh'] for x in semantic['items']}
+            semantic_status={x['term_code']:x['status'] for x in semantic['items']}
+            used=[item.get('primary_typical_problem_code'),*item['secondary_typical_problem_codes'],item.get('primary_quality_concern_code'),*item['secondary_quality_concern_codes'],*item['environment_condition_codes']]
+            item['semantic_labels']={code:semantic_labels.get(code,code) for code in used if code}
+            item['semantic_pending_codes']=[code for code in used if code and semantic_status.get(code)!='ACTIVE']
         return item
 
     def save_scenario_capability_gap(self,scenario_id,payload):
@@ -487,6 +551,10 @@ class ScenarioRepository:
         experience_codes=lambda x:[x.get('primary_experience_code'),*(x.get('secondary_experience_codes') or [])]
         qiu_codes=lambda x:x.get('quality_in_use_codes') or []
         quality_codes=lambda x:[x.get('primary_quality_characteristic_code'),*(x.get('secondary_quality_characteristic_codes') or [])]
+        semantic=self.semantic_dictionary('',False)
+        typical=semantic['typical_problem'];conditions=semantic['environment_condition']
+        typical_codes=lambda x:[x.get('primary_typical_problem_code'),*(x.get('secondary_typical_problem_codes') or [])]
+        condition_codes=lambda x:x.get('environment_condition_codes') or []
         standardized=sum(1 for x in detailed if x.get('primary_experience_code') and x.get('primary_quality_characteristic_code'))
         capability_dict=self.capability_dictionary();capability_counts={}
         for item in detailed:
@@ -498,11 +566,14 @@ class ScenarioRepository:
             labels={x['code']:x['label_zh'] for x in capability_dict['items'].get(axis,[])};entry['scenario_count']=len(entry.pop('scenario_ids'));entry['axis_label']=capability_dict['axis_labels'].get(axis,axis);entry['capability_label']=labels.get(code,code);capability_rows.append(entry)
         capability_rows.sort(key=lambda x:(-x['p0_count'],-x['issue_count'],-x['scenario_count']))
         return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(x['_issue_count'] for x in detailed),'standardized_count':standardized,'standardized_rate':round(standardized*100/len(items),1) if items else 0,
-                'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code'),'capability_rows':capability_rows}
+                'activity_typical_problem_matrix':matrix(activities,typical,activity_codes,typical_codes,'activity_code','typical_problem_code'),'environment_typical_problem_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in conditions],typical,condition_codes,typical_codes,'environment_code','typical_problem_code'),'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code'),'capability_rows':capability_rows}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model):
         taxonomy=self.taxonomy_active(product)
         payload={**item,'scenario_code':code,'status':'IN_REVIEW','product_code':product,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
+        for proposed in item.get('proposed_semantic_terms',[]):
+            if not isinstance(proposed,dict):continue
+            self.save_semantic_term({**proposed,'product_code':product,'status':'CANDIDATE','source_scenario_id':code})
         scenario_id=self.save_scenario('',payload,scopes)
         summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[]),
                             **{k:item.get(k) for k in ('source_status','source_label','field_sources','source_warnings','source_material_id','cs_material_id','linked_knowledge_id','year','month','missing_leakage','lifecycle_assessment','lifecycle_reason','operating_conditions')}},ensure_ascii=False)
@@ -569,6 +640,16 @@ class ScenarioRepository:
             subquality_labels=[allowed[x][0] for x in subqualities if x in allowed]
             c.execute("""UPDATE quality_scenario SET customer_perception=?,primary_experience_code=?,secondary_experience_codes=?,quality_in_use_codes=?,primary_quality_characteristic_code=?,secondary_quality_characteristic_codes=?,quality_subcharacteristic_codes=?,quality_classification_status=?,quality_model_version=?,quality_attribute=CASE WHEN ?<>'' THEN ? ELSE quality_attribute END,quality_subcharacteristic=CASE WHEN ?<>'' THEN ? ELSE quality_subcharacteristic END WHERE scenario_id=?""",
                       (payload.get('customer_perception',''),experience,json.dumps(secondary_experiences,ensure_ascii=False),json.dumps(qiu,ensure_ascii=False),primary_quality,json.dumps(secondary_quality,ensure_ascii=False),json.dumps(subqualities,ensure_ascii=False),payload.get('quality_classification_status') or ('CONFIRMED' if status=='PUBLISHED' else 'PENDING_CONFIRMATION'),PRODUCT_QUALITY_MODEL,'、'.join(quality_labels),'、'.join(quality_labels),'、'.join(subquality_labels),'、'.join(subquality_labels),scenario_id))
+            primary_problem=str(payload.get('primary_typical_problem_code') or '');secondary_problems=codes('secondary_typical_problem_codes')
+            primary_concern=str(payload.get('primary_quality_concern_code') or '');secondary_concerns=codes('secondary_quality_concern_codes');environment_codes=codes('environment_condition_codes')
+            semantic_rows={x['term_code']:dict(x) for x in c.execute("SELECT * FROM scenario_semantic_term WHERE status IN ('ACTIVE','CANDIDATE') AND (product_code='' OR product_code=?)",(product_code,))}
+            expected=[('TYPICAL_PROBLEM',primary_problem),*[('TYPICAL_PROBLEM',x) for x in secondary_problems],('QUALITY_CONCERN',primary_concern),*[('QUALITY_CONCERN',x) for x in secondary_concerns],*[('ENVIRONMENT_CONDITION',x) for x in environment_codes]]
+            for kind,code in expected:
+                if code and (code not in semantic_rows or semantic_rows[code]['term_type']!=kind):raise ValueError(f'SCENARIO_SEMANTIC_TERM_INVALID:{code}')
+            secondary_statements=payload.get('secondary_customer_experience_statements') or []
+            if isinstance(secondary_statements,str):secondary_statements=[x.strip() for x in secondary_statements.splitlines() if x.strip()]
+            c.execute("""UPDATE quality_scenario SET primary_typical_problem_code=?,secondary_typical_problem_codes=?,primary_quality_concern_code=?,secondary_quality_concern_codes=?,primary_customer_experience_statement=?,secondary_customer_experience_statements=?,operating_environment=?,operating_condition=?,duration_frequency=?,disturbances=?,extreme_conditions=?,environment_condition_codes=? WHERE scenario_id=?""",
+                      (primary_problem,json.dumps(secondary_problems,ensure_ascii=False),primary_concern,json.dumps(secondary_concerns,ensure_ascii=False),str(payload.get('primary_customer_experience_statement') or ''),json.dumps(secondary_statements,ensure_ascii=False),str(payload.get('operating_environment') or ''),str(payload.get('operating_condition') or ''),str(payload.get('duration_frequency') or ''),str(payload.get('disturbances') or ''),str(payload.get('extreme_conditions') or ''),json.dumps(environment_codes,ensure_ascii=False),scenario_id))
             c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
             for kind,items in scopes.items():
                 for value in items:

@@ -16,13 +16,20 @@ from quality_knowledge.model_config import choose_quality_issue_agent, load_qual
 
 STANDARDIZATION_PROMPT = """/no_think
 你是资深质量工程专家。对一个既有质量场景补齐标准化分类，不改变场景名称、业务活动、发布状态和来源证据。只输出严格JSON：
-{"customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[]}
-所有code只能从quality_models中选择；质量子特性必须属于已选择的主要或次要产品质量特性。禁止输出解释、Markdown或新增字段。"""
+{"customer_perception":"","primary_typical_problem_code":"","secondary_typical_problem_codes":[],"primary_quality_concern_code":"","secondary_quality_concern_codes":[],"primary_customer_experience_statement":"","secondary_customer_experience_statements":[],"operating_environment":"未知","operating_condition":"未知","duration_frequency":"未知","disturbances":"未知","extreme_conditions":"未知","environment_condition_codes":[],"primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[]}
+所有code只能从提供的词典选择；质量子特性必须属于已选择的主要或次要产品质量特性。典型问题写客户看到的短标签，质量关注点写需守住的质量对象；客户体验表述必须使用“我希望……不要……否则……”一类客户语言。环境工况按客观证据拆分，无证据写“未知”。禁止输出解释、Markdown或新增字段。"""
 
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
-输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[],"experience_requirement":"","concern_points":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
+输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","customer_perception":"","primary_typical_problem_code":"","secondary_typical_problem_codes":[],"primary_quality_concern_code":"","secondary_quality_concern_codes":[],"primary_customer_experience_statement":"","secondary_customer_experience_statements":[],"operating_environment":"","operating_condition":"","duration_frequency":"","disturbances":"","extreme_conditions":"","environment_condition_codes":[],"proposed_semantic_terms":[],"primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[],"experience_requirement":"","concern_points":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
 要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；客户质量体验、使用质量要素、产品质量特性和质量子特性只能使用 quality_models 中给定的 code，禁止自由造词；质量子特性必须属于已选择的主要或次要产品质量特性；customer_perception 填客户直接感知的负向表现；掉电保持活动仅在产品词典中存在且业务链路匹配时选择，不得仅因关键词覆盖其他阶段；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+
+PROMPT += """
+语义收敛规则：优先从 semantic_dictionary 选择正式术语。primary_customer_experience_statement 必须写成客户语言，如“我希望……时……，不要……，否则会……”，不得只填“可靠、易恢复”等抽象词；secondary_customer_experience_statements 同理。
+典型问题回答“客户看到了什么”，不得写内存泄漏、线程死锁等根因；质量关注点回答“研发和测试必须守住什么质量对象”，不得复述整段问题。
+必须分别填写 operating_environment（软硬件/网络/部署环境）、operating_condition（负载与运行状态）、duration_frequency（时长/频次）、disturbances（异常扰动）、extreme_conditions（极限边界）；无证据写“未知”，不得猜测。
+若没有合适词典项，proposed_semantic_terms 可提出候选，结构为 {"term_type":"TYPICAL_PROBLEM|QUALITY_CONCERN|ENVIRONMENT_CONDITION","term_code":"大写英文编码","label_zh":"短标签","definition":"定义","inclusion_criteria":"纳入条件","exclusion_criteria":"排除条件","nearest_term_code":"最接近正式术语","difference_note":"不能复用的原因"}；候选会进入人工审核，禁止仅因措辞不同新增。
+"""
 
 PROMPT += """
 阶段判定必须比较三种解释，并在 lifecycle_assessment 中为 RUNTIME_EXECUTION、SYSTEM_INTEGRATION、LONG_TERM_OPERATION 分别填写支持证据、反证或证据不足；在 lifecycle_reason 中说明主阶段和排除其他阶段的理由。
@@ -139,7 +146,7 @@ class ScenarioGenerationService:
             if not lifecycle:lifecycle=activity[1]
             context=evidence_text(evidence)
             if activity[1]!=lifecycle:continue
-            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','customer_perception','primary_experience_code','primary_quality_characteristic_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
+            item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','customer_perception','primary_typical_problem_code','primary_quality_concern_code','primary_customer_experience_statement','operating_environment','operating_condition','duration_frequency','disturbances','extreme_conditions','primary_experience_code','primary_quality_characteristic_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             quality_models=taxonomy.get('quality_models') or {};groups=('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics')
             allowed_quality={x['term_code'] if 'term_code' in x else x['code']:x for group in groups for x in quality_models.get(group,[])}
             for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
@@ -149,6 +156,16 @@ class ScenarioGenerationService:
             parents={x.get('term_code') or x.get('code'):x.get('parent_code') for x in quality_models.get('product_subcharacteristics',[])}
             selected_parents={item['primary_quality_characteristic_code'],*item['secondary_quality_characteristic_codes']}
             item['quality_subcharacteristic_codes']=[x for x in item['quality_subcharacteristic_codes'] if parents.get(x) in selected_parents]
+            semantic=taxonomy.get('semantic_dictionary') or {};semantic_items=semantic.get('items') or []
+            allowed_semantic={x['term_code']:x for x in semantic_items if x.get('status') in {'ACTIVE','CANDIDATE'}}
+            proposed=[x for x in raw.get('proposed_semantic_terms',[]) if isinstance(x,dict)]
+            proposed_codes={str(x.get('term_code') or '') for x in proposed}
+            for key in ('secondary_typical_problem_codes','secondary_quality_concern_codes','environment_condition_codes'):
+                item[key]=list(dict.fromkeys(str(x) for x in raw.get(key,[]) if str(x) in allowed_semantic or str(x) in proposed_codes))
+            item['secondary_customer_experience_statements']=[str(x)[:160] for x in raw.get('secondary_customer_experience_statements',[]) if str(x).strip()][:5]
+            for key in ('primary_typical_problem_code','primary_quality_concern_code'):
+                if item[key] not in allowed_semantic and item[key] not in proposed_codes:item[key]=''
+            item['proposed_semantic_terms']=proposed[:5]
             item['quality_classification_status']='PENDING_CONFIRMATION'
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item['scenario_chain']=activity[2]
@@ -171,7 +188,7 @@ class ScenarioGenerationService:
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
         taxonomy=self.scenarios.taxonomy_active(product)
         if not taxonomy:raise ValueError(f'SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:{product}')
-        compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities'],'quality_models':self.scenarios.quality_models()}
+        compact_taxonomy={'lifecycles':taxonomy['lifecycles'],'activities':taxonomy['activities'],'quality_models':self.scenarios.quality_models(),'semantic_dictionary':self.scenarios.semantic_dictionary(product,False)}
         parallel={'enabled':True,'max_workers':4}
         if self.ai_client is None:
             config_path=resolve_model_config_path(self.root)
@@ -238,6 +255,7 @@ class ScenarioGenerationService:
 
     def standardize_existing(self,scenario_ids,batch_id=''):
         models=self.scenarios.quality_models()
+        semantics=self.scenarios.semantic_dictionary('',False)
         allowed={x['term_code']:x for group in ('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics') for x in models[group]}
         parents={x['term_code']:x.get('parent_code') for x in models['product_subcharacteristics']}
         outcome={'completed':0,'failed':0,'skipped':0}
@@ -252,7 +270,7 @@ class ScenarioGenerationService:
             if batch_id:self.scenarios.mark_standardization_item(batch_id,scenario_id,'RUNNING',agent=agent,model=model)
             self.scenarios.mark_standardization(scenario_id,'RUNNING',agent=agent,model=model)
             fields=('name','scenario_chain','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','validation_direction','measurement_suggestion')
-            response=client.complete([{'role':'system','content':STANDARDIZATION_PROMPT},{'role':'user','content':json.dumps({'scenario':{k:item.get(k) for k in fields},'quality_models':models},ensure_ascii=False)}])
+            response=client.complete([{'role':'system','content':STANDARDIZATION_PROMPT},{'role':'user','content':json.dumps({'scenario':{k:item.get(k) for k in fields},'quality_models':models,'semantic_dictionary':semantics},ensure_ascii=False)}])
             parsed,_=parse_json_object(response.content,allow_repair=True)
             if not isinstance(parsed,dict):raise ValueError('QUALITY_STANDARDIZATION_SCHEMA_INVALID')
             result={'customer_perception':str(parsed.get('customer_perception') or '')[:160]}
@@ -260,6 +278,14 @@ class ScenarioGenerationService:
                 code=str(parsed.get(key) or '');result[key]=code if code in allowed else ''
             for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes'):
                 result[key]=list(dict.fromkeys(str(x) for x in parsed.get(key,[]) if str(x) in allowed))
+            semantic_allowed={x['term_code']:x for x in semantics['items']}
+            for key in ('primary_typical_problem_code','primary_quality_concern_code'):
+                code=str(parsed.get(key) or '');result[key]=code if code in semantic_allowed else ''
+            for key in ('secondary_typical_problem_codes','secondary_quality_concern_codes','environment_condition_codes'):
+                result[key]=list(dict.fromkeys(str(x) for x in parsed.get(key,[]) if str(x) in semantic_allowed))
+            for key in ('primary_customer_experience_statement','operating_environment','operating_condition','duration_frequency','disturbances','extreme_conditions'):
+                result[key]=str(parsed.get(key) or '')[:240]
+            result['secondary_customer_experience_statements']=[str(x)[:160] for x in parsed.get('secondary_customer_experience_statements',[]) if str(x).strip()][:5]
             selected={result['primary_quality_characteristic_code'],*result['secondary_quality_characteristic_codes']}
             result['quality_subcharacteristic_codes']=[x for x in result['quality_subcharacteristic_codes'] if parents.get(x) in selected]
             if not result['primary_experience_code'] or not result['primary_quality_characteristic_code']:raise ValueError('QUALITY_STANDARDIZATION_REQUIRED_CODE_MISSING')

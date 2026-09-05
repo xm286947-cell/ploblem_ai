@@ -9,12 +9,14 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH29_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH30_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
+    "docs/requirements/SCENARIO_SEMANTIC_CONVERGENCE_PATCH30.md",
+    "quality_knowledge/scenario_semantics.py",
     "docs/requirements/SOFTWARE_OPERATION_YEAR_PATCH29.md",
     "quality_knowledge/scenario_evidence.py",
     "quality_knowledge/scenario_interpretation.py",
@@ -92,7 +94,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH29 累计升级说明
+    readme = """# PATCH30 累计升级说明
+
+质量场景新增语义收敛链路：客户原始感知、典型问题、客户语言体验、质量关注点、环境工况和标准质量模型分层保存。
+新增场景语义词典和人工候选审核；AI优先复用正式词条，无匹配项才能提出带边界说明的候选，未批准候选不进入正式矩阵。
+场景编辑页新增五类环境工况事实；看板新增“业务活动×典型问题”和“环境工况×典型问题”。场景资产解读优先读取正式关注点与结构化工况。
+历史场景可通过原标准化入口补齐新增字段，不改变场景名称、业务活动、证据和发布状态。详见 docs/requirements/SCENARIO_SEMANTIC_CONVERGENCE_PATCH30.md。
 
 软件考核工作台新增考核年份管理：导入时可人工指定；留空时默认从标准 ITR 的
 ITRYYYY 前缀解析，不能解析时才读取文件年份。清单支持年份筛选、勾选问题批量修改，
