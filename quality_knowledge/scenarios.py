@@ -504,7 +504,8 @@ class ScenarioRepository:
         taxonomy=self.taxonomy_active(product)
         payload={**item,'scenario_code':code,'status':'IN_REVIEW','product_code':product,'taxonomy_version_id':taxonomy['version_id'] if taxonomy else '','applicable_boundary':item.get('applicable_boundary') or f'{product}；{start}—{end}'}
         scenario_id=self.save_scenario('',payload,scopes)
-        summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[])},ensure_ascii=False)
+        summary=json.dumps({'generation_id':generation_id,'product':product,'period':f'{start}—{end}','model':model,'summary':item.get('evidence_summary'),'confidence':item.get('confidence'),'questions':item.get('confirmation_questions',[]),
+                            **{k:item.get(k) for k in ('source_status','source_label','field_sources','source_warnings','source_material_id','cs_material_id','linked_knowledge_id','year','month','missing_leakage','lifecycle_assessment','lifecycle_reason','operating_conditions')}},ensure_ascii=False)
         with self.connect() as c:
             for knowledge_id in item.get('evidence_issue_ids',[]):c.execute("INSERT OR IGNORE INTO quality_scenario_evidence VALUES(?,?,?)",(scenario_id,knowledge_id,summary))
             c.execute("INSERT OR IGNORE INTO quality_scenario_generation_candidate(generation_id,scenario_id) VALUES(?,?)",(generation_id,scenario_id))

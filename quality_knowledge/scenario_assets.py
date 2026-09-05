@@ -88,6 +88,13 @@ class ScenarioAssets:
                     raw=json.loads(r['raw_json'] or '{}');f=facts.setdefault(r['knowledge_id'],{})
                     for key,names in {'industry':['问题信息_客户行业','客户行业'],'customer':['问题信息_客户名称','客户名称'],'product':['问题信息_产品型号','产品型号']}.items():
                         f[key]=next((str(raw[n]).strip() for n in names if raw.get(n)), '')
+            if 'scenario_generation_source' in tables:
+                for snapshot in c.execute('SELECT records_json FROM scenario_generation_source ORDER BY rowid'):
+                    for row in json.loads(snapshot[0]):
+                        context=row.get('itr_cs_context') or {}
+                        facts[row['knowledge_id']]={'business_issue_id':row.get('business_issue_id'),'title':row.get('description'),
+                            'industry':context.get('customer_industry'),'customer':context.get('customer_name'),
+                            'product':context.get('product_model'),'year':row.get('year'),'month':row.get('month')}
         return facts
 
     def report(self,filters=None):

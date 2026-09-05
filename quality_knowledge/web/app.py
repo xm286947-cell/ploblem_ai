@@ -358,19 +358,34 @@ def create_app(db_path):
         return RedirectResponse(f'/quality-scenarios/{scenario_id}/capabilities',303)
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = ''):
-        scope=scenario_generation_svc.precheck(product_code,start_month,end_month) if preview and product_code and start_month and end_month else None
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'job':scenario_repo.generation(job_id) if job_id else None,'filters':{'product_code':product_code,'start_month':start_month,'end_month':end_month}})
+    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = '', source: str = 'operations', ipmt: str = '', spdt: str = '', product_model: str = '', year: str = ''):
+        from quality_knowledge.scenario_sources import operation_records
+        filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':source,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year}
+        options=operation_records(scenario_generation_svc,{'product_code':product_code},metadata_only=True)
+        choices={key:sorted({x[key] for x in options if x.get(key)}) for key in ('ipmt','spdt','product_model','year')}
+        scope=None
+        if preview and source=='operations':
+            rows=operation_records(scenario_generation_svc,filters)
+            analysed=sum(bool(x['leakage_analysis']) for x in rows)
+            scope={'items':rows,'issue_count':len(rows),'analysed_count':analysed,'coverage_rate':round(analysed*100/len(rows),1) if rows else 0}
+        elif preview and product_code and start_month and end_month:
+            scope=scenario_generation_svc.precheck(product_code,start_month,end_month)
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters})
 
     @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_insights(request: Request, status: str = ''):
         return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(...), end_month: str = Form(...), selected_ids: list[str] = Form([])):
+    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), source: str = Form('leakage'), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), year: str = Form('')):
         if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')
         if not scenario_repo.taxonomy_active(product_code):raise HTTPException(400,f'产品 {product_code} 尚未配置并激活场景词典，请先到场景词典配置中创建并激活')
         generation_id=f'QSG-{uuid.uuid4().hex}'
+        if source=='operations':
+            from quality_knowledge.scenario_sources import operation_records
+            rows=operation_records(scenario_generation_svc,{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year,'start_month':start_month,'end_month':end_month},selected_ids)
+            if {x['knowledge_id'] for x in rows}!=set(selected_ids):raise HTTPException(409,'选中数据已变化或不属于当前筛选范围，请重新预览')
+            scenario_generation_svc.save_source_snapshot(generation_id,rows)
         scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')
         threading.Thread(target=scenario_generation_svc.run_job,args=(generation_id,product_code,start_month,end_month,list(selected_ids)),daemon=True,name=f'scenario-{generation_id[-8:]}').start()
         return RedirectResponse(f'/quality-scenarios/generate?job_id={generation_id}',303)
@@ -394,6 +409,11 @@ def create_app(db_path):
         if not selected_ids:selected_ids=[x['knowledge_id'] for x in scenario_repo.issue_classifications(generation_id) if x['status'] in {'FAILED','REVIEW_REQUIRED','PENDING'}]
         if not selected_ids:raise HTTPException(400,'NO_RETRYABLE_SCENARIO_ISSUES')
         new_id=f'QSG-{uuid.uuid4().hex}';scenario_repo.create_generation(new_id,job['product_code'],job['start_month'],job['end_month'],len(selected_ids),'WEB_RETRY')
+        snapshot=scenario_generation_svc.source_snapshot(generation_id)
+        if snapshot:
+            retry_rows=[r for r in snapshot if r['knowledge_id'] in selected_ids]
+            if len(retry_rows)!=len(set(selected_ids)):raise HTTPException(400,'重试问题不属于原任务')
+            scenario_generation_svc.save_source_snapshot(new_id,retry_rows)
         threading.Thread(target=scenario_generation_svc.run_job,args=(new_id,job['product_code'],job['start_month'],job['end_month'],selected_ids),daemon=True,name=f'scenario-{new_id[-8:]}').start()
         return RedirectResponse(f'/quality-scenarios/generate?job_id={new_id}',303)
 

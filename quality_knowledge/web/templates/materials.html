@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block breadcrumb %}{{workspace.title}}{% endblock %}
 {% block body %}
+{% if workbench=='software-operations' %}<a class="btn btn-primary" href="/quality-scenarios/generate?source=operations">按考核范围生成质量场景</a>{% endif %}
 <div class="di-pagehead"><div><h1>{{workspace.title}}</h1><p>{{workspace.description}} · {{workspace.scope}}</p></div><button class="btn" type="button" onclick="document.getElementById('material-import').toggleAttribute('hidden')">导入数据</button></div>
 <nav class="compact-tabs"><a href="/materials/itr" {% if workbench=='itr' %}class="active"{% endif %}>ITR问题</a><a href="/materials/cs" {% if workbench=='cs' %}class="active"{% endif %}>彻底解决</a><a href="/materials/software-operations" {% if workbench=='software-operations' %}class="active"{% endif %}>软件考核</a></nav>
 {% if result %}<div class="di-alert"><b>导入完成</b><span>共 {{result.total}} 条；新增 {{result.new}}；更新 {{result.updated}}；跳过 {{result.skipped}}；失败 {{result.failed}}</span></div>{% endif %}

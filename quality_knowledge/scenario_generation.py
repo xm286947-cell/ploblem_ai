@@ -22,7 +22,18 @@ STANDARDIZATION_PROMPT = """/no_think
 PROMPT = """/no_think
 你是资深产品质量与测试专家。请根据历史客户问题提炼可复用的产品质量场景，而不是复述问题。不要输出思考过程。
 输出严格 JSON：{"items":[{"name":"","lifecycle_code":"","activity_code":"","customer_perception":"","primary_experience_code":"","secondary_experience_codes":[],"quality_in_use_codes":[],"primary_quality_characteristic_code":"","secondary_quality_characteristic_codes":[],"quality_subcharacteristic_codes":[],"experience_requirement":"","concern_points":"","failure_mode":"","failure_mechanism":"","trigger_conditions":"","preconditions":"","participating_systems":"","system_scale":"","user_type":"","affected_object":"","business_impact":"","recovery_method":"","applicable_boundary":"","validation_direction":"","measurement_suggestion":"","evidence_issue_ids":[],"evidence_summary":"","confidence":0.0,"confirmation_questions":[]}]}
-要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；客户质量体验、使用质量要素、产品质量特性和质量子特性只能使用 quality_models 中给定的 code，禁止自由造词；质量子特性必须属于已选择的主要或次要产品质量特性；customer_perception 填客户直接感知的负向表现；掉电、断电、保持变量丢失、上电恢复异常等问题必须优先选择 POWER_LOSS_RETENTION_RECOVERY；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+要求：当前输入始终只有一个问题，只输出一个 items 元素；该问题必须且只能出现在该元素的 evidence_issue_ids 中，不得遗漏、不得与其他问题合并；每项必须有来源问题；客户质量体验、使用质量要素、产品质量特性和质量子特性只能使用 quality_models 中给定的 code，禁止自由造词；质量子特性必须属于已选择的主要或次要产品质量特性；customer_perception 填客户直接感知的负向表现；掉电保持活动仅在产品词典中存在且业务链路匹配时选择，不得仅因关键词覆盖其他阶段；场景链路由系统根据 activity_code 从场景配置表读取，不需要输出；彻底解决单中的 occurrence_phase（原始问题发生阶段）只作为推断标准生命周期和业务活动的参考证据，不得直接照搬为最终分类，但“终端正常使用”且没有配置操作证据时不得归入 ENGINEERING_CONFIGURATION；客户、行业、客户分级和客户状态只作为场景适用范围与证据，不得虚构；measurement_suggestion 必须包含建议指标、度量/计算方法和观测条件，数据不足时只给度量建议，不虚构阈值；不确定内容写入 confirmation_questions，禁止猜测；每个文本字段不超过160个汉字；只输出JSON，不要解释、Markdown或代码围栏。"""
+
+PROMPT += """
+阶段判定必须比较三种解释，并在 lifecycle_assessment 中为 RUNTIME_EXECUTION、SYSTEM_INTEGRATION、LONG_TERM_OPERATION 分别填写支持证据、反证或证据不足；在 lifecycle_reason 中说明主阶段和排除其他阶段的理由。
+运行执行：单系统控制或处理任务出错，不以跨系统交互或时间累积为必要条件。
+系统联动：故障依赖多个系统之间指令、状态、时序、数据一致性或协同过程；仅出现通信词语不足以判定。
+长稳运行：持续时长、反复循环或资源累积是故障触发的必要条件；仅出现稳定性或内存泄漏词语不足以判定。
+出现多种条件时，以客户正在完成的主要业务活动选主阶段，并在 operating_conditions 保留其他工况；证据不足必须在 confirmation_questions 标明，不可默认运行执行。
+新增JSON字段：lifecycle_assessment（对象，键为上述三个阶段代码、值为证据说明）、lifecycle_reason（字符串）、operating_conditions（字符串）。
+必须匹配当前产品启用词典中的生命周期和业务活动，活动必须属于选择的阶段。原始发生阶段仅供参考。若词典不支持所需活动，提出待确认，不要硬匹配。
+存在 leakage_analysis 时优先使用其有效结论，缺失字段由 itr_cs_context 中根因、TRC纠正信息及解决方案补充。field_sources 是系统提供的来源事实，不得改写。缺少漏测流出原因不能虚构测试漏测结论。
+"""
 
 
 class ScenarioGenerationService:
@@ -31,6 +42,17 @@ class ScenarioGenerationService:
         self.scenarios = scenario_repository
         self.root = Path(root)
         self.ai_client = ai_client
+        with self.scenarios.connect() as c:
+            c.execute('CREATE TABLE IF NOT EXISTS scenario_generation_source(generation_id TEXT PRIMARY KEY,records_json TEXT NOT NULL)')
+
+    def save_source_snapshot(self,generation_id,records):
+        with self.scenarios.connect() as c:
+            c.execute('INSERT INTO scenario_generation_source VALUES(?,?)',(generation_id,json.dumps(records,ensure_ascii=False,default=str)))
+
+    def source_snapshot(self,generation_id):
+        with self.scenarios.connect() as c:
+            row=c.execute('SELECT records_json FROM scenario_generation_source WHERE generation_id=?',(generation_id,)).fetchone()
+        return json.loads(row[0]) if row else []
 
     @staticmethod
     def _month(value):
@@ -71,6 +93,9 @@ class ScenarioGenerationService:
         return {key:value for key,value in result.items() if value}
 
     def _records(self, product, start_month, end_month, selected_ids=None):
+        if selected_ids and all(str(x).startswith('MAT-') for x in selected_ids):
+            from quality_knowledge.scenario_sources import operation_records
+            return operation_records(self,{'product_code':product},selected_ids)
         lo, hi = self._month(start_month), self._month(end_month)
         rows = self.issues.query_issues({'business_type': product} if product else {}, 100000)
         records=[]
@@ -84,9 +109,9 @@ class ScenarioGenerationService:
             occurrence=results['occurrence'];escape=results['escape'];recurrence=results['recurrence'];raw_gaps=results['capability_gap'].get('capability_gaps') or []
             records.append({
                 'knowledge_id':row['knowledge_id'],'business_issue_id':row.get('business_issue_id'),'title':row.get('title'),
-                'description':str(row.get('description') or '')[:300],'month':row.get('month'),'severity':row.get('severity'),
-                'occurrence':{'root_cause':str(self._value(occurrence,'root_cause_summary','root_cause'))[:240],'failure_mechanism':str(self._value(occurrence,'failure_mechanism'))[:240],'category':str(self._value(occurrence,'occurrence_category'))[:80]},
-                'escape':{'reason':str(self._value(escape,'escape_cause_summary','escape_reason'))[:240],'verification_gap':str(self._value(escape,'verification_gap'))[:240],'missing_control':str(self._value(escape,'missing_control'))[:160]},
+                'description':str(row.get('description') or ''),'month':row.get('month'),'severity':row.get('severity'),
+                'occurrence':{'root_cause':str(self._value(occurrence,'root_cause_summary','root_cause')),'failure_mechanism':str(self._value(occurrence,'failure_mechanism')),'category':str(self._value(occurrence,'occurrence_category'))[:80]},
+                'escape':{'reason':str(self._value(escape,'escape_cause_summary','escape_reason')),'verification_gap':str(self._value(escape,'verification_gap')),'missing_control':str(self._value(escape,'missing_control'))[:160]},
                 'recurrence':{'risk':str(self._value(recurrence,'recurrence_risk_level'))[:40],'customer_impact':str(self._value(recurrence,'customer_impact'))[:200]},
                 'capability_gaps':[{'dimension':str(gap.get('dimension') or '')[:40],'category':str(gap.get('category') or '')[:80],'description':str(gap.get('description') or gap.get('gap_description') or '')[:200]} for gap in raw_gaps[:4] if isinstance(gap,dict)],
                 'itr_cs_context':self._cs_context(row['knowledge_id']),
@@ -112,11 +137,7 @@ class ScenarioGenerationService:
             lifecycle=life.get(raw.get('lifecycle_code'));activity=activities.get(raw.get('activity_code'))
             if not evidence or not activity: continue
             if not lifecycle:lifecycle=activity[1]
-            context=evidence_text(evidence);terminal_override=False
-            if re.search(r'掉电|断电|重新上电|上电恢复|保持变量|数据保持|保持数据|计数清零',context):
-                activity=activities.get('POWER_LOSS_RETENTION_RECOVERY') or activity;lifecycle=activity[1]
-            elif lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context) and not re.search(r'用户.{0,6}(配置|组态|编程|编译)|执行.{0,4}(配置|组态|编程|编译)',context):
-                activity=activities.get('STATE_DATA_PROCESSING') or activity;lifecycle=activity[1];terminal_override=True
+            context=evidence_text(evidence)
             if activity[1]!=lifecycle:continue
             item={key:raw.get(key,'') for key in ('name','lifecycle_code','activity_code','customer_perception','primary_experience_code','primary_quality_characteristic_code','experience_requirement','concern_points','quality_attribute','quality_subcharacteristic','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','applicable_boundary','validation_direction','measurement_suggestion','evidence_summary')}
             quality_models=taxonomy.get('quality_models') or {};groups=('customer_experiences','quality_in_use','product_characteristics','product_subcharacteristics')
@@ -132,13 +153,21 @@ class ScenarioGenerationService:
             item['lifecycle_code']=lifecycle;item['activity_code']=activity[0]
             item['scenario_chain']=activity[2]
             item.update({'evidence_issue_ids':evidence,'confidence':max(0,min(1,float(raw.get('confidence') or 0))),'confirmation_questions':[str(x) for x in raw.get('confirmation_questions',[]) if str(x).strip()][:5]})
-            if terminal_override:
-                item['confirmation_questions']=(item['confirmation_questions']+['原始阶段为终端正常使用，请确认实际业务活动是否属于设备状态与数据处理'])[:5]
+            item['lifecycle_assessment']=raw.get('lifecycle_assessment') if isinstance(raw.get('lifecycle_assessment'),dict) else {}
+            item['lifecycle_reason']=str(raw.get('lifecycle_reason') or '')
+            item['operating_conditions']=str(raw.get('operating_conditions') or '')
+            if not item['lifecycle_reason'] or len(item['lifecycle_assessment'])<3:
+                item['confirmation_questions'].append('阶段比较证据不足，请核对运行执行、系统联动及长稳运行')
+            if lifecycle=='ENGINEERING_CONFIGURATION' and re.search(r'终端正常使用|客户正常使用|正常运行阶段',context):
+                item['confirmation_questions'].append('原始阶段与工程配置可能冲突，请核对实际操作，不自动改为运行执行')
+            source=next((x for x in payload if x.get('knowledge_id') in evidence),{})
+            for key in ('source_status','source_label','field_sources','source_warnings','source_material_id','cs_material_id','linked_knowledge_id','year','month','missing_leakage'):
+                item[key]=source.get(key)
             if item['name']: items.append(item)
         return items,response.model
 
     def generate(self, product, start_month, end_month, created_by='WEB_USER',selected_ids=None,generation_id=''):
-        records=self._records(product,start_month,end_month,selected_ids)
+        records=self.source_snapshot(generation_id) or self._records(product,start_month,end_month,selected_ids)
         if not records: raise ValueError('SCENARIO_SOURCE_ANALYSIS_REQUIRED')
         taxonomy=self.scenarios.taxonomy_active(product)
         if not taxonomy:raise ValueError(f'SCENARIO_PRODUCT_TAXONOMY_NOT_ACTIVE:{product}')
