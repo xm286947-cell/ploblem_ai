@@ -8,8 +8,37 @@ DIMENSIONS={'industry':'行业','customer':'客户','product':'产品型号','bu
             'activity':'业务活动','scale':'系统规模','environment':'环境/工况','concern':'客户质量关注点',
             'quality':'质量属性','period':'场景问题时间','scenario':'质量场景'}
 
-def create_asset_router(repository,templates):
+def create_asset_router(repository,templates,generation=None):
     router=APIRouter();service=ScenarioAssets(repository)
+    from quality_knowledge.scenario_interpretation import ScenarioInterpretation
+    interpreter=ScenarioInterpretation(service,generation) if generation else None
+
+    @router.post('/quality-scenario-interpretations')
+    async def generate_interpretation(request:Request):
+        if interpreter is None:raise HTTPException(503,'综合解读服务未配置')
+        data=dict(await request.form())
+        try:jid=interpreter.start(data,refresh=data.get('refresh')=='1')
+        except ValueError as e:raise HTTPException(400,str(e))
+        return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
+
+    @router.get('/quality-scenario-interpretations/{jid}')
+    def interpretation(request:Request,jid:str):
+        job=interpreter.get(jid) if interpreter else None
+        if not job:raise HTTPException(404,'解读不存在')
+        stale=interpreter.snapshot(job['filters'])[2]!=job['input_hash']
+        return templates.TemplateResponse(request,'scenario_interpretation.html',{'job':job,'stale':stale})
+
+    @router.post('/quality-scenario-interpretations/{jid}/stop')
+    def stop_interpretation(jid:str):
+        if not interpreter or not interpreter.get(jid):raise HTTPException(404,'解读不存在')
+        interpreter.stop(jid)
+        return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
+
+    @router.get('/api/quality-scenario-interpretations/{jid}')
+    def interpretation_status(jid:str):
+        job=interpreter.get(jid) if interpreter else None
+        if not job:raise HTTPException(404,'解读不存在')
+        return {k:job[k] for k in ('status','progress','error')}
 
     @router.get('/quality-scenario-assets')
     def overview(request:Request):
@@ -43,7 +72,7 @@ def create_asset_router(repository,templates):
             columns[raw_y]=cell['y']
             matrix_rows.setdefault(raw_x,{'label':cell['x'],'cells':{}})['cells'][raw_y]=cell
         for row in report['distributions']['scenario']:row['label']=names.get(row['label'],row['label'])
-        return templates.TemplateResponse(request,'scenario_asset_overview.html',{'report':report,'filters':filters,'dimensions':DIMENSIONS,'x':x,'y':y,'matrix_rows':matrix_rows,'columns':columns,'taxonomy_labels':taxonomy_labels})
+        return templates.TemplateResponse(request,'scenario_asset_overview.html',{'report':report,'filters':filters,'dimensions':DIMENSIONS,'x':x,'y':y,'matrix_rows':matrix_rows,'columns':columns,'taxonomy_labels':taxonomy_labels,'interpretation':interpreter.latest(filters) if interpreter else None})
 
     @router.get('/quality-scenario-assets/{sid}')
     def detail(request:Request,sid:str):

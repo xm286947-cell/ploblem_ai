@@ -1,0 +1,102 @@
+import json
+from types import SimpleNamespace
+import pytest
+from fastapi.testclient import TestClient
+from builder.ai_client import AIResponse
+from quality_knowledge.scenario_assets import ScenarioAssets
+from quality_knowledge.scenario_interpretation import ScenarioInterpretation
+from test_scenario_operation_sources import seed
+
+
+def setup(tmp_path):
+    app,gen,repo,ids=seed(tmp_path)
+    scenes=gen.scenarios
+    sid=scenes.save_scenario('',{'scenario_code':'TEST','name':'持续运行响应及时性','product_code':'PLC','preconditions':'连续运行72小时','trigger_conditions':'资源持续累积'}, {})
+    with repo.connect() as c:
+        for kid in ('K0','K1',ids[2]):
+            c.execute('INSERT INTO quality_scenario_evidence VALUES(?,?,?)',(sid,kid,'{}'))
+    assets=ScenarioAssets(scenes)
+    return app,gen,repo,ids,assets,ScenarioInterpretation(assets,gen)
+
+
+class FakeClient:
+    def __init__(self):self.calls=0
+    def complete(self,messages):
+        self.calls+=1
+        payload=json.loads(messages[1]['content'])
+        ids=[x['id'] for x in payload['records']] if payload['mode']=='ANALYSE' else sorted({i for x in payload['analyses'] for f in x['findings'] for i in f['evidence_ids']})
+        finding={k:'合成测试结论' for k in ('title','observation','why','escape','boundaries','design','test','metrics')}
+        finding['evidence_ids']=ids
+        return AIResponse(json.dumps({'summary':'合成测试，待评审','findings':[finding],'unresolved_ids':[]}), 'fake-model', {})
+
+
+def test_historical_kpi_environment_and_no_publication_needed(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    facts=assets.facts()
+    assert facts['K0']['year']=='2026' and facts['K0']['month']=='8'
+    assert facts['K0']['period_status']=='年月完整'
+    assert facts['K0']['cs_context']['技术根因分析与纠正_TRC纠正信息']=='修复资源释放'
+    assert assets.report()['unknown_time_count']==0
+    assert all(r['environment']=='连续运行72小时；资源持续累积' for r in assets.report()['records'])
+    key='ITR20250100000CS'
+    repo.add_material(repo.group('SW-OPS'),key,{'数据运营_KPI计入月份':'9月'},'synthetic.xlsx','test',1)
+    assert assets.facts()['K0']['period_status']=='月份已知、年份缺失'
+    assert assets.facts()['K0']['year']=='未知'
+    assert assets.report()['unknown_time_count']==1
+    assert assets.report()['assets'][0]['status']!='PUBLISHED'
+
+
+def test_saved_manual_generation_coverage_stale_and_no_get_calls(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    fake=FakeClient();service.client=fake
+    # Deterministically run the real worker in the test thread.
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
+    jid=service.start({})
+    job=service.get(jid)
+    assert job['status']=='COMPLETED' and fake.calls==1
+    assert {i for f in job['result']['findings'] for i in f['evidence_ids']}=={'K0','K1',ids[2]}
+    assert service.start({})==jid and fake.calls==1
+    client=TestClient(app)
+    response=client.post('/quality-scenario-interpretations',data={},follow_redirects=False)
+    assert response.status_code==303 and response.headers['location'].endswith(jid)
+    for _ in range(2):
+        page=client.get('/quality-scenario-interpretations/'+jid)
+        assert page.status_code==200 and '整体判断' in page.text
+        assert client.get('/api/quality-scenario-interpretations/'+jid).json()['status']=='COMPLETED'
+    assert fake.calls==1
+    assets.save_context(assets.catalog()[0]['scenario_id'],{'environment':'高负载'})
+    assert '尚未反映新数据' in client.get('/quality-scenario-interpretations/'+jid).text
+    assert fake.calls==1
+    assert client.get('/quality-scenario-assets').status_code==200
+
+
+def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path);fake=FakeClient();service.client=fake
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
+    original=service.batches
+    service.batches=lambda items: [[x] for x in items] if items and 'id' in items[0] else original(items)
+    jid=service.start({})
+    assert service.get(jid)['status']=='COMPLETED' and fake.calls==4
+    with pytest.raises(ValueError,match='遗漏'):
+        service.complete(fake,{'mode':'ANALYSE','records':[{'id':'K0'}]},['K0','K1'])
+    with pytest.raises(ValueError,match='来源引用'):
+        service.complete(fake,{'mode':'ANALYSE','records':[{'id':'FORGED'}]},['K0'])
+    with pytest.raises(ValueError,match='未截断'):original([{'text':'x'*23000}])
+    class Bad:
+        def complete(self,messages):return AIResponse('{"summary":', 'bad', {})
+    service.client=Bad()
+    failed=service.start({},refresh=True)
+    assert service.get(failed)['status']=='FAILED'
+    assert not service.get(failed)['result']
+
+
+def test_stop_prevents_late_result_and_allows_retry(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda **kw:SimpleNamespace(start=lambda:None))
+    jid=service.start({})
+    assert service.start({})==jid
+    response=TestClient(app).post('/quality-scenario-interpretations/'+jid+'/stop',follow_redirects=False)
+    assert response.status_code==303
+    service.update(jid,status='COMPLETED',result_json='{}')
+    assert service.get(jid)['status']=='FAILED'
+    assert service.start({})!=jid

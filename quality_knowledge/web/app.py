@@ -218,7 +218,7 @@ def create_app(db_path):
     tpl.env.globals['confidence'] = _confidence
     tpl.env.globals['zh_value'] = zh_value
     from .scenario_asset_pages import create_asset_router
-    app.include_router(create_asset_router(scenario_repo,tpl))
+    app.include_router(create_asset_router(scenario_repo,tpl,scenario_generation_svc))
 
     def filters(req):
         return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}

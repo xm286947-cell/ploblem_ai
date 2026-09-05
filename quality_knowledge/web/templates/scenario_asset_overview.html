@@ -12,7 +12,12 @@
 <div class="di-pagehead"><div><h1>质量场景资产与业务洞察</h1><p>问题事实 → 业务活动 → 质量场景 → 质量关注点 → 指标与测试验收</p></div><a class="btn" href="/quality-scenarios">场景候选与维护</a></div>
 <section class="qs-hero"><div>质量场景<strong>{{report.assets|length}}</strong></div><div>关联市场问题（去重）<strong>{{report.issue_count}}</strong></div><div>覆盖客户<strong>{{report.customer_count}}</strong></div><div>覆盖行业<strong>{{report.industry_count}}</strong></div><div>已关联指标建议<strong>{{report.metric_count}}</strong></div></section>
 <p class="di-alert">统计范围为已关联问题，不代表全部市场问题或故障率。场景可关联多个问题；同一问题跨场景出现时，总数去重。未知时间 {{report.unknown_time_count}} 条。指标建议不等于已经实测达标。</p>
-{% set decision=report.decision %}{% include 'scenario_decision_digest.html' %}
+<section class="di-card"><h2>本范围综合解读</h2><p>基于下方已应用的筛选范围，由默认模型综合现有场景、漏测分析与彻底解决单。人工触发会调用 AI；刷新只读取已保存结果，不重新分析单问题。</p>
+<form method="post" action="/quality-scenario-interpretations">{% for key,value in filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<button class="btn btn-primary" {% if not report.issue_count %}disabled{% endif %}>生成 / 查看本范围解读</button></form>
+{% if interpretation %}<p><a href="/quality-scenario-interpretations/{{interpretation.job_id}}">查看最近解读：{{interpretation.progress}}</a> · {{interpretation.created_at}}</p>{% endif %}
+<p>时间仅使用软件考核的 KPI 计入年月；只有月份而没有年份时保留缺失提示，不用提单年份代替。工况缺失时展示前置/触发条件原文，仍需人工确认。</p></section>
+<details><summary>规则辅助线索（非 AI 综合解读）</summary>{% set decision=report.decision %}{% include 'scenario_decision_digest.html' %}</details>
+<p>考核时间准备情况：{% for row in report.period_readiness %}{{row.label}} {{row.count}} 条；{% endfor %}</p>
 <form method="get" class="qs-filters">
 {% if filters.get('asset_id') %}<input type="hidden" name="asset_id" value="{{filters.asset_id}}">{% endif %}
 <label>资产状态<select name="status">{% for code,label in [('','全部（含候选）'),('PUBLISHED','已发布'),('IN_REVIEW','审核中'),('DRAFT','草稿'),('ARCHIVED','已归档')] %}<option value="{{code}}" {% if filters.get('status','')==code %}selected{% endif %}>{{label}}</option>{% endfor %}</select></label>

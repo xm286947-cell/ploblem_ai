@@ -95,6 +95,8 @@ class ScenarioAssets:
                         facts[row['knowledge_id']]={'business_issue_id':row.get('business_issue_id'),'title':row.get('description'),
                             'industry':context.get('customer_industry'),'customer':context.get('customer_name'),
                             'product':context.get('product_model'),'year':row.get('year'),'month':row.get('month')}
+            from quality_knowledge.scenario_evidence import enrich_facts
+            facts=enrich_facts(c,facts)
         return facts
 
     def report(self,filters=None):
@@ -123,7 +125,9 @@ class ScenarioAssets:
                          'industry':str(f.get('industry') or '未知行业'),'customer':str(f.get('customer') or '未知客户'),
                          'product':str(f.get('product') or '未知产品型号'),'business':asset.get('product_code') or '未知业务',
                          'lifecycle':member.get('lifecycle_code') or '未知阶段','activity':member.get('activity_code') or '未知活动',
-                         'scale':scale,'environment':context.get('environment') or '未知工况',
+                         'scale':scale,'environment':context.get('environment') or '；'.join(str(member.get(k) or '') for k in ('preconditions','trigger_conditions') if member.get(k)) or '未知工况',
+                         'environment_source':'人工工况' if context.get('environment') else '前置/触发条件原文' if member.get('preconditions') or member.get('trigger_conditions') else '缺失',
+                         'period_status':f.get('period_status','时间未完整提供'),'kpi_raw':f.get('kpi_raw',''),
                          'concern':member.get('concern_points') or '未知关注点','quality':member.get('quality_attribute') or '未知属性','period':period}
                     if all(not filters.get(k) or row.get(k)==filters[k] for k in ('industry','customer','product','business','activity','lifecycle','scale','environment','concern','quality','period','asset_id')):records.append(row)
         visible={r['asset_id'] for r in records}
@@ -142,7 +146,7 @@ class ScenarioAssets:
         for r in records:cells[(r[x],r[y])].add(r['issue_key'])
         matched={r['issue_key']:{**r,**facts.get(r['issue_id'],{})} for r in records}
         return {'assets':selected,'records':records,'issue_count':len({r['issue_key'] for r in records}),
-                'matched_issues':list(matched.values()),
+                'matched_issues':list(matched.values()),'period_readiness':counts('period_status'),
                 'customer_count':len({r['customer'] for r in records if r['customer']!='未知客户'}),
                 'industry_count':len({r['industry'] for r in records if r['industry']!='未知行业'}),
                 'metric_count':sum(len(a['metrics']) for a in selected),'distributions':{k:counts(k) for k in dimensions},
