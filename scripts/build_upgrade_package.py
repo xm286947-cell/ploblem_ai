@@ -9,12 +9,15 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH25_20260905"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH26_20260905"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
 EXCLUDED_SUFFIXES = (".db", ".sqlite", ".sqlite3", ".log", ".zip", ".pyc")
 REQUIRED_WORKBENCH_FILES = {
+    "quality_knowledge/scenario_decisions.py",
+    "quality_knowledge/web/templates/scenario_decision_digest.html",
+    "docs/requirements/SCENARIO_DECISION_DIGEST_PATCH26.md",
     "quality_knowledge/scenario_sources.py",
     "docs/requirements/SCENARIO_SOURCE_PHASE_FIX_PATCH25.md",
     "quality_knowledge/scenario_assets.py",
@@ -77,7 +80,11 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH25 累计升级说明
+    readme = """# PATCH26 累计升级说明
+
+行业与场景看板、场景资产与业务洞察新增“当前能得出的结论与下一步”。
+基于已有关注点原文做规则辅助主题归纳，保留证据、行业客户差异、单例/共性提示与数据缺口。
+提供待评审的研发、测试和指标建议，不自动合并场景、不生成治理工单、不调用AI或重跑历史分析。
 
 本轮新增：软件考核工作台 → 按IPMT/SPDT/产品型号/考核年月选题 → 生成质量场景。
 漏测分析优先，缺失部分补充彻底解决单；无漏测数据仍可生成，并保留来源标记及原单链接。

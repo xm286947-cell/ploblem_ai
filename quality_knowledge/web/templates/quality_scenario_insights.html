@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block breadcrumb %}质量场景库 / 行业与场景看板{% endblock %}
 {% block body %}
+{% include 'scenario_decision_digest.html' %}
 <div class="di-pagehead"><div><a class="mw-back" href="/quality-scenarios">← 返回质量场景库</a><h1>质量场景矩阵看板</h1><p>从客户体验、使用质量和产品质量三个层级观察业务活动风险；统计来自真实场景及来源问题。</p></div></div>
 <form class="qs-filters" method="get"><select name="status"><option value="">全部状态</option><option value="IN_REVIEW" {% if status=='IN_REVIEW' %}selected{% endif %}>待审核</option><option value="PUBLISHED" {% if status=='PUBLISHED' %}selected{% endif %}>已发布</option></select><button class="btn btn-primary">查询</button></form>
 <section class="qs-hero"><div><span>质量场景</span><strong>{{insights.scenario_count}}</strong><small>当前口径</small></div><div><span>来源问题</span><strong>{{insights.issue_count}}</strong><small>按场景证据计数</small></div><div><span>标准化覆盖</span><strong>{{insights.standardized_count}} / {{insights.scenario_count}}</strong><small>{{insights.standardized_rate}}% 已具备体验与产品质量分类</small></div></section>

@@ -374,7 +374,10 @@ def create_app(db_path):
 
     @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_insights(request: Request, status: str = ''):
-        return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status})
+        from quality_knowledge.scenario_assets import ScenarioAssets
+        from quality_knowledge.scenario_decisions import decision_digest
+        decision=decision_digest(ScenarioAssets(scenario_repo).report({'status':status}),scenario_repo)
+        return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status,'decision':decision})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), source: str = Form('leakage'), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), year: str = Form('')):

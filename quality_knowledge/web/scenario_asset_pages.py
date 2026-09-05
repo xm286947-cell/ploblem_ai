@@ -2,6 +2,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from quality_knowledge.scenario_assets import ScenarioAssets, CONTEXT_FIELDS, METRIC_FIELDS
+from quality_knowledge.scenario_decisions import decision_digest
 
 DIMENSIONS={'industry':'行业','customer':'客户','product':'产品型号','business':'产品/业务','lifecycle':'使用生命周期',
             'activity':'业务活动','scale':'系统规模','environment':'环境/工况','concern':'客户质量关注点',
@@ -15,6 +16,8 @@ def create_asset_router(repository,templates):
         filters=dict(request.query_params)
         try:report=service.report(filters)
         except ValueError as e:raise HTTPException(400,str(e))
+        report['decision']=decision_digest(report,repository)
+        report['concern_themes']=report['decision']['concerns']
         x=filters.get('x','industry');y=filters.get('y','scenario')
         names={a['scenario_id']:a['name'] for a in service.catalog()}
         taxonomy_labels={}
