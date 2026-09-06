@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH34_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH35_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -38,6 +38,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/QUALITY_SCENARIO_INCREMENTAL_UPDATE_PATCH32_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_CLEANUP_PATCH33_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_SOURCE_SCOPE_PATCH34_DELIVERY.md",
+    "docs/requirements/QUALITY_SCENARIO_ENTRY_CONVERGENCE_PATCH35_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
@@ -101,7 +102,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH34 累计升级说明
+    readme = """# PATCH35 累计升级说明
+
+软件质量场景候选收敛为唯一选题入口：软件考核工作台。候选页不再提供彻底解决单、ITR、
+软件/硬件/机械领域或源产品切换，避免选错业务流。选题严格按软件考核KPI计入年月、IPMT、
+SPDT和产品型号；同号彻底解决单、ITR与漏测分析只补充证据，不扩大或缩小选题范围。
+客户/行业场景画像保留为独立、人工触发的业务流，不与软件场景候选混用。
+
+以下为 PATCH34 及更早累计内容：
 
 AI质量场景候选生成修复取数边界：场景词典只决定AI采用的生命周期和业务活动，不再被误认为源问题产品过滤。
 彻底解决单/ITR入口默认只显示软件问题，硬件和机械必须显式切换；新增源数据产品/产品线过滤。

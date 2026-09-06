@@ -96,24 +96,36 @@ def test_same_evidence_is_reused_across_generation_batches(tmp_path):
     assert ledger[0]['status']=='REUSED' and '直接复用' in ledger[0]['error_message']
 
 
-def test_generate_page_exposes_cs_itr_source_and_material_link(tmp_path):
+def test_generate_page_keeps_software_operations_as_the_only_candidate_scope(tmp_path):
     db=tmp_path/'web.db';client=TestClient(create_app(db));materials=MaterialRepository(db)
+    materials.add_material(materials.group('SW-OPS'),'ITR20260605083CS',{
+        '问题信息_彻底解决单号':'ITR20260605083CS','问题信息_问题描述':'软件考核范围问题',
+        '数据运营_KPI计入月份':'2026-06'},'operations.xlsx','sheet',2)
     materials.add_material(materials.group('ITR-CS'),'ITR20260605084CS',{
         '问题信息_彻底解决单号':'ITR20260605084CS','问题信息_问题描述':'彻底解决单描述',
         '问题信息_问题发生时间':'2026-06-05','问题信息_问题领域':'软件','问题信息_产品类型':'PLC软件'},'cs.xlsx','sheet',3)
     materials.add_material(materials.group('ITR-CS'),'ITR20260605085CS',{
         '问题信息_彻底解决单号':'ITR20260605085CS','问题信息_问题描述':'硬件器件损坏',
         '问题信息_问题发生时间':'2026-06-06','问题信息_问题领域':'硬件','问题信息_产品类型':'控制器硬件'},'cs.xlsx','sheet',4)
-    page=client.get('/quality-scenarios/generate?preview=1&source=cs_itr&product_code=PLC&start_month=6&end_month=6')
+    page=client.get('/quality-scenarios/generate?preview=1&source=cs_itr&product_code=PLC&year=2026&start_month=6&end_month=6')
     assert page.status_code==200
-    assert '彻底解决单 + ITR（推荐）' in page.text
-    assert '/materials/cs/MAT-' in page.text and '无漏测分析，基于彻底解决单' in page.text
-    assert '软件（默认）' in page.text and '去重后 1 个问题' in page.text
-    assert '彻底解决单描述' in page.text and '硬件器件损坏' not in page.text
-    hardware=client.get('/quality-scenarios/generate?preview=1&source=cs_itr&product_code=PLC&problem_domain=HARDWARE&start_month=6&end_month=6')
-    assert '去重后 1 个问题' in hardware.text and '硬件器件损坏' in hardware.text and '彻底解决单描述' not in hardware.text
-    product=client.get('/quality-scenarios/generate?preview=1&source=cs_itr&product_code=PLC&source_product=PLC%E8%BD%AF%E4%BB%B6&start_month=6&end_month=6')
-    assert '去重后 1 个问题' in product.text and 'PLC软件' in product.text
+    assert '软件考核工作台（固定）' in page.text and '当前筛选范围 1 个问题' in page.text
+    assert '软件考核范围问题' in page.text
+    assert '彻底解决单描述' not in page.text and '硬件器件损坏' not in page.text
+
+
+def test_generate_page_defaults_to_software_operations_without_domain_exclusion(tmp_path):
+    db=tmp_path/'default-scope.db';client=TestClient(create_app(db));materials=MaterialRepository(db)
+    materials.add_material(materials.group('SW-OPS'),'ITR20260800001CS',{
+        '问题信息_彻底解决单号':'ITR20260800001CS','数据运营_KPI计入月份':'2026-08',
+        '问题信息_问题描述':'软件考核问题'},'operations.xlsx','sheet',2)
+    materials.add_material(materials.group('ITR-CS'),'ITR20260800002CS',{
+        '问题信息_彻底解决单号':'ITR20260800002CS','问题信息_问题发生时间':'2026-08-02',
+        '问题信息_问题领域':'硬件','问题信息_问题描述':'不应扩大进默认选题'},'cs.xlsx','sheet',2)
+    page=client.get('/quality-scenarios/generate?preview=1&product_code=PLC&year=2026&start_month=8&end_month=8')
+    assert '软件考核工作台（固定）' in page.text
+    assert '软件考核问题' in page.text and '不应扩大进默认选题' not in page.text
+    assert '当前筛选范围 1 个问题' in page.text
 
 
 def test_cs_itr_portrait_period_is_not_erased_by_kpi_enrichment(tmp_path):
