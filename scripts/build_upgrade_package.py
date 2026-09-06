@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH35_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH36_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -39,8 +39,10 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/QUALITY_SCENARIO_CLEANUP_PATCH33_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_SOURCE_SCOPE_PATCH34_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_ENTRY_CONVERGENCE_PATCH35_DELIVERY.md",
+    "docs/requirements/SQLITE_PERFORMANCE_PATCH36_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
+    "quality_knowledge/sqlite_tuning.py",
     "quality_knowledge/scenarios.py",
     "quality_knowledge/scenario_generation.py",
     "quality_knowledge/web/app.py",
@@ -102,7 +104,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH35 累计升级说明
+    readme = """# PATCH36 累计升级说明
+
+SQLite性能专项：材料工作台改为数据库内筛选、计数和分页，不再读取最多10万条记录后反复解析JSON；
+场景列表按条件精确查询，场景详情不再加载全部场景；质量场景看板复用一次数据快照并消除逐场景查询。
+新增材料、关联、场景、范围、证据和能力缺口常用索引，统一10秒忙等待及32MB连接缓存。
+保持SQLite、BAT入口和现有数据结构不变，不自动删除数据、不自动VACUUM，也不切换日志模式。
+
+以下为 PATCH35 及更早累计内容：
 
 软件质量场景候选收敛为唯一选题入口：软件考核工作台。候选页不再提供彻底解决单、ITR、
 软件/硬件/机械领域或源产品切换，避免选错业务流。选题严格按软件考核KPI计入年月、IPMT、

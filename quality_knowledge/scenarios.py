@@ -9,6 +9,7 @@ import uuid
 from openpyxl import load_workbook
 from quality_knowledge.quality_models import CUSTOMER_EXPERIENCE_MODEL, PRODUCT_QUALITY_MODEL, QUALITY_IN_USE_MODEL, model_payload
 from quality_knowledge.scenario_semantics import DEFAULT_TERMS, SEMANTIC_PRINCIPLES, SEMANTIC_TYPES
+from quality_knowledge.sqlite_tuning import configure_connection
 
 
 LIFECYCLES = (
@@ -74,10 +75,13 @@ CREATE TABLE IF NOT EXISTS scenario_lifecycle(version_id TEXT NOT NULL,lifecycle
 CREATE TABLE IF NOT EXISTS scenario_activity(version_id TEXT NOT NULL,activity_code TEXT NOT NULL,lifecycle_code TEXT NOT NULL,label_zh TEXT NOT NULL,chain_text TEXT,description TEXT,enabled INTEGER NOT NULL DEFAULT 1,sort_order INTEGER NOT NULL,PRIMARY KEY(version_id,activity_code));
 CREATE TABLE IF NOT EXISTS quality_scenario(scenario_id TEXT PRIMARY KEY,scenario_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,product_code TEXT NOT NULL DEFAULT '',taxonomy_version_id TEXT,lifecycle_code TEXT,activity_code TEXT,scenario_chain TEXT,experience_requirement TEXT,concern_points TEXT,quality_attribute TEXT,quality_subcharacteristic TEXT,applicable_boundary TEXT,validation_direction TEXT,measurement_suggestion TEXT,failure_mode TEXT,failure_mechanism TEXT,trigger_conditions TEXT,preconditions TEXT,participating_systems TEXT,system_scale TEXT,user_type TEXT,affected_object TEXT,business_impact TEXT,recovery_method TEXT,status TEXT NOT NULL DEFAULT 'DRAFT',version_no INTEGER NOT NULL DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_scope(scenario_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,PRIMARY KEY(scenario_id,scope_type,scope_value));
+CREATE INDEX IF NOT EXISTS idx_quality_scenario_status_updated ON quality_scenario(status,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_scenario_scope_lookup ON quality_scenario_scope(scope_type,scope_value,scenario_id);
 CREATE TABLE IF NOT EXISTS quality_scenario_generation(generation_id TEXT PRIMARY KEY,product_code TEXT,start_month TEXT,end_month TEXT,source_issue_count INTEGER,candidate_count INTEGER,model_name TEXT,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_evidence(scenario_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,evidence_summary TEXT,PRIMARY KEY(scenario_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_duplicate(candidate_id TEXT NOT NULL,existing_id TEXT NOT NULL,similarity REAL NOT NULL,reason TEXT,PRIMARY KEY(candidate_id,existing_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_generation_candidate(generation_id TEXT NOT NULL,scenario_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,scenario_id));
+CREATE INDEX IF NOT EXISTS idx_scenario_generation_candidate_scenario ON quality_scenario_generation_candidate(scenario_id,generation_id);
 CREATE TABLE IF NOT EXISTS quality_scenario_issue_classification(generation_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,business_issue_id TEXT,status TEXT NOT NULL DEFAULT 'PENDING',scenario_id TEXT,activity_code TEXT,lifecycle_code TEXT,error_message TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(generation_id,knowledge_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_analysis_cache(input_key TEXT PRIMARY KEY,canonical_itr TEXT,task_type TEXT NOT NULL,evidence_hash TEXT NOT NULL,taxonomy_version_id TEXT NOT NULL,scenario_id TEXT NOT NULL,source_knowledge_id TEXT,model_name TEXT,status TEXT NOT NULL DEFAULT 'COMPLETED',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_analysis_claim(input_key TEXT PRIMARY KEY,generation_id TEXT NOT NULL,knowledge_id TEXT NOT NULL,claimed_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -89,6 +93,8 @@ CREATE TABLE IF NOT EXISTS quality_scenario_standardization_batch(batch_id TEXT 
 CREATE TABLE IF NOT EXISTS quality_scenario_standardization_item(batch_id TEXT NOT NULL,scenario_id TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'PENDING',error_message TEXT,agent_id TEXT,model_name TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(batch_id,scenario_id));
 CREATE TABLE IF NOT EXISTS quality_scenario_confirmation(confirmation_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,confirmed_by TEXT NOT NULL,previous_status TEXT,new_status TEXT,before_json TEXT,after_json TEXT,confirmed_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS quality_scenario_capability_gap(gap_id TEXT PRIMARY KEY,scenario_id TEXT NOT NULL,capability_axis TEXT NOT NULL,capability_code TEXT NOT NULL,gap_description TEXT NOT NULL,source_basis TEXT,improvement_action TEXT,verification_metric TEXT,priority TEXT NOT NULL DEFAULT 'P1',status TEXT NOT NULL DEFAULT 'OPEN',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_scenario_evidence_issue ON quality_scenario_evidence(knowledge_id,scenario_id);
+CREATE INDEX IF NOT EXISTS idx_scenario_gap_scenario ON quality_scenario_capability_gap(scenario_id,priority,updated_at DESC);
 CREATE TABLE IF NOT EXISTS scenario_semantic_term(term_id TEXT PRIMARY KEY,term_type TEXT NOT NULL,term_code TEXT NOT NULL,label_zh TEXT NOT NULL,definition TEXT NOT NULL,inclusion_criteria TEXT,exclusion_criteria TEXT,aliases_json TEXT,product_code TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'ACTIVE',source_scenario_id TEXT,nearest_term_code TEXT,difference_note TEXT,merged_into_code TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(term_type,term_code,product_code));
 """
 
@@ -109,6 +115,7 @@ class ScenarioRepository:
             scenario_columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario)")}
             for name in ('scenario_chain','quality_subcharacteristic','measurement_suggestion','failure_mode','failure_mechanism','trigger_conditions','preconditions','participating_systems','system_scale','user_type','affected_object','business_impact','recovery_method','product_code','taxonomy_version_id','customer_perception','primary_experience_code','secondary_experience_codes','quality_in_use_codes','primary_quality_characteristic_code','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','quality_classification_status','quality_model_version','quality_classification_error','quality_classification_agent','quality_classification_model','quality_classification_updated_at','primary_typical_problem_code','secondary_typical_problem_codes','primary_quality_concern_code','secondary_quality_concern_codes','primary_customer_experience_statement','secondary_customer_experience_statements','operating_environment','operating_condition','duration_frequency','disturbances','extreme_conditions','environment_condition_codes'):
                 if name not in scenario_columns:c.execute(f"ALTER TABLE quality_scenario ADD COLUMN {name} TEXT")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_quality_scenario_product_activity ON quality_scenario(product_code,activity_code,lifecycle_code)")
             self._seed_quality_models(c)
             self._seed_semantic_terms(c)
             columns={row['name'] for row in c.execute("PRAGMA table_info(quality_scenario_generation)")}
@@ -239,7 +246,7 @@ class ScenarioRepository:
                 if value:c.execute("INSERT OR IGNORE INTO quality_scenario_scope VALUES(?,?,?)",(row['scenario_id'],kind,value))
 
     def connect(self):
-        c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute("PRAGMA foreign_keys=ON");c.execute("PRAGMA busy_timeout=5000");return c
+        c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;return configure_connection(c)
 
     def versions(self, product_code=''):
         with self.connect() as c:
@@ -344,23 +351,39 @@ class ScenarioRepository:
         values={key:set() for key in ("IPMT","SPDT","PRODUCT_MODEL","INDUSTRY","CUSTOMER_NAME","CUSTOMER_LEVEL","CUSTOMER_STATUS","OCCURRENCE_PHASE")}
         aliases={"IPMT":("问题信息_IPMT","IPMT"),"SPDT":("问题信息_SPDT","SPDT"),"PRODUCT_MODEL":("问题信息_产品型号","产品型号"),"INDUSTRY":("问题信息_客户行业","客户行业"),"CUSTOMER_NAME":("问题信息_客户名称","客户名称"),"CUSTOMER_LEVEL":("问题信息_客户分级","客户分级"),"CUSTOMER_STATUS":("问题信息_当前客户状态","问题信息_当前问题状态","问题信息_问题状态","当前客户状态","当前问题状态"),"OCCURRENCE_PHASE":("问题信息_问题发生阶段","问题发生阶段")}
         with self.connect() as c:
-            try:rows=c.execute("SELECT raw_json FROM source_material WHERE material_type='ITR_CS'").fetchall()
+            def expression(names):
+                return "COALESCE("+",".join(f"NULLIF(TRIM(CAST(json_extract(raw_json, '$.\"{name}\"') AS TEXT)),'')" for name in names)+")"
+            columns=','.join(f"{expression(names)} AS \"{kind}\"" for kind,names in aliases.items())
+            try:rows=c.execute(f"SELECT {columns} FROM source_material WHERE material_type='ITR_CS'").fetchall()
             except sqlite3.OperationalError:rows=[]
             for row in rows:
-                raw=json.loads(row[0] or "{}")
-                for kind,names in aliases.items():
-                    for name in names:
-                        value=str(raw.get(name) or "").strip()
-                        if value:values[kind].add(value);break
+                for kind in aliases:
+                    if row[kind]:values[kind].add(row[kind])
             for row in c.execute("SELECT scope_type,scope_value FROM quality_scenario_scope"):
                 values.setdefault(row['scope_type'],set()).add(row['scope_value'])
         return {key:sorted(items) for key,items in values.items()}
 
-    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code="", typical_problem_code="", environment_code=""):
+    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code="", typical_problem_code="", environment_code="", scenario_id=""):
         with self.connect() as c:
-            rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
-            scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
-            capability_gaps=c.execute("SELECT * FROM quality_scenario_capability_gap ORDER BY priority,updated_at DESC").fetchall()
+            clauses=[];params=[]
+            if scenario_id:clauses.append("s.scenario_id=?");params.append(scenario_id)
+            if q:clauses.append("LOWER(s.name||' '||s.scenario_code) LIKE ?");params.append('%'+q.lower()+'%')
+            if status:clauses.append("s.status=?");params.append(status)
+            if activity_code:clauses.append("s.activity_code=?");params.append(activity_code)
+            if generation_id:
+                clauses.append("EXISTS(SELECT 1 FROM quality_scenario_generation_candidate gc WHERE gc.scenario_id=s.scenario_id AND gc.generation_id=?)");params.append(generation_id)
+            for scope_type,value in (("IPMT",ipmt),("SPDT",spdt),("PRODUCT_MODEL",product_model),("INDUSTRY",industry),("CUSTOMER_NAME",customer_name)):
+                if value:
+                    clauses.append("EXISTS(SELECT 1 FROM quality_scenario_scope qs WHERE qs.scenario_id=s.scenario_id AND qs.scope_type=? AND qs.scope_value=?)")
+                    params.extend((scope_type,value))
+            sql="SELECT s.* FROM quality_scenario s"+(" WHERE "+" AND ".join(clauses) if clauses else "")+" ORDER BY s.updated_at DESC"
+            rows=[dict(x) for x in c.execute(sql,params)]
+            ids=[row['scenario_id'] for row in rows]
+            scopes=[];capability_gaps=[]
+            for start in range(0,len(ids),500):
+                batch=ids[start:start+500];marks=','.join('?' for _ in batch)
+                scopes.extend(c.execute(f"SELECT * FROM quality_scenario_scope WHERE scenario_id IN ({marks})",batch).fetchall())
+                capability_gaps.extend(c.execute(f"SELECT * FROM quality_scenario_capability_gap WHERE scenario_id IN ({marks}) ORDER BY priority,updated_at DESC",batch).fetchall())
             generated_rows=c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=? ORDER BY created_at,rowid",(generation_id,)).fetchall() if generation_id else []
             generated_order={row[0]:index for index,row in enumerate(generated_rows)}
             generated=set(generated_order)
@@ -369,16 +392,12 @@ class ScenarioRepository:
         gaps_by_id={}
         for row in capability_gaps:gaps_by_id.setdefault(row['scenario_id'],[]).append(dict(row))
         for item in rows:item['scopes']=by_id.get(item['scenario_id'],{});item['capability_gaps']=gaps_by_id.get(item['scenario_id'],[])
-        def matches(item):
-            s=item['scopes']
-            return (not generation_id or item['scenario_id'] in generated) and (not q or q.lower() in (item['name']+' '+item['scenario_code']).lower()) and (not status or item['status']==status) and (not ipmt or ipmt in s.get('IPMT',[])) and (not spdt or spdt in s.get('SPDT',[])) and (not product_model or product_model in s.get('PRODUCT_MODEL',[])) and (not industry or industry in s.get('INDUSTRY',[])) and (not customer_name or customer_name in s.get('CUSTOMER_NAME',[]))
-        items=[item for item in rows if matches(item)]
+        items=rows
         def codes(item,key,primary=''):
             values=[item.get(primary)] if primary and item.get(primary) else []
             try:values.extend(json.loads(item.get(key) or '[]'))
             except (TypeError,json.JSONDecodeError):pass
             return {str(x) for x in values if x}
-        if activity_code:items=[x for x in items if x.get('activity_code')==activity_code]
         if experience_code:items=[x for x in items if experience_code in codes(x,'secondary_experience_codes','primary_experience_code')]
         if qiu_code:items=[x for x in items if qiu_code in codes(x,'quality_in_use_codes')]
         if quality_code:items=[x for x in items if quality_code in codes(x,'secondary_quality_characteristic_codes','primary_quality_characteristic_code')]
@@ -435,7 +454,7 @@ class ScenarioRepository:
         self.mark_standardization(scenario_id,'PENDING_CONFIRMATION',agent=agent,model=model)
 
     def scenario(self, scenario_id):
-        item=next(iter(self.scenarios()),None) if not scenario_id else next((x for x in self.scenarios() if x['scenario_id']==scenario_id),None)
+        item=next(iter(self.scenarios()),None) if not scenario_id else next(iter(self.scenarios(scenario_id=scenario_id)),None)
         if item:
             for key in ('secondary_experience_codes','quality_in_use_codes','secondary_quality_characteristic_codes','quality_subcharacteristic_codes','secondary_typical_problem_codes','secondary_quality_concern_codes','secondary_customer_experience_statements','environment_condition_codes'):
                 try:item[key]=json.loads(item.get(key) or '[]')

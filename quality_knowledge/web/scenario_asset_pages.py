@@ -43,14 +43,15 @@ def create_asset_router(repository,templates,generation=None):
     @router.get('/quality-scenario-assets')
     def overview(request:Request):
         filters=dict(request.query_params)
-        try:report=service.report(filters)
+        assets=service.catalog();facts=service.facts()
+        try:report=service.report(filters,assets=assets,facts=facts)
         except ValueError as e:raise HTTPException(400,str(e))
         report['decision']=decision_digest(report,repository)
         report['concern_themes']=report['decision']['concerns']
         x=filters.get('x','industry');y=filters.get('y','scenario')
-        names={a['scenario_id']:a['name'] for a in service.catalog()}
+        names={a['scenario_id']:a['name'] for a in assets}
         taxonomy_labels={}
-        for a in service.catalog():
+        for a in assets:
             taxonomy=repository.taxonomy(product_code=a['product_code'])
             if taxonomy:
                 taxonomy_labels.update({r['activity_code']:r['label_zh'] for r in taxonomy['activities']})
@@ -77,11 +78,12 @@ def create_asset_router(repository,templates,generation=None):
     @router.get('/quality-scenario-assets/portrait')
     def portrait(request:Request):
         filters=dict(request.query_params)
-        try:report=service.portrait(filters)
+        assets=service.catalog();facts=service.facts()
+        try:report=service.portrait(filters,assets=assets,facts=facts)
         except ValueError as e:raise HTTPException(400,str(e))
         report['decision']=decision_digest(report,repository)
         taxonomy_labels={}
-        for a in service.catalog():
+        for a in assets:
             taxonomy=repository.taxonomy(product_code=a['product_code'])
             if taxonomy:
                 taxonomy_labels.update({r['activity_code']:r['label_zh'] for r in taxonomy['activities']})

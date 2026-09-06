@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import load_workbook
+from quality_knowledge.sqlite_tuning import configure_connection
 
 
 MATERIAL_TYPES = {"ESCAPE_ANALYSIS", "ITR_SOURCE", "ITR_CS", "SOFTWARE_OPERATION", "BATCH_ISSUE", "TEST_ISSUE"}
@@ -34,6 +35,9 @@ CREATE TABLE IF NOT EXISTS source_material(
  raw_json TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(group_id,business_key,source_hash));
 CREATE INDEX IF NOT EXISTS idx_source_material_itr ON source_material(canonical_itr,material_type);
+CREATE INDEX IF NOT EXISTS idx_source_material_group_created ON source_material(group_id,created_at DESC,material_id);
+CREATE INDEX IF NOT EXISTS idx_source_material_group_business ON source_material(group_id,business_key);
+CREATE INDEX IF NOT EXISTS idx_source_material_type_itr_version ON source_material(material_type,canonical_itr,version_no DESC);
 CREATE TABLE IF NOT EXISTS association_rule(
  rule_id TEXT PRIMARY KEY,rule_name TEXT NOT NULL,source_type TEXT NOT NULL,target_type TEXT NOT NULL,
  source_field TEXT NOT NULL,target_field TEXT NOT NULL,transform TEXT NOT NULL DEFAULT 'EXACT',
@@ -43,6 +47,8 @@ CREATE TABLE IF NOT EXISTS issue_material_link(
  link_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,material_id TEXT NOT NULL REFERENCES source_material(material_id),
  rule_id TEXT REFERENCES association_rule(rule_id),link_status TEXT NOT NULL,match_value TEXT,
  created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(knowledge_id,material_id));
+CREATE INDEX IF NOT EXISTS idx_issue_material_link_issue ON issue_material_link(knowledge_id,material_id);
+CREATE INDEX IF NOT EXISTS idx_issue_material_link_material ON issue_material_link(material_id,knowledge_id);
 CREATE TABLE IF NOT EXISTS material_review(
  material_id TEXT PRIMARY KEY REFERENCES source_material(material_id),review_status TEXT NOT NULL DEFAULT 'DRAFT',
  analysis_summary TEXT,root_cause TEXT,improvement_action TEXT,reviewer TEXT,
@@ -50,6 +56,7 @@ CREATE TABLE IF NOT EXISTS material_review(
 CREATE TABLE IF NOT EXISTS source_material_reporting_year(
  material_id TEXT PRIMARY KEY REFERENCES source_material(material_id) ON DELETE CASCADE,
  reporting_year TEXT NOT NULL,year_source TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_source_material_reporting_year ON source_material_reporting_year(reporting_year,material_id);
 """
 
 
@@ -137,8 +144,7 @@ class MaterialRepository:
     def connect(self):
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        return configure_connection(connection)
 
     def groups(self, enabled_only=True):
         where = " WHERE enabled=1" if enabled_only else ""
@@ -199,24 +205,41 @@ class MaterialRepository:
         with self.connect() as c:return [dict(x) for x in c.execute(sql,values)]
 
     def search_materials(self, group_code, *, q="", domain="", month="", year="", page=1, page_size=20):
-        rows = self.list_materials(group_code, 100000)
-        items = [_material_view(row) for row in rows]
+        def first_json(*keys):
+            parts=[f"NULLIF(TRIM(CAST(json_extract(m.raw_json, '$.\"{key}\"') AS TEXT)),'')" for key in keys]
+            return "COALESCE("+",".join(parts)+")"
+        title_expr=first_json("问题信息_问题主题","问题信息_问题描述","问题主题","问题描述")
+        month_expr=first_json("数据运营_KPI计入月份","问题信息_创建月份","创建月份")
+        file_year_expr=first_json("数据运营_KPI计入年份","数据运营_KPI计入年度","KPI计入年份","考核年份")
+        product_expr=first_json("问题信息_产品型号","问题信息_产品类型","产品型号","产品类型")
+        domain_expr=first_json("问题信息_问题领域","问题领域","问题信息_产品类型","产品类型")
+        itr_year_expr="CASE WHEN UPPER(m.business_key) GLOB 'ITR20[0-9][0-9]*' THEN SUBSTR(UPPER(m.business_key),4,4) END"
+        year_expr=f"COALESCE(NULLIF(TRIM(y.reporting_year),''),{itr_year_expr},{file_year_expr})"
+        base=" FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
+        where=["g.group_code=?"];values=[group_code]
         if q:
-            keyword = q.strip().lower()
-            items = [item for item in items if keyword in (item["business_key"] + " " + item["canonical_itr"] + " " + item["title"] + " " + item["product"]).lower()]
+            where.append(f"LOWER(COALESCE(m.business_key,'')||' '||COALESCE(m.canonical_itr,'')||' '||COALESCE({title_expr},'')||' '||COALESCE({product_expr},'')) LIKE ?")
+            values.append('%'+q.strip().lower()+'%')
         if domain:
-            items = [item for item in items if domain.lower() in item["domain"].lower()]
+            where.append(f"LOWER(COALESCE({domain_expr},'未分类')) LIKE ?");values.append('%'+domain.lower()+'%')
         if month:
-            items = [item for item in items if item["month"] == month]
+            where.append(f"COALESCE({month_expr},'-')=?");values.append(month)
         if year:
-            items = [item for item in items if item["year"] == year]
-        total = len(items); page=max(1,int(page));page_size=max(1,min(100,int(page_size)))
-        start=(page-1)*page_size
-        return {"items":items[start:start+page_size],"total":total,"page":page,"page_size":page_size,
+            where.append(f"COALESCE({year_expr},'-')=?");values.append(year)
+        where_sql=" WHERE "+" AND ".join(where)
+        page=max(1,int(page));page_size=max(1,min(100,int(page_size)));offset=(page-1)*page_size
+        select="SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source"
+        facet_sql=f"SELECT DISTINCT COALESCE({domain_expr},'未分类') domain,COALESCE({month_expr},'-') month,COALESCE({year_expr},'-') year"+base+" WHERE g.group_code=?"
+        with self.connect() as c:
+            total=c.execute("SELECT COUNT(*)"+base+where_sql,values).fetchone()[0]
+            rows=c.execute(select+base+where_sql+" ORDER BY m.created_at DESC,m.material_id LIMIT ? OFFSET ?",[*values,page_size,offset]).fetchall()
+            facets=c.execute(facet_sql,(group_code,)).fetchall()
+        items=[_material_view(dict(row)) for row in rows]
+        return {"items":items,"total":total,"page":page,"page_size":page_size,
                 "pages":max(1,(total+page_size-1)//page_size),
-                "domains":sorted({item["domain"] for item in [_material_view(row) for row in rows] if item["domain"]}),
-                "months":sorted({item["month"] for item in [_material_view(row) for row in rows] if item["month"]!="-"},reverse=True),
-                "years":sorted({item["year"] for item in [_material_view(row) for row in rows] if item["year"]!="-"},reverse=True)}
+                "domains":sorted({row['domain'] for row in facets if row['domain']}),
+                "months":sorted({row['month'] for row in facets if row['month']!='-'},reverse=True),
+                "years":sorted({row['year'] for row in facets if row['year']!='-'},reverse=True)}
 
     def material(self, material_id):
         with self.connect() as c:

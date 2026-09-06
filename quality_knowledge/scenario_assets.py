@@ -71,7 +71,7 @@ class ScenarioAssets:
             sid=s['scenario_id']
             if sid in groups:continue
             members=[sid]+[m for m,a in groups.items() if a==sid and m in by_id]
-            assets.append({**s,'context':contexts.get(sid,{}),'members':[{**by_id[m],'context':contexts.get(m,{})} for m in members],
+            assets.append({**s,'context':contexts.get(sid,{}),'members':[{**by_id[m],'context':contexts.get(m,{}),'issue_ids':sorted(evidence[m])} for m in members],
                            'issue_ids':sorted(set().union(*(evidence[m] for m in members))),
                            'metrics':[metric for m in members for metric in metrics[m]]})
         return assets
@@ -107,8 +107,8 @@ class ScenarioAssets:
             facts=enrich_facts(c,facts)
         return facts
 
-    def report(self,filters=None):
-        filters=filters or {};facts=self.facts();records=[];assets=self.catalog()
+    def report(self,filters=None,*,facts=None,assets=None):
+        filters=filters or {};facts=self.facts() if facts is None else facts;records=[];assets=self.catalog() if assets is None else assets
         semantic_labels={}
         for code in {a.get('product_code') or '' for a in assets}|{''}:
             semantic_labels.update({x['term_code']:x['label_zh'] for x in self.repo.semantic_dictionary(code,False)['items']})
@@ -118,8 +118,7 @@ class ScenarioAssets:
             if filters.get('status') and asset['status']!=filters['status']:
                 continue
             for member in asset['members']:
-                with self.repo.connect() as c:ids=[r[0] for r in c.execute('SELECT knowledge_id FROM quality_scenario_evidence WHERE scenario_id=?',(member['scenario_id'],))]
-                for kid in ids:
+                for kid in member.get('issue_ids',[]):
                     f=facts.get(kid,{})
                     raw_id=str(f.get('business_issue_id') or kid).strip().upper()
                     issue_key=re.sub(r'CS$','',raw_id) if raw_id.startswith('ITR') else kid
@@ -167,10 +166,10 @@ class ScenarioAssets:
                 'cells':[{'x':a,'y':b,'count':len(v)} for (a,b),v in sorted(cells.items())],
                 'unknown_time_count':len({r['issue_key'] for r in records if r['period']=='未知时间'})}
 
-    def portrait(self, filters=None):
+    def portrait(self, filters=None,*,facts=None,assets=None):
         """A factual customer/industry portrait; it never invents topology."""
         filters=filters or {}
-        report=self.report(filters)
+        report=self.report(filters,facts=facts,assets=assets)
         records=report['records']
         def grouped(key):
             buckets=defaultdict(lambda:{'issues':set(),'activities':set(),'lifecycles':set(),'conditions':set(),'scenarios':set()})
