@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from builder.ai_client import AIResponse
 from quality_knowledge.web.app import create_app
 from quality_knowledge.materials import MaterialRepository
-from quality_knowledge.scenario_sources import operation_records, period
+from quality_knowledge.scenario_sources import operation_records, period, normalize_problem_domain
 from quality_knowledge.scenario_generation import PROMPT
 
 
@@ -39,6 +39,17 @@ def test_source_priority_filters_and_unknown_year(tmp_path):
     assert next(r for r in rows if not r['linked_knowledge_id'])['occurrence']['root_cause']=='原始根因'
     assert not operation_records(svc,{'ipmt':'其他'})
     assert period({'数据运营_KPI计入月份':'8月','问题信息_彻底解决单号':'ITR202501001CS'})==('未知','8')
+
+
+def test_problem_domain_uses_structured_evidence_only():
+    assert normalize_problem_domain('软件')=='SOFTWARE'
+    assert normalize_problem_domain('硬件')=='HARDWARE'
+    assert normalize_problem_domain('机械')=='MECHANICAL'
+    assert normalize_problem_domain('',{'software_module':'Runtime'})=='SOFTWARE'
+    assert normalize_problem_domain('',{'component_code':'R100'})=='HARDWARE'
+    assert normalize_problem_domain('',{'mechanical_failure_mode':'壳体开裂'})=='MECHANICAL'
+    assert normalize_problem_domain('')=='UNKNOWN'
+    assert normalize_problem_domain('',software_operation=True)=='SOFTWARE'
 
 
 def test_http_selection_snapshot_generation_and_material_links(tmp_path):

@@ -62,6 +62,24 @@ def period(raw):
 def context_from(raw):
     return {key:first(raw,*names) for key,names in CONTEXT_ALIASES.items()}
 
+def normalize_problem_domain(value, context=None, software_operation=False):
+    """Use explicit structured evidence first; never infer the domain from free text."""
+    if software_operation:return 'SOFTWARE'
+    text=str(value or '').strip().upper()
+    if any(x in text for x in ('SOFTWARE','软件')):return 'SOFTWARE'
+    if any(x in text for x in ('MECHANICAL','机械')):return 'MECHANICAL'
+    if any(x in text for x in ('HARDWARE','硬件','器件','电子')):return 'HARDWARE'
+    if '结构' in text:return 'MECHANICAL'
+    context=context or {}
+    if any(context.get(x) for x in ('software_module','software_function','software_failure_mode','software_failure_mechanism')):return 'SOFTWARE'
+    if any(context.get(x) for x in ('mechanical_failure_mode','mechanical_mechanism')):return 'MECHANICAL'
+    if any(context.get(x) for x in ('component_failure','component_category','circuit_category','circuit_subcategory','component_refdes','component_code','component_vendor','component_failure_mode','component_failure_mechanism')):return 'HARDWARE'
+    return 'UNKNOWN'
+
+def source_product(context):
+    """Actual source-data product scope; independent from the chosen scenario taxonomy."""
+    return next((context.get(key,'') for key in ('product_type','product_line','product_series','product_code') if context.get(key)), '')
+
 def portrait_period(raw, business_key=''):
     for key,label in (('问题信息_问题发生时间','问题发生时间'),('问题信息_提单时间','提单时间')):
         value=first(raw,key,label)
@@ -83,8 +101,14 @@ def _latest_materials(service, material_types):
 
 def _issue_index(service):
     with service.scenarios.connect() as c:
-        try:rows=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
-        except Exception:rows=[]
+        try:
+            rows=[dict(r) for r in c.execute('''SELECT q.knowledge_id,q.business_issue_id,q.business_type,
+                        v.issue_domain,v.product AS issue_product
+                    FROM quality_issue q
+                    LEFT JOIN quality_issue_version v ON v.issue_version_id=q.current_version_id''')]
+        except Exception:
+            try:rows=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
+            except Exception:rows=[]
     result=defaultdict(list)
     for row in rows:result[normalize_itr(row['business_issue_id'])].append(row)
     return result
@@ -128,11 +152,19 @@ def material_scene_records(service, filters=None, selected_ids=None, metadata_on
         cs_context=context_from(cs_raw);itr_context=context_from(itr_raw)
         context={key:cs_context.get(key) or itr_context.get(key) or '' for key in CONTEXT_ALIASES}
         year,month,time_source=portrait_period(cs_raw or itr_raw,(cs or itr)['business_key'])
-        values={key:context.get(key,'') for key in ('ipmt','spdt','product_model')};values.update({'year':year,'month':month})
+        linked_issues=issue_index[canonical]
+        problem_domain=normalize_problem_domain(context.get('issue_domain'),context)
+        linked_domains={normalize_problem_domain(x.get('issue_domain')) for x in linked_issues}-{'UNKNOWN'}
+        if problem_domain=='UNKNOWN' and len(linked_domains)==1:problem_domain=linked_domains.pop()
+        actual_product=source_product(context)
+        linked_products={str(x.get('issue_product') or '').strip() for x in linked_issues}-{''}
+        if not actual_product and len(linked_products)==1:actual_product=linked_products.pop()
+        values={key:context.get(key,'') for key in ('ipmt','spdt','product_model')}
+        values.update({'year':year,'month':month,'problem_domain':problem_domain,'source_product':actual_product})
         if any(filters.get(key) and str(filters[key])!=str(value) for key,value in values.items()):continue
         if (filters.get('start_month') or filters.get('end_month')) and (month=='未知' or not service._month(filters.get('start_month') or '1')<=int(month)<=service._month(filters.get('end_month') or '12')):continue
         if metadata_only:records.append(values);continue
-        issue,analyses=_analyses(service,issue_index[canonical],filters.get('product_code',''))
+        issue,analyses=_analyses(service,linked_issues,filters.get('product_code',''))
         root=service._value(analyses.get('occurrence',{}),'root_cause_summary','root_cause')
         escape=service._value(analyses.get('escape',{}),'escape_cause_summary','escape_reason')
         facts=cs_raw or itr_raw
@@ -177,8 +209,10 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         raw=json.loads(material['raw_json'])
         if material.get('reporting_year'):raw['数据运营_KPI计入年份']=material['reporting_year']
         year,month=period(raw)
+        operation_context=context_from(raw)
         values={'ipmt':first(raw,'问题信息_IPMT','IPMT'),'spdt':first(raw,'问题信息_SPDT','SPDT'),
-                'product_model':first(raw,'问题信息_产品型号','产品型号'),'year':year,'month':month}
+                'product_model':first(raw,'问题信息_产品型号','产品型号'),'year':year,'month':month,
+                'problem_domain':'SOFTWARE','source_product':source_product(operation_context)}
         if any(filters.get(k) and filters[k]!=v for k,v in values.items()):continue
         if (filters.get('start_month') or filters.get('end_month')) and (month=='未知' or not service._month(filters.get('start_month') or '1')<=int(month)<=service._month(filters.get('end_month') or '12')):continue
         if metadata_only:
