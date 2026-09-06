@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH36_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH37_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -40,8 +40,10 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/QUALITY_SCENARIO_SOURCE_SCOPE_PATCH34_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_ENTRY_CONVERGENCE_PATCH35_DELIVERY.md",
     "docs/requirements/SQLITE_PERFORMANCE_PATCH36_DELIVERY.md",
+    "docs/requirements/PATCH37_MISSING_MODULE_HOTFIX.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
+    "quality_knowledge/issue_period.py",
     "quality_knowledge/sqlite_tuning.py",
     "quality_knowledge/scenarios.py",
     "quality_knowledge/scenario_generation.py",
@@ -104,7 +106,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH36 累计升级说明
+    readme = """# PATCH37 累计升级说明
+
+修复 PATCH36 覆盖升级后部分旧安装目录缺少 `quality_knowledge.issue_period` 模块而无法启动的问题。
+本包显式携带问题年月解析模块；无需修改 Python、BAT 或数据库配置，可直接覆盖 PATCH36。
+
+以下为 PATCH36 及更早累计内容：
 
 SQLite性能专项：材料工作台改为数据库内筛选、计数和分页，不再读取最多10万条记录后反复解析JSON；
 场景列表按条件精确查询，场景详情不再加载全部场景；质量场景看板复用一次数据快照并消除逐场景查询。
