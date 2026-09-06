@@ -134,3 +134,19 @@ def test_portrait_queries_cs_itr_database_before_existing_scenes(tmp_path):
     assert page.status_code==200
     assert '数据库命中问题' in page.text and '现场高温下模块重启' in page.text
     assert '尚无场景，AI待提炼' in page.text
+
+
+def test_portrait_choices_prioritize_scene_evidence_and_cascade_company(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    for i in range(5):
+        key=f'ITR2026122{i:04d}CS'
+        repo.add_material(repo.group('ITR-CS'),key,{'问题信息_问题描述':'未沉淀场景问题',
+            '问题信息_客户行业':'行业乙','问题信息_客户名称':'客户乙','问题信息_产品型号':'M2'},'portrait.xlsx','Sheet1',i+1)
+    client=TestClient(app)
+    page=client.get('/quality-scenario-assets/portrait')
+    assert page.status_code==200
+    # 测试行业关联了场景，尽管问题数少于行业乙，仍排在前面。
+    assert page.text.index('测试行业（场景关联') < page.text.index('行业乙（场景关联')
+    cascaded=client.get('/quality-scenario-assets/portrait?industry=行业乙').text
+    company_select=cascaded.split('name="customer"',1)[1].split('</select>',1)[0]
+    assert '客户乙' in company_select and '测试客户' not in company_select

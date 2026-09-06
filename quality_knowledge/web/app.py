@@ -253,14 +253,23 @@ def create_app(db_path):
         return RedirectResponse('/materials/itr',303)
 
     @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', year: str = '', page: int = 1):
+    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', year: str = '', industry: str = '', customer: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', product_series: str = '', page: int = 1):
         workspace=material_workbenches.get(workbench)
         if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
-        result=material_repo.search_materials(workspace['group_code'],q=q,domain=domain,month=month,year=year,page=page)
+        filters={'q':q,'domain':domain,'month':month,'year':year,'industry':industry,'customer':customer,
+                 'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series}
+        result=material_repo.search_materials(workspace['group_code'],page=page,**filters)
         return tpl.TemplateResponse(request, 'materials.html', {
             'groups': material_repo.groups(False), 'items': result['items'], 'listing':result,
-            'filters':{'q':q,'domain':domain,'month':month,'year':year},'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
+            'filters':filters,'page_query':urlencode({k:v for k,v in filters.items() if v}),
+            'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
         })
+
+    @app.get('/software-operation-distribution', response_class=HTMLResponse, include_in_schema=False)
+    def software_operation_distribution(request:Request, ipmt: str = '', spdt: str = '', product_model: str = '', product_series: str = '', year: str = '', month: str = ''):
+        filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series,'year':year,'month':month}
+        report=material_repo.software_operation_distribution(**filters)
+        return tpl.TemplateResponse(request,'software_operation_distribution.html',{'filters':filters,'report':report})
 
     @app.get('/materials/{workbench}/{material_id}', response_class=HTMLResponse, include_in_schema=False)
     def material_detail(request: Request, workbench: str, material_id: str):
@@ -292,7 +301,7 @@ def create_app(db_path):
         listing=material_repo.search_materials(group_code)
         return tpl.TemplateResponse(request, 'materials.html', {
             'groups': material_repo.groups(False), 'items': listing['items'],
-            'listing':listing,'filters':{'q':'','domain':'','month':'','year':''},
+            'listing':listing,'filters':{'q':'','domain':'','month':'','year':'','industry':'','customer':'','ipmt':'','spdt':'','product_model':'','product_series':''},'page_query':'',
             'group_code': group_code, 'result': result, 'workbench':workbench, 'workspace':workspace,
         })
 
@@ -372,11 +381,19 @@ def create_app(db_path):
         return RedirectResponse(f'/quality-scenarios/{scenario_id}/capabilities',303)
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', year: str = ''):
+    def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', product_series: str = '', industry: str = '', customer: str = '', year: str = ''):
         from quality_knowledge.scenario_sources import scene_source_records,operation_scope_counts
-        filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':'operations','ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year}
+        filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':'operations','ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series,'industry':industry,'customer':customer,'year':year}
         options=scene_source_records(scenario_generation_svc,'operations',{'product_code':product_code},metadata_only=True)
-        choices={key:sorted({x[key] for x in options if x.get(key)}) for key in ('ipmt','spdt','product_model','year')}
+        selected={key:filters.get(key,'') for key in ('industry','customer','ipmt','spdt','product_model','product_series','year')}
+        choices={}
+        for key in selected:
+            counts={}
+            for row in options:
+                if any(value and other!=key and str(row.get(other) or '')!=str(value) for other,value in selected.items()):continue
+                label=str(row.get(key) or '').strip()
+                if label:counts[label]=counts.get(label,0)+1
+            choices[key]=[{'label':label,'count':count} for label,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))]
         scope=None
         if preview:
             rows=scene_source_records(scenario_generation_svc,'operations',filters)
@@ -395,12 +412,12 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status,'decision':decision})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), year: str = Form('')):
+    def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), product_series: str = Form(''), industry: str = Form(''), customer: str = Form(''), year: str = Form('')):
         if not selected_ids:raise HTTPException(400,'SCENARIO_SOURCE_SELECTION_REQUIRED')
         if not scenario_repo.taxonomy_active(product_code):raise HTTPException(400,f'产品 {product_code} 尚未配置并激活场景词典，请先到场景词典配置中创建并激活')
         generation_id=f'QSG-{uuid.uuid4().hex}'
         from quality_knowledge.scenario_sources import scene_source_records
-        rows=scene_source_records(scenario_generation_svc,'operations',{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year,'start_month':start_month,'end_month':end_month},selected_ids)
+        rows=scene_source_records(scenario_generation_svc,'operations',{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series,'industry':industry,'customer':customer,'year':year,'start_month':start_month,'end_month':end_month},selected_ids)
         if {x['knowledge_id'] for x in rows}!=set(selected_ids):raise HTTPException(409,'选中数据已变化或不属于当前软件考核筛选范围，请重新预览')
         scenario_generation_svc.save_source_snapshot(generation_id,rows)
         scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')

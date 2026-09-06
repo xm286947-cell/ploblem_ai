@@ -229,7 +229,10 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         year,month=period(raw,material['business_key'],material.get('reporting_year'),material.get('year_source'))
         operation_context=context_from(raw)
         values={'ipmt':first(raw,'问题信息_IPMT','IPMT'),'spdt':first(raw,'问题信息_SPDT','SPDT'),
-                'product_model':first(raw,'问题信息_产品型号','产品型号'),'year':year,'month':month,
+                'product_model':first(raw,'问题信息_产品型号','产品型号'),
+                'product_series':first(raw,'问题信息_产品系列','产品系列'),
+                'industry':first(raw,'问题信息_客户行业','客户行业'),
+                'customer':first(raw,'问题信息_客户名称','客户名称'),'year':year,'month':month,
                 'problem_domain':'SOFTWARE','source_product':source_product(operation_context)}
         if any(filters.get(k) and filters[k]!=v for k,v in values.items()):continue
         if (filters.get('start_month') or filters.get('end_month')) and (month=='未知' or not service._month(filters.get('start_month') or '1')<=int(month)<=service._month(filters.get('end_month') or '12')):continue

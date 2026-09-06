@@ -90,7 +90,26 @@ def create_asset_router(repository,templates,generation=None):
                 taxonomy_labels.update({r['lifecycle_code']:r['label_zh'] for r in taxonomy['lifecycles']})
         from quality_knowledge.scenario_sources import material_scene_records
         raw_options=material_scene_records(generation,metadata_only=True) if generation else []
-        choices={key:sorted({str(x.get(key)) for x in raw_options if x.get(key)}) for key in ('industry','customer','product_model','problem_domain','source_product','year')}
+        scene_records=service.report({},assets=assets,facts=facts)['records']
+        selected={'industry':filters.get('industry',''),'customer':filters.get('customer',''),
+                  'product_model':filters.get('product',''),'problem_domain':filters.get('problem_domain','')}
+        def related_choices(key):
+            counts={}
+            for row in raw_options:
+                if any(value and other!=key and str(row.get(other) or '')!=str(value) for other,value in selected.items()):continue
+                label=str(row.get(key) or '').strip()
+                if label:counts[label]=counts.get(label,0)+1
+            scene_counts={}
+            scene_key='product' if key=='product_model' else key
+            for row in scene_records:
+                if selected['industry'] and key!='industry' and row.get('industry')!=selected['industry']:continue
+                if selected['customer'] and key!='customer' and row.get('customer')!=selected['customer']:continue
+                if selected['product_model'] and key!='product_model' and row.get('product')!=selected['product_model']:continue
+                label=str(row.get(scene_key) or '').strip()
+                if label:scene_counts.setdefault(label,set()).add(row.get('issue_key'))
+            return [{'label':label,'problem_count':count,'scene_issue_count':len(scene_counts.get(label,set()))}
+                    for label,count in sorted(counts.items(),key=lambda item:(-len(scene_counts.get(item[0],set())),-item[1],item[0]))]
+        choices={key:related_choices(key) for key in ('industry','customer','product_model')}
         market_scope=None
         if interpreter and (filters.get('industry') or filters.get('customer')):
             market_rows=interpreter.portrait_scope({**filters,'portrait_mode':'1'})

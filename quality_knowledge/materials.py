@@ -219,7 +219,7 @@ class MaterialRepository:
         sql+=" ORDER BY m.created_at DESC LIMIT ?";values.append(limit)
         with self.connect() as c:return [dict(x) for x in c.execute(sql,values)]
 
-    def search_materials(self, group_code, *, q="", domain="", month="", year="", page=1, page_size=20):
+    def search_materials(self, group_code, *, q="", domain="", month="", year="", industry="", customer="", ipmt="", spdt="", product_model="", product_series="", page=1, page_size=20):
         def first_json(*keys):
             parts=[f"NULLIF(TRIM(CAST(json_extract(m.raw_json, '$.\"{key}\"') AS TEXT)),'')" for key in keys]
             return "COALESCE("+",".join(parts)+")"
@@ -228,6 +228,14 @@ class MaterialRepository:
         file_year_expr=first_json("数据运营_KPI计入年份","数据运营_KPI计入年度","KPI计入年份","考核年份")
         product_expr=first_json("问题信息_产品型号","问题信息_产品类型","产品型号","产品类型")
         domain_expr=first_json("问题信息_问题领域","问题领域","问题信息_产品类型","产品类型")
+        dimension_exprs={
+            'industry':first_json('问题信息_客户行业','客户行业'),
+            'customer':first_json('问题信息_客户名称','客户名称'),
+            'ipmt':first_json('问题信息_IPMT','IPMT'),
+            'spdt':first_json('问题信息_SPDT','SPDT'),
+            'product_model':first_json('问题信息_产品型号','产品型号'),
+            'product_series':first_json('问题信息_产品系列','产品系列'),
+        }
         itr_year_expr="CASE WHEN UPPER(m.business_key) GLOB 'ITR20[0-9][0-9]*' THEN SUBSTR(UPPER(m.business_key),4,4) END"
         kpi_month_year_expr=f"CASE WHEN INSTR({month_expr},'20')>0 THEN SUBSTR({month_expr},INSTR({month_expr},'20'),4) END"
         year_expr=f"CASE WHEN y.year_source IN ('BATCH_MANUAL','IMPORT_MANUAL') THEN NULLIF(TRIM(y.reporting_year),'') ELSE COALESCE({kpi_month_year_expr},{file_year_expr},NULLIF(TRIM(y.reporting_year),''),{itr_year_expr}) END"
@@ -242,20 +250,47 @@ class MaterialRepository:
             where.append(f"COALESCE({month_expr},'-')=?");values.append(month)
         if year:
             where.append(f"COALESCE({year_expr},'-')=?");values.append(year)
+        dimension_filters={'industry':industry,'customer':customer,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series}
+        for key,value in dimension_filters.items():
+            if value:
+                where.append(f"COALESCE({dimension_exprs[key]},'')=?");values.append(value)
         where_sql=" WHERE "+" AND ".join(where)
         page=max(1,int(page));page_size=max(1,min(100,int(page_size)));offset=(page-1)*page_size
         select="SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source"
-        facet_sql=f"SELECT DISTINCT COALESCE({domain_expr},'未分类') domain,COALESCE({month_expr},'-') month,COALESCE({year_expr},'-') year"+base+" WHERE g.group_code=?"
+        facet_sql="SELECT m.material_id,m.canonical_itr,m.business_key,"+','.join([
+            f"COALESCE({domain_expr},'未分类') domain",f"COALESCE({month_expr},'-') month",f"COALESCE({year_expr},'-') year",
+            *[f"COALESCE({expr},'') {key}" for key,expr in dimension_exprs.items()]])+base+" WHERE g.group_code=?"
         with self.connect() as c:
             total=c.execute("SELECT COUNT(*)"+base+where_sql,values).fetchone()[0]
             rows=c.execute(select+base+where_sql+" ORDER BY m.created_at DESC,m.material_id LIMIT ? OFFSET ?",[*values,page_size,offset]).fetchall()
-            facets=c.execute(facet_sql,(group_code,)).fetchall()
+            facets=[dict(row) for row in c.execute(facet_sql,(group_code,))]
         items=[_material_view(dict(row)) for row in rows]
+        all_filters={'domain':domain,'month':month,'year':year,**dimension_filters}
+        def related_options(key):
+            counts={}
+            for row in facets:
+                if any(value and other!=key and str(row.get(other) or '')!=str(value) for other,value in all_filters.items()):continue
+                label=str(row.get(key) or '').strip()
+                if not label or label=='-':continue
+                issue=normalize_itr(row.get('canonical_itr') or row.get('business_key')) or row['material_id']
+                counts.setdefault(label,set()).add(issue)
+            return [{'label':label,'count':len(ids)} for label,ids in sorted(counts.items(),key=lambda item:(-len(item[1]),item[0]))]
+        month_options=related_options('month');month_options.sort(key=lambda row:row['label'],reverse=True)
+        year_options=related_options('year');year_options.sort(key=lambda row:row['label'],reverse=True)
         return {"items":items,"total":total,"page":page,"page_size":page_size,
                 "pages":max(1,(total+page_size-1)//page_size),
-                "domains":sorted({row['domain'] for row in facets if row['domain']}),
-                "months":sorted({row['month'] for row in facets if row['month']!='-'},reverse=True),
-                "years":sorted({row['year'] for row in facets if row['year']!='-'},reverse=True)}
+                "domains":[x['label'] for x in related_options('domain')],
+                "months":[x['label'] for x in month_options],
+                "years":[x['label'] for x in year_options],
+                "options":{key:related_options(key) for key in dimension_exprs}}
+
+    def software_operation_distribution(self, *, ipmt='', spdt='', product_model='', product_series='', year='', month=''):
+        """Top customer/industry distribution under one associated software-operation scope."""
+        scoped=self.search_materials('SW-OPS',ipmt=ipmt,spdt=spdt,product_model=product_model,
+            product_series=product_series,year=year,month=month,page=1,page_size=1)
+        return {'total':scoped['total'],'industries':scoped['options']['industry'][:10],
+                'customers':scoped['options']['customer'][:10],'options':scoped['options'],
+                'years':scoped['years'],'months':scoped['months']}
 
     def material(self, material_id):
         with self.connect() as c:

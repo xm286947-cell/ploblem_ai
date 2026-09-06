@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH39_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH40_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -43,6 +43,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/PATCH37_MISSING_MODULE_HOTFIX.md",
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_PATCH38_DELIVERY.md",
     "docs/requirements/DIRECT_DATABASE_PORTRAIT_PATCH39_DELIVERY.md",
+    "docs/requirements/ASSOCIATED_FILTERS_TOP10_PATCH40_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -108,7 +109,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH39 累计升级说明
+    readme = """# PATCH40 累计升级说明
+
+客户／行业画像的行业、公司和产品型号改为关联筛选；行业与公司双向约束，选项优先按已有
+质量场景关联问题数排序，再按数据库问题数排序。软件考核工作台及AI候选页新增行业、客户、
+IPMT、SPDT、产品型号、产品系列、年份和月份的关联筛选，禁止拼出数据库中不存在的组合。
+新增关键行业／客户Top10看板，可按业务、SPDT、型号、系列和年月限定范围并下钻问题清单。
+
+以下为 PATCH39 及更早累计内容：
 
 修复AI候选和客户／行业画像取数范围。软件候选只由软件考核工作台最新有效记录决定，
 页面显示原始记录、去重问题、历史版本和当前筛选命中数用于直接对账。彻底解决单、ITR与
