@@ -89,7 +89,8 @@ def create_asset_router(repository,templates,generation=None):
                 taxonomy_labels.update({r['activity_code']:r['label_zh'] for r in taxonomy['activities']})
                 taxonomy_labels.update({r['lifecycle_code']:r['label_zh'] for r in taxonomy['lifecycles']})
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
-            'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels})
+            'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
+            'interpretation':interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None})
 
     @router.get('/quality-scenario-assets/{sid}')
     def detail(request:Request,sid:str):

@@ -100,3 +100,22 @@ def test_stop_prevents_late_result_and_allows_retry(tmp_path,monkeypatch):
     service.update(jid,status='COMPLETED',result_json='{}')
     assert service.get(jid)['status']=='FAILED'
     assert service.start({})!=jid
+
+
+def test_portrait_market_supplement_requires_scope_and_runs_one_issue_per_chunk(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    key='ITR20250909099CS'
+    repo.add_material(repo.group('ITR-CS'),key,{'问题信息_问题描述':'高温现场运行后器件异常','问题信息_客户行业':'锂电',
+        '问题信息_客户名称':'客户甲','问题信息_产品型号':'H3U','问题信息_问题领域':'硬件',
+        '技术根因分析与纠正_器件类别':'电容','技术根因分析与纠正_器件失效模式':'容量衰减'},'supplement.xlsx','Sheet1',1)
+    with pytest.raises(ValueError,match='必须先指定行业或客户'):
+        service.snapshot({'supplement_market':'1','portrait_mode':'1'})
+    filters,records,_=service.snapshot({'industry':'锂电','supplement_market':'1','problem_domain':'HARDWARE','portrait_mode':'1'})
+    assert filters['portrait_mode']=='1' and len(records)==1
+    assert records[0]['evidence_mode']=='MARKET_PROBLEM_SUPPLEMENT' and records[0]['product']=='H3U'
+    fake=FakeClient();service.client=fake
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
+    jid=service.start(filters)
+    job=service.get(jid)
+    assert job['status']=='COMPLETED' and fake.calls==1
+    assert len(job['chunks'])==1 and job['chunks'][0]['chunk_type']=='单问题补充提取'

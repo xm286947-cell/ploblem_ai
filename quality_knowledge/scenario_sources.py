@@ -160,6 +160,7 @@ def material_scene_records(service, filters=None, selected_ids=None, metadata_on
         linked_products={str(x.get('issue_product') or '').strip() for x in linked_issues}-{''}
         if not actual_product and len(linked_products)==1:actual_product=linked_products.pop()
         values={key:context.get(key,'') for key in ('ipmt','spdt','product_model')}
+        values.update({'industry':context.get('customer_industry',''),'customer':context.get('customer_name','')})
         values.update({'year':year,'month':month,'problem_domain':problem_domain,'source_product':actual_product})
         if any(filters.get(key) and str(filters[key])!=str(value) for key,value in values.items()):continue
         if (filters.get('start_month') or filters.get('end_month')) and (month=='未知' or not service._month(filters.get('start_month') or '1')<=int(month)<=service._month(filters.get('end_month') or '12')):continue

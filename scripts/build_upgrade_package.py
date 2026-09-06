@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH37_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH38_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -41,6 +41,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/QUALITY_SCENARIO_ENTRY_CONVERGENCE_PATCH35_DELIVERY.md",
     "docs/requirements/SQLITE_PERFORMANCE_PATCH36_DELIVERY.md",
     "docs/requirements/PATCH37_MISSING_MODULE_HOTFIX.md",
+    "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_PATCH38_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -106,7 +107,15 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH37 累计升级说明
+    readme = """# PATCH38 累计升级说明
+
+客户/行业质量场景画像升级为两种人工触发模式：优先基于已有场景资产生成；覆盖不足时，
+必须先指定行业或客户，再从CS/ITR市场问题按需补充。补充证据显式标记为AI画像推断，
+不自动写入正式场景库。支持软件、硬件、机械及源产品范围限制。
+市场问题补充严格一问题一次模型调用，再按上下文预算分层归并；保存分批处理台账，
+最终结果必须覆盖或明确列出全部输入问题，禁止部分完成冒充成功。
+
+以下为 PATCH37 及更早累计内容：
 
 修复 PATCH36 覆盖升级后部分旧安装目录缺少 `quality_knowledge.issue_period` 模块而无法启动的问题。
 本包显式携带问题年月解析模块；无需修改 Python、BAT 或数据库配置，可直接覆盖 PATCH36。
