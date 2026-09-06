@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH32_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH33_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -36,6 +36,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/SOL_DEVELOPMENT_HANDOFF.md",
     "docs/requirements/QUALITY_SCENARIO_PORTRAIT_PATCH31_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_INCREMENTAL_UPDATE_PATCH32_DELIVERY.md",
+    "docs/requirements/QUALITY_SCENARIO_CLEANUP_PATCH33_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/scenarios.py",
@@ -99,7 +100,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH32 累计升级说明
+    readme = """# PATCH33 累计升级说明
+
+质量场景库新增按当前筛选范围一键清理未发布 AI 候选；已发布、人工确认和人工新建场景受保护。
+AI 生成页支持删除单条任务记录或清空全部已结束记录，运行任务受保护；删除任务记录不删除场景资产。
+删除动作同步清理关联账本和残留引用，均有二次确认与结果提示。
+
+以下为 PATCH32 及更早累计内容：
 
 本轮补齐 ITR 到彻底解决单的增量增强流程：只有 ITR 时可先形成候选；同号彻底解决单后续到达，
 人工再次生成会增强原候选、保留同一场景编号和前后证据，并在任务账本显示“已增强原候选”。
