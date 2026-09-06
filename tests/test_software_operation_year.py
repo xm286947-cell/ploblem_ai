@@ -6,16 +6,16 @@ from quality_knowledge.web.app import create_app
 from test_itr_cs_material_mvp import operations_workbook
 
 
-def test_year_defaults_from_itr_and_import_override_wins(tmp_path):
+def test_kpi_year_precedes_itr_and_import_override_wins(tmp_path):
     assert year_from_itr('ITR20250605084CS') == '2025'
     source=tmp_path/'ops.xlsx';operations_workbook(source,'ITR20250605084CS')
     repo=MaterialRepository(tmp_path/'default.db')
     MaterialImportService(repo).import_file(source,'SW-OPS',2)
     item=repo.search_materials('SW-OPS')['items'][0]
-    assert item['year']=='2025' and item['year_source']=='ITR编号默认'
+    assert item['year']=='2026' and item['year_source']=='KPI计入月份'
     repo.add_material(repo.group('SW-OPS'),'ITR20241200001CS',{'数据运营_KPI计入年份':'2026'},'synthetic.xlsx','Sheet',4)
     parsed=next(x for x in repo.search_materials('SW-OPS')['items'] if x['business_key'].startswith('ITR2024'))
-    assert parsed['year']=='2024' and parsed['year_source']=='ITR编号默认'
+    assert parsed['year']=='2026' and parsed['year_source']=='原始文件'
 
     other=MaterialRepository(tmp_path/'manual.db')
     MaterialImportService(other).import_file(source,'SW-OPS',2,reporting_year='2027')
@@ -28,7 +28,7 @@ def test_batch_year_updates_workbench_and_scenario_period_without_changing_raw(t
     source=tmp_path/'ops.xlsx';operations_workbook(source,'ITR20250605084CS')
     with source.open('rb') as stream:
         response=client.post('/materials/import',data={'workbench':'software-operations','group_code':'SW-OPS','header_rows':'2'},files={'file':('ops.xlsx',stream,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')})
-    assert response.status_code==200 and 'ITR编号默认' in response.text and '2025' in response.text
+    assert response.status_code==200 and 'KPI计入月份' in response.text and '2026' in response.text
     item=repo.search_materials('SW-OPS')['items'][0];original=dict(item['raw'])
     changed=client.post('/materials/software-operations/batch-year',data={'material_ids':item['material_id'],'reporting_year':'2028'},follow_redirects=False)
     assert changed.status_code==303 and changed.headers['location'].endswith('year=2028')
@@ -43,6 +43,19 @@ def test_batch_year_updates_workbench_and_scenario_period_without_changing_raw(t
     # Reimporting without an explicit year must not erase a later manual correction.
     MaterialImportService(repo).import_file(source,'SW-OPS',2)
     assert repo.material(item['material_id'])['year']=='2028'
+
+
+def test_legacy_auto_itr_year_does_not_hide_explicit_kpi_year(tmp_path):
+    app=create_app(tmp_path/'legacy.db');repo=app.state.material_repository
+    key='ITR20250202001CS'
+    material_id,_=repo.add_material(repo.group('SW-OPS'),key,{
+        '问题信息_彻底解决单号':key,'问题信息_SPDT':'中小型PLC SPDT',
+        '数据运营_KPI计入月份':'2026-02','问题信息_问题描述':'历史考核问题'},'legacy.xlsx','Sheet1',1)
+    repo.set_reporting_year([material_id],'2025',source='AUTO_ITR')
+    assert repo.material(material_id)['year']=='2026'
+    assert repo.search_materials('SW-OPS',year='2026')['total']==1
+    rows=operation_records(app.state.scenario_generation_service,{'spdt':'中小型PLC SPDT','year':'2026'})
+    assert len(rows)==1 and rows[0]['year']=='2026'
 
 
 def test_year_validation_and_group_isolation(tmp_path):

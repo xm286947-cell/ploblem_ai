@@ -55,6 +55,8 @@ class ScenarioInterpretation:
 
     def snapshot(self,filters):
         filters={k:str(filters[k]) for k in FILTERS if filters.get(k)}
+        if filters.get('portrait_mode')=='1':
+            return self._portrait_snapshot(filters)
         report_filters={k:v for k,v in filters.items() if k in REPORT_FILTERS}
         report=self.assets.report(report_filters);facts=self.assets.facts();by_id={};analyses={}
         for row in report['records']:
@@ -104,6 +106,60 @@ class ScenarioInterpretation:
                     'field_evidence':{key:value for key,value in (row.get('field_evidence') or {}).items() if key in ('ipmt','spdt','product_model','customer_industry','customer_name','customer_level','customer_status','occurrence_phase','root_cause','trc_correction','trc_root_cause','solution','symptom','failure_frequency','used_duration','component_category','component_failure_mode','component_failure_mechanism')},
                     'evidence_mode':'MARKET_PROBLEM_SUPPLEMENT','scenarios':[]}
         records=sorted(by_id.values(),key=lambda x:(x['evidence_mode'],x['id']))
+        return filters,records,digest({'prompt':PROMPT,'records':records})
+
+    def portrait_scope(self,filters):
+        clean={k:str(filters[k]) for k in FILTERS if filters.get(k)}
+        return self._portrait_snapshot(clean,include_analysis=False)[1]
+
+    def _portrait_snapshot(self,filters,include_analysis=True):
+        """Portrait scope comes from CS/ITR rows; scenarios only enrich matches."""
+        if not filters.get('industry') and not filters.get('customer'):
+            raise ValueError('生成行业/客户画像时，必须先指定行业或客户，避免无边界扫描')
+        source_filters={k:filters[k] for k in ('industry','customer','problem_domain','source_product') if filters.get(k)}
+        if filters.get('product'):source_filters['product_model']=filters['product']
+        candidates=material_scene_records(self.generation,source_filters,include_analysis=include_analysis)
+        if filters.get('period'):
+            grain=filters.get('grain','quarter')
+            def period_label(row):
+                year=str(row.get('year') or '');month=str(row.get('month') or '')
+                if not year.isdigit() or not month.isdigit() or not 1<=int(month)<=12:return '未知时间'
+                number=int(month)
+                return year if grain=='year' else f'{year} H{(number-1)//6+1}' if grain=='half' else f'{year} Q{(number-1)//3+1}'
+            candidates=[row for row in candidates if period_label(row)==filters['period']]
+
+        scenario_by_itr={};scenario_lookup={}
+        for asset in self.assets.catalog():
+            for member in asset.get('members',[]):
+                scenario_lookup[member.get('scenario_id')]={
+                    'asset_id':asset.get('scenario_id'),'name':asset.get('name'),
+                    'business':asset.get('product_code'),'activity':member.get('activity_code'),
+                    'lifecycle':member.get('lifecycle_code'),'concern':member.get('concern_points'),
+                    'quality':member.get('quality_attribute')}
+        with self.repo.connect() as c:
+            rows=c.execute('''SELECT e.scenario_id,e.knowledge_id,
+                        COALESCE(m.canonical_itr,q.business_issue_id,'') AS business_issue_id
+                    FROM quality_scenario_evidence e
+                    LEFT JOIN source_material m ON m.material_id=e.knowledge_id
+                    LEFT JOIN quality_issue q ON q.knowledge_id=e.knowledge_id''')
+            for evidence in rows:
+                canonical=normalize_itr(evidence['business_issue_id'])
+                scene=scenario_lookup.get(evidence['scenario_id'])
+                if canonical and scene and scene not in scenario_by_itr.setdefault(canonical,[]):
+                    scenario_by_itr[canonical].append(scene)
+        records=[]
+        for row in candidates:
+            context=row.get('itr_cs_context') or {};canonical=normalize_itr(row.get('canonical_itr') or row.get('business_issue_id'))
+            scenarios=scenario_by_itr.get(canonical,[])
+            records.append({'id':row['knowledge_id'],'number':row.get('business_issue_id') or row['knowledge_id'],
+                'description':row.get('description') or row.get('title') or '',
+                'industry':row.get('industry') or context.get('customer_industry'),'customer':row.get('customer') or context.get('customer_name'),
+                'product':row.get('product_model'),'year':row.get('year'),'month':row.get('month'),
+                'root_cause':(row.get('occurrence') or {}).get('root_cause'),'escape_reason':(row.get('escape') or {}).get('reason'),
+                'problem_domain':row.get('problem_domain'),'source_status':row.get('source_status'),'source_warnings':row.get('source_warnings') or [],
+                'field_evidence':row.get('field_evidence') or {},
+                'evidence_mode':'EXISTING_SCENARIO' if scenarios else 'MARKET_PROBLEM_SUPPLEMENT','scenarios':scenarios})
+        records=sorted(records,key=lambda x:(x['evidence_mode'],x['id']))
         return filters,records,digest({'prompt':PROMPT,'records':records})
 
     def latest(self,filters):
@@ -180,9 +236,10 @@ class ScenarioInterpretation:
             if client is None:
                 cfg,_=load_quality_issue_ai_config(self.generation.root,agent_id='DEFAULT')
                 client=OpenAICompatibleClient({**cfg,'max_tokens':int(cfg.get('scenario_interpretation_max_tokens') or 8192),'temperature':0})
-            supplemental=[[row] for row in records if row.get('evidence_mode')=='MARKET_PROBLEM_SUPPLEMENT']
-            established=self.batches([row for row in records if row.get('evidence_mode')!='MARKET_PROBLEM_SUPPLEMENT'])
-            batches=supplemental+established;outputs=[];models=set()
+            # One source problem per call prevents a large portrait scope from
+            # silently losing records at the model context boundary.
+            batches=[[row] for row in records] if job['filters'].get('portrait_mode')=='1' else self.batches(records)
+            outputs=[];models=set()
             for i,batch in enumerate(batches):
                 if self.get(jid)['status']!='RUNNING':return
                 kind='单问题补充提取' if batch[0].get('evidence_mode')=='MARKET_PROBLEM_SUPPLEMENT' else '已有场景证据汇总'

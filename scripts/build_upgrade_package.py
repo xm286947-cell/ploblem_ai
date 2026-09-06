@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH38_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH39_20260906"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -42,6 +42,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/SQLITE_PERFORMANCE_PATCH36_DELIVERY.md",
     "docs/requirements/PATCH37_MISSING_MODULE_HOTFIX.md",
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_PATCH38_DELIVERY.md",
+    "docs/requirements/DIRECT_DATABASE_PORTRAIT_PATCH39_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -107,7 +108,18 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH38 累计升级说明
+    readme = """# PATCH39 累计升级说明
+
+修复AI候选和客户／行业画像取数范围。软件候选只由软件考核工作台最新有效记录决定，
+页面显示原始记录、去重问题、历史版本和当前筛选命中数用于直接对账。彻底解决单、ITR与
+漏测分析只补充证据，不再缩小选题范围。
+修复考核年份错误缩量：人工设置年份优先，其次采用KPI计入月份中的年份，再读取文件年份，
+只有这些信息都缺失时才从ITR编号兜底。旧数据无需重导即可按新口径查询。
+客户／行业画像按所选行业、公司、产品型号和问题领域直接查询CS／ITR数据库；已有场景只
+标记“已沉淀”，不再决定问题能否进入画像。画像对数据库命中的每个问题独立解析后再分层
+归并，并校验最终覆盖，防止上下文限制导致部分问题被静默遗漏。
+
+以下为 PATCH38 及更早累计内容：
 
 客户/行业质量场景画像升级为两种人工触发模式：优先基于已有场景资产生成；覆盖不足时，
 必须先指定行业或客户，再从CS/ITR市场问题按需补充。补充证据显式标记为AI画像推断，

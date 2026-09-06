@@ -59,7 +59,8 @@ def test_http_forms_and_matrix_routes(tmp_path):
     portrait=client.get('/quality-scenario-assets/portrait')
     assert portrait.status_code==200 and '客户 / 行业质量场景画像' in portrait.text
     assert '不虚构系统拓扑' in portrait.text
-    assert '基于已有场景生成画像解读' in portrait.text and '从市场问题补充画像' in portrait.text
+    assert '分析当前数据库问题并生成画像' in portrait.text
+    assert '画像范围直接查询彻底解决单/ITR数据库' in portrait.text
     assert client.get('/quality-scenario-assets?x=invalid').status_code==400
     response=client.post(f'/quality-scenario-assets/{a}/ungroup',data={'member_ids':b})
     assert response.status_code==200 and len(s.catalog())==2

@@ -81,6 +81,19 @@ def validate_reporting_year(value: Any) -> str:
     return year
 
 
+def effective_reporting_year(raw: dict[str, Any], business_key: Any, reporting_year: Any = "", year_source: Any = "") -> str:
+    """Software KPI year: manual override > KPI date > file year > ITR fallback."""
+    stored=_clean(reporting_year);source=_clean(year_source)
+    if stored and source in {"BATCH_MANUAL", "IMPORT_MANUAL"}:
+        return stored
+    kpi_month=_first(raw, "数据运营_KPI计入月份", "KPI计入月份")
+    dated=re.search(r"(20\d{2})\s*(?:年|[-/.])", kpi_month)
+    if dated:
+        return dated.group(1)
+    file_year=_first(raw, "数据运营_KPI计入年份", "数据运营_KPI计入年度", "KPI计入年份", "考核年份")
+    return file_year or stored or year_from_itr(business_key)
+
+
 def combine_headers(parent_row, child_row) -> list[str]:
     result, parent = [], ""
     width = max(len(parent_row or ()), len(child_row or ()))
@@ -110,11 +123,13 @@ def _material_view(row: dict[str, Any]) -> dict[str, Any]:
     item["raw"] = raw
     item["title"] = _first(raw, "问题信息_问题主题", "问题信息_问题描述", "问题主题", "问题描述") or "未提供问题描述"
     item["month"] = _first(raw, "数据运营_KPI计入月份", "问题信息_创建月份", "创建月份") or "-"
-    file_year = _first(raw, "数据运营_KPI计入年份", "数据运营_KPI计入年度", "KPI计入年份", "考核年份")
     itr_year = year_from_itr(item.get("business_key"))
-    item["year"] = _clean(item.get("reporting_year")) or itr_year or file_year or "-"
+    item["year"] = effective_reporting_year(raw,item.get("business_key"),item.get("reporting_year"),item.get("year_source")) or "-"
     source_labels={"BATCH_MANUAL":"批量人工设置","IMPORT_MANUAL":"导入时人工设置","IMPORT_FILE":"原始文件","AUTO_ITR":"ITR编号默认"}
-    item["year_source"] = source_labels.get(_clean(item.get("year_source")),_clean(item.get("year_source"))) or ("ITR编号默认" if itr_year else "原始文件" if file_year else "未设置")
+    kpi_dated=re.search(r"(20\d{2})\s*(?:年|[-/.])",item["month"])
+    file_year=_first(raw,"数据运营_KPI计入年份","数据运营_KPI计入年度","KPI计入年份","考核年份")
+    stored_source=_clean(item.get("year_source"))
+    item["year_source"] = source_labels.get(stored_source,stored_source) if stored_source in {"BATCH_MANUAL","IMPORT_MANUAL"} else "KPI计入月份" if kpi_dated else "原始文件" if file_year else source_labels.get(stored_source,stored_source) or ("ITR编号默认" if itr_year else "未设置")
     item["product"] = _first(raw, "问题信息_产品型号", "问题信息_产品类型", "产品型号", "产品类型") or "-"
     item["domain"] = _first(raw, "问题信息_问题领域", "问题领域", "问题信息_产品类型", "产品类型") or "未分类"
     item["severity"] = _first(raw, "问题信息_问题等级", "问题等级") or "-"
@@ -214,7 +229,8 @@ class MaterialRepository:
         product_expr=first_json("问题信息_产品型号","问题信息_产品类型","产品型号","产品类型")
         domain_expr=first_json("问题信息_问题领域","问题领域","问题信息_产品类型","产品类型")
         itr_year_expr="CASE WHEN UPPER(m.business_key) GLOB 'ITR20[0-9][0-9]*' THEN SUBSTR(UPPER(m.business_key),4,4) END"
-        year_expr=f"COALESCE(NULLIF(TRIM(y.reporting_year),''),{itr_year_expr},{file_year_expr})"
+        kpi_month_year_expr=f"CASE WHEN INSTR({month_expr},'20')>0 THEN SUBSTR({month_expr},INSTR({month_expr},'20'),4) END"
+        year_expr=f"CASE WHEN y.year_source IN ('BATCH_MANUAL','IMPORT_MANUAL') THEN NULLIF(TRIM(y.reporting_year),'') ELSE COALESCE({kpi_month_year_expr},{file_year_expr},NULLIF(TRIM(y.reporting_year),''),{itr_year_expr}) END"
         base=" FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
         where=["g.group_code=?"];values=[group_code]
         if q:
@@ -337,8 +353,10 @@ class MaterialImportService:
                     material_id,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
                     if group["material_type"]=="SOFTWARE_OPERATION":
                         file_year=_first(raw,"数据运营_KPI计入年份","数据运营_KPI计入年度","KPI计入年份","考核年份")
-                        itr_year=year_from_itr(key);effective=reporting_year or itr_year or file_year
-                        if effective:self.repository.set_reporting_year([material_id],effective,source="IMPORT_MANUAL" if reporting_year else "AUTO_ITR" if itr_year else "IMPORT_FILE",preserve_manual=not bool(reporting_year))
+                        kpi_year=effective_reporting_year(raw,key)
+                        itr_year=year_from_itr(key);effective=reporting_year or kpi_year
+                        source="IMPORT_MANUAL" if reporting_year else "IMPORT_FILE" if (kpi_year and kpi_year!=itr_year) or file_year else "AUTO_ITR"
+                        if effective:self.repository.set_reporting_year([material_id],effective,source=source,preserve_manual=not bool(reporting_year))
         finally:
             workbook.close()
         self.repository.refresh_links()

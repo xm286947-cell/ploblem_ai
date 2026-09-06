@@ -119,3 +119,18 @@ def test_portrait_market_supplement_requires_scope_and_runs_one_issue_per_chunk(
     job=service.get(jid)
     assert job['status']=='COMPLETED' and fake.calls==1
     assert len(job['chunks'])==1 and job['chunks'][0]['chunk_type']=='单问题补充提取'
+
+
+def test_portrait_queries_cs_itr_database_before_existing_scenes(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    key='ITR20261212001CS'
+    repo.add_material(repo.group('ITR-CS'),key,{'问题信息_问题描述':'现场高温下模块重启',
+        '问题信息_客户行业':'锂电','问题信息_客户名称':'客户乙','问题信息_产品型号':'H5U',
+        '问题信息_问题领域':'硬件'},'portrait.xlsx','Sheet1',1)
+    filters,records,_=service.snapshot({'industry':'锂电','customer':'客户乙','portrait_mode':'1'})
+    assert len(records)==1 and records[0]['number']==key
+    assert records[0]['evidence_mode']=='MARKET_PROBLEM_SUPPLEMENT'
+    page=TestClient(app).get('/quality-scenario-assets/portrait?industry=锂电&customer=客户乙')
+    assert page.status_code==200
+    assert '数据库命中问题' in page.text and '现场高温下模块重启' in page.text
+    assert '尚无场景，AI待提炼' in page.text

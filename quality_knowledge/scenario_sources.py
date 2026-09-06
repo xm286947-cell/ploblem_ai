@@ -2,7 +2,7 @@
 import json
 import re
 from collections import defaultdict
-from quality_knowledge.materials import normalize_itr, year_from_itr
+from quality_knowledge.materials import normalize_itr, year_from_itr, effective_reporting_year
 
 LABELS = {'LEAKAGE':'有漏测分析', 'PARTIAL':'漏测分析不完整，已补充彻底解决单',
           'CS_ONLY':'无漏测分析，基于彻底解决单', 'ITR_ONLY':'仅有ITR现场信息，根因待确认',
@@ -51,11 +51,11 @@ CONTEXT_ALIASES = {
 def first(raw, *keys):
     return next((str(raw[k]).strip() for k in keys if raw.get(k) not in (None, '', [], {})), '')
 
-def period(raw):
+def period(raw,business_key='',reporting_year='',year_source=''):
     value=first(raw,'数据运营_KPI计入月份','KPI计入月份')
-    year=first(raw,'数据运营_KPI计入年份','数据运营_KPI计入年度','KPI计入年份','考核年份')
+    year=effective_reporting_year(raw,business_key,reporting_year,year_source) or '未知'
     dated=re.search(r'(20\d{2})\s*(?:年|[-/.])\s*(\d{1,2})',value)
-    if dated:return year or dated[1],str(int(dated[2]))
+    if dated:return year,str(int(dated[2]))
     month=re.fullmatch(r'\s*(\d{1,2})\s*月?\s*',value)
     return year or '未知', str(int(month[1])) if month and 1<=int(month[1])<=12 else '未知'
 
@@ -124,7 +124,7 @@ def _analyses(service, matches, product_code=''):
             if latest.get('result'):analyses[stage]=latest['result']
     return issue,analyses
 
-def material_scene_records(service, filters=None, selected_ids=None, metadata_only=False):
+def material_scene_records(service, filters=None, selected_ids=None, metadata_only=False, include_analysis=True):
     """One controlled scene input per canonical ITR; CS facts win, ITR only fills gaps."""
     filters=filters or {};selected=set(selected_ids or [])
     rows=_latest_materials(service,('ITR_CS','ITR_SOURCE'))
@@ -165,7 +165,7 @@ def material_scene_records(service, filters=None, selected_ids=None, metadata_on
         if any(filters.get(key) and str(filters[key])!=str(value) for key,value in values.items()):continue
         if (filters.get('start_month') or filters.get('end_month')) and (month=='未知' or not service._month(filters.get('start_month') or '1')<=int(month)<=service._month(filters.get('end_month') or '12')):continue
         if metadata_only:records.append(values);continue
-        issue,analyses=_analyses(service,linked_issues,filters.get('product_code',''))
+        issue,analyses=_analyses(service,linked_issues,filters.get('product_code','')) if include_analysis else (linked_issues[0] if len(linked_issues)==1 else None,{})
         root=service._value(analyses.get('occurrence',{}),'root_cause_summary','root_cause')
         escape=service._value(analyses.get('escape',{}),'escape_cause_summary','escape_reason')
         facts=cs_raw or itr_raw
@@ -197,19 +197,36 @@ def scene_source_records(service, source='operations', filters=None, selected_id
 def operation_records(service, filters=None, selected_ids=None, metadata_only=False):
     filters=filters or {}; selected=set(selected_ids or [])
     with service.scenarios.connect() as c:
-        materials=[dict(r) for r in c.execute("SELECT m.*,y.reporting_year FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id WHERE m.material_type='ITR_CS' OR (m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS') ORDER BY m.version_no DESC,m.created_at DESC,m.material_id")]
+        # Selection is deliberately driven only by the software-operation workbench.
+        # CS/ITR and issue analyses enrich the selected rows later and must never
+        # reduce the number of selectable operation issues.
+        materials=[dict(r) for r in c.execute('''WITH ranked AS (
+                SELECT m.*,y.reporting_year,y.year_source,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY m.group_id,COALESCE(NULLIF(m.canonical_itr,''),m.business_key)
+                         ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC
+                       ) AS rn
+                FROM source_material m
+                JOIN data_group g ON g.group_id=m.group_id
+                LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id
+                WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'
+            ) SELECT * FROM ranked WHERE rn=1 ORDER BY business_key,material_id''')]
         issues=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
     latest={}; cs=defaultdict(list); index=defaultdict(list)
-    for row in materials:latest.setdefault((row['material_type'],row['group_id'],normalize_itr(row['business_key'])),row)
-    for row in latest.values():
-        if row['material_type']=='ITR_CS':cs[normalize_itr(row['business_key'])].append(row)
+    for row in materials:latest[(row['material_type'],row['group_id'],normalize_itr(row['business_key']))]=row
     for row in issues:index[normalize_itr(row['business_issue_id'])].append(row)
+    # Metadata/choices and filtered counts need no CS join.  For the full rows,
+    # load latest CS records separately so a missing/conflicting CS cannot hide
+    # a software-operation record.
+    if not metadata_only:
+        for row in _latest_materials(service,('ITR_CS',)):
+            cs[normalize_itr(row['business_key'])].append(row)
     records=[]
     for material in latest.values():
         if material['material_type']!='SOFTWARE_OPERATION' or (selected and material['material_id'] not in selected):continue
         raw=json.loads(material['raw_json'])
         if material.get('reporting_year'):raw['数据运营_KPI计入年份']=material['reporting_year']
-        year,month=period(raw)
+        year,month=period(raw,material['business_key'],material.get('reporting_year'),material.get('year_source'))
         operation_context=context_from(raw)
         values={'ipmt':first(raw,'问题信息_IPMT','IPMT'),'spdt':first(raw,'问题信息_SPDT','SPDT'),
                 'product_model':first(raw,'问题信息_产品型号','产品型号'),'year':year,'month':month,
@@ -260,3 +277,12 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
             'source_hashes':sorted([material['source_hash']]+([source['source_hash']] if source else [])),
             'source_material_ids':[material['material_id']]+([source['material_id']] if source else [])})
     return records
+
+def operation_scope_counts(service, filters=None):
+    """Transparent counts for reconciling workbench rows with AI selection."""
+    filters=filters or {}
+    with service.scenarios.connect() as c:
+        raw=c.execute("SELECT COUNT(*) FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'").fetchone()[0]
+        distinct=c.execute("SELECT COUNT(DISTINCT m.group_id||'|'||COALESCE(NULLIF(m.canonical_itr,''),m.business_key)) FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'").fetchone()[0]
+    matched=len(operation_records(service,filters,metadata_only=True))
+    return {'raw_count':raw,'distinct_issue_count':distinct,'matched_count':matched,'version_count':max(0,raw-distinct)}

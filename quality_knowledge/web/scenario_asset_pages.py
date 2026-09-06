@@ -88,8 +88,19 @@ def create_asset_router(repository,templates,generation=None):
             if taxonomy:
                 taxonomy_labels.update({r['activity_code']:r['label_zh'] for r in taxonomy['activities']})
                 taxonomy_labels.update({r['lifecycle_code']:r['label_zh'] for r in taxonomy['lifecycles']})
+        from quality_knowledge.scenario_sources import material_scene_records
+        raw_options=material_scene_records(generation,metadata_only=True) if generation else []
+        choices={key:sorted({str(x.get(key)) for x in raw_options if x.get(key)}) for key in ('industry','customer','product_model','problem_domain','source_product','year')}
+        market_scope=None
+        if interpreter and (filters.get('industry') or filters.get('customer')):
+            market_rows=interpreter.portrait_scope({**filters,'portrait_mode':'1'})
+            market_scope={'items':market_rows,'issue_count':len(market_rows),
+                'with_scene_count':sum(bool(x.get('scenarios')) for x in market_rows),
+                'without_scene_count':sum(not x.get('scenarios') for x in market_rows),
+                'domain_counts':{domain:sum(x.get('problem_domain')==domain for x in market_rows) for domain in ('SOFTWARE','HARDWARE','MECHANICAL','UNKNOWN')}}
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
+            'choices':choices,'market_scope':market_scope,
             'interpretation':interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None})
 
     @router.get('/quality-scenario-assets/{sid}')

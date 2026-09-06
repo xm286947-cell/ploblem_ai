@@ -373,7 +373,7 @@ def create_app(db_path):
 
     @app.get('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate_page(request: Request, product_code: str = '', start_month: str = '', end_month: str = '', preview: int = 0, job_id: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', year: str = ''):
-        from quality_knowledge.scenario_sources import scene_source_records
+        from quality_knowledge.scenario_sources import scene_source_records,operation_scope_counts
         filters={'product_code':product_code,'start_month':start_month,'end_month':end_month,'source':'operations','ipmt':ipmt,'spdt':spdt,'product_model':product_model,'year':year}
         options=scene_source_records(scenario_generation_svc,'operations',{'product_code':product_code},metadata_only=True)
         choices={key:sorted({x[key] for x in options if x.get(key)}) for key in ('ipmt','spdt','product_model','year')}
@@ -384,7 +384,8 @@ def create_app(db_path):
             scope={'items':rows,'issue_count':len(rows),'analysed_count':analysed,'coverage_rate':round(analysed*100/len(rows),1) if rows else 0,
                    'linked_cs_count':sum(bool(x.get('cs_material_id')) for x in rows),
                    'missing_leakage_count':sum(bool(x.get('missing_leakage')) for x in rows)}
-        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters})
+        counts=operation_scope_counts(scenario_generation_svc,filters)
+        return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'scope_counts':counts,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters})
 
     @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_insights(request: Request, status: str = ''):

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from builder.ai_client import AIResponse
 from quality_knowledge.web.app import create_app
 from quality_knowledge.materials import MaterialRepository
-from quality_knowledge.scenario_sources import operation_records, period, normalize_problem_domain
+from quality_knowledge.scenario_sources import operation_records, operation_scope_counts, period, normalize_problem_domain
 from quality_knowledge.scenario_generation import PROMPT
 
 
@@ -95,3 +95,23 @@ def test_http_selection_snapshot_generation_and_material_links(tmp_path):
 def test_no_keyword_forcing_and_three_phase_rules():
     assert '必须优先选择 POWER_LOSS_RETENTION_RECOVERY' not in PROMPT
     assert all(x in PROMPT for x in ('跨系统','持续时长','时间累积','证据不足','operating_conditions'))
+
+
+def test_candidate_scope_returns_every_latest_workbench_issue(tmp_path):
+    app=create_app(tmp_path/'bulk.db');svc=app.state.scenario_generation_service
+    repo=MaterialRepository(tmp_path/'bulk.db');group=repo.group('SW-OPS')
+    for i in range(275):
+        key=f'ITR202608{i:05d}CS'
+        repo.add_material(group,key,{'问题信息_彻底解决单号':key,'问题信息_IPMT':'FA',
+            '问题信息_客户行业':'锂电','数据运营_KPI计入月份':'2026-08',
+            '问题信息_问题描述':f'问题{i}'},'bulk.xlsx','Sheet1',i+1)
+    # A newer version is not a new problem and must not replace the whole scope.
+    repo.add_material(group,'ITR20260800000CS',{'问题信息_彻底解决单号':'ITR20260800000CS',
+        '问题信息_IPMT':'FA','数据运营_KPI计入月份':'2026-08','问题信息_问题描述':'更新描述'},'bulk-v2.xlsx','Sheet1',1)
+    rows=operation_records(svc,{'ipmt':'FA','year':'2026','start_month':'8','end_month':'8'})
+    counts=operation_scope_counts(svc,{'ipmt':'FA','year':'2026','start_month':'8','end_month':'8'})
+    assert len(rows)==275
+    assert counts=={'raw_count':276,'distinct_issue_count':275,'matched_count':275,'version_count':1}
+    page=TestClient(app).get('/quality-scenarios/generate?preview=1&ipmt=FA&year=2026&start_month=8&end_month=8')
+    assert page.status_code==200 and '当前筛选范围 275 个问题' in page.text
+    assert '当前筛选命中 275 个问题' in page.text
