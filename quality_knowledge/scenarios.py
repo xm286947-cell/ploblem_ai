@@ -361,7 +361,9 @@ class ScenarioRepository:
             rows=[dict(x) for x in c.execute("SELECT * FROM quality_scenario ORDER BY updated_at DESC")]
             scopes=c.execute("SELECT * FROM quality_scenario_scope").fetchall()
             capability_gaps=c.execute("SELECT * FROM quality_scenario_capability_gap ORDER BY priority,updated_at DESC").fetchall()
-            generated={x[0] for x in c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=?",(generation_id,))} if generation_id else set()
+            generated_rows=c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=? ORDER BY created_at,rowid",(generation_id,)).fetchall() if generation_id else []
+            generated_order={row[0]:index for index,row in enumerate(generated_rows)}
+            generated=set(generated_order)
         by_id={}
         for row in scopes:by_id.setdefault(row['scenario_id'],{}).setdefault(row['scope_type'],[]).append(row['scope_value'])
         gaps_by_id={}
@@ -382,6 +384,7 @@ class ScenarioRepository:
         if quality_code:items=[x for x in items if quality_code in codes(x,'secondary_quality_characteristic_codes','primary_quality_characteristic_code')]
         if typical_problem_code:items=[x for x in items if typical_problem_code in codes(x,'secondary_typical_problem_codes','primary_typical_problem_code')]
         if environment_code:items=[x for x in items if environment_code in codes(x,'environment_condition_codes')]
+        if generation_id:items.sort(key=lambda item:generated_order[item['scenario_id']])
         return items
 
     def standardization_items(self):
