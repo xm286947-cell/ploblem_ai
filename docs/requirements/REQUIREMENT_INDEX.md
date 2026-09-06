@@ -1,6 +1,6 @@
 # QUALITY ENGINE 需求池
 
-最后更新：2026-09-05
+最后更新：2026-09-06
 
 ## 当前路线
 
@@ -39,6 +39,7 @@
 | REQ-018 | ITR与彻底解决单接入、自动关联和统一问题视图 | READY | P0 | 短期MVP | `REQ-018_ITR_AND_CS_INTAKE_MVP.md` |
 | REQ-019 | 客户问题逆向推理与产品质量场景库 | PARTIAL（已有实现，增量按020验收） | P1 | 当前 | `REQ-019_PRODUCT_QUALITY_SCENARIO_WORKFLOW.md` |
 | REQ-020 | 多源去重、软件/硬件客户与行业质量场景画像 | READY_FOR_SOL | P0 | 第一阶段价值验证 | [方案基线](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md) / [执行台账](SOL_DEVELOPMENT_HANDOFF.md) |
+| REQ-021 | SQLite 大库性能、体检、查询分页与历史运行数据归档 | TRIAGED | P0 | 近期性能专项 | `REQ-021_SQLITE_PERFORMANCE_AND_ARCHIVE.md` |
 
 ## 已明确但暂不实施
 
