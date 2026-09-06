@@ -542,6 +542,38 @@ class ScenarioRepository:
     def generations(self):
         with self.connect() as c:return [dict(x) for x in c.execute("SELECT g.*,(SELECT COUNT(*) FROM quality_scenario_generation_candidate x WHERE x.generation_id=g.generation_id) linked_candidate_count FROM quality_scenario_generation g ORDER BY g.created_at DESC LIMIT 30")]
 
+    def delete_generation(self,generation_id):
+        """Delete generation history without deleting scenarios produced by the job."""
+        with self.connect() as c:
+            row=c.execute("SELECT status FROM quality_scenario_generation WHERE generation_id=?",(generation_id,)).fetchone()
+            if not row:raise KeyError(generation_id)
+            if row['status'] in {'QUEUED','RUNNING'}:raise ValueError('SCENARIO_GENERATION_IS_RUNNING')
+            self._delete_generation_rows(c,generation_id)
+
+    def delete_finished_generations(self):
+        """Clear all terminal generation records while leaving scenario assets intact."""
+        with self.connect() as c:
+            ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation WHERE status NOT IN ('QUEUED','RUNNING')")]
+            for generation_id in ids:self._delete_generation_rows(c,generation_id)
+            return len(ids)
+
+    @staticmethod
+    def _delete_generation_rows(c,generation_id):
+        tables={row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'quality_scenario_generation_candidate' in tables and 'quality_scenario_evidence' in tables:
+            scenario_ids=[row[0] for row in c.execute("SELECT scenario_id FROM quality_scenario_generation_candidate WHERE generation_id=?",(generation_id,))]
+            for scenario_id in scenario_ids:
+                evidence=c.execute("SELECT knowledge_id,evidence_summary FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,)).fetchall()
+                for row in evidence:
+                    try:summary=json.loads(row['evidence_summary'] or '{}')
+                    except (TypeError,json.JSONDecodeError):continue
+                    if isinstance(summary,dict) and summary.get('generation_id')==generation_id:
+                        summary.pop('generation_id',None)
+                        c.execute("UPDATE quality_scenario_evidence SET evidence_summary=? WHERE scenario_id=? AND knowledge_id=?",(json.dumps(summary,ensure_ascii=False),scenario_id,row['knowledge_id']))
+        for table in ('quality_scenario_generation_candidate','quality_scenario_issue_classification','quality_scenario_analysis_claim','scenario_generation_source'):
+            if table in tables:c.execute(f"DELETE FROM {table} WHERE generation_id=?",(generation_id,))
+        c.execute("DELETE FROM quality_scenario_generation WHERE generation_id=?",(generation_id,))
+
     def insights(self, *, status=''):
         items=self.scenarios(status=status)
         product_codes={x.get('product_code') or 'PLC' for x in items} or {'PLC'}
@@ -707,21 +739,40 @@ class ScenarioRepository:
                 c.execute("INSERT INTO quality_scenario_confirmation(confirmation_id,scenario_id,confirmed_by,previous_status,new_status,before_json,after_json) VALUES(?,?,?,?,?,?,?)",(f"QCF-{uuid.uuid4().hex}",scenario_id,payload.get('confirmed_by') or 'WEB_USER',old_classification,'CONFIRMED',json.dumps(before,ensure_ascii=False),json.dumps(after,ensure_ascii=False)))
         return scenario_id
 
+    def delete_generated_scenarios(self,**filters):
+        """Delete unconfirmed AI candidates in the selected UI scope."""
+        selected=self.scenarios(**filters)
+        selected_ids=[row['scenario_id'] for row in selected]
+        if not selected_ids:return {'matched':0,'deleted':0,'protected':0}
+        marks=','.join('?' for _ in selected_ids)
+        with self.connect() as c:
+            generated={row[0] for row in c.execute(f"""SELECT scenario_id FROM quality_scenario
+                WHERE scenario_id IN ({marks}) AND (scenario_code LIKE 'AI-%' OR EXISTS(
+                    SELECT 1 FROM quality_scenario_generation_candidate g WHERE g.scenario_id=quality_scenario.scenario_id))""",selected_ids)}
+            eligible=[]
+            for row in selected:
+                if row['scenario_id'] in generated and row.get('status') in {'DRAFT','IN_REVIEW'} and row.get('quality_classification_status')!='CONFIRMED':
+                    eligible.append(row['scenario_id'])
+            for scenario_id in eligible:self._delete_scenario_rows(c,scenario_id)
+        return {'matched':len(selected_ids),'deleted':len(eligible),'protected':len(selected_ids)-len(eligible)}
+
     def delete_scenario(self, scenario_id):
         with self.connect() as c:
             if not c.execute("SELECT 1 FROM quality_scenario WHERE scenario_id=?",(scenario_id,)).fetchone():raise KeyError(scenario_id)
-            tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if 'scenario_asset_member' in tables:
-                c.execute("DELETE FROM scenario_asset_member WHERE member_id=? OR asset_id=?",(scenario_id,scenario_id))
-            for table in ('scenario_asset_context','scenario_asset_metric'):
-                if table in tables:
-                    c.execute(f"DELETE FROM {table} WHERE scenario_id=?",(scenario_id,))
-            generation_ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))]
-            c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=? OR existing_id=?",(scenario_id,scenario_id))
-            c.execute("DELETE FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,))
-            c.execute("DELETE FROM quality_scenario_industry_variant WHERE scenario_id=?",(scenario_id,))
-            c.execute("DELETE FROM quality_scenario_scope WHERE scenario_id=?",(scenario_id,))
-            c.execute("DELETE FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))
-            c.execute("DELETE FROM quality_scenario WHERE scenario_id=?",(scenario_id,))
-            for generation_id in generation_ids:
-                c.execute("UPDATE quality_scenario_generation SET candidate_count=(SELECT COUNT(*) FROM quality_scenario_generation_candidate WHERE generation_id=?) WHERE generation_id=?",(generation_id,generation_id))
+            self._delete_scenario_rows(c,scenario_id)
+
+    @staticmethod
+    def _delete_scenario_rows(c,scenario_id):
+        tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'scenario_asset_member' in tables:
+            c.execute("DELETE FROM scenario_asset_member WHERE member_id=? OR asset_id=?",(scenario_id,scenario_id))
+        for table in ('scenario_asset_context','scenario_asset_metric','quality_scenario_evidence','quality_scenario_industry_variant','quality_scenario_scope','quality_scenario_analysis_cache','quality_scenario_confirmation','quality_scenario_capability_gap','quality_scenario_standardization_item'):
+            if table in tables:c.execute(f"DELETE FROM {table} WHERE scenario_id=?",(scenario_id,))
+        generation_ids=[row[0] for row in c.execute("SELECT generation_id FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))]
+        c.execute("DELETE FROM quality_scenario_duplicate WHERE candidate_id=? OR existing_id=?",(scenario_id,scenario_id))
+        c.execute("DELETE FROM quality_scenario_generation_candidate WHERE scenario_id=?",(scenario_id,))
+        c.execute("UPDATE quality_scenario_issue_classification SET scenario_id=NULL,status='REVIEW_REQUIRED',error_message='关联场景已删除',updated_at=CURRENT_TIMESTAMP WHERE scenario_id=?",(scenario_id,))
+        if 'scenario_semantic_term' in tables:c.execute("UPDATE scenario_semantic_term SET source_scenario_id=NULL WHERE source_scenario_id=?",(scenario_id,))
+        c.execute("DELETE FROM quality_scenario WHERE scenario_id=?",(scenario_id,))
+        for generation_id in generation_ids:
+            c.execute("UPDATE quality_scenario_generation SET candidate_count=(SELECT COUNT(*) FROM quality_scenario_generation_candidate WHERE generation_id=?) WHERE generation_id=?",(generation_id,generation_id))

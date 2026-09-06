@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
@@ -97,6 +99,63 @@ def test_scenario_can_be_deleted_from_listing(tmp_path):
     assert f'/quality-scenarios/{scenario_id}/delete' in page.text
     response=client.post(f'/quality-scenarios/{scenario_id}/delete',follow_redirects=False)
     assert response.status_code==303 and repository.scenario(scenario_id) is None
+
+
+def test_bulk_delete_only_removes_unconfirmed_ai_scenarios_in_filter_scope(tmp_path):
+    client=TestClient(create_app(tmp_path/'bulk-delete.db'));repository=client.app.state.scenario_repository
+    for generation_id in ('QSG-A','QSG-B'):
+        repository.create_generation(generation_id,'PLC','1月','12月',1,'TEST')
+        repository.update_generation(generation_id,status='COMPLETED')
+    candidate=repository.save_generated_candidate('AI-DELETE',{'name':'待清理AI场景','activity_code':'ONLINE_MONITORING','evidence_issue_ids':['QK-A']},{'INDUSTRY':['锂电']},'QSG-A','PLC','1月','12月','model-a')
+    published=repository.save_generated_candidate('AI-PUBLISHED',{'name':'已发布AI场景','activity_code':'ONLINE_MONITORING','status':'PUBLISHED','quality_classification_status':'CONFIRMED','evidence_issue_ids':['QK-B']},{'INDUSTRY':['锂电']},'QSG-B','PLC','1月','12月','model-a')
+    repository.save_scenario(published,{'scenario_code':'AI-PUBLISHED','name':'已发布AI场景','status':'PUBLISHED','quality_classification_status':'CONFIRMED','activity_code':'ONLINE_MONITORING'},{'INDUSTRY':['锂电']})
+    manual=repository.save_scenario('',{'scenario_code':'MANUAL-1','name':'人工场景','status':'DRAFT','activity_code':'ONLINE_MONITORING'},{'INDUSTRY':['锂电']})
+    outside=repository.save_generated_candidate('AI-OUTSIDE',{'name':'其他行业AI场景','activity_code':'ONLINE_MONITORING','evidence_issue_ids':['QK-C']},{'INDUSTRY':['光伏']},'QSG-A','PLC','1月','12月','model-a')
+    page=client.get('/quality-scenarios?industry=锂电')
+    assert '/quality-scenarios/delete-generated' in page.text and '一键清理当前范围' in page.text
+    response=client.post('/quality-scenarios/delete-generated',data={'industry':'锂电'},follow_redirects=False)
+    assert response.status_code==303 and 'deleted=1' in response.headers['location'] and 'protected=2' in response.headers['location']
+    assert repository.scenario(candidate) is None
+    assert repository.scenario(published) and repository.scenario(manual) and repository.scenario(outside)
+    assert repository.issue_classifications('QSG-A')==[]
+
+
+def test_generation_records_can_be_deleted_without_deleting_scenarios(tmp_path):
+    db=tmp_path/'generation-delete.db';client=TestClient(create_app(db));repository=client.app.state.scenario_repository
+    repository.create_generation('QSG-DONE','PLC','1月','12月',1,'TEST')
+    scenario_id=repository.save_generated_candidate('AI-KEEP',{'name':'保留场景','activity_code':'ONLINE_MONITORING','evidence_issue_ids':['QK-1']},{},'QSG-DONE','PLC','1月','12月','model-a')
+    repository.initialize_issue_classifications('QSG-DONE',[{'knowledge_id':'QK-1','business_issue_id':'ITR-1'}])
+    repository.update_generation('QSG-DONE',status='COMPLETED',candidate_count=1)
+    response=client.post('/quality-scenarios/generations/QSG-DONE/delete',follow_redirects=False)
+    assert response.status_code==303 and repository.generation('QSG-DONE') is None
+    assert repository.scenario(scenario_id) is not None
+    assert repository.issue_classifications('QSG-DONE')==[]
+    restarted=ScenarioRepository(db)
+    with restarted.connect() as c:
+        assert c.execute("SELECT 1 FROM quality_scenario_generation_candidate WHERE generation_id='QSG-DONE'").fetchone() is None
+        summary=c.execute("SELECT evidence_summary FROM quality_scenario_evidence WHERE scenario_id=?",(scenario_id,)).fetchone()[0]
+    assert 'generation_id' not in json.loads(summary)
+    page=client.get('/quality-scenarios/generate')
+    assert '清空已结束记录' not in page.text
+
+
+def test_running_generation_record_is_protected_from_deletion(tmp_path):
+    client=TestClient(create_app(tmp_path/'running-delete.db'));repository=client.app.state.scenario_repository
+    repository.create_generation('QSG-RUN','PLC','1月','12月',1,'TEST')
+    repository.update_generation('QSG-RUN',status='RUNNING')
+    response=client.post('/quality-scenarios/generations/QSG-RUN/delete',follow_redirects=False)
+    assert response.status_code==409 and repository.generation('QSG-RUN') is not None
+    assert '删除记录' not in client.get('/quality-scenarios/generate').text
+
+
+def test_finished_generation_records_can_be_cleared_together(tmp_path):
+    client=TestClient(create_app(tmp_path/'clear-generations.db'));repository=client.app.state.scenario_repository
+    for generation_id,status in [('QSG-DONE','COMPLETED'),('QSG-FAIL','FAILED'),('QSG-RUN','RUNNING')]:
+        repository.create_generation(generation_id,'PLC','1月','12月',1,'TEST');repository.update_generation(generation_id,status=status)
+    response=client.post('/quality-scenarios/generations/delete-finished',follow_redirects=False)
+    assert response.status_code==303 and 'records_deleted=2' in response.headers['location']
+    assert repository.generation('QSG-DONE') is None and repository.generation('QSG-FAIL') is None
+    assert repository.generation('QSG-RUN') is not None
 
 
 def test_taxonomy_template_import_preserves_definition_participants_and_goal(tmp_path):

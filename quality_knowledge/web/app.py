@@ -315,10 +315,18 @@ def create_app(db_path):
         return RedirectResponse('/settings/associations',303)
 
     @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = '', activity_code: str = '', experience_code: str = '', qiu_code: str = '', quality_code: str = '', typical_problem_code: str = '', environment_code: str = ''):
+    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = '', activity_code: str = '', experience_code: str = '', qiu_code: str = '', quality_code: str = '', typical_problem_code: str = '', environment_code: str = '', deleted: int = 0, protected: int = 0):
         taxonomy=scenario_repo.taxonomy()
         filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
-        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(**filters),'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None})
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(**filters),'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None,'deleted':deleted,'protected':protected})
+
+    @app.post('/quality-scenarios/delete-generated', include_in_schema=False)
+    def quality_scenario_delete_generated(ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), industry: str = Form(''), customer_name: str = Form(''), q: str = Form(''), status: str = Form(''), generation_id: str = Form(''), activity_code: str = Form(''), experience_code: str = Form(''), qiu_code: str = Form(''), quality_code: str = Form(''), typical_problem_code: str = Form(''), environment_code: str = Form('')):
+        filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
+        result=scenario_repo.delete_generated_scenarios(**filters)
+        kept={key:value for key,value in filters.items() if value}
+        kept.update({'deleted':result['deleted'],'protected':result['protected']})
+        return RedirectResponse('/quality-scenarios?'+urlencode(kept),303)
 
     @app.get('/quality-scenarios/standardize', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_standardize_page(request: Request, batch_id: str = ''):
@@ -421,6 +429,18 @@ def create_app(db_path):
             items.append({**row,'source_workbench':source.get('source_workbench') or '',
                           'source_material_id':source.get('source_material_id') or ''})
         return tpl.TemplateResponse(request,'quality_scenario_generation_issues.html',{'job':job,'items':items})
+
+    @app.post('/quality-scenarios/generations/delete-finished', include_in_schema=False)
+    def quality_scenario_generation_delete_finished():
+        deleted=scenario_repo.delete_finished_generations()
+        return RedirectResponse(f'/quality-scenarios/generate?records_deleted={deleted}',303)
+
+    @app.post('/quality-scenarios/generations/{generation_id}/delete', include_in_schema=False)
+    def quality_scenario_generation_delete(generation_id: str):
+        try:scenario_repo.delete_generation(generation_id)
+        except KeyError:raise HTTPException(404,'SCENARIO_GENERATION_NOT_FOUND')
+        except ValueError as error:raise HTTPException(409,str(error)) from error
+        return RedirectResponse('/quality-scenarios/generate?records_deleted=1',303)
 
     @app.post('/quality-scenarios/generations/{generation_id}/retry', include_in_schema=False)
     def quality_scenario_generation_retry(generation_id: str, selected_ids: list[str] = Form([])):
