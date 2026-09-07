@@ -118,6 +118,7 @@ def test_failed_portrait_shows_real_reason_and_failed_chunk(tmp_path,monkeypatch
     client=TestClient(app)
     detail=client.get('/quality-scenario-interpretations/'+jid).text
     assert '分批处理状态' in detail and 'proxy connection refused' in detail
+    assert '从失败步骤继续' in detail and '放弃断点，全部重新生成' in detail
     portrait=client.get('/quality-scenario-assets/portrait?industry=测试行业&customer=测试客户').text
     assert '失败原因' in portrait and 'proxy connection refused' in portrait
 
@@ -236,3 +237,46 @@ def test_explicit_output_token_limit_uses_compact_retry(tmp_path):
     finding={key:'下层结论' for key in ('title','observation','why','escape','boundaries','design','test','metrics')};finding['evidence_ids']=['K0']
     result,_=service.complete_with_schema_retry(TokenLimitedThenValid(),{'mode':'MERGE','analyses':[{'summary':'A','findings':[finding],'unresolved_ids':[]}]},{'K0'})
     assert result['findings'][0]['evidence_ids']==['K0']
+
+
+def test_failed_third_level_merge_resumes_without_rerunning_completed_chunks(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    records=[{'id':f'R{i:02d}','number':f'ITR20260000{i:03d}','description':f'问题{i}',
+        'evidence_mode':'MARKET_PROBLEM_SUPPLEMENT','scenarios':[]} for i in range(17)]
+    jid='SCI-RESUME-THIRD'
+    with repo.connect() as c:
+        c.execute('''INSERT INTO scenario_interpretation(job_id,scope_hash,input_hash,filters_json,input_json,status,progress)
+            VALUES(?,?,?,?,?,'RUNNING','测试第三层归并')''',(jid,'scope','input',json.dumps({'portrait_mode':'1'}),json.dumps(records)))
+    class FailThirdLevel(FakeClient):
+        def complete(self,messages):
+            payload=json.loads(messages[-1]['content'])
+            if payload.get('mode')=='MERGE' and payload.get('merge_level')==2:
+                self.calls+=1
+                return AIResponse('{"summary":"第三层截断","findings":[','failed-third',{})
+            return super().complete(messages)
+    failed_client=FailThirdLevel();service.client=failed_client;service.run(jid)
+    failed=service.get(jid)
+    assert failed['status']=='FAILED'
+    assert sum(chunk['status']=='COMPLETED' for chunk in failed['chunks'])==24
+    assert any(chunk['chunk_type'].startswith('第3层归并') and chunk['status']=='FAILED' for chunk in failed['chunks'])
+
+    resumed_client=FakeClient();service.client=resumed_client
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
+    service.resume(jid)
+    resumed=service.get(jid)
+    assert resumed['status']=='COMPLETED' and resumed_client.calls==1
+    assert len(resumed['chunks'])==25 and all(chunk['status']=='COMPLETED' for chunk in resumed['chunks'])
+
+
+def test_merge_uses_short_wire_ids_and_restores_real_evidence_ids(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    real_ids=['MAT-'+('a'*32),'MAT-'+('b'*32)]
+    class InspectWireIds(FakeClient):
+        def complete(self,messages):
+            payload=json.loads(messages[-1]['content'])
+            sent=[source for analysis in payload['analyses'] for finding in analysis['findings'] for source in finding['evidence_ids']]
+            assert sent==['E1','E2']
+            return super().complete(messages)
+    finding={key:'归并内容' for key in ('title','observation','why','escape','boundaries','design','test','metrics')};finding['evidence_ids']=real_ids
+    result,_=service.complete_with_schema_retry(InspectWireIds(),{'mode':'MERGE','merge_level':2,'analyses':[{'summary':'A','findings':[finding],'unresolved_ids':[]}]},real_ids)
+    assert result['findings'][0]['evidence_ids']==real_ids

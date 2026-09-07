@@ -34,6 +34,13 @@ def create_asset_router(repository,templates,generation=None):
         interpreter.stop(jid)
         return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
 
+    @router.post('/quality-scenario-interpretations/{jid}/resume')
+    def resume_interpretation(jid:str):
+        if not interpreter:raise HTTPException(503,'综合解读服务未配置')
+        try:interpreter.resume(jid)
+        except KeyError:raise HTTPException(404,'解读不存在')
+        return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
+
     @router.get('/api/quality-scenario-interpretations/{jid}')
     def interpretation_status(jid:str):
         job=interpreter.get(jid) if interpreter else None

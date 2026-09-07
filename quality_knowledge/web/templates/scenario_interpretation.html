@@ -7,7 +7,8 @@
 {% if stale %}<p class="di-alert">来源或场景信息已变化。以下为生成时的快照结果，尚未反映新数据。</p>{% endif %}
 {% if job.error %}<p class="di-alert">{{job.error}}</p>{% endif %}
 {% if job.status == 'RUNNING' %}<form method="post" action="/quality-scenario-interpretations/{{job.job_id}}/stop"><button class="btn">停止等待</button><p>重启后或等待异常时可停止并重试。已发出的请求可能仍在模型服务器处理。</p></form>{% endif %}
-{% if job.status != 'RUNNING' %}<form method="post" action="/quality-scenario-interpretations">{% for key,value in job.filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<input type="hidden" name="refresh" value="1"><button class="btn">按当前数据重新生成（调用 AI）</button></form>{% endif %}
+{% if job.status == 'FAILED' %}<form method="post" action="/quality-scenario-interpretations/{{job.job_id}}/resume"><button class="btn btn-primary">从失败步骤继续</button><p>复用已经完成且输入范围一致的单问题分析和归并结果，只重跑失败步骤及其后续步骤。</p></form>{% endif %}
+{% if job.status != 'RUNNING' %}<form method="post" action="/quality-scenario-interpretations">{% for key,value in job.filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<input type="hidden" name="refresh" value="1"><button class="btn">放弃断点，全部重新生成</button></form>{% endif %}
 </section>
 {% if job.chunks %}<section class="di-card"><h2>分批处理状态</h2><div class="table-wrap"><table class="qs-table"><thead><tr><th>批次</th><th>环节</th><th>状态</th><th>模型</th><th>错误</th></tr></thead><tbody>{% for chunk in job.chunks %}<tr><td>{{chunk.chunk_no}}</td><td>{{chunk.chunk_type}}</td><td>{{chunk.status}}</td><td>{{chunk.model or '—'}}</td><td>{{chunk.error or '—'}}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
 {% if job.status == 'COMPLETED' %}

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH47_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH48_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -51,6 +51,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/MATERIAL_INCREMENTAL_IMPORT_PATCH45_DELIVERY.md",
     "docs/requirements/WRONG_SHEET_CLEANUP_PATCH46_DELIVERY.md",
     "docs/requirements/INTERPRETATION_MERGE_JSON_PATCH47_DELIVERY.md",
+    "docs/requirements/INTERPRETATION_CHECKPOINT_RESUME_PATCH48_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -116,7 +117,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH47 累计升级说明
+    readme = """# PATCH48 累计升级说明
+
+“本范围综合解读”新增断点续跑：失败后复用输入范围一致的已完成单问题批次和前序归并结果，
+只调用失败步骤及其后续步骤；仍保留放弃断点、全部重跑入口。第三层及以上归并缩小为两项一组，
+采用更强摘要约束；长内部来源ID在线路中改用E1/E2短ID并在校验后还原，降低大范围归并体积。
+
+以下为 PATCH47 及更早累计内容：
 
 修复“本范围综合解读”第二层及后续归并可能因输出过长导致JSON不完整的问题。归并采用更小批次，
 限制中间主题及段落体积；JSON解析失败或接口明确达到max_tokens时，第二次调用改为紧凑JSON重生成，

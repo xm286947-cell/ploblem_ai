@@ -31,6 +31,8 @@ MAX_MERGE_BATCH_CHARS=12000
 MAX_MERGE_BATCH_ITEMS=4
 MAX_MERGE_FINDINGS=8
 MAX_MERGE_SECTION_CHARS=220
+HIGH_LEVEL_MERGE_FINDINGS=5
+HIGH_LEVEL_SECTION_CHARS=140
 
 class ScenarioInterpretation:
     def __init__(self,assets,generation):
@@ -217,26 +219,39 @@ class ScenarioInterpretation:
 
     def complete(self,client,payload,allowed,*,compact_retry=False):
         merge=payload.get('mode')=='MERGE'
+        merge_level=int(payload.get('merge_level') or 0)
+        finding_limit=HIGH_LEVEL_MERGE_FINDINGS if merge_level>=2 else MAX_MERGE_FINDINGS
+        section_limit=HIGH_LEVEL_SECTION_CHARS if merge_level>=2 else MAX_MERGE_SECTION_CHARS
         instruction=''
         if merge:
-            instruction=f'''\n当前为分层归并。相似主题必须合并，最多输出{MAX_MERGE_FINDINGS}个findings；不得逐条复述下层summary。
-每个finding的observation/why/escape/boundaries/design/test/metrics分别不超过{MAX_MERGE_SECTION_CHARS}个汉字。
+            instruction=f'''\n当前为第{merge_level+1}层归并。相似主题必须合并，最多输出{finding_limit}个findings；不得逐条复述下层summary。
+每个finding的observation/why/escape/boundaries/design/test/metrics分别不超过{section_limit}个汉字。
 来源ID只放在evidence_ids，不要在正文反复抄写；仍须覆盖全部输入来源ID。'''
         if compact_retry:
             instruction+='''\n上一次返回未形成完整合法JSON。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多6个主题，各文字段不超过140个汉字，优先保留合法闭合结构和全部来源ID。'''
-        response=client.complete([{'role':'system','content':PROMPT+instruction},{'role':'user','content':encode(payload)}])
+        allowed=set(allowed);wire_aliases={};wire_payload=payload
+        if merge:
+            actual_to_wire={actual:f'E{index}' for index,actual in enumerate(sorted(allowed),1)}
+            wire_aliases={wire:actual for actual,wire in actual_to_wire.items()}
+            wire_payload=json.loads(encode(payload))
+            for analysis in wire_payload.get('analyses') or []:
+                analysis['unresolved_ids']=[actual_to_wire.get(ref,ref) for ref in analysis.get('unresolved_ids') or []]
+                for finding in analysis.get('findings') or []:
+                    finding['evidence_ids']=[actual_to_wire.get(ref,ref) for ref in finding.get('evidence_ids') or []]
+            instruction+='\n本层输入来源已使用E1、E2等短ID；输出必须原样使用这些短ID，系统会在校验后还原真实来源。'
+        response=client.complete([{'role':'system','content':PROMPT+instruction},{'role':'user','content':encode(wire_payload)}])
         try:data,_=parse_json_object(response.content,allow_repair=False)
         except ValueError as exc:
             ending=(response.content or '')[-80:].replace('\n',' ')
             raise ValueError(f'模型返回JSON不完整或无法解析（输出{len(response.content or "")}字符，结尾：{ending}）：{exc}') from exc
         if not isinstance(data,dict) or not isinstance(data.get('summary'),str) or not isinstance(data.get('findings'),list) or not isinstance(data.get('unresolved_ids'),list):raise ValueError('综合解读结构不完整')
         section_keys=('observation','why','escape','boundaries','design','test','metrics')
-        too_long=any(len(f.get(key,'') or '')>MAX_MERGE_SECTION_CHARS
+        too_long=any(len(f.get(key,'') or '')>section_limit
             for f in data['findings'] if isinstance(f,dict) for key in section_keys)
-        if merge and (len(data['findings'])>MAX_MERGE_FINDINGS or too_long):
-            raise ValueError(f'归并结果未按紧凑结构输出（主题最多{MAX_MERGE_FINDINGS}个，各段最多{MAX_MERGE_SECTION_CHARS}字）')
+        if merge and (len(data['findings'])>finding_limit or too_long):
+            raise ValueError(f'归并结果未按紧凑结构输出（主题最多{finding_limit}个，各段最多{section_limit}字）')
         if any(not isinstance(x,str) for x in data['unresolved_ids']):raise ValueError('待归纳来源不合法')
-        allowed=set(allowed);alias_sets={}
+        alias_sets={ref:{actual} for ref,actual in wire_aliases.items()}
         for record in payload.get('records') or []:
             rid=str(record.get('id') or '')
             if not rid or rid not in allowed:continue
@@ -303,16 +318,44 @@ class ScenarioInterpretation:
         return f'{category}（{name}）：{text[:800]}'
 
     def save_chunk(self,jid,number,kind,items,*,status,result=None,error='',model=''):
+        ids=self.chunk_input_ids(items)
+        with self.repo.connect() as c:c.execute('''INSERT INTO scenario_interpretation_chunk(job_id,chunk_no,chunk_type,input_ids_json,status,result_json,error,model,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(job_id,chunk_no) DO UPDATE SET chunk_type=excluded.chunk_type,input_ids_json=excluded.input_ids_json,status=excluded.status,result_json=excluded.result_json,error=excluded.error,model=excluded.model,updated_at=CURRENT_TIMESTAMP''',
+            (jid,number,kind,encode(ids),status,encode(result) if result is not None else '',error,model))
+
+    @staticmethod
+    def chunk_input_ids(items):
         ids=[]
         for item in items:
             if not isinstance(item,dict):continue
             if item.get('id'):ids.append(item['id'])
             ids.extend(item.get('unresolved_ids') or [])
             for finding in item.get('findings') or []:ids.extend(finding.get('evidence_ids') or [])
-        ids=sorted(set(ids))
-        with self.repo.connect() as c:c.execute('''INSERT INTO scenario_interpretation_chunk(job_id,chunk_no,chunk_type,input_ids_json,status,result_json,error,model,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(job_id,chunk_no) DO UPDATE SET status=excluded.status,result_json=excluded.result_json,error=excluded.error,model=excluded.model,updated_at=CURRENT_TIMESTAMP''',
-            (jid,number,kind,encode(ids),status,encode(result) if result is not None else '',error,model))
+        return sorted(set(ids))
+
+    def completed_chunk(self,jid,number,kind,items):
+        expected=encode(self.chunk_input_ids(items))
+        with self.repo.connect() as c:
+            row=c.execute('''SELECT result_json,model FROM scenario_interpretation_chunk
+                WHERE job_id=? AND chunk_no=? AND chunk_type=? AND input_ids_json=? AND status='COMPLETED' ''',
+                (jid,number,kind,expected)).fetchone()
+        if not row or not row['result_json']:return None
+        try:result=json.loads(row['result_json'])
+        except (TypeError,json.JSONDecodeError):return None
+        if not isinstance(result,dict) or not isinstance(result.get('findings'),list) or not isinstance(result.get('unresolved_ids'),list):return None
+        return result,str(row['model'] or '')
+
+    def resume(self,jid):
+        """Resume a failed/stopped job from its persisted completed chunks."""
+        with self.repo.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute('SELECT status FROM scenario_interpretation WHERE job_id=?',(jid,)).fetchone()
+            if not row:raise KeyError(jid)
+            if row['status']=='RUNNING':return jid
+            if row['status']=='COMPLETED':return jid
+            c.execute("UPDATE scenario_interpretation SET status='RUNNING',progress='从失败步骤继续，正在复用已完成批次',error='' WHERE job_id=?",(jid,))
+        threading.Thread(target=self.run,args=(jid,),daemon=True).start()
+        return jid
 
     def run(self,jid):
         try:
@@ -327,6 +370,12 @@ class ScenarioInterpretation:
             for i,batch in enumerate(batches):
                 if self.get(jid)['status']!='RUNNING':return
                 kind='单问题补充提取' if batch[0].get('evidence_mode')=='MARKET_PROBLEM_SUPPLEMENT' else '已有场景证据汇总'
+                cached=self.completed_chunk(jid,i+1,kind,batch)
+                if cached:
+                    result,model=cached;outputs.append(result)
+                    if model:models.add(model)
+                    self.update(jid,progress=f'已复用 {i+1}/{len(batches)} 批完成结果；共 {len(records)} 条来源记录')
+                    continue
                 self.update(jid,progress=f'{kind} {i+1}/{len(batches)} 批；共 {len(records)} 条来源记录')
                 self.save_chunk(jid,i+1,kind,batch,status='RUNNING')
                 try:
@@ -338,22 +387,30 @@ class ScenarioInterpretation:
             merge_chunk_no=len(batches)
             for level in range(5):
                 if len(outputs)==1:break
-                groups=self.batches(outputs,limit=MAX_MERGE_BATCH_CHARS,max_items=MAX_MERGE_BATCH_ITEMS);merged=[]
+                max_items=2 if level>=2 else MAX_MERGE_BATCH_ITEMS
+                groups=self.batches(outputs,limit=MAX_MERGE_BATCH_CHARS,max_items=max_items);merged=[]
                 if all(len(g)==1 for g in groups):raise ValueError('分批摘要仍过长，停止归并，原结果未冒充完成')
                 for group_no,group in enumerate(groups,1):
                     if self.get(jid)['status']!='RUNNING':return
                     allowed={i for d in group for f in d['findings'] for i in f['evidence_ids']}|{i for d in group for i in d['unresolved_ids']}
                     merge_chunk_no+=1;kind=f'第{level+1}层归并 {group_no}/{len(groups)}'
+                    cached=self.completed_chunk(jid,merge_chunk_no,kind,group)
+                    if cached:
+                        result,model=cached;merged.append(result)
+                        if model:models.add(model)
+                        self.update(jid,progress=f'已复用 {kind}；覆盖 {len(allowed)} 个来源问题')
+                        continue
                     self.update(jid,progress=f'{kind}；覆盖 {len(allowed)} 个来源问题')
                     self.save_chunk(jid,merge_chunk_no,kind,group,status='RUNNING')
                     try:
-                        result,model=self.complete_with_schema_retry(client,{'mode':'MERGE','analyses':group},allowed)
+                        result,model=self.complete_with_schema_retry(client,{'mode':'MERGE','merge_level':level,'analyses':group},allowed)
                         self.save_chunk(jid,merge_chunk_no,kind,group,status='COMPLETED',result=result,model=str(model))
                     except Exception as exc:
                         self.save_chunk(jid,merge_chunk_no,kind,group,status='FAILED',error=self.diagnostic_error(exc));raise
                     merged.append(result);models.add(str(model))
                 outputs=merged
             if len(outputs)!=1:raise ValueError('归并层数超限')
+            with self.repo.connect() as c:c.execute('DELETE FROM scenario_interpretation_chunk WHERE job_id=? AND chunk_no>?',(jid,merge_chunk_no))
             self.update(jid,status='COMPLETED',progress='综合解读完成，待人工评审',result_json=encode(outputs[0]),model='、'.join(sorted(models)),error='')
         except Exception as exc:
             self.update(jid,status='FAILED',progress='生成未完成，可查看失败原因后重试',
