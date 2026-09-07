@@ -86,8 +86,26 @@ def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypa
         def complete(self,messages):return AIResponse('{"summary":', 'bad', {})
     service.client=Bad()
     failed=service.start({},refresh=True)
-    assert service.get(failed)['status']=='FAILED'
-    assert not service.get(failed)['result']
+    failed_job=service.get(failed)
+    assert failed_job['status']=='FAILED' and '模型返回内容校验失败' in failed_job['error']
+    assert not failed_job['result']
+
+
+def test_failed_portrait_shows_real_reason_and_failed_chunk(tmp_path,monkeypatch):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    class Broken:
+        def complete(self,messages):raise RuntimeError('proxy connection refused at 127.0.0.1:7897')
+    service.client=Broken()
+    monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
+    filters={'industry':'测试行业','customer':'测试客户','portrait_mode':'1'}
+    jid=service.start(filters);job=service.get(jid)
+    assert job['status']=='FAILED' and 'proxy connection refused' in job['error']
+    assert job['chunks'][0]['status']=='FAILED'
+    client=TestClient(app)
+    detail=client.get('/quality-scenario-interpretations/'+jid).text
+    assert '分批处理状态' in detail and 'proxy connection refused' in detail
+    portrait=client.get('/quality-scenario-assets/portrait?industry=测试行业&customer=测试客户').text
+    assert '失败原因' in portrait and 'proxy connection refused' in portrait
 
 
 def test_stop_prevents_late_result_and_allows_retry(tmp_path,monkeypatch):

@@ -1,6 +1,7 @@
 """User-triggered portrait synthesis: existing assets first, market evidence on demand."""
 import hashlib
 import json
+import re
 import threading
 import uuid
 from builder.ai_client import OpenAICompatibleClient
@@ -224,8 +225,37 @@ class ScenarioInterpretation:
         if covered!=set(allowed):raise ValueError('来源引用不合法或遗漏输入问题，未发布解读')
         return data,response.model
 
+    def complete_with_schema_retry(self,client,payload,allowed):
+        """Retry one malformed model response; transport retries stay in the AI client."""
+        last=None
+        for attempt in range(2):
+            try:return self.complete(client,payload,allowed)
+            except ValueError as exc:
+                last=exc
+                if attempt==0:continue
+        raise last
+
+    @staticmethod
+    def diagnostic_error(exc):
+        text=str(exc).strip() or repr(exc)
+        text=re.sub(r'(?i)(authorization|bearer|api[_-]?key)\s*[:=]?\s*[^\s,;]+',r'\1=[已隐藏]',text)
+        text=re.sub(r'([?&](?:key|token|api_key)=)[^&\s]+',r'\1[已隐藏]',text,flags=re.I)
+        name=type(exc).__name__
+        if isinstance(exc,ValueError):category='模型返回内容校验失败'
+        elif any(word in text.lower() for word in ('timed out','timeout','超时')):category='模型接口超时'
+        elif any(word in text.lower() for word in ('environment','未设置','未配置','model未配置','base_url')):category='默认模型配置不完整'
+        elif any(word in text.lower() for word in ('token上限','finish_reason','截断','max_tokens')):category='模型输出被截断'
+        else:category='模型接口调用失败'
+        return f'{category}（{name}）：{text[:800]}'
+
     def save_chunk(self,jid,number,kind,items,*,status,result=None,error='',model=''):
-        ids=[item.get('id') for item in items if isinstance(item,dict) and item.get('id')]
+        ids=[]
+        for item in items:
+            if not isinstance(item,dict):continue
+            if item.get('id'):ids.append(item['id'])
+            ids.extend(item.get('unresolved_ids') or [])
+            for finding in item.get('findings') or []:ids.extend(finding.get('evidence_ids') or [])
+        ids=sorted(set(ids))
         with self.repo.connect() as c:c.execute('''INSERT INTO scenario_interpretation_chunk(job_id,chunk_no,chunk_type,input_ids_json,status,result_json,error,model,updated_at)
             VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(job_id,chunk_no) DO UPDATE SET status=excluded.status,result_json=excluded.result_json,error=excluded.error,model=excluded.model,updated_at=CURRENT_TIMESTAMP''',
             (jid,number,kind,encode(ids),status,encode(result) if result is not None else '',error,model))
@@ -246,22 +276,31 @@ class ScenarioInterpretation:
                 self.update(jid,progress=f'{kind} {i+1}/{len(batches)} 批；共 {len(records)} 条来源记录')
                 self.save_chunk(jid,i+1,kind,batch,status='RUNNING')
                 try:
-                    result,model=self.complete(client,{'mode':'ANALYSE','records':batch},[r['id'] for r in batch])
+                    result,model=self.complete_with_schema_retry(client,{'mode':'ANALYSE','records':batch},[r['id'] for r in batch])
                     self.save_chunk(jid,i+1,kind,batch,status='COMPLETED',result=result,model=str(model))
                 except Exception as exc:
                     self.save_chunk(jid,i+1,kind,batch,status='FAILED',error=str(exc));raise
                 outputs.append(result);models.add(str(model))
+            merge_chunk_no=len(batches)
             for level in range(5):
                 if len(outputs)==1:break
                 groups=self.batches(outputs);merged=[]
                 if all(len(g)==1 for g in groups):raise ValueError('分批摘要仍过长，停止归并，原结果未冒充完成')
-                for group in groups:
+                for group_no,group in enumerate(groups,1):
                     if self.get(jid)['status']!='RUNNING':return
                     allowed={i for d in group for f in d['findings'] for i in f['evidence_ids']}|{i for d in group for i in d['unresolved_ids']}
-                    result,model=self.complete(client,{'mode':'MERGE','analyses':group},allowed);merged.append(result);models.add(str(model))
+                    merge_chunk_no+=1;kind=f'第{level+1}层归并 {group_no}/{len(groups)}'
+                    self.update(jid,progress=f'{kind}；覆盖 {len(allowed)} 个来源问题')
+                    self.save_chunk(jid,merge_chunk_no,kind,group,status='RUNNING')
+                    try:
+                        result,model=self.complete_with_schema_retry(client,{'mode':'MERGE','analyses':group},allowed)
+                        self.save_chunk(jid,merge_chunk_no,kind,group,status='COMPLETED',result=result,model=str(model))
+                    except Exception as exc:
+                        self.save_chunk(jid,merge_chunk_no,kind,group,status='FAILED',error=self.diagnostic_error(exc));raise
+                    merged.append(result);models.add(str(model))
                 outputs=merged
             if len(outputs)!=1:raise ValueError('归并层数超限')
             self.update(jid,status='COMPLETED',progress='综合解读完成，待人工评审',result_json=encode(outputs[0]),model='、'.join(sorted(models)),error='')
         except Exception as exc:
-            message=str(exc) if isinstance(exc,ValueError) else '模型调用失败，请检查默认模型配置、网络及输出额度'
-            self.update(jid,status='FAILED',progress='生成未完成，可重试',error=message+'；未保存为完成结论。')
+            self.update(jid,status='FAILED',progress='生成未完成，可查看失败原因后重试',
+                        error=self.diagnostic_error(exc)+'；未保存为完成结论。')

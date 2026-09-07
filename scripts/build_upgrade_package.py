@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH41_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH42_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -45,6 +45,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/DIRECT_DATABASE_PORTRAIT_PATCH39_DELIVERY.md",
     "docs/requirements/ASSOCIATED_FILTERS_TOP10_PATCH40_DELIVERY.md",
     "docs/requirements/PORTRAIT_ANALYSIS_SUMMARY_PATCH41_DELIVERY.md",
+    "docs/requirements/PORTRAIT_FAILURE_DIAGNOSTICS_PATCH42_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -110,7 +111,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH41 累计升级说明
+    readme = """# PATCH42 累计升级说明
+
+修复人工画像解读失败后原因不可见的问题。画像页直接显示经过脱敏的失败分类、具体异常、
+已完成／失败批次数；任务详情增加逐批处理状态。模型返回JSON或证据覆盖不合格时自动重试一次；
+大范围画像的分层归并也记录进度和失败批次，便于区分配置、代理超时、输出截断与格式错误。
+
+以下为 PATCH41 及更早累计内容：
 
 客户／行业质量场景画像新增全量问题统计汇总和可行动结论：突出主要产品与问题领域、
 场景资产覆盖率、根因／发生阶段／客户状态证据完备度，并增加Top产品、问题领域构成、
