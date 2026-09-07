@@ -26,6 +26,10 @@ class FakeClient:
         payload=json.loads(messages[1]['content'])
         ids=[x['id'] for x in payload['records']] if payload['mode']=='ANALYSE' else sorted({i for x in payload['analyses'] for f in x['findings'] for i in f['evidence_ids']})
         finding={k:'合成测试结论' for k in ('title','observation','why','escape','boundaries','design','test','metrics')}
+        finding.update({'lifecycle_activity':'长稳运行｜连续运行','usage':'客户连续运行设备',
+            'systems_devices':'PLC、伺服','scale':'8轴','environment_conditions':'高温、高负载',
+            'quality_concern':'连续稳定','customer_language':'设备不能越跑越容易停',
+            'impact':'产线停机','information_gaps':'负载曲线待补充'})
         finding['evidence_ids']=ids
         return AIResponse(json.dumps({'summary':'合成测试，待评审','findings':[finding],'unresolved_ids':[]}), 'fake-model', {})
 
@@ -146,6 +150,8 @@ def test_portrait_market_supplement_requires_scope_and_runs_one_issue_per_chunk(
     filters,records,_=service.snapshot({'industry':'锂电','supplement_market':'1','problem_domain':'HARDWARE','portrait_mode':'1'})
     assert filters['portrait_mode']=='1' and len(records)==1
     assert records[0]['evidence_mode']=='MARKET_PROBLEM_SUPPLEMENT' and records[0]['product']=='H3U'
+    assert records[0]['systems_devices_evidence']=='H3U'
+    assert '高温现场运行' in records[0]['environment_evidence']
     fake=FakeClient();service.client=fake
     monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
     jid=service.start(filters)
@@ -167,6 +173,7 @@ def test_portrait_queries_cs_itr_database_before_existing_scenes(tmp_path):
     assert page.status_code==200
     assert '数据库命中问题' in page.text and '现场高温下模块重启' in page.text
     assert '尚无场景，AI待提炼' in page.text
+    assert 'name="year"' in page.text and 'name="start_month"' in page.text and 'name="end_month"' in page.text
 
 
 def test_portrait_choices_prioritize_scene_evidence_and_cascade_company(tmp_path):

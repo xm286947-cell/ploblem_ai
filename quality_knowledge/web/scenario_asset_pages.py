@@ -99,7 +99,8 @@ def create_asset_router(repository,templates,generation=None):
         raw_options=material_scene_records(generation,metadata_only=True) if generation else []
         scene_records=service.report({},assets=assets,facts=facts)['records']
         selected={'industry':filters.get('industry',''),'customer':filters.get('customer',''),
-                  'product_model':filters.get('product',''),'problem_domain':filters.get('problem_domain','')}
+                  'product_model':filters.get('product',''),'problem_domain':filters.get('problem_domain',''),
+                  'year':filters.get('year','')}
         def related_choices(key):
             counts={}
             for row in raw_options:
@@ -116,14 +117,18 @@ def create_asset_router(repository,templates,generation=None):
                 if label:scene_counts.setdefault(label,set()).add(row.get('issue_key'))
             return [{'label':label,'problem_count':count,'scene_issue_count':len(scene_counts.get(label,set()))}
                     for label,count in sorted(counts.items(),key=lambda item:(-len(scene_counts.get(item[0],set())),-item[1],item[0]))]
-        choices={key:related_choices(key) for key in ('industry','customer','product_model')}
+        choices={key:related_choices(key) for key in ('industry','customer','product_model','year')}
         market_scope=None
         if interpreter and (filters.get('industry') or filters.get('customer')):
             market_rows=interpreter.portrait_scope({**filters,'portrait_mode':'1'})
             market_scope={'items':market_rows,'issue_count':len(market_rows),
                 'with_scene_count':sum(bool(x.get('scenarios')) for x in market_rows),
                 'without_scene_count':sum(not x.get('scenarios') for x in market_rows),
-                'domain_counts':{domain:sum(x.get('problem_domain')==domain for x in market_rows) for domain in ('SOFTWARE','HARDWARE','MECHANICAL','UNKNOWN')}}
+                'domain_counts':{domain:sum(x.get('problem_domain')==domain for x in market_rows) for domain in ('SOFTWARE','HARDWARE','MECHANICAL','UNKNOWN')},
+                'cs_count':sum(x.get('source_workbench')=='cs' for x in market_rows),
+                'itr_only_count':sum(x.get('source_workbench')=='itr' for x in market_rows),
+                'conflict_count':sum(x.get('source_status')=='CONFLICT' for x in market_rows),
+                'agent_input_count':len(market_rows)}
         latest_interpretation=interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
