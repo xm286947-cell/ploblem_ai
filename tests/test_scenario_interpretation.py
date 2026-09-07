@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
-from builder.ai_client import AIResponse
+from builder.ai_client import AIClientError,AIResponse
 from quality_knowledge.scenario_assets import ScenarioAssets
 from quality_knowledge.scenario_interpretation import ScenarioInterpretation
 from test_scenario_operation_sources import seed
@@ -75,7 +75,7 @@ def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypa
     app,gen,repo,ids,assets,service=setup(tmp_path);fake=FakeClient();service.client=fake
     monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))
     original=service.batches
-    service.batches=lambda items: [[x] for x in items] if items and 'id' in items[0] else original(items)
+    service.batches=lambda items,**kwargs: [[x] for x in items] if items and 'id' in items[0] else original(items,**kwargs)
     jid=service.start({})
     assert service.get(jid)['status']=='COMPLETED' and fake.calls==4
     covered,_=service.complete(fake,{'mode':'ANALYSE','records':[{'id':'K0'}]},['K0','K1'])
@@ -88,7 +88,7 @@ def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypa
     service.client=Bad()
     failed=service.start({},refresh=True)
     failed_job=service.get(failed)
-    assert failed_job['status']=='FAILED' and '模型返回内容校验失败' in failed_job['error']
+    assert failed_job['status']=='FAILED' and '模型返回JSON不完整' in failed_job['error']
     assert not failed_job['result']
 
 
@@ -197,3 +197,42 @@ def test_portrait_has_full_scope_digest_and_actionable_summary(tmp_path):
     assert '产品 × 问题领域' in text
     assert 'Top产品' in text and 'P1' in text and 'P2' in text
     assert '根因信息 1/3' in text
+
+
+def test_merge_invalid_json_retries_with_compact_instruction(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    class TruncatedThenCompact:
+        def __init__(self):self.calls=0;self.system_prompts=[]
+        def complete(self,messages):
+            self.calls+=1;self.system_prompts.append(messages[0]['content'])
+            if self.calls==1:return AIResponse('{"summary":"第二层归并未闭合","findings":[', 'merge-model', {})
+            payload=json.loads(messages[-1]['content'])
+            allowed=sorted({source for analysis in payload['analyses'] for finding in analysis['findings'] for source in finding['evidence_ids']})
+            finding={key:'紧凑归并结论' for key in ('title','observation','why','escape','boundaries','design','test','metrics')}
+            finding['evidence_ids']=allowed
+            return AIResponse(json.dumps({'summary':'紧凑重试成功','findings':[finding],'unresolved_ids':[]},ensure_ascii=False),'merge-model',{})
+    client=TruncatedThenCompact()
+    finding={key:'下层结论' for key in ('title','observation','why','escape','boundaries','design','test','metrics')}
+    finding['evidence_ids']=['K0','K1']
+    result,model=service.complete_with_schema_retry(client,{'mode':'MERGE','analyses':[{'summary':'A','findings':[finding],'unresolved_ids':[]}]},{'K0','K1'})
+    assert result['summary']=='紧凑重试成功' and model=='merge-model' and client.calls==2
+    assert '上一次返回未形成完整合法JSON' in client.system_prompts[1]
+
+
+def test_merge_batches_limit_item_count(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    items=[{'summary':str(i),'findings':[],'unresolved_ids':[]} for i in range(9)]
+    groups=service.batches(items,limit=12000,max_items=4)
+    assert [len(group) for group in groups]==[4,4,1]
+
+
+def test_explicit_output_token_limit_uses_compact_retry(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    class TokenLimitedThenValid(FakeClient):
+        def complete(self,messages):
+            if not any('上一次返回未形成完整合法JSON' in message['content'] for message in messages):
+                raise AIClientError('AI响应达到输出Token上限(max_tokens=8192)，JSON可能被截断')
+            return super().complete(messages)
+    finding={key:'下层结论' for key in ('title','observation','why','escape','boundaries','design','test','metrics')};finding['evidence_ids']=['K0']
+    result,_=service.complete_with_schema_retry(TokenLimitedThenValid(),{'mode':'MERGE','analyses':[{'summary':'A','findings':[finding],'unresolved_ids':[]}]},{'K0'})
+    assert result['findings'][0]['evidence_ids']==['K0']

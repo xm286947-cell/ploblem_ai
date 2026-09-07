@@ -4,7 +4,7 @@ import json
 import re
 import threading
 import uuid
-from builder.ai_client import OpenAICompatibleClient
+from builder.ai_client import AIClientError,OpenAICompatibleClient
 from builder.json_response import parse_json_object
 from quality_knowledge.model_config import load_quality_issue_ai_config
 from quality_knowledge.materials import normalize_itr
@@ -27,6 +27,10 @@ CONTROL_FILTERS=('supplement_market','problem_domain','source_product','portrait
 FILTERS=REPORT_FILTERS+CONTROL_FILTERS
 MAX_BATCH_CHARS=18000
 MAX_SINGLE_RECORD_CHARS=12000
+MAX_MERGE_BATCH_CHARS=12000
+MAX_MERGE_BATCH_ITEMS=4
+MAX_MERGE_FINDINGS=8
+MAX_MERGE_SECTION_CHARS=220
 
 class ScenarioInterpretation:
     def __init__(self,assets,generation):
@@ -202,19 +206,35 @@ class ScenarioInterpretation:
         return jid
 
     @staticmethod
-    def batches(items,limit=MAX_BATCH_CHARS):
+    def batches(items,limit=MAX_BATCH_CHARS,max_items=0):
         groups=[];group=[]
         for item in items:
             if len(encode(item))>MAX_SINGLE_RECORD_CHARS:raise ValueError('单条结构化证据仍超过上下文预算，请先整理该问题；系统未截断原文')
-            if group and len(encode(group+[item]))>limit:groups.append(group);group=[]
+            if group and (len(encode(group+[item]))>limit or (max_items and len(group)>=max_items)):groups.append(group);group=[]
             group.append(item)
         if group:groups.append(group)
         return groups
 
-    def complete(self,client,payload,allowed):
-        response=client.complete([{'role':'system','content':PROMPT},{'role':'user','content':encode(payload)}])
-        data,_=parse_json_object(response.content,allow_repair=False)
+    def complete(self,client,payload,allowed,*,compact_retry=False):
+        merge=payload.get('mode')=='MERGE'
+        instruction=''
+        if merge:
+            instruction=f'''\n当前为分层归并。相似主题必须合并，最多输出{MAX_MERGE_FINDINGS}个findings；不得逐条复述下层summary。
+每个finding的observation/why/escape/boundaries/design/test/metrics分别不超过{MAX_MERGE_SECTION_CHARS}个汉字。
+来源ID只放在evidence_ids，不要在正文反复抄写；仍须覆盖全部输入来源ID。'''
+        if compact_retry:
+            instruction+='''\n上一次返回未形成完整合法JSON。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多6个主题，各文字段不超过140个汉字，优先保留合法闭合结构和全部来源ID。'''
+        response=client.complete([{'role':'system','content':PROMPT+instruction},{'role':'user','content':encode(payload)}])
+        try:data,_=parse_json_object(response.content,allow_repair=False)
+        except ValueError as exc:
+            ending=(response.content or '')[-80:].replace('\n',' ')
+            raise ValueError(f'模型返回JSON不完整或无法解析（输出{len(response.content or "")}字符，结尾：{ending}）：{exc}') from exc
         if not isinstance(data,dict) or not isinstance(data.get('summary'),str) or not isinstance(data.get('findings'),list) or not isinstance(data.get('unresolved_ids'),list):raise ValueError('综合解读结构不完整')
+        section_keys=('observation','why','escape','boundaries','design','test','metrics')
+        too_long=any(len(f.get(key,'') or '')>MAX_MERGE_SECTION_CHARS
+            for f in data['findings'] if isinstance(f,dict) for key in section_keys)
+        if merge and (len(data['findings'])>MAX_MERGE_FINDINGS or too_long):
+            raise ValueError(f'归并结果未按紧凑结构输出（主题最多{MAX_MERGE_FINDINGS}个，各段最多{MAX_MERGE_SECTION_CHARS}字）')
         if any(not isinstance(x,str) for x in data['unresolved_ids']):raise ValueError('待归纳来源不合法')
         allowed=set(allowed);alias_sets={}
         for record in payload.get('records') or []:
@@ -257,11 +277,13 @@ class ScenarioInterpretation:
         return data,response.model
 
     def complete_with_schema_retry(self,client,payload,allowed):
-        """Retry one malformed model response; transport retries stay in the AI client."""
+        """Retry malformed output once with an explicit compact-JSON instruction."""
         last=None
         for attempt in range(2):
-            try:return self.complete(client,payload,allowed)
-            except ValueError as exc:
+            try:return self.complete(client,payload,allowed,compact_retry=attempt>0)
+            except (ValueError,AIClientError) as exc:
+                if isinstance(exc,AIClientError) and not any(marker in str(exc).lower() for marker in ('max_tokens','token上限','finish_reason','截断')):
+                    raise
                 last=exc
                 if attempt==0:continue
         raise last
@@ -272,7 +294,8 @@ class ScenarioInterpretation:
         text=re.sub(r'(?i)(authorization|bearer|api[_-]?key)\s*[:=]?\s*[^\s,;]+',r'\1=[已隐藏]',text)
         text=re.sub(r'([?&](?:key|token|api_key)=)[^&\s]+',r'\1[已隐藏]',text,flags=re.I)
         name=type(exc).__name__
-        if isinstance(exc,ValueError):category='模型返回内容校验失败'
+        if '模型返回json不完整或无法解析' in text.lower():category='模型返回JSON不完整（可能被截断）'
+        elif isinstance(exc,ValueError):category='模型返回内容校验失败'
         elif any(word in text.lower() for word in ('timed out','timeout','超时')):category='模型接口超时'
         elif any(word in text.lower() for word in ('environment','未设置','未配置','model未配置','base_url')):category='默认模型配置不完整'
         elif any(word in text.lower() for word in ('token上限','finish_reason','截断','max_tokens')):category='模型输出被截断'
@@ -296,7 +319,7 @@ class ScenarioInterpretation:
             job=self.get(jid);records=job['input'];client=self.client
             if client is None:
                 cfg,_=load_quality_issue_ai_config(self.generation.root,agent_id='DEFAULT')
-                client=OpenAICompatibleClient({**cfg,'max_tokens':int(cfg.get('scenario_interpretation_max_tokens') or 8192),'temperature':0})
+                client=OpenAICompatibleClient({**cfg,'max_tokens':int(cfg.get('scenario_interpretation_max_tokens') or 12288),'temperature':0})
             # One source problem per call prevents a large portrait scope from
             # silently losing records at the model context boundary.
             batches=[[row] for row in records] if job['filters'].get('portrait_mode')=='1' else self.batches(records)
@@ -315,7 +338,7 @@ class ScenarioInterpretation:
             merge_chunk_no=len(batches)
             for level in range(5):
                 if len(outputs)==1:break
-                groups=self.batches(outputs);merged=[]
+                groups=self.batches(outputs,limit=MAX_MERGE_BATCH_CHARS,max_items=MAX_MERGE_BATCH_ITEMS);merged=[]
                 if all(len(g)==1 for g in groups):raise ValueError('分批摘要仍过长，停止归并，原结果未冒充完成')
                 for group_no,group in enumerate(groups,1):
                     if self.get(jid)['status']!='RUNNING':return
