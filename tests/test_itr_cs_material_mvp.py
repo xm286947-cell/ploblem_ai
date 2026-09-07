@@ -72,6 +72,33 @@ def test_group_isolation_versioning_and_linking(tmp_path):
     assert json.dumps(linked,ensure_ascii=False).find("测试问题") >= 0
 
 
+def test_incremental_import_lists_latest_and_cleans_unreferenced_history(tmp_path):
+    repo=MaterialRepository(tmp_path/'incremental.db');group=repo.group('ITR-CS')
+    key='ITR20260605084CS'
+    first,_=repo.add_material(group,key,{'问题信息_彻底解决单号':key,'问题信息_问题描述':'旧内容'},'a.xlsx','Sheet1',3)
+    same,action=repo.add_material(group,key.lower(),{'问题信息_彻底解决单号':key,'问题信息_问题描述':'旧内容'},'b.xlsx','Sheet1',3)
+    assert action=='SKIPPED' and same==first
+    latest,_=repo.add_material(group,key,{'问题信息_彻底解决单号':key,'问题信息_问题描述':'新内容'},'c.xlsx','Sheet1',3)
+    listing=repo.search_materials('ITR-CS')
+    assert listing['total']==1 and listing['items'][0]['material_id']==latest and listing['items'][0]['version_no']==2
+    summary=repo.duplicate_summary('ITR-CS')
+    assert summary['history_count']==1 and summary['removable_count']==1
+    cleaned=repo.cleanup_duplicates('ITR-CS')
+    assert cleaned=={'deleted':1,'protected':0}
+    assert len(repo.list_materials('ITR-CS',include_history=True))==1
+
+
+def test_duplicate_cleanup_preserves_reviewed_old_version(tmp_path):
+    repo=MaterialRepository(tmp_path/'protected.db');group=repo.group('ITR')
+    key='ITR20260605084'
+    old,_=repo.add_material(group,key,{'问题信息_ITR单号':key,'问题信息_问题描述':'旧内容'},'a.xlsx','Sheet1',3)
+    repo.save_review(old,review_status='COMPLETED',analysis_summary='人工结论',root_cause='',improvement_action='',reviewer='质量组')
+    repo.add_material(group,key,{'问题信息_ITR单号':key,'问题信息_问题描述':'新内容'},'b.xlsx','Sheet1',3)
+    assert repo.duplicate_summary('ITR')['protected_count']==1
+    assert repo.cleanup_duplicates('ITR')=={'deleted':0,'protected':1}
+    assert len(repo.list_materials('ITR',include_history=True))==2
+
+
 def test_cs_suffixed_analysis_issue_links_to_resolution_record(tmp_path):
     db=tmp_path/'cs-issue.db';repo=MaterialRepository(db)
     with repo.connect() as c:
@@ -102,7 +129,7 @@ def test_material_web_import_and_navigation(tmp_path):
     itr=tmp_path/"itr.xlsx";workbook(itr,"ITR_SOURCE","ITR20260605084")
     with itr.open("rb") as stream:
         result=client.post("/materials/import",data={"workbench":"itr","group_code":"ITR","header_rows":"2"},files={"file":("itr.xlsx",stream,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    assert result.status_code==200 and "ITR20260605084" in result.text and "新增 1" in result.text
+    assert result.status_code==200 and "ITR20260605084" in result.text and "全新问题 1" in result.text
     assert "搜索编号、问题描述、产品" in result.text and "查看 / 分析" in result.text
     material_id=client.app.state.material_repository.list_materials("ITR")[0]["material_id"]
     detail=client.get(f"/materials/itr/{material_id}")
@@ -119,6 +146,19 @@ def test_material_web_import_and_navigation(tmp_path):
     saved=client.post("/settings/associations/RULE-CS-ITR",data={"source_field":"问题信息_彻底解决单号","target_field":"问题信息_ITR单号","transform":"STRIP_CS","status":"INACTIVE"},follow_redirects=False)
     assert saved.status_code==303
     assert next(x for x in client.app.state.material_repository.rules() if x["rule_id"]=="RULE-CS-ITR")["status"]=="INACTIVE"
+
+
+def test_workbench_can_preview_and_clean_duplicate_history(tmp_path):
+    app=create_app(tmp_path/'cleanup-web.db');client=TestClient(app);repo=app.state.material_repository
+    group=repo.group('SW-OPS');key='ITR20260605084CS'
+    repo.add_material(group,key,{'问题信息_彻底解决单号':key,'问题信息_问题描述':'旧内容'},'a.xlsx','Sheet1',3)
+    repo.add_material(group,key,{'问题信息_彻底解决单号':key,'问题信息_问题描述':'新内容'},'b.xlsx','Sheet1',3)
+    page=client.get('/materials/software-operations')
+    assert page.status_code==200 and '历史重复问题' in page.text and '可安全清理 1 条' in page.text
+    cleaned=client.post('/materials/software-operations/cleanup-duplicates',follow_redirects=False)
+    assert cleaned.status_code==303 and 'cleaned=1' in cleaned.headers['location']
+    result=client.get(cleaned.headers['location']).text
+    assert '删除无引用的历史版本 1 条' in result and '历史重复问题' not in result
 
 
 def test_disabled_rule_stops_automatic_link_but_keeps_other_type(tmp_path):

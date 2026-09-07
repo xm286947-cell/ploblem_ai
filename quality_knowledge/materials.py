@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS source_material(
 CREATE INDEX IF NOT EXISTS idx_source_material_itr ON source_material(canonical_itr,material_type);
 CREATE INDEX IF NOT EXISTS idx_source_material_group_created ON source_material(group_id,created_at DESC,material_id);
 CREATE INDEX IF NOT EXISTS idx_source_material_group_business ON source_material(group_id,business_key);
+CREATE INDEX IF NOT EXISTS idx_source_material_group_itr_version ON source_material(group_id,canonical_itr,version_no DESC);
 CREATE INDEX IF NOT EXISTS idx_source_material_type_itr_version ON source_material(material_type,canonical_itr,version_no DESC);
 CREATE TABLE IF NOT EXISTS association_rule(
  rule_id TEXT PRIMARY KEY,rule_name TEXT NOT NULL,source_type TEXT NOT NULL,target_type TEXT NOT NULL,
@@ -175,12 +176,16 @@ class MaterialRepository:
         canonical = normalize_itr(business_key)
         digest = hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
         with self.connect() as c:
-            existing = c.execute("SELECT material_id FROM source_material WHERE group_id=? AND business_key=? AND source_hash=?", (group["group_id"], business_key, digest)).fetchone()
+            existing = c.execute("SELECT material_id FROM source_material WHERE group_id=? AND canonical_itr=? AND source_hash=? ORDER BY version_no DESC LIMIT 1", (group["group_id"], canonical, digest)).fetchone()
             if existing:
                 return existing[0], "SKIPPED"
-            version = c.execute("SELECT COALESCE(MAX(version_no),0)+1 FROM source_material WHERE group_id=? AND business_key=?", (group["group_id"], business_key)).fetchone()[0]
+            previous=c.execute("SELECT material_id FROM source_material WHERE group_id=? AND canonical_itr=? ORDER BY version_no DESC,created_at DESC,material_id DESC LIMIT 1",(group["group_id"],canonical)).fetchone()
+            version = c.execute("SELECT COALESCE(MAX(version_no),0)+1 FROM source_material WHERE group_id=? AND canonical_itr=?", (group["group_id"], canonical)).fetchone()[0]
             material_id = f"MAT-{uuid.uuid4().hex}"
             c.execute("INSERT INTO source_material(material_id,group_id,material_type,business_key,canonical_itr,version_no,source_hash,source_file,sheet_name,row_number,raw_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (material_id, group["group_id"], group["material_type"], business_key, canonical, version, digest, source_file, sheet, row_number, json.dumps(raw, ensure_ascii=False, default=str)))
+            if previous:
+                manual=c.execute("SELECT reporting_year,year_source FROM source_material_reporting_year WHERE material_id=? AND year_source IN ('BATCH_MANUAL','IMPORT_MANUAL')",(previous[0],)).fetchone()
+                if manual:c.execute("INSERT INTO source_material_reporting_year(material_id,reporting_year,year_source) VALUES(?,?,?)",(material_id,manual['reporting_year'],manual['year_source']))
             return material_id, "NEW" if version == 1 else "UPDATED"
 
     def refresh_links(self):
@@ -195,7 +200,9 @@ class MaterialRepository:
             except sqlite3.OperationalError:issue_rows=[]
             issues_by_itr={}
             for issue in issue_rows:issues_by_itr.setdefault(normalize_itr(issue['business_issue_id']),[]).append(issue['knowledge_id'])
-            materials = c.execute("SELECT material_id,material_type,canonical_itr FROM source_material WHERE canonical_itr<>''").fetchall()
+            materials = c.execute("""SELECT material_id,material_type,canonical_itr FROM (
+                SELECT m.*,ROW_NUMBER() OVER(PARTITION BY group_id,canonical_itr ORDER BY version_no DESC,created_at DESC,material_id DESC) rn
+                FROM source_material m WHERE canonical_itr<>'') WHERE rn=1""").fetchall()
             for material in materials:
                 rule=allowed.get(material["material_type"])
                 if not rule:continue
@@ -212,8 +219,11 @@ class MaterialRepository:
                 item=dict(row); item["raw"]=json.loads(item.pop("raw_json") or "{}"); result.append(item)
             return result
 
-    def list_materials(self, group_code="", limit=200):
-        sql="SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
+    def list_materials(self, group_code="", limit=200, include_history=False):
+        material_source="source_material m" if include_history else """(SELECT * FROM (
+            SELECT sm.*,ROW_NUMBER() OVER(PARTITION BY sm.group_id,sm.canonical_itr ORDER BY sm.version_no DESC,sm.created_at DESC,sm.material_id DESC) rn
+            FROM source_material sm) WHERE rn=1) m"""
+        sql=f"SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source FROM {material_source} JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
         values=[]
         if group_code: sql+=" WHERE g.group_code=?";values.append(group_code)
         sql+=" ORDER BY m.created_at DESC LIMIT ?";values.append(limit)
@@ -240,7 +250,11 @@ class MaterialRepository:
         kpi_month_year_expr=f"CASE WHEN INSTR({month_expr},'20')>0 THEN SUBSTR({month_expr},INSTR({month_expr},'20'),4) END"
         year_expr=f"CASE WHEN y.year_source IN ('BATCH_MANUAL','IMPORT_MANUAL') THEN NULLIF(TRIM(y.reporting_year),'') ELSE COALESCE({kpi_month_year_expr},{file_year_expr},NULLIF(TRIM(y.reporting_year),''),{itr_year_expr}) END"
         base=" FROM source_material m JOIN data_group g ON g.group_id=m.group_id LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id"
-        where=["g.group_code=?"];values=[group_code]
+        latest_condition="""NOT EXISTS(SELECT 1 FROM source_material newer
+            WHERE newer.group_id=m.group_id AND newer.canonical_itr=m.canonical_itr AND
+              (newer.version_no>m.version_no OR (newer.version_no=m.version_no AND
+               (newer.created_at>m.created_at OR (newer.created_at=m.created_at AND newer.material_id>m.material_id)))))"""
+        where=["g.group_code=?",latest_condition];values=[group_code]
         if q:
             where.append(f"LOWER(COALESCE(m.business_key,'')||' '||COALESCE(m.canonical_itr,'')||' '||COALESCE({title_expr},'')||' '||COALESCE({product_expr},'')) LIKE ?")
             values.append('%'+q.strip().lower()+'%')
@@ -259,7 +273,7 @@ class MaterialRepository:
         select="SELECT m.*,g.group_code,g.group_name,y.reporting_year,y.year_source"
         facet_sql="SELECT m.material_id,m.canonical_itr,m.business_key,"+','.join([
             f"COALESCE({domain_expr},'未分类') domain",f"COALESCE({month_expr},'-') month",f"COALESCE({year_expr},'-') year",
-            *[f"COALESCE({expr},'') {key}" for key,expr in dimension_exprs.items()]])+base+" WHERE g.group_code=?"
+            *[f"COALESCE({expr},'') {key}" for key,expr in dimension_exprs.items()]])+base+" WHERE g.group_code=? AND "+latest_condition
         with self.connect() as c:
             total=c.execute("SELECT COUNT(*)"+base+where_sql,values).fetchone()[0]
             rows=c.execute(select+base+where_sql+" ORDER BY m.created_at DESC,m.material_id LIMIT ? OFFSET ?",[*values,page_size,offset]).fetchall()
@@ -283,6 +297,50 @@ class MaterialRepository:
                 "months":[x['label'] for x in month_options],
                 "years":[x['label'] for x in year_options],
                 "options":{key:related_options(key) for key in dimension_exprs}}
+
+    def duplicate_summary(self,group_code):
+        group=self.group(group_code)
+        if not group:raise ValueError('DATA_GROUP_NOT_FOUND')
+        with self.connect() as c:
+            tables={row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            rows=[dict(row) for row in c.execute("""SELECT * FROM (
+                SELECT m.material_id,m.canonical_itr,m.version_no,
+                       ROW_NUMBER() OVER(PARTITION BY m.group_id,m.canonical_itr ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC) rn,
+                       COUNT(*) OVER(PARTITION BY m.group_id,m.canonical_itr) copies
+                FROM source_material m WHERE m.group_id=?) WHERE copies>1""",(group['group_id'],))]
+            old=[row for row in rows if row['rn']>1];protected=set()
+            if old:
+                marks=','.join('?' for _ in old);ids=[row['material_id'] for row in old]
+                protected.update(row[0] for row in c.execute(f"SELECT material_id FROM material_review WHERE material_id IN ({marks})",ids))
+                protected.update(row[0] for row in c.execute(f"SELECT material_id FROM issue_material_link WHERE link_status='MANUAL_LINKED' AND material_id IN ({marks})",ids))
+                if 'quality_scenario_evidence' in tables:
+                    protected.update(row[0] for row in c.execute(f"SELECT knowledge_id FROM quality_scenario_evidence WHERE knowledge_id IN ({marks})",ids))
+            return {'problem_count':len({row['canonical_itr'] for row in rows}),
+                    'history_count':len(old),'removable_count':sum(row['material_id'] not in protected for row in old),
+                    'protected_count':sum(row['material_id'] in protected for row in old)}
+
+    def cleanup_duplicates(self,group_code):
+        group=self.group(group_code)
+        if not group:raise ValueError('DATA_GROUP_NOT_FOUND')
+        with self.connect() as c:
+            tables={row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            rows=[dict(row) for row in c.execute("""SELECT * FROM (
+                SELECT m.material_id,m.canonical_itr,
+                       ROW_NUMBER() OVER(PARTITION BY m.group_id,m.canonical_itr ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC) rn
+                FROM source_material m WHERE m.group_id=?) WHERE rn>1""",(group['group_id'],))]
+            deleted=0;protected=0
+            for row in rows:
+                mid=row['material_id']
+                used=bool(c.execute("SELECT 1 FROM material_review WHERE material_id=?",(mid,)).fetchone())
+                used=used or bool(c.execute("SELECT 1 FROM issue_material_link WHERE material_id=? AND link_status='MANUAL_LINKED'",(mid,)).fetchone())
+                if 'quality_scenario_evidence' in tables:
+                    used=used or bool(c.execute("SELECT 1 FROM quality_scenario_evidence WHERE knowledge_id=?",(mid,)).fetchone())
+                if used:protected+=1;continue
+                c.execute("DELETE FROM issue_material_link WHERE material_id=?",(mid,))
+                c.execute("DELETE FROM source_material_reporting_year WHERE material_id=?",(mid,))
+                c.execute("DELETE FROM source_material WHERE material_id=?",(mid,));deleted+=1
+        self.refresh_links()
+        return {'deleted':deleted,'protected':protected}
 
     def software_operation_distribution(self, *, ipmt='', spdt='', product_model='', product_series='', year='', month=''):
         """Top customer/industry distribution under one associated software-operation scope."""

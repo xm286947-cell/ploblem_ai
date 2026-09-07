@@ -261,7 +261,7 @@ def create_app(db_path):
         return RedirectResponse('/materials/itr',303)
 
     @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', year: str = '', industry: str = '', customer: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', product_series: str = '', page: int = 1):
+    def materials_page(request: Request, workbench: str, q: str = '', domain: str = '', month: str = '', year: str = '', industry: str = '', customer: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', product_series: str = '', page: int = 1, cleaned: int = 0, protected: int = 0):
         workspace=material_workbenches.get(workbench)
         if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
         filters={'q':q,'domain':domain,'month':month,'year':year,'industry':industry,'customer':customer,
@@ -271,6 +271,7 @@ def create_app(db_path):
             'groups': material_repo.groups(False), 'items': result['items'], 'listing':result,
             'filters':filters,'page_query':urlencode({k:v for k,v in filters.items() if v}),
             'group_code': workspace['group_code'], 'result': None, 'workbench':workbench, 'workspace':workspace,
+            'duplicates':material_repo.duplicate_summary(workspace['group_code']),'cleanup_result':{'deleted':cleaned,'protected':protected} if cleaned or protected else None,
         })
 
     @app.get('/software-operation-distribution', response_class=HTMLResponse, include_in_schema=False)
@@ -311,7 +312,15 @@ def create_app(db_path):
             'groups': material_repo.groups(False), 'items': listing['items'],
             'listing':listing,'filters':{'q':'','domain':'','month':'','year':'','industry':'','customer':'','ipmt':'','spdt':'','product_model':'','product_series':''},'page_query':'',
             'group_code': group_code, 'result': result, 'workbench':workbench, 'workspace':workspace,
+            'duplicates':material_repo.duplicate_summary(group_code),'cleanup_result':None,
         })
+
+    @app.post('/materials/{workbench}/cleanup-duplicates', include_in_schema=False)
+    def material_cleanup_duplicates(workbench:str):
+        workspace=material_workbenches.get(workbench)
+        if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
+        result=material_repo.cleanup_duplicates(workspace['group_code'])
+        return RedirectResponse(f"/materials/{workbench}?cleaned={result['deleted']}&protected={result['protected']}",303)
 
     @app.post('/materials/software-operations/batch-year', include_in_schema=False)
     def software_operation_batch_year(material_ids: list[str] = Form(default=[]), reporting_year: str = Form(...)):

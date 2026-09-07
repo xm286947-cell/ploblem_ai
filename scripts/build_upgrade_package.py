@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH44_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH45_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -48,6 +48,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/PORTRAIT_FAILURE_DIAGNOSTICS_PATCH42_DELIVERY.md",
     "docs/requirements/READABLE_CHINESE_EVIDENCE_PATCH43_DELIVERY.md",
     "docs/requirements/INTERPRETATION_EVIDENCE_COVERAGE_PATCH44_DELIVERY.md",
+    "docs/requirements/MATERIAL_INCREMENTAL_IMPORT_PATCH45_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -113,7 +114,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH44 累计升级说明
+    readme = """# PATCH45 累计升级说明
+
+ITR、彻底解决单和软件考核三个工作台统一支持按标准ITR号增量导入：相同内容跳过、
+内容变化保存新版本、全新问题新增，默认问题清单只显示每个问题的最新版本。
+新增历史重复问题预览与安全清理，保留最新版本及带人工分析、人工关联或场景证据的旧版本。
+软件考核问题产生新版本时继承人工设置的考核年份，并优化最新版本查询与自动关联索引。
+
+以下为 PATCH44 及更早累计内容：
 
 修复综合解读因模型使用ITR单号引用来源、或归并时遗漏个别来源而整单失败的问题。
 系统将唯一可核验的ITR号映射为内部来源ID；合法但未归纳的问题自动进入“尚不能归纳”，

@@ -44,6 +44,14 @@ def test_batch_year_updates_workbench_and_scenario_period_without_changing_raw(t
     MaterialImportService(repo).import_file(source,'SW-OPS',2)
     assert repo.material(item['material_id'])['year']=='2028'
 
+    # A changed export creates a new current version and inherits the manual year.
+    from openpyxl import load_workbook
+    book=load_workbook(source);book.active.cell(row=3,column=4,value='软件异常（已更新）');book.save(source);book.close()
+    changed_stats=MaterialImportService(repo).import_file(source,'SW-OPS',2)
+    current=repo.search_materials('SW-OPS')['items'][0]
+    assert changed_stats['updated']==1 and current['material_id']!=item['material_id']
+    assert current['year']=='2028' and current['year_source']=='批量人工设置'
+
 
 def test_legacy_auto_itr_year_does_not_hide_explicit_kpi_year(tmp_path):
     app=create_app(tmp_path/'legacy.db');repo=app.state.material_repository
