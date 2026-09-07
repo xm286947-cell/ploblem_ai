@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH40_20260906"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH41_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -44,6 +44,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_PATCH38_DELIVERY.md",
     "docs/requirements/DIRECT_DATABASE_PORTRAIT_PATCH39_DELIVERY.md",
     "docs/requirements/ASSOCIATED_FILTERS_TOP10_PATCH40_DELIVERY.md",
+    "docs/requirements/PORTRAIT_ANALYSIS_SUMMARY_PATCH41_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -109,7 +110,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH40 累计升级说明
+    readme = """# PATCH41 累计升级说明
+
+客户／行业质量场景画像新增全量问题统计汇总和可行动结论：突出主要产品与问题领域、
+场景资产覆盖率、根因／发生阶段／客户状态证据完备度，并增加Top产品、问题领域构成、
+高频业务活动和“产品×问题领域”矩阵。AI画像完成后，主题、原因与漏测、适用边界、
+研发／测试建议及指标建议直接回显在画像页，不再只有任务链接。
+
+以下为 PATCH40 及更早累计内容：
 
 客户／行业画像的行业、公司和产品型号改为关联筛选；行业与公司双向约束，选项优先按已有
 质量场景关联问题数排序，再按数据库问题数排序。软件考核工作台及AI候选页新增行业、客户、

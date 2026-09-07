@@ -2,7 +2,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from quality_knowledge.scenario_assets import ScenarioAssets, CONTEXT_FIELDS, METRIC_FIELDS
-from quality_knowledge.scenario_decisions import decision_digest
+from quality_knowledge.scenario_decisions import decision_digest, portrait_digest
 
 DIMENSIONS={'industry':'行业','customer':'客户','product':'产品型号','business':'产品/业务','lifecycle':'使用生命周期',
             'activity':'业务活动','scale':'系统规模','environment':'环境/工况','concern':'客户质量关注点',
@@ -117,10 +117,12 @@ def create_asset_router(repository,templates,generation=None):
                 'with_scene_count':sum(bool(x.get('scenarios')) for x in market_rows),
                 'without_scene_count':sum(not x.get('scenarios') for x in market_rows),
                 'domain_counts':{domain:sum(x.get('problem_domain')==domain for x in market_rows) for domain in ('SOFTWARE','HARDWARE','MECHANICAL','UNKNOWN')}}
+        latest_interpretation=interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
             'choices':choices,'market_scope':market_scope,
-            'interpretation':interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None})
+            'portrait_digest':portrait_digest(market_scope['items'] if market_scope else []),
+            'interpretation':latest_interpretation})
 
     @router.get('/quality-scenario-assets/{sid}')
     def detail(request:Request,sid:str):

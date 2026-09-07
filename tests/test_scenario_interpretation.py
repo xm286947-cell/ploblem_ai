@@ -150,3 +150,18 @@ def test_portrait_choices_prioritize_scene_evidence_and_cascade_company(tmp_path
     cascaded=client.get('/quality-scenario-assets/portrait?industry=行业乙').text
     company_select=cascaded.split('name="customer"',1)[1].split('</select>',1)[0]
     assert '客户乙' in company_select and '测试客户' not in company_select
+
+
+def test_portrait_has_full_scope_digest_and_actionable_summary(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    for i,domain in enumerate(('软件','硬件','硬件')):
+        key=f'ITR2026110{i:04d}CS'
+        repo.add_material(repo.group('ITR-CS'),key,{'问题信息_问题描述':f'画像问题{i}',
+            '问题信息_客户行业':'画像行业','问题信息_客户名称':'画像客户',
+            '问题信息_产品型号':'P1' if i<2 else 'P2','问题信息_问题领域':domain,
+            '问题信息_问题原因定位':'设计原因' if i==0 else ''},'portrait-summary.xlsx','Sheet1',i+1)
+    text=TestClient(app).get('/quality-scenario-assets/portrait?industry=画像行业&customer=画像客户').text
+    assert '当前范围结论与下一步' in text
+    assert '产品 × 问题领域' in text
+    assert 'Top产品' in text and 'P1' in text and 'P2' in text
+    assert '根因信息 1/3' in text

@@ -1,5 +1,6 @@
 """Evidence-backed screening themes; suggestions are not diagnosed root causes."""
 import re
+from collections import defaultdict
 
 THEMES = (
     ('trust','状态与结果不可信',r'状态.*(错误|异常|不一致)|显示.*(错误|异常|未刷新)|反馈.*(错误|不一致)|不可信|定位.*错误',
@@ -59,3 +60,74 @@ def decision_digest(report, repository):
         'unpublished':sum(a['status']!='PUBLISHED' for a in report['assets']),
         'no_metrics':sum(not a['metrics'] for a in report['assets']),
         'asset_count':len(report['assets'])}
+
+
+def portrait_digest(rows):
+    """Summarise the complete CS/ITR portrait scope without inventing causality."""
+    rows=list(rows or [])
+
+    def value(row,key):
+        raw=(row.get('field_evidence') or {}).get(key)
+        return str(raw.get('value') if isinstance(raw,dict) else raw or '').strip()
+
+    def ranked(key, fallback=''):
+        buckets=defaultdict(set)
+        for row in rows:
+            label=str(row.get(key) or fallback).strip() or fallback
+            if label:buckets[label].add(row.get('id') or row.get('number'))
+        return sorted(({'label':label,'count':len(ids)} for label,ids in buckets.items()),
+                      key=lambda item:(-item['count'],item['label']))
+
+    def evidence_count(*keys):
+        return sum(any(value(row,key) for key in keys) for row in rows)
+
+    domain_labels={'SOFTWARE':'软件','HARDWARE':'硬件','MECHANICAL':'机械','UNKNOWN':'待识别'}
+    domain_rows=ranked('problem_domain','UNKNOWN')
+    for item in domain_rows:item['label']=domain_labels.get(item['label'],item['label'])
+    products=ranked('product','未知产品')
+    industries=ranked('industry','未知行业')
+    customers=ranked('customer','未知客户')
+    periods=defaultdict(set)
+    for row in rows:
+        year=str(row.get('year') or '').strip();month=str(row.get('month') or '').strip()
+        label=f'{year}-{int(month):02d}' if year.isdigit() and month.isdigit() and 1<=int(month)<=12 else '未知时间'
+        periods[label].add(row.get('id') or row.get('number'))
+    period_rows=[{'label':label,'count':len(ids)} for label,ids in sorted(periods.items())]
+
+    scene_rows=[row for row in rows if row.get('scenarios')]
+    activities=defaultdict(set);lifecycles=defaultdict(set);qualities=defaultdict(set)
+    product_domain=defaultdict(lambda:defaultdict(set))
+    for row in rows:
+        issue=row.get('id') or row.get('number');product=str(row.get('product') or '未知产品')
+        product_domain[product][domain_labels.get(row.get('problem_domain') or 'UNKNOWN','待识别')].add(issue)
+        for scene in row.get('scenarios') or []:
+            for target,key in ((activities,'activity'),(lifecycles,'lifecycle'),(qualities,'quality')):
+                label=str(scene.get(key) or '').strip()
+                if label:target[label].add(issue)
+    def set_rows(buckets):
+        return sorted(({'label':label,'count':len(ids)} for label,ids in buckets.items()),key=lambda item:(-item['count'],item['label']))
+    matrix=[]
+    for product in [item['label'] for item in products[:8]]:
+        matrix.append({'label':product,'total':sum(len(ids) for ids in product_domain[product].values()),
+                       'domains':{key:len(ids) for key,ids in product_domain[product].items()}})
+
+    total=len(rows);scene_count=len(scene_rows);cause_count=evidence_count('root_cause','trc_root_cause')
+    phase_count=evidence_count('occurrence_phase');status_count=evidence_count('customer_status')
+    top_product=products[0] if products else None;top_domain=domain_rows[0] if domain_rows else None
+    conclusions=[]
+    if top_product:
+        conclusions.append({'title':'问题主要集中范围','level':'focus',
+            'text':f"{top_product['label']}涉及 {top_product['count']} 个问题（{top_product['count']/total:.0%}）；问题领域以{top_domain['label']}为主（{top_domain['count']} 个）。",
+            'action':'先下钻该产品的业务活动和原始问题，确认是否存在可归一的共性场景。'})
+    if total:
+        conclusions.append({'title':'场景资产覆盖','level':'warning' if scene_count<total else 'good',
+            'text':f'已有质量场景覆盖 {scene_count}/{total} 个问题（{scene_count/total:.0%}），其余 {total-scene_count} 个仍只能按问题事实观察。',
+            'action':'优先处理数量高且尚无场景的问题簇，避免画像只反映已建设资产。' if scene_count<total else '继续核查已有场景的边界与指标是否完整。'})
+        conclusions.append({'title':'分析证据完备度','level':'warning' if cause_count<total else 'good',
+            'text':f'根因信息 {cause_count}/{total}，发生阶段 {phase_count}/{total}，客户状态 {status_count}/{total}。',
+            'action':'根因不足时不得形成确定性原因结论；先补齐证据或触发AI逐问题提炼并人工评审。'})
+    return {'total':total,'products':products[:10],'industries':industries[:10],'customers':customers[:10],
+            'domains':domain_rows,'periods':period_rows,'activities':set_rows(activities)[:10],
+            'lifecycles':set_rows(lifecycles)[:10],'qualities':set_rows(qualities)[:10],
+            'product_domain':matrix,'scene_count':scene_count,'cause_count':cause_count,
+            'phase_count':phase_count,'customer_status_count':status_count,'conclusions':conclusions}
