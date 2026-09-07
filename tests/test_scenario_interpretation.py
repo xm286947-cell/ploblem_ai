@@ -78,8 +78,8 @@ def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypa
     service.batches=lambda items: [[x] for x in items] if items and 'id' in items[0] else original(items)
     jid=service.start({})
     assert service.get(jid)['status']=='COMPLETED' and fake.calls==4
-    with pytest.raises(ValueError,match='遗漏'):
-        service.complete(fake,{'mode':'ANALYSE','records':[{'id':'K0'}]},['K0','K1'])
+    covered,_=service.complete(fake,{'mode':'ANALYSE','records':[{'id':'K0'}]},['K0','K1'])
+    assert covered['unresolved_ids']==['K1'] and '未静默遗漏' in covered['summary']
     with pytest.raises(ValueError,match='来源引用'):
         service.complete(fake,{'mode':'ANALYSE','records':[{'id':'FORGED'}]},['K0'])
     with pytest.raises(ValueError,match='未截断'):original([{'text':'x'*23000}])
@@ -90,6 +90,19 @@ def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypa
     failed_job=service.get(failed)
     assert failed_job['status']=='FAILED' and '模型返回内容校验失败' in failed_job['error']
     assert not failed_job['result']
+
+
+def test_readable_itr_reference_is_normalized_to_internal_source_id(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    class NumberClient:
+        def complete(self,messages):
+            record=json.loads(messages[-1]['content'])['records'][0]
+            finding={k:'测试' for k in ('title','observation','why','escape','boundaries','design','test','metrics')}
+            finding['evidence_ids']=[record['number']]
+            return AIResponse(json.dumps({'summary':'按ITR引用','findings':[finding],'unresolved_ids':[]},ensure_ascii=False),'number-model',{})
+    payload={'mode':'ANALYSE','records':[{'id':'MAT-INTERNAL','number':'ITR20260101001CS'}]}
+    result,_=service.complete(NumberClient(),payload,['MAT-INTERNAL'])
+    assert result['findings'][0]['evidence_ids']==['MAT-INTERNAL']
 
 
 def test_failed_portrait_shows_real_reason_and_failed_chunk(tmp_path,monkeypatch):

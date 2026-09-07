@@ -18,7 +18,7 @@ evidence_mode=EXISTING_SCENARIO 表示已有质量场景资产；evidence_mode=M
 不要硬凑TOP3；单例标明单例，无充分共性证据时明确说明。无装机量等分母，不推断发生率或质量提升。建议不等于已验证措施。
 同一ITR编号及其CS编号代表同一问题的不同来源，不能作为多个独立样本；保留其来源ID便于追溯。
 只输出JSON：{"summary":"整体判断与局限","findings":[{"title":"主题","observation":"业务活动与客户影响","why":"发生原因及来源，缺失写未知","escape":"漏测原因及来源，缺失写未知","boundaries":"共性与行业/客户/规模/工况差异","design":"针对性研发建议","test":"针对性验证建议","metrics":"指标、方法和条件，不编造阈值","evidence_ids":["输入问题ID"]}],"unresolved_ids":["无法归纳的问题ID"]}。
-每个主题至少一个合法来源ID；所有输入问题必须出现在主题或unresolved_ids中。各段不超过300汉字。归并模式保持问题覆盖及证据边界，不丢弃分批结论中的重要差异。'''
+每个主题至少一个合法来源ID；引用来源时必须使用输入记录的id字段，不要使用number/ITR单号代替。所有输入问题必须出现在主题或unresolved_ids中。各段不超过300汉字。归并模式保持问题覆盖及证据边界，不丢弃分批结论中的重要差异。'''
 
 def encode(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,default=str)
 def digest(value):return hashlib.sha256(encode(value).encode()).hexdigest()
@@ -216,13 +216,44 @@ class ScenarioInterpretation:
         data,_=parse_json_object(response.content,allow_repair=False)
         if not isinstance(data,dict) or not isinstance(data.get('summary'),str) or not isinstance(data.get('findings'),list) or not isinstance(data.get('unresolved_ids'),list):raise ValueError('综合解读结构不完整')
         if any(not isinstance(x,str) for x in data['unresolved_ids']):raise ValueError('待归纳来源不合法')
+        allowed=set(allowed);alias_sets={}
+        for record in payload.get('records') or []:
+            rid=str(record.get('id') or '')
+            if not rid or rid not in allowed:continue
+            for raw in (rid,record.get('number'),record.get('business_issue_id'),record.get('canonical_itr')):
+                ref=str(raw or '').strip()
+                if ref:alias_sets.setdefault(ref,set()).add(rid)
+                canonical=normalize_itr(ref)
+                if canonical:alias_sets.setdefault(canonical,set()).add(rid)
+        aliases={ref:next(iter(ids)) for ref,ids in alias_sets.items() if len(ids)==1}
+        def normalized(ref):
+            ref=str(ref).strip()
+            if ref in allowed:return ref
+            return aliases.get(ref) or aliases.get(normalize_itr(ref))
+        unknown=[];unresolved=[]
+        for ref in data['unresolved_ids']:
+            mapped=normalized(ref)
+            if mapped:unresolved.append(mapped)
+            else:unknown.append(ref)
+        data['unresolved_ids']=list(dict.fromkeys(unresolved))
         covered=set(data['unresolved_ids'])
         for f in data['findings']:
             if not isinstance(f,dict) or not all(isinstance(f.get(k),str) for k in ('title','observation','why','escape','boundaries','design','test','metrics')):raise ValueError('主题内容不完整')
             ids=f.get('evidence_ids')
             if not isinstance(ids,list) or not ids or any(not isinstance(x,str) for x in ids):raise ValueError('主题缺少来源')
-            covered.update(ids)
-        if covered!=set(allowed):raise ValueError('来源引用不合法或遗漏输入问题，未发布解读')
+            mapped=[]
+            for ref in ids:
+                target=normalized(ref)
+                if target:mapped.append(target)
+                else:unknown.append(ref)
+            f['evidence_ids']=list(dict.fromkeys(mapped))
+            if not f['evidence_ids']:raise ValueError('主题来源引用不合法，没有可核验的范围内来源')
+            covered.update(f['evidence_ids'])
+        if unknown:raise ValueError('模型引用了当前分析范围之外的来源：'+'、'.join(dict.fromkeys(unknown))[:300])
+        missing=sorted(allowed-covered)
+        if missing:
+            data['unresolved_ids']=list(dict.fromkeys(data['unresolved_ids']+missing))
+            data['summary']=data['summary'].rstrip()+f' 系统覆盖校验：{len(missing)}个未被模型归纳的问题已列入“尚不能归纳”，未静默遗漏。'
         return data,response.model
 
     def complete_with_schema_retry(self,client,payload,allowed):

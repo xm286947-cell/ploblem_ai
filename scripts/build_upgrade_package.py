@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH43_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH44_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -47,6 +47,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/PORTRAIT_ANALYSIS_SUMMARY_PATCH41_DELIVERY.md",
     "docs/requirements/PORTRAIT_FAILURE_DIAGNOSTICS_PATCH42_DELIVERY.md",
     "docs/requirements/READABLE_CHINESE_EVIDENCE_PATCH43_DELIVERY.md",
+    "docs/requirements/INTERPRETATION_EVIDENCE_COVERAGE_PATCH44_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -112,7 +113,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH43 累计升级说明
+    readme = """# PATCH44 累计升级说明
+
+修复综合解读因模型使用ITR单号引用来源、或归并时遗漏个别来源而整单失败的问题。
+系统将唯一可核验的ITR号映射为内部来源ID；合法但未归纳的问题自动进入“尚不能归纳”，
+保持全量覆盖且不冒充结论。引用当前范围外来源时仍拒绝发布。
+
+以下为 PATCH43 及更早累计内容：
 
 修复“场景资产／本范围综合解读”来源证据中的中文被显示为 \\uXXXX 的问题。
 原始问题快照现在以可读中文和缩进JSON展示，同时保持HTML安全转义。
