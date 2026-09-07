@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH42_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH43_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -46,6 +46,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/ASSOCIATED_FILTERS_TOP10_PATCH40_DELIVERY.md",
     "docs/requirements/PORTRAIT_ANALYSIS_SUMMARY_PATCH41_DELIVERY.md",
     "docs/requirements/PORTRAIT_FAILURE_DIAGNOSTICS_PATCH42_DELIVERY.md",
+    "docs/requirements/READABLE_CHINESE_EVIDENCE_PATCH43_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -111,7 +112,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH42 累计升级说明
+    readme = """# PATCH43 累计升级说明
+
+修复“场景资产／本范围综合解读”来源证据中的中文被显示为 \\uXXXX 的问题。
+原始问题快照现在以可读中文和缩进JSON展示，同时保持HTML安全转义。
+
+以下为 PATCH42 及更早累计内容：
 
 修复人工画像解读失败后原因不可见的问题。画像页直接显示经过脱敏的失败分类、具体异常、
 已完成／失败批次数；任务详情增加逐批处理状态。模型返回JSON或证据覆盖不合格时自动重试一次；

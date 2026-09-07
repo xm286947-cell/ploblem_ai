@@ -62,6 +62,7 @@ def test_saved_manual_generation_coverage_stale_and_no_get_calls(tmp_path,monkey
     for _ in range(2):
         page=client.get('/quality-scenario-interpretations/'+jid)
         assert page.status_code==200 and '整体判断' in page.text
+        assert '连续运行72小时' in page.text and r'\u8fde\u7eed\u8fd0\u884c' not in page.text
         assert client.get('/api/quality-scenario-interpretations/'+jid).json()['status']=='COMPLETED'
     assert fake.calls==1
     assets.save_context(assets.catalog()[0]['scenario_id'],{'environment':'高负载'})

@@ -56,6 +56,13 @@ def _intake_diag(event,diagnostic_id,**details):
 def _safe_json(value, default=None):
     if value is None:
         return {} if default is None else default
+
+
+def _json_zh(value, indent=2):
+    """Readable, HTML-safe JSON that keeps Chinese characters instead of \\u escapes."""
+    try:spacing=max(0,min(int(indent),8))
+    except (TypeError,ValueError):spacing=2
+    return html.escape(json.dumps(value,ensure_ascii=False,indent=spacing,default=str))
     if isinstance(value, (dict, list)):
         return value
     try:
@@ -214,6 +221,7 @@ def create_app(db_path):
     app.state.intake_session_service = intake_svc
     app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
     tpl = Jinja2Templates(directory=BASE / 'templates')
+    tpl.env.filters['json_zh']=_json_zh
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
     tpl.env.globals['zh_value'] = zh_value
