@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH48_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH49_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -52,6 +52,8 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/WRONG_SHEET_CLEANUP_PATCH46_DELIVERY.md",
     "docs/requirements/INTERPRETATION_MERGE_JSON_PATCH47_DELIVERY.md",
     "docs/requirements/INTERPRETATION_CHECKPOINT_RESUME_PATCH48_DELIVERY.md",
+    "docs/requirements/CURRENT_PHASE_DEMO_BASELINE.md",
+    "docs/requirements/CUSTOMER_QUALITY_PORTRAIT_DEMO_PATCH49_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -117,7 +119,15 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH48 累计升级说明
+    readme = """# PATCH49 累计升级说明
+
+客户／行业质量画像收敛为短期价值验证 Demo：画像范围直接查询彻底解决单与 ITR，按标准 ITR
+去重并明确 CS 主体、仅 ITR 补充、进入 Agent、已有／缺失场景和来源冲突数量。新增年份及月份
+范围，AI 输出改为可直接阅读的画像主题卡片，集中展示客户怎么使用、系统设备、系统规模、
+环境工况、客户语言痛点、业务影响、信息缺口以及研发／测试核查建议。已有场景资产只作辅助
+参考，不再与本次数据库问题口径混合。详细规则见 CURRENT_PHASE_DEMO_BASELINE.md。
+
+以下为 PATCH48 及更早累计内容：
 
 “本范围综合解读”新增断点续跑：失败后复用输入范围一致的已完成单问题批次和前序归并结果，
 只调用失败步骤及其后续步骤；仍保留放弃断点、全部重跑入口。第三层及以上归并缩小为两项一组，
