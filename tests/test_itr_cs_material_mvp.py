@@ -161,6 +161,46 @@ def test_workbench_can_preview_and_clean_duplicate_history(tmp_path):
     assert '删除无引用的历史版本 1 条' in result and '历史重复问题' not in result
 
 
+def test_wrong_sheet_records_can_be_previewed_and_safely_deleted_by_raw_field(tmp_path):
+    repo=MaterialRepository(tmp_path/'wrong-sheet.db');group=repo.group('ITR')
+    valid,_=repo.add_material(group,'ITR20260605001',{'问题信息_ITR单号':'ITR20260605001','问题信息_问题描述':'正常问题','过程信息_当前状态':'处理中'},'itr.xlsx','正确Sheet',3)
+    wrong,_=repo.add_material(group,'ITR20260605002',{'问题信息_ITR单号':'ITR20260605002','问题信息_问题描述':'错误Sheet数据','错误表_统计口径':'仅供汇总'},'itr.xlsx','错误Sheet',3)
+    protected,_=repo.add_material(group,'ITR20260605003',{'问题信息_ITR单号':'ITR20260605003','问题信息_问题描述':'受保护错误数据','错误表_统计口径':'仅供汇总'},'itr.xlsx','错误Sheet',4)
+    repo.save_review(protected,review_status='COMPLETED',analysis_summary='已人工使用',root_cause='',improvement_action='',reviewer='质量组')
+    catalog={row['field_name']:row['record_count'] for row in repo.raw_field_catalog('ITR')}
+    assert catalog['错误表_统计口径']==2
+    preview=repo.invalid_import_preview('ITR',field_name='错误表_统计口径',operator='HAS_FIELD')
+    assert preview['total']==2 and preview['deletable']==1 and preview['protected']==1
+    assert preview['sources']==[{'source_file':'itr.xlsx','sheet_name':'错误Sheet','count':2}]
+    result=repo.cleanup_invalid_import('ITR',field_name='错误表_统计口径',operator='VALUE_CONTAINS',value='汇总')
+    assert result=={'matched':2,'deleted':1,'protected':1}
+    assert repo.material(valid) is not None and repo.material(wrong) is None and repo.material(protected) is not None
+
+
+def test_wrong_sheet_filter_distinguishes_missing_field_from_value_not_contains(tmp_path):
+    repo=MaterialRepository(tmp_path/'wrong-sheet-operators.db');group=repo.group('ITR-CS')
+    repo.add_material(group,'ITR20260605011CS',{'问题信息_彻底解决单号':'ITR20260605011CS','标记':'错误数据'},'cs.xlsx','A',3)
+    repo.add_material(group,'ITR20260605012CS',{'问题信息_彻底解决单号':'ITR20260605012CS','标记':'正确数据'},'cs.xlsx','A',4)
+    repo.add_material(group,'ITR20260605013CS',{'问题信息_彻底解决单号':'ITR20260605013CS'},'cs.xlsx','B',3)
+    missing=repo.invalid_import_preview('ITR-CS',field_name='标记',operator='MISSING_FIELD')
+    not_contains=repo.invalid_import_preview('ITR-CS',field_name='标记',operator='VALUE_NOT_CONTAINS',value='正确')
+    assert missing['total']==1 and missing['samples'][0]['business_key']=='ITR20260605013CS'
+    assert not_contains['total']==1 and not_contains['samples'][0]['business_key']=='ITR20260605011CS'
+
+
+def test_all_workbenches_expose_wrong_sheet_cleanup_page(tmp_path):
+    app=create_app(tmp_path/'wrong-sheet-web.db');client=TestClient(app);repo=app.state.material_repository
+    group=repo.group('SW-OPS')
+    repo.add_material(group,'ITR20260605101CS',{'问题信息_彻底解决单号':'ITR20260605101CS','错误表_标识':'DELETE'},'ops.xlsx','汇总Sheet',3)
+    page=client.get('/materials/software-operations')
+    assert page.status_code==200 and '清理误导入数据' in page.text
+    preview=client.get('/materials/software-operations/data-cleanup',params={'preview':1,'field_name':'错误表_标识','operator':'VALUE_EQUALS','value':'DELETE'})
+    assert preview.status_code==200 and '汇总Sheet' in preview.text and '确认删除 1 条误导入记录' in preview.text
+    deleted=client.post('/materials/software-operations/data-cleanup',data={'field_name':'错误表_标识','operator':'VALUE_EQUALS','value':'DELETE','confirmed':'yes'},follow_redirects=False)
+    assert deleted.status_code==303 and 'deleted=1' in deleted.headers['location']
+    assert repo.search_materials('SW-OPS')['total']==0
+
+
 def test_disabled_rule_stops_automatic_link_but_keeps_other_type(tmp_path):
     db=tmp_path/"rules.db";repo=MaterialRepository(db)
     with repo.connect() as c:

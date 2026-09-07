@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH45_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH46_20260907"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -49,6 +49,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/READABLE_CHINESE_EVIDENCE_PATCH43_DELIVERY.md",
     "docs/requirements/INTERPRETATION_EVIDENCE_COVERAGE_PATCH44_DELIVERY.md",
     "docs/requirements/MATERIAL_INCREMENTAL_IMPORT_PATCH45_DELIVERY.md",
+    "docs/requirements/WRONG_SHEET_CLEANUP_PATCH46_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -114,7 +115,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH45 累计升级说明
+    readme = """# PATCH46 累计升级说明
+
+三个原始数据工作台新增“清理误导入数据”：可按原始字段是否存在、字段值包含／不包含、
+等于、为空或非空筛选物理导入记录。执行删除前展示命中数量、来源文件、Sheet和行号样例；
+人工分析、人工关联或质量场景已引用的记录继续受保护。删除错误的新版本后自动恢复上一正确版本。
+
+以下为 PATCH45 及更早累计内容：
 
 ITR、彻底解决单和软件考核三个工作台统一支持按标准ITR号增量导入：相同内容跳过、
 内容变化保存新版本、全新问题新增，默认问题清单只显示每个问题的最新版本。

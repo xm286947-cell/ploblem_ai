@@ -280,6 +280,29 @@ def create_app(db_path):
         report=material_repo.software_operation_distribution(**filters)
         return tpl.TemplateResponse(request,'software_operation_distribution.html',{'filters':filters,'report':report})
 
+    @app.get('/materials/{workbench}/data-cleanup', response_class=HTMLResponse, include_in_schema=False)
+    def material_data_cleanup_page(request:Request,workbench:str,field_name:str='',operator:str='HAS_FIELD',value:str='',preview:int=0,deleted:int=0,protected:int=0):
+        workspace=material_workbenches.get(workbench)
+        if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
+        criteria={'field_name':field_name,'operator':operator,'value':value}
+        result=None;error=''
+        if preview:
+            try:result=material_repo.invalid_import_preview(workspace['group_code'],**criteria)
+            except ValueError as exc:error=str(exc)
+        return tpl.TemplateResponse(request,'material_data_cleanup.html',{'workspace':workspace,'workbench':workbench,
+            'fields':material_repo.raw_field_catalog(workspace['group_code']),'criteria':criteria,'preview':result,'error':error,
+            'cleanup_result':{'deleted':deleted,'protected':protected} if deleted or protected else None})
+
+    @app.post('/materials/{workbench}/data-cleanup', include_in_schema=False)
+    def material_data_cleanup_execute(workbench:str,field_name:str=Form(...),operator:str=Form(...),value:str=Form(''),confirmed:str=Form('')):
+        workspace=material_workbenches.get(workbench)
+        if not workspace:raise HTTPException(404,'MATERIAL_WORKBENCH_NOT_FOUND')
+        if confirmed!='yes':raise HTTPException(400,'请先预览并确认删除范围')
+        try:result=material_repo.cleanup_invalid_import(workspace['group_code'],field_name=field_name,operator=operator,value=value)
+        except ValueError as exc:raise HTTPException(400,str(exc)) from exc
+        query=urlencode({'deleted':result['deleted'],'protected':result['protected']})
+        return RedirectResponse(f'/materials/{workbench}/data-cleanup?{query}',303)
+
     @app.get('/materials/{workbench}/{material_id}', response_class=HTMLResponse, include_in_schema=False)
     def material_detail(request: Request, workbench: str, material_id: str):
         workspace=material_workbenches.get(workbench)

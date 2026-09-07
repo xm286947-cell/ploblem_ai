@@ -342,6 +342,87 @@ class MaterialRepository:
         self.refresh_links()
         return {'deleted':deleted,'protected':protected}
 
+    def raw_field_catalog(self,group_code):
+        """List raw Excel fields in one workbench, ordered by record coverage."""
+        group=self.group(group_code)
+        if not group:raise ValueError('DATA_GROUP_NOT_FOUND')
+        with self.connect() as c:
+            rows=c.execute("""SELECT fields.key field_name,COUNT(*) record_count
+                FROM source_material m JOIN json_each(m.raw_json) fields
+                WHERE m.group_id=? GROUP BY fields.key
+                ORDER BY record_count DESC,fields.key""",(group['group_id'],)).fetchall()
+            return [dict(row) for row in rows]
+
+    def _material_ids_protected_from_delete(self,connection,material_ids):
+        ids=list(dict.fromkeys(material_ids or []));protected=set()
+        if not ids:return protected
+        marks=','.join('?' for _ in ids)
+        tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        protected.update(row[0] for row in connection.execute(f"SELECT material_id FROM material_review WHERE material_id IN ({marks})",ids))
+        protected.update(row[0] for row in connection.execute(f"SELECT material_id FROM issue_material_link WHERE link_status='MANUAL_LINKED' AND material_id IN ({marks})",ids))
+        if 'quality_scenario_evidence' in tables:
+            protected.update(row[0] for row in connection.execute(f"SELECT knowledge_id FROM quality_scenario_evidence WHERE knowledge_id IN ({marks})",ids))
+        return protected
+
+    def _invalid_import_matches(self,connection,group_id,field_name,operator,value=''):
+        operators={'HAS_FIELD','MISSING_FIELD','VALUE_CONTAINS','VALUE_NOT_CONTAINS','VALUE_EQUALS','VALUE_EMPTY','VALUE_NOT_EMPTY'}
+        if operator not in operators:raise ValueError('请选择有效的过滤条件')
+        field_name=_clean(field_name);value=_clean(value)
+        if not field_name:raise ValueError('请选择用于识别错误数据的字段')
+        if operator in {'VALUE_CONTAINS','VALUE_NOT_CONTAINS','VALUE_EQUALS'} and not value:
+            raise ValueError('当前过滤条件必须填写字段值')
+        exists="EXISTS(SELECT 1 FROM json_each(m.raw_json) field WHERE field.key=?)"
+        value_expr="COALESCE((SELECT CAST(field.value AS TEXT) FROM json_each(m.raw_json) field WHERE field.key=? LIMIT 1),'')"
+        params=[group_id]
+        if operator=='HAS_FIELD':condition=exists;params.append(field_name)
+        elif operator=='MISSING_FIELD':condition='NOT '+exists;params.append(field_name)
+        elif operator=='VALUE_EMPTY':condition=exists+f" AND TRIM({value_expr})=''";params.extend([field_name,field_name])
+        elif operator=='VALUE_NOT_EMPTY':condition=exists+f" AND TRIM({value_expr})<>''";params.extend([field_name,field_name])
+        elif operator=='VALUE_CONTAINS':condition=exists+f" AND LOWER({value_expr}) LIKE ?";params.extend([field_name,field_name,'%'+value.lower()+'%'])
+        elif operator=='VALUE_NOT_CONTAINS':condition=exists+f" AND LOWER({value_expr}) NOT LIKE ?";params.extend([field_name,field_name,'%'+value.lower()+'%'])
+        else:condition=exists+f" AND LOWER(TRIM({value_expr}))=?";params.extend([field_name,field_name,value.lower()])
+        rows=connection.execute(f"""SELECT m.material_id,m.business_key,m.canonical_itr,m.version_no,
+                m.source_file,m.sheet_name,m.row_number,m.raw_json,m.created_at
+            FROM source_material m WHERE m.group_id=? AND {condition}
+            ORDER BY m.created_at DESC,m.source_file,m.sheet_name,m.row_number""",params).fetchall()
+        return [dict(row) for row in rows]
+
+    def invalid_import_preview(self,group_code,*,field_name,operator,value=''):
+        """Preview physical import records matched by a raw-field rule, including history."""
+        group=self.group(group_code)
+        if not group:raise ValueError('DATA_GROUP_NOT_FOUND')
+        with self.connect() as c:
+            rows=self._invalid_import_matches(c,group['group_id'],field_name,operator,value)
+            protected=self._material_ids_protected_from_delete(c,[row['material_id'] for row in rows])
+        sources={}
+        for row in rows:
+            key=(row.get('source_file') or '未知文件',row.get('sheet_name') or '未知Sheet')
+            sources[key]=sources.get(key,0)+1
+        samples=[]
+        for row in rows[:20]:
+            raw=json.loads(row.pop('raw_json','{}') or '{}')
+            row['title']=_first(raw,'问题信息_问题主题','问题信息_问题描述','问题主题','问题描述') or '未提供问题描述'
+            row['protected']=row['material_id'] in protected;samples.append(row)
+        return {'total':len(rows),'deletable':len(rows)-len(protected),'protected':len(protected),'samples':samples,
+                'sources':[{'source_file':key[0],'sheet_name':key[1],'count':count} for key,count in sorted(sources.items(),key=lambda item:(-item[1],item[0]))]}
+
+    def cleanup_invalid_import(self,group_code,*,field_name,operator,value=''):
+        """Delete matched import records while preserving reviewed or referenced evidence."""
+        group=self.group(group_code)
+        if not group:raise ValueError('DATA_GROUP_NOT_FOUND')
+        with self.connect() as c:
+            rows=self._invalid_import_matches(c,group['group_id'],field_name,operator,value)
+            ids=[row['material_id'] for row in rows]
+            protected=self._material_ids_protected_from_delete(c,ids)
+            deleted=0
+            for material_id in ids:
+                if material_id in protected:continue
+                c.execute("DELETE FROM issue_material_link WHERE material_id=?",(material_id,))
+                c.execute("DELETE FROM source_material_reporting_year WHERE material_id=?",(material_id,))
+                c.execute("DELETE FROM source_material WHERE material_id=?",(material_id,));deleted+=1
+        self.refresh_links()
+        return {'matched':len(ids),'deleted':deleted,'protected':len(protected)}
+
     def software_operation_distribution(self, *, ipmt='', spdt='', product_model='', product_series='', year='', month=''):
         """Top customer/industry distribution under one associated software-operation scope."""
         scoped=self.search_materials('SW-OPS',ipmt=ipmt,spdt=spdt,product_model=product_model,
