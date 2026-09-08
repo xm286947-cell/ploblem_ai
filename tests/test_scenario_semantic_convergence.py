@@ -30,7 +30,8 @@ def test_scenario_persists_customer_language_and_operating_conditions(tmp_path):
     assert item['environment_condition_codes']==['POWER_CYCLE','REPEATED_OPERATION']
     assert item['operating_condition']=='设备正常生产后突然断电'
     page=client.get(response.headers['location'])
-    assert '客户问题与客户语言' in page.text and '环境与运行工况' in page.text and '掉电重启后关键计数仍然存在' in page.text
+    assert '客户痛点与质量体验' in page.text and '环境与运行工况' in page.text and '掉电重启后关键计数仍然存在' in page.text
+    assert page.text.index('关键场景判断') < page.text.index('客户痛点与质量体验') < page.text.index('标准质量模型与工程映射')
     insights=repository.insights(status='IN_REVIEW')
     assert insights['activity_typical_problem_matrix']['rows']
     assert any(cell['issue_count']==0 for row in insights['environment_typical_problem_matrix']['rows'] for cell in row['cells'].values())

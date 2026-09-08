@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH49_20260907"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH50_20260908"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -54,6 +54,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/INTERPRETATION_CHECKPOINT_RESUME_PATCH48_DELIVERY.md",
     "docs/requirements/CURRENT_PHASE_DEMO_BASELINE.md",
     "docs/requirements/CUSTOMER_QUALITY_PORTRAIT_DEMO_PATCH49_DELIVERY.md",
+    "docs/requirements/QUALITY_SCENARIO_FORM_HIERARCHY_PATCH50_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -119,7 +120,14 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH49 累计升级说明
+    readme = """# PATCH50 累计升级说明
+
+质量场景编辑页按人工判断顺序重新分层：顶部集中展示场景名称、生命周期、业务活动、状态、
+逆向判定理由、客户质量痛点、体验要求和质量关注点；中部展示场景链路、系统设备、规模、
+用户、失效与环境工况；适用范围、原始证据、行业变体及ISO工程映射下沉到底部。字段和保存
+接口保持兼容，已有场景无需迁移，保存按钮在核心事实区保持可见。
+
+以下为 PATCH49 及更早累计内容：
 
 客户／行业质量画像收敛为短期价值验证 Demo：画像范围直接查询彻底解决单与 ITR，按标准 ITR
 去重并明确 CS 主体、仅 ITR 补充、进入 Agent、已有／缺失场景和来源冲突数量。新增年份及月份
