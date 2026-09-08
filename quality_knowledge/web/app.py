@@ -56,6 +56,12 @@ def _intake_diag(event,diagnostic_id,**details):
 def _safe_json(value, default=None):
     if value is None:
         return {} if default is None else default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {} if default is None else default
 
 
 def _json_zh(value, indent=2):
@@ -63,12 +69,6 @@ def _json_zh(value, indent=2):
     try:spacing=max(0,min(int(indent),8))
     except (TypeError,ValueError):spacing=2
     return html.escape(json.dumps(value,ensure_ascii=False,indent=spacing,default=str))
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return {} if default is None else default
 
 
 def _ev(obj):

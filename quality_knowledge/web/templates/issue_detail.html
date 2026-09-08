@@ -183,7 +183,7 @@
       <div class="compact-card-head"><h3>原始问题</h3><span>业务原始信息</span></div>
       <div class="readable-table-wrap">
         <table class="readable-kv"><tbody>
-        {% for r in original_rows[:8] %}<tr><th>{{r.label}}</th><td><div class="clamp-text">{{r.value}}</div></td></tr>{% else %}<tr><td class="compact-empty">暂无原始数据</td></tr>{% endfor %}
+        {% for r in original_rows %}<tr><th>{{r.label}}</th><td><div class="clamp-text">{{r.value}}</div></td></tr>{% else %}<tr><td class="compact-empty">暂无原始数据</td></tr>{% endfor %}
         </tbody></table>
       </div>
       {% if original_rows|length > 8 %}<details class="reference-more"><summary>查看全部字段（{{original_rows|length}}）</summary><table class="readable-kv"><tbody>{% for r in original_rows[8:] %}<tr><th>{{r.label}}</th><td>{{r.value}}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
