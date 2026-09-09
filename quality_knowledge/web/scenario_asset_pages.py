@@ -21,11 +21,26 @@ def create_asset_router(repository,templates,generation=None):
         except ValueError as e:raise HTTPException(400,str(e))
         return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
 
+    @router.get('/quality-scenario-archives')
+    def interpretation_archives(request:Request):
+        if interpreter is None:raise HTTPException(503,'综合解读服务未配置')
+        return templates.TemplateResponse(request,'scenario_portrait_archives.html',{'archives':interpreter.archives()})
+
+    @router.post('/quality-scenario-interpretations/{jid}/archive')
+    async def archive_interpretation(request:Request,jid:str):
+        if interpreter is None:raise HTTPException(503,'综合解读服务未配置')
+        data=await request.form()
+        try:interpreter.archive(jid,name=data.get('archive_name',''),reason=data.get('archive_reason',''))
+        except KeyError:raise HTTPException(404,'解读不存在')
+        except ValueError as e:raise HTTPException(400,str(e))
+        return RedirectResponse('/quality-scenario-interpretations/'+jid,303)
+
     @router.get('/quality-scenario-interpretations/{jid}')
     def interpretation(request:Request,jid:str):
         job=interpreter.get(jid) if interpreter else None
         if not job:raise HTTPException(404,'解读不存在')
-        stale=interpreter.snapshot(job['filters'])[2]!=job['input_hash']
+        try:stale=interpreter.snapshot(job['filters'])[2]!=job['input_hash']
+        except ValueError:stale=True
         return templates.TemplateResponse(request,'scenario_interpretation.html',{'job':job,'stale':stale})
 
     @router.post('/quality-scenario-interpretations/{jid}/stop')
@@ -134,7 +149,7 @@ def create_asset_router(repository,templates,generation=None):
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
             'choices':choices,'market_scope':market_scope,
             'portrait_digest':portrait_digest(market_scope['items'] if market_scope else []),
-            'interpretation':latest_interpretation})
+            'interpretation':latest_interpretation,'archives':interpreter.archives(10) if interpreter else []})
 
     @router.get('/quality-scenario-assets/{sid}')
     def detail(request:Request,sid:str):

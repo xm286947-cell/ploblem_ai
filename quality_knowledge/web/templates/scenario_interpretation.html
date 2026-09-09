@@ -3,6 +3,7 @@
 {% block body %}
 <a class="btn" href="{{'/quality-scenario-assets/portrait' if job.filters.get('portrait_mode') else '/quality-scenario-assets'}}">{{'返回客户 / 行业画像' if job.filters.get('portrait_mode') else '返回场景资产与业务洞察'}}</a>
 <section class="di-card"><h1>本范围综合解读</h1><p id="progress">{{job.progress}}</p><p>{{job.created_at}} · {{job.input|length}} 条来源记录 · 模型：{{job.model or '待返回'}}</p>{% if job.filters.get('portrait_mode') %}<p><b>已有场景证据 {{job.evidence_counts.EXISTING_SCENARIO}} 条；市场问题补充 {{job.evidence_counts.MARKET_PROBLEM_SUPPLEMENT}} 条。</b> 后者仅为 AI 画像推断。</p>{% endif %}<p>筛选范围：{% for key,value in job.filters.items() %}{{key}}={{value}}；{% else %}全部已关联场景问题{% endfor %}</p>
+{% if job.archived %}<p class="di-alert"><b>已归档：{{job.archive_name}}</b> · {{job.archived_at}}<br>触发原因：{{job.archive_reason}}</p>{% endif %}
 {% if job.chunks %}<p>上下文处理记录：{{job.chunks|length}} 批；完成 {{job.chunks|selectattr('status','equalto','COMPLETED')|list|length}}，失败 {{job.chunks|selectattr('status','equalto','FAILED')|list|length}}，处理中 {{job.chunks|selectattr('status','equalto','RUNNING')|list|length}}。市场问题按单问题独立提取，再分层归并。</p>{% endif %}
 {% if stale %}<p class="di-alert">来源或场景信息已变化。以下为生成时的快照结果，尚未反映新数据。</p>{% endif %}
 {% if job.error %}<p class="di-alert">{{job.error}}</p>{% endif %}
@@ -10,6 +11,7 @@
 {% if job.status == 'FAILED' %}<form method="post" action="/quality-scenario-interpretations/{{job.job_id}}/resume"><button class="btn btn-primary">从失败步骤继续</button><p>复用已经完成且输入范围一致的单问题分析和归并结果，只重跑失败步骤及其后续步骤。</p></form>{% endif %}
 {% if job.status != 'RUNNING' %}<form method="post" action="/quality-scenario-interpretations">{% for key,value in job.filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<input type="hidden" name="refresh" value="1"><button class="btn">放弃断点，全部重新生成</button></form>{% endif %}
 </section>
+{% if job.status=='COMPLETED' and job.filters.get('portrait_mode') and not job.archived %}<section class="di-card"><h2>归档本次质量画像</h2><p>归档会冻结本次生成结果、输入问题快照和筛选条件。请补充为什么发起本次分析，便于后续追溯。</p><form method="post" action="/quality-scenario-interpretations/{{job.job_id}}/archive" class="form-grid"><label>画像名称<input name="archive_name" placeholder="例如：2026年锂电行业先导公司质量画像"></label><label class="span-2">分析触发原因（必填）<textarea name="archive_reason" required placeholder="例如：年度客户质量复盘；针对近期批量停机问题发起专项画像"></textarea></label><div class="span-2"><button class="btn btn-primary">确认归档</button> <a class="btn" href="/quality-scenario-archives">查看画像归档</a></div></form></section>{% endif %}
 {% if job.chunks %}<section class="di-card"><h2>分批处理状态</h2><div class="table-wrap"><table class="qs-table"><thead><tr><th>批次</th><th>环节</th><th>状态</th><th>模型</th><th>错误</th></tr></thead><tbody>{% for chunk in job.chunks %}<tr><td>{{chunk.chunk_no}}</td><td>{{chunk.chunk_type}}</td><td>{{chunk.status}}</td><td>{{chunk.model or '—'}}</td><td>{{chunk.error or '—'}}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
 {% if job.status == 'COMPLETED' %}
 <section class="di-card"><h2>整体判断</h2><p style="white-space:pre-wrap">{{job.result.summary}}</p><p>AI 解读及研发、测试、指标建议均待人工评审；问题数量不代表故障率。</p></section>

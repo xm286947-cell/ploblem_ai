@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH53_20260909"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH54_20260909"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -58,6 +58,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/ISSUE_WORKBENCH_RAW_DATA_PATCH51_DELIVERY.md",
     "docs/requirements/SCENARIO_LIBRARY_TAXONOMY_LABEL_PATCH52_DELIVERY.md",
     "docs/requirements/SCENARIO_PRODUCT_GROUPING_PATCH53_DELIVERY.md",
+    "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_ARCHIVE_PATCH54_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -123,7 +124,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH53 累计升级说明
+    readme = """# PATCH54 累计升级说明
+
+客户/行业质量画像新增人工归档：已完成画像可填写名称和必填触发原因后归档，系统同时冻结
+筛选条件、输入问题数、证据来源构成、模型、输入哈希、结果摘要和归档时间，并提供归档清单回看。
+
+以下为 PATCH53 及更早累计内容：
 
 质量场景库与行业场景看板统一接入产品配置：场景库按产品分组展示并支持产品筛选；看板增加
 产品分组和产品筛选，场景数、来源问题、质量矩阵、行业分布及下钻链接使用同一产品口径。

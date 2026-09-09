@@ -4,7 +4,7 @@
 **Status:** Release Candidate + Field Configuration Initial Baseline  
 **Design Baseline:** `KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_DESIGN_V1.0` (Frozen)  
 **Existing Capability Baseline:** `REPEAT_CASE_ENGINE_V2.4_M6_SOLUTION_OPTIMIZED`
-**Latest cumulative patch:** `V1.1_P2_RC2_PATCH53_20260909`（场景库与行业场景看板按产品配置分组）
+**Latest cumulative patch:** `V1.1_P2_RC2_PATCH54_20260909`（客户/行业质量画像归档与触发条件追溯）
 
 ## 1. 用途
 

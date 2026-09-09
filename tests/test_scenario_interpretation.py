@@ -75,6 +75,29 @@ def test_saved_manual_generation_coverage_stale_and_no_get_calls(tmp_path,monkey
     assert client.get('/quality-scenario-assets').status_code==200
 
 
+def test_completed_customer_portrait_can_be_archived_with_trigger_snapshot(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    jid='SCI-ARCHIVE-DEMO';filters={'portrait_mode':'1','industry':'锂电','customer':'先导公司','year':'2026','problem_domain':'HARDWARE'}
+    sources=[{'id':'MAT-1','number':'ITR20260101001CS','evidence_mode':'MARKET_PROBLEM_SUPPLEMENT'}]
+    result={'summary':'硬件环境工况画像，待评审','findings':[],'unresolved_ids':['MAT-1']}
+    with repo.connect() as c:
+        c.execute('''INSERT INTO scenario_interpretation(job_id,scope_hash,input_hash,filters_json,input_json,status,progress,result_json,model)
+            VALUES(?,?,?,?,?,'COMPLETED','画像完成',?,?)''',(jid,'scope','input',json.dumps(filters,ensure_ascii=False),json.dumps(sources,ensure_ascii=False),json.dumps(result,ensure_ascii=False),'quality-model'))
+    client=TestClient(app)
+    response=client.post(f'/quality-scenario-interpretations/{jid}/archive',data={'archive_name':'2026锂电先导质量画像','archive_reason':'年度客户质量复盘'},follow_redirects=False)
+    assert response.status_code==303 and response.headers['location'].endswith(jid)
+    archived=service.get(jid)
+    assert archived['archived']==1 and archived['archive_reason']=='年度客户质量复盘'
+    assert archived['archive_snapshot']['input_count']==1
+    assert {'label':'行业','value':'锂电','key':'industry'} in archived['archive_snapshot']['trigger_conditions']
+    assert {'label':'问题领域','value':'硬件','key':'problem_domain'} in archived['archive_snapshot']['trigger_conditions']
+    detail=client.get(f'/quality-scenario-interpretations/{jid}')
+    assert detail.status_code==200 and '已归档：2026锂电先导质量画像' in detail.text and '年度客户质量复盘' in detail.text
+    archive_page=client.get('/quality-scenario-archives')
+    assert archive_page.status_code==200 and '质量画像归档' in archive_page.text
+    assert '先导公司' in archive_page.text and '1 个问题' in archive_page.text
+
+
 def test_batches_merge_and_reject_missing_or_invented_evidence(tmp_path,monkeypatch):
     app,gen,repo,ids,assets,service=setup(tmp_path);fake=FakeClient();service.client=fake
     monkeypatch.setattr('quality_knowledge.scenario_interpretation.threading.Thread',lambda target,args,**kw:SimpleNamespace(start=lambda:target(*args)))

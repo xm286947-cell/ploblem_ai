@@ -27,6 +27,10 @@ def digest(value):return hashlib.sha256(encode(value).encode()).hexdigest()
 REPORT_FILTERS=('status','business','product','industry','customer','activity','lifecycle','scale','environment','concern','quality','period','asset_id','grain')
 CONTROL_FILTERS=('supplement_market','problem_domain','source_product','portrait_mode','year','start_month','end_month')
 FILTERS=REPORT_FILTERS+CONTROL_FILTERS
+FILTER_LABELS={'industry':'行业','customer':'客户/公司','product':'产品型号','business':'产品/业务','year':'年份',
+               'start_month':'开始月份','end_month':'结束月份','problem_domain':'问题领域','source_product':'来源产品',
+               'activity':'业务活动','lifecycle':'使用生命周期','scale':'系统规模','environment':'环境/工况',
+               'concern':'质量关注','quality':'质量属性','period':'统计周期','status':'场景状态'}
 MAX_BATCH_CHARS=18000
 MAX_SINGLE_RECORD_CHARS=12000
 MAX_MERGE_BATCH_CHARS=12000
@@ -42,6 +46,9 @@ class ScenarioInterpretation:
         with self.repo.connect() as c:
             c.execute('''CREATE TABLE IF NOT EXISTS scenario_interpretation(job_id TEXT PRIMARY KEY,scope_hash TEXT,input_hash TEXT,filters_json TEXT,input_json TEXT,status TEXT,progress TEXT,result_json TEXT,error TEXT,model TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
             c.execute('''CREATE TABLE IF NOT EXISTS scenario_interpretation_chunk(job_id TEXT NOT NULL,chunk_no INTEGER NOT NULL,chunk_type TEXT NOT NULL,input_ids_json TEXT NOT NULL,status TEXT NOT NULL,result_json TEXT,error TEXT,model TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(job_id,chunk_no))''')
+            columns={row['name'] for row in c.execute('PRAGMA table_info(scenario_interpretation)')}
+            for name,definition in {'archived':'INTEGER NOT NULL DEFAULT 0','archive_name':'TEXT','archive_reason':'TEXT','archive_snapshot_json':'TEXT','archived_at':'TEXT'}.items():
+                if name not in columns:c.execute(f'ALTER TABLE scenario_interpretation ADD COLUMN {name} {definition}')
 
     @staticmethod
     def _analysis_digest(analyses):
@@ -200,9 +207,47 @@ class ScenarioInterpretation:
         if not row:return None
         item=dict(row)
         for key in ('filters','input','result'):item[key]=json.loads(item.pop(key+'_json') or ('[]' if key=='input' else '{}'))
+        try:item['archive_snapshot']=json.loads(item.pop('archive_snapshot_json') or '{}')
+        except (TypeError,json.JSONDecodeError):item['archive_snapshot']={}
         item['evidence_counts']={mode:sum(1 for source in item['input'] if source.get('evidence_mode')==mode) for mode in ('EXISTING_SCENARIO','MARKET_PROBLEM_SUPPLEMENT')}
         with self.repo.connect() as c:item['chunks']=[dict(x) for x in c.execute('SELECT chunk_no,chunk_type,status,error,model,updated_at FROM scenario_interpretation_chunk WHERE job_id=? ORDER BY chunk_no',(jid,))]
         return item
+
+    @staticmethod
+    def trigger_conditions(filters):
+        domain_labels={'SOFTWARE':'软件','HARDWARE':'硬件','MECHANICAL':'机械','UNKNOWN':'待识别'}
+        rows=[]
+        for key,value in filters.items():
+            if key in {'portrait_mode','supplement_market','grain'} or value in ('',None):continue
+            shown=domain_labels.get(str(value),str(value)) if key=='problem_domain' else str(value)
+            rows.append({'key':key,'label':FILTER_LABELS.get(key,key),'value':shown})
+        return rows
+
+    def archive(self,jid,*,name='',reason=''):
+        job=self.get(jid)
+        if not job:raise KeyError(jid)
+        if job['status']!='COMPLETED':raise ValueError('只有已完成的画像可以归档')
+        if job['filters'].get('portrait_mode')!='1':raise ValueError('只有客户/行业质量画像可以归档')
+        reason=str(reason or '').strip()
+        if not reason:raise ValueError('请填写本次画像的触发原因')
+        name=str(name or '').strip()
+        if not name:
+            parts=[job['filters'].get(key) for key in ('industry','customer','year') if job['filters'].get(key)]
+            name=' / '.join(parts) or f"质量场景画像 {job['created_at']}"
+        snapshot={'trigger_conditions':self.trigger_conditions(job['filters']),'input_count':len(job['input']),
+                  'evidence_counts':job['evidence_counts'],'model':job.get('model') or '',
+                  'input_hash':job['input_hash'],'summary':(job.get('result') or {}).get('summary','')}
+        with self.repo.connect() as c:
+            c.execute('''UPDATE scenario_interpretation SET archived=1,archive_name=?,archive_reason=?,
+                         archive_snapshot_json=?,archived_at=CURRENT_TIMESTAMP WHERE job_id=?''',
+                      (name[:160],reason[:500],encode(snapshot),jid))
+        return self.get(jid)
+
+    def archives(self,limit=50):
+        with self.repo.connect() as c:
+            ids=[row['job_id'] for row in c.execute('''SELECT job_id FROM scenario_interpretation
+                WHERE archived=1 ORDER BY archived_at DESC,created_at DESC LIMIT ?''',(int(limit),))]
+        return [self.get(jid) for jid in ids]
 
     def update(self,jid,**fields):
         with self.repo.connect() as c:c.execute('UPDATE scenario_interpretation SET '+','.join(k+'=?' for k in fields)+" WHERE job_id=? AND status='RUNNING'",(*fields.values(),jid))
