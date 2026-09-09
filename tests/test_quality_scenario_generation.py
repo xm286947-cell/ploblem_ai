@@ -237,6 +237,23 @@ def test_scenario_insights_show_activity_and_industry_views(tmp_path):
     assert '掉电数据保持与上电恢复' in page.text and '锂电' in page.text
 
 
+def test_scenario_insights_groups_and_filters_by_configured_product(tmp_path):
+    client=TestClient(create_app(tmp_path/'insight-product.db'));repository=client.app.state.scenario_repository
+    plc=repository.save_scenario('',{'scenario_code':'PLC-I-1','name':'PLC洞察场景','product_code':'PLC','status':'PUBLISHED'}, {})
+    hmi=repository.save_scenario('',{'scenario_code':'HMI-I-1','name':'HMI洞察场景','product_code':'HMI','status':'PUBLISHED'}, {})
+    with repository.connect() as c:
+        c.execute("INSERT INTO quality_scenario_evidence VALUES(?,?,?)",(plc,'QK-PLC','{}'))
+        c.execute("INSERT INTO quality_scenario_evidence VALUES(?,?,?)",(hmi,'QK-HMI','{}'))
+    page=client.get('/quality-scenarios/insights')
+    assert page.status_code==200 and '产品分组' in page.text
+    assert 'PLC</b><span>1 个场景 · 1 个来源问题' in page.text
+    assert 'HMI</b><span>1 个场景 · 1 个来源问题' in page.text
+    filtered=client.get('/quality-scenarios/insights?product_code=HMI')
+    assert filtered.status_code==200 and '<option value="HMI" selected>HMI</option>' in filtered.text
+    assert 'href="/quality-scenarios/insights?product_code=PLC"' not in filtered.text
+    assert repository.insights(product_code='HMI')['scenario_count']==1
+
+
 def test_scenario_insights_show_four_standard_quality_matrices(tmp_path):
     client=TestClient(create_app(tmp_path/'matrix.db'));repository=client.app.state.scenario_repository
     scenario_id=repository.save_scenario('',{'scenario_code':'MATRIX-1','name':'在线监控卡顿','lifecycle_code':'SOFTWARE_DEBUGGING','activity_code':'ONLINE_MONITORING','status':'PUBLISHED','primary_experience_code':'EFFICIENT_SMOOTH','quality_in_use_codes':['EFFICIENCY','SATISFACTION'],'primary_quality_characteristic_code':'PERFORMANCE_EFFICIENCY','quality_subcharacteristic_codes':['TIME_BEHAVIOUR'],'quality_classification_status':'CONFIRMED'}, {})

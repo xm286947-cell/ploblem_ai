@@ -364,14 +364,19 @@ def create_app(db_path):
         return RedirectResponse('/settings/associations',303)
 
     @app.get('/quality-scenarios', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenarios(request: Request, ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = '', activity_code: str = '', experience_code: str = '', qiu_code: str = '', quality_code: str = '', typical_problem_code: str = '', environment_code: str = '', deleted: int = 0, protected: int = 0):
+    def quality_scenarios(request: Request, product_code: str = '', ipmt: str = '', spdt: str = '', product_model: str = '', industry: str = '', customer_name: str = '', q: str = '', status: str = '', generation_id: str = '', activity_code: str = '', experience_code: str = '', qiu_code: str = '', quality_code: str = '', typical_problem_code: str = '', environment_code: str = '', deleted: int = 0, protected: int = 0):
         taxonomy=scenario_repo.taxonomy()
-        filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
-        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':scenario_repo.scenarios(**filters),'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None,'deleted':deleted,'protected':protected})
+        filters={'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
+        products=product_repo.list();product_labels={x['product_code']:x['product_name'] for x in products};items=scenario_repo.scenarios(**filters)
+        grouped={code:[] for code in product_labels}
+        for item in items:
+            code=item.get('product_code') or 'UNCONFIGURED';item['product_name']=product_labels.get(code,code or '未配置产品');grouped.setdefault(code,[]).append(item)
+        product_groups=[{'product_code':code,'product_name':product_labels.get(code,code or '未配置产品'),'items':rows} for code,rows in grouped.items() if rows]
+        return tpl.TemplateResponse(request,'quality_scenarios.html',{'items':items,'product_groups':product_groups,'products':products,'options':scenario_repo.scope_options(),'filters':filters,'taxonomy':taxonomy,'lifecycle_labels':{x['lifecycle_code']:x['label_zh'] for x in taxonomy['lifecycles']},'activity_labels':{x['activity_code']:x['label_zh'] for x in taxonomy['activities']},'generation':scenario_repo.generation(generation_id) if generation_id else None,'deleted':deleted,'protected':protected})
 
     @app.post('/quality-scenarios/delete-generated', include_in_schema=False)
-    def quality_scenario_delete_generated(ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), industry: str = Form(''), customer_name: str = Form(''), q: str = Form(''), status: str = Form(''), generation_id: str = Form(''), activity_code: str = Form(''), experience_code: str = Form(''), qiu_code: str = Form(''), quality_code: str = Form(''), typical_problem_code: str = Form(''), environment_code: str = Form('')):
-        filters={'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
+    def quality_scenario_delete_generated(product_code: str = Form(''), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), industry: str = Form(''), customer_name: str = Form(''), q: str = Form(''), status: str = Form(''), generation_id: str = Form(''), activity_code: str = Form(''), experience_code: str = Form(''), qiu_code: str = Form(''), quality_code: str = Form(''), typical_problem_code: str = Form(''), environment_code: str = Form('')):
+        filters={'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'industry':industry,'customer_name':customer_name,'q':q,'status':status,'generation_id':generation_id,'activity_code':activity_code,'experience_code':experience_code,'qiu_code':qiu_code,'quality_code':quality_code,'typical_problem_code':typical_problem_code,'environment_code':environment_code}
         result=scenario_repo.delete_generated_scenarios(**filters)
         kept={key:value for key,value in filters.items() if value}
         kept.update({'deleted':result['deleted'],'protected':result['protected']})
@@ -445,11 +450,14 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'quality_scenario_generate.html',{'products':product_repo.list(),'generations':scenario_repo.generations(),'result':None,'scope':scope,'scope_counts':counts,'choices':choices,'job':scenario_repo.generation(job_id) if job_id else None,'filters':filters})
 
     @app.get('/quality-scenarios/insights', response_class=HTMLResponse, include_in_schema=False)
-    def quality_scenario_insights(request: Request, status: str = ''):
+    def quality_scenario_insights(request: Request, status: str = '', product_code: str = ''):
         from quality_knowledge.scenario_assets import ScenarioAssets
         from quality_knowledge.scenario_decisions import decision_digest
-        decision=decision_digest(ScenarioAssets(scenario_repo).report({'status':status}),scenario_repo)
-        return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':scenario_repo.insights(status=status),'status':status,'decision':decision})
+        products=product_repo.list();labels={x['product_code']:x['product_name'] for x in products}
+        decision=decision_digest(ScenarioAssets(scenario_repo).report({'status':status,'business':product_code}),scenario_repo)
+        insights=scenario_repo.insights(status=status,product_code=product_code)
+        for row in insights['product_rows']:row['product_name']=labels.get(row['product_code'],row['product_code'])
+        return tpl.TemplateResponse(request,'quality_scenario_insights.html',{'insights':insights,'status':status,'product_code':product_code,'products':products,'decision':decision})
 
     @app.post('/quality-scenarios/generate', response_class=HTMLResponse, include_in_schema=False)
     def quality_scenario_generate(request: Request, product_code: str = Form(...), start_month: str = Form(''), end_month: str = Form(''), selected_ids: list[str] = Form([]), ipmt: str = Form(''), spdt: str = Form(''), product_model: str = Form(''), product_series: str = Form(''), industry: str = Form(''), customer: str = Form(''), year: str = Form('')):

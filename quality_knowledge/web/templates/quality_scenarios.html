@@ -8,6 +8,7 @@
 <form class="qs-filters" method="get">
 {% if filters.activity_code or filters.experience_code or filters.qiu_code or filters.quality_code %}<div class="di-alert"><b>矩阵下钻口径</b><span>仅显示同时满足所选业务活动与质量分类的场景。</span></div>{% endif %}
 <input name="q" value="{{filters.q}}" placeholder="搜索场景名称或编码">
+<select name="product_code"><option value="">全部产品（按产品分组）</option>{% for product in products %}<option value="{{product.product_code}}" {% if filters.product_code==product.product_code %}selected{% endif %}>{{product.product_name}}</option>{% endfor %}</select>
 <select name="ipmt"><option value="">全部IPMT</option>{% for value in options.IPMT %}<option {% if filters.ipmt==value %}selected{% endif %}>{{value}}</option>{% endfor %}</select>
 <select name="spdt"><option value="">全部SPDT</option>{% for value in options.SPDT %}<option {% if filters.spdt==value %}selected{% endif %}>{{value}}</option>{% endfor %}</select>
 <select name="product_model"><option value="">全部产品型号</option>{% for value in options.PRODUCT_MODEL %}<option {% if filters.product_model==value %}selected{% endif %}>{{value}}</option>{% endfor %}</select>
@@ -16,15 +17,16 @@
 <select name="status"><option value="">全部状态</option><option value="DRAFT" {% if filters.status=='DRAFT' %}selected{% endif %}>草稿</option><option value="IN_REVIEW" {% if filters.status=='IN_REVIEW' %}selected{% endif %}>审核中</option><option value="PUBLISHED" {% if filters.status=='PUBLISHED' %}selected{% endif %}>已发布</option><option value="RETIRED" {% if filters.status=='RETIRED' %}selected{% endif %}>已退役</option></select>
 <button class="btn btn-primary">查询</button><a class="btn" href="/quality-scenarios">重置</a>
 </form>
-<section class="di-card"><div class="di-cardhead"><div><h2>场景清单</h2><p>客户与行业信息取自彻底解决单；AI候选经人工确认后才可发布。</p></div>{% if items %}<form method="post" action="/quality-scenarios/delete-generated" onsubmit="return confirm('将删除当前筛选范围内所有未发布、未人工确认的 AI 场景。已发布、已确认和人工新建场景会保留。确定继续？')">{% for key,value in filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<button class="qs-delete" type="submit">一键清理当前范围</button></form>{% endif %}</div><div class="table-wrap"><table class="qs-table qs-scenario-table"><thead><tr><th>质量场景 / 产品范围</th><th>客户与原始事实</th><th>生命周期 / 业务活动</th><th>场景链路</th><th>质量特性</th><th>指标与度量方式建议</th><th>状态 / 操作</th></tr></thead><tbody>
-{% for item in items %}<tr>
-<td><a href="/quality-scenarios/{{item.scenario_id}}"><b>{{item.name}}</b></a><small>{{item.scenario_code}} · V{{item.version_no}}</small><small>IPMT：{{item.scopes.get('IPMT',[])|join('、') or '-'}}</small><small>SPDT：{{item.scopes.get('SPDT',[])|join('、') or '-'}}</small><small>型号：{{item.scopes.get('PRODUCT_MODEL',[])|join('、') or '-'}}</small></td>
+<section class="di-card"><div class="di-cardhead"><div><h2>场景清单</h2><p>按“产品配置”中的产品分组；客户与行业信息取自彻底解决单，AI候选经人工确认后才可发布。</p></div>{% if items %}<form method="post" action="/quality-scenarios/delete-generated" onsubmit="return confirm('将删除当前筛选范围内所有未发布、未人工确认的 AI 场景。已发布、已确认和人工新建场景会保留。确定继续？')">{% for key,value in filters.items() %}<input type="hidden" name="{{key}}" value="{{value}}">{% endfor %}<button class="qs-delete" type="submit">一键清理当前范围</button></form>{% endif %}</div><div class="table-wrap"><table class="qs-table qs-scenario-table"><thead><tr><th>质量场景 / 产品范围</th><th>客户与原始事实</th><th>生命周期 / 业务活动</th><th>场景链路</th><th>质量特性</th><th>指标与度量方式建议</th><th>状态 / 操作</th></tr></thead><tbody>
+{% for group in product_groups %}<tr class="qs-product-group"><td colspan="7"><b>{{group.product_name}}</b><span>{{group.product_code}} · {{group['items']|length}} 个质量场景</span></td></tr>
+{% for item in group['items'] %}<tr>
+<td><a href="/quality-scenarios/{{item.scenario_id}}"><b>{{item.name}}</b></a><small>{{item.product_name}} · {{item.scenario_code}} · V{{item.version_no}}</small><small>IPMT：{{item.scopes.get('IPMT',[])|join('、') or '-'}}</small><small>SPDT：{{item.scopes.get('SPDT',[])|join('、') or '-'}}</small><small>型号：{{item.scopes.get('PRODUCT_MODEL',[])|join('、') or '-'}}</small></td>
 <td>行业：{{item.scopes.get('INDUSTRY',[])|join('、') or '-'}}<small>客户：{{item.scopes.get('CUSTOMER_NAME',[])|join('、') or '-'}}</small><small>客户分级：{{item.scopes.get('CUSTOMER_LEVEL',[])|join('、') or '-'}}</small><small>客户状态：{{item.scopes.get('CUSTOMER_STATUS',[])|join('、') or '-'}}</small><small>原始发生阶段（参考）：{{item.scopes.get('OCCURRENCE_PHASE',[])|join('、') or '-'}}</small></td>
 <td>{{item.lifecycle_label or lifecycle_labels.get(item.lifecycle_code,item.lifecycle_code) or '-'}}<small>{{item.activity_label or activity_labels.get(item.activity_code,item.activity_code) or '-'}}</small></td>
 <td><span class="qs-clamp">{{item.scenario_chain or '业务活动未配置链路'}}</span></td>
 <td>{{item.quality_attribute or '待补充'}}<small>子特性：{{item.quality_subcharacteristic or '待补充'}}</small></td>
 <td><span class="qs-clamp">{{item.measurement_suggestion or '待补充'}}</span></td>
 <td><span class="map-status-chip {% if item.status=='PUBLISHED' %}active{% endif %}">{% if item.status=='IN_REVIEW' %}待人工审核{% elif item.status=='PUBLISHED' %}已发布{% elif item.status=='DRAFT' %}草稿{% else %}{{item.status}}{% endif %}</span><small><a href="/quality-scenarios/{{item.scenario_id}}">查看 / 编辑 →</a></small><small><a href="/quality-scenarios/{{item.scenario_id}}/capabilities">能力缺口（{{item.capability_gaps|length}}）→</a></small><form method="post" action="/quality-scenarios/{{item.scenario_id}}/delete" onsubmit="return confirm('确定删除该质量场景？删除后无法恢复。')"><button class="qs-delete" type="submit">删除</button></form></td>
-</tr>{% else %}<tr><td colspan="7" class="di-empty">暂无质量场景，可人工新建或由AI生成候选。</td></tr>{% endfor %}
+</tr>{% endfor %}{% else %}<tr><td colspan="7" class="di-empty">暂无质量场景，可人工新建或由AI生成候选。</td></tr>{% endfor %}
 </tbody></table></div></section>
 {% endblock %}

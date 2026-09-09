@@ -103,6 +103,18 @@ def test_scenario_scope_filters_ipmt_spdt_and_product_model(tmp_path):
     assert "场景资产" in matched.text
 
 
+def test_scenario_library_groups_and_filters_by_configured_product(tmp_path):
+    client=TestClient(create_app(tmp_path/'product-groups.db'));repository=client.app.state.scenario_repository
+    repository.save_scenario('',{'scenario_code':'PLC-GROUP-1','name':'PLC质量场景','product_code':'PLC','status':'PUBLISHED'}, {})
+    repository.save_scenario('',{'scenario_code':'HMI-GROUP-1','name':'HMI质量场景','product_code':'HMI','status':'PUBLISHED'}, {})
+    page=client.get('/quality-scenarios')
+    assert page.status_code==200 and '全部产品（按产品分组）' in page.text
+    assert 'PLC · 1 个质量场景' in page.text and 'HMI · 1 个质量场景' in page.text
+    filtered=client.get('/quality-scenarios?product_code=HMI')
+    assert 'HMI质量场景' in filtered.text and 'PLC质量场景' not in filtered.text
+    assert '<option value="HMI" selected>HMI</option>' in filtered.text
+
+
 def test_new_scenario_route_is_not_swallowed_by_dynamic_detail(tmp_path):
     client=TestClient(create_app(tmp_path/"route.db"))
     page=client.get("/quality-scenarios/new")

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH52_20260909"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH53_20260909"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -57,6 +57,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/QUALITY_SCENARIO_FORM_HIERARCHY_PATCH50_DELIVERY.md",
     "docs/requirements/ISSUE_WORKBENCH_RAW_DATA_PATCH51_DELIVERY.md",
     "docs/requirements/SCENARIO_LIBRARY_TAXONOMY_LABEL_PATCH52_DELIVERY.md",
+    "docs/requirements/SCENARIO_PRODUCT_GROUPING_PATCH53_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -122,7 +123,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH52 累计升级说明
+    readme = """# PATCH53 累计升级说明
+
+质量场景库与行业场景看板统一接入产品配置：场景库按产品分组展示并支持产品筛选；看板增加
+产品分组和产品筛选，场景数、来源问题、质量矩阵、行业分布及下钻链接使用同一产品口径。
+
+以下为 PATCH52 及更早累计内容：
 
 修复质量场景库首页的生命周期、业务活动显示为编码：列表现在按每条质量场景绑定的产品场景
 词典版本解析中文名称，不再统一使用默认 PLC 词典。场景详情、场景链路和历史数据均不改写。

@@ -363,10 +363,11 @@ class ScenarioRepository:
                 values.setdefault(row['scope_type'],set()).add(row['scope_value'])
         return {key:sorted(items) for key,items in values.items()}
 
-    def scenarios(self, *, ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code="", typical_problem_code="", environment_code="", scenario_id=""):
+    def scenarios(self, *, product_code="", ipmt="", spdt="", product_model="", industry="", customer_name="", q="", status="", generation_id="", activity_code="", experience_code="", qiu_code="", quality_code="", typical_problem_code="", environment_code="", scenario_id=""):
         with self.connect() as c:
             clauses=[];params=[]
             if scenario_id:clauses.append("s.scenario_id=?");params.append(scenario_id)
+            if product_code:clauses.append("s.product_code=?");params.append(product_code)
             if q:clauses.append("LOWER(s.name||' '||s.scenario_code) LIKE ?");params.append('%'+q.lower()+'%')
             if status:clauses.append("s.status=?");params.append(status)
             if activity_code:clauses.append("s.activity_code=?");params.append(activity_code)
@@ -606,8 +607,8 @@ class ScenarioRepository:
             if table in tables:c.execute(f"DELETE FROM {table} WHERE generation_id=?",(generation_id,))
         c.execute("DELETE FROM quality_scenario_generation WHERE generation_id=?",(generation_id,))
 
-    def insights(self, *, status=''):
-        items=self.scenarios(status=status)
+    def insights(self, *, status='', product_code=''):
+        items=self.scenarios(status=status,product_code=product_code)
         product_codes={x.get('product_code') or 'PLC' for x in items} or {'PLC'}
         taxonomies=[self.taxonomy_active(code) for code in product_codes]
         taxonomies=[x for x in taxonomies if x] or [{'activities':[],'lifecycles':[]}]
@@ -620,12 +621,14 @@ class ScenarioRepository:
             industries=item.get('scopes',{}).get('INDUSTRY') or ['未提供行业']
             evidence_count=len((self.scenario(item['scenario_id']) or {}).get('evidence',[]))
             activity=item.get('activity_code') or 'UNCLASSIFIED'
-            a=activity_rows.setdefault(activity,{'activity_code':activity,'activity_label':activity_labels.get(activity,activity),'lifecycle_label':lifecycle_labels.get(item.get('lifecycle_code'),item.get('lifecycle_code') or '未分类'),'scenario_ids':set(),'issue_count':0,'industries':{}})
+            activity_label=item.get('activity_label') or activity_labels.get(activity,activity)
+            lifecycle_label=item.get('lifecycle_label') or lifecycle_labels.get(item.get('lifecycle_code'),item.get('lifecycle_code') or '未分类')
+            a=activity_rows.setdefault(activity,{'activity_code':activity,'activity_label':activity_label,'lifecycle_label':lifecycle_label,'scenario_ids':set(),'issue_count':0,'industries':{}})
             a['scenario_ids'].add(item['scenario_id']);a['issue_count']+=evidence_count
             for industry in industries:
                 a['industries'][industry]=a['industries'].get(industry,0)+evidence_count
                 i=industry_rows.setdefault(industry,{'industry':industry,'scenario_ids':set(),'issue_count':0,'activities':{}})
-                i['scenario_ids'].add(item['scenario_id']);i['issue_count']+=evidence_count;i['activities'][activity_labels.get(activity,activity)]=i['activities'].get(activity_labels.get(activity,activity),0)+evidence_count
+                i['scenario_ids'].add(item['scenario_id']);i['issue_count']+=evidence_count;i['activities'][activity_label]=i['activities'].get(activity_label,0)+evidence_count
         def finish(rows):
             result=[]
             for row in rows.values():
@@ -643,7 +646,7 @@ class ScenarioRepository:
                 matching=[x for x in detailed if row_term['code'] in row_codes(x)]
                 for column in column_terms:
                     selected=[x for x in matching if column['term_code'] in column_codes(x)]
-                    query=f"{row_filter}={row_term['code']}&{column_filter}={column['term_code']}"
+                    query=f"{row_filter}={row_term['code']}&{column_filter}={column['term_code']}"+(f"&product_code={product_code}" if product_code else '')
                     cells[column['term_code']]={'scenario_count':len(selected),'issue_count':sum(x['_issue_count'] for x in selected),'drilldown_url':'/quality-scenarios?'+query}
                 rows.append({'code':row_term['code'],'label':row_term['label'],'cells':cells})
             return {'columns':[{'code':x['term_code'],'label':x['label_zh']} for x in column_terms],'rows':rows}
@@ -669,7 +672,13 @@ class ScenarioRepository:
         for (axis,code),entry in capability_counts.items():
             labels={x['code']:x['label_zh'] for x in capability_dict['items'].get(axis,[])};entry['scenario_count']=len(entry.pop('scenario_ids'));entry['axis_label']=capability_dict['axis_labels'].get(axis,axis);entry['capability_label']=labels.get(code,code);capability_rows.append(entry)
         capability_rows.sort(key=lambda x:(-x['p0_count'],-x['issue_count'],-x['scenario_count']))
+        product_rows={}
+        for item in detailed:
+            code=item.get('product_code') or 'UNCONFIGURED'
+            row=product_rows.setdefault(code,{'product_code':code,'scenario_count':0,'issue_count':0})
+            row['scenario_count']+=1;row['issue_count']+=item['_issue_count']
         return {'activity_rows':finish(activity_rows),'industry_rows':finish(industry_rows),'scenario_count':len(items),'issue_count':sum(x['_issue_count'] for x in detailed),'standardized_count':standardized,'standardized_rate':round(standardized*100/len(items),1) if items else 0,
+                'product_rows':sorted(product_rows.values(),key=lambda x:(-x['issue_count'],-x['scenario_count'],x['product_code'])),
                 'activity_typical_problem_matrix':matrix(activities,typical,activity_codes,typical_codes,'activity_code','typical_problem_code'),'environment_typical_problem_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in conditions],typical,condition_codes,typical_codes,'environment_code','typical_problem_code'),'activity_experience_matrix':matrix(activities,experiences,activity_codes,experience_codes,'activity_code','experience_code'),'activity_qiu_matrix':matrix(activities,qiu,activity_codes,qiu_codes,'activity_code','qiu_code'),'qiu_quality_matrix':matrix([{'code':x['term_code'],'label':x['label_zh']} for x in qiu],qualities,qiu_codes,quality_codes,'qiu_code','quality_code'),'activity_quality_matrix':matrix(activities,qualities,activity_codes,quality_codes,'activity_code','quality_code'),'capability_rows':capability_rows}
 
     def save_generated_candidate(self,code,item,scopes,generation_id,product,start,end,model,scenario_id=''):
