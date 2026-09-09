@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH54_20260909"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH55_20260909"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -59,6 +59,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/SCENARIO_LIBRARY_TAXONOMY_LABEL_PATCH52_DELIVERY.md",
     "docs/requirements/SCENARIO_PRODUCT_GROUPING_PATCH53_DELIVERY.md",
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_ARCHIVE_PATCH54_DELIVERY.md",
+    "docs/requirements/INTERPRETATION_FINAL_MERGE_BUDGET_PATCH55_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -124,7 +125,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH54 累计升级说明
+    readme = """# PATCH55 累计升级说明
+
+修复客户/行业画像最后一次归并仍可能超过模型上下文的问题：归并前对重复摘要生成不改写原结果的
+紧凑传输视图，保留全部来源ID；超长结果继续做多层二叉归并，每次请求执行输入预算硬校验，归并
+输出预留降至安全范围。失败任务可从失败层继续，不重新运行已完成的单问题及中间归并。
+
+以下为 PATCH54 及更早累计内容：
 
 客户/行业质量画像新增人工归档：已完成画像可填写名称和必填触发原因后归档，系统同时冻结
 筛选条件、输入问题数、证据来源构成、模型、输入哈希、结果摘要和归档时间，并提供归档清单回看。

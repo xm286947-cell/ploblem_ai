@@ -39,6 +39,14 @@ MAX_MERGE_FINDINGS=8
 MAX_MERGE_SECTION_CHARS=220
 HIGH_LEVEL_MERGE_FINDINGS=5
 HIGH_LEVEL_SECTION_CHARS=140
+MAX_MERGE_LEVELS=12
+# Keep the complete merge request comfortably below a 24K context even when
+# the provider reserves the full output allowance.  This is a character budget
+# (Chinese text is deliberately treated conservatively as roughly one token).
+MAX_MERGE_REQUEST_CHARS=15000
+MERGE_OUTPUT_TOKENS=6144
+MERGE_VIEW_SUMMARY_CHARS=360
+MERGE_VIEW_SECTION_CHARS=96
 
 class ScenarioInterpretation:
     def __init__(self,assets,generation):
@@ -268,14 +276,58 @@ class ScenarioInterpretation:
         return jid
 
     @staticmethod
-    def batches(items,limit=MAX_BATCH_CHARS,max_items=0):
+    def batches(items,limit=MAX_BATCH_CHARS,max_items=0,strict_single=True):
         groups=[];group=[]
         for item in items:
-            if len(encode(item))>MAX_SINGLE_RECORD_CHARS:raise ValueError('单条结构化证据仍超过上下文预算，请先整理该问题；系统未截断原文')
+            if strict_single and len(encode(item))>MAX_SINGLE_RECORD_CHARS:raise ValueError('单条结构化证据仍超过上下文预算，请先整理该问题；系统未截断原文')
             if group and (len(encode(group+[item]))>limit or (max_items and len(group)>=max_items)):groups.append(group);group=[]
             group.append(item)
         if group:groups.append(group)
         return groups
+
+    @staticmethod
+    def _compact_text(value,limit):
+        """Bound transport text while retaining both conclusion and qualifier."""
+        text=str(value or '').strip()
+        if len(text)<=limit:return text
+        tail=max(12,limit//4);head=max(12,limit-tail-1)
+        return text[:head]+'…'+text[-tail:]
+
+    @classmethod
+    def merge_view(cls,analysis,level):
+        """Create a bounded merge input; persisted results remain untouched.
+
+        Final reducers need themes and evidence, not repeated prose from every
+        previous layer.  Evidence IDs are never shortened or discarded here;
+        complete() maps them to E1/E2 wire IDs before sending the request.
+        """
+        findings=analysis.get('findings') or []
+        # Older completed chunks may predate the compact-output validation.  A
+        # dynamic per-field cap keeps those resumable without silently dropping
+        # any theme or source reference.
+        field_count=max(1,len(findings))
+        section_limit=min(MERGE_VIEW_SECTION_CHARS,max(36,4000//(field_count*17)))
+        if level>=2:section_limit=min(section_limit,64)
+        keys=('title','lifecycle_activity','usage','systems_devices','scale','environment_conditions',
+              'quality_concern','customer_language','impact','information_gaps','observation','why',
+              'escape','boundaries','design','test','metrics')
+        compact=[]
+        for finding in findings:
+            if not isinstance(finding,dict):continue
+            row={key:cls._compact_text(finding.get(key),section_limit) for key in keys}
+            row['evidence_ids']=list(dict.fromkeys(str(ref) for ref in finding.get('evidence_ids') or [] if str(ref)))
+            compact.append(row)
+        return {'summary':cls._compact_text(analysis.get('summary'),MERGE_VIEW_SUMMARY_CHARS if level<2 else 180),
+                'findings':compact,
+                'unresolved_ids':list(dict.fromkeys(str(ref) for ref in analysis.get('unresolved_ids') or [] if str(ref)))}
+
+    @staticmethod
+    def merge_client(client):
+        """Reserve less output space for reducers so input+output fits locally hosted models."""
+        if not isinstance(client,OpenAICompatibleClient):return client
+        configured=int(client.config.get('max_tokens') or MERGE_OUTPUT_TOKENS)
+        if configured<=MERGE_OUTPUT_TOKENS:return client
+        return OpenAICompatibleClient({**client.config,'max_tokens':MERGE_OUTPUT_TOKENS})
 
     def complete(self,client,payload,allowed,*,compact_retry=False):
         merge=payload.get('mode')=='MERGE'
@@ -288,7 +340,7 @@ class ScenarioInterpretation:
 每个finding的observation/why/escape/boundaries/design/test/metrics分别不超过{section_limit}个汉字。
 来源ID只放在evidence_ids，不要在正文反复抄写；仍须覆盖全部输入来源ID。'''
         if compact_retry:
-            instruction+='''\n上一次返回未形成完整合法JSON。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多6个主题，各文字段不超过140个汉字，优先保留合法闭合结构和全部来源ID。'''
+            instruction+=f'''\n上一次返回未形成完整合法JSON。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多{finding_limit}个主题，各文字段不超过{section_limit}个汉字，优先保留合法闭合结构和全部来源ID。'''
         allowed=set(allowed);wire_aliases={};wire_payload=payload
         if merge:
             actual_to_wire={actual:f'E{index}' for index,actual in enumerate(sorted(allowed),1)}
@@ -299,7 +351,11 @@ class ScenarioInterpretation:
                 for finding in analysis.get('findings') or []:
                     finding['evidence_ids']=[actual_to_wire.get(ref,ref) for ref in finding.get('evidence_ids') or []]
             instruction+='\n本层输入来源已使用E1、E2等短ID；输出必须原样使用这些短ID，系统会在校验后还原真实来源。'
-        response=client.complete([{'role':'system','content':PROMPT+instruction},{'role':'user','content':encode(wire_payload)}])
+        messages=[{'role':'system','content':PROMPT+instruction},{'role':'user','content':encode(wire_payload)}]
+        request_chars=sum(len(message['content']) for message in messages)
+        if merge and request_chars>MAX_MERGE_REQUEST_CHARS:
+            raise ValueError(f'归并输入预算超限（{request_chars}字符，安全上限{MAX_MERGE_REQUEST_CHARS}），请继续分层归并')
+        response=client.complete(messages)
         try:data,_=parse_json_object(response.content,allow_repair=False)
         except ValueError as exc:
             ending=(response.content or '')[-80:].replace('\n',' ')
@@ -376,11 +432,13 @@ class ScenarioInterpretation:
         text=re.sub(r'(?i)(authorization|bearer|api[_-]?key)\s*[:=]?\s*[^\s,;]+',r'\1=[已隐藏]',text)
         text=re.sub(r'([?&](?:key|token|api_key)=)[^&\s]+',r'\1[已隐藏]',text,flags=re.I)
         name=type(exc).__name__
-        if '模型返回json不完整或无法解析' in text.lower():category='模型返回JSON不完整（可能被截断）'
+        lower=text.lower()
+        if any(word in lower for word in ('归并输入预算超限','分批摘要仍过长','context length','context window','total token','too many tokens')):category='模型输入/上下文预算超限'
+        elif '模型返回json不完整或无法解析' in lower:category='模型返回JSON不完整（可能被截断）'
         elif isinstance(exc,ValueError):category='模型返回内容校验失败'
-        elif any(word in text.lower() for word in ('timed out','timeout','超时')):category='模型接口超时'
-        elif any(word in text.lower() for word in ('environment','未设置','未配置','model未配置','base_url')):category='默认模型配置不完整'
-        elif any(word in text.lower() for word in ('token上限','finish_reason','截断','max_tokens')):category='模型输出被截断'
+        elif any(word in lower for word in ('timed out','timeout','超时')):category='模型接口超时'
+        elif any(word in lower for word in ('environment','未设置','未配置','model未配置','base_url')):category='默认模型配置不完整'
+        elif any(word in lower for word in ('token上限','finish_reason','截断','max_tokens')):category='模型输出被截断'
         else:category='模型接口调用失败'
         return f'{category}（{name}）：{text[:800]}'
 
@@ -451,12 +509,17 @@ class ScenarioInterpretation:
                 except Exception as exc:
                     self.save_chunk(jid,i+1,kind,batch,status='FAILED',error=str(exc));raise
                 outputs.append(result);models.add(str(model))
-            merge_chunk_no=len(batches)
-            for level in range(5):
+            merge_chunk_no=len(batches);merge_client=self.merge_client(client)
+            for level in range(MAX_MERGE_LEVELS):
                 if len(outputs)==1:break
                 max_items=2 if level>=2 else MAX_MERGE_BATCH_ITEMS
-                groups=self.batches(outputs,limit=MAX_MERGE_BATCH_CHARS,max_items=max_items);merged=[]
-                if all(len(g)==1 for g in groups):raise ValueError('分批摘要仍过长，停止归并，原结果未冒充完成')
+                merge_inputs=[self.merge_view(output,level) for output in outputs]
+                groups=self.batches(merge_inputs,limit=MAX_MERGE_BATCH_CHARS,max_items=max_items,strict_single=False);merged=[]
+                # Long legacy chunks can each exceed the grouping estimate due
+                # to real evidence IDs.  Wire IDs are short, so force a binary
+                # tree and let complete() enforce the actual request budget.
+                if len(outputs)>1 and all(len(group)==1 for group in groups):
+                    groups=[merge_inputs[index:index+2] for index in range(0,len(merge_inputs),2)]
                 for group_no,group in enumerate(groups,1):
                     if self.get(jid)['status']!='RUNNING':return
                     allowed={i for d in group for f in d['findings'] for i in f['evidence_ids']}|{i for d in group for i in d['unresolved_ids']}
@@ -470,7 +533,7 @@ class ScenarioInterpretation:
                     self.update(jid,progress=f'{kind}；覆盖 {len(allowed)} 个来源问题')
                     self.save_chunk(jid,merge_chunk_no,kind,group,status='RUNNING')
                     try:
-                        result,model=self.complete_with_schema_retry(client,{'mode':'MERGE','merge_level':level,'analyses':group},allowed)
+                        result,model=self.complete_with_schema_retry(merge_client,{'mode':'MERGE','merge_level':level,'analyses':group},allowed)
                         self.save_chunk(jid,merge_chunk_no,kind,group,status='COMPLETED',result=result,model=str(model))
                     except Exception as exc:
                         self.save_chunk(jid,merge_chunk_no,kind,group,status='FAILED',error=self.diagnostic_error(exc));raise

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from builder.ai_client import AIClientError,AIResponse
 from quality_knowledge.scenario_assets import ScenarioAssets
-from quality_knowledge.scenario_interpretation import ScenarioInterpretation
+from quality_knowledge.scenario_interpretation import MAX_MERGE_REQUEST_CHARS,ScenarioInterpretation
 from test_scenario_operation_sources import seed
 
 
@@ -310,3 +310,49 @@ def test_merge_uses_short_wire_ids_and_restores_real_evidence_ids(tmp_path):
     finding={key:'归并内容' for key in ('title','observation','why','escape','boundaries','design','test','metrics')};finding['evidence_ids']=real_ids
     result,_=service.complete_with_schema_retry(InspectWireIds(),{'mode':'MERGE','merge_level':2,'analyses':[{'summary':'A','findings':[finding],'unresolved_ids':[]}]},real_ids)
     assert result['findings'][0]['evidence_ids']==real_ids
+
+
+def test_long_completed_summaries_are_compacted_before_final_merge(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    sources=[]
+    for group in range(2):
+        findings=[]
+        for index in range(5):
+            source=f'MAT-{group}-{index}-'+('x'*32)
+            finding={key:(f'{key}-'+('很长的历史归并结论'*80)) for key in (
+                'title','lifecycle_activity','usage','systems_devices','scale','environment_conditions',
+                'quality_concern','customer_language','impact','information_gaps','observation','why',
+                'escape','boundaries','design','test','metrics')}
+            finding['evidence_ids']=[source];findings.append(finding);sources.append(source)
+        analysis={'summary':'历史分批摘要'*1000,'findings':findings,'unresolved_ids':[]}
+        compact=service.merge_view(analysis,3)
+        assert set(service.chunk_input_ids([compact]))==set(service.chunk_input_ids([analysis]))
+        if group==0:analyses=[compact]
+        else:analyses.append(compact)
+
+    class InspectBoundedMerge(FakeClient):
+        def complete(self,messages):
+            assert sum(len(message['content']) for message in messages)<=MAX_MERGE_REQUEST_CHARS
+            return super().complete(messages)
+    result,_=service.complete_with_schema_retry(InspectBoundedMerge(),
+        {'mode':'MERGE','merge_level':3,'analyses':analyses},set(sources))
+    assert set(result['findings'][0]['evidence_ids'])==set(sources)
+
+
+def test_merge_context_budget_has_clear_diagnostic(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    text=service.diagnostic_error(ValueError('归并输入预算超限（25938 token）'))
+    assert text.startswith('模型输入/上下文预算超限')
+
+
+def test_large_real_id_set_is_batched_by_short_merge_wire_ids(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    real_ids=[f'MAT-{index:03d}-'+('x'*80) for index in range(300)]
+    finding={key:'归并内容' for key in ('title','observation','why','escape','boundaries','design','test','metrics')}
+    finding['evidence_ids']=real_ids
+    analysis=service.merge_view({'summary':'旧摘要','findings':[finding],'unresolved_ids':[]},3)
+    assert len(json.dumps(analysis,ensure_ascii=False))>12000
+    assert service.batches([analysis],limit=12000,max_items=2,strict_single=False)==[[analysis]]
+    result,_=service.complete_with_schema_retry(FakeClient(),
+        {'mode':'MERGE','merge_level':3,'analyses':[analysis]},set(real_ids))
+    assert set(result['findings'][0]['evidence_ids'])==set(real_ids)
