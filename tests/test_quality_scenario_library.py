@@ -35,6 +35,23 @@ def test_product_taxonomy_is_independent_and_can_copy_plc(tmp_path):
     assert repository.taxonomy_active('PLC')['lifecycles'][1]['description']!='HMI画面、通信和交互调试价值'
 
 
+def test_scenario_listing_resolves_labels_from_its_product_taxonomy_version(tmp_path):
+    client=TestClient(create_app(tmp_path/'product-labels.db'));repository=client.app.state.scenario_repository
+    draft_id=repository.create_draft('HMI','PLC')
+    repository.save_lifecycle(draft_id,'HMI_OPERATION','HMI运行操作','面向HMI运行期的人机操作',True)
+    repository.save_activity(draft_id,'HMI_OPERATION','HMI_ALARM_CONFIRM','报警查看与确认','报警出现 → 查看 → 确认 → 处置','处理设备报警',True)
+    repository.activate(draft_id)
+    repository.save_scenario('',{
+        'scenario_code':'HMI-AI-1','name':'HMI报警确认可靠性','product_code':'HMI',
+        'taxonomy_version_id':draft_id,'lifecycle_code':'HMI_OPERATION',
+        'activity_code':'HMI_ALARM_CONFIRM','status':'IN_REVIEW',
+    },{})
+    page=client.get('/quality-scenarios')
+    assert page.status_code==200
+    assert 'HMI运行操作' in page.text and '报警查看与确认' in page.text
+    assert '>HMI_OPERATION<' not in page.text and '>HMI_ALARM_CONFIRM<' not in page.text
+
+
 def test_product_taxonomy_page_shows_missing_state_and_copy_entry(tmp_path):
     client=TestClient(create_app(tmp_path/'product-page.db'))
     page=client.get('/settings/scenario-taxonomy?product_code=HMI')

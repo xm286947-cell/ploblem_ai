@@ -376,7 +376,17 @@ class ScenarioRepository:
                 if value:
                     clauses.append("EXISTS(SELECT 1 FROM quality_scenario_scope qs WHERE qs.scenario_id=s.scenario_id AND qs.scope_type=? AND qs.scope_value=?)")
                     params.extend((scope_type,value))
-            sql="SELECT s.* FROM quality_scenario s"+(" WHERE "+" AND ".join(clauses) if clauses else "")+" ORDER BY s.updated_at DESC"
+            # A scenario keeps the taxonomy version that was used when it was
+            # created.  Resolve labels against that exact version: product
+            # dictionaries may reuse a code with a different Chinese label,
+            # and newly imported codes do not necessarily exist in the default
+            # PLC dictionary shown in the page header.
+            sql="""SELECT s.*,sl.label_zh AS lifecycle_label,sa.label_zh AS activity_label
+                   FROM quality_scenario s
+                   LEFT JOIN scenario_lifecycle sl
+                     ON sl.version_id=s.taxonomy_version_id AND sl.lifecycle_code=s.lifecycle_code
+                   LEFT JOIN scenario_activity sa
+                     ON sa.version_id=s.taxonomy_version_id AND sa.activity_code=s.activity_code"""+(" WHERE "+" AND ".join(clauses) if clauses else "")+" ORDER BY s.updated_at DESC"
             rows=[dict(x) for x in c.execute(sql,params)]
             ids=[row['scenario_id'] for row in rows]
             scopes=[];capability_gaps=[]

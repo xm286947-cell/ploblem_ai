@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH51_20260908"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH52_20260909"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -56,6 +56,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/CUSTOMER_QUALITY_PORTRAIT_DEMO_PATCH49_DELIVERY.md",
     "docs/requirements/QUALITY_SCENARIO_FORM_HIERARCHY_PATCH50_DELIVERY.md",
     "docs/requirements/ISSUE_WORKBENCH_RAW_DATA_PATCH51_DELIVERY.md",
+    "docs/requirements/SCENARIO_LIBRARY_TAXONOMY_LABEL_PATCH52_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -121,7 +122,12 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH51 累计升级说明
+    readme = """# PATCH52 累计升级说明
+
+修复质量场景库首页的生命周期、业务活动显示为编码：列表现在按每条质量场景绑定的产品场景
+词典版本解析中文名称，不再统一使用默认 PLC 词典。场景详情、场景链路和历史数据均不改写。
+
+以下为 PATCH51 及更早累计内容：
 
 修复问题工作台详情页无法查看原始问题数据：恢复非空原始JSON和标准化JSON的解析逻辑，
 “原始问题”区域不再误判为空；取消只显示前8个原始字段的限制，完整保留并展示导入字段。

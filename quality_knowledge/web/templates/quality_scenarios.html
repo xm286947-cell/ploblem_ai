@@ -20,7 +20,7 @@
 {% for item in items %}<tr>
 <td><a href="/quality-scenarios/{{item.scenario_id}}"><b>{{item.name}}</b></a><small>{{item.scenario_code}} · V{{item.version_no}}</small><small>IPMT：{{item.scopes.get('IPMT',[])|join('、') or '-'}}</small><small>SPDT：{{item.scopes.get('SPDT',[])|join('、') or '-'}}</small><small>型号：{{item.scopes.get('PRODUCT_MODEL',[])|join('、') or '-'}}</small></td>
 <td>行业：{{item.scopes.get('INDUSTRY',[])|join('、') or '-'}}<small>客户：{{item.scopes.get('CUSTOMER_NAME',[])|join('、') or '-'}}</small><small>客户分级：{{item.scopes.get('CUSTOMER_LEVEL',[])|join('、') or '-'}}</small><small>客户状态：{{item.scopes.get('CUSTOMER_STATUS',[])|join('、') or '-'}}</small><small>原始发生阶段（参考）：{{item.scopes.get('OCCURRENCE_PHASE',[])|join('、') or '-'}}</small></td>
-<td>{{lifecycle_labels.get(item.lifecycle_code,item.lifecycle_code) or '-'}}<small>{{activity_labels.get(item.activity_code,item.activity_code) or '-'}}</small></td>
+<td>{{item.lifecycle_label or lifecycle_labels.get(item.lifecycle_code,item.lifecycle_code) or '-'}}<small>{{item.activity_label or activity_labels.get(item.activity_code,item.activity_code) or '-'}}</small></td>
 <td><span class="qs-clamp">{{item.scenario_chain or '业务活动未配置链路'}}</span></td>
 <td>{{item.quality_attribute or '待补充'}}<small>子特性：{{item.quality_subcharacteristic or '待补充'}}</small></td>
 <td><span class="qs-clamp">{{item.measurement_suggestion or '待补充'}}</span></td>
