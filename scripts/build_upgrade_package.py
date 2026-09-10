@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH55_20260909"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH56_20260910"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -60,6 +60,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/SCENARIO_PRODUCT_GROUPING_PATCH53_DELIVERY.md",
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_ARCHIVE_PATCH54_DELIVERY.md",
     "docs/requirements/INTERPRETATION_FINAL_MERGE_BUDGET_PATCH55_DELIVERY.md",
+    "docs/requirements/INTERPRETATION_OVERLONG_SECTION_PATCH56_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -125,7 +126,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH55 累计升级说明
+    readme = """# PATCH56 累计升级说明
+
+修复第四层归并JSON完整但个别字段超过140字时整单失败的问题。首次超长要求模型按90字严格重写；
+第二次若主题数量、来源引用和JSON结构均正确，仅文字仍过长，则自动收敛超长段落并保留全部来源证据。
+主题超量、来源错误和问题遗漏仍继续拦截。失败任务可从原第四层步骤继续。
+
+以下为 PATCH55 及更早累计内容：
 
 修复客户/行业画像最后一次归并仍可能超过模型上下文的问题：归并前对重复摘要生成不改写原结果的
 紧凑传输视图，保留全部来源ID；超长结果继续做多层二叉归并，每次请求执行输入预算硬校验，归并

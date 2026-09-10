@@ -334,13 +334,14 @@ class ScenarioInterpretation:
         merge_level=int(payload.get('merge_level') or 0)
         finding_limit=HIGH_LEVEL_MERGE_FINDINGS if merge_level>=2 else MAX_MERGE_FINDINGS
         section_limit=HIGH_LEVEL_SECTION_CHARS if merge_level>=2 else MAX_MERGE_SECTION_CHARS
+        retry_section_limit=min(section_limit,90 if merge_level>=2 else 120)
         instruction=''
         if merge:
             instruction=f'''\n当前为第{merge_level+1}层归并。相似主题必须合并，最多输出{finding_limit}个findings；不得逐条复述下层summary。
 每个finding的observation/why/escape/boundaries/design/test/metrics分别不超过{section_limit}个汉字。
 来源ID只放在evidence_ids，不要在正文反复抄写；仍须覆盖全部输入来源ID。'''
         if compact_retry:
-            instruction+=f'''\n上一次返回未形成完整合法JSON。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多{finding_limit}个主题，各文字段不超过{section_limit}个汉字，优先保留合法闭合结构和全部来源ID。'''
+            instruction+=f'''\n上一次返回未形成完整合法JSON或字段过长。本次必须重新输出更紧凑的单个JSON对象：禁止Markdown代码围栏、禁止前后解释、禁止尾逗号；最多{finding_limit}个主题，各文字段严格不超过{retry_section_limit}个汉字，优先保留合法闭合结构和全部来源ID。'''
         allowed=set(allowed);wire_aliases={};wire_payload=payload
         if merge:
             actual_to_wire={actual:f'E{index}' for index,actual in enumerate(sorted(allowed),1)}
@@ -362,11 +363,23 @@ class ScenarioInterpretation:
             raise ValueError(f'模型返回JSON不完整或无法解析（输出{len(response.content or "")}字符，结尾：{ending}）：{exc}') from exc
         if not isinstance(data,dict) or not isinstance(data.get('summary'),str) or not isinstance(data.get('findings'),list) or not isinstance(data.get('unresolved_ids'),list):raise ValueError('综合解读结构不完整')
         portrait_keys=('lifecycle_activity','usage','systems_devices','scale','environment_conditions','quality_concern','customer_language','impact','information_gaps')
-        section_keys=('observation','why','escape','boundaries','design','test','metrics')+portrait_keys
+        section_keys=('title','observation','why','escape','boundaries','design','test','metrics')+portrait_keys
         too_long=any(len(f.get(key,'') or '')>section_limit
             for f in data['findings'] if isinstance(f,dict) for key in section_keys)
-        if merge and (len(data['findings'])>finding_limit or too_long):
+        if merge and len(data['findings'])>finding_limit:
             raise ValueError(f'归并结果未按紧凑结构输出（主题最多{finding_limit}个，各段最多{section_limit}字）')
+        if merge and too_long:
+            if not compact_retry:
+                raise ValueError(f'归并结果未按紧凑结构输出（主题最多{finding_limit}个，各段最多{section_limit}字）')
+            compacted=0
+            for finding in data['findings']:
+                if not isinstance(finding,dict):continue
+                for key in section_keys:
+                    value=finding.get(key)
+                    if isinstance(value,str) and len(value)>section_limit:
+                        finding[key]=self._compact_text(value,section_limit);compacted+=1
+            if compacted:
+                data['summary']=data['summary'].rstrip()+f' 系统格式校验：{compacted}个超长段落已在保留首尾语义的前提下收敛，来源证据未删减。'
         if any(not isinstance(x,str) for x in data['unresolved_ids']):raise ValueError('待归纳来源不合法')
         alias_sets={ref:{actual} for ref,actual in wire_aliases.items()}
         for record in payload.get('records') or []:

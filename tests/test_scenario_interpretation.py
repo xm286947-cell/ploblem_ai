@@ -356,3 +356,29 @@ def test_large_real_id_set_is_batched_by_short_merge_wire_ids(tmp_path):
     result,_=service.complete_with_schema_retry(FakeClient(),
         {'mode':'MERGE','merge_level':3,'analyses':[analysis]},set(real_ids))
     assert set(result['findings'][0]['evidence_ids'])==set(real_ids)
+
+
+def test_fourth_level_overlong_sections_retry_then_converge_without_losing_evidence(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    class StillVerbose:
+        def __init__(self):self.calls=0;self.prompts=[]
+        def complete(self,messages):
+            self.calls+=1;self.prompts.append(messages[0]['content'])
+            finding={key:'结论'*100 for key in (
+                'title','lifecycle_activity','usage','systems_devices','scale','environment_conditions',
+                'quality_concern','customer_language','impact','information_gaps','observation','why',
+                'escape','boundaries','design','test','metrics')}
+            finding['evidence_ids']=['E1']
+            return AIResponse(json.dumps({'summary':'第四层归并','findings':[finding],'unresolved_ids':[]},ensure_ascii=False),'verbose-model',{})
+    lower={key:'下层结论' for key in ('title','observation','why','escape','boundaries','design','test','metrics')}
+    lower['evidence_ids']=['MAT-REAL-ID']
+    client=StillVerbose()
+    result,_=service.complete_with_schema_retry(client,
+        {'mode':'MERGE','merge_level':3,'analyses':[{'summary':'A','findings':[lower],'unresolved_ids':[]}]},{'MAT-REAL-ID'})
+    assert client.calls==2 and '严格不超过90个汉字' in client.prompts[1]
+    assert all(len(result['findings'][0][key])<=140 for key in (
+        'title','lifecycle_activity','usage','systems_devices','scale','environment_conditions',
+        'quality_concern','customer_language','impact','information_gaps','observation','why',
+        'escape','boundaries','design','test','metrics'))
+    assert result['findings'][0]['evidence_ids']==['MAT-REAL-ID']
+    assert '超长段落已' in result['summary']
