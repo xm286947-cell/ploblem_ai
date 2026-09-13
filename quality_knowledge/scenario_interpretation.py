@@ -25,10 +25,11 @@ evidence_mode=EXISTING_SCENARIO 表示已有质量场景资产；evidence_mode=M
 def encode(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,default=str)
 def digest(value):return hashlib.sha256(encode(value).encode()).hexdigest()
 REPORT_FILTERS=('status','business','product','industry','customer','activity','lifecycle','scale','environment','concern','quality','period','asset_id','grain')
-CONTROL_FILTERS=('supplement_market','problem_domain','source_product','portrait_mode','year','start_month','end_month')
+CONTROL_FILTERS=('supplement_market','problem_domain','source_product','product_group','portrait_mode','year','start_month','end_month')
 FILTERS=REPORT_FILTERS+CONTROL_FILTERS
 FILTER_LABELS={'industry':'行业','customer':'客户/公司','product':'产品型号','business':'产品/业务','year':'年份',
                'start_month':'开始月份','end_month':'结束月份','problem_domain':'问题领域','source_product':'来源产品',
+               'product_group':'产品分类',
                'activity':'业务活动','lifecycle':'使用生命周期','scale':'系统规模','environment':'环境/工况',
                'concern':'质量关注','quality':'质量属性','period':'统计周期','status':'场景状态'}
 MAX_BATCH_CHARS=18000
@@ -141,6 +142,7 @@ class ScenarioInterpretation:
         if not filters.get('industry') and not filters.get('customer'):
             raise ValueError('生成行业/客户画像时，必须先指定行业或客户，避免无边界扫描')
         source_filters={k:filters[k] for k in ('industry','customer','problem_domain','source_product') if filters.get(k)}
+        if filters.get('product_group'):source_filters['source_product']=filters['product_group']
         if filters.get('product'):source_filters['product_model']=filters['product']
         for key in ('year','start_month','end_month'):
             if filters.get(key):source_filters[key]=filters[key]
@@ -188,7 +190,8 @@ class ScenarioInterpretation:
             records.append({'id':row['knowledge_id'],'number':row.get('business_issue_id') or row['knowledge_id'],
                 'description':row.get('description') or row.get('title') or '',
                 'industry':row.get('industry') or context.get('customer_industry'),'customer':row.get('customer') or context.get('customer_name'),
-                'product':row.get('product_model'),'product_series':context.get('product_series'),'ipmt':context.get('ipmt'),'spdt':context.get('spdt'),
+                'product':row.get('product_model'),'product_group':row.get('source_product') or context.get('product_type') or context.get('product_line') or context.get('product_series') or row.get('product_model') or '未知产品分类',
+                'product_series':context.get('product_series'),'ipmt':context.get('ipmt'),'spdt':context.get('spdt'),
                 'year':row.get('year'),'month':row.get('month'),'original_phase':context.get('occurrence_phase'),'customer_status':context.get('customer_status'),
                 'systems_devices_evidence':'；'.join(device_values),'environment_evidence':'；'.join(environment_values),
                 'root_cause':(row.get('occurrence') or {}).get('root_cause'),'escape_reason':(row.get('escape') or {}).get('reason'),

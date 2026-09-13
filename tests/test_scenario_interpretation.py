@@ -382,3 +382,21 @@ def test_fourth_level_overlong_sections_retry_then_converge_without_losing_evide
         'escape','boundaries','design','test','metrics'))
     assert result['findings'][0]['evidence_ids']==['MAT-REAL-ID']
     assert '超长段落已' in result['summary']
+
+
+def test_customer_portrait_can_switch_product_groups_without_mixing_models(tmp_path):
+    app,gen,repo,ids,assets,service=setup(tmp_path)
+    samples=(('ITR20261213001CS','PLC','AM600','软件'),('ITR20261213002CS','iFA','iFA Evolution','软件'),
+             ('ITR20261213003CS','伺服','SV680','硬件'))
+    for index,(key,product_type,model,domain) in enumerate(samples,1):
+        repo.add_material(repo.group('ITR-CS'),key,{'问题信息_问题描述':f'{product_type}画像问题',
+            '问题信息_客户行业':'锂电','问题信息_客户名称':'先导公司','问题信息_产品类型':product_type,
+            '问题信息_产品型号':model,'问题信息_问题领域':domain},'product-groups.xlsx','Sheet1',index)
+    client=TestClient(app)
+    overview=client.get('/quality-scenario-assets/portrait?industry=锂电&customer=先导公司')
+    assert overview.status_code==200
+    assert all(text in overview.text for text in ('按产品分类查看','PLC','iFA','伺服','产品分类画像'))
+    plc=client.get('/quality-scenario-assets/portrait?industry=锂电&customer=先导公司&product_group=PLC')
+    assert plc.status_code==200 and 'AM600' in plc.text
+    scope=service.portrait_scope({'industry':'锂电','customer':'先导公司','product_group':'PLC','portrait_mode':'1'})
+    assert len(scope)==1 and scope[0]['product_group']=='PLC' and scope[0]['product']=='AM600'

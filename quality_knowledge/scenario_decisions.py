@@ -85,6 +85,7 @@ def portrait_digest(rows):
     domain_rows=ranked('problem_domain','UNKNOWN')
     for item in domain_rows:item['label']=domain_labels.get(item['label'],item['label'])
     products=ranked('product','未知产品')
+    product_groups=ranked('product_group','未知产品分类')
     industries=ranked('industry','未知行业')
     customers=ranked('customer','未知客户')
     periods=defaultdict(set)
@@ -96,20 +97,39 @@ def portrait_digest(rows):
 
     scene_rows=[row for row in rows if row.get('scenarios')]
     activities=defaultdict(set);lifecycles=defaultdict(set);qualities=defaultdict(set)
-    product_domain=defaultdict(lambda:defaultdict(set))
+    product_domain=defaultdict(lambda:defaultdict(set));group_detail={};cross_product=[]
     for row in rows:
         issue=row.get('id') or row.get('number');product=str(row.get('product') or '未知产品')
+        group=str(row.get('product_group') or '未知产品分类')
         product_domain[product][domain_labels.get(row.get('problem_domain') or 'UNKNOWN','待识别')].add(issue)
+        detail=group_detail.setdefault(group,{'label':group,'issues':set(),'models':defaultdict(set),'domains':defaultdict(set),'activities':defaultdict(set),'scene_issues':set()})
+        detail['issues'].add(issue);detail['models'][product].add(issue)
+        detail['domains'][domain_labels.get(row.get('problem_domain') or 'UNKNOWN','待识别')].add(issue)
+        scene_businesses=set()
         for scene in row.get('scenarios') or []:
+            detail['scene_issues'].add(issue)
+            if scene.get('business'):scene_businesses.add(str(scene['business']))
             for target,key in ((activities,'activity'),(lifecycles,'lifecycle'),(qualities,'quality')):
                 label=str(scene.get(key) or '').strip()
-                if label:target[label].add(issue)
+                if label:
+                    target[label].add(issue)
+                    if key=='activity':detail['activities'][label].add(issue)
+        if len(scene_businesses)>1:
+            cross_product.append({'id':issue,'number':row.get('number') or issue,'description':row.get('description') or '',
+                                  'products':sorted(scene_businesses)})
     def set_rows(buckets):
         return sorted(({'label':label,'count':len(ids)} for label,ids in buckets.items()),key=lambda item:(-item['count'],item['label']))
     matrix=[]
     for product in [item['label'] for item in products[:8]]:
         matrix.append({'label':product,'total':sum(len(ids) for ids in product_domain[product].values()),
                        'domains':{key:len(ids) for key,ids in product_domain[product].items()}})
+    group_cards=[]
+    for group in [item['label'] for item in product_groups]:
+        detail=group_detail[group]
+        models=set_rows(detail['models'])[:3];group_activities=set_rows(detail['activities'])[:3]
+        group_cards.append({'label':group,'count':len(detail['issues']),'models':models,
+            'domains':{key:len(ids) for key,ids in detail['domains'].items()},
+            'scene_count':len(detail['scene_issues']),'activities':group_activities})
 
     total=len(rows);scene_count=len(scene_rows);cause_count=evidence_count('root_cause','trc_root_cause')
     phase_count=evidence_count('occurrence_phase');status_count=evidence_count('customer_status')
@@ -126,8 +146,8 @@ def portrait_digest(rows):
         conclusions.append({'title':'分析证据完备度','level':'warning' if cause_count<total else 'good',
             'text':f'根因信息 {cause_count}/{total}，发生阶段 {phase_count}/{total}，客户状态 {status_count}/{total}。',
             'action':'根因不足时不得形成确定性原因结论；先补齐证据或触发AI逐问题提炼并人工评审。'})
-    return {'total':total,'products':products[:10],'industries':industries[:10],'customers':customers[:10],
+    return {'total':total,'products':products[:10],'product_groups':group_cards,'industries':industries[:10],'customers':customers[:10],
             'domains':domain_rows,'periods':period_rows,'activities':set_rows(activities)[:10],
             'lifecycles':set_rows(lifecycles)[:10],'qualities':set_rows(qualities)[:10],
             'product_domain':matrix,'scene_count':scene_count,'cause_count':cause_count,
-            'phase_count':phase_count,'customer_status_count':status_count,'conclusions':conclusions}
+            'phase_count':phase_count,'customer_status_count':status_count,'cross_product':cross_product[:10],'conclusions':conclusions}

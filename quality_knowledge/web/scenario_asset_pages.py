@@ -115,7 +115,7 @@ def create_asset_router(repository,templates,generation=None):
         scene_records=service.report({},assets=assets,facts=facts)['records']
         selected={'industry':filters.get('industry',''),'customer':filters.get('customer',''),
                   'product_model':filters.get('product',''),'problem_domain':filters.get('problem_domain',''),
-                  'year':filters.get('year','')}
+                  'source_product':filters.get('product_group',''),'year':filters.get('year','')}
         def related_choices(key):
             counts={}
             for row in raw_options:
@@ -132,7 +132,12 @@ def create_asset_router(repository,templates,generation=None):
                 if label:scene_counts.setdefault(label,set()).add(row.get('issue_key'))
             return [{'label':label,'problem_count':count,'scene_issue_count':len(scene_counts.get(label,set()))}
                     for label,count in sorted(counts.items(),key=lambda item:(-len(scene_counts.get(item[0],set())),-item[1],item[0]))]
-        choices={key:related_choices(key) for key in ('industry','customer','product_model','year')}
+        choices={key:related_choices(key) for key in ('industry','customer','source_product','product_model','year')}
+        tab_base={key:value for key,value in filters.items() if key!='product_group' and value}
+        product_group_tabs=[{'label':'全部产品','value':'','problem_count':sum(row['problem_count'] for row in choices['source_product']),
+                             'url':'/quality-scenario-assets/portrait?'+urlencode(tab_base)}]
+        product_group_tabs.extend({'label':row['label'],'value':row['label'],'problem_count':row['problem_count'],
+            'url':'/quality-scenario-assets/portrait?'+urlencode({**tab_base,'product_group':row['label']})} for row in choices['source_product'])
         market_scope=None
         if interpreter and (filters.get('industry') or filters.get('customer')):
             market_rows=interpreter.portrait_scope({**filters,'portrait_mode':'1'})
@@ -147,7 +152,7 @@ def create_asset_router(repository,templates,generation=None):
         latest_interpretation=interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
-            'choices':choices,'market_scope':market_scope,
+            'choices':choices,'product_group_tabs':product_group_tabs,'market_scope':market_scope,
             'portrait_digest':portrait_digest(market_scope['items'] if market_scope else []),
             'interpretation':latest_interpretation,'archives':interpreter.archives(10) if interpreter else []})
 

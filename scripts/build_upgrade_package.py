@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH56_20260910"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH57_20260913"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -61,6 +61,7 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/CUSTOMER_INDUSTRY_PORTRAIT_ARCHIVE_PATCH54_DELIVERY.md",
     "docs/requirements/INTERPRETATION_FINAL_MERGE_BUDGET_PATCH55_DELIVERY.md",
     "docs/requirements/INTERPRETATION_OVERLONG_SECTION_PATCH56_DELIVERY.md",
+    "docs/requirements/CUSTOMER_PORTRAIT_PRODUCT_GROUP_PATCH57_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
@@ -126,7 +127,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH56 累计升级说明
+    readme = """# PATCH57 累计升级说明
+
+客户／行业质量场景画像支持按产品分类查看：保留“全部产品”观察跨产品全貌，并可切换 PLC、iFA、
+伺服等产品分类。切换后，数据库问题范围、统计结论、AI任务和证据清单使用同一范围；每个分类
+展示主要型号、问题领域、场景覆盖和高频业务活动。跨产品协同只展示可核验的结构化关联。
+
+以下为 PATCH56 及更早累计内容：
 
 修复第四层归并JSON完整但个别字段超过140字时整单失败的问题。首次超长要求模型按90字严格重写；
 第二次若主题数量、来源引用和JSON结构均正确，仅文字仍过长，则自动收敛超长段落并保留全部来源证据。
