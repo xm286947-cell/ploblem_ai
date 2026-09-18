@@ -37,6 +37,8 @@ from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
 from quality_knowledge.scenarios import ScenarioRepository
 from quality_knowledge.scenario_generation import ScenarioGenerationService
+from quality_knowledge.reverse_quality import ReverseQualityService, SECTIONS as REVERSE_SECTIONS, LABELS as REVERSE_LABELS
+from builder.ai_client import AIClientError
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -215,9 +217,11 @@ def create_app(db_path):
     material_svc = MaterialImportService(material_repo)
     scenario_repo = ScenarioRepository(db_path)
     scenario_generation_svc = ScenarioGenerationService(svc,scenario_repo,BASE.parent.parent)
+    reverse_quality_svc = ReverseQualityService(material_repo,scenario_repo,svc,BASE.parent.parent)
     app.state.material_repository = material_repo
     app.state.scenario_repository = scenario_repo
     app.state.scenario_generation_service = scenario_generation_svc
+    app.state.reverse_quality_service = reverse_quality_svc
     app.state.intake_session_service = intake_svc
     app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
     tpl = Jinja2Templates(directory=BASE / 'templates')
@@ -227,6 +231,45 @@ def create_app(db_path):
     tpl.env.globals['zh_value'] = zh_value
     from .scenario_asset_pages import create_asset_router
     app.include_router(create_asset_router(scenario_repo,tpl,scenario_generation_svc))
+
+    @app.get('/reverse-quality/{material_id}', response_class=HTMLResponse, include_in_schema=False)
+    def reverse_quality_page(request: Request, material_id: str, product_code: str = '', error: str = ''):
+        try:facts=reverse_quality_svc.facts(material_id)
+        except KeyError:raise HTTPException(404,'原始问题不存在')
+        except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+        analysis=reverse_quality_svc.get(facts['canonical_itr'])
+        selected=product_code or (analysis['product_code'] if analysis else '')
+        taxonomy=scenario_repo.taxonomy_active(selected) if selected else None
+        return tpl.TemplateResponse(request,'reverse_quality_issue.html',{'facts':facts,'analysis':analysis,
+            'sections':REVERSE_SECTIONS,'labels':REVERSE_LABELS,'products':product_repo.list(),
+            'product_code':selected,'taxonomy':taxonomy,'error':error,
+            'available_scenarios':scenario_repo.scenarios(product_code=selected) if selected else []})
+
+    @app.post('/reverse-quality/{material_id}/analyse', include_in_schema=False)
+    def reverse_quality_analyse(material_id: str, product_code: str = Form(...), force: str = Form('')):
+        try:reverse_quality_svc.analyse(material_id,product_code,force=force=='1')
+        except (ValueError,KeyError,AIClientError) as exc:
+            return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'product_code':product_code,'error':str(exc)}),303)
+        return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'product_code':product_code}),303)
+
+    @app.post('/reverse-quality/{material_id}/review', include_in_schema=False)
+    def reverse_quality_review(material_id: str, field_name: str = Form(...), action: str = Form(...), value: str = Form(''), reviewer: str = Form('')):
+        try:
+            facts=reverse_quality_svc.facts(material_id)
+            reverse_quality_svc.review_field(facts['canonical_itr'],field_name,action=action,value=value,reviewer=reviewer)
+        except (ValueError,KeyError) as exc:
+            return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'error':str(exc)}),303)
+        return RedirectResponse('/reverse-quality/'+material_id+'#'+field_name,303)
+
+    @app.post('/reverse-quality/{material_id}/match', include_in_schema=False)
+    def reverse_quality_match(material_id: str, status: str = Form(...), scene_id: str = Form(''), reason: str = Form(''), missing_condition: str = Form(''), reviewer: str = Form('')):
+        try:
+            facts=reverse_quality_svc.facts(material_id)
+            reverse_quality_svc.review_match(facts['canonical_itr'],status=status,scene_id=scene_id,
+                reason=reason,missing_condition=missing_condition,reviewer=reviewer)
+        except (ValueError,KeyError) as exc:
+            return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'error':str(exc)})+'#scene-match',303)
+        return RedirectResponse('/reverse-quality/'+material_id+'#scene-match',303)
 
     def filters(req):
         return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}

@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_TAG = "v1.1-p2-rc2-full-20260901"
-PATCH_VERSION = "V1.1_P2_RC2_PATCH57_20260913"
+PATCH_VERSION = "V1.1_P2_RC2_PATCH58_20260918"
 OUTPUT = ROOT / "baseline_release"
 PACKAGE_ROOT = f"KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_{PATCH_VERSION}"
 EXCLUDED_PREFIXES = ("knowledge/raw_evidence/", "knowledge/raw_excel/", "output/", "baseline_release/", "releases/")
@@ -62,17 +62,20 @@ REQUIRED_WORKBENCH_FILES = {
     "docs/requirements/INTERPRETATION_FINAL_MERGE_BUDGET_PATCH55_DELIVERY.md",
     "docs/requirements/INTERPRETATION_OVERLONG_SECTION_PATCH56_DELIVERY.md",
     "docs/requirements/CUSTOMER_PORTRAIT_PRODUCT_GROUP_PATCH57_DELIVERY.md",
+    "docs/requirements/REVERSE_QUALITY_SINGLE_ISSUE_PATCH58_DELIVERY.md",
     "docs/requirements/SCENARIO_ASSETS_PHASE1_ACCEPTANCE.md",
     "quality_knowledge/materials.py",
     "quality_knowledge/issue_period.py",
     "quality_knowledge/sqlite_tuning.py",
     "quality_knowledge/scenarios.py",
     "quality_knowledge/scenario_generation.py",
+    "quality_knowledge/reverse_quality.py",
     "quality_knowledge/web/app.py",
     "quality_knowledge/web/static/app.css",
     "quality_knowledge/web/templates/base.html",
     "quality_knowledge/web/templates/materials.html",
     "quality_knowledge/web/templates/material_detail.html",
+    "quality_knowledge/web/templates/reverse_quality_issue.html",
     "quality_knowledge/web/templates/quality_scenarios.html",
     "quality_knowledge/web/templates/quality_scenario_edit.html",
     "quality_knowledge/web/templates/quality_scenario_generate.html",
@@ -127,7 +130,13 @@ def main() -> None:
             for path in files
         ],
     }
-    readme = """# PATCH57 累计升级说明
+    readme = """# PATCH58 累计升级说明
+
+新增单问题逆向质量分析工作台：原始问题事实、AI推断和人工确认分层保存；
+使用产品场景词典判断生命周期与业务活动，逐字段证据核对与修订，
+人工确认现有场景覆盖情况；不自动发布场景或指标。新表在应用启动时自动创建。
+
+以下为 PATCH57 及更早累计内容：
 
 客户／行业质量场景画像支持按产品分类查看：保留“全部产品”观察跨产品全貌，并可切换 PLC、iFA、
 伺服等产品分类。切换后，数据库问题范围、统计结论、AI任务和证据清单使用同一范围；每个分类
@@ -437,6 +446,7 @@ ITRYYYY 前缀解析，不能解析时才读取文件年份。清单支持年份
 - AI生成候选：`/quality-scenarios/generate`
 - 场景词典配置：`/settings/scenario-taxonomy`
 - 行业与质量场景看板：`/quality-scenarios/insights`
+- 单问题逆向分析：从 ITR／彻底解决单／软件考核问题详情进入
 
 本包已显式包含上述三个工作台所需的侧边栏入口、路由、数据服务、列表页、详情页和样式文件。
 

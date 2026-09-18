@@ -1,0 +1,111 @@
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from quality_knowledge.web.app import create_app
+
+
+class FakeResponse:
+    model = 'test-model'
+    def __init__(self, content):self.content=json.dumps(content,ensure_ascii=False)
+
+
+class FakeClient:
+    def complete(self, messages):
+        return FakeResponse({'fields':{
+            'customer_experience':{'value':'掉电后关键计数丢失','evidence_ids':['cs.description'],'confidence':.9},
+            'expected_quality_state':{'value':'重新上电后计数应正确恢复','evidence_ids':['cs.description'],'confidence':.8},
+            'root_cause':{'value':'保持变量写入未完成','evidence_ids':['cs.root_cause'],'confidence':1},
+            'related_objects':{'value':'PLC AM600','evidence_ids':['structured.product_model'],'confidence':.9},
+            'quality_requirement_candidate':{'value':'异常掉电后关键运行数据能够正确恢复','evidence_ids':['cs.description','cs.root_cause'],'confidence':.75},
+            'lifecycle_stage':{'value':'运行执行','evidence_ids':['cs.description','cs.phase'],'confidence':.85},
+            'business_activity_scene':{'value':'掉电数据保持与上电恢复','evidence_ids':['cs.description'],'confidence':.9},
+        },'lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY',
+        'match_reason':'有掉电和重新上电的数据恢复证据','missing_condition':'掉电次数未知'})
+
+
+def setup_case(tmp_path):
+    app=create_app(tmp_path/'reverse.db')
+    repo=app.state.material_repository
+    material_id,_=repo.add_material(repo.group('ITR-CS'),'ITR20260918001CS',{
+        '问题信息_问题描述':'PLC 正常运行时异常掉电，重新上电后关键计数丢失',
+        '问题信息_问题原因定位':'保持变量写入未完成',
+        '问题信息_问题发生阶段':'终端正常使用',
+        '问题信息_产品型号':'PLC AM600',
+        '问题信息_问题领域':'软件',
+    },'synthetic.xlsx','Sheet1',2)
+    app.state.reverse_quality_service.ai_client=FakeClient()
+    return app,material_id
+
+
+def test_reverse_quality_single_issue_analysis_review_and_source_preservation(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    client=TestClient(app)
+    page=client.get(f'/reverse-quality/{material_id}')
+    assert page.status_code==200 and '单问题逆向质量分析' in page.text
+    response=client.post(f'/reverse-quality/{material_id}/analyse',data={'product_code':'PLC'},follow_redirects=False)
+    assert response.status_code==303
+    service=app.state.reverse_quality_service
+    saved=service.get('ITR20260918001')
+    assert saved['status']=='PENDING_REVIEW'
+    assert saved['review']['root_cause']['source_type']=='FACT'
+    assert saved['review']['lifecycle_stage']['value']=='运行执行'
+    assert saved['review']['business_activity_scene']['value']=='掉电数据保持与上电恢复'
+    assert saved['scene_match_status']=='NEED_REVIEW'
+    assert client.get(f'/reverse-quality/{material_id}').status_code==200
+    reviewed=client.post(f'/reverse-quality/{material_id}/review',data={'field_name':'expected_quality_state','action':'EDITED',
+        'value':'重新上电后关键计数应保持一致','reviewer':'质量专家'},follow_redirects=False)
+    assert reviewed.status_code==303
+    saved=service.get('ITR20260918001')
+    assert saved['ai']['expected_quality_state']['value']=='重新上电后计数应正确恢复'
+    assert saved['review']['expected_quality_state']['value']=='重新上电后关键计数应保持一致'
+    assert saved['review']['expected_quality_state']['review_status']=='CONFIRMED'
+    with pytest.raises(ValueError,match='人工逐字段审核'):
+        service.analyse(material_id,'PLC',force=True)
+
+
+def test_reverse_quality_rejects_fabricated_root_cause(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    class BadClient:
+        def complete(self, messages):
+            return FakeResponse({'fields':{'root_cause':{'value':'没有证据的新根因','evidence_ids':['cs.root_cause']}},
+                                 'lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY'})
+    service=app.state.reverse_quality_service
+    service.ai_client=BadClient()
+    with pytest.raises(ValueError,match='已确认根因必须直接来自'):
+        service.analyse(material_id,'PLC')
+    assert service.get('ITR20260918001') is None
+
+
+def test_reverse_quality_match_review_and_invalid_match(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    service=app.state.reverse_quality_service
+    service.analyse(material_id,'PLC')
+    client=TestClient(app)
+    response=client.post(f'/reverse-quality/{material_id}/match',data={
+        'status':'NOT_MATCHED','scene_id':'','reason':'现有质量场景尚未覆盖该掉电保持条件',
+        'missing_condition':'缺少异常掉电后的恢复要求','reviewer':'质量专家'},follow_redirects=False)
+    assert response.status_code==303
+    saved=service.get('ITR20260918001')
+    assert saved['scene_match_status']=='NOT_MATCHED'
+    assert saved['missing_condition']=='缺少异常掉电后的恢复要求'
+    with pytest.raises(ValueError,match='必须选择场景'):
+        service.review_match('ITR20260918001',status='MATCHED',scene_id='',reason='已覆盖',missing_condition='',reviewer='质量专家')
+
+
+def test_reverse_quality_rejects_unreferenced_output_and_hardware(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    service=app.state.reverse_quality_service
+    class Unreferenced:
+        def complete(self,messages):
+            return FakeResponse({'fields':{'capability_gap':{'value':'随意编造的能力短板','evidence_ids':[]}},
+                                 'lifecycle_code':'RUNTIME_EXECUTION','activity_code':''})
+    service.ai_client=Unreferenced()
+    with pytest.raises(ValueError,match='缺少可核验的来源证据'):
+        service.analyse(material_id,'PLC')
+    hardware_id,_=app.state.material_repository.add_material(app.state.material_repository.group('ITR-CS'),
+        'ITR20260918002CS',{'问题信息_问题描述':'电源板器件损坏','问题信息_问题领域':'硬件'},
+        'synthetic.xlsx','Sheet1',3)
+    with pytest.raises(ValueError,match='仅处理软件问题'):
+        service.analyse(hardware_id,'PLC')
