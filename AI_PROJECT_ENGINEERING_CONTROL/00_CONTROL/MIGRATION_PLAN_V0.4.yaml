@@ -1,0 +1,81 @@
+schema_version: "0.4"
+updated_at: "2026-09-20"
+status: DESIGN_READY
+
+objective: "通过 Adapter First 将公共执行机制逐步从业务代码中收敛，不进行一次性重写。"
+
+phases:
+  - phase: P0_CONTRACT_FREEZE
+    status: COMPLETED_DESIGN
+    deliverables:
+      - AI_RUNTIME_CONTRACT
+      - EXECUTION_ENGINE_CONTRACT
+      - PACKAGING_POLICY
+
+  - phase: P1_EXECUTION_ADAPTER
+    status: PLANNED
+    priority: HIGHEST
+    changes:
+      - "建立统一 ExecutionEngine 接口"
+      - "用 adapter 包装 builder/parallel_execution.py"
+      - "让 scenario_generation 与 v2_batch_job_service 通过 adapter 调用"
+    must_preserve:
+      - "输入顺序语义"
+      - "现有并发上限"
+      - "批任务进度"
+      - "单项失败隔离"
+      - "同一业务对象的业务策略"
+    acceptance:
+      - "现有专项测试不退化"
+      - "不得新增第四套 ThreadPool 执行实现"
+      - "执行状态统一映射"
+
+  - phase: P2_AI_RUNTIME_ADAPTER
+    status: PLANNED
+    priority: HIGH
+    changes:
+      - "AI Client 收敛为 provider adapter"
+      - "model_config 收敛为 runtime config adapter"
+      - "业务服务改调 AI Runtime"
+    must_preserve:
+      - "现有 model.yaml 兼容"
+      - "环境变量密钥机制"
+      - "真实/Mock显式区分"
+      - "stage runtime override"
+      - "agent selection"
+    acceptance:
+      - "业务代码不再直接读取 Provider/密钥"
+      - "错误分类可见"
+      - "Mock 不得伪装真实模型"
+
+  - phase: P3_PACKAGING_POLICY
+    status: PLANNED
+    priority: HIGH
+    changes:
+      - "抽公共 file selector"
+      - "抽公共 exclusion policy"
+      - "抽公共 manifest builder"
+      - "三个脚本改为 profile"
+    must_preserve:
+      - "FULL基线能力"
+      - "累计增量包能力"
+      - "REQ-022独立项目增量包能力"
+      - "sources/和运行数据禁止打包"
+    acceptance:
+      - "公共排除规则只有一处"
+      - "Manifest schema统一"
+      - "缺少 required path 构建失败"
+
+  - phase: P4_DEPRECATION
+    status: FUTURE
+    changes:
+      - "删除已无调用的重复执行逻辑"
+      - "删除已迁移的重复Packaging逻辑"
+      - "发布 deprecation 清单"
+    precondition: "所有 consumer 完成迁移且通过回归"
+
+execution_order:
+  - P1_EXECUTION_ADAPTER
+  - P2_AI_RUNTIME_ADAPTER
+  - P3_PACKAGING_POLICY
+  - P4_DEPRECATION
