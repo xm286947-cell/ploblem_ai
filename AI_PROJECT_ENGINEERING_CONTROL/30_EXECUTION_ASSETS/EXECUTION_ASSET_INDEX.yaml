@@ -1,0 +1,74 @@
+schema_version: "0.5"
+updated_at: "2026-09-20"
+purpose: "给所有项目提供可直接复用的目标、计划、有效证据和结论索引。"
+
+principle:
+  archive_only_effective_data: true
+  raw_process_log_required: false
+  default_reuse: true
+  revalidate_only_when_invalidated: true
+
+asset_types: [TARGET, PLAN, EVIDENCE, DECISION]
+
+assets:
+  - asset_id: ASSET-001
+    type: DECISION
+    subject: "P0/P1 architecture baseline"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    conclusion: "P0/P1 新架构作为后续开发基线。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [PRODUCT_REQUIREMENT_CHANGED, REAL_E2E_CONTRADICTS_CONCLUSION]
+
+  - asset_id: ASSET-002
+    type: DECISION
+    subject: "legacy database compatibility"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    conclusion: "不迁移、不读取、不兼容旧业务数据库。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [PRODUCT_REQUIREMENT_CHANGED, DATABASE_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-003
+    type: EVIDENCE
+    subject: "P1 import E2E"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    evidence_summary: "PLC全字段样例 Preview→Validate/Activate→Import 已完成；5/5成功。"
+    reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY, MAJOR_PROBLEM_AGENT]
+    invalidation: [RELATED_IMPORT_FILES_CHANGED, MAPPING_CONTRACT_CHANGED, REAL_E2E_CONTRADICTS_CONCLUSION]
+
+  - asset_id: ASSET-004
+    type: EVIDENCE
+    subject: "batch AI analysis E2E"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    evidence_summary: "并发2完成四阶段批量分析；结果持久化和详情读取已验证。"
+    reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY, MAJOR_PROBLEM_AGENT]
+    invalidation: [AI_RUNTIME_CHANGED, EXECUTION_ENGINE_CHANGED, ANALYSIS_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-005
+    type: DECISION
+    subject: "shared component convergence"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/05_DESIGN/SHARED_COMPONENT_CONVERGENCE_V0.4.md"
+    status: ACTIVE
+    conclusion: "业务层保留领域策略；AI Runtime、Execution Engine、Packaging 收敛到共享层。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [ARCHITECTURE_DECISION_CHANGED, SHARED_COMPONENT_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-006
+    type: PLAN
+    subject: "shared component migration order"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/MIGRATION_PLAN_V0.4.yaml"
+    status: ACTIVE
+    plan_summary: [EXECUTION_ENGINE, AI_RUNTIME, PACKAGING_POLICY, DEPRECATION]
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [ARCHITECTURE_DECISION_CHANGED, BLOCKING_TECHNICAL_EVIDENCE]
+
+usage:
+  task_start:
+    - "先按 PROJECT_ID / module / subject 查询本索引。"
+    - "命中 ACTIVE 资产且未触发失效条件时直接复用。"
+  task_end:
+    - "只登记对后续项目有复用价值的新证据或结论。"
+    - "临时日志、调试过程、无结论中间产物默认不归档。"

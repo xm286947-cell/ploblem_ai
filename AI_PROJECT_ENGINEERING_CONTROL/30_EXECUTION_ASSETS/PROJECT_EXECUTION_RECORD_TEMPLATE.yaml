@@ -1,0 +1,46 @@
+schema_version: "0.5"
+template_id: PROJECT_EXECUTION_RECORD
+instruction: "每个阶段只维护一条简洁记录，不作为工作日志。"
+
+project_id: ""
+baseline:
+  branch: ""
+  commit: ""
+
+target:
+  objective: ""
+  acceptance: []
+  out_of_scope: []
+
+plan:
+  steps: []
+  shared_modules_touched: []
+
+effective_evidence:
+  - evidence_id: ""
+    type: "TEST | E2E | AUDIT | SCAN | METRIC | MANIFEST"
+    result: ""
+    source: ""
+    reusable: true
+
+reusable_decisions:
+  - decision_id: ""
+    conclusion: ""
+    applies_to: []
+    invalidation: []
+
+result:
+  status: "PLANNED | IN_PROGRESS | COMPLETED | FAILED | PARTIAL"
+  changed_files: []
+  next_action: ""
+
+archive_rule:
+  keep_only:
+    - "影响后续决策的证据"
+    - "可复用结论"
+    - "基线与验证结果"
+  do_not_keep_by_default:
+    - "完整调试日志"
+    - "重复截图"
+    - "无结论中间推理"
+    - "可从Git重新生成的临时清单"
