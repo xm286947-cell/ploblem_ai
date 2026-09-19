@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}重大复盘知识库{% endblock %}
+{% block body %}
+<h1>重大复盘知识库</h1>
+<p class="muted">文档库与业务库独立；列表只读取摘要、状态和派生标签。</p>
+<form method="post" action="/knowledge/major-cases" class="card form-grid">
+  <h2>新建重大案例</h2>
+  <label>标题<input name="title" required></label><label>数据分组<input name="group_code" required placeholder="例如 SW"></label>
+  <label>领域<input name="domain"></label><button type="submit">新建</button>
+</form>
+<form method="get" class="filters"><input name="group" value="{{ group }}" placeholder="分组"><input name="status" value="{{ status }}" placeholder="状态"><input name="tag" value="{{ tag }}" placeholder="标签编码"><button>筛选</button></form>
+<div class="card"><b>案例 {{ result.total }}</b><table><thead><tr><th>标题</th><th>分组</th><th>状态</th><th>材料</th><th>事件</th><th>待处理</th></tr></thead><tbody>
+{% for item in result['items'] %}<tr><td><a href="/knowledge/major-cases/{{ item.case_id }}">{{ item.title }}</a></td><td>{{ item.group_code }}</td><td>{{ item.status }}</td><td>{{ item.document_count }}</td><td>{{ item.event_count }}</td><td>{{ item.pending_link_count + item.pending_entry_count }}</td></tr>{% else %}<tr><td colspan="6">暂无案例</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

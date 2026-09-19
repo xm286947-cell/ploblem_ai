@@ -1,6 +1,6 @@
 # QUALITY ENGINE 需求池
 
-最后更新：2026-09-06
+最后更新：2026-09-19
 
 ## 当前路线
 
@@ -13,7 +13,7 @@
 → 场景消费与治理闭环（后续，当前不开发）
 ```
 
-当前执行基线：[REQ-020](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md)。后续由 GPT-5.6 Sol 按 [开发交接台账](SOL_DEVELOPMENT_HANDOFF.md) 执行。部署演进保留为独立长期需求。
+当前新增开发范围：[REQ-022](REQ-022_MAJOR_CASE_KNOWLEDGE_DESIGN_V1.md)。REQ-020 与现有单问题逆向、画像能力继续保留；本轮不扩展治理闭环。部署演进保留为独立长期需求。
 
 ## 需求目录
 
@@ -40,6 +40,7 @@
 | REQ-019 | 客户问题逆向推理与产品质量场景库 | PARTIAL（已有实现，增量按020验收） | P1 | 当前 | `REQ-019_PRODUCT_QUALITY_SCENARIO_WORKFLOW.md` |
 | REQ-020 | 多源去重、软件/硬件客户与行业质量场景画像 | READY_FOR_SOL | P0 | 第一阶段价值验证 | [方案基线](REQ-020_CUSTOMER_QUALITY_SCENARIO_PORTRAIT_BASELINE_V1.md) / [执行台账](SOL_DEVELOPMENT_HANDOFF.md) |
 | REQ-021 | SQLite 大库性能、体检、查询分页与历史运行数据归档 | TRIAGED | P0 | 近期性能专项 | `REQ-021_SQLITE_PERFORMANCE_AND_ARCHIVE.md` |
+| REQ-022 | 重大复盘、独立知识库、可配置Skill与原Repeat Case接回 | DONE（代码与合成验收；真实模型/Windows待外部验收） | P1 | M0–M4 已完成 | [方案与验收基线](REQ-022_MAJOR_CASE_KNOWLEDGE_DESIGN_V1.md) / [交付记录](REQ-022_M4_DELIVERY.md) |
 
 ## 已明确但暂不实施
 

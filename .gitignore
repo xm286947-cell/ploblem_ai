@@ -29,3 +29,7 @@ baseline_release/
 knowledge/raw_evidence/*.json
 knowledge/raw_excel/*.json
 output/retrieval_results/*.json
+
+# REQ-022 independent runtime store (database, attachments and isolated M8 runs)
+data/knowledge/
+knowledge/major_knowledge/

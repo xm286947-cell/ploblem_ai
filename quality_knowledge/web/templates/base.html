@@ -23,6 +23,8 @@
     <a class="nav-item {% if request.url.path.startswith('/materials/itr') %}active{% endif %}" href="/materials/itr">ITR工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/materials/cs') %}active{% endif %}" href="/materials/cs">彻底解决工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/materials/software-operations') %}active{% endif %}" href="/materials/software-operations">软件考核工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/knowledge/major-cases') %}active{% endif %}" href="/knowledge/major-cases">重大复盘知识库</a>
+    <a class="nav-item {% if request.url.path.startswith('/knowledge/tasks') or request.url.path.startswith('/knowledge/repeat-runs') %}active{% endif %}" href="/knowledge/tasks">知识任务</a>
     <div class="nav-divider"></div>
     <div class="nav-label">管理</div>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
@@ -31,6 +33,7 @@
     <a class="nav-item {% if request.url.path.startswith('/settings/scenario-semantics') %}active{% endif %}" href="/settings/scenario-semantics">场景语义词典</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/knowledge/skills') %}active{% endif %}" href="/knowledge/skills">知识 Skill 配置</a>
   </nav>
   <div class="side-foot"><a href="/analysis">批量 AI 分析</a><a href="/export">数据导出</a></div>
 </aside>

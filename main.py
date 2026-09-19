@@ -172,6 +172,38 @@ def build_parser() -> argparse.ArgumentParser:
     kw.add_argument("--port", type=int, default=8080)
     kw.add_argument("--debug", action="store_true")
 
+    major_init = subparsers.add_parser("major-knowledge-init", help="REQ-022 初始化独立重大复盘知识库")
+    major_init.add_argument("--db", default=str(ROOT / "knowledge/major_knowledge/knowledge.sqlite3"))
+    major_init.add_argument("--attachments", default=str(ROOT / "knowledge/major_knowledge/attachments"))
+
+    major_ingest = subparsers.add_parser("major-case-ingest", help="REQ-022 导入PDF/DOCX并提取知识（合成/脱敏材料）")
+    major_ingest.add_argument("--db", default=str(ROOT / "knowledge/major_knowledge/knowledge.sqlite3"))
+    major_ingest.add_argument("--attachments", default=str(ROOT / "knowledge/major_knowledge/attachments"))
+    major_ingest.add_argument("--business-db", default="", help="可选，只读业务库；省略时不自动命中ITR")
+    major_ingest.add_argument("--input", required=True)
+    major_ingest.add_argument("--title", required=True)
+    major_ingest.add_argument("--group", required=True)
+    major_ingest.add_argument("--domain", default="")
+    major_ingest.add_argument("--itr", action="append", default=[])
+
+    major_benchmark = subparsers.add_parser("major-knowledge-benchmark", help="REQ-022 运行合成数据库性能检查（不含AI）")
+    major_benchmark.add_argument("--db", required=True)
+    major_benchmark.add_argument("--attachments", required=True)
+    major_benchmark.add_argument("--events", type=int, default=10000)
+    major_benchmark.add_argument("--fragments", type=int, default=100000)
+    major_benchmark.add_argument("--iterations", type=int, default=40)
+    major_benchmark.add_argument("--report", default="")
+
+    major_backup = subparsers.add_parser("major-knowledge-backup", help="REQ-022 一致性备份独立知识库与附件")
+    major_backup.add_argument("--db", required=True)
+    major_backup.add_argument("--attachments", required=True)
+    major_backup.add_argument("--output", required=True)
+
+    major_restore = subparsers.add_parser("major-knowledge-restore", help="REQ-022 校验并恢复到全新目标目录")
+    major_restore.add_argument("--backup", required=True)
+    major_restore.add_argument("--db", required=True)
+    major_restore.add_argument("--attachments", required=True)
+
     p0_init = subparsers.add_parser("knowledge-p0-init", help="初始化干净的 Quality Capability P0 数据库")
     p0_init.add_argument("--db", default=str(ROOT / "knowledge/quality_capability_p0.db"))
     p0_init.add_argument(
@@ -430,6 +462,35 @@ def main() -> int:
             from quality_knowledge.web import create_app
             uvicorn.run(create_app(args.db),host=args.host,port=args.port)
             return 0
+        if args.command == "major-knowledge-init":
+            from quality_knowledge.major_cases import MajorKnowledgeRepository
+            repository = MajorKnowledgeRepository(args.db, args.attachments)
+            return _print({"status": "READY", "schema_version": repository.schema_version(), "database": str(Path(args.db)), "attachments": str(Path(args.attachments))})
+        if args.command == "major-case-ingest":
+            from quality_knowledge.major_cases import MajorCaseService, MajorKnowledgeRepository, SqliteBusinessSourceGateway
+            from quality_knowledge.major_cases.sources import NullBusinessSourceGateway
+            repository = MajorKnowledgeRepository(args.db, args.attachments)
+            gateway = SqliteBusinessSourceGateway(args.business_db) if args.business_db else NullBusinessSourceGateway()
+            service = MajorCaseService(repository, gateway)
+            case = service.create_case(args.title, args.group, args.domain)
+            intake = service.ingest(case["case_id"], args.input, current_itrs=args.itr)
+            extraction = service.extract(case["case_id"], intake["version_id"]) if intake.get("parse_status") != "FAILED" else None
+            return _print({"case": case, "intake": intake, "extraction": extraction})
+        if args.command == "major-knowledge-benchmark":
+            from quality_knowledge.major_cases import MajorKnowledgeRepository
+            from quality_knowledge.major_cases.performance import run_synthetic_benchmark
+            result = run_synthetic_benchmark(MajorKnowledgeRepository(args.db, args.attachments), event_count=args.events, fragment_count=args.fragments, iterations=args.iterations)
+            if args.report:
+                report = Path(args.report); report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            return _print(result)
+        if args.command == "major-knowledge-backup":
+            from quality_knowledge.major_cases import MajorKnowledgeRepository
+            from quality_knowledge.major_cases.backup import create_backup
+            return _print(create_backup(MajorKnowledgeRepository(args.db, args.attachments), args.output))
+        if args.command == "major-knowledge-restore":
+            from quality_knowledge.major_cases.backup import restore_backup
+            return _print(restore_backup(args.backup, args.db, args.attachments))
         if args.command == "knowledge-query":
             from quality_knowledge.repositories import IssueKnowledgeRepository
             from quality_knowledge.services import KnowledgeIssueService
