@@ -1,4 +1,4 @@
-schema_version: "0.5"
+schema_version: "0.6"
 updated_at: "2026-09-20"
 purpose: "给所有项目提供可直接复用的目标、计划、有效证据和结论索引。"
 
@@ -64,6 +64,19 @@ assets:
     plan_summary: [EXECUTION_ENGINE, AI_RUNTIME, PACKAGING_POLICY, DEPRECATION]
     reusable_by: [ALL_PROJECTS]
     invalidation: [ARCHITECTURE_DECISION_CHANGED, BLOCKING_TECHNICAL_EVIDENCE]
+
+  - asset_id: ASSET-008
+    type: EVIDENCE
+    subject: "Execution Engine first adapter"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.6_EXECUTION_ENGINE_ADAPTER.yaml"
+    status: ACTIVE
+    evidence_summary: "共享 ExecutionEngine 已承接 ordered sequential/parallel map；旧 ordered_map 保持兼容。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation:
+      - "builder/execution_engine.py MATERIAL_CHANGE"
+      - "builder/parallel_execution.py MATERIAL_CHANGE"
+      - "EXECUTION_ENGINE_CONTRACT_CHANGED"
+      - "RELATED_REGRESSION_FAILED"
 
 usage:
   task_start:

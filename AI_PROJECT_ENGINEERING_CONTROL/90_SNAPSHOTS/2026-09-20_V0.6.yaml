@@ -1,0 +1,37 @@
+snapshot_version: "0.6"
+snapshot_date: "2026-09-20"
+focus: "EXECUTION_ENGINE_MINIMAL_ADAPTER"
+
+implementation:
+  engine: "builder/execution_engine.py"
+  compatibility_adapter: "builder/parallel_execution.py"
+  dedicated_test: "tests/test_execution_engine.py"
+
+scope:
+  implemented:
+    - ORDERED_SEQUENTIAL_MAP
+    - ORDERED_PARALLEL_MAP
+    - FAIL_FAST_EXCEPTION_PROPAGATION
+  deferred:
+    - RETRY
+    - CHECKPOINT_RESUME
+    - PROGRESS
+    - STRUCTURED_PARTIAL_RESULT
+    - PIPELINE
+
+compatibility:
+  existing_ordered_map_api_changed: false
+  consumer_code_changed: false
+  business_code_changed: false
+
+evidence:
+  isolated_smoke_validation: PASS
+  repository_ci: NOT_AVAILABLE
+  full_regression: NOT_RUN
+
+next_target:
+  version: "0.7"
+  focus:
+    - "运行/补充相关回归证据"
+    - "选择第二个 consumer 接入 Execution Engine"
+    - "优先比较 scenario_generation 与 v2_batch_job_service 的迁移风险"
