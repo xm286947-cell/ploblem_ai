@@ -1,0 +1,44 @@
+schema_version: "0.1"
+updated_at: "2026-09-20"
+
+dependencies:
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: NOT_UNIFIED
+    target_state: UNIFIED_SERVICE
+    status: PLANNED
+
+  - consumer: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: NOT_UNIFIED
+    target_state: UNIFIED_SERVICE
+    status: PLANNED
+
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: SHARED_MODEL_CONFIG
+    dependency_type: runtime_config
+    current_state:
+      repository: "xm286947-cell/ploblem_ai"
+      path: "config/model.yaml"
+      verified: true
+    target_state: CONTROLLED_REFERENCE
+    status: ACTIVE
+
+  - consumer: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    provider: SHARED_MODEL_CONFIG
+    dependency_type: runtime_config
+    current_state:
+      repository: "xm286947-cell/ploblem_ai"
+      path: "config/model.yaml"
+      verified: true
+    target_state: CONTROLLED_REFERENCE
+    status: ACTIVE
+
+  - consumer: STORAGE_LIFE_SPECIALTY
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: UNKNOWN
+    target_state: TO_BE_ASSESSED
+    status: PENDING_REGISTRATION

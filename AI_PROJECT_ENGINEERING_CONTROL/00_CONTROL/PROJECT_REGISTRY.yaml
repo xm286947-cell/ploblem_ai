@@ -1,0 +1,39 @@
+schema_version: "0.1"
+updated_at: "2026-09-20"
+
+projects:
+  - project_id: MAJOR_PROBLEM_AGENT
+    name: "重大问题智能体"
+    project_type: logical_subproject
+    repository: "xm286947-cell/ploblem_ai"
+    repository_status: VERIFIED
+    code_source: github
+    status: FROZEN_FAILED_ACCEPTANCE
+    config_profile: "10_PROJECTS/MAJOR_PROBLEM_AGENT.yaml"
+
+  - project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    name: "质量场景与案例库"
+    project_type: logical_subproject
+    repository: "xm286947-cell/ploblem_ai"
+    repository_status: VERIFIED
+    code_source: github
+    status: DEVELOPMENT
+    config_profile: "10_PROJECTS/QUALITY_SCENARIO_AND_CASE_LIBRARY.yaml"
+
+  - project_id: AI_ORCHESTRATOR
+    name: "统一AI编排器"
+    project_type: shared_platform
+    repository: null
+    repository_status: PENDING_REGISTRATION
+    code_source: github
+    status: PLANNING
+    config_profile: "10_PROJECTS/AI_ORCHESTRATOR.yaml"
+
+  - project_id: STORAGE_LIFE_SPECIALTY
+    name: "存储写入寿命专项"
+    project_type: domain_project
+    repository: null
+    repository_status: PENDING_REGISTRATION
+    code_source: github
+    status: DEVELOPMENT
+    config_profile: "10_PROJECTS/STORAGE_LIFE_SPECIALTY.yaml"

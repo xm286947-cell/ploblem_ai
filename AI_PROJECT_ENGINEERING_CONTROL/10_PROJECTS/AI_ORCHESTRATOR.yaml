@@ -1,0 +1,17 @@
+project_id: AI_ORCHESTRATOR
+name: "统一AI编排器"
+
+repository:
+  full_name: null
+  status: PENDING_REGISTRATION
+
+role: "为上层业务提供统一 AI 调用接口，根据请求统一调度 Agent/Model/Prompt；串行、连续、并发等调度机制可由上层参数表达。"
+
+current_state:
+  status: PLANNING
+
+target_state:
+  interface: UNIFIED_SERVICE
+  agent_config: CENTRALIZED
+  model_config: CENTRALIZED
+  business_awareness: LOW_COUPLING

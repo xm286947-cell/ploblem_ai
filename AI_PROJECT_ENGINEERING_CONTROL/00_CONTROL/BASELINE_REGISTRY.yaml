@@ -1,0 +1,38 @@
+schema_version: "0.1"
+updated_at: "2026-09-20"
+
+baselines:
+  - project_id: MAJOR_PROBLEM_AGENT
+    baseline_id: REQ022_RC1_FAILED_ACCEPTANCE
+    repository: "xm286947-cell/ploblem_ai"
+    source_branch: main
+    base_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+    baseline_branch: "handoff/req022-rc1-failed-acceptance"
+    baseline_commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+    baseline_status: FROZEN_FAILED_ACCEPTANCE
+    verified: true
+    note: "冻结已验收失败版本；不代表可发布基线。"
+
+  - project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    baseline_id: REVERSE_QUALITY_V01
+    repository: "xm286947-cell/ploblem_ai"
+    baseline_branch: "feature/reverse-quality-v01"
+    baseline_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+    baseline_status: DEVELOPMENT_BASELINE
+    verified: true
+
+  - project_id: AI_ORCHESTRATOR
+    baseline_id: null
+    repository: null
+    baseline_branch: null
+    baseline_commit: null
+    baseline_status: PENDING_REGISTRATION
+    verified: false
+
+  - project_id: STORAGE_LIFE_SPECIALTY
+    baseline_id: null
+    repository: null
+    baseline_branch: null
+    baseline_commit: null
+    baseline_status: PENDING_REGISTRATION
+    verified: false

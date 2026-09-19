@@ -1,0 +1,16 @@
+project_id: STORAGE_LIFE_SPECIALTY
+name: "存储写入寿命专项"
+
+repository:
+  full_name: null
+  status: PENDING_REGISTRATION
+
+current_state:
+  status: DEVELOPMENT
+
+scope_note: "独立专项；器件寿命知识库与案例库/重大问题数据源保持边界。"
+
+dependencies:
+  ai_orchestrator:
+    current_state: UNKNOWN
+    target_state: TO_BE_ASSESSED

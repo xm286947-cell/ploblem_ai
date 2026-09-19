@@ -1,0 +1,23 @@
+schema_version: "0.1"
+updated_at: "2026-09-20"
+
+shared_components:
+  - component_id: SHARED_MODEL_CONFIG
+    type: runtime_config
+    current_reference:
+      repository: "xm286947-cell/ploblem_ai"
+      path: "config/model.yaml"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    status: ACTIVE
+
+  - component_id: AGENT_SCHEMA
+    type: contract
+    version: null
+    status: PENDING_DEFINITION
+
+  - component_id: AI_API_CONTRACT
+    type: contract
+    version: null
+    status: PENDING_DEFINITION

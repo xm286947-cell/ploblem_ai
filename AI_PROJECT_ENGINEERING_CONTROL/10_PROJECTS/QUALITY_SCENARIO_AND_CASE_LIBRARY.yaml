@@ -1,0 +1,18 @@
+project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+name: "质量场景与案例库"
+
+repository:
+  full_name: "xm286947-cell/ploblem_ai"
+  verified: true
+
+baseline:
+  branch: "feature/reverse-quality-v01"
+  commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+  status: DEVELOPMENT_BASELINE
+
+runtime_config:
+  model_config:
+    path: "config/model.yaml"
+    verified: true
+
+scope_note: "质量场景与案例库按一套业务能力管理，避免重复注册。"

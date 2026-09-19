@@ -1,0 +1,20 @@
+project_id: MAJOR_PROBLEM_AGENT
+name: "重大问题智能体"
+
+repository:
+  full_name: "xm286947-cell/ploblem_ai"
+  verified: true
+
+baseline:
+  branch: "handoff/req022-rc1-failed-acceptance"
+  commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+  status: FROZEN_FAILED_ACCEPTANCE
+
+runtime_config:
+  model_config:
+    path: "config/model.yaml"
+    verified: true
+
+governance:
+  do_not_merge_to_main_automatically: true
+  failed_acceptance_baseline_is_release: false
