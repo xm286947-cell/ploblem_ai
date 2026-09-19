@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## V0.3 — 2026-09-20
+
+- 对 `ploblem_ai` 执行首轮模块自动清点。
+- 在质量场景基线上识别 316 个 Python 文件，其中 builder 45、quality_knowledge 84、tests 119。
+- 建立 MODULE_CATALOG，按入口/业务域/AI Runtime/数据契约/解析转换/呈现/兼容发布七层分类。
+- 建立 DEPENDENCY_GRAPH，并以 import、Git lineage、Web 装配关系作为证据。
+- 建立 DISCOVERY_CONFIRMATION：控制面负责统一发现，各项目只做确认与补差。
+- 建立 DUPLICATION_CANDIDATES；候选不等同重复代码结论。
+- 高优先级候选：并发执行机制、打包工具链。
+- 中优先级候选：配置加载、Response Normalizer、Analysis Service 版本并存。
+- 低优先级边界项：parser/parsing 命名空间、通用 JSON Repository 与质量域 Repository。
+- 新增 ARCHITECTURE_GUARDRAILS，开始约束跨层与跨项目依赖。
+- 全程未修改业务代码，未修改 main。
+
 ## V0.2 — 2026-09-20
 
 - 完成当前可写 GitHub 仓库盘点。

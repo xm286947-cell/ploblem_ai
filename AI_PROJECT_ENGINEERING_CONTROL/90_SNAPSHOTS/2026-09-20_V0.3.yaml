@@ -1,0 +1,34 @@
+snapshot_version: "0.3"
+snapshot_date: "2026-09-20"
+repository: "xm286947-cell/ploblem_ai"
+
+baselines:
+  quality_scenario:
+    branch: "feature/reverse-quality-v01"
+    commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+  major_problem:
+    branch: "handoff/req022-rc1-failed-acceptance"
+    commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+    parent_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+    delta_commits: 1
+
+discovery:
+  python_files_scanned_on_quality_scenario_baseline: 316
+  architecture_layers: 7
+  duplication_candidates: 7
+  high_priority_candidates:
+    - DUP-002_PARALLEL_EXECUTION
+    - DUP-007_PACKAGING
+  pending_project_confirmation:
+    - QUALITY_SCENARIO_DOMAIN
+    - MAJOR_CASE_DOMAIN
+    - SHARED_MODEL_RUNTIME
+    - PARALLEL_EXECUTION
+    - PACKAGING_TOOLCHAIN
+
+next_target:
+  version: "0.4"
+  focus:
+    - "项目确认机制落地"
+    - "共享组件公共接口定义"
+    - "AI_ORCHESTRATOR 收敛并发/模型运行时的详细迁移边界"
