@@ -1,0 +1,122 @@
+schema_version: "0.2"
+updated_at: "2026-09-20"
+
+ownership_types:
+  OWNED: "单一逻辑子项目主责，其他项目原则上不直接修改。"
+  SHARED: "多个子项目共同依赖，修改必须做影响分析。"
+  BOUNDARY_REVIEW_REQUIRED: "当前存在功能交叉或重复实现迹象，需要后续组件化梳理。"
+
+modules:
+  - module_id: MAJOR_CASE_DOMAIN
+    ownership: OWNED
+    owner: MAJOR_PROBLEM_AGENT
+    paths:
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/web/major_case_pages.py"
+      - "quality_knowledge/web/templates/major_*.html"
+      - "tests/test_req022_major_cases.py"
+      - "scripts/build_req022_package.py"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+
+  - module_id: QUALITY_SCENARIO_DOMAIN
+    ownership: OWNED
+    owner: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    paths:
+      - "quality_knowledge/reverse_quality.py"
+      - "quality_knowledge/scenario_*.py"
+      - "quality_knowledge/scenarios.py"
+      - "quality_knowledge/web/scenario_asset_pages.py"
+      - "quality_knowledge/web/templates/quality_scenario*.html"
+      - "quality_knowledge/web/templates/scenario_*.html"
+      - "quality_knowledge/web/templates/reverse_quality_issue.html"
+      - "tests/test_quality_scenario_*.py"
+      - "tests/test_scenario_*.py"
+      - "tests/test_reverse_quality.py"
+    consumers:
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+
+  - module_id: SHARED_MODEL_RUNTIME
+    ownership: SHARED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "config/model.yaml"
+      - "quality_knowledge/model_config.py"
+      - "builder/ai_client.py"
+      - "builder/json_response.py"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    change_gate: IMPACT_ANALYSIS_REQUIRED
+
+  - module_id: SHARED_QUALITY_ANALYSIS
+    ownership: SHARED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "quality_knowledge/analyzers.py"
+      - "quality_knowledge/response_normalizer.py"
+      - "quality_knowledge/response_normalizer_v2.py"
+      - "quality_knowledge/services/v2_analysis_service.py"
+      - "quality_knowledge/services/v2_batch_analysis_service.py"
+      - "quality_knowledge/services/v2_batch_job_service.py"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    change_gate: IMPACT_ANALYSIS_REQUIRED
+
+  - module_id: SHARED_MATERIAL_AND_ISSUE_DATA
+    ownership: SHARED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "quality_knowledge/materials.py"
+      - "quality_knowledge/repositories/**"
+      - "quality_knowledge/models/**"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    change_gate: DATA_CONTRACT_REVIEW_REQUIRED
+
+  - module_id: SHARED_WEB_SHELL
+    ownership: SHARED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "quality_knowledge/web/app.py"
+      - "quality_knowledge/web/templates/base.html"
+      - "quality_knowledge/web/static/app.css"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    change_gate: ROUTE_AND_NAV_IMPACT_REVIEW
+
+  - module_id: SHARED_CONTRACTS
+    ownership: SHARED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "contracts/**"
+      - "schema/**"
+    current_contract_versions:
+      dto: "1.0.0"
+      schema: "1.0.0"
+      contract: "1.0.0"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    change_gate: VERSION_CHANGE_REQUIRED
+
+  - module_id: YAML_CONFIG_LOADING
+    ownership: BOUNDARY_REVIEW_REQUIRED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "common/config_loader.py"
+      - "quality_knowledge/config_loader.py"
+    issue: "当前存在两个配置加载入口；V0.2只登记，不立即重构。"
+    target: "后续组件梳理时确认职责边界，避免继续产生第三套配置加载实现。"
+
+  - module_id: PACKAGING_AND_RELEASE
+    ownership: BOUNDARY_REVIEW_REQUIRED
+    owner: ENGINEERING_CONTROL
+    paths:
+      - "scripts/build_upgrade_package.py"
+      - "scripts/build_baseline_package.py"
+      - "scripts/build_req022_package.py"
+    issue: "不同子项目存在独立打包脚本；需逐步统一公共排除规则、基线元数据和敏感文件规则。"

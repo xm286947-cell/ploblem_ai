@@ -10,9 +10,32 @@ baseline:
   commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
   status: DEVELOPMENT_BASELINE
 
+primary_workspace:
+  - "quality_knowledge/reverse_quality.py"
+  - "quality_knowledge/scenario_*.py"
+  - "quality_knowledge/scenarios.py"
+  - "quality_knowledge/web/scenario_asset_pages.py"
+  - "quality_knowledge/web/templates/quality_scenario*.html"
+  - "quality_knowledge/web/templates/scenario_*.html"
+  - "quality_knowledge/web/templates/reverse_quality_issue.html"
+  - "tests/test_quality_scenario_*.py"
+  - "tests/test_scenario_*.py"
+  - "tests/test_reverse_quality.py"
+
+shared_modules:
+  - SHARED_MODEL_RUNTIME
+  - SHARED_QUALITY_ANALYSIS
+  - SHARED_MATERIAL_AND_ISSUE_DATA
+  - SHARED_WEB_SHELL
+  - SHARED_CONTRACTS
+
 runtime_config:
   model_config:
     path: "config/model.yaml"
+    loader: "quality_knowledge/model_config.py"
     verified: true
 
 scope_note: "质量场景与案例库按一套业务能力管理，避免重复注册。"
+
+governance:
+  cross_project_workspace_change_requires_impact_analysis: true

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## V0.2 — 2026-09-20
+
+- 完成当前可写 GitHub 仓库盘点。
+- 确认 `ploblem_ai` 为当前可写纳管仓库。
+- 识别重大问题与质量场景的基线继承关系：`18ac9ea...` 直接基于 `c7aa301...`，仅增加 1 个提交。
+- 为重大问题、质量场景登记主要代码工作区。
+- 新增 MODULE_OWNERSHIP，区分 OWNED / SHARED / BOUNDARY_REVIEW_REQUIRED。
+- 登记共享 AI Runtime、质量分析、数据、Web Shell、Contracts。
+- 发现两个 YAML 配置加载入口，登记为边界梳理项，本轮不做代码重构。
+- 将既有 Development Audit Ledger 纳入 AUDIT_REUSE_REGISTRY，默认执行增量审计，减少重复全仓审计。
+- 建立跨子项目 WORKSPACE_RULES。
+
 ## V0.1 Bootstrap — 2026-09-20
 
 - 建立跨项目 Project Registry。

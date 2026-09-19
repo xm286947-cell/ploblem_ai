@@ -9,12 +9,32 @@ baseline:
   branch: "handoff/req022-rc1-failed-acceptance"
   commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
   status: FROZEN_FAILED_ACCEPTANCE
+  inherited_from:
+    project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+    delta_commits: 1
+
+primary_workspace:
+  - "quality_knowledge/major_cases/**"
+  - "quality_knowledge/web/major_case_pages.py"
+  - "quality_knowledge/web/templates/major_*.html"
+  - "tests/test_req022_major_cases.py"
+  - "scripts/build_req022_package.py"
+
+shared_modules:
+  - SHARED_MODEL_RUNTIME
+  - SHARED_QUALITY_ANALYSIS
+  - SHARED_MATERIAL_AND_ISSUE_DATA
+  - SHARED_WEB_SHELL
+  - SHARED_CONTRACTS
 
 runtime_config:
   model_config:
     path: "config/model.yaml"
+    loader: "quality_knowledge/model_config.py"
     verified: true
 
 governance:
   do_not_merge_to_main_automatically: true
   failed_acceptance_baseline_is_release: false
+  cross_project_workspace_change_requires_impact_analysis: true

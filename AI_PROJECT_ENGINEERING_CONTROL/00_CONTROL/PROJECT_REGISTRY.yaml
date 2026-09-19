@@ -1,4 +1,4 @@
-schema_version: "0.1"
+schema_version: "0.2"
 updated_at: "2026-09-20"
 
 projects:
@@ -10,6 +10,12 @@ projects:
     code_source: github
     status: FROZEN_FAILED_ACCEPTANCE
     config_profile: "10_PROJECTS/MAJOR_PROBLEM_AGENT.yaml"
+    primary_workspace:
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/web/major_case_pages.py"
+      - "quality_knowledge/web/templates/major_*.html"
+      - "tests/test_req022_major_cases.py"
+      - "scripts/build_req022_package.py"
 
   - project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
     name: "质量场景与案例库"
@@ -19,6 +25,17 @@ projects:
     code_source: github
     status: DEVELOPMENT
     config_profile: "10_PROJECTS/QUALITY_SCENARIO_AND_CASE_LIBRARY.yaml"
+    primary_workspace:
+      - "quality_knowledge/reverse_quality.py"
+      - "quality_knowledge/scenario_*.py"
+      - "quality_knowledge/scenarios.py"
+      - "quality_knowledge/web/scenario_asset_pages.py"
+      - "quality_knowledge/web/templates/quality_scenario*.html"
+      - "quality_knowledge/web/templates/scenario_*.html"
+      - "quality_knowledge/web/templates/reverse_quality_issue.html"
+      - "tests/test_quality_scenario_*.py"
+      - "tests/test_scenario_*.py"
+      - "tests/test_reverse_quality.py"
 
   - project_id: AI_ORCHESTRATOR
     name: "统一AI编排器"
