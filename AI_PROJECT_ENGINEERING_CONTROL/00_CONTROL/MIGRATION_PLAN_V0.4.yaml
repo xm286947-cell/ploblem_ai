@@ -4,6 +4,28 @@ status: DESIGN_READY
 
 objective: "通过 Adapter First 将公共执行机制逐步从业务代码中收敛，不进行一次性重写。"
 
+fast_track_validations:
+  - id: STORAGE_CONTRACT_COMPATIBILITY
+    status: ACTIVE
+    phase: P0_3_RUNTIME_POC
+    purpose: "在正式迁移前，用 Storage 真实异构业务契约尽早验证统一 Runtime，避免到后期才发现 Contract 不兼容。"
+    design_ref: "https://docs.google.com/document/d/1ZcBfNn7DEnMwfbNpHgrkZ-398xVtacBrjJFIM9k-95A/edit"
+    test_case: TC11_STORAGE_CONTRACT_COMPATIBILITY
+    input_policy:
+      public_vendor_datasheet: ALLOWED
+      frozen_storage_golden: ALLOWED
+      internal_customer_data: FORBIDDEN
+    constraints:
+      - "不修改 Storage RC3-D1/D2 冻结业务语义"
+      - "不把 Storage Schema 硬编码进 Runtime"
+      - "不在 Storage 新增 Provider/Retry/Chunk/Checkpoint 公共 Runtime"
+      - "正式 Adapter 定版前先完成公共 Contract Canonicalization"
+    gates:
+      - CONTRACT_CANONICALIZATION
+      - STORAGE_REPOSITORY_REGISTRATION
+      - EMMC_GOLDEN_NO_REGRESSION
+      - FOUR_DEVICE_GOLDEN_NO_REGRESSION
+
 phases:
   - phase: P0_CONTRACT_FREEZE
     status: COMPLETED_DESIGN
@@ -11,6 +33,8 @@ phases:
       - AI_RUNTIME_CONTRACT
       - EXECUTION_ENGINE_CONTRACT
       - PACKAGING_POLICY
+    follow_up:
+      - "Canonicalize Drive P0.2 AgentRequest/AgentResult with Engineering Control V0.4 AIRequest/AIResult before freezing external consumer adapters."
 
   - phase: P1_EXECUTION_ADAPTER
     status: PLANNED
