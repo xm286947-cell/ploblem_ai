@@ -397,103 +397,121 @@ class SqliteTaskStore:
         if self.fault_injector:
             self.fault_injector("before_atomic_commit")
 
-        with self._connect() as conn:
-            existing = conn.execute(
-                """
-                SELECT commit_id
-                FROM runtime_execution_commit
-                WHERE execution_key=?
-                """,
-                (commit.execution_key,),
-            ).fetchone()
+        try:
+            with self._connect() as conn:
+                existing = conn.execute(
+                    """
+                    SELECT commit_id
+                    FROM runtime_execution_commit
+                    WHERE execution_key=?
+                    """,
+                    (commit.execution_key,),
+                ).fetchone()
+                if existing:
+                    return CommitResult(
+                        commit_id=existing["commit_id"],
+                        execution_key=commit.execution_key,
+                        inserted=False,
+                    )
+
+                conn.execute(
+                    """
+                    INSERT INTO runtime_attempt(
+                        attempt_id, step_run_id, status, execution_key,
+                        provider_call_seq, record_json
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(attempt_id) DO UPDATE SET
+                        step_run_id=excluded.step_run_id,
+                        status=excluded.status,
+                        execution_key=excluded.execution_key,
+                        provider_call_seq=excluded.provider_call_seq,
+                        record_json=excluded.record_json
+                    """,
+                    (
+                        commit.attempt.attempt_id,
+                        commit.attempt.step_run_id,
+                        commit.attempt.status.value,
+                        commit.attempt.execution_key,
+                        commit.attempt.provider_call_seq,
+                        commit.attempt.model_dump_json(),
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO runtime_step_run(step_run_id, run_id, step_id, status, record_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(step_run_id) DO UPDATE SET
+                        run_id=excluded.run_id,
+                        step_id=excluded.step_id,
+                        status=excluded.status,
+                        record_json=excluded.record_json
+                    """,
+                    (
+                        commit.step_run.step_run_id,
+                        commit.step_run.run_id,
+                        commit.step_run.step_id,
+                        commit.step_run.status.value,
+                        commit.step_run.model_dump_json(),
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO runtime_checkpoint(
+                        checkpoint_id, task_id, run_id, step_run_id, status, record_json
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(checkpoint_id) DO UPDATE SET
+                        status=excluded.status,
+                        record_json=excluded.record_json
+                    """,
+                    (
+                        commit.checkpoint.checkpoint_id,
+                        commit.checkpoint.task_id,
+                        commit.checkpoint.run_id,
+                        commit.checkpoint.step_run_id,
+                        commit.checkpoint.status.value,
+                        commit.checkpoint.model_dump_json(),
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO runtime_execution_commit(
+                        commit_id, execution_key, task_id, run_id, step_run_id,
+                        status, result_json, coverage_json, evidence_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        commit.commit_id,
+                        commit.execution_key,
+                        commit.task_id,
+                        commit.run_id,
+                        commit.step_run.step_run_id,
+                        commit.status.value,
+                        self._json(commit.result_data),
+                        self._json(commit.coverage),
+                        self._json(commit.evidence),
+                        commit.checkpoint.created_at.isoformat(),
+                    ),
+                )
+
+                if self.fault_injector:
+                    self.fault_injector("after_atomic_writes_before_commit")
+        except sqlite3.IntegrityError:
+            with self._connect() as conn:
+                existing = conn.execute(
+                    """
+                    SELECT commit_id
+                    FROM runtime_execution_commit
+                    WHERE execution_key=?
+                    """,
+                    (commit.execution_key,),
+                ).fetchone()
             if existing:
                 return CommitResult(
                     commit_id=existing["commit_id"],
                     execution_key=commit.execution_key,
                     inserted=False,
                 )
-
-            conn.execute(
-                """
-                INSERT INTO runtime_attempt(
-                    attempt_id, step_run_id, status, execution_key,
-                    provider_call_seq, record_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(attempt_id) DO UPDATE SET
-                    step_run_id=excluded.step_run_id,
-                    status=excluded.status,
-                    execution_key=excluded.execution_key,
-                    provider_call_seq=excluded.provider_call_seq,
-                    record_json=excluded.record_json
-                """,
-                (
-                    commit.attempt.attempt_id,
-                    commit.attempt.step_run_id,
-                    commit.attempt.status.value,
-                    commit.attempt.execution_key,
-                    commit.attempt.provider_call_seq,
-                    commit.attempt.model_dump_json(),
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO runtime_step_run(step_run_id, run_id, step_id, status, record_json)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(step_run_id) DO UPDATE SET
-                    run_id=excluded.run_id,
-                    step_id=excluded.step_id,
-                    status=excluded.status,
-                    record_json=excluded.record_json
-                """,
-                (
-                    commit.step_run.step_run_id,
-                    commit.step_run.run_id,
-                    commit.step_run.step_id,
-                    commit.step_run.status.value,
-                    commit.step_run.model_dump_json(),
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO runtime_checkpoint(
-                    checkpoint_id, task_id, run_id, step_run_id, status, record_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(checkpoint_id) DO UPDATE SET
-                    status=excluded.status,
-                    record_json=excluded.record_json
-                """,
-                (
-                    commit.checkpoint.checkpoint_id,
-                    commit.checkpoint.task_id,
-                    commit.checkpoint.run_id,
-                    commit.checkpoint.step_run_id,
-                    commit.checkpoint.status.value,
-                    commit.checkpoint.model_dump_json(),
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO runtime_execution_commit(
-                    commit_id, execution_key, task_id, run_id, step_run_id,
-                    status, result_json, coverage_json, evidence_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    commit.commit_id,
-                    commit.execution_key,
-                    commit.task_id,
-                    commit.run_id,
-                    commit.step_run.step_run_id,
-                    commit.status.value,
-                    self._json(commit.result_data),
-                    self._json(commit.coverage),
-                    self._json(commit.evidence),
-                    commit.checkpoint.created_at.isoformat(),
-                ),
-            )
-
-            if self.fault_injector:
-                self.fault_injector("after_atomic_writes_before_commit")
+            raise
 
         return CommitResult(
             commit_id=commit.commit_id,
