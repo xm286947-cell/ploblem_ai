@@ -229,11 +229,10 @@ def test_lq03_execution_commit_and_projection_outbox_are_atomic(tmp_path):
             "QK-DEMO-1",
             issue_input=issue(),
             issue_version_id="ISSUE-V1",
+            request_id="req-lq03-atomic",
         )
 
-    task = store.get_task_by_request_id(
-        "quality-issue:QK-DEMO-1:ISSUE-V1:quality"
-    )
+    task = store.get_task_by_request_id("req-lq03-atomic")
     assert task is not None
     assert len(store.list_committed_execution_keys(task.task_id)) == 0
     assert store.list_projection_events(
