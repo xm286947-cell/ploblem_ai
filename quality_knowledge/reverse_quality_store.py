@@ -132,6 +132,9 @@ class ReverseQualityResult:
     missing_information: list[dict[str, Any]]
     scene_match: dict[str, Any]
     model: str = ""
+    run_seq: int = 0
+    started_at: str = ""
+    completed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -430,7 +433,7 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
     def get_latest(self, canonical_itr: str) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute(
-                """SELECT analysis.*,run.run_id,run.product_code AS run_product_code,
+                """SELECT analysis.*,run.run_id,run.run_seq,run.product_code AS run_product_code,
                           run.taxonomy_version_id AS run_taxonomy_version_id,
                           run.source_hash,run.input_json,run.model,run.error,
                           run.started_at,run.completed_at
@@ -496,11 +499,17 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 missing_information=missing,
                 scene_match=scene,
                 model=row["model"] or "",
+                run_seq=int(row["run_seq"]),
+                started_at=row["started_at"] or "",
+                completed_at=row["completed_at"] or "",
             )
             return {
                 "result_version": RESULT_VERSION,
                 "analysis_id": row["analysis_id"],
                 "run_id": row["run_id"],
+                "run_seq": int(row["run_seq"]),
+                "started_at": row["started_at"] or "",
+                "completed_at": row["completed_at"] or "",
                 "canonical_itr": row["canonical_itr"],
                 "source_hash": row["source_hash"],
                 "product_code": row["run_product_code"] or row["product_code"],
