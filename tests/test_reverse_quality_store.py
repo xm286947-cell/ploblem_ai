@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 from quality_knowledge.reverse_quality_store import ReverseQualityResult, SQLiteReverseQualityRepository
@@ -124,3 +125,80 @@ def test_human_review_and_scene_match_are_append_only(tmp_path):
     with repo.connect() as connection:
         assert connection.execute('SELECT COUNT(*) FROM reverse_quality_human_review').fetchone()[0] == 1
         assert connection.execute('SELECT COUNT(*) FROM reverse_quality_scene_match').fetchone()[0] == 2
+
+
+
+def test_older_completion_cannot_replace_newer_valid_run(tmp_path):
+    repo = SQLiteReverseQualityRepository(tmp_path / 'reverse_quality_v01.db')
+    older = repo.start_run(canonical_itr='ITR-ORDER', product_code='PLC', taxonomy_version_id='T1',
+                           source_hash='old', input_payload={})
+    newer = repo.start_run(canonical_itr='ITR-ORDER', product_code='PLC', taxonomy_version_id='T1',
+                           source_hash='new', input_payload={})
+    _complete(repo, newer, '新结果')
+    _complete(repo, older, '旧结果')
+    latest = repo.get_latest('ITR-ORDER')
+    assert latest['run_id'] == newer['run_id']
+    assert latest['review']['customer_task']['value'] == '新结果'
+
+
+def test_patch58_legacy_data_migrates_idempotently(tmp_path):
+    legacy_path = tmp_path / 'legacy.db'
+    with sqlite3.connect(legacy_path) as connection:
+        connection.executescript('''
+        CREATE TABLE reverse_quality_analysis(
+          canonical_itr TEXT PRIMARY KEY, source_hash TEXT NOT NULL, product_code TEXT NOT NULL,
+          taxonomy_version_id TEXT, input_json TEXT NOT NULL, ai_json TEXT NOT NULL,
+          review_json TEXT NOT NULL, scene_match_status TEXT NOT NULL,
+          matched_scene_id TEXT, match_reason TEXT, missing_condition TEXT,
+          status TEXT NOT NULL, model TEXT, error TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE reverse_quality_field_review(
+          review_id INTEGER PRIMARY KEY AUTOINCREMENT, canonical_itr TEXT NOT NULL, field_name TEXT NOT NULL,
+          action TEXT NOT NULL, old_json TEXT NOT NULL, new_json TEXT NOT NULL, reviewer TEXT NOT NULL,
+          reviewed_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE reverse_quality_match_review(
+          review_id INTEGER PRIMARY KEY AUTOINCREMENT, canonical_itr TEXT NOT NULL,
+          old_json TEXT NOT NULL, new_json TEXT NOT NULL, reviewer TEXT NOT NULL,
+          reviewed_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        ''')
+        ai = {'customer_task': {'value': '旧AI值', 'source_type': 'FACT', 'evidence_ids': ['cs.description'],
+                                'confidence': 1.0, 'review_status': 'PENDING', 'reviewer_edit': ''}}
+        reviewed = {'customer_task': {**ai['customer_task'], 'value': '人工值',
+                                      'review_status': 'CONFIRMED', 'reviewer_edit': '人工值'}}
+        payload = {'canonical_itr': 'ITR-LEGACY',
+                   'evidence': {'cs.description': {'id': 'cs.description', 'value': '旧AI值'}}}
+        connection.execute(
+            '''INSERT INTO reverse_quality_analysis(
+               canonical_itr,source_hash,product_code,taxonomy_version_id,input_json,ai_json,review_json,
+               scene_match_status,matched_scene_id,match_reason,missing_condition,status,model,error)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            ('ITR-LEGACY','legacy-hash','PLC','T1',json.dumps(payload),json.dumps(ai),json.dumps(reviewed),
+             'NOT_MATCHED','','未覆盖','条件缺失','IN_REVIEW','legacy-model',''))
+        connection.execute(
+            '''INSERT INTO reverse_quality_field_review(
+               canonical_itr,field_name,action,old_json,new_json,reviewer)
+               VALUES(?,?,?,?,?,?)''',
+            ('ITR-LEGACY','customer_task','EDITED',json.dumps(ai['customer_task']),
+             json.dumps(reviewed['customer_task']),'质量专家'))
+        connection.execute(
+            '''INSERT INTO reverse_quality_match_review(
+               canonical_itr,old_json,new_json,reviewer) VALUES(?,?,?,?)''',
+            ('ITR-LEGACY',json.dumps({'scene_match_status':'NEED_REVIEW'}),
+             json.dumps({'scene_match_status':'NOT_MATCHED','matched_scene_id':'',
+                         'match_reason':'未覆盖','missing_condition':'条件缺失'}),'质量专家'))
+
+    class LegacyRepository:
+        def connect(self):
+            connection = sqlite3.connect(legacy_path)
+            connection.row_factory = sqlite3.Row
+            return connection
+
+    repo = SQLiteReverseQualityRepository(tmp_path / 'reverse_quality_v01.db')
+    assert repo.migrate_legacy(LegacyRepository()) == 1
+    latest = repo.get_latest('ITR-LEGACY')
+    assert latest['ai']['customer_task']['value'] == '旧AI值'
+    assert latest['review']['customer_task']['value'] == '人工值'
+    assert latest['match_reviewed'] is True
+    assert latest['scene_match_status'] == 'NOT_MATCHED'
+    assert latest['status'] == 'IN_REVIEW'
+    assert repo.migrate_legacy(LegacyRepository()) == 0
