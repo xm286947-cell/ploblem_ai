@@ -6,8 +6,10 @@ on:
       - feature/agent-runtime-p0
       - feature/agent-config-001
       - fix/runtime-secret-persistence
+      - integration/storage-runtime-acceptance
     paths:
       - "runtime/**"
+      - "storage_e2e/**"
       - "tests/test_agent_runtime_p0_*.py"
       - "tests/test_runtime_request_secret_persistence.py"
       - ".github/workflows/agent-runtime-p0.yml"
@@ -18,6 +20,7 @@ on:
       - feature/agent-config-001
     paths:
       - "runtime/**"
+      - "storage_e2e/**"
       - "tests/test_agent_runtime_p0_*.py"
       - "tests/test_runtime_request_secret_persistence.py"
       - ".github/workflows/agent-runtime-p0.yml"
@@ -40,5 +43,5 @@ jobs:
       - name: Install minimal test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-runtime-p0-test.txt
 
-      - name: Run Runtime P0 D1-D11 final acceptance
-        run: python -m pytest tests/test_agent_runtime_p0_d1_d2.py tests/test_agent_runtime_p0_d3.py tests/test_agent_runtime_p0_d4.py tests/test_agent_runtime_p0_d5.py tests/test_agent_runtime_p0_d6.py tests/test_agent_runtime_p0_d7.py tests/test_agent_runtime_p0_d8.py tests/test_agent_runtime_p0_d9.py tests/test_agent_runtime_p0_d10.py tests/test_agent_runtime_p0_d11_acceptance_gaps.py tests/test_agent_runtime_p0_merge_blockers.py tests/test_agent_runtime_p0_agent_config.py tests/test_runtime_request_secret_persistence.py -q
+      - name: Run Runtime P0 + Storage integration acceptance
+        run: python -m pytest tests/test_agent_runtime_p0_d1_d2.py tests/test_agent_runtime_p0_d3.py tests/test_agent_runtime_p0_d4.py tests/test_agent_runtime_p0_d5.py tests/test_agent_runtime_p0_d6.py tests/test_agent_runtime_p0_d7.py tests/test_agent_runtime_p0_d8.py tests/test_agent_runtime_p0_d9.py tests/test_agent_runtime_p0_d10.py tests/test_agent_runtime_p0_d11_acceptance_gaps.py tests/test_agent_runtime_p0_merge_blockers.py tests/test_agent_runtime_p0_agent_config.py tests/test_runtime_request_secret_persistence.py tests/test_agent_runtime_p0_storage_e2e_json_truncation.py -q
