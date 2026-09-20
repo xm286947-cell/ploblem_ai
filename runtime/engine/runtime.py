@@ -10,6 +10,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from runtime.contracts import (
+    AgentDefinition,
     AgentRequest,
     AgentResult,
     AttemptRecord,
@@ -19,6 +20,7 @@ from runtime.contracts import (
     CompletenessGateResult,
     ErrorCategory,
     ExecutionCommit,
+    ExecutionDefinitionSnapshot,
     ExecutionMode,
     ExecutionPolicy,
     ExecutionSummary,
@@ -70,6 +72,25 @@ def _hash_payload(value: Any) -> str:
 def _normalize_data(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
+    return value
+
+
+_SECRET_KEY_PARTS = ("secret", "password", "token", "api_key", "apikey", "credential")
+
+
+def _strip_secrets(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if any(part in normalized for part in _SECRET_KEY_PARTS):
+                continue
+            cleaned[key] = _strip_secrets(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_secrets(item) for item in value]
     return value
 
 
@@ -127,10 +148,23 @@ class LightweightExecutionEngine:
         self.store = store
         self.fault_injector = fault_injector
         self._agents: dict[str, AgentHandler] = {}
+        self._agent_definitions: dict[str, AgentDefinition] = {}
         self._workflows: dict[str, WorkflowDefinition] = {}
 
-    def register_agent(self, agent_id: str, handler: AgentHandler) -> None:
+    def register_agent(
+        self,
+        agent_id: str,
+        handler: AgentHandler,
+        definition: AgentDefinition | None = None,
+    ) -> None:
         self._agents[agent_id] = handler
+        if definition is not None:
+            if definition.agent_id != agent_id:
+                raise ValueError("AgentDefinition.agent_id must match registered agent_id")
+            self._agent_definitions[agent_id] = definition
+
+    def register_agent_definition(self, definition: AgentDefinition) -> None:
+        self._agent_definitions[definition.agent_id] = definition
 
     def register_workflow(self, definition: WorkflowDefinition) -> None:
         self._workflows[definition.workflow_id] = definition
