@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from runtime.contracts import EvidenceReference, EvidenceLocator, SourceRef
+from runtime.content.errors import PartitionMismatchError
 
 
 class EvidenceIntegrityError(Exception):
@@ -28,6 +29,25 @@ class EvidenceRegistry:
             raise EvidenceIntegrityError(
                 f"derived evidence references unknown evidence: {missing}"
             )
+
+        if evidence.derived_from and not evidence.metadata.get("cross_partition"):
+            partitions = {
+                self._items[parent].partition_key
+                for parent in evidence.derived_from
+            }
+            partitions.add(evidence.partition_key)
+            if len(partitions) > 1:
+                raise PartitionMismatchError(
+                    "derived evidence cannot cross partitions by default",
+                    details={
+                        "evidence_id": evidence.evidence_id,
+                        "partitions": sorted(
+                            "__none__" if value is None else value
+                            for value in partitions
+                        ),
+                    },
+                )
+
         self._items[evidence.evidence_id] = evidence
         self._assert_acyclic(evidence.evidence_id)
         return evidence
@@ -43,7 +63,11 @@ class EvidenceRegistry:
         confidence: float | None = None,
         partition_key: str | None = None,
         metadata: dict | None = None,
+        cross_partition: bool = False,
     ) -> EvidenceReference:
+        merged_metadata = dict(metadata or {})
+        if cross_partition:
+            merged_metadata["cross_partition"] = True
         evidence = EvidenceReference(
             evidence_id=evidence_id,
             source=source,
@@ -52,7 +76,7 @@ class EvidenceRegistry:
             confidence=confidence,
             derived_from=list(derived_from),
             partition_key=partition_key,
-            metadata=metadata or {},
+            metadata=merged_metadata,
         )
         return self.save(evidence)
 
