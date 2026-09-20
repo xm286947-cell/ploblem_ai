@@ -48,7 +48,7 @@ from runtime.store import SqliteTaskStore
 
 MajorIssueProvider = Callable[
     [dict[str, Any], list[dict[str, Any]], dict[str, Any]],
-    list[dict[str, Any] | "MajorIssueObjectCandidate"],
+    list[Any],
 ]
 RepeatCaseAgent = Callable[[Any, dict[str, Any]], Any]
 
