@@ -44,7 +44,7 @@ class Behavior:
     def from_dict(cls, raw: dict[str, Any] | None) -> "Behavior":
         raw = raw or {}
         return cls(
-            status=_as_int(raw.get("status", 200), "status", minimum=100, maximum=599),
+            status=_as_int(raw.get("status", 200), "status", minimum=200, maximum=599),
             delay_ms=_as_int(raw.get("delay_ms", 0), "delay_ms", minimum=0),
             stream=_as_optional_bool(raw.get("stream"), "stream"),
             fail_first_n=_as_int(raw.get("fail_first_n", 0), "fail_first_n", minimum=0),
@@ -164,7 +164,7 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
                 return
             self._delay(scenario.behavior)
             return self._json(
-                200,
+                scenario.behavior.status,
                 {
                     "object": "list",
                     "data": [
@@ -487,7 +487,7 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
         if behavior.truncate_at is not None:
             raw = raw[: behavior.truncate_at]
         self._raw(
-            200,
+            behavior.status,
             raw,
             headers=behavior.headers,
             content_type="application/json",
@@ -496,7 +496,7 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
     def _send_stream_bytes(self, wire: bytes, behavior: Behavior) -> None:
         if behavior.disconnect_at is not None:
             part = wire[: behavior.disconnect_at]
-            self.send_response(200)
+            self.send_response(behavior.status)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
@@ -511,7 +511,7 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
             return
 
-        self.send_response(200)
+        self.send_response(behavior.status)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
