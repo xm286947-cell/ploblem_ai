@@ -207,3 +207,42 @@ Still UNVERIFIED:
 - manual de-identified business validation.
 
 Formal Release remains **NOT APPROVED**.
+
+
+## 11. Historical P0.3 local pre-acceptance evidence
+
+This section preserves the earlier local P0.3 gate evidence for audit only.
+It does **not** override the current G01–G07 status above.
+
+Frozen evidence branch:
+- `integration/major-runtime-p03@9a0e5f7d70e708ddadc54992f7ddf60ce58d9d00`
+- base business: `fix/req022-release-gate@12ea090f911d376554e6accd3b4ca17386fe937c`
+- base Runtime: `main@5f9d0a7093ef1ea2531767d84c05b234eb95335a`
+- role: old P0.3 local Integration Gate pre-acceptance evidence
+- status: frozen; no further development; no merge/rebase into current integration branch
+
+Executed local test record on that frozen branch:
+- Runtime P0 D1–D11 + merge blockers: **84 passed**
+- REQ-022 Major Case: **21 passed**
+- Legacy integration: **9 passed**
+- M7/M8: **53 passed**
+- ITR/CS: **14 passed**
+- Quality Scenario: **43 passed**
+- Workbench: **13 passed**
+- cumulative authoritative command total: **237 passed, 2 known deprecation warnings**
+
+The older branch also documented a synthetic D01 Golden fixture covering:
+- schema-valid partial object commits;
+- truncated final object not being committed;
+- uncovered-only resume;
+- stable prior partial/execution identities;
+- one EvidenceReference per object;
+- business consumption only after coverage, merge, evidence lineage and completeness gate pass.
+
+Historical interpretation:
+- G03 Provider Boundary was already identified as the blocking dependency.
+- G04 and G06 were only partial on the old P0.3 baseline.
+- those two items are superseded by the current branch evidence:
+  - G04 is now PASS through Runtime D11 retry/hard-budget acceptance.
+  - G06 is now PASS after Agent Config and secret-hardening were merged to main.
+- therefore this appendix is evidence lineage only, not the current Gate decision.
