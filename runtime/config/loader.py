@@ -426,6 +426,7 @@ class AgentConfigLoader:
             "agent_config_hash": config_hash,
             "provider_ref": provider.profile_ref,
             "provider_type": provider.type,
+            "provider_base_url": provider.base_url,
             "base_url_env": provider.base_url_env,
             "api_key_env": provider.api_key_env,
             "prompt_version": prompt.version,
