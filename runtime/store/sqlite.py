@@ -34,6 +34,7 @@ from runtime.contracts import (
     WorkflowRunRecord,
 )
 from runtime.reliability.errors import IdempotencyConflictError
+from runtime.reliability.state import RuntimeStateMachine
 
 
 FaultInjector = Callable[[str], None]
@@ -315,6 +316,15 @@ class SqliteTaskStore:
         error: RuntimeErrorInfo | None = None,
     ) -> None:
         with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT status FROM runtime_task WHERE task_id=?",
+                (record.task_id,),
+            ).fetchone()
+            if existing is not None:
+                RuntimeStateMachine.validate(
+                    RuntimeStatus(existing["status"]),
+                    record.status,
+                )
             self._upsert_task(
                 conn,
                 record,
@@ -712,6 +722,30 @@ class SqliteTaskStore:
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return {row["execution_key"] for row in rows}
+
+    def has_committed_progress(self, task_id: str) -> bool:
+        with self._connect() as conn:
+            execution = conn.execute(
+                """
+                SELECT 1
+                FROM runtime_execution_commit
+                WHERE task_id=?
+                LIMIT 1
+                """,
+                (task_id,),
+            ).fetchone()
+            if execution is not None:
+                return True
+            partial = conn.execute(
+                """
+                SELECT 1
+                FROM runtime_partial_commit
+                WHERE task_id=?
+                LIMIT 1
+                """,
+                (task_id,),
+            ).fetchone()
+        return partial is not None
 
     def count_provider_calls(self, execution_key: str) -> int:
         with self._connect() as conn:
