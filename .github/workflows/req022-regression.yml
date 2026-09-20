@@ -8,6 +8,8 @@ on:
   pull_request:
     branches:
       - main
+      - "handoff/req022-*"
+      - "repair/req022-*"
   workflow_dispatch:
 
 permissions:
