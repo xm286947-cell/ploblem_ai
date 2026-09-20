@@ -15,10 +15,21 @@ from .skills import MajorReviewSkillRunner
 
 
 class MajorCaseService:
-    def __init__(self, repository: MajorKnowledgeRepository, source_gateway: BusinessSourceGateway | None = None):
+    def __init__(
+        self,
+        repository: MajorKnowledgeRepository,
+        source_gateway: BusinessSourceGateway | None = None,
+        *,
+        skill_model_client=None,
+        project_root: str | Path | None = None,
+    ):
         self.repository = repository
         self.source_gateway = source_gateway or NullBusinessSourceGateway()
-        self.skill_runner = MajorReviewSkillRunner(repository)
+        self.skill_runner = MajorReviewSkillRunner(
+            repository,
+            project_root=project_root,
+            model_client=skill_model_client,
+        )
         self.skill_runner.ensure_default_skill()
 
     def create_case(self, title: str, group_code: str, domain: str = "") -> dict:
@@ -123,8 +134,22 @@ class MajorCaseService:
         live = self.source_gateway.fetch_summaries(case["group_code"], itrs)
         return self.repository.reconcile_sources(case_id, live)
 
-    def extract(self, case_id: str, version_id: str, *, skill_version_id: str | None = None, retry_failed: bool = False) -> dict:
-        return self.skill_runner.run(case_id, version_id, skill_version_id=skill_version_id, retry_failed=retry_failed)
+    def extract(
+        self,
+        case_id: str,
+        version_id: str,
+        *,
+        skill_version_id: str | None = None,
+        retry_failed: bool = False,
+        execution_mode: str = "mock",
+    ) -> dict:
+        return self.skill_runner.run(
+            case_id,
+            version_id,
+            skill_version_id=skill_version_id,
+            retry_failed=retry_failed,
+            execution_mode=execution_mode,
+        )
 
     def review_entry(self, entry_id: str, *, content: str, action: str, reviewer: str, reason: str = "") -> dict:
         mapping = {"CONFIRM": "CONFIRMED", "CORRECT": "CORRECTED", "REJECT": "REJECTED"}

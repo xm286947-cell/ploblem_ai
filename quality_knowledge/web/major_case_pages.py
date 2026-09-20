@@ -64,8 +64,20 @@ def create_major_case_router(
         return RedirectResponse(f"/knowledge/major-cases/{case_id}?message={result['action']}", 303)
 
     @router.post("/knowledge/major-cases/{case_id}/extract", include_in_schema=False)
-    def extract(case_id: str, version_id: str = Form(...), skill_version_id: str = Form(""), retry_failed: str = Form("")):
-        result = service.extract(case_id, version_id, skill_version_id=skill_version_id or None, retry_failed=retry_failed == "1")
+    def extract(
+        case_id: str,
+        version_id: str = Form(...),
+        skill_version_id: str = Form(""),
+        retry_failed: str = Form(""),
+        execution_mode: str = Form("mock"),
+    ):
+        result = service.extract(
+            case_id,
+            version_id,
+            skill_version_id=skill_version_id or None,
+            retry_failed=retry_failed == "1",
+            execution_mode=execution_mode,
+        )
         return RedirectResponse(f"/knowledge/tasks/{result['run_id']}", 303)
 
     @router.post("/knowledge/entries/{entry_id}/review", include_in_schema=False)
