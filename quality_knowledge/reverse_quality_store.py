@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS reverse_quality_run(
  run_id TEXT PRIMARY KEY,
  analysis_id TEXT NOT NULL REFERENCES reverse_quality_analysis(analysis_id),
  run_seq INTEGER NOT NULL,
+ product_code TEXT NOT NULL DEFAULT '',
+ taxonomy_version_id TEXT,
  source_hash TEXT NOT NULL,
  status TEXT NOT NULL,
  input_json TEXT NOT NULL DEFAULT '{}',
@@ -174,6 +176,21 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=NORMAL")
             connection.executescript(SCHEMA)
+            run_columns = {row["name"] for row in connection.execute("PRAGMA table_info(reverse_quality_run)")}
+            if "product_code" not in run_columns:
+                connection.execute("ALTER TABLE reverse_quality_run ADD COLUMN product_code TEXT NOT NULL DEFAULT ''")
+            if "taxonomy_version_id" not in run_columns:
+                connection.execute("ALTER TABLE reverse_quality_run ADD COLUMN taxonomy_version_id TEXT")
+            connection.execute(
+                """UPDATE reverse_quality_run
+                   SET product_code=COALESCE(NULLIF(product_code,''),(
+                         SELECT product_code FROM reverse_quality_analysis
+                         WHERE analysis_id=reverse_quality_run.analysis_id)),
+                       taxonomy_version_id=COALESCE(taxonomy_version_id,(
+                         SELECT taxonomy_version_id FROM reverse_quality_analysis
+                         WHERE analysis_id=reverse_quality_run.analysis_id))
+                   WHERE COALESCE(product_code,'')='' OR taxonomy_version_id IS NULL"""
+            )
 
     @contextmanager
     def _transaction(self):
@@ -197,10 +214,7 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 """INSERT INTO reverse_quality_analysis(
                        analysis_id,canonical_itr,product_code,taxonomy_version_id)
                    VALUES(?,?,?,?)
-                   ON CONFLICT(canonical_itr) DO UPDATE SET
-                       product_code=excluded.product_code,
-                       taxonomy_version_id=excluded.taxonomy_version_id,
-                       updated_at=CURRENT_TIMESTAMP""",
+                   ON CONFLICT(canonical_itr) DO NOTHING""",
                 (analysis_id, canonical_itr, product_code, taxonomy_version_id),
             )
             row = connection.execute(
@@ -214,9 +228,10 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
             ).fetchone()["value"]
             connection.execute(
                 """INSERT INTO reverse_quality_run(
-                       run_id,analysis_id,run_seq,source_hash,status,input_json)
-                   VALUES(?,?,?,?, 'RUNNING', ?)""",
-                (run_id, analysis_id, run_seq, source_hash, _json(input_payload)),
+                       run_id,analysis_id,run_seq,product_code,taxonomy_version_id,source_hash,status,input_json)
+                   VALUES(?,?,?,?,?,?, 'RUNNING', ?)""",
+                (run_id, analysis_id, run_seq, product_code, taxonomy_version_id,
+                 source_hash, _json(input_payload)),
             )
         return {"analysis_id": analysis_id, "run_id": run_id, "run_seq": int(run_seq)}
 
@@ -292,9 +307,10 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
             if self._can_promote(connection, run["analysis_id"], run["run_seq"]):
                 connection.execute(
                     """UPDATE reverse_quality_analysis
-                       SET latest_valid_run_id=?,status='PENDING_REVIEW',updated_at=CURRENT_TIMESTAMP
+                       SET latest_valid_run_id=?,product_code=?,taxonomy_version_id=?,
+                           status='PENDING_REVIEW',updated_at=CURRENT_TIMESTAMP
                        WHERE analysis_id=?""",
-                    (run_id, run["analysis_id"]),
+                    (run_id, run["product_code"], run["taxonomy_version_id"], run["analysis_id"]),
                 )
 
     def reuse_run(self, run_id: str, source_run_id: str) -> None:
@@ -350,9 +366,10 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
             if self._can_promote(connection, run["analysis_id"], run["run_seq"]):
                 connection.execute(
                     """UPDATE reverse_quality_analysis
-                       SET latest_valid_run_id=?,status='PENDING_REVIEW',updated_at=CURRENT_TIMESTAMP
+                       SET latest_valid_run_id=?,product_code=?,taxonomy_version_id=?,
+                           status='PENDING_REVIEW',updated_at=CURRENT_TIMESTAMP
                        WHERE analysis_id=?""",
-                    (run_id, run["analysis_id"]),
+                    (run_id, run["product_code"], run["taxonomy_version_id"], run["analysis_id"]),
                 )
 
     def fail_run(self, run_id: str, error: str) -> None:
@@ -393,7 +410,9 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
     def get_latest(self, canonical_itr: str) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute(
-                """SELECT analysis.*,run.run_id,run.source_hash,run.input_json,run.model,run.error,
+                """SELECT analysis.*,run.run_id,run.product_code AS run_product_code,
+                          run.taxonomy_version_id AS run_taxonomy_version_id,
+                          run.source_hash,run.input_json,run.model,run.error,
                           run.started_at,run.completed_at
                    FROM reverse_quality_analysis analysis
                    JOIN reverse_quality_run run ON run.run_id=analysis.latest_valid_run_id
@@ -443,8 +462,8 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
             }
             identity = {
                 "canonical_itr": row["canonical_itr"],
-                "product_code": row["product_code"],
-                "taxonomy_version_id": row["taxonomy_version_id"] or "",
+                "product_code": row["run_product_code"] or row["product_code"],
+                "taxonomy_version_id": row["run_taxonomy_version_id"] or row["taxonomy_version_id"] or "",
                 "source_hash": row["source_hash"],
             }
             result = ReverseQualityResult(
@@ -464,8 +483,8 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 "run_id": row["run_id"],
                 "canonical_itr": row["canonical_itr"],
                 "source_hash": row["source_hash"],
-                "product_code": row["product_code"],
-                "taxonomy_version_id": row["taxonomy_version_id"],
+                "product_code": row["run_product_code"] or row["product_code"],
+                "taxonomy_version_id": row["run_taxonomy_version_id"] or row["taxonomy_version_id"],
                 "input": input_payload,
                 "ai": ai_fields,
                 "review": review_fields,
@@ -550,6 +569,27 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 (status, canonical_itr),
             )
 
+    def _discard_analysis(self, canonical_itr: str) -> None:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT analysis_id FROM reverse_quality_analysis WHERE canonical_itr=?",
+                (canonical_itr,),
+            ).fetchone()
+            if not row:
+                return
+            analysis_id = row["analysis_id"]
+            run_ids = [item["run_id"] for item in connection.execute(
+                "SELECT run_id FROM reverse_quality_run WHERE analysis_id=?", (analysis_id,)
+            ).fetchall()]
+            for run_id in run_ids:
+                connection.execute("DELETE FROM reverse_quality_human_review WHERE run_id=?", (run_id,))
+                connection.execute("DELETE FROM reverse_quality_scene_match WHERE run_id=?", (run_id,))
+                connection.execute("DELETE FROM reverse_quality_missing_information WHERE run_id=?", (run_id,))
+                connection.execute("DELETE FROM reverse_quality_field_result WHERE run_id=?", (run_id,))
+                connection.execute("DELETE FROM reverse_quality_evidence WHERE run_id=?", (run_id,))
+            connection.execute("DELETE FROM reverse_quality_run WHERE analysis_id=?", (analysis_id,))
+            connection.execute("DELETE FROM reverse_quality_analysis WHERE analysis_id=?", (analysis_id,))
+
     def migrate_legacy(self, legacy_repository: Any) -> int:
         """One-way, idempotent import from PATCH58 tables if they exist in the old DB."""
         with legacy_repository.connect() as legacy:
@@ -623,5 +663,8 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 self._set_analysis_status(canonical_itr, legacy.get("status") or "PENDING_REVIEW")
                 migrated += 1
             except Exception as exc:
-                self.fail_run(run["run_id"], f"LEGACY_MIGRATION_FAILED: {exc}")
+                self._discard_analysis(canonical_itr)
+                raise RuntimeError(
+                    f"LEGACY_MIGRATION_FAILED:{canonical_itr}: {exc}"
+                ) from exc
         return migrated
