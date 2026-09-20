@@ -17,6 +17,7 @@ from runtime.contracts import (
     CommitResult,
     CommittedExecution,
     ExecutionCommit,
+    MergeResult,
     RuntimeErrorInfo,
     RuntimeStatus,
     StepRunRecord,
@@ -142,6 +143,12 @@ class SqliteTaskStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_runtime_execution_commit_task
                     ON runtime_execution_commit(task_id);
+
+                CREATE TABLE IF NOT EXISTS runtime_merge_commit (
+                    merge_key TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(conn, "runtime_attempt", "execution_key", "TEXT")
@@ -613,6 +620,44 @@ class SqliteTaskStore:
                 (execution_key, RuntimeStatus.RUNNING.value),
             ).fetchone()
         return row is not None
+
+    def get_merge_result(self, merge_key: str) -> MergeResult | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT result_json FROM runtime_merge_commit WHERE merge_key=?",
+                (merge_key,),
+            ).fetchone()
+        return MergeResult.model_validate_json(row["result_json"]) if row else None
+
+    def commit_merge_result(self, result: MergeResult) -> MergeResult:
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT result_json FROM runtime_merge_commit WHERE merge_key=?",
+                (result.merge_key,),
+            ).fetchone()
+            if existing:
+                return MergeResult.model_validate_json(existing["result_json"])
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO runtime_merge_commit(merge_key, result_json, created_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        result.merge_key,
+                        result.model_dump_json(),
+                        datetime.now().isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                existing = conn.execute(
+                    "SELECT result_json FROM runtime_merge_commit WHERE merge_key=?",
+                    (result.merge_key,),
+                ).fetchone()
+                if existing:
+                    return MergeResult.model_validate_json(existing["result_json"])
+                raise
+        return result
 
     def get_task(self, task_id: str) -> TaskRecord | None:
         with self._connect() as conn:
