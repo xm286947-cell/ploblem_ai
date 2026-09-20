@@ -42,3 +42,24 @@ The following belong to subsequent locked stages and are not considered complete
 - D11: full P0.3 acceptance.
 
 No P0.2 frozen contract semantics may be silently changed during implementation.
+
+
+## D3 reliability evidence
+
+- Request idempotency and fingerprint conflict.
+- Stable execution keys and provider-call hard budgets.
+- Atomic result/checkpoint/attempt commit marker.
+- Same Task + new Run resume.
+- Crash recovery at before-call, after-return-before-commit, and after-commit-before-status windows.
+- PR #3 CI evidence: 12 tests passed before D4 entry.
+
+## D4 implementation
+
+- Explicit ContentStrategyRegistry / ContentProjector boundary.
+- SourceBundle / LogicalUnit / AtomicGroup contracts.
+- Deterministic ContentPlanner.
+- KEEP_TOGETHER / SAME_CONTEXT enforcement.
+- Chunk capacity and overlap planning.
+- PartialResultCommitter rejects schema-invalid or incomplete/truncated objects.
+
+D5 Coverage / Evidence / Merge remains intentionally outside the D4 implementation boundary.
