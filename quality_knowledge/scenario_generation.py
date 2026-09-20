@@ -4,12 +4,12 @@ import hashlib
 import json
 import re
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
 
 from builder.ai_client import OpenAICompatibleClient
+from builder.execution_engine import ExecutionEngine, ExecutionPlan
 from builder.json_response import parse_json_object
 from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
 
@@ -259,39 +259,47 @@ class ScenarioGenerationService:
                 self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',error_message='相同证据正在另一个任务中分析，稍后重试即可复用',finished=True)
                 continue
             pending.append((row,input_key,evidence_hash,update_scenario_id))
-        futures={}
-        with ThreadPoolExecutor(max_workers=max_workers,thread_name_prefix='scenario-ai') as executor:
-            for index,(row,input_key,evidence_hash,update_scenario_id) in enumerate(pending):
-                agent_id='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,row['knowledge_id'],slot=index)
-                cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent_id)[0]
-                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'RUNNING',agent_id=agent_id,model_name=str(cfg.get('model') or getattr(self.ai_client,'model','')),started=True)
-                futures[executor.submit(analyse,index,row)]=(row,input_key,evidence_hash,update_scenario_id)
-            for future in as_completed(futures):
-                row,input_key,evidence_hash,update_scenario_id=futures[future]
-                try:
-                    source_row,item,agent_id,model=future.result();models.add(model)
-                    if not item:
-                        self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',agent_id=agent_id,model_name=model,error_message='AI未返回该问题的有效场景，请人工确认',finished=True)
-                        raise StopIteration
-                    code=f"AI-{hashlib.sha1((generation_id+row['knowledge_id']).encode()).hexdigest()[:10].upper()}"
-                    source_records=[source_row]
-                    scope_fields={'IPMT':'ipmt','SPDT':'spdt','PRODUCT_MODEL':'product_model','INDUSTRY':'customer_industry','CUSTOMER_NAME':'customer_name','CUSTOMER_LEVEL':'customer_level','CUSTOMER_STATUS':'customer_status','OCCURRENCE_PHASE':'occurrence_phase'}
-                    scopes={kind:sorted({x['itr_cs_context'].get(field,'') for x in source_records}-{''}) for kind,field in scope_fields.items()}
-                    scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model,update_scenario_id)
-                    industries=sorted({x['itr_cs_context'].get('customer_industry','') for x in source_records}-{''})
-                    variants=[{'industry':industry,'product_models':sorted({x['itr_cs_context'].get('product_model','') for x in source_records if x['itr_cs_context'].get('customer_industry')==industry}-{''}),'trigger_conditions':item.get('trigger_conditions',''),'business_impact':item.get('business_impact',''),'recovery_method':item.get('recovery_method',''),'evidence_count':1} for industry in industries]
-                    self.scenarios.save_industry_variants(scenario_id,variants)
-                    self.scenarios.finish_scenario_analysis(input_key,canonical_itr=row.get('canonical_itr') or row.get('business_issue_id') or row['knowledge_id'],task_type='QUALITY_SCENARIO_V1',evidence_hash=evidence_hash,taxonomy_version_id=taxonomy['version_id'],scenario_id=scenario_id,source_knowledge_id=row['knowledge_id'],model_name=model)
-                    status='UPDATED' if update_scenario_id else 'CLASSIFIED'
-                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],status,scenario_id=scenario_id,activity_code=item.get('activity_code',''),lifecycle_code=item.get('lifecycle_code',''),agent_id=agent_id,model_name=model,error_message='新增彻底解决单或其他有效证据已增强原候选' if update_scenario_id else '',finished=True)
-                    (updated if update_scenario_id else created).append(scenario_id)
-                except StopIteration:
-                    self.scenarios.release_scenario_analysis(input_key)
-                except Exception as error:
-                    self.scenarios.release_scenario_analysis(input_key)
-                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'FAILED',error_message=str(error),finished=True)
-                coverage=self.scenarios.refresh_generation_coverage(generation_id)
-                self.scenarios.update_generation(generation_id,progress_text=f"已处理 {coverage['processed_count']}/{len(records)}；新识别 {coverage['classified_count']}，增强 {coverage['updated_count']}，复用 {coverage['reused_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}")
+        tasks=[]
+        for index,(row,input_key,evidence_hash,update_scenario_id) in enumerate(pending):
+            agent_id='TEST' if self.ai_client is not None else choose_quality_issue_agent(self.root,row['knowledge_id'],slot=index)
+            cfg={} if self.ai_client is not None else load_quality_issue_ai_config(self.root,agent_id=agent_id)[0]
+            self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'RUNNING',agent_id=agent_id,model_name=str(cfg.get('model') or getattr(self.ai_client,'model','')),started=True)
+            tasks.append((index,row,input_key,evidence_hash,update_scenario_id))
+        execution=ExecutionPlan(
+            mode='PARALLEL' if max_workers>1 else 'SEQUENTIAL',
+            max_concurrency=max_workers,
+            preserve_input_order=False,
+            fail_policy='CONTINUE',
+            thread_name_prefix='scenario-ai',
+        )
+        for completed in ExecutionEngine().iter_completed(tasks,lambda task: analyse(task[0],task[1]),execution):
+            index,row,input_key,evidence_hash,update_scenario_id=completed.item
+            try:
+                if completed.error is not None:raise completed.error
+                source_row,item,agent_id,model=completed.value;models.add(model)
+                if not item:
+                    self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'REVIEW_REQUIRED',agent_id=agent_id,model_name=model,error_message='AI未返回该问题的有效场景，请人工确认',finished=True)
+                    raise StopIteration
+                code=f"AI-{hashlib.sha1((generation_id+row['knowledge_id']).encode()).hexdigest()[:10].upper()}"
+                source_records=[source_row]
+                scope_fields={'IPMT':'ipmt','SPDT':'spdt','PRODUCT_MODEL':'product_model','INDUSTRY':'customer_industry','CUSTOMER_NAME':'customer_name','CUSTOMER_LEVEL':'customer_level','CUSTOMER_STATUS':'customer_status','OCCURRENCE_PHASE':'occurrence_phase'}
+                scopes={kind:sorted({x['itr_cs_context'].get(field,'') for x in source_records}-{''}) for kind,field in scope_fields.items()}
+                scenario_id=self.scenarios.save_generated_candidate(code,item,scopes,generation_id,product,start_month,end_month,model,update_scenario_id)
+                industries=sorted({x['itr_cs_context'].get('customer_industry','') for x in source_records}-{''})
+                variants=[{'industry':industry,'product_models':sorted({x['itr_cs_context'].get('product_model','') for x in source_records if x['itr_cs_context'].get('customer_industry')==industry}-{''}),'trigger_conditions':item.get('trigger_conditions',''),'business_impact':item.get('business_impact',''),'recovery_method':item.get('recovery_method',''),'evidence_count':1} for industry in industries]
+                self.scenarios.save_industry_variants(scenario_id,variants)
+                self.scenarios.finish_scenario_analysis(input_key,canonical_itr=row.get('canonical_itr') or row.get('business_issue_id') or row['knowledge_id'],task_type='QUALITY_SCENARIO_V1',evidence_hash=evidence_hash,taxonomy_version_id=taxonomy['version_id'],scenario_id=scenario_id,source_knowledge_id=row['knowledge_id'],model_name=model)
+                status='UPDATED' if update_scenario_id else 'CLASSIFIED'
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],status,scenario_id=scenario_id,activity_code=item.get('activity_code',''),lifecycle_code=item.get('lifecycle_code',''),agent_id=agent_id,model_name=model,error_message='新增彻底解决单或其他有效证据已增强原候选' if update_scenario_id else '',finished=True)
+                (updated if update_scenario_id else created).append(scenario_id)
+            except StopIteration:
+                self.scenarios.release_scenario_analysis(input_key)
+            except Exception as error:
+                self.scenarios.release_scenario_analysis(input_key)
+                self.scenarios.mark_issue_classification(generation_id,row['knowledge_id'],'FAILED',error_message=str(error),finished=True)
+            coverage=self.scenarios.refresh_generation_coverage(generation_id)
+            self.scenarios.update_generation(generation_id,progress_text=f"已处理 {coverage['processed_count']}/{len(records)}；新识别 {coverage['classified_count']}，增强 {coverage['updated_count']}，复用 {coverage['reused_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}")
+
         coverage=self.scenarios.refresh_generation_coverage(generation_id)
         final_status='COMPLETED' if coverage['unprocessed_count']==0 and coverage['failed_count']==0 and coverage['review_required_count']==0 else 'PARTIAL'
         text=f"覆盖 {coverage['classified_count']+coverage['reused_count']+coverage['updated_count']}/{len(records)}；新识别 {coverage['classified_count']}，增强 {coverage['updated_count']}，复用 {coverage['reused_count']}，待确认 {coverage['review_required_count']}，失败 {coverage['failed_count']}"
@@ -343,22 +351,30 @@ class ScenarioGenerationService:
             if not result['primary_experience_code'] or not result['primary_quality_characteristic_code']:raise ValueError('QUALITY_STANDARDIZATION_REQUIRED_CODE_MISSING')
             return scenario_id,agent,str(response.model or model),result
         ids=list(dict.fromkeys(scenario_ids))
-        with ThreadPoolExecutor(max_workers=min(8,max(1,len(ids))),thread_name_prefix='scenario-standardize') as executor:
-            futures={executor.submit(analyse,index,sid):sid for index,sid in enumerate(ids)}
-            for future in as_completed(futures):
-                sid=futures[future]
-                try:
-                    result=future.result()
-                    if result is None:outcome['skipped']+=1;continue
-                    scenario_id,agent,model,payload=result
-                    self.scenarios.save_standardization(scenario_id,payload,agent=agent,model=model)
-                    if batch_id:self.scenarios.mark_standardization_item(batch_id,scenario_id,'COMPLETED',agent=agent,model=model)
-                    outcome['completed']+=1
-                except Exception as error:
-                    try:self.scenarios.mark_standardization(sid,'FAILED',error=str(error))
-                    except Exception:pass
-                    if batch_id:self.scenarios.mark_standardization_item(batch_id,sid,'FAILED',error=str(error))
-                    outcome['failed']+=1
+        tasks=list(enumerate(ids))
+        execution=ExecutionPlan(
+            mode='PARALLEL' if len(ids)>1 else 'SEQUENTIAL',
+            max_concurrency=min(8,max(1,len(ids))),
+            preserve_input_order=False,
+            fail_policy='CONTINUE',
+            thread_name_prefix='scenario-standardize',
+        )
+        for completed in ExecutionEngine().iter_completed(tasks,lambda task: analyse(task[0],task[1]),execution):
+            index,sid=completed.item
+            try:
+                if completed.error is not None:raise completed.error
+                result=completed.value
+                if result is None:outcome['skipped']+=1;continue
+                scenario_id,agent,model,payload=result
+                self.scenarios.save_standardization(scenario_id,payload,agent=agent,model=model)
+                if batch_id:self.scenarios.mark_standardization_item(batch_id,scenario_id,'COMPLETED',agent=agent,model=model)
+                outcome['completed']+=1
+            except Exception as error:
+                try:self.scenarios.mark_standardization(sid,'FAILED',error=str(error))
+                except Exception:pass
+                if batch_id:self.scenarios.mark_standardization_item(batch_id,sid,'FAILED',error=str(error))
+                outcome['failed']+=1
+
         if batch_id:
             for sid in ids:
                 item=next((x for x in self.scenarios.standardization_batch(batch_id)['items'] if x['scenario_id']==sid),None)
