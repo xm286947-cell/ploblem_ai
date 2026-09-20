@@ -1,0 +1,50 @@
+name: Reverse Quality RC1
+
+on:
+  push:
+    branches:
+      - feature/reverse-quality-v01
+    paths:
+      - "quality_knowledge/reverse_quality.py"
+      - "quality_knowledge/reverse_quality_store.py"
+      - "quality_knowledge/reverse_quality_scenario_adapter.py"
+      - "quality_knowledge/scenario_generation.py"
+      - "quality_knowledge/web/app.py"
+      - "quality_knowledge/web/templates/reverse_quality_issue.html"
+      - "tests/test_reverse_quality.py"
+      - "tests/test_reverse_quality_store.py"
+      - ".github/workflows/reverse-quality-rc1.yml"
+  workflow_dispatch:
+
+jobs:
+  rc1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile
+        run: python -m compileall -q quality_knowledge builder
+
+      - name: Reverse quality store
+        run: python -m pytest tests/test_reverse_quality_store.py -q
+
+      - name: Reverse quality service and API
+        run: python -m pytest tests/test_reverse_quality.py -q
+
+      - name: Scenario generation regression
+        run: python -m pytest tests/test_quality_scenario_generation.py -q
+
+      - name: Related scenario regressions
+        run: |
+          python -m pytest tests/test_quality_scenario_library.py -q
+          python -m pytest tests/test_scenario_multisource_dedup.py -q
+          python -m pytest tests/test_scenario_operation_sources.py -q
