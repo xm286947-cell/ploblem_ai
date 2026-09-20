@@ -341,6 +341,7 @@ class MajorKnowledgeRepository:
         params: list = [state, error_code, error_detail]
         if state == "RUNNING":
             parts.append("started_at=COALESCE(started_at,CURRENT_TIMESTAMP)")
+            parts.append("completed_at=NULL")
         if state in {"COMPLETED", "FAILED", "PARTIAL", "CANCELLED"}:
             parts.append("completed_at=CURRENT_TIMESTAMP")
         if coverage_total is not None:
@@ -400,7 +401,12 @@ class MajorKnowledgeRepository:
                 """SELECT e.*,r.revision_no,r.content,r.applicability,r.limitations,r.assertion_kind,r.origin,r.model_profile
                    FROM kb_entry e JOIN kb_entry_revision r ON r.revision_id=e.current_revision_id WHERE e.entry_id=?""", (entry_id,)
             ).fetchone()
-            return _row(row)
+            item = _row(row)
+            if item:
+                item["evidence"] = [dict(ev) for ev in connection.execute(
+                    "SELECT * FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id", (item["current_revision_id"],)
+                )]
+            return item
 
     def revise_entry(self, entry_id: str, content: str, status: str, reviewer: str, reason: str = "") -> dict:
         before = self.entry(entry_id)
@@ -414,6 +420,11 @@ class MajorKnowledgeRepository:
                    VALUES(?,?,?,?,?,?, 'HUMAN_REVISION','HUMAN',?)""",
                 (revision_id, entry_id, revision_no, content, before["applicability"], before["limitations"], reviewer),
             )
+            for evidence in before.get("evidence", []):
+                connection.execute(
+                    "INSERT INTO kb_evidence(evidence_id,revision_id,fragment_id,source_link_id,locator,excerpt) VALUES(?,?,?,?,?,?)",
+                    (_id("KEV"), revision_id, evidence.get("fragment_id"), evidence.get("source_link_id"), evidence.get("locator", ""), evidence.get("excerpt", "")),
+                )
             connection.execute("UPDATE kb_entry SET current_revision_id=?,status=? WHERE entry_id=?", (revision_id, status, entry_id))
             connection.execute(
                 "INSERT INTO kb_review(review_id,target_type,target_id,action,before_json,after_json,reason,reviewer) VALUES(?,?,?,?,?,?,?,?)",
@@ -441,6 +452,13 @@ class MajorKnowledgeRepository:
         with self.connect() as connection:
             connection.execute(
                 "UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP WHERE case_id=? AND status IN ('PENDING','MISSING') AND current_revision_id IN (SELECT revision_id FROM kb_entry_revision WHERE origin='AI')",
+                (case_id,),
+            )
+
+    def clear_missing_ai_entries(self, case_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP WHERE case_id=? AND status='MISSING' AND current_revision_id IN (SELECT revision_id FROM kb_entry_revision WHERE origin='AI')",
                 (case_id,),
             )
 
