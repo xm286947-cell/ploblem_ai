@@ -763,6 +763,68 @@ providers:
     assert "[REDACTED]" in serialized
 
 
+def test_direct_provider_secret_is_redacted_from_successful_persisted_result(tmp_path):
+    direct_secret = "direct-provider-secret-in-result"
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        f"""
+providers:
+  qwen_test:
+    type: openai_compatible
+    mode: direct
+    base_url: http://qwen.test/v1
+    api_key: {direct_secret}
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml().replace(
+            "provider_ref: qwen_prod",
+            "provider_ref: qwen_test",
+        ),
+        encoding="utf-8",
+    )
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        provider_profiles="providers.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        content_strategies=_strategy_registry(),
+        completeness_gates={
+            "storage_parameter_gate": lambda value: value,
+        },
+        environ={},
+    )
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+
+    runtime.load_agent(
+        config_path,
+        lambda _payload, _context: {
+            "provider_message": f"response contained {direct_secret}",
+            "nested": [direct_secret],
+        },
+    )
+    result = runtime.invoke(
+        AgentRequest(
+            request_id="direct-secret-success-redaction",
+            agent_id="storage.emmc.parameter_extract",
+            input={},
+        )
+    )
+
+    assert result.status == RuntimeStatus.COMPLETED
+    serialized = result.model_dump_json()
+    assert direct_secret not in serialized
+    assert "[REDACTED]" in serialized
+
+    task = store.get_task(result.task_id)
+    committed = store.get_committed_execution(
+        next(iter(store.list_committed_execution_keys(task.task_id)))
+    )
+    assert committed is not None
+    assert direct_secret not in committed.model_dump_json()
+
+
 @pytest.mark.parametrize(
     "model",
     [
