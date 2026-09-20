@@ -1,8 +1,7 @@
 agent_id: storage.emmc.parameter_extract
 version: v1
 label: Storage eMMC Parameter Extract
-provider_ref: qwen_prod
-model: qwen3.8-max
+model_ref: qwen_prod
 
 prompt:
   ref: prompts/runtime/storage/emmc_parameter_extract.md
@@ -20,10 +19,6 @@ execution:
     step_attempts: 1
   budget:
     max_provider_calls_per_step: 4
-  model:
-    max_tokens: 8192
-    temperature: 0
-
 long_content:
   enabled: true
   strategy_ref: storage_linked_fields@1
