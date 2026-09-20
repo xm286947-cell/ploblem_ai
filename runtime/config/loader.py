@@ -25,6 +25,8 @@ from runtime.config.errors import (
 )
 from runtime.config.models import (
     AgentConfig,
+    ModelProfileConfig,
+    ModelProfilesConfig,
     ProviderConfig,
     ProviderProfilesConfig,
     ResolvedAgentConfig,
@@ -85,8 +87,16 @@ def _find_forbidden_secret_key(value: Any, path: str = "$") -> str | None:
             normalized = str(key).lower()
             direct_provider_api_key = (
                 normalized == "api_key"
-                and str(value.get("mode", "")).lower() == "direct"
-                and "type" in value
+                and (
+                    (
+                        str(value.get("mode", "")).lower() == "direct"
+                        and "type" in value
+                    )
+                    or (
+                        "model" in value
+                        and ("base_url" in value or "base_url_env" in value)
+                    )
+                )
             )
             if (
                 normalized in _FORBIDDEN_SECRET_KEYS
@@ -117,6 +127,7 @@ class AgentConfigLoader:
         self,
         *,
         root: str | Path | None = None,
+        model_profiles: Mapping[str, Any] | str | Path | None = None,
         provider_profiles: Mapping[str, Any] | str | Path | None = None,
         schemas: Mapping[str, Any] | None = None,
         content_strategies: Any = None,
@@ -124,12 +135,37 @@ class AgentConfigLoader:
         environ: Mapping[str, str] | None = None,
     ):
         self.root = Path(root).resolve() if root is not None else None
+        self.model_profiles, self.active_model = self._load_model_profiles(
+            model_profiles
+        )
         self.provider_profiles = self._load_provider_profiles(provider_profiles)
         self.schemas = dict(schemas or {})
         self.content_strategies = content_strategies
         self.completeness_gates = dict(completeness_gates or {})
         self.environ = environ if environ is not None else os.environ
         self._runtime_api_keys: dict[str, str] = {}
+
+    def _load_model_profiles(
+        self,
+        source: Mapping[str, Any] | str | Path | None,
+    ) -> tuple[dict[str, ModelProfileConfig], str | None]:
+        if source is None:
+            return {}, None
+        if isinstance(source, Mapping):
+            raw = dict(source)
+        else:
+            path = Path(source)
+            if not path.is_absolute() and self.root is not None:
+                path = self.root / path
+            raw = self._load_yaml(path)
+        try:
+            profiles = ModelProfilesConfig.model_validate(raw)
+        except ValidationError as exc:
+            raise ConfigValidationError(
+                "invalid model profile configuration",
+                details={"errors": exc.errors(include_input=False)},
+            ) from exc
+        return profiles.models, profiles.active_model
 
     def _load_provider_profiles(
         self,
@@ -267,7 +303,59 @@ class AgentConfigLoader:
     def _resolve_provider(
         self,
         config: AgentConfig,
-    ) -> tuple[ResolvedProviderConfig, str | None]:
+    ) -> tuple[
+        ResolvedProviderConfig,
+        str | None,
+        ModelProfileConfig | None,
+    ]:
+        model_ref = config.model_ref or (
+            self.active_model
+            if not config.provider_ref and config.provider is None
+            else None
+        )
+        if model_ref is not None:
+            profile = self.model_profiles.get(model_ref)
+            if profile is None:
+                raise ConfigReferenceNotFoundError("model_profile", model_ref)
+
+            mode = "env" if profile.base_url_env else "direct"
+            auth = (
+                "api_key"
+                if profile.api_key is not None or profile.api_key_env is not None
+                else "none"
+            )
+            base_url = (
+                self._require_env(profile.base_url_env)
+                if profile.base_url_env
+                else profile.base_url
+            )
+            api_key = (
+                self._require_env(profile.api_key_env)
+                if profile.api_key_env
+                else profile.api_key
+            )
+
+            return (
+                ResolvedProviderConfig(
+                    type=profile.provider,
+                    mode=mode,
+                    auth=auth,
+                    profile_ref=model_ref,
+                    model=profile.model,
+                    base_url_env=profile.base_url_env,
+                    api_key_env=profile.api_key_env,
+                    base_url=base_url,
+                    sdk_retry=0,
+                    metadata={
+                        **profile.metadata,
+                        "model_ref": model_ref,
+                    },
+                ),
+                api_key,
+                profile,
+            )
+
+        # Legacy AGENT-CONFIG-001 provider path. Kept for compatibility only.
         if config.provider_ref:
             provider = self.provider_profiles.get(config.provider_ref)
             if provider is None:
@@ -280,7 +368,12 @@ class AgentConfigLoader:
             provider = config.provider
             profile_ref = None
 
-        assert provider is not None
+        if provider is None:
+            raise ConfigValidationError(
+                "model_ref is required when no active_model is configured",
+                details={"agent_id": config.agent_id},
+            )
+
         model = config.model or provider.model
         if model is None or not str(model).strip():
             raise ConfigValidationError(
@@ -313,15 +406,27 @@ class AgentConfigLoader:
                 metadata=dict(provider.metadata),
             ),
             api_key,
+            None,
         )
 
     @staticmethod
-    def _build_execution_policy(config: AgentConfig) -> ExecutionPolicy:
+    def _build_execution_policy(
+        config: AgentConfig,
+        model_profile: ModelProfileConfig | None = None,
+    ) -> ExecutionPolicy:
         retry = config.execution.retry
         budget = config.execution.budget
         model_policy = {
-            "max_tokens": config.execution.model.max_tokens,
-            "temperature": config.execution.model.temperature,
+            "max_tokens": (
+                config.execution.model.max_tokens
+                if config.execution.model.max_tokens is not None
+                else (model_profile.max_tokens if model_profile else None)
+            ),
+            "temperature": (
+                config.execution.model.temperature
+                if config.execution.model.temperature is not None
+                else (model_profile.temperature if model_profile else None)
+            ),
             "sdk_retry": 0,
             **config.execution.model.metadata,
         }
@@ -379,7 +484,7 @@ class AgentConfigLoader:
                 },
             ) from exc
 
-        provider, runtime_api_key = self._resolve_provider(config)
+        provider, runtime_api_key, model_profile = self._resolve_provider(config)
         prompt = self._resolve_prompt(
             config.prompt.ref,
             config.prompt.version,
@@ -419,7 +524,7 @@ class AgentConfigLoader:
                 registry=self.completeness_gates,
             )
 
-        execution_policy = self._build_execution_policy(config)
+        execution_policy = self._build_execution_policy(config, model_profile)
         safe_provider = provider.model_dump(mode="json")
         reference_material = {
             "prompt": prompt.model_dump(mode="json"),
@@ -460,6 +565,7 @@ class AgentConfigLoader:
             **config.metadata,
             "agent_config_version": config.version,
             "agent_config_hash": config_hash,
+            "model_ref": provider.profile_ref,
             "provider_ref": provider.profile_ref,
             "provider_type": provider.type,
             "provider_mode": provider.mode,
