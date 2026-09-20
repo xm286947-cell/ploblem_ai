@@ -1,10 +1,11 @@
-"""Unified Agent Runtime P0.3 implementation.
+"""Unified Agent Runtime P0.3.
 
-Implementation boundary:
-- D0 engineering baseline locked.
-- D1 Contract + Persistent Store implemented.
-- D2 Minimal Execution Core implemented.
-- D3 Reliability Core implemented in the lightweight engine and pending executed acceptance evidence.
+D0-D11 are implemented and validated against the P0.3 mandatory acceptance
+baseline. LightweightExecutionEngine is the P0 default. LangGraph is a
+validated alternative used through an explicit optional/test dependency.
+
+P0.3 validation does not imply real-business, real-model, deployment, or
+production-release acceptance.
 """
 
 from runtime.contracts import *
