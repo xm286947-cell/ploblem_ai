@@ -296,6 +296,8 @@ class TaskRecord(ContractModel):
     started_at: datetime | None = None
     updated_at: datetime
     completed_at: datetime | None = None
+    cancel_requested: bool = False
+    cancel_requested_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -431,6 +433,31 @@ class TaskSnapshot(ContractModel):
     updated_at: datetime
     cancel_requested: bool = False
     cancel_requested_at: datetime | None = None
+
+
+class ExecutionDefinitionSnapshot(ContractModel):
+    snapshot_id: str
+    fingerprint: str
+    canonical_contract_version: str = "P0.2_CONTRACT_FROZEN_V1.0"
+    agent_definition: dict[str, Any] | None = None
+    agent_definition_hash: str | None = None
+    workflow_definition: WorkflowDefinition | None = None
+    workflow_definition_hash: str | None = None
+    prompt_ref: str | None = None
+    prompt_hash: str | None = None
+    output_schema_ref: str | None = None
+    output_schema_version: str | None = None
+    output_schema_hash: str | None = None
+    content_strategy_ref: str | None = None
+    content_strategy_version: str | None = None
+    content_strategy_hash: str | None = None
+    execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
+    model_policy: dict[str, Any] = Field(default_factory=dict)
+    completeness_gate_ref: str | None = None
+    completeness_gate_version: str | None = None
+    runtime_version: str = "p0.3"
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AtomicGroupPolicy(str, Enum):
