@@ -64,6 +64,16 @@ def test_failed_run_never_replaces_latest_valid_result(tmp_path):
     assert [row['status'] for row in runs] == ['FAILED', 'COMPLETED']
 
 
+    run3 = repo.start_run(canonical_itr='ITR-001', product_code='HMI', taxonomy_version_id='T2',
+                          source_hash='hash-3', input_payload={})
+    repo.fail_run(run3['run_id'], 'new identity failed')
+    latest = repo.get_latest('ITR-001')
+    assert latest['product_code'] == 'PLC'
+    assert latest['taxonomy_version_id'] == 'T1'
+    assert latest['result']['identity']['product_code'] == 'PLC'
+    assert latest['result']['identity']['taxonomy_version_id'] == 'T1'
+
+
 def test_duplicate_execution_keeps_history_and_uses_new_run_id(tmp_path):
     repo = SQLiteReverseQualityRepository(tmp_path / 'reverse_quality_v01.db')
     run1 = repo.start_run(canonical_itr='ITR-001', product_code='PLC', taxonomy_version_id='T1',
