@@ -48,11 +48,11 @@ Content-Type: application/json
 
 | 字段 | 含义 |
 |---|---|
-| `status` | 正常阶段最终 HTTP Status，默认 200 |
+| `status` | fail-first-N 结束后的最终 HTTP Status，默认 200；允许 200–599。2xx 走成功响应，3xx–5xx 走 OpenAI-shaped error；1xx 拒绝配置 |
 | `delay_ms` | 返回前延迟毫秒数 |
 | `stream` | 可选；强制覆盖请求中的 stream |
 | `fail_first_n` | 前 N 次请求失败 |
-| `fail_status` | 前 N 次失败时的 HTTP Status |
+| `fail_status` | 前 N 次失败时的 HTTP Status；仅允许 400–599 |
 | `retry_after` | 错误响应中的 Retry-After |
 | `truncate_at` | 非流式响应在指定字节处截断 |
 | `disconnect_before_response` | 收到请求后直接断开连接，不发送 HTTP 响应，用于连接中断测试 |
@@ -60,6 +60,37 @@ Content-Type: application/json
 | `chunk_size` | 流式文本 delta 的分块大小 |
 | `headers` | 附加响应 Header |
 | `raw_response_body` | 直接返回原始 Body，用于协议异常测试 |
+
+### 2.3 status / fail_status 语义
+
+`status` 表示 `fail_first_n` 阶段结束后的最终 HTTP Status，而不是仅表示错误码。
+
+示例：第一次 429，第二次返回 202：
+
+```json
+{
+  "scenario_key": "accepted-after-retry",
+  "payload": "ok",
+  "behavior": {
+    "fail_first_n": 1,
+    "fail_status": 429,
+    "status": 202
+  }
+}
+```
+
+预期：
+
+```text
+call 1 -> 429
+call 2 -> 202 + OpenAI-compatible success body
+```
+
+控制面约束：
+- `status`：200–599；
+- `fail_status`：400–599；
+- 1xx 不作为最终响应状态接受；
+- Mock 可以故意制造非常规 HTTP 组合用于协议健壮性测试，调用方应根据自己的测试目的选择合理状态。
 
 ## 3. Scenario 选择
 
