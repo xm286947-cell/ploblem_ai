@@ -8,7 +8,7 @@ from runtime.contracts import (
     MergeResult,
 )
 from runtime.content.evidence import EvidenceRegistry
-from runtime.content.errors import InvalidPartialResultError
+from runtime.content.errors import InvalidPartialResultError, PartitionMismatchError
 
 
 class ResultMerger(Protocol):
@@ -40,6 +40,31 @@ class ListResultMerger:
                 "ResultMerger accepts committed partials only"
             )
 
+        partitions = {item.partition_key for item in inputs}
+        if context.partition_policy == "ISOLATED":
+            if len(partitions) > 1:
+                raise PartitionMismatchError(
+                    "ISOLATED merge cannot mix partitions",
+                    details={
+                        "partitions": sorted(
+                            "__none__" if value is None else value
+                            for value in partitions
+                        )
+                    },
+                )
+            if (
+                context.partition_key is not None
+                and partitions
+                and partitions != {context.partition_key}
+            ):
+                raise PartitionMismatchError(
+                    "merge input partition does not match MergeContext",
+                    details={
+                        "expected_partition": context.partition_key,
+                        "actual_partitions": list(partitions),
+                    },
+                )
+
         present_ids = {item.partial_id for item in inputs}
         expected_ids = set(context.expected_partial_ids)
         missing = sorted(expected_ids - present_ids)
@@ -65,6 +90,11 @@ class ListResultMerger:
             metadata={
                 "input_count": len(inputs),
                 "expected_count": len(expected_ids),
+                "source_partitions": sorted(
+                    "__none__" if value is None else value
+                    for value in partitions
+                ),
+                "partition_policy": context.partition_policy,
             },
         )
 
