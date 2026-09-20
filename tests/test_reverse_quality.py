@@ -4,6 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.app import create_app
+from quality_knowledge.scenarios import ScenarioRepository
+from quality_knowledge.scenario_generation import ScenarioGenerationService
 
 
 class FakeResponse:
@@ -238,8 +240,7 @@ def test_reverse_quality_result_and_candidate_api_use_single_analysis_pass(tmp_p
 
 
 def test_reverse_quality_candidate_rejects_unknown_result_version(tmp_path):
-    repository=app_repository=__import__('quality_knowledge.scenarios',fromlist=['ScenarioRepository']).ScenarioRepository(tmp_path/'scenario.db')
-    from quality_knowledge.scenario_generation import ScenarioGenerationService
+    repository=ScenarioRepository(tmp_path/'scenario.db')
     service=ScenarioGenerationService(None,repository,tmp_path)
     bad={
         'result_version':'reverse-quality-v9',
