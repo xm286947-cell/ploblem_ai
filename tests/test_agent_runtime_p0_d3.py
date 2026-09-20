@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from runtime import (
@@ -302,3 +304,83 @@ def test_r04_hard_provider_call_cap_is_not_multiplied_by_nested_retry(tmp_path):
     assert calls["n"] == 4
     assert result.execution.provider_calls == 4
     assert result.execution.retry_budget_exhausted is True
+
+
+def test_g04_crash_before_provider_call_consumes_no_budget(tmp_path):
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    crash_once = {"armed": True}
+    calls = {"n": 0}
+
+    def fault(point):
+        if point == "before_provider_call" and crash_once["armed"]:
+            crash_once["armed"] = False
+            raise SimulatedCrash(point)
+
+    def handler(payload, _context):
+        calls["n"] += 1
+        return payload["value"]
+
+    runtime = LightweightExecutionEngine(store, fault_injector=fault)
+    runtime.register_agent("echo", handler)
+
+    with pytest.raises(SimulatedCrash):
+        runtime.invoke(
+            AgentRequest(
+                request_id="req-crash-before-call",
+                agent_id="echo",
+                input={"value": 5},
+                execution_policy=make_policy(provider_calls=1),
+            )
+        )
+
+    task = store.get_task_by_request_id("req-crash-before-call")
+    assert task is not None
+    assert calls["n"] == 0
+    assert store.count_task_provider_calls(task.task_id) == 0
+    assert len(store.list_committed_execution_keys(task.task_id)) == 0
+
+    resumed = LightweightExecutionEngine(store)
+    resumed.register_agent("echo", handler)
+    handle = resumed.resume(task.task_id)
+
+    assert handle.status == RuntimeStatus.COMPLETED
+    assert calls["n"] == 1
+    assert store.count_task_provider_calls(task.task_id) == 1
+
+
+def test_d3_store_migrates_d1_attempt_table_before_index_creation(tmp_path):
+    db_path = tmp_path / "runtime.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE runtime_attempt (
+                attempt_id TEXT PRIMARY KEY,
+                step_run_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                record_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SqliteTaskStore(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(runtime_attempt)").fetchall()
+        }
+        indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list(runtime_attempt)").fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert "execution_key" in columns
+    assert "provider_call_seq" in columns
+    assert "idx_runtime_attempt_execution_key" in indexes
