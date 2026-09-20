@@ -98,7 +98,7 @@ def test_storage_runtime_acceptance_truncated_then_runtime_retry_completes(tmp_p
     task = store.get_task(outcome.runtime_result.task_id)
     committed_keys = store.list_committed_execution_keys(task.task_id)
     assert len(committed_keys) == 1
-    committed = store.get_committed_execution(committed_keys[0])
+    committed = store.get_committed_execution(next(iter(committed_keys)))
     assert committed is not None
     assert committed.result_data == golden
 
