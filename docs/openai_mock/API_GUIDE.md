@@ -55,6 +55,7 @@ Content-Type: application/json
 | `fail_status` | 前 N 次失败时的 HTTP Status |
 | `retry_after` | 错误响应中的 Retry-After |
 | `truncate_at` | 非流式响应在指定字节处截断 |
+| `disconnect_before_response` | 收到请求后直接断开连接，不发送 HTTP 响应，用于连接中断测试 |
 | `disconnect_at` | 流式响应发送指定字节后断开 |
 | `chunk_size` | 流式文本 delta 的分块大小 |
 | `headers` | 附加响应 Header |
@@ -201,6 +202,19 @@ Streaming 中途断连：
   "behavior": {
     "chunk_size": 10,
     "disconnect_at": 200
+  }
+}
+```
+
+
+连接建立后直接中断：
+
+```json
+{
+  "scenario_key": "connection-drop",
+  "payload": "never returned",
+  "behavior": {
+    "disconnect_before_response": true
   }
 }
 ```
