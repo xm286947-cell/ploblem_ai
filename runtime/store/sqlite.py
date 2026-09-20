@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from runtime.contracts import (
     AgentRequest,
     AgentResult,
+    CommittedPartialResult,
     AttemptRecord,
     CheckpointRecord,
     CommitResult,
@@ -152,6 +153,19 @@ class SqliteTaskStore:
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS runtime_partial_commit (
+                    partial_id TEXT PRIMARY KEY,
+                    execution_key TEXT NOT NULL UNIQUE,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    partition_key TEXT,
+                    partial_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_partial_task_partition
+                    ON runtime_partial_commit(task_id, partition_key, created_at);
 
                 CREATE TABLE IF NOT EXISTS runtime_execution_snapshot (
                     snapshot_id TEXT PRIMARY KEY,
@@ -783,6 +797,103 @@ class SqliteTaskStore:
         if not row:
             raise KeyError(f"execution snapshot not found: {snapshot_id}")
         return ExecutionDefinitionSnapshot.model_validate_json(row["snapshot_json"])
+
+    def commit_partial_result(
+        self,
+        *,
+        task_id: str,
+        run_id: str,
+        step_run_id: str,
+        partial: CommittedPartialResult,
+    ) -> CommittedPartialResult:
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT partial_json
+                FROM runtime_partial_commit
+                WHERE execution_key=?
+                """,
+                (partial.execution_key,),
+            ).fetchone()
+            if existing:
+                return CommittedPartialResult.model_validate_json(
+                    existing["partial_json"]
+                )
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO runtime_partial_commit(
+                        partial_id, execution_key, task_id, run_id,
+                        step_run_id, partition_key, partial_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        partial.partial_id,
+                        partial.execution_key,
+                        task_id,
+                        run_id,
+                        step_run_id,
+                        partial.partition_key,
+                        partial.model_dump_json(),
+                        partial.committed_at.isoformat(),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                existing = conn.execute(
+                    """
+                    SELECT partial_json
+                    FROM runtime_partial_commit
+                    WHERE execution_key=?
+                    """,
+                    (partial.execution_key,),
+                ).fetchone()
+                if existing:
+                    return CommittedPartialResult.model_validate_json(
+                        existing["partial_json"]
+                    )
+                raise
+        return partial
+
+    def list_partial_results(
+        self,
+        task_id: str,
+        *,
+        partition_key: str | None = None,
+    ) -> list[CommittedPartialResult]:
+        sql = (
+            "SELECT partial_json FROM runtime_partial_commit "
+            "WHERE task_id=?"
+        )
+        params: list[Any] = [task_id]
+        if partition_key is not None:
+            sql += " AND partition_key=?"
+            params.append(partition_key)
+        sql += " ORDER BY created_at, partial_id"
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [
+            CommittedPartialResult.model_validate_json(row["partial_json"])
+            for row in rows
+        ]
+
+    def get_partial_by_execution_key(
+        self,
+        execution_key: str,
+    ) -> CommittedPartialResult | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT partial_json
+                FROM runtime_partial_commit
+                WHERE execution_key=?
+                """,
+                (execution_key,),
+            ).fetchone()
+        return (
+            CommittedPartialResult.model_validate_json(row["partial_json"])
+            if row
+            else None
+        )
 
     def get_merge_result(self, merge_key: str) -> MergeResult | None:
         with self._connect() as conn:
