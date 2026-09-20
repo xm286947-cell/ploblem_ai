@@ -151,17 +151,37 @@ def test_skill_budget_missing_retry_human_revision_and_skill_version(env) -> Non
     case = service.create_case("长文复盘", "G1")
     result = service.ingest(case["case_id"], _full_review(tmp / "long.docx", long=True), current_itrs=["ITR20260001"])
     extraction = service.extract(case["case_id"], result["version_id"])
-    assert extraction["state"] == "COMPLETED" and extraction["truncated"] is True
-    reused = service.extract(case["case_id"], result["version_id"])
-    assert reused["reused"] is True
+    assert extraction["state"] == "PARTIAL" and extraction["truncated"] is True
+    first_run = repo.run(extraction["run_id"])
+    assert first_run["state"] == "PARTIAL"
+    assert 0 < first_run["coverage_processed"] < first_run["coverage_total"]
+
+    continued = service.extract(case["case_id"], result["version_id"])
+    assert continued["run_id"] == extraction["run_id"]
+    assert continued["continued"] is True
+    assert continued["reused"] is False
+    assert continued["state"] == "COMPLETED"
     run = repo.run(extraction["run_id"])
+    assert run["state"] == "COMPLETED"
+    assert run["coverage_processed"] == run["coverage_total"]
     assert run["model_profile"] == "programmatic-mock"
-    assert run["error_code"] == "INPUT_TRUNCATED"
+    assert run["error_code"] == ""
     entries = repo.entries(case["case_id"])
     assert {item["entry_type"] for item in entries} == {"ISSUE_FACT", "ROOT_CAUSE", "ACTION", "VERIFICATION"}
     target = next(item for item in entries if item["entry_type"] == "ROOT_CAUSE")
+    original_evidence = target["evidence"]
+    assert original_evidence
     revised = service.review_entry(target["entry_id"], content="人工确认：状态机边界判断缺失。", action="CORRECT", reviewer="tester", reason="对照复盘原文")
     assert revised["status"] == "CORRECTED" and revised["origin"] == "HUMAN"
+    assert revised["evidence"]
+    assert [
+        (item["fragment_id"], item["source_link_id"], item["locator"], item["excerpt"])
+        for item in revised["evidence"]
+    ] == [
+        (item["fragment_id"], item["source_link_id"], item["locator"], item["excerpt"])
+        for item in original_evidence
+    ]
+    assert revised["current_revision_id"] != target["current_revision_id"]
     base = service.skill_runner.ensure_default_skill()
     config = {
         "skill_code": "major_review_extract", "material_types": ["DOCX"],
