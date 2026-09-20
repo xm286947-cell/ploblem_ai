@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from pydantic import BaseModel
+
 from runtime.config.errors import ConfigValidationError
 from runtime.config.loader import AgentConfigLoader
 from runtime.config.models import ResolvedAgentConfig
@@ -56,6 +58,8 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
 
     @staticmethod
     def _redact_secret_values(value: Any, secrets: list[str]) -> Any:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="python")
         if isinstance(value, dict):
             return {
                 key: ConfiguredAgentRuntime._redact_secret_values(item, secrets)
@@ -112,7 +116,14 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             }
             secrets = [secret_value] if secret_value else []
             try:
-                return handler(payload, configured_context)
+                # Provider responses are persisted by the Runtime after the
+                # handler returns. Scrub the success value at this boundary
+                # so a misbehaving adapter cannot persist an injected secret
+                # in AgentResult, ExecutionCommit, or checkpoint state.
+                return self._redact_secret_values(
+                    handler(payload, configured_context),
+                    secrets,
+                )
             except RuntimeExecutionException as exc:
                 raise RuntimeStepError(
                     self._redact_secret_values(str(exc), secrets),
