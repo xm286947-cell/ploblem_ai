@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import threading
 import time
 import uuid
@@ -33,6 +34,7 @@ class Behavior:
     fail_status: int = 429
     retry_after: str | None = None
     truncate_at: int | None = None
+    disconnect_before_response: bool = False
     disconnect_at: int | None = None
     chunk_size: int = 16
     headers: dict[str, str] = field(default_factory=dict)
@@ -49,6 +51,12 @@ class Behavior:
             fail_status=_as_int(raw.get("fail_status", 429), "fail_status", minimum=100, maximum=599),
             retry_after=_as_optional_str(raw.get("retry_after"), "retry_after"),
             truncate_at=_as_optional_int(raw.get("truncate_at"), "truncate_at", minimum=0),
+            disconnect_before_response=bool(
+                _as_optional_bool(
+                    raw.get("disconnect_before_response", False),
+                    "disconnect_before_response",
+                )
+            ),
             disconnect_at=_as_optional_int(raw.get("disconnect_at"), "disconnect_at", minimum=0),
             chunk_size=_as_int(raw.get("chunk_size", 16), "chunk_size", minimum=1),
             headers=_string_dict(raw.get("headers", {}), "headers"),
@@ -233,6 +241,8 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
         if self._maybe_failure(scenario, call_no):
             return
         self._delay(scenario.behavior)
+        if scenario.behavior.disconnect_before_response:
+            return self._disconnect_without_response()
         payload = _payload_text(scenario.payload)
         model = str(request.get("model") or DEFAULT_MODEL)
         stream = requested_stream if scenario.behavior.stream is None else scenario.behavior.stream
@@ -453,6 +463,15 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
         message, error_type, code = _error_details(status)
         self._json(status, _error(message, error_type, code), headers=headers)
         return True
+
+    def _disconnect_without_response(self) -> None:
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        finally:
+            self.connection.close()
+            self.close_connection = True
 
     def _send_success_body(self, body_obj: dict[str, Any], behavior: Behavior) -> None:
         if behavior.raw_response_body is not None:
