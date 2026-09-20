@@ -156,6 +156,22 @@ class ReverseQualityRepository(ABC):
     @abstractmethod
     def get_latest(self, canonical_itr: str) -> dict[str, Any] | None: ...
 
+    @abstractmethod
+    def reuse_run(self, run_id: str, source_run_id: str) -> None: ...
+
+    @abstractmethod
+    def save_field_review(self, canonical_itr: str, *, field_name: str, action: str,
+                          old: dict[str, Any], new: dict[str, Any], reviewer: str,
+                          analysis_status: str) -> None: ...
+
+    @abstractmethod
+    def save_scene_review(self, canonical_itr: str, *, scene_match: dict[str, Any], reviewer: str,
+                          analysis_status: str) -> None: ...
+
+    @abstractmethod
+    def resolve_missing_information(self, canonical_itr: str, *, missing_id: str, status: str,
+                                    answer: str, reviewer: str) -> dict[str, Any]: ...
+
 
 class SQLiteReverseQualityRepository(ReverseQualityRepository):
     """SQLite implementation of the reverse-quality repository contract."""
@@ -534,6 +550,48 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 "UPDATE reverse_quality_analysis SET status=?,updated_at=CURRENT_TIMESTAMP WHERE analysis_id=?",
                 (analysis_status, current["analysis_id"]),
             )
+
+    def resolve_missing_information(self, canonical_itr: str, *, missing_id: str, status: str,
+                                    answer: str, reviewer: str) -> dict[str, Any]:
+        if status not in {"CONFIRMED", "NOT_APPLICABLE"}:
+            raise ValueError("MISSING_INFORMATION_STATUS_INVALID")
+        reviewer = reviewer.strip()
+        if not reviewer:
+            raise ValueError("MISSING_INFORMATION_REVIEWER_REQUIRED")
+        with self._transaction() as connection:
+            current = connection.execute(
+                """SELECT analysis_id,latest_valid_run_id FROM reverse_quality_analysis
+                   WHERE canonical_itr=?""",
+                (canonical_itr,),
+            ).fetchone()
+            if not current or not current["latest_valid_run_id"]:
+                raise KeyError(canonical_itr)
+            row = connection.execute(
+                """SELECT * FROM reverse_quality_missing_information
+                   WHERE missing_id=? AND analysis_id=? AND run_id=?""",
+                (missing_id, current["analysis_id"], current["latest_valid_run_id"]),
+            ).fetchone()
+            if not row:
+                raise KeyError(missing_id)
+            old = dict(row)
+            connection.execute(
+                """UPDATE reverse_quality_missing_information
+                   SET status=?,answer=?,reviewer=?,updated_at=CURRENT_TIMESTAMP
+                   WHERE missing_id=?""",
+                (status, answer.strip(), reviewer, missing_id),
+            )
+            new = dict(connection.execute(
+                "SELECT * FROM reverse_quality_missing_information WHERE missing_id=?",
+                (missing_id,),
+            ).fetchone())
+            connection.execute(
+                """INSERT INTO reverse_quality_human_review(
+                       analysis_id,run_id,target_type,field_name,action,old_json,new_json,reviewer)
+                   VALUES(?,?,'MISSING_INFORMATION',?,?,?,?,?)""",
+                (current["analysis_id"], current["latest_valid_run_id"], missing_id, status,
+                 _json(old), _json(new), reviewer),
+            )
+            return new
 
     def save_scene_review(self, canonical_itr: str, *, scene_match: dict[str, Any], reviewer: str,
                           analysis_status: str) -> None:
