@@ -46,9 +46,13 @@ def test_reverse_quality_store_pragmas_schema_and_result_contract(tmp_path):
         result_version='reverse-quality-v0.1', analysis_id='A1', run_id='R1', status='PENDING_REVIEW',
         identity={'canonical_itr': 'ITR-001', 'product_code': 'PLC', 'taxonomy_version_id': 'T1', 'source_hash': 'h1'},
         fields={}, missing_information=[], scene_match={'status': 'NEED_REVIEW'}, model='m',
+        run_seq=3, started_at='2026-09-20T10:00:00', completed_at='2026-09-20T10:00:01',
     )
     assert json.loads(dto.to_json()) == dto.to_dict()
     assert dto.to_json() == dto.to_json()
+    assert dto.run_seq == 3
+    assert dto.started_at
+    assert dto.completed_at
 
 
 def test_failed_run_never_replaces_latest_valid_result(tmp_path):
@@ -61,6 +65,12 @@ def test_failed_run_never_replaces_latest_valid_result(tmp_path):
     repo.fail_run(run2['run_id'], 'simulated failure')
     latest = repo.get_latest('ITR-001')
     assert latest['run_id'] == run1['run_id']
+    assert latest['run_seq'] == run1['run_seq']
+    assert latest['started_at']
+    assert latest['completed_at']
+    assert latest['result']['run_seq'] == run1['run_seq']
+    assert latest['result']['started_at']
+    assert latest['result']['completed_at']
     assert latest['review']['customer_task']['value'] == '有效结果'
     runs = repo.list_runs('ITR-001')
     assert [row['status'] for row in runs] == ['FAILED', 'COMPLETED']
@@ -139,6 +149,8 @@ def test_older_completion_cannot_replace_newer_valid_run(tmp_path):
     _complete(repo, older, '旧结果')
     latest = repo.get_latest('ITR-ORDER')
     assert latest['run_id'] == newer['run_id']
+    assert latest['run_seq'] == newer['run_seq']
+    assert latest['result']['run_seq'] == newer['run_seq']
     assert latest['review']['customer_task']['value'] == '新结果'
 
 
