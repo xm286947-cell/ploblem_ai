@@ -16,6 +16,7 @@ venv/
 output/logs/
 output/diagnostics/
 output/raw_ai/
+test-results/
 
 # Local release archives and spreadsheet inspection artifacts
 releases/
