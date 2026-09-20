@@ -211,12 +211,16 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
     @contextmanager
     def _transaction(self):
         connection = self.connect()
+        begun = False
         try:
             connection.execute("BEGIN IMMEDIATE")
+            begun = True
             yield connection
             connection.execute("COMMIT")
+            begun = False
         except Exception:
-            connection.execute("ROLLBACK")
+            if begun:
+                connection.execute("ROLLBACK")
             raise
         finally:
             connection.close()
