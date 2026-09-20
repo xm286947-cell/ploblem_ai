@@ -39,6 +39,9 @@ def test_d1_task_store_survives_process_reopen(tmp_path):
     assert snapshot.result.data["echo"] == {"value": 7}
     assert len(reopened.list_runs(result.task_id)) == 1
     assert len(reopened.list_step_runs(snapshot.current_run_id)) == 1
+    step_run = reopened.list_step_runs(snapshot.current_run_id)[0]
+    assert len(reopened.list_attempts(step_run.step_run_id)) == 1
+    assert reopened.load_request(result.task_id).request_id == "req-d1-persist"
 
 
 def test_d2_single_invoke_and_submit_get_task(tmp_path):
