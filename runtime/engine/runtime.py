@@ -247,21 +247,51 @@ class LightweightExecutionEngine:
         return TaskHandle(task_id=task_id, status=result.status)
 
     def cancel(self, task_id: str) -> TaskSnapshot:
-        snapshot = self.store.get_task_snapshot(task_id)
-        if snapshot.status in {
+        task = self.store.get_task(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        if task.status in {
             RuntimeStatus.COMPLETED,
             RuntimeStatus.FAILED,
             RuntimeStatus.CANCELLED,
         }:
-            return snapshot
-        task = self.store.get_task(task_id)
-        if task is None:
-            raise KeyError(task_id)
-        task.status = RuntimeStatus.CANCELLED
-        task.updated_at = _now()
-        task.completed_at = task.updated_at
+            return self.store.get_task_snapshot(task_id)
+
+        requested_at = _now()
+        task.cancel_requested = True
+        task.cancel_requested_at = task.cancel_requested_at or requested_at
+        task.updated_at = requested_at
+
+        if task.status in {
+            RuntimeStatus.QUEUED,
+            RuntimeStatus.WAITING,
+            RuntimeStatus.PARTIAL,
+        }:
+            task.status = RuntimeStatus.CANCELLED
+            task.completed_at = requested_at
+
+        # RUNNING is cooperative: do not kill an in-flight handler/provider call.
+        # The execution loop observes cancel_requested at the next safe boundary.
         self.store.save_task(task)
         return self.store.get_task_snapshot(task_id)
+
+    def _sync_cancel_state(self, task: TaskRecord) -> bool:
+        latest = self.store.get_task(task.task_id)
+        if latest is None:
+            return False
+        task.cancel_requested = latest.cancel_requested
+        task.cancel_requested_at = latest.cancel_requested_at
+        return task.cancel_requested
+
+    @staticmethod
+    def _cancelled_error(task_id: str) -> RuntimeErrorInfo:
+        return RuntimeErrorInfo(
+            code="CANCELLED",
+            category=ErrorCategory.CANCELLED,
+            message=f"task cancellation requested: {task_id}",
+            retryable=False,
+            details={"task_id": task_id},
+        )
 
     def _resolve_agent_definition(
         self,
@@ -491,6 +521,10 @@ class LightweightExecutionEngine:
             inherited_policy=policy,
         )
 
+        if self._sync_cancel_state(task):
+            status = RuntimeStatus.CANCELLED
+            error = self._cancelled_error(task.task_id)
+
         finished = _now()
         run.status = status
         run.completed_at = finished
@@ -537,7 +571,11 @@ class LightweightExecutionEngine:
                 else _incomplete_completion(
                     "RETRYABLE_INCOMPLETE"
                     if status == RuntimeStatus.PARTIAL
-                    else "STEP_FAILED"
+                    else (
+                        "CANCELLED"
+                        if status == RuntimeStatus.CANCELLED
+                        else "STEP_FAILED"
+                    )
                 )
             ),
             error=error,
@@ -575,11 +613,17 @@ class LightweightExecutionEngine:
         warnings: list[RuntimeWarning] = []
         terminal_error: RuntimeErrorInfo | None = None
         partial_error: RuntimeErrorInfo | None = None
+        cancelled = False
 
         inherited_policy = snapshot.execution_policy
         mode = inherited_policy.mode
 
         while pending:
+            if self._sync_cancel_state(task):
+                cancelled = True
+                pending.clear()
+                break
+
             ready = [
                 step
                 for step in pending.values()
@@ -663,6 +707,11 @@ class LightweightExecutionEngine:
                     completed.add(step.step_id)
                     continue
 
+                if status == RuntimeStatus.CANCELLED:
+                    cancelled = True
+                    pending.clear()
+                    break
+
                 if step.required_for_completion:
                     if status == RuntimeStatus.PARTIAL:
                         partial_error = error
@@ -685,11 +734,19 @@ class LightweightExecutionEngine:
                 )
                 completed.add(step.step_id)
 
+            if self._sync_cancel_state(task):
+                cancelled = True
+                pending.clear()
+                break
+
             if terminal_error or partial_error:
                 break
 
         finished = _now()
-        if terminal_error:
+        if cancelled:
+            status = RuntimeStatus.CANCELLED
+            error = self._cancelled_error(task.task_id)
+        elif terminal_error:
             status = RuntimeStatus.FAILED
             error = terminal_error
         elif partial_error:
@@ -749,7 +806,11 @@ class LightweightExecutionEngine:
                 else _incomplete_completion(
                     "RETRYABLE_INCOMPLETE"
                     if status == RuntimeStatus.PARTIAL
-                    else "WORKFLOW_FAILED"
+                    else (
+                        "CANCELLED"
+                        if status == RuntimeStatus.CANCELLED
+                        else "WORKFLOW_FAILED"
+                    )
                 )
             ),
             warnings=warnings,
@@ -870,6 +931,20 @@ class LightweightExecutionEngine:
             for validation_cycle_no in range(1, validation_limit + 1):
                 retry_validation = False
                 for transport_attempt_no in range(1, transport_limit + 1):
+                    current_task = self.store.get_task(task.task_id)
+                    if current_task is not None and current_task.cancel_requested:
+                        cancel_error = self._cancelled_error(task.task_id)
+                        step_run.status = RuntimeStatus.CANCELLED
+                        step_run.error = cancel_error
+                        step_run.completed_at = _now()
+                        self.store.save_step_run(step_run)
+                        return (
+                            RuntimeStatus.CANCELLED,
+                            None,
+                            cancel_error,
+                            step_run,
+                        )
+
                     consumed = self.store.count_provider_calls(execution_key)
                     task_consumed = self.store.count_task_provider_calls(task.task_id)
                     try:
