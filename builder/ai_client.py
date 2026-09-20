@@ -84,7 +84,7 @@ class OpenAICompatibleClient:
                     model=str(raw.get("model") or self.model),
                     raw=raw,
                 )
-            except (AIClientError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError, socket.timeout, KeyError, IndexError, json.JSONDecodeError) as exc:
+            except (AIClientError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError, socket.timeout, ConnectionError, KeyError, IndexError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt < self.max_retries:
                     time.sleep(min(2 ** attempt, 4))
