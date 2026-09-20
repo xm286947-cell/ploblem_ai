@@ -8,6 +8,13 @@ on:
       - "runtime/**"
       - "tests/test_agent_runtime_p0_*.py"
       - ".github/workflows/agent-runtime-p0.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "runtime/**"
+      - "tests/test_agent_runtime_p0_*.py"
+      - ".github/workflows/agent-runtime-p0.yml"
   workflow_dispatch:
 
 jobs:
