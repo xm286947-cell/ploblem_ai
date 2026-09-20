@@ -7,7 +7,9 @@
 - 根据真实 consumer 需求，为共享引擎补充 completion-order 与 CONTINUE 单项异常隔离。
 - 质量场景业务规则、缓存/claim、持久化及最终状态仍留在领域层。
 - 建立 Draft PR #2，不修改 main，不把业务代码并入工程治理分支。
-- 有效证据已回写 EXECUTION_ASSET_INDEX；完整质量场景回归仍标记 NOT_RUN。
+- 有效证据已回写 EXECUTION_ASSET_INDEX；完整质量场景回归尚未通过。
+- PR #2 首轮专项回归触发环境熔断：执行环境缺少 pytest，三组必测套件均未执行；compileall 通过且未产生代码修改。
+- 资产状态调整为 IMPLEMENTED_VALIDATION_BLOCKED；下一步先恢复测试依赖，再原样重跑，不扩展到第三个 consumer。
 
 
 ## V0.6 — 2026-09-20

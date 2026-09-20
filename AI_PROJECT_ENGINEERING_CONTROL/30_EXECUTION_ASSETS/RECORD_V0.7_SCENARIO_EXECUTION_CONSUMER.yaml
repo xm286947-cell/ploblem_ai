@@ -40,11 +40,23 @@ effective_evidence:
     result: "迁移后领域层仍负责 Agent 规则、缓存/claim、进度文案、场景持久化与最终状态；共享层只负责执行机制。"
     source: "scenario_generation.py delta review"
     reusable: true
+  - evidence_id: EVD-V07-004
+    type: ENVIRONMENT
+    result: "Gemma4 e4b + Codex CLI 正确触发环境熔断：pytest 缺失，三组专项回归均未执行；未修改代码。"
+    source: "PR #2 regression execution report"
+    reusable: true
 
 validation_gap:
   repository_ci: NOT_AVAILABLE
-  quality_scenario_regression: NOT_RUN
-  note: "在完整回归通过前，该资产用于复用架构/迁移结论，不作为发布验收证据。"
+  quality_scenario_regression: BLOCKED_ENVIRONMENT
+  note: "专项回归尚未执行；执行环境缺少 pytest，已按熔断规则停止。该资产当前不作为发布验收证据。"
+  environment_blocker:
+    code: "CIRCUIT_BREAKER: BASELINE_OR_ENVIRONMENT_FAILURE"
+    reason: "pytest command not found; python3 -m pytest also unavailable because pytest is not installed"
+    introduced_by_pr2: false
+    code_changes_made: false
+    compileall: PASS
+    required_next_step: "安装仓库测试依赖后重新执行三个专项测试套件"
 
 reusable_decisions:
   - decision_id: DEC-V07-001
@@ -57,10 +69,10 @@ reusable_decisions:
       - "EXECUTION_ENGINE_CONTRACT_CHANGED"
 
 result:
-  status: IMPLEMENTED_PENDING_REGRESSION
+  status: VALIDATION_BLOCKED_ENVIRONMENT
   changed_files:
     - "builder/execution_engine.py"
     - "builder/parallel_execution.py"
     - "quality_knowledge/scenario_generation.py"
     - "tests/test_execution_engine.py"
-  next_action: "执行质量场景相关回归；通过后再评估 v2_batch_job_service 迁移。"
+  next_action: "先恢复 pytest/仓库测试依赖，再原样重跑三组专项测试；通过前不迁移 v2_batch_job_service。"

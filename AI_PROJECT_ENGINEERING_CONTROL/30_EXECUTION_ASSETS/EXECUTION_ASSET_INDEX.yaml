@@ -83,7 +83,7 @@ assets:
     type: EVIDENCE
     subject: "Quality scenario Execution Engine consumer migration"
     source: "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.7_SCENARIO_EXECUTION_CONSUMER.yaml"
-    status: ACTIVE_WITH_PENDING_REGRESSION
+    status: IMPLEMENTED_VALIDATION_BLOCKED
     reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY]
     evidence_summary: "scenario_generation 的候选生成与历史场景标准化已从直接 ThreadPool/as_completed 迁移到共享 Execution Engine；业务状态与持久化逻辑保持在领域层。"
     implementation:
@@ -94,7 +94,8 @@ assets:
       static_readback: PASS
       isolated_engine_semantics_smoke: PASS
       repository_ci: NOT_AVAILABLE
-      quality_scenario_regression: NOT_RUN
+      quality_scenario_regression: BLOCKED_ENVIRONMENT
+      blocker: "pytest dependency unavailable in execution environment"
     invalidation:
       - "RELATED_REGRESSION_FAILED"
       - "SCENARIO_GENERATION_SEMANTICS_CHANGED"
