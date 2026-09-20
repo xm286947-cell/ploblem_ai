@@ -14,6 +14,8 @@ from builder.m83_solution_runner import run_m83_solution
 from builder.m84_repeat_runner import run_m84_decision
 from builder.m85_delivery_runner import run_m85_delivery
 from builder.validators import validate_json
+from builder.retrieval_document_builder import RetrievalDocumentBuilder
+from retriever.case_retriever import CaseRetriever, QueryInput
 from parser.common import write_json
 from .repository import MajorKnowledgeRepository
 
@@ -48,6 +50,44 @@ def _evidence_value(value: str) -> list[dict]:
 
 def _cause_detail(value: str = "") -> dict:
     return {"original": "", "report": value, "standard": value, "confidence": 1.0 if value else 0.0, "evidence_refs": []}
+
+
+class _MemoryCaseRetriever(CaseRetriever):
+    """Run the existing M7 CaseRetriever against repository-backed event views."""
+
+    def __init__(
+        self,
+        root: Path,
+        app: dict,
+        model: dict,
+        config: dict,
+        records: list[dict],
+        documents: dict[str, dict],
+        cases: dict[str, dict],
+    ) -> None:
+        super().__init__(root, app, model, config)
+        self._records = records
+        self._documents = documents
+        self._cases = cases
+        self._embeddings: dict[str, dict] = {}
+        for case_id, document in documents.items():
+            response = self.embedding_client.embed(str(document.get("text") or ""))
+            self._embeddings[case_id] = {
+                "vector": response.vector,
+                "model": response.model,
+            }
+
+    def _load_index(self) -> list[dict]:
+        return self._records
+
+    def _load_document(self, record: dict) -> dict:
+        return self._documents[record["case_id"]]
+
+    def _load_embedding(self, record: dict) -> dict:
+        return self._embeddings[record["case_id"]]
+
+    def _load_case(self, document: dict) -> dict:
+        return self._cases[document["case_id"]]
 
 
 class LegacyRepeatAdapter:
@@ -90,7 +130,7 @@ class LegacyRepeatAdapter:
                 "itr_id": event["standard_itr"],
                 "assessment_year": "", "assessment_month": "", "report_filename": "",
                 "source_excel": "", "source_report": "REQ022_CONFIRMED_ENTRIES",
-                "builder_version": "REQ022-LEGACY-1", "schema_version": "1.0",
+                "builder_version": "REQ022-LEGACY-2", "schema_version": "1.0",
                 "fusion_rule_version": "REQ022-1", "prompt_version": "REQ022-1",
                 "model_version": "HUMAN_CONFIRMED", "source_file_version": str(max((item["revision_no"] for item in entries), default=0)),
                 "created_at": now, "updated_at": now, "generated_at": now,
@@ -136,18 +176,146 @@ class LegacyRepeatAdapter:
             raise ValueError("LEGACY_STANDARD_CASE_INVALID:" + ";".join(errors))
         return standard_case
 
+    def _knowledge_fingerprint(self, case_id: str) -> str:
+        entries = self.repository.entries(case_id)
+        payload = []
+        for item in entries:
+            evidence = sorted(
+                [
+                    {
+                        "fragment_id": ev.get("fragment_id"),
+                        "source_link_id": ev.get("source_link_id"),
+                        "locator": ev.get("locator", ""),
+                        "excerpt": ev.get("excerpt", ""),
+                    }
+                    for ev in item.get("evidence", [])
+                ],
+                key=lambda ev: (
+                    str(ev.get("fragment_id") or ""),
+                    str(ev.get("source_link_id") or ""),
+                    str(ev.get("locator") or ""),
+                    str(ev.get("excerpt") or ""),
+                ),
+            )
+            payload.append({
+                "entry_id": item["entry_id"],
+                "entry_type": item["entry_type"],
+                "status": item["status"],
+                "current_revision_id": item["current_revision_id"],
+                "revision_no": item["revision_no"],
+                "content": item["content"],
+                "evidence": evidence,
+            })
+        payload.sort(key=lambda item: (item["entry_type"], item["entry_id"]))
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+    def _retrieval_config_hash(self) -> str:
+        payload = {
+            "app": yaml.safe_load((self.legacy_project_root / "config/app.yaml").read_text(encoding="utf-8")) or {},
+            "model_embedding": (yaml.safe_load((self.legacy_project_root / "config/model.yaml").read_text(encoding="utf-8")) or {}).get("embedding", {}),
+            "retrieval": yaml.safe_load((self.legacy_project_root / "config/retrieval.yaml").read_text(encoding="utf-8")) or {},
+        }
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _query_from_view(view: dict) -> QueryInput:
+        def values(items: Iterable[dict]) -> str:
+            return "\n".join(
+                str(item.get("value") or "").strip()
+                for item in items or []
+                if str(item.get("value") or "").strip()
+            )
+
+        problem = view.get("problem", {})
+        analysis = view.get("analysis", {})
+        solution = view.get("solution", {})
+        knowledge = view.get("knowledge", {})
+        business = view.get("business_context", {})
+        text = (
+            str(knowledge.get("normalized_problem") or "").strip()
+            or str(problem.get("standard_description") or "").strip()
+            or str(problem.get("report_description") or "").strip()
+            or str(knowledge.get("retrieval_text") or "").strip()
+        )
+        cause = "\n".join(filter(None, [
+            values(analysis.get("root_cause", [])),
+            values(analysis.get("failure_mechanism", [])),
+        ]))
+        solution_text = "\n".join(filter(None, [
+            values(solution.get("corrective_actions", [])),
+            values(solution.get("preventive_actions", [])),
+            values(solution.get("reusable_actions", [])),
+        ]))
+        return QueryInput(
+            text=text,
+            cause_description=cause,
+            solution=solution_text,
+            ipmt=str(business.get("ipmt") or ""),
+            spdt=str(business.get("spdt") or ""),
+            responsible_department_level2=str(business.get("responsible_department_level2") or ""),
+            product=str(business.get("product") or ""),
+            domain=str(business.get("domain") or ""),
+        )
+
     def _candidate_events(self, current: dict, limit: int = 10) -> list[dict]:
-        # Same case is excluded because its case-level review conclusions cannot be
-        # safely allocated to sibling events. This is stricter than merely excluding
-        # one attachment/version and prevents false self-repeat findings.
+        # Authorization/isolation happens before similarity retrieval. Only ACTIVE
+        # cases in the same data group are eligible, and the entire current case is
+        # excluded so sibling events cannot become self-repeat candidates.
         with self.repository.connect() as connection:
             rows = connection.execute(
                 """SELECT e.* FROM kb_event e JOIN kb_case c ON c.case_id=e.case_id
-                   WHERE e.group_code=? AND e.event_id<>? AND e.case_id<>? AND c.status='ACTIVE'
-                   ORDER BY c.updated_at DESC,e.created_at DESC LIMIT ?""",
-                (current["group_code"], current["event_id"], current["case_id"], limit),
+                   WHERE e.group_code=? AND e.case_id<>? AND c.status='ACTIVE'""",
+                (current["group_code"], current["case_id"]),
             ).fetchall()
-        return [dict(row) for row in rows]
+        pool = [dict(row) for row in rows]
+        if not pool:
+            return []
+
+        builder = RetrievalDocumentBuilder()
+        documents: dict[str, dict] = {}
+        cases: dict[str, dict] = {}
+        records: list[dict] = []
+        event_by_retrieval_case: dict[str, dict] = {}
+        for candidate in pool:
+            view = self.export_event_view(candidate["event_id"])
+            document = builder.build(view, "")
+            retrieval_case_id = document["case_id"]
+            documents[retrieval_case_id] = document
+            cases[retrieval_case_id] = view
+            event_by_retrieval_case[retrieval_case_id] = candidate
+            records.append({
+                "document_id": document["document_id"],
+                "case_id": retrieval_case_id,
+                "title": document["title"],
+                "organization": document["organization"],
+                "classification": document["classification"],
+                "filters": document["filters"],
+                "tags": document["tags"],
+                "quality_flags": document["quality_flags"],
+                "content_hash": document["content_hash"],
+                "embedding_path": f"memory://{retrieval_case_id}/embedding",
+                "retrieval_doc_path": f"memory://{retrieval_case_id}/retrieval",
+            })
+
+        app = yaml.safe_load((self.legacy_project_root / "config/app.yaml").read_text(encoding="utf-8")) or {}
+        model = yaml.safe_load((self.legacy_project_root / "config/model.yaml").read_text(encoding="utf-8")) or {}
+        retrieval_config = yaml.safe_load((self.legacy_project_root / "config/retrieval.yaml").read_text(encoding="utf-8")) or {}
+        retriever = _MemoryCaseRetriever(
+            self.legacy_project_root, app, model, retrieval_config, records, documents, cases
+        )
+        current_view = self.export_event_view(current["event_id"])
+        result = retriever.search(self._query_from_view(current_view), top_k=limit)
+
+        ranked: list[dict] = []
+        for item in result.get("results", []):
+            candidate = dict(event_by_retrieval_case[item["case_id"]])
+            candidate["retrieval_rank"] = int(item["rank"])
+            candidate["retrieval_score"] = float(item["score"])
+            candidate["retrieval_score_breakdown"] = item.get("score_breakdown", {})
+            candidate["retrieval_reasons"] = item.get("reasons", [])
+            candidate["knowledge_fingerprint"] = self._knowledge_fingerprint(candidate["case_id"])
+            ranked.append(candidate)
+        return ranked
 
     def run(self, event_id: str, *, mock: bool = True, skip_ai: bool = False, limit: int = 10) -> dict:
         current = self.repository.event(event_id)
@@ -159,8 +327,19 @@ class LegacyRepeatAdapter:
         input_value = {
             "event": event_id,
             "revision": revision,
-            "candidates": [item["event_id"] for item in candidates],
-            "adapter": "REQ022-LEGACY-1",
+            "current_knowledge_fingerprint": self._knowledge_fingerprint(current["case_id"]),
+            "candidates": [
+                {
+                    "event_id": item["event_id"],
+                    "case_id": item["case_id"],
+                    "knowledge_fingerprint": item["knowledge_fingerprint"],
+                    "retrieval_score": item["retrieval_score"],
+                    "retrieval_rank": item["retrieval_rank"],
+                }
+                for item in candidates
+            ],
+            "retrieval_config_hash": self._retrieval_config_hash(),
+            "adapter": "REQ022-LEGACY-2",
             "execution": "mock" if mock else ("skip-ai" if skip_ai else "configured-model"),
         }
         input_hash = hashlib.sha256(json.dumps(input_value, sort_keys=True).encode()).hexdigest()
@@ -174,7 +353,7 @@ class LegacyRepeatAdapter:
         root = self._prepare_root(run["run_id"])
         write_json(root / f"event_views/{event_id}.json", view)
         write_json(root / f"event_views/{event_id}.mapping.json", {
-            "adapter_version": "REQ022-LEGACY-1", "source_case_id": current["case_id"],
+            "adapter_version": "REQ022-LEGACY-2", "source_case_id": current["case_id"],
             "source_event_id": event_id, "group_code": current["group_code"], "revision": revision,
         })
         if not candidates:
@@ -192,7 +371,7 @@ class LegacyRepeatAdapter:
             case_id = candidate["event_id"]
             write_json(root / f"event_views/{case_id}.json", candidate_view)
             write_json(root / f"event_views/{case_id}.mapping.json", {
-                "adapter_version": "REQ022-LEGACY-1", "source_case_id": candidate["case_id"],
+                "adapter_version": "REQ022-LEGACY-2", "source_case_id": candidate["case_id"],
                 "source_event_id": candidate["event_id"], "group_code": candidate["group_code"],
                 "revision": int(candidate_view["metadata"]["source_file_version"] or 0),
             })
@@ -201,7 +380,13 @@ class LegacyRepeatAdapter:
                 "query_id": query_id,
                 "case_id": case_id,
                 "query": {"standard_query": view, "retrieval_profile": {"group_code": current["group_code"]}},
-                "candidate": {"rank": rank, "score": max(0.01, 1 - rank * 0.05), "case_id": case_id},
+                "candidate": {
+                    "rank": int(candidate.get("retrieval_rank") or rank),
+                    "score": float(candidate.get("retrieval_score") or 0.0),
+                    "case_id": case_id,
+                    "score_breakdown": candidate.get("retrieval_score_breakdown", {}),
+                    "reasons": candidate.get("retrieval_reasons", []),
+                },
                 "case": {
                     "standard_case": candidate_view,
                     "enriched_case": candidate_view,
