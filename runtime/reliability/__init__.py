@@ -1,5 +1,6 @@
 from .errors import (
     ExistingTaskNotCompleteError,
+    ExecutionSnapshotMissingError,
     IdempotencyConflictError,
     RetryBudgetExhaustedError,
     RuntimeExecutionException,
