@@ -460,6 +460,35 @@ class ExecutionDefinitionSnapshot(ContractModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProjectionOutboxEvent(ContractModel):
+    event_id: str
+    task_id: str
+    run_id: str
+    step_run_id: str | None = None
+    commit_id: str
+    projection_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["PENDING", "APPLIED", "FAILED"] = "PENDING"
+    attempt_count: int = 0
+    last_error: str | None = None
+    created_at: datetime
+    applied_at: datetime | None = None
+
+
+class LegacyProjectionBinding(ContractModel):
+    binding_id: str
+    task_id: str
+    run_id: str
+    legacy_analysis_set_id: str
+    step_run_id: str | None = None
+    legacy_stage: str | None = None
+    projection_version: str = "1"
+    last_applied_commit_id: str | None = None
+    projection_status: Literal["PENDING", "APPLIED", "FAILED"] = "PENDING"
+    created_at: datetime
+    updated_at: datetime
+
+
 class AtomicGroupPolicy(str, Enum):
     KEEP_TOGETHER = "KEEP_TOGETHER"
     SAME_CONTEXT = "SAME_CONTEXT"
