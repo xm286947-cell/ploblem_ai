@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from quality_knowledge.reverse_quality_store import ReverseQualityResult, SQLiteReverseQualityRepository
 
 
-def _complete(repo, run, value='掉电后计数保持'):
+def _complete(repo, run, value='掉电后计数保持', missing_information=None):
     repo.complete_run(
         run['run_id'],
         fields={'customer_task': {
@@ -25,6 +25,7 @@ def _complete(repo, run, value='掉电后计数保持'):
         },
         model='test-model',
         input_payload={'canonical_itr': 'ITR-001', 'evidence': {'cs.description': {'value': value}}},
+        missing_information=missing_information,
     )
 
 
@@ -202,3 +203,38 @@ def test_patch58_legacy_data_migrates_idempotently(tmp_path):
     assert latest['scene_match_status'] == 'NOT_MATCHED'
     assert latest['status'] == 'IN_REVIEW'
     assert repo.migrate_legacy(LegacyRepository()) == 0
+
+
+
+def test_missing_information_resolution_is_audited(tmp_path):
+    repo = SQLiteReverseQualityRepository(tmp_path / 'reverse_quality_v01.db')
+    run = repo.start_run(canonical_itr='ITR-MISSING', product_code='PLC', taxonomy_version_id='T1',
+                         source_hash='hash-missing', input_payload={})
+    _complete(repo, run, missing_information=[{
+        'missing_id': 'RQM-TEST-1',
+        'field_name': 'scale_or_load',
+        'reason': '原始问题未提供规模',
+        'question': '现场设备规模是多少？',
+        'evidence_needed': ['现场拓扑或设备数量'],
+    }])
+    resolved = repo.resolve_missing_information(
+        'ITR-MISSING', missing_id='RQM-TEST-1', status='CONFIRMED',
+        answer='现场共 12 台设备', reviewer='质量专家')
+    assert resolved['status'] == 'CONFIRMED'
+    assert resolved['answer'] == '现场共 12 台设备'
+    latest = repo.get_latest('ITR-MISSING')
+    assert latest['missing_information'][0]['status'] == 'CONFIRMED'
+    assert latest['missing_information'][0]['answer'] == '现场共 12 台设备'
+    with repo.connect() as connection:
+        audit = connection.execute(
+            """SELECT target_type,field_name,action,reviewer
+               FROM reverse_quality_human_review
+               WHERE run_id=? ORDER BY review_id DESC LIMIT 1""",
+            (run['run_id'],),
+        ).fetchone()
+    assert dict(audit) == {
+        'target_type': 'MISSING_INFORMATION',
+        'field_name': 'RQM-TEST-1',
+        'action': 'CONFIRMED',
+        'reviewer': '质量专家',
+    }
