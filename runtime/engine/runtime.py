@@ -38,6 +38,8 @@ from runtime.contracts import (
     WorkflowRequest,
     WorkflowResult,
     WorkflowRunRecord,
+    canonical_request_payload,
+    strip_runtime_credentials,
 )
 from runtime.reliability import (
     ExistingTaskNotCompleteError,
@@ -413,7 +415,7 @@ class LightweightExecutionEngine:
         task_type: TaskType,
         started: datetime,
     ) -> tuple[TaskRecord, bool]:
-        body = request.model_dump(mode="json")
+        body = canonical_request_payload(request)
         body_without_request_id = {
             key: value
             for key, value in body.items()
@@ -434,7 +436,7 @@ class LightweightExecutionEngine:
                 input_hash=_hash_payload(request.input),
                 created_at=started,
                 updated_at=started,
-                metadata=dict(request.metadata),
+                metadata=strip_runtime_credentials(request.metadata),
             )
             return self.store.create_or_get_task(probe, request=request)
 
@@ -452,7 +454,7 @@ class LightweightExecutionEngine:
             execution_definition_fingerprint=snapshot.fingerprint,
             created_at=started,
             updated_at=started,
-            metadata=dict(request.metadata),
+            metadata=strip_runtime_credentials(request.metadata),
         )
         return self.store.create_or_get_task(task, request=request)
 

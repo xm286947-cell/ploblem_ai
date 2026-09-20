@@ -139,6 +139,60 @@ class WorkflowRequest(ContractModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+_RUNTIME_CREDENTIAL_FIELDS = frozenset(
+    {
+        "provider_api_key",
+        "provider_access_token",
+        "provider_bearer_token",
+        "provider_credential",
+        "runtime_api_key",
+        "runtime_access_token",
+        "runtime_bearer_token",
+        "runtime_credential",
+        "runtime_credentials",
+        "runtime_secret",
+    }
+)
+
+
+def strip_runtime_credentials(value: Any) -> Any:
+    """Return persistence-safe auxiliary Runtime data without altering input.
+
+    The reserved fields identify credentials injected by Runtime/provider
+    configuration. They are intentionally distinct from ordinary business
+    fields such as ``password``, ``api_key``, ``token``, and ``secret``.
+    """
+    if isinstance(value, dict):
+        return {
+            key: strip_runtime_credentials(item)
+            for key, item in value.items()
+            if str(key).lower() not in _RUNTIME_CREDENTIAL_FIELDS
+        }
+    if isinstance(value, list):
+        return [strip_runtime_credentials(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(strip_runtime_credentials(item) for item in value)
+    return value
+
+
+def canonical_request_payload(
+    request: AgentRequest | WorkflowRequest,
+) -> dict[str, Any]:
+    """Build the durable request projection used for task persistence.
+
+    Business input remains verbatim. Runtime credentials are resolved again at
+    execution time from the configured provider and are never task data.
+    """
+    payload = request.model_dump(mode="json")
+    payload["context"] = strip_runtime_credentials(payload["context"])
+    payload["metadata"] = strip_runtime_credentials(payload["metadata"])
+    if isinstance(request, WorkflowRequest) and payload["workflow"] is not None:
+        payload["workflow"]["metadata"] = strip_runtime_credentials(
+            payload["workflow"]["metadata"]
+        )
+    return payload
+
+
 class SourceRef(ContractModel):
     source_id: str
     source_type: str
@@ -638,4 +692,4 @@ __all__ = [
     name
     for name, value in globals().items()
     if isinstance(value, type) and getattr(value, "__module__", None) == __name__
-]
+] + ["canonical_request_payload", "strip_runtime_credentials"]
