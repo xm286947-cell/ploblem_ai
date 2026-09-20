@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## V0.7 — 2026-09-20
+
+- 第二个 Execution Engine consumer 落地到独立质量场景实现分支。
+- scenario_generation 的候选生成与历史标准化不再直接维护 ThreadPool/as_completed。
+- 根据真实 consumer 需求，为共享引擎补充 completion-order 与 CONTINUE 单项异常隔离。
+- 质量场景业务规则、缓存/claim、持久化及最终状态仍留在领域层。
+- 建立 Draft PR #2，不修改 main，不把业务代码并入工程治理分支。
+- 有效证据已回写 EXECUTION_ASSET_INDEX；完整质量场景回归仍标记 NOT_RUN。
+
+
 ## V0.6 — 2026-09-20
 
 - 新增最小共享 Execution Engine。
