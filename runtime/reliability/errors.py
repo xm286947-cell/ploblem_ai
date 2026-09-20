@@ -69,6 +69,16 @@ class TaskNotResumableError(RuntimeExecutionException):
         )
 
 
+class ExecutionSnapshotMissingError(RuntimeExecutionException):
+    code = "EXECUTION_SNAPSHOT_MISSING"
+
+    def __init__(self, task_id: str):
+        super().__init__(
+            f"task {task_id} has no immutable execution snapshot",
+            details={"task_id": task_id},
+        )
+
+
 class RetryBudgetExhaustedError(RuntimeExecutionException):
     code = "RETRY_BUDGET_EXHAUSTED"
 
