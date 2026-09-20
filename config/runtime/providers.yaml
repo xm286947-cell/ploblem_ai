@@ -1,6 +1,7 @@
 # Unified Runtime provider profiles.
 # mode=env is the production path. mode=direct is for local/test integration only.
 # Never commit a real production API key in a direct profile.
+# auth=none is intended for trusted local endpoints such as Ollama.
 providers:
   qwen_prod:
     type: openai_compatible
@@ -37,3 +38,11 @@ providers:
     mode: direct
     base_url: https://replace-with-deepseek-test-endpoint.example/v1
     api_key: __REPLACE_LOCALLY_FOR_TEST_ONLY__
+
+  ollama_local:
+    type: openai_compatible
+    mode: direct
+    auth: none
+    base_url: http://192.168.1.100:11434/v1
+    metadata:
+      backend: ollama
