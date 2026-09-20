@@ -194,3 +194,62 @@ def test_reverse_quality_missing_information_confirmation_requires_answer(tmp_pa
             'ITR20260918001',missing_id=missing['missing_id'],
             status='CONFIRMED',answer='',reviewer='质量专家')
 
+def test_reverse_quality_result_and_candidate_api_use_single_analysis_pass(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    class CountingClient(FakeClient):
+        def __init__(self):
+            self.calls=0
+        def complete(self,messages):
+            self.calls+=1
+            return super().complete(messages)
+
+    ai=CountingClient()
+    service=app.state.reverse_quality_service
+    service.ai_client=ai
+    service.analyse(material_id,'PLC')
+    assert ai.calls==1
+
+    client=TestClient(app)
+    result_response=client.get('/api/reverse-quality/ITR20260918001')
+    assert result_response.status_code==200
+    result=result_response.json()
+    assert result['result_version']=='reverse-quality-v0.1'
+    assert result['identity']['canonical_itr']=='ITR20260918001'
+    assert result['fields']['preconditions']['value']=='PLC 正常运行时'
+    assert result['fields']['recovery_method']['value']=='重新上电恢复运行'
+
+    candidate_response=client.get('/api/reverse-quality/ITR20260918001/scenario-candidate')
+    assert candidate_response.status_code==200
+    adapted=candidate_response.json()
+    assert adapted['adapter_version']=='reverse-quality-scenario-adapter-v0.1'
+    assert adapted['source_result_version']=='reverse-quality-v0.1'
+    assert adapted['ready'] is True
+    assert adapted['blockers']==[]
+    candidate=adapted['candidate']
+    assert candidate['lifecycle_code']=='RUNTIME_EXECUTION'
+    assert candidate['activity_code']=='POWER_LOSS_RETENTION_RECOVERY'
+    assert candidate['preconditions']=='PLC 正常运行时'
+    assert candidate['recovery_method']=='重新上电恢复运行'
+    assert candidate['participating_systems']=='PLC AM600'
+    assert candidate['confirmation_questions']==['现场参与设备规模是多少？']
+    assert adapted['field_evidence']['preconditions']['reverse_field']=='preconditions'
+    assert adapted['field_evidence']['recovery_method']['evidence_ids']==['structured.recovery_measure']
+    assert ai.calls==1
+
+
+def test_reverse_quality_candidate_rejects_unknown_result_version(tmp_path):
+    repository=app_repository=__import__('quality_knowledge.scenarios',fromlist=['ScenarioRepository']).ScenarioRepository(tmp_path/'scenario.db')
+    from quality_knowledge.scenario_generation import ScenarioGenerationService
+    service=ScenarioGenerationService(None,repository,tmp_path)
+    bad={
+        'result_version':'reverse-quality-v9',
+        'analysis_id':'A1',
+        'run_id':'R1',
+        'identity':{'canonical_itr':'ITR-X','product_code':'PLC','taxonomy_version_id':repository.taxonomy_active('PLC')['version_id']},
+        'fields':{},
+        'missing_information':[],
+        'scene_match':{},
+    }
+    with pytest.raises(ValueError,match='REVERSE_QUALITY_RESULT_VERSION_UNSUPPORTED'):
+        service.candidate_from_reverse_quality(bad)
+
