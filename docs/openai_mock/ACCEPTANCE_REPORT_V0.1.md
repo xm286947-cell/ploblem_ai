@@ -5,8 +5,8 @@
 范围：OPENAI-MOCK-001  
 Issue：#16  
 Draft PR：#17  
-验收代码 Head：`357440b86d6ef4308e275693eac23a3b87f79128`  
-最终验收 CI：GitHub Actions Run #226 / `35516898740` — PASS
+当前分支 Head：`c29b567c0690ed5a774a67ce3c1ab4789a0e3b01`\n最终可执行代码 Gate Head：`0e02157b667119d77cf812992fe92cf12a297c78`  
+最终验收 CI：GitHub Actions Run #240 / `35516985444` — PASS
 
 > 本报告表示 V0.1 已按冻结设计基线完成自动化验收。当前仍未合并 main，不标记 DONE。
 
@@ -15,10 +15,10 @@ Draft PR：#17
 | Gate | 结果 | 证据 |
 |---|---|---|
 | Runtime P0 + Storage 历史回归 | PASS | 119 passed |
-| Mock HTTP + OpenAI Python SDK | PASS | 23 passed |
-| Runtime → Mock real HTTP | PASS | 15 passed |
+| OpenAI Mock V0.1 全量 Python Acceptance | PASS | 38 passed |
+| Runtime → Mock real HTTP / Secret / Resume / Streaming / Storage E2E | PASS | 15 cases（包含于 38 passed） |
 | OpenAI JS SDK | PASS | 5/5 PASS |
-| PR/Branch CI | PASS | Run 35516898740 |
+| PR/Branch CI | PASS | Run 35516985444 |
 | Secret Persistence | PASS | Runtime DB + Mock request history 双侧验证 |
 | Retry Owner / Hard Budget | PASS | Mock counters 与 Runtime provider_calls 对齐 |
 | Storage Runtime+Mock E2E | PASS | JSON 截断 → Runtime Retry → Golden PASS |
@@ -110,7 +110,7 @@ Draft PR：#17
 - `tools/openai_mock/examples/business_integration_example.py`
 - `tests/test_openai_mock_server.py`
 - `tests/test_openai_mock_sdk_compat.py`
-- `tests/openai_mock_runtime_integration.py`
+- `tests/test_openai_mock_runtime_integration.py`
 - `tests/test_openai_mock_runtime_streaming.py`
 - `tests/test_openai_mock_runtime_secret_resume.py`
 - `tests/test_openai_mock_storage_e2e.py`
