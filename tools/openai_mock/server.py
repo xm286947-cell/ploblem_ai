@@ -48,7 +48,7 @@ class Behavior:
             delay_ms=_as_int(raw.get("delay_ms", 0), "delay_ms", minimum=0),
             stream=_as_optional_bool(raw.get("stream"), "stream"),
             fail_first_n=_as_int(raw.get("fail_first_n", 0), "fail_first_n", minimum=0),
-            fail_status=_as_int(raw.get("fail_status", 429), "fail_status", minimum=100, maximum=599),
+            fail_status=_as_int(raw.get("fail_status", 429), "fail_status", minimum=400, maximum=599),
             retry_after=_as_optional_str(raw.get("retry_after"), "retry_after"),
             truncate_at=_as_optional_int(raw.get("truncate_at"), "truncate_at", minimum=0),
             disconnect_before_response=bool(
