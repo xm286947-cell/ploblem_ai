@@ -1014,6 +1014,10 @@ class LightweightExecutionEngine:
                                 "replayed_after_crash": attempt.replayed_after_crash,
                                 "execution_snapshot_id": task.execution_snapshot_id,
                                 "execution_definition_fingerprint": task.execution_definition_fingerprint,
+                                "sdk_retry_policy": {
+                                    "implicit_retry_enabled": False,
+                                    "adapter_must_report_actual_provider_requests": True,
+                                },
                             },
                         }
                         snapshot = self._load_execution_snapshot(task)
@@ -1144,10 +1148,17 @@ class LightweightExecutionEngine:
                 details={"execution_key": execution_key},
             )
 
-        status = RetryCoordinator.failure_status(
-            retryable=last_error.retryable,
-            hard_budget_exhausted=hard_budget_exhausted,
-        )
+        if (
+            hard_budget_exhausted
+            and last_error.retryable
+            and self.store.has_committed_progress(task.task_id)
+        ):
+            status = RuntimeStatus.PARTIAL
+        else:
+            status = RetryCoordinator.failure_status(
+                retryable=last_error.retryable,
+                hard_budget_exhausted=hard_budget_exhausted,
+            )
         finished = _now()
         step_run.status = status
         step_run.error = last_error
