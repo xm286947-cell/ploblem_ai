@@ -872,3 +872,193 @@ providers:
         )
 
     assert exc.value.code == "CONFIG_VALIDATION_FAILED"
+
+
+def test_simple_model_yaml_is_the_public_configuration_path(tmp_path):
+    (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "prompts" / "simple.md").write_text(
+        "Return strict JSON.",
+        encoding="utf-8",
+    )
+    (tmp_path / "model.yaml").write_text(
+        """
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url_env: DASHSCOPE_BASE_URL
+    api_key_env: DASHSCOPE_API_KEY
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+
+  ollama_qwen:
+    provider: openai_compatible
+    base_url: http://192.168.1.100:11434/v1
+    model: qwen3-vl:8b-thinking-q4_K_M
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "agent.yaml"
+    config_path.write_text(
+        """
+agent_id: demo.simple
+version: v1
+model_ref: ollama_qwen
+prompt:
+  ref: prompts/simple.md
+  version: v1
+output_schema:
+  ref: StorageFieldResult
+  version: v1
+execution:
+  retry:
+    transport_attempts: 1
+    validation_attempts: 1
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        environ={
+            "DASHSCOPE_BASE_URL": "https://example.invalid/v1",
+            "DASHSCOPE_API_KEY": "env-key",
+        },
+    )
+    resolved = loader.load(config_path)
+
+    assert resolved.definition.model == "qwen3-vl:8b-thinking-q4_K_M"
+    assert resolved.provider.base_url == "http://192.168.1.100:11434/v1"
+    assert resolved.provider.auth == "none"
+    assert resolved.execution_policy.model_policy["max_tokens"] == 8192
+    assert resolved.execution_policy.model_policy["temperature"] == 0
+
+
+def test_simple_model_yaml_infers_direct_key_and_env_key_without_mode_or_auth(
+    tmp_path,
+):
+    (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "prompts" / "simple.md").write_text(
+        "Return strict JSON.",
+        encoding="utf-8",
+    )
+    (tmp_path / "model.yaml").write_text(
+        """
+models:
+  cloud_test:
+    provider: openai_compatible
+    base_url: https://test.example/v1
+    api_key: local-test-key
+    model: test-model
+  cloud_prod:
+    provider: openai_compatible
+    base_url_env: CLOUD_BASE_URL
+    api_key_env: CLOUD_API_KEY
+    model: prod-model
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def write_agent(ref):
+        path = tmp_path / f"{ref}.yaml"
+        path.write_text(
+            f"""
+agent_id: demo.{ref}
+model_ref: {ref}
+prompt:
+  ref: prompts/simple.md
+output_schema:
+  ref: StorageFieldResult
+execution:
+  retry:
+    transport_attempts: 1
+    validation_attempts: 1
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 1
+""".strip(),
+            encoding="utf-8",
+        )
+        return path
+
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        environ={
+            "CLOUD_BASE_URL": "https://prod.example/v1",
+            "CLOUD_API_KEY": "prod-secret",
+        },
+    )
+
+    direct = loader.load(write_agent("cloud_test"))
+    prod = loader.load(write_agent("cloud_prod"))
+
+    assert direct.provider.mode == "direct"
+    assert direct.provider.auth == "api_key"
+    assert direct.provider.base_url == "https://test.example/v1"
+    assert "local-test-key" not in direct.model_dump_json()
+
+    assert prod.provider.mode == "env"
+    assert prod.provider.auth == "api_key"
+    assert prod.provider.base_url == "https://prod.example/v1"
+    assert "prod-secret" not in prod.model_dump_json()
+
+
+def test_agent_can_use_active_model_without_model_ref(tmp_path):
+    (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "prompts" / "simple.md").write_text(
+        "Return strict JSON.",
+        encoding="utf-8",
+    )
+    (tmp_path / "model.yaml").write_text(
+        """
+active_model: ollama_gemma
+models:
+  ollama_gemma:
+    provider: openai_compatible
+    base_url: http://192.168.1.100:11434/v1
+    model: gemma4:e4b
+    temperature: 0
+    max_tokens: 4096
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "agent.yaml"
+    config_path.write_text(
+        """
+agent_id: demo.default
+prompt:
+  ref: prompts/simple.md
+output_schema:
+  ref: StorageFieldResult
+execution:
+  retry:
+    transport_attempts: 1
+    validation_attempts: 1
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        environ={},
+    )
+    resolved = loader.load(config_path)
+
+    assert resolved.definition.model == "gemma4:e4b"
+    assert resolved.provider.profile_ref == "ollama_gemma"
+    assert resolved.execution_policy.model_policy["max_tokens"] == 4096
