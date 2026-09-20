@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -112,9 +113,6 @@ class SqliteTaskStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_runtime_attempt_step
                     ON runtime_attempt(step_run_id);
-                CREATE INDEX IF NOT EXISTS idx_runtime_attempt_execution_key
-                    ON runtime_attempt(execution_key);
-
                 CREATE TABLE IF NOT EXISTS runtime_checkpoint (
                     checkpoint_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
@@ -148,6 +146,10 @@ class SqliteTaskStore:
             )
             self._ensure_column(conn, "runtime_attempt", "execution_key", "TEXT")
             self._ensure_column(conn, "runtime_attempt", "provider_call_seq", "INTEGER")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runtime_attempt_execution_key "
+                "ON runtime_attempt(execution_key)"
+            )
 
     @staticmethod
     def _ensure_column(
@@ -372,15 +374,13 @@ class SqliteTaskStore:
         input_hash: str,
         started_at: datetime,
     ) -> WorkflowRunRecord:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT MAX(CAST(json_extract(record_json, '$.run_sequence') AS INTEGER)) AS seq "
-                "FROM runtime_run WHERE task_id=?",
-                (task_id,),
-            ).fetchone()
-            run_sequence = int(row["seq"] or 0) + 1
+        existing_runs = self.list_runs(task_id)
+        run_sequence = max(
+            (item.run_sequence for item in existing_runs),
+            default=0,
+        ) + 1
         run = WorkflowRunRecord(
-            run_id=f"run-{__import__('uuid').uuid4().hex}",
+            run_id=f"run-{uuid4().hex}",
             task_id=task_id,
             workflow_id=workflow_id,
             workflow_version=workflow_version,
