@@ -1,5 +1,39 @@
+# Unified Runtime provider profiles.
+# mode=env is the production path. mode=direct is for local/test integration only.
+# Never commit a real production API key in a direct profile.
 providers:
   qwen_prod:
     type: openai_compatible
+    mode: env
     base_url_env: DASHSCOPE_BASE_URL
     api_key_env: DASHSCOPE_API_KEY
+
+  zhipu_prod:
+    type: openai_compatible
+    mode: env
+    base_url_env: ZHIPU_BASE_URL
+    api_key_env: ZHIPU_API_KEY
+
+  deepseek_prod:
+    type: openai_compatible
+    mode: env
+    base_url_env: DEEPSEEK_BASE_URL
+    api_key_env: DEEPSEEK_API_KEY
+
+  qwen_test:
+    type: openai_compatible
+    mode: direct
+    base_url: https://replace-with-qwen-test-endpoint.example/v1
+    api_key: __REPLACE_LOCALLY_FOR_TEST_ONLY__
+
+  zhipu_test:
+    type: openai_compatible
+    mode: direct
+    base_url: https://replace-with-zhipu-test-endpoint.example/v1
+    api_key: __REPLACE_LOCALLY_FOR_TEST_ONLY__
+
+  deepseek_test:
+    type: openai_compatible
+    mode: direct
+    base_url: https://replace-with-deepseek-test-endpoint.example/v1
+    api_key: __REPLACE_LOCALLY_FOR_TEST_ONLY__
