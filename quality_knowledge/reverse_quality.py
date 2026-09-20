@@ -10,7 +10,7 @@ from builder.ai_client import OpenAICompatibleClient
 from builder.json_response import parse_json_object
 from quality_knowledge.materials import normalize_itr
 from quality_knowledge.model_config import load_quality_issue_ai_config
-from quality_knowledge.reverse_quality_store import SQLiteReverseQualityRepository
+from quality_knowledge.reverse_quality_store import ReverseQualityRepository, SQLiteReverseQualityRepository
 from quality_knowledge.scenario_sources import CONTEXT_ALIASES, first, normalize_problem_domain, context_from
 
 
@@ -51,14 +51,16 @@ def _json(value):
 
 
 class ReverseQualityService:
-    def __init__(self, materials, scenarios, issues, root, ai_client=None):
+    def __init__(self, materials, scenarios, issues, root, ai_client=None,
+                 repository: ReverseQualityRepository | None = None):
         self.materials, self.scenarios, self.issues = materials, scenarios, issues
         self.root, self.ai_client = root, ai_client
         scenario_db = Path(self.scenarios.db_path)
-        self.repository = SQLiteReverseQualityRepository(
+        self.repository = repository or SQLiteReverseQualityRepository(
             scenario_db.with_name('reverse_quality_v01.db')
         )
-        self.repository.migrate_legacy(self.scenarios)
+        if hasattr(self.repository, 'migrate_legacy'):
+            self.repository.migrate_legacy(self.scenarios)
 
     def facts(self, material_id):
         item = self.materials.material(material_id)
