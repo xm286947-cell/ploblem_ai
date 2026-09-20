@@ -51,6 +51,11 @@ jobs:
           python -m pytest tests/test_major_runtime_integration_gate.py -q \
             --junitxml=test-results/major-runtime-integration/domain-gate.xml
 
+      - name: Run Runtime retry and hard-budget acceptance
+        run: |
+          python -m pytest tests/test_agent_runtime_p0_d11_acceptance_gaps.py -q \
+            --junitxml=test-results/major-runtime-integration/runtime-d11.xml
+
       - name: Run REQ-022 regression
         run: |
           python -m pytest tests/test_req022_major_cases.py -q \
