@@ -41,6 +41,7 @@ from runtime.contracts import (
 )
 from runtime.reliability import (
     ExistingTaskNotCompleteError,
+    ExecutionSnapshotMissingError,
     RetryBudgetExhaustedError,
     RetryCoordinator,
     RuntimeExecutionException,
@@ -262,6 +263,108 @@ class LightweightExecutionEngine:
         self.store.save_task(task)
         return self.store.get_task_snapshot(task_id)
 
+    def _resolve_agent_definition(
+        self,
+        agent_id: str,
+        request: AgentRequest | None = None,
+    ) -> AgentDefinition:
+        current = self._agent_definitions.get(agent_id)
+        if current is not None:
+            return current
+        return AgentDefinition(
+            agent_id=agent_id,
+            output_schema=request.output_schema if request is not None else None,
+        )
+
+    def _build_execution_snapshot(
+        self,
+        request: AgentRequest | WorkflowRequest,
+    ) -> ExecutionDefinitionSnapshot:
+        created_at = _now()
+        if isinstance(request, AgentRequest):
+            definition = self._resolve_agent_definition(request.agent_id, request)
+            agent_data = _strip_secrets(definition)
+            policy = request.execution_policy or ExecutionPolicy(
+                mode=ExecutionMode.SINGLE
+            )
+            clean_policy = ExecutionPolicy.model_validate(_strip_secrets(policy))
+            material = {
+                "kind": "AGENT",
+                "agent_definition": agent_data,
+                "execution_policy": clean_policy.model_dump(mode="json"),
+                "output_schema_ref": request.output_schema or definition.output_schema,
+                "model_policy": _strip_secrets(clean_policy.model_policy),
+            }
+            fingerprint = _hash_payload(material)
+            snapshot = ExecutionDefinitionSnapshot(
+                snapshot_id=f"snapshot-{uuid4().hex}",
+                fingerprint=fingerprint,
+                agent_definition=agent_data,
+                agent_definition_hash=_hash_payload(agent_data),
+                prompt_ref=definition.prompt_ref,
+                prompt_hash=definition.metadata.get("prompt_hash"),
+                output_schema_ref=request.output_schema or definition.output_schema,
+                output_schema_version=definition.metadata.get("output_schema_version"),
+                output_schema_hash=definition.metadata.get("output_schema_hash"),
+                content_strategy_ref=definition.content_strategy_ref,
+                content_strategy_version=definition.metadata.get("content_strategy_version"),
+                content_strategy_hash=definition.metadata.get("content_strategy_hash"),
+                execution_policy=clean_policy,
+                model_policy=_strip_secrets(clean_policy.model_policy),
+                completeness_gate_ref=definition.metadata.get("completeness_gate_ref"),
+                completeness_gate_version=definition.metadata.get("completeness_gate_version"),
+                created_at=created_at,
+                metadata={"task_type": "AGENT"},
+            )
+        else:
+            definition = request.workflow or self._workflows.get(request.workflow_id)
+            if definition is None:
+                raise KeyError(f"workflow not found: {request.workflow_id}")
+            clean_workflow = WorkflowDefinition.model_validate(
+                _strip_secrets(definition)
+            )
+            policy = request.execution_policy or ExecutionPolicy(
+                mode=ExecutionMode.SEQUENTIAL
+            )
+            clean_policy = ExecutionPolicy.model_validate(_strip_secrets(policy))
+            agent_definitions: dict[str, Any] = {}
+            for step in clean_workflow.steps:
+                agent_definition = self._resolve_agent_definition(step.agent_id)
+                agent_definitions[step.agent_id] = _strip_secrets(agent_definition)
+            material = {
+                "kind": "WORKFLOW",
+                "workflow_definition": clean_workflow.model_dump(mode="json"),
+                "agent_definitions": agent_definitions,
+                "execution_policy": clean_policy.model_dump(mode="json"),
+                "model_policy": _strip_secrets(clean_policy.model_policy),
+            }
+            fingerprint = _hash_payload(material)
+            snapshot = ExecutionDefinitionSnapshot(
+                snapshot_id=f"snapshot-{uuid4().hex}",
+                fingerprint=fingerprint,
+                workflow_definition=clean_workflow,
+                workflow_definition_hash=_hash_payload(
+                    clean_workflow.model_dump(mode="json")
+                ),
+                execution_policy=clean_policy,
+                model_policy=_strip_secrets(clean_policy.model_policy),
+                created_at=created_at,
+                metadata={
+                    "task_type": "WORKFLOW",
+                    "agent_definitions": agent_definitions,
+                },
+            )
+
+        return self.store.save_execution_snapshot(snapshot)
+
+    def _load_execution_snapshot(
+        self,
+        task: TaskRecord,
+    ) -> ExecutionDefinitionSnapshot:
+        if not task.execution_snapshot_id:
+            raise ExecutionSnapshotMissingError(task.task_id)
+        return self.store.get_execution_snapshot(task.execution_snapshot_id)
+
     def _create_or_get_task(
         self,
         request: AgentRequest | WorkflowRequest,
@@ -269,16 +372,42 @@ class LightweightExecutionEngine:
         started: datetime,
     ) -> tuple[TaskRecord, bool]:
         body = request.model_dump(mode="json")
-        body_without_request_id = {k: v for k, v in body.items() if k != "request_id"}
+        body_without_request_id = {
+            key: value
+            for key, value in body.items()
+            if key != "request_id"
+        }
+        request_fingerprint = _hash_payload(body_without_request_id)
+
+        existing = self.store.get_task_by_request_id(request.request_id)
+        if existing is not None:
+            probe = TaskRecord(
+                task_id=f"task-{uuid4().hex}",
+                request_id=request.request_id,
+                request_fingerprint=request_fingerprint,
+                task_type=task_type,
+                business_domain=request.metadata.get("business_domain"),
+                business_id=request.metadata.get("business_id"),
+                status=RuntimeStatus.QUEUED,
+                input_hash=_hash_payload(request.input),
+                created_at=started,
+                updated_at=started,
+                metadata=dict(request.metadata),
+            )
+            return self.store.create_or_get_task(probe, request=request)
+
+        snapshot = self._build_execution_snapshot(request)
         task = TaskRecord(
             task_id=f"task-{uuid4().hex}",
             request_id=request.request_id,
-            request_fingerprint=_hash_payload(body_without_request_id),
+            request_fingerprint=request_fingerprint,
             task_type=task_type,
             business_domain=request.metadata.get("business_domain"),
             business_id=request.metadata.get("business_id"),
             status=RuntimeStatus.QUEUED,
             input_hash=_hash_payload(request.input),
+            execution_snapshot_id=snapshot.snapshot_id,
+            execution_definition_fingerprint=snapshot.fingerprint,
             created_at=started,
             updated_at=started,
             metadata=dict(request.metadata),
@@ -315,6 +444,7 @@ class LightweightExecutionEngine:
                 status=RuntimeStatus.RUNNING,
                 input_hash=task.input_hash,
                 run_sequence=1,
+                execution_snapshot_id=task.execution_snapshot_id,
                 started_at=started,
             )
             self.store.save_run(run)
@@ -344,12 +474,13 @@ class LightweightExecutionEngine:
             resumed=resumed,
             resume_of_run_id=resume_of_run_id,
         )
+        snapshot = self._load_execution_snapshot(task)
         step = StepDefinition(
             step_id=request.agent_id,
             agent_id=request.agent_id,
-            execution_policy=request.execution_policy,
+            execution_policy=snapshot.execution_policy,
         )
-        policy = request.execution_policy or ExecutionPolicy(mode=ExecutionMode.SINGLE)
+        policy = snapshot.execution_policy
 
         status, data, error, step_run = self._run_step(
             task=task,
@@ -389,6 +520,8 @@ class LightweightExecutionEngine:
                 )
                 >= policy.retry_budget.max_provider_calls_per_step
             ),
+            execution_snapshot_id=snapshot.snapshot_id,
+            execution_definition_fingerprint=snapshot.fingerprint,
         )
         result = AgentResult(
             task_id=task.task_id,
@@ -421,9 +554,10 @@ class LightweightExecutionEngine:
         resumed: bool,
         resume_of_run_id: str | None,
     ) -> WorkflowResult:
-        definition = request.workflow or self._workflows.get(request.workflow_id)
+        snapshot = self._load_execution_snapshot(task)
+        definition = snapshot.workflow_definition
         if definition is None:
-            raise KeyError(f"workflow not found: {request.workflow_id}")
+            raise ExecutionSnapshotMissingError(task.task_id)
 
         started = _now()
         run = self._create_run(
@@ -442,9 +576,7 @@ class LightweightExecutionEngine:
         terminal_error: RuntimeErrorInfo | None = None
         partial_error: RuntimeErrorInfo | None = None
 
-        inherited_policy = request.execution_policy or ExecutionPolicy(
-            mode=ExecutionMode.SEQUENTIAL
-        )
+        inherited_policy = snapshot.execution_policy
         mode = inherited_policy.mode
 
         while pending:
@@ -594,6 +726,8 @@ class LightweightExecutionEngine:
                 and provider_calls
                 >= inherited_policy.retry_budget.max_provider_calls_per_task
             ),
+            execution_snapshot_id=snapshot.snapshot_id,
+            execution_definition_fingerprint=snapshot.fingerprint,
         )
         data = {
             step_id: item.data
@@ -791,8 +925,19 @@ class LightweightExecutionEngine:
                                 "execution_key": execution_key,
                                 "provider_call_seq": provider_call_seq,
                                 "replayed_after_crash": attempt.replayed_after_crash,
+                                "execution_snapshot_id": task.execution_snapshot_id,
+                                "execution_definition_fingerprint": task.execution_definition_fingerprint,
                             },
                         }
+                        snapshot = self._load_execution_snapshot(task)
+                        if snapshot.workflow_definition is not None:
+                            agent_snapshot = snapshot.metadata.get(
+                                "agent_definitions", {}
+                            ).get(definition.agent_id)
+                        else:
+                            agent_snapshot = snapshot.agent_definition
+                        handler_context["runtime"]["agent_definition"] = agent_snapshot
+                        handler_context["runtime"]["model_policy"] = snapshot.model_policy
                         value = _normalize_data(
                             handler(business_input, handler_context)
                         )
