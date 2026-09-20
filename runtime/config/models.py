@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -18,10 +18,35 @@ class ReferenceConfig(ConfigModel):
 
 class ProviderConfig(ConfigModel):
     type: str
+    mode: Literal["env", "direct"] = "env"
     base_url_env: str | None = None
     api_key_env: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     model: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_credential_mode(self):
+        if self.mode == "env":
+            if self.api_key is not None or self.base_url is not None:
+                raise ValueError(
+                    "env provider mode cannot configure direct api_key/base_url"
+                )
+            if self.type == "openai_compatible" and not self.api_key_env:
+                raise ValueError(
+                    "openai_compatible env provider requires api_key_env"
+                )
+        else:
+            if self.api_key_env is not None or self.base_url_env is not None:
+                raise ValueError(
+                    "direct provider mode cannot configure *_env references"
+                )
+            if self.type == "openai_compatible" and not self.api_key:
+                raise ValueError(
+                    "openai_compatible direct provider requires api_key"
+                )
+        return self
 
 
 class ModelExecutionConfig(ConfigModel):
@@ -106,6 +131,7 @@ class ProviderProfilesConfig(ConfigModel):
 
 class ResolvedProviderConfig(ConfigModel):
     type: str
+    mode: Literal["env", "direct"] = "env"
     profile_ref: str | None = None
     model: str
     base_url_env: str | None = None
