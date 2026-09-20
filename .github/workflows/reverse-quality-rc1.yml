@@ -1,6 +1,9 @@
 name: Reverse Quality RC1
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/reverse-quality-v01
