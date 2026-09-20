@@ -4,8 +4,8 @@
 状态：ACCEPTANCE_PASS / V0.1 RC / READY_FOR_REVIEW  
 范围：OPENAI-MOCK-001  
 Issue：#16  
-Draft PR：#17  
-当前分支 Head：`c29b567c0690ed5a774a67ce3c1ab4789a0e3b01`\n验收执行代码 Head：`0e02157b667119d77cf812992fe92cf12a297c78`  
+PR：#17 / Ready for Review  
+验收执行代码 Head：`0e02157b667119d77cf812992fe92cf12a297c78`  
 最终验收 CI：GitHub Actions Run #240 / `35516985444` — PASS
 
 > 本报告表示 V0.1 已按冻结设计基线完成自动化验收。当前仍未合并 main，不标记 DONE。
@@ -93,13 +93,12 @@ Draft PR：#17
 
 曾将全部 `test_openai_mock*.py` 放在仅安装 Mock SDK 依赖后的步骤执行，导致 Runtime 集成测试缺少 PyYAML 等依赖。
 
-处理：恢复分层 Gate：
-1. Mock HTTP + Python SDK；
-2. 安装 Runtime test dependencies；
-3. Runtime → Mock integration；
-4. JS SDK compatibility。
+处理：在 Python Acceptance 前一次性安装 Mock + Runtime 验收依赖，再执行完整 `tests/test_openai_mock*.py`，形成单一、可重复的 V0.1 Python Acceptance Gate；JS SDK 保持独立兼容 Gate。
 
-最终 Run #226 全绿。
+最终 Run #240：
+- OpenAI Mock V0.1 Python Acceptance：38 passed；
+- OpenAI JS SDK：5/5 PASS；
+- Runtime P0 + Storage historical regression：119 passed。
 
 ## 5. 交付物
 
