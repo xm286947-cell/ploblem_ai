@@ -1,8 +1,14 @@
 # OpenAI Mock Compatibility Matrix V0.1
 
 Baseline Date: 2026-09-20  
-Status: REVIEW_FIX_IN_PROGRESS / V0.1 RC  
-Review Basis: PR #17 second review
+Status: REVIEW_PASS / V0.1 RC / READY_FOR_MERGE_DECISION  
+Review Basis: PR #17 second review + remediation gate  
+Evidence: GitHub Actions Run #256 / 35517950221 — PASS
+
+- OpenAI Mock V0.1 Python Acceptance: 43 passed
+- official OpenAI JS SDK: 5/5 PASS
+- Runtime P0 + Storage historical regression: 119 passed
+- Review blocker fixes verified on executable code head: fc4feae63a61d361d00faa377d7409d3d10811a7
 
 “兼容”指声明支持的 OpenAI Endpoint 在请求、响应、错误、Streaming 和 SDK 消费层可以被标准调用方式使用；不表示 V0.1 一次性覆盖 OpenAI 全部产品 API，也不表示 Mock 具备真实模型智能。
 
@@ -40,7 +46,7 @@ Review Basis: PR #17 second review
 | `delay_ms` | VERIFIED | HTTP + SDK timeout | 可稳定制造慢响应 |
 | `fail_first_n` | VERIFIED | HTTP + Runtime | 前 N 次失败后恢复 |
 | `fail_status` | VERIFIED | HTTP + Runtime | 仅允许 400–599 |
-| final `status` | FIXED / REVERIFYING | New contract tests | 200–599；2xx 成功路径，3xx–5xx error path |
+| final `status` | VERIFIED | final-status contract tests | 200–599；2xx 成功路径，3xx–5xx error path |
 | non-stream truncate | VERIFIED | HTTP | 指定字节截断 |
 | raw invalid body | VERIFIED | HTTP | `raw_response_body` |
 | connection drop before response | VERIFIED | HTTP + Runtime | `disconnect_before_response` |
