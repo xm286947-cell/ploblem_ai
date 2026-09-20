@@ -16,7 +16,9 @@ class FakeClient:
         return FakeResponse({'fields':{
             'customer_experience':{'value':'掉电后关键计数丢失','evidence_ids':['cs.description'],'confidence':.9},
             'expected_quality_state':{'value':'重新上电后计数应正确恢复','evidence_ids':['cs.description'],'confidence':.8},
+            'preconditions':{'value':'PLC 正常运行时','evidence_ids':['cs.description'],'confidence':.9},
             'root_cause':{'value':'保持变量写入未完成','evidence_ids':['cs.root_cause'],'confidence':1},
+            'recovery_method':{'value':'重新上电恢复运行','evidence_ids':['structured.recovery_measure'],'confidence':.95},
             'related_objects':{'value':'PLC AM600','evidence_ids':['structured.product_model'],'confidence':.9},
             'quality_requirement_candidate':{'value':'异常掉电后关键运行数据能够正确恢复','evidence_ids':['cs.description','cs.root_cause'],'confidence':.75},
             'lifecycle_stage':{'value':'运行执行','evidence_ids':['cs.description','cs.phase'],'confidence':.85},
@@ -34,6 +36,16 @@ def setup_case(tmp_path):
         '问题信息_问题发生阶段':'终端正常使用',
         '问题信息_产品型号':'PLC AM600',
         '问题信息_问题领域':'软件',
+        '问题信息_客户行业':'锂电',
+        '问题信息_客户分级':'A',
+        '问题信息_问题发生地点':'客户现场',
+        '问题信息_问题发生地区归属':'华东',
+        '问题信息_已用时长':'6个月',
+        '问题信息_故障台数':'12',
+        '问题信息_不良问题频率':'3次/周',
+        '问题处理结果_问题解决方案':'重新上电恢复运行',
+        '技术根因分析与纠正_软件模块':'RetainManager',
+        '技术根因分析与纠正_软件功能':'掉电保持',
     },'synthetic.xlsx','Sheet1',2)
     app.state.reverse_quality_service.ai_client=FakeClient()
     return app,material_id
@@ -52,6 +64,10 @@ def test_reverse_quality_single_issue_analysis_review_and_source_preservation(tm
     assert saved['review']['root_cause']['source_type']=='FACT'
     assert saved['review']['lifecycle_stage']['value']=='运行执行'
     assert saved['review']['business_activity_scene']['value']=='掉电数据保持与上电恢复'
+    assert saved['review']['preconditions']['value']=='PLC 正常运行时'
+    assert saved['review']['preconditions']['evidence_ids']==['cs.description']
+    assert saved['review']['recovery_method']['value']=='重新上电恢复运行'
+    assert saved['review']['recovery_method']['evidence_ids']==['structured.recovery_measure']
     assert saved['scene_match_status']=='NEED_REVIEW'
     assert client.get(f'/reverse-quality/{material_id}').status_code==200
     reviewed=client.post(f'/reverse-quality/{material_id}/review',data={'field_name':'expected_quality_state','action':'EDITED',
@@ -109,3 +125,21 @@ def test_reverse_quality_rejects_unreferenced_output_and_hardware(tmp_path):
         'synthetic.xlsx','Sheet1',3)
     with pytest.raises(ValueError,match='仅处理软件问题'):
         service.analyse(hardware_id,'PLC')
+
+def test_reverse_quality_facts_include_v01_context_evidence(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    facts=app.state.reverse_quality_service.facts(material_id)
+    expected={
+        'structured.customer_industry':'锂电',
+        'structured.customer_level':'A',
+        'structured.occurrence_location':'客户现场',
+        'structured.occurrence_region':'华东',
+        'structured.used_duration':'6个月',
+        'structured.failure_count':'12',
+        'structured.failure_frequency':'3次/周',
+        'structured.recovery_measure':'重新上电恢复运行',
+        'structured.software_module':'RetainManager',
+        'structured.software_function':'掉电保持',
+    }
+    assert {key:facts['evidence'][key]['value'] for key in expected}==expected
+
