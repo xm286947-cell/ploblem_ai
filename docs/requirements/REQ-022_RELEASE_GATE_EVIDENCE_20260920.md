@@ -1,0 +1,67 @@
+# REQ-022 Release Gate 自动回归证据（2026-09-20）
+
+## 执行对象
+
+- 代码基线：`repair/req022-acceptance@ff652bfb96519bf2ef652d5fa9c59f1726c30e18`
+- 本地执行环境：macOS，Python 3.14.4，pytest 8.4.2
+- 测试数据：仓库测试样本、合成数据和 Mock；未使用真实内部数据
+
+## 结果
+
+| Gate | 结果 | JUnit SHA-256 |
+|---|---:|---|
+| REQ-022 | 21 passed，1 warning | `f4e23a802d7b0f6b3d60427d4fcf776a48fe6ef9949bebbaca25434f47e3824b` |
+| 旧 M7/M8 | 56 passed | `d22b1bac3ce575d5a7e9b85929b6b8fdf724bff7562a601fa8999506155ce227` |
+| ITR/CS | 28 passed，1 warning | `dc6ff29fe2554e38471feb6f5b0198662337791da25de601910a2340fbd070bf` |
+| 质量场景 | 103 passed，1 warning | `2a13ef6d243e962b712ae3822c114d6b6cb212748661dcd7d008555ec803bbba` |
+| 问题工作台 | 31 passed，1 warning | `6ff840f24e0248eb21702ae43057adc00a3c2aea253e074dcebb4f074893210f` |
+| 累计仓库回归（排除已知打包基线缺口） | 536 passed，1 warning | `214f86dd4c061b770eb00e17941e452dee83aa36f46f32a0dc8a6c229f117149` |
+
+warning 均为 Starlette TestClient 使用 AnyIO 旧别名产生的弃用提示，不是功能失败。
+
+## 全量首轮发现
+
+未排除任何测试的首轮结果为 `536 passed, 1 failed, 1 warning`。唯一失败项为 `tests/test_upgrade_package_dependencies.py`：升级包脚本要求 Git 标签 `v1.1-p2-rc2-full-20260901`，但远端仓库没有该标签，导致 `git diff <tag>..HEAD` 无法执行。
+
+该项记录为 `KNOWN EXCLUSION / NOT PASSED`。当前没有证据表明它是 REQ-022、旧 M7/M8、ITR/CS、质量场景或问题工作台的功能回归，但正式升级包 Gate 仍需补回标签或评审并变更包基线后复验。
+
+## Release Gate 状态
+
+- 自动代码回归：`PASS WITH KNOWN EXCLUSION`
+- Windows 10 BAT：`UNVERIFIED`
+- 真实外部模型：`UNVERIFIED`
+- 人工脱敏业务验证：`UNVERIFIED`
+- 正式发布结论：`NOT APPROVED`
+
+本记录只证明上述代码基线在本地自动测试范围内的结果，不将 Mock、合成数据或 macOS 测试冒充环境验收。CI 在变更分支上复跑后，以 GitHub Actions Artifact 作为远端可下载证据。
+
+## Known Exclusion 处置（2026-09-20）
+
+历史核对确认该问题是正式基线漏打 tag，而不是升级包测试引用错误版本：
+
+- 目标 tag：`v1.1-p2-rc2-full-20260901`
+- 准确 commit：`a2593e1afb980ddb7c84ab1906c5a8d880e5b9ea`
+- 提交时间：2026-09-01 23:23（Asia/Shanghai）
+- 提交说明：`chore: baseline P2 RC2 full package`
+- 基线文件：`BASELINE_VERSION = V1.1_P2_RC2_FULL_20260901`
+- 交叉证据：`docs/requirements/README.md`、`scripts/build_upgrade_package.py`、RC2 后续交付文档均引用同一版本
+
+本地已创建该 tag 并验证其指向上述 commit。Release Gate 工作流已改为获取完整 Git 历史和 tags，恢复执行升级包依赖测试，并移除累计回归中的排除项。远端 tag 推送及后续 CI 结果待具备仓库写权限后确认；在此之前 Release Gate 不宣称远端已通过。
+
+## 本地复验结果（tag 修复后）
+
+- 升级包依赖测试：`1 passed`
+- 全量 `pytest tests`：`537 passed, 1 warning`
+- warning：Starlette TestClient 使用 AnyIO 旧别名的弃用提示，不是功能失败
+- JUnit：`/tmp/req022-cumulative-after-tag.xml`（本地验证产物）
+
+本地累计回归已不再排除升级包测试；远端 Release Gate 仍需在 tag 和本次提交推送后由 GitHub Actions 复跑确认。
+
+## GitHub Actions 复跑
+
+- 验证提交：`85e1f99fbed99055b4d814630efb40a463910276`
+- REQ-022 Release Gate Run：`35498472707`，`SUCCESS`
+- Release Gate Job：`106045786751`，所有专项、累计回归、已知排除记录和证据上传步骤均为 `SUCCESS`
+- 原 REQ-022 Regression Run：`35498472671`，`SUCCESS`
+
+远端复跑环境为 GitHub Actions Ubuntu runner、Python 3.11。工作流将五类 JUnit、累计 JUnit 和 `KNOWN_EXCLUSIONS.txt` 上传为 90 天保留的证据 Artifact。
