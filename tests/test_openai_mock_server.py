@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from http.client import HTTPConnection
+from http.client import HTTPConnection, RemoteDisconnected
 from typing import Iterator
 
 import pytest
@@ -321,3 +322,92 @@ def test_stream_disconnect_stops_before_completed_event():
         assert status == 200
         text = raw.decode(errors="replace")
         assert "response.completed" not in text
+
+
+def test_empty_payload_is_returned_without_business_schema_validation():
+    with running_server() as (host, port):
+        configure(host, port, payload="")
+        status, _, raw = request(
+            host,
+            port,
+            "POST",
+            "/v1/chat/completions",
+            {"model": "gpt-test", "messages": [{"role": "user", "content": "x"}]},
+            auth(),
+        )
+        body = json.loads(raw)
+        assert status == 200
+        assert body["choices"][0]["message"]["content"] == ""
+
+
+def test_very_long_payload_round_trips_unchanged():
+    with running_server() as (host, port):
+        payload = "长内容-" + ("0123456789abcdef" * 16384)
+        configure(host, port, payload=payload)
+        status, _, raw = request(
+            host,
+            port,
+            "POST",
+            "/v1/responses",
+            {"model": "gpt-test", "input": "long"},
+            auth(),
+        )
+        body = json.loads(raw)
+        assert status == 200
+        assert body["output"][0]["content"][0]["text"] == payload
+
+
+def test_disconnect_before_response_is_deterministic():
+    with running_server() as (host, port):
+        configure(
+            host,
+            port,
+            payload="never returned",
+            behavior={"disconnect_before_response": True},
+        )
+        conn = HTTPConnection(host, port, timeout=2)
+        raw = json.dumps({"model": "gpt-test", "input": "x"}).encode()
+        conn.request(
+            "POST",
+            "/v1/responses",
+            body=raw,
+            headers={
+                **auth(),
+                "Content-Type": "application/json",
+                "Content-Length": str(len(raw)),
+            },
+        )
+        with pytest.raises(RemoteDisconnected):
+            conn.getresponse()
+        conn.close()
+
+
+def test_parallel_scenario_keys_are_isolated():
+    with running_server() as (host, port):
+        configure(host, port, key="parallel-a", payload="A")
+        configure(host, port, key="parallel-b", payload="B")
+
+        def call(key, expected):
+            status, _, raw = request(
+                host,
+                port,
+                "POST",
+                "/v1/responses",
+                {"model": "gpt-test", "input": key},
+                auth({"X-Mock-Scenario-Key": key}),
+            )
+            body = json.loads(raw)
+            return status, body["output"][0]["content"][0]["text"], expected
+
+        jobs = [
+            ("parallel-a", "A") if i % 2 == 0 else ("parallel-b", "B")
+            for i in range(40)
+        ]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda pair: call(*pair), jobs))
+
+        assert all(status == 200 and actual == expected for status, actual, expected in results)
+        _, _, raw = request(host, port, "GET", "/__mock__/counters")
+        data = json.loads(raw)["data"]
+        assert data["parallel-a"] == 20
+        assert data["parallel-b"] == 20
