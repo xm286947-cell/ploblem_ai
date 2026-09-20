@@ -33,5 +33,5 @@ jobs:
       - name: Install minimal test dependencies
         run: python -m pip install --upgrade pip "pytest>=8,<9" "pydantic>=2.7,<3" "PyYAML>=6,<7"
 
-      - name: Run Runtime P0 D1-D8 tests
-        run: python -m pytest tests/test_agent_runtime_p0_d1_d2.py tests/test_agent_runtime_p0_d3.py tests/test_agent_runtime_p0_d4.py tests/test_agent_runtime_p0_d5.py tests/test_agent_runtime_p0_d6.py tests/test_agent_runtime_p0_d7.py tests/test_agent_runtime_p0_d8.py -q
+      - name: Run Runtime P0 D1-D9 tests
+        run: python -m pytest tests/test_agent_runtime_p0_d1_d2.py tests/test_agent_runtime_p0_d3.py tests/test_agent_runtime_p0_d4.py tests/test_agent_runtime_p0_d5.py tests/test_agent_runtime_p0_d6.py tests/test_agent_runtime_p0_d7.py tests/test_agent_runtime_p0_d8.py tests/test_agent_runtime_p0_d9.py -q
