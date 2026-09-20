@@ -236,6 +236,106 @@ def _active_case(service: MajorCaseService, repo: MajorKnowledgeRepository, tmp:
     return case, repo.events(case["case_id"])[0]
 
 
+def _active_case_with_review(
+    service: MajorCaseService,
+    repo: MajorKnowledgeRepository,
+    tmp: Path,
+    title: str,
+    itr: str,
+    suffix: str,
+    *,
+    problem: str,
+    cause: str,
+    action: str,
+) -> tuple[dict, dict]:
+    case = service.create_case(title, "G1")
+    document = _docx(tmp / f"{suffix}.docx", [
+        ("问题经过", [problem]),
+        ("根因分析", [cause]),
+        ("整改措施", [action]),
+        ("验证结果", ["验证通过，问题未复现。"]),
+    ])
+    result = service.ingest(case["case_id"], document, current_itrs=[itr])
+    service.extract(case["case_id"], result["version_id"])
+    for entry in repo.entries(case["case_id"]):
+        if entry["status"] != "MISSING":
+            service.review_entry(entry["entry_id"], content=entry["content"], action="CONFIRM", reviewer="tester")
+    repo.update_case_status(case["case_id"], "ACTIVE")
+    return case, repo.events(case["case_id"])[0]
+
+
+def test_repeat_candidates_use_similarity_not_recency_and_preserve_group_isolation(env) -> None:
+    tmp, _, repo, service = env
+    similar_case, similar_event = _active_case_with_review(
+        service, repo, tmp, "历史相似案例", "ITR20260002", "similar",
+        problem="电机在高速切换过程中出现明显抖动。",
+        cause="根因是状态机边界判断缺失，切换过程发生竞争。",
+        action="修正状态机边界并补充切换场景自动化测试。",
+    )
+    unrelated_case, unrelated_event = _active_case_with_review(
+        service, repo, tmp, "近期无关案例", "ITR20260003", "unrelated",
+        problem="通信报文周期性丢失并出现网络断连。",
+        cause="根因是连接器松动导致物理链路不稳定。",
+        action="重新锁紧连接器并增加振动检查。",
+    )
+    current_case, current_event = _active_case_with_review(
+        service, repo, tmp, "当前案例", "ITR20260001", "current-similarity",
+        problem="电机高速切换时出现抖动。",
+        cause="根因是状态机边界竞争。",
+        action="修正状态机并增加边界测试。",
+    )
+    with repo.connect() as connection:
+        connection.execute("UPDATE kb_case SET updated_at='2026-01-01 00:00:00' WHERE case_id=?", (similar_case["case_id"],))
+        connection.execute("UPDATE kb_case SET updated_at='2026-01-02 00:00:00' WHERE case_id=?", (unrelated_case["case_id"],))
+
+    other_group = service.create_case("其他分组相似案例", "G2")
+    other_event = repo.upsert_event(other_group["case_id"], standard_itr="ITR20260009", internal_event_key="ITR20260009")
+    repo.update_case_status(other_group["case_id"], "ACTIVE")
+
+    adapter = LegacyRepeatAdapter(repo, ROOT, tmp / "retrieval-runs")
+    ranked = adapter._candidate_events(current_event, limit=1)
+    assert ranked[0]["event_id"] == similar_event["event_id"]
+    assert ranked[0]["retrieval_score"] > 0
+    assert all(item["event_id"] != other_event["event_id"] for item in ranked)
+    assert all(item["case_id"] != current_case["case_id"] for item in ranked)
+
+
+def test_repeat_cache_invalidates_when_candidate_knowledge_revision_changes(env) -> None:
+    tmp, _, repo, service = env
+    historical, historical_event = _active_case_with_review(
+        service, repo, tmp, "历史候选", "ITR20260002", "cache-history",
+        problem="电机高速切换时出现抖动。",
+        cause="根因是状态机边界竞争。",
+        action="修正状态机并增加边界测试。",
+    )
+    _, current_event = _active_case_with_review(
+        service, repo, tmp, "当前问题", "ITR20260001", "cache-current",
+        problem="电机高速切换时出现抖动。",
+        cause="根因是状态机边界竞争。",
+        action="修正状态机并增加边界测试。",
+    )
+    adapter = LegacyRepeatAdapter(repo, ROOT, tmp / "cache-runs")
+    first = adapter.run(current_event["event_id"], mock=True, limit=1)
+    second = adapter.run(current_event["event_id"], mock=True, limit=1)
+    assert second["reused"] is True
+    assert second["run_id"] == first["run_id"]
+
+    root_cause = next(item for item in repo.entries(historical["case_id"]) if item["entry_type"] == "ROOT_CAUSE")
+    service.review_entry(
+        root_cause["entry_id"],
+        content=root_cause["content"] + " 人工补充：已确认竞争窗口。",
+        action="CORRECT",
+        reviewer="tester",
+        reason="候选知识修订",
+    )
+
+    refreshed = adapter.run(current_event["event_id"], mock=True, limit=1)
+    assert refreshed["reused"] is False
+    assert refreshed["run_id"] != first["run_id"]
+    assert refreshed["candidate_count"] == 1
+    assert repo.run(first["run_id"])["state"] == "COMPLETED"
+
+
 def test_legacy_m8_isolated_repeat_and_same_case_exclusion(env) -> None:
     tmp, _, repo, service = env
     historical, historical_event = _active_case(service, repo, tmp, "历史案例", "ITR20260002", "history")
