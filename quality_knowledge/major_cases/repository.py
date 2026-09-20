@@ -336,9 +336,12 @@ class MajorKnowledgeRepository:
             row = connection.execute("SELECT * FROM kb_run WHERE run_id=?", (run_id,)).fetchone()
         return dict(row), False
 
-    def set_run(self, run_id: str, state: str, *, coverage_total: int | None = None, coverage_processed: int | None = None, error_code: str = "", error_detail: str = "") -> None:
+    def set_run(self, run_id: str, state: str, *, coverage_total: int | None = None, coverage_processed: int | None = None, error_code: str = "", error_detail: str = "", model_profile: str | None = None) -> None:
         parts = ["state=?", "error_code=?", "error_detail=?"]
         params: list = [state, error_code, error_detail]
+        if model_profile is not None:
+            parts.append("model_profile=?")
+            params.append(model_profile)
         if state == "RUNNING":
             parts.append("started_at=COALESCE(started_at,CURRENT_TIMESTAMP)")
             parts.append("completed_at=NULL")
