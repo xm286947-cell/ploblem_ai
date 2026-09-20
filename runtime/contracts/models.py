@@ -431,3 +431,10 @@ class TaskSnapshot(ContractModel):
     updated_at: datetime
     cancel_requested: bool = False
     cancel_requested_at: datetime | None = None
+
+
+__all__ = [
+    name
+    for name, value in globals().items()
+    if isinstance(value, type) and getattr(value, "__module__", None) == __name__
+]
