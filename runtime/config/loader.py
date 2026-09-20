@@ -290,15 +290,20 @@ class AgentConfigLoader:
 
         if provider.mode == "env":
             base_url = self._require_env(provider.base_url_env)
-            api_key = self._require_env(provider.api_key_env)
+            api_key = (
+                self._require_env(provider.api_key_env)
+                if provider.auth == "api_key"
+                else None
+            )
         else:
             base_url = provider.base_url
-            api_key = provider.api_key
+            api_key = provider.api_key if provider.auth == "api_key" else None
 
         return (
             ResolvedProviderConfig(
                 type=provider.type,
                 mode=provider.mode,
+                auth=provider.auth,
                 profile_ref=profile_ref,
                 model=str(model),
                 base_url_env=provider.base_url_env,
@@ -458,6 +463,7 @@ class AgentConfigLoader:
             "provider_ref": provider.profile_ref,
             "provider_type": provider.type,
             "provider_mode": provider.mode,
+            "provider_auth": provider.auth,
             "provider_base_url": provider.base_url,
             "base_url_env": provider.base_url_env,
             "api_key_env": provider.api_key_env,
