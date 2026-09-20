@@ -17,6 +17,7 @@ from runtime.contracts import (
     CommitResult,
     CommittedExecution,
     ExecutionCommit,
+    ExecutionDefinitionSnapshot,
     MergeResult,
     RuntimeErrorInfo,
     RuntimeStatus,
@@ -147,6 +148,13 @@ class SqliteTaskStore:
                 CREATE TABLE IF NOT EXISTS runtime_merge_commit (
                     merge_key TEXT PRIMARY KEY,
                     result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS runtime_execution_snapshot (
+                    snapshot_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
                 """
@@ -621,6 +629,52 @@ class SqliteTaskStore:
             ).fetchone()
         return row is not None
 
+    def save_execution_snapshot(
+        self,
+        snapshot: ExecutionDefinitionSnapshot,
+    ) -> ExecutionDefinitionSnapshot:
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT snapshot_json FROM runtime_execution_snapshot WHERE snapshot_id=?",
+                (snapshot.snapshot_id,),
+            ).fetchone()
+            if existing:
+                current = ExecutionDefinitionSnapshot.model_validate_json(
+                    existing["snapshot_json"]
+                )
+                if current.fingerprint != snapshot.fingerprint:
+                    raise ValueError(
+                        f"immutable snapshot collision: {snapshot.snapshot_id}"
+                    )
+                return current
+            conn.execute(
+                """
+                INSERT INTO runtime_execution_snapshot(
+                    snapshot_id, fingerprint, snapshot_json, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    snapshot.snapshot_id,
+                    snapshot.fingerprint,
+                    snapshot.model_dump_json(),
+                    snapshot.created_at.isoformat(),
+                ),
+            )
+        return snapshot
+
+    def get_execution_snapshot(
+        self,
+        snapshot_id: str,
+    ) -> ExecutionDefinitionSnapshot:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT snapshot_json FROM runtime_execution_snapshot WHERE snapshot_id=?",
+                (snapshot_id,),
+            ).fetchone()
+        if not row:
+            raise KeyError(f"execution snapshot not found: {snapshot_id}")
+        return ExecutionDefinitionSnapshot.model_validate_json(row["snapshot_json"])
+
     def get_merge_result(self, merge_key: str) -> MergeResult | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -758,4 +812,6 @@ class SqliteTaskStore:
             error=error,
             created_at=task.created_at,
             updated_at=task.updated_at,
+            cancel_requested=task.cancel_requested,
+            cancel_requested_at=task.cancel_requested_at,
         )
