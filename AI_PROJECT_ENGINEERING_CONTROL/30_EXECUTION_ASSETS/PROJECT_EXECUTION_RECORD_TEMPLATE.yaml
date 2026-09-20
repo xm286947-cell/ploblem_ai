@@ -1,8 +1,14 @@
-schema_version: "0.8"
+schema_version: "0.9"
 template_id: PROJECT_EXECUTION_RECORD
 instruction: "每个阶段只维护一条简洁记录，不作为工作日志。"
 
 project_id: ""
+traceability:
+  trace_id: ""
+  requirement_ref: ""
+  solution_ref: ""
+  rule: "存在代码/契约变更时必须填写；只读任务可留空。"
+
 baseline:
   branch: ""
   commit: ""
@@ -46,6 +52,8 @@ reusable_decisions:
 result:
   status: "PLANNED | IN_PROGRESS | COMPLETED | FAILED | PARTIAL | VALIDATION_BLOCKED"
   changed_files: []
+  change_id: ""
+  verification_id: ""
   next_action: ""
 
 archive_rule:
@@ -54,6 +62,7 @@ archive_rule:
     - "可复用结论"
     - "基线与验证结果"
     - "会阻断后续执行的环境事实"
+    - "CMO追溯链接"
   do_not_keep_by_default:
     - "完整调试日志"
     - "重复截图"

@@ -1,57 +1,61 @@
 # AI_PROJECT_ENGINEERING_CONTROL
 
-跨子项目工程配置管理控制面（V0.8）。
+跨子项目工程配置管理控制面（V0.9）。
 
 ## 核心目标
 
-减少四类重复工作：
-
+减少：
 - 重复理解
 - 重复设计
 - 重复开发
 - 重复审计
+- **需求、方案、代码和验收之间的断链**
 
-当前统一执行链路：
+## 统一执行链路
 
 ```text
-目标 / 基线
+需求 / 目标
     ↓
-复用已有资产
+方案 / 决策
+    ↓
+CMO Trace
     ↓
 Preflight
-Runtime / Dependencies / Test Framework
     ↓
-正式执行
+编码 / PR / Commit
     ↓
-有效证据
+测试 / 验收
     ↓
-可复用结论
+Baseline / Release
+    ↓
+有效证据归档
 ```
 
-## 轻量规则
+## CMO 追溯
 
-只保留真正影响后续工作的内容：
-- 目标与验收；
-- Preflight 结果；
-- 计划；
-- Test / E2E / Audit / Scan / Metric / Manifest；
-- 可复用结论及失效条件。
+CMO 不重复 PMO，也不保存正文。
 
-已有 `docs/DEVELOPMENT_AUDIT_LEDGER.md` 继续作为证据源引用，不复制。
+统一入口：
 
-Preflight 未通过时：
+`40_CMO_TRACEABILITY/TRACE_REGISTER.yaml`
+
+每条链只维护：
+
+`REQ → SOL → CHG → Commit/PR → VER → Baseline`
+
+CMO回答的是：
+
+> 这个需求用了哪套方案、改了哪些代码、通过了什么验证、最后进入哪个基线？
+
+当前 TRACE-EXEC-001 已覆盖 Execution Engine → 质量场景 PR #2；由于 pytest 环境阻断，目前状态为 `VALIDATION_BLOCKED`，不会错误标记为已基线。
+
+## 执行资产与 Preflight
+
+任务开始先复用已有资产，再进行 Runtime / Dependencies / Test Framework Preflight。
+
+Preflight 未通过：
 - 不修改代码；
 - 不把环境失败判成代码失败；
-- 记录熔断原因；
-- 环境恢复后原样重跑。
-
-## 共享组件方向
-
-当前共享收敛对象：
-1. Execution Engine
-2. AI Runtime
-3. Packaging
-
-质量场景 Execution Engine consumer 已实现，但专项回归当前因执行环境缺 pytest 处于 `IMPLEMENTED_VALIDATION_BLOCKED`。
+- 恢复环境后原样重跑。
 
 最后更新：2026-09-20

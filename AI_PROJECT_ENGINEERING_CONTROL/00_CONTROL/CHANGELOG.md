@@ -1,29 +1,30 @@
 # CHANGELOG
 
+## V0.9 — 2026-09-20
+
+- 新增 CMO 轻量追溯链，统一管理 Requirement → Solution → Change → Code → Verification → Baseline。
+- 新增 TRACE_REGISTER 与 TRACE_ITEM_TEMPLATE，不复制需求/方案/测试正文，只保存 ID、状态和引用。
+- 代码/契约变更任务新增 TRACE_ID、REQUIREMENT_REF、SOLUTION_REF 最小要求。
+- Verification 未通过不得进入 BASELINED 状态。
+- 以 Execution Engine / 质量场景 PR #2 建立首条真实 TRACE-EXEC-001。
+- TRACE-EXEC-001 当前明确为 VALIDATION_BLOCKED，保留 pytest 环境阻断事实。
+- CMO 与 PMO 分工明确：PMO管责任/计划/进度，CMO管配置项/版本/追溯链。
+
 ## V0.8 — 2026-09-20
 
 - 将 Preflight 正式纳入所有代码任务前置门禁。
 - Preflight 最小检查 Runtime、Dependencies、Test Framework。
 - Preflight 未 PASS 时禁止进入代码修改，统一按环境熔断处理。
-- PROJECT_EXECUTION_RECORD_TEMPLATE 增加 Preflight 结果与 circuit breaker 字段。
-- 将 PR #2 pytest 缺失熔断登记为首个可复用环境证据。
-- 保持轻量：不新增独立平台或日志系统。
 
 ## V0.7 — 2026-09-20
 
 - 第二个 Execution Engine consumer 落地到独立质量场景实现分支。
-- scenario_generation 的候选生成与历史标准化不再直接维护 ThreadPool/as_completed。
-- 根据真实 consumer 需求，为共享引擎补充 completion-order 与 CONTINUE 单项异常隔离。
-- 质量场景业务规则、缓存/claim、持久化及最终状态仍留在领域层。
-- 建立 Draft PR #2，不修改 main，不把业务代码并入工程治理分支。
-- PR #2 首轮专项回归触发环境熔断：执行环境缺少 pytest，三组必测套件均未执行；compileall 通过且未产生代码修改。
-- 资产状态调整为 IMPLEMENTED_VALIDATION_BLOCKED；下一步先恢复测试依赖，再原样重跑，不扩展到第三个 consumer。
+- PR #2 首轮专项回归触发环境熔断：执行环境缺少 pytest，未产生代码修改。
 
 ## V0.6 — 2026-09-20
 
 - 新增最小共享 Execution Engine。
-- builder/parallel_execution.py 改为兼容适配层，现有 ordered_map API 不变。
-- ThreadPool 执行机制从旧模块下沉到共享引擎。
+- builder/parallel_execution.py 改为兼容适配层。
 
 ## V0.5 — 2026-09-20
 
