@@ -45,6 +45,7 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             "model": agent_definition.get("model") or fallback.provider.model,
             "profile_ref": metadata.get("provider_ref"),
             "mode": metadata.get("provider_mode", fallback.provider.mode),
+            "auth": metadata.get("provider_auth", fallback.provider.auth),
             "base_url_env": metadata.get("base_url_env"),
             "api_key_env": metadata.get("api_key_env"),
             "base_url": metadata.get("provider_base_url"),
@@ -92,9 +93,13 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
                 context,
                 resolved,
             )
-            secret_value = self.config_loader.get_runtime_api_key(
-                config_hash,
-                api_key_env=provider_config.get("api_key_env"),
+            secret_value = (
+                self.config_loader.get_runtime_api_key(
+                    config_hash,
+                    api_key_env=provider_config.get("api_key_env"),
+                )
+                if provider_config.get("auth", "api_key") == "api_key"
+                else None
             )
             runtime_context["provider_config"] = {
                 **provider_config,
