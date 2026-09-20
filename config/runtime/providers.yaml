@@ -1,0 +1,5 @@
+providers:
+  qwen_prod:
+    type: openai_compatible
+    base_url_env: DASHSCOPE_BASE_URL
+    api_key_env: DASHSCOPE_API_KEY
