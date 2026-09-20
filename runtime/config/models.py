@@ -66,6 +66,41 @@ class ProviderConfig(ConfigModel):
         return self
 
 
+class ModelProfileConfig(ConfigModel):
+    provider: str = "openai_compatible"
+    base_url: str | None = None
+    base_url_env: str | None = None
+    api_key: str | None = None
+    api_key_env: str | None = None
+    model: str
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_endpoint_and_key_source(self):
+        if bool(self.base_url) == bool(self.base_url_env):
+            raise ValueError(
+                "exactly one of base_url or base_url_env must be configured"
+            )
+        if self.api_key is not None and self.api_key_env is not None:
+            raise ValueError(
+                "api_key and api_key_env cannot be configured together"
+            )
+        return self
+
+
+class ModelProfilesConfig(ConfigModel):
+    active_model: str | None = None
+    models: dict[str, ModelProfileConfig]
+
+    @model_validator(mode="after")
+    def validate_active_model(self):
+        if self.active_model is not None and self.active_model not in self.models:
+            raise ValueError("active_model must reference an entry in models")
+        return self
+
+
 class ModelExecutionConfig(ConfigModel):
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = None
@@ -122,6 +157,9 @@ class AgentConfig(ConfigModel):
     label: str | None = None
     enabled: bool = True
 
+    model_ref: str | None = None
+
+    # Legacy compatibility only. New projects should use model_ref + model.yaml.
     provider_ref: str | None = None
     provider: ProviderConfig | None = None
     model: str | None = None
@@ -136,9 +174,16 @@ class AgentConfig(ConfigModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_provider_source(self):
-        if bool(self.provider_ref) == bool(self.provider):
-            raise ValueError("exactly one of provider_ref or provider must be configured")
+    def validate_model_source(self):
+        configured = [
+            bool(self.model_ref),
+            bool(self.provider_ref),
+            bool(self.provider),
+        ]
+        if sum(configured) > 1:
+            raise ValueError(
+                "configure model_ref, provider_ref or provider; do not mix them"
+            )
         return self
 
 
@@ -185,6 +230,8 @@ __all__ = [
     "ExecutionConfig",
     "LongContentConfig",
     "ModelExecutionConfig",
+    "ModelProfileConfig",
+    "ModelProfilesConfig",
     "ProviderConfig",
     "ProviderProfilesConfig",
     "ReferenceConfig",
