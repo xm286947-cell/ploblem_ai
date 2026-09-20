@@ -14,6 +14,7 @@ from runtime.content import (
     ListResultMerger,
     MergeCoordinator,
     PartialResultCommitter,
+    SourceIdentityProvider,
 )
 from runtime.content.errors import InvalidPartialResultError
 from runtime.contracts import (
@@ -624,7 +625,21 @@ class MajorIssueD01RuntimeAdapter:
         result = self.runtime.execute(request)
         return self.outcome(result.task_id)
 
-    def resume(self, task_id: str) -> MajorIssueD01Outcome:
+    def resume(
+        self,
+        task_id: str,
+        *,
+        actual_source: SourceRef | None = None,
+    ) -> MajorIssueD01Outcome:
+        if actual_source is not None:
+            request = self.store.load_request(task_id)
+            if not isinstance(request, WorkflowRequest):
+                raise TypeError("D01 task must be a WorkflowRequest")
+            expected_source = self._source(dict(request.input or {}))
+            SourceIdentityProvider.validate_same_identity(
+                expected_source,
+                actual_source,
+            )
         self.runtime.resume(task_id)
         return self.outcome(task_id)
 
