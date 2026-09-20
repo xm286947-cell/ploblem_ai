@@ -79,7 +79,13 @@ jobs:
         run: npm install --no-save openai@7.20.0
 
       - name: Run OpenAI Mock HTTP + official Python SDK compatibility gates
-        run: python -m pytest tests/test_openai_mock_server.py tests/test_openai_mock_sdk_compat.py tests/test_openai_mock_runtime_integration.py -q
+        run: python -m pytest tests/test_openai_mock_server.py tests/test_openai_mock_sdk_compat.py -q
+
+      - name: Install Runtime integration test dependencies
+        run: python -m pip install -r requirements-runtime-p0-test.txt
+
+      - name: Run Runtime-to-Mock integration gate
+        run: python -m pytest tests/test_openai_mock_runtime_integration.py -q
 
       - name: Run official OpenAI JS SDK compatibility gate
         shell: bash
