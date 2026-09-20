@@ -5,7 +5,7 @@
 范围：OPENAI-MOCK-001  
 Issue：#16  
 Draft PR：#17  
-当前分支 Head：`c29b567c0690ed5a774a67ce3c1ab4789a0e3b01`\n最终可执行代码 Gate Head：`0e02157b667119d77cf812992fe92cf12a297c78`  
+当前分支 Head：`c29b567c0690ed5a774a67ce3c1ab4789a0e3b01`\n验收执行代码 Head：`0e02157b667119d77cf812992fe92cf12a297c78`  
 最终验收 CI：GitHub Actions Run #240 / `35516985444` — PASS
 
 > 本报告表示 V0.1 已按冻结设计基线完成自动化验收。当前仍未合并 main，不标记 DONE。
@@ -134,7 +134,7 @@ ACCEPTANCE_PASS / V0.1 RC / READY_FOR_REVIEW
 ```
 
 仍保持：
-- PR #17 为 Draft；
+- PR #17 已进入 Ready for Review；
 - 未合并 main；
 - 不标记 DONE。
 
