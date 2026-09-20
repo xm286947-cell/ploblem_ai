@@ -198,7 +198,9 @@ class MajorReviewSkillRunner:
                     "consumed_by_fragment": consumed_by_fragment,
                 },
             )
-            if not continued:
+            if continued:
+                self.repository.clear_missing_ai_entries(case_id)
+            else:
                 self.repository.clear_pending_ai_entries(case_id)
             for item in result.entries:
                 self.repository.add_entry(
