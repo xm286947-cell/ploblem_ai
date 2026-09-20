@@ -16,6 +16,7 @@ from quality_knowledge.major_cases.legacy_import import LegacyCaseImporter
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from quality_knowledge.major_cases.service import MajorCaseService
 from quality_knowledge.major_cases.sources import SqliteBusinessSourceGateway
+from builder.ai_client import AIClientError, AIResponse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -205,6 +206,117 @@ def test_skill_budget_missing_retry_human_revision_and_skill_version(env) -> Non
     assert cancelled["state"] == "CANCELLED"
     repo.set_run(queued["run_id"], "RUNNING")
     assert repo.run(queued["run_id"])["state"] == "RUNNING"
+
+
+
+class _FakeSkillModelClient:
+    def __init__(self, payload: dict, model: str = "fake-real-model") -> None:
+        self.payload = payload
+        self.model = model
+        self.calls: list[list[dict]] = []
+
+    def complete(self, messages: list[dict]) -> AIResponse:
+        self.calls.append(messages)
+        return AIResponse(
+            content=json.dumps(self.payload, ensure_ascii=False),
+            model=self.model,
+            raw={"fake": True},
+        )
+
+
+class _FailingSkillModelClient:
+    model = "fake-failing-model"
+
+    def complete(self, messages: list[dict]) -> AIResponse:
+        raise AIClientError("synthetic model outage")
+
+
+def _real_model_payload(repo: MajorKnowledgeRepository, version_id: str, *, invalid_evidence: bool = False) -> dict:
+    fragments = repo.fragments(version_id)
+    by_section = {item["section_path"]: item["fragment_id"] for item in fragments}
+    def ref(label: str) -> list[str]:
+        if invalid_evidence:
+            return ["UNKNOWN-FRAGMENT"]
+        match = next((fragment_id for section, fragment_id in by_section.items() if label in section), "")
+        return [match] if match else []
+    return {
+        "entries": [
+            {"entry_type": "ISSUE_FACT", "content": "模型识别：电机运行中出现抖动。", "fragment_ids": ref("问题经过")},
+            {"entry_type": "ROOT_CAUSE", "content": "模型识别：状态机边界判断缺失导致竞争。", "fragment_ids": ref("根因")},
+            {"entry_type": "ACTION", "content": "模型识别：修正状态机并增加自动化测试。", "fragment_ids": ref("整改")},
+            {"entry_type": "VERIFICATION", "content": "模型识别：连续运行验证未复现。", "fragment_ids": ref("验证")},
+        ]
+    }
+
+
+def test_skill_real_model_path_is_executed_and_evidence_is_program_bound(env) -> None:
+    tmp, _, repo, _ = env
+    case = MajorCaseService(repo).create_case("真实模型执行", "G1")
+    setup = MajorCaseService(repo)
+    imported = setup.ingest(case["case_id"], _full_review(tmp / "real-model.docx"), current_itrs=["ITR20260001"])
+    client = _FakeSkillModelClient(_real_model_payload(repo, imported["version_id"]))
+    service = MajorCaseService(repo, skill_model_client=client)
+
+    result = service.extract(case["case_id"], imported["version_id"], execution_mode="real")
+    assert result["state"] == "COMPLETED"
+    assert result["execution_outcome"] == "REAL_MODEL"
+    assert result["model_profile"] == "real-model:fake-real-model"
+    assert len(client.calls) == 1
+
+    run = repo.run(result["run_id"])
+    assert run["model_profile"] == "real-model:fake-real-model"
+    assert run["error_code"] == ""
+    entries = repo.entries(case["case_id"])
+    assert all(item["model_profile"] == "real-model:fake-real-model" for item in entries if item["status"] == "PENDING")
+    assert all(item["evidence"] for item in entries if item["status"] == "PENDING")
+    valid_fragment_ids = {item["fragment_id"] for item in repo.fragments(imported["version_id"])}
+    assert {
+        evidence["fragment_id"]
+        for item in entries
+        for evidence in item["evidence"]
+    } <= valid_fragment_ids
+
+
+def test_skill_real_model_evidence_insufficient_is_explicit(env) -> None:
+    tmp, _, repo, _ = env
+    setup = MajorCaseService(repo)
+    case = setup.create_case("模型证据不足", "G1")
+    imported = setup.ingest(case["case_id"], _full_review(tmp / "insufficient.docx"), current_itrs=["ITR20260001"])
+    client = _FakeSkillModelClient(_real_model_payload(repo, imported["version_id"], invalid_evidence=True))
+    service = MajorCaseService(repo, skill_model_client=client)
+
+    result = service.extract(case["case_id"], imported["version_id"], execution_mode="real")
+    assert result["state"] == "COMPLETED"
+    assert result["execution_outcome"] == "EVIDENCE_INSUFFICIENT"
+    run = repo.run(result["run_id"])
+    assert run["error_code"] == "EVIDENCE_INSUFFICIENT"
+    assert all(item["status"] == "MISSING" for item in repo.entries(case["case_id"]))
+
+
+def test_skill_real_model_failure_never_falls_back_to_mock(env) -> None:
+    tmp, _, repo, _ = env
+    setup = MajorCaseService(repo)
+    case = setup.create_case("模型失败", "G1")
+    imported = setup.ingest(case["case_id"], _full_review(tmp / "model-failed.docx"), current_itrs=["ITR20260001"])
+    service = MajorCaseService(repo, skill_model_client=_FailingSkillModelClient())
+
+    result = service.extract(case["case_id"], imported["version_id"], execution_mode="real")
+    assert result["state"] == "FAILED"
+    assert result["execution_outcome"] == "MODEL_FAILED"
+    assert result["model_profile"] == "real-model:fake-failing-model"
+    run = repo.run(result["run_id"])
+    assert run["error_code"] == "MODEL_FAILED"
+    assert repo.entries(case["case_id"]) == []
+
+
+def test_skill_mock_execution_remains_explicit(env) -> None:
+    tmp, _, repo, service = env
+    case = service.create_case("Mock模型", "G1")
+    imported = service.ingest(case["case_id"], _full_review(tmp / "mock-explicit.docx"), current_itrs=["ITR20260001"])
+    result = service.extract(case["case_id"], imported["version_id"], execution_mode="mock")
+    assert result["execution_outcome"] == "MOCK"
+    assert result["model_profile"] == "programmatic-mock"
+    assert repo.run(result["run_id"])["model_profile"] == "programmatic-mock"
 
 
 def test_source_conflict_stale_and_deleted(env) -> None:
