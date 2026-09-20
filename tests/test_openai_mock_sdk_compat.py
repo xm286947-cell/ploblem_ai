@@ -6,7 +6,8 @@ from contextlib import contextmanager
 from typing import Iterator
 from urllib.request import Request, urlopen
 
-from openai import OpenAI
+import pytest
+from openai import APITimeoutError, OpenAI
 
 from tools.openai_mock.server import create_server
 
@@ -28,9 +29,19 @@ def running_server() -> Iterator[tuple[str, int]]:
         thread.join(timeout=2)
 
 
-def configure(host: str, port: int, key: str, payload: str) -> None:
+def configure(
+    host: str,
+    port: int,
+    key: str,
+    payload: str,
+    behavior: dict | None = None,
+) -> None:
     raw = json.dumps(
-        {"scenario_key": key, "payload": payload, "behavior": {}}
+        {
+            "scenario_key": key,
+            "payload": payload,
+            "behavior": behavior or {},
+        }
     ).encode()
     request = Request(
         f"http://{host}:{port}/__mock__/scenario",
@@ -42,9 +53,9 @@ def configure(host: str, port: int, key: str, payload: str) -> None:
         assert response.status == 200
 
 
-def test_official_python_sdk_responses_only_needs_base_url_switch():
+def test_official_python_sdk_responses_only_needs_base_url_and_api_key():
     with running_server() as (host, port):
-        configure(host, port, "sdk-responses", "SDK responses OK")
+        configure(host, port, "default", "SDK responses OK")
         client = OpenAI(
             api_key="mock-key",
             base_url=f"http://{host}:{port}/v1",
@@ -53,14 +64,13 @@ def test_official_python_sdk_responses_only_needs_base_url_switch():
         response = client.responses.create(
             model="mock-gpt",
             input="hello",
-            extra_headers={"X-Mock-Scenario-Key": "sdk-responses"},
         )
         assert response.output_text == "SDK responses OK"
 
 
-def test_official_python_sdk_chat_completions_only_needs_base_url_switch():
+def test_official_python_sdk_chat_completions_only_needs_base_url_and_api_key():
     with running_server() as (host, port):
-        configure(host, port, "sdk-chat", "SDK chat OK")
+        configure(host, port, "default", "SDK chat OK")
         client = OpenAI(
             api_key="mock-key",
             base_url=f"http://{host}:{port}/v1",
@@ -69,7 +79,6 @@ def test_official_python_sdk_chat_completions_only_needs_base_url_switch():
         response = client.chat.completions.create(
             model="mock-gpt",
             messages=[{"role": "user", "content": "hello"}],
-            extra_headers={"X-Mock-Scenario-Key": "sdk-chat"},
         )
         assert response.choices[0].message.content == "SDK chat OK"
 
@@ -128,3 +137,25 @@ def test_official_python_sdk_chat_stream_parses_chunks():
             if event.choices and event.choices[0].delta.content:
                 chunks.append(event.choices[0].delta.content)
         assert "".join(chunks) == "chat stream"
+
+
+def test_official_python_sdk_timeout_is_deterministically_reproducible():
+    with running_server() as (host, port):
+        configure(
+            host,
+            port,
+            "default",
+            "too late",
+            behavior={"delay_ms": 250},
+        )
+        client = OpenAI(
+            api_key="mock-key",
+            base_url=f"http://{host}:{port}/v1",
+            max_retries=0,
+            timeout=0.05,
+        )
+        with pytest.raises(APITimeoutError):
+            client.responses.create(
+                model="mock-gpt",
+                input="timeout please",
+            )
