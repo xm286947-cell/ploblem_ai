@@ -258,6 +258,8 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
         if self._maybe_failure(scenario, call_no):
             return
         self._delay(scenario.behavior)
+        if scenario.behavior.disconnect_before_response:
+            return self._disconnect_without_response()
         payload = _payload_text(scenario.payload)
         model = str(request.get("model") or DEFAULT_MODEL)
         stream = requested_stream if scenario.behavior.stream is None else scenario.behavior.stream
