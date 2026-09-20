@@ -22,6 +22,12 @@ python -m pip install -r requirements-openai-mock-test.txt
 python -m pip install -r requirements-runtime-p0-test.txt
 ```
 
+V0.1 稳定 Acceptance SDK 基线：
+- OpenAI Python SDK：`3.16.2`；
+- OpenAI JS SDK：`7.20.0`。
+
+稳定验收版本固定；如需跟踪未来 SDK 版本，使用独立 latest-compatible 检查，不改变 V0.1 Acceptance Gate 的可重复性。
+
 启动 Mock Service：
 
 
