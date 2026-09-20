@@ -396,10 +396,6 @@ class LangGraphExecutionEngine(LightweightExecutionEngine):
             ),
             warnings=warnings,
             error=error,
-            metadata={
-                "engine": self.engine_name,
-                "graph_iterations": final_state["iteration"],
-            },
         )
         self.store.save_task(task, result=result, error=error)
         return result
