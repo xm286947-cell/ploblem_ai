@@ -542,6 +542,42 @@ class CommittedPartialResult(ContractModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CoverageUnit(ContractModel):
+    unit_id: str
+    locator: dict[str, Any] = Field(default_factory=dict)
+    required: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoverageUniverse(ContractModel):
+    source: SourceRef
+    coverage_type: Literal["RANGE", "PAGE", "SECTION", "ITEM"]
+    range_targets: list[Range] = Field(default_factory=list)
+    unit_targets: list[CoverageUnit] = Field(default_factory=list)
+    universe_fingerprint: str
+    partition_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MergeContext(ContractModel):
+    merge_key: str
+    expected_partial_ids: list[str]
+    partition_key: str | None = None
+    partition_policy: Literal["ISOLATED", "CROSS_PARTITION"] = "ISOLATED"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MergeResult(ContractModel):
+    merge_key: str
+    data: Any = None
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    derived_from_partial_ids: list[str] = Field(default_factory=list)
+    complete: bool
+    missing_partial_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     name
     for name, value in globals().items()
