@@ -15,6 +15,7 @@ on:
       - "tests/test_agent_runtime_p0_*.py"
       - "tests/test_runtime_request_secret_persistence.py"
       - "tests/test_openai_mock*.py"
+      - "tests/openai_mock_sdk_compat.mjs"
       - ".github/workflows/agent-runtime-p0.yml"
       - "requirements-runtime-p0-test.txt"
       - "requirements-openai-mock-test.txt"
@@ -29,6 +30,7 @@ on:
       - "tests/test_agent_runtime_p0_*.py"
       - "tests/test_runtime_request_secret_persistence.py"
       - "tests/test_openai_mock*.py"
+      - "tests/openai_mock_sdk_compat.mjs"
       - ".github/workflows/agent-runtime-p0.yml"
       - "requirements-runtime-p0-test.txt"
       - "requirements-openai-mock-test.txt"
@@ -65,8 +67,31 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install OpenAI Mock test dependencies
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install OpenAI Mock Python test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-openai-mock-test.txt
+
+      - name: Install official OpenAI JS SDK
+        run: npm install --no-save openai@7.20.0
 
       - name: Run OpenAI Mock HTTP + official Python SDK compatibility gates
         run: python -m pytest tests/test_openai_mock_server.py tests/test_openai_mock_sdk_compat.py -q
+
+      - name: Run official OpenAI JS SDK compatibility gate
+        shell: bash
+        run: |
+          python -m tools.openai_mock.server --host 127.0.0.1 --port 8765 >/tmp/openai-mock.log 2>&1 &
+          MOCK_PID=$!
+          trap 'kill $MOCK_PID || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/__mock__/health >/dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          curl -fsS http://127.0.0.1:8765/__mock__/health
+          OPENAI_MOCK_BASE_URL=http://127.0.0.1:8765/v1 node tests/openai_mock_sdk_compat.mjs
