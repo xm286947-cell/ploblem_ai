@@ -447,7 +447,16 @@ class LegacyProjector:
 
         # A resumed Run may reuse a previously committed execution_key and
         # therefore create no new outbox event. Re-project it into the new
-        # Analysis Set without re-executing the model.
+        # Analysis Set without re-executing the model. A real PENDING outbox
+        # event must never be bypassed here; it remains the replay authority.
+        pending_step_ids = {
+            event.step_run_id
+            for event in self.store.list_projection_events(
+                run_id=run_id,
+                status="PENDING",
+            )
+            if event.step_run_id is not None
+        }
         for step in self.store.list_step_runs(run_id):
             current = {
                 item["legacy_stage"]: item
@@ -456,6 +465,8 @@ class LegacyProjector:
                 )
             }
             if step.step_id in current:
+                continue
+            if step.step_run_id in pending_step_ids:
                 continue
             execution_key = step.metadata.get("execution_key")
             committed = (
