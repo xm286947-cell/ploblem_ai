@@ -1,0 +1,25 @@
+snapshot_version: "0.8"
+snapshot_date: "2026-09-20"
+focus: "PREFLIGHT_GATE"
+
+preflight:
+  required_before_code_change: true
+  minimum_checks:
+    - RUNTIME
+    - DEPENDENCIES
+    - TEST_FRAMEWORK
+  failure_action: CIRCUIT_BREAKER
+  code_change_allowed_when_blocked: false
+
+first_evidence:
+  project: QUALITY_SCENARIO_AND_CASE_LIBRARY
+  pull_request: 2
+  blocker: "pytest unavailable"
+  result: "environment failure isolated without code changes"
+
+execution_flow:
+  - REUSE_ASSETS
+  - PREFLIGHT
+  - EXECUTE
+  - VALIDATE
+  - ARCHIVE_EFFECTIVE_EVIDENCE

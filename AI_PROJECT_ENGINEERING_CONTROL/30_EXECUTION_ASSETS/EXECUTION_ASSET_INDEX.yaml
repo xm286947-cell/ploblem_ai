@@ -1,4 +1,4 @@
-schema_version: "0.7"
+schema_version: "0.8"
 updated_at: "2026-09-20"
 purpose: "给所有项目提供可直接复用的目标、计划、有效证据和结论索引。"
 
@@ -7,6 +7,7 @@ principle:
   raw_process_log_required: false
   default_reuse: true
   revalidate_only_when_invalidated: true
+  preflight_before_execution: true
 
 asset_types: [TARGET, PLAN, EVIDENCE, DECISION]
 
@@ -78,7 +79,6 @@ assets:
       - "EXECUTION_ENGINE_CONTRACT_CHANGED"
       - "RELATED_REGRESSION_FAILED"
 
-
   - asset_id: ASSET-009
     type: EVIDENCE
     subject: "Quality scenario Execution Engine consumer migration"
@@ -101,10 +101,21 @@ assets:
       - "SCENARIO_GENERATION_SEMANTICS_CHANGED"
       - "EXECUTION_ENGINE_CONTRACT_CHANGED"
 
+  - asset_id: ASSET-010
+    type: DECISION
+    subject: "Task Preflight Gate"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/EXECUTION_ASSET_RULES.md"
+    status: ACTIVE
+    reusable_by: [ALL_PROJECTS]
+    conclusion: "代码任务在正式执行前必须确认 Runtime、依赖和测试框架可用；Preflight 未通过时环境熔断，不进入代码修改。"
+    evidence: "PR #2 首轮回归因 pytest 缺失触发 BASELINE_OR_ENVIRONMENT_FAILURE，未产生代码修改。"
+    invalidation: [GOVERNANCE_RULE_CHANGED]
+
 usage:
   task_start:
     - "先按 PROJECT_ID / module / subject 查询本索引。"
     - "命中 ACTIVE 资产且未触发失效条件时直接复用。"
+    - "执行 Preflight；未 PASS 时停止并记录环境熔断。"
   task_end:
     - "只登记对后续项目有复用价值的新证据或结论。"
     - "临时日志、调试过程、无结论中间产物默认不归档。"

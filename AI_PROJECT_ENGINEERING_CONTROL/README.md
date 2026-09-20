@@ -1,6 +1,6 @@
 # AI_PROJECT_ENGINEERING_CONTROL
 
-跨子项目工程配置管理控制面（V0.5）。
+跨子项目工程配置管理控制面（V0.8）。
 
 ## 核心目标
 
@@ -11,47 +11,47 @@
 - 重复开发
 - 重复审计
 
-治理方式不是保存所有过程，而是统一沉淀：
+当前统一执行链路：
 
 ```text
-目标
-  ↓
-计划
-  ↓
-执行
-  ↓
+目标 / 基线
+    ↓
+复用已有资产
+    ↓
+Preflight
+Runtime / Dependencies / Test Framework
+    ↓
+正式执行
+    ↓
 有效证据
-  ↓
+    ↓
 可复用结论
-  ↓
-其他项目直接复用
 ```
 
-## V0.5 轻量执行资产机制
+## 轻量规则
 
-只新增三个核心入口：
+只保留真正影响后续工作的内容：
+- 目标与验收；
+- Preflight 结果；
+- 计划；
+- Test / E2E / Audit / Scan / Metric / Manifest；
+- 可复用结论及失效条件。
 
-- `30_EXECUTION_ASSETS/EXECUTION_ASSET_INDEX.yaml`：查目前有什么可以直接复用。
-- `30_EXECUTION_ASSETS/PROJECT_EXECUTION_RECORD_TEMPLATE.yaml`：每个项目阶段按同一最小格式记录。
-- `00_CONTROL/EXECUTION_ASSET_RULES.md`：定义什么值得归档、什么时候需要重验。
+已有 `docs/DEVELOPMENT_AUDIT_LEDGER.md` 继续作为证据源引用，不复制。
 
-已有 `docs/DEVELOPMENT_AUDIT_LEDGER.md` 不复制，作为现有证据源被索引引用。
-
-## 使用原则
-
-开始任务先查资产索引。已有 ACTIVE 结论且未触发失效条件，直接复用，不重新全量审计。
-
-执行中只记录对后续有价值的数据：Test / E2E / Audit / Scan / Metric / Manifest / Architecture Decision。
-
-结束任务只把可复用信息登记进索引，不保存大量过程日志、重复截图和无结论探索过程。
+Preflight 未通过时：
+- 不修改代码；
+- 不把环境失败判成代码失败；
+- 记录熔断原因；
+- 环境恢复后原样重跑。
 
 ## 共享组件方向
 
-V0.4 已冻结：
+当前共享收敛对象：
 1. Execution Engine
 2. AI Runtime
 3. Packaging
 
-V0.5 的执行资产机制作为后续组件开发的统一前置动作。
+质量场景 Execution Engine consumer 已实现，但专项回归当前因执行环境缺 pytest 处于 `IMPLEMENTED_VALIDATION_BLOCKED`。
 
 最后更新：2026-09-20

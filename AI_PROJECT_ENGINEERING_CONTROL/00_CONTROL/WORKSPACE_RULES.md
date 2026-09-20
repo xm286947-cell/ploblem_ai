@@ -1,15 +1,21 @@
-# 跨子项目工作区规则 V0.2
+# 跨子项目工作区规则 V0.8
 
 ## 1. 开始任务前
 
-必须明确四件事：
+必须先明确：
 
 1. PROJECT_ID
 2. BASELINE_BRANCH + BASELINE_COMMIT
 3. PRIMARY_WORKSPACE
 4. SHARED_MODULES_TOUCHED
 
-缺少任一项时，不进入跨模块修改。
+然后执行 Preflight：
+
+- Runtime 可用；
+- 依赖可安装/可解析；
+- 测试框架可运行。
+
+Preflight 未 PASS 时，禁止进入代码修改，按环境熔断处理。
 
 ## 2. 修改范围
 
@@ -30,17 +36,17 @@
 ## 4. 审计
 
 默认使用增量审计：
-- 读取 AUDIT_REUSE_REGISTRY
-- 读取已有 Development Audit Ledger
-- 只审计 changed files + 直接上下游
-- 无触发条件禁止重复全工程审计
+- 先读取 EXECUTION_ASSET_INDEX / AUDIT_REUSE_REGISTRY；
+- 复用仍有效的既有结论；
+- 只审计 changed files + 直接上下游；
+- 无触发条件禁止重复全工程审计。
 
 ## 5. 基线继承
 
 当前重大问题基线直接继承质量场景基线。重大问题项目开发时：
-- 不得把继承来的质量场景模块自动视为本项目 OWNED
-- 修改 scenario/reverse_quality 等模块时按跨项目共享/越界变更处理
-- 后续优先将隐式“整仓继承”收敛成显式组件依赖
+- 不得把继承来的质量场景模块自动视为本项目 OWNED；
+- 修改 scenario/reverse_quality 等模块时按跨项目共享/越界变更处理；
+- 后续优先将隐式“整仓继承”收敛成显式组件依赖。
 
 ## 6. 新增子项目
 

@@ -1,4 +1,4 @@
-schema_version: "0.5"
+schema_version: "0.8"
 template_id: PROJECT_EXECUTION_RECORD
 instruction: "每个阶段只维护一条简洁记录，不作为工作日志。"
 
@@ -12,13 +12,27 @@ target:
   acceptance: []
   out_of_scope: []
 
+preflight:
+  status: "NOT_RUN | PASS | BLOCKED"
+  runtime:
+    command: ""
+    result: ""
+  dependencies:
+    command: ""
+    result: ""
+  test_framework:
+    command: ""
+    result: ""
+  circuit_breaker: ""
+  rule: "Preflight 未 PASS 时不得进入代码修改。"
+
 plan:
   steps: []
   shared_modules_touched: []
 
 effective_evidence:
   - evidence_id: ""
-    type: "TEST | E2E | AUDIT | SCAN | METRIC | MANIFEST"
+    type: "TEST | E2E | AUDIT | SCAN | METRIC | MANIFEST | ENVIRONMENT"
     result: ""
     source: ""
     reusable: true
@@ -30,7 +44,7 @@ reusable_decisions:
     invalidation: []
 
 result:
-  status: "PLANNED | IN_PROGRESS | COMPLETED | FAILED | PARTIAL"
+  status: "PLANNED | IN_PROGRESS | COMPLETED | FAILED | PARTIAL | VALIDATION_BLOCKED"
   changed_files: []
   next_action: ""
 
@@ -39,6 +53,7 @@ archive_rule:
     - "影响后续决策的证据"
     - "可复用结论"
     - "基线与验证结果"
+    - "会阻断后续执行的环境事实"
   do_not_keep_by_default:
     - "完整调试日志"
     - "重复截图"
