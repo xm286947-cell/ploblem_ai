@@ -50,6 +50,31 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
+def _analysis_review_status(item, *, fields=None, scene_status=None, match_reviewed=None, missing_information=None):
+    fields=fields if fields is not None else (item.get('review') or {})
+    present=[x for x in fields.values() if isinstance(x,dict) and x.get('value')]
+    if not present or not all(x.get('review_status') in {'CONFIRMED','REJECTED'} for x in present):
+        return 'IN_REVIEW'
+    if any(x.get('review_status')=='REJECTED' for x in present):
+        return 'REVIEWED_WITH_REJECTIONS'
+    core_confirmed=all(
+        isinstance(fields.get(name),dict)
+        and fields[name].get('value')
+        and fields[name].get('review_status')=='CONFIRMED'
+        for name in CORE_FIELDS
+    )
+    scene_status=item.get('scene_match_status') if scene_status is None else scene_status
+    match_reviewed=bool(item.get('match_reviewed')) if match_reviewed is None else bool(match_reviewed)
+    missing=missing_information if missing_information is not None else (item.get('missing_information') or [])
+    missing_complete=all(
+        isinstance(x,dict) and x.get('status') in {'CONFIRMED','NOT_APPLICABLE'}
+        for x in missing
+    )
+    return ('CONFIRMED'
+            if core_confirmed and match_reviewed and scene_status!='NEED_REVIEW' and missing_complete
+            else 'IN_REVIEW')
+
+
 def _missing_information_from_questions(parsed):
     questions=parsed.get('questions') or []
     if not isinstance(questions,list):
@@ -308,11 +333,7 @@ class ReverseQualityService:
             new.update({'value':value[:500],'reviewer_edit':value[:500],'review_status':'CONFIRMED'})
         else:new['review_status']=action
         fields[name]=new
-        reviewed=[x for x in fields.values() if x['value']]
-        all_reviewed=bool(reviewed) and all(x['review_status'] in {'CONFIRMED','REJECTED'} for x in reviewed)
-        core_confirmed=all(fields[x]['value'] and fields[x]['review_status']=='CONFIRMED' for x in CORE_FIELDS)
-        status=('REVIEWED_WITH_REJECTIONS' if any(x['review_status']=='REJECTED' for x in reviewed)
-                else 'CONFIRMED' if core_confirmed and item['match_reviewed'] and item['scene_match_status']!='NEED_REVIEW' else 'IN_REVIEW') if all_reviewed else 'IN_REVIEW'
+        status=_analysis_review_status(item,fields=fields)
         self.repository.save_field_review(
             item['canonical_itr'],field_name=name,action=action,old=old,new=new,
             reviewer=reviewer,analysis_status=status)
@@ -327,9 +348,15 @@ class ReverseQualityService:
         answer=answer.strip()
         if status=='CONFIRMED' and not answer:
             raise ValueError('确认缺失信息时请填写人工答案')
+        canonical=normalize_itr(canonical)
         self.repository.resolve_missing_information(
-            normalize_itr(canonical),missing_id=missing_id,status=status,
+            canonical,missing_id=missing_id,status=status,
             answer=answer,reviewer=reviewer)
+        refreshed=self.get(canonical)
+        if not refreshed:
+            raise KeyError(canonical)
+        self.repository.set_analysis_status(
+            canonical,_analysis_review_status(refreshed))
         return self.get(canonical)
 
     def review_match(self, canonical, *, status, scene_id, reason, missing_condition, reviewer):
@@ -351,10 +378,9 @@ class ReverseQualityService:
              'missing_condition':missing_condition.strip()[:500]}
         if status!='NEED_REVIEW' and not new['match_reason']:
             raise ValueError('请说明匹配或未匹配的依据')
-        fields=item['review'];present=[x for x in fields.values() if x['value']]
-        complete=(status!='NEED_REVIEW' and bool(present) and all(x['review_status']=='CONFIRMED' for x in present)
-                  and all(fields[x]['value'] and fields[x]['review_status']=='CONFIRMED' for x in CORE_FIELDS))
+        analysis_status=_analysis_review_status(
+            item,scene_status=status,match_reviewed=(status!='NEED_REVIEW'))
         self.repository.save_scene_review(
             item['canonical_itr'],scene_match=new,reviewer=reviewer,
-            analysis_status='CONFIRMED' if complete else 'IN_REVIEW')
+            analysis_status=analysis_status)
         return self.get(canonical)
