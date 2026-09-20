@@ -18,7 +18,9 @@ from runtime.contracts import (
     CommittedExecution,
     ExecutionCommit,
     ExecutionDefinitionSnapshot,
+    LegacyProjectionBinding,
     MergeResult,
+    ProjectionOutboxEvent,
     RuntimeErrorInfo,
     RuntimeStatus,
     StepRunRecord,
@@ -156,6 +158,68 @@ class SqliteTaskStore:
                     fingerprint TEXT NOT NULL,
                     snapshot_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS runtime_projection_outbox (
+                    event_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    step_run_id TEXT,
+                    commit_id TEXT NOT NULL,
+                    projection_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    applied_at TEXT,
+                    UNIQUE(commit_id, projection_type)
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_projection_outbox_pending
+                    ON runtime_projection_outbox(status, task_id, run_id);
+
+                CREATE TABLE IF NOT EXISTS runtime_legacy_projection_binding (
+                    binding_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    legacy_analysis_set_id TEXT NOT NULL,
+                    step_run_id TEXT,
+                    legacy_stage TEXT,
+                    projection_version TEXT NOT NULL,
+                    last_applied_commit_id TEXT,
+                    projection_status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_legacy_binding_run
+                    ON runtime_legacy_projection_binding(run_id)
+                    WHERE step_run_id IS NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_legacy_binding_step
+                    ON runtime_legacy_projection_binding(step_run_id)
+                    WHERE step_run_id IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS legacy_quality_analysis_set_projection (
+                    legacy_analysis_set_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL UNIQUE,
+                    knowledge_id TEXT,
+                    issue_version_id TEXT,
+                    status TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS legacy_quality_stage_projection (
+                    legacy_analysis_set_id TEXT NOT NULL,
+                    legacy_stage TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    commit_id TEXT,
+                    status TEXT NOT NULL,
+                    result_json TEXT,
+                    evidence_json TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(legacy_analysis_set_id, legacy_stage)
                 );
                 """
             )
@@ -511,6 +575,47 @@ class SqliteTaskStore:
                         commit.checkpoint.created_at.isoformat(),
                     ),
                 )
+                outbox_event = ProjectionOutboxEvent(
+                    event_id=f"outbox-{commit.commit_id}",
+                    task_id=commit.task_id,
+                    run_id=commit.run_id,
+                    step_run_id=commit.step_run.step_run_id,
+                    commit_id=commit.commit_id,
+                    projection_type="EXECUTION_COMMITTED",
+                    payload={
+                        "execution_key": commit.execution_key,
+                        "status": commit.status.value,
+                        "result_data": commit.result_data,
+                        "evidence": [
+                            item.model_dump(mode="json")
+                            for item in commit.evidence
+                        ],
+                    },
+                    created_at=commit.checkpoint.created_at,
+                )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO runtime_projection_outbox(
+                        event_id, task_id, run_id, step_run_id, commit_id,
+                        projection_type, payload_json, status, attempt_count,
+                        last_error, created_at, applied_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        outbox_event.event_id,
+                        outbox_event.task_id,
+                        outbox_event.run_id,
+                        outbox_event.step_run_id,
+                        outbox_event.commit_id,
+                        outbox_event.projection_type,
+                        self._json(outbox_event.payload),
+                        outbox_event.status,
+                        outbox_event.attempt_count,
+                        outbox_event.last_error,
+                        outbox_event.created_at.isoformat(),
+                        None,
+                    ),
+                )
 
                 if self.fault_injector:
                     self.fault_injector("after_atomic_writes_before_commit")
@@ -716,6 +821,296 @@ class SqliteTaskStore:
                     return MergeResult.model_validate_json(existing["result_json"])
                 raise
         return result
+
+    def get_run(self, run_id: str) -> WorkflowRunRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT record_json FROM runtime_run WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        return WorkflowRunRecord.model_validate_json(row["record_json"]) if row else None
+
+    def get_step_run(self, step_run_id: str) -> StepRunRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT record_json FROM runtime_step_run WHERE step_run_id=?",
+                (step_run_id,),
+            ).fetchone()
+        return StepRunRecord.model_validate_json(row["record_json"]) if row else None
+
+    def list_projection_events(
+        self,
+        *,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        status: str = "PENDING",
+    ) -> list[ProjectionOutboxEvent]:
+        where = ["status=?"]
+        params: list[Any] = [status]
+        if task_id is not None:
+            where.append("task_id=?")
+            params.append(task_id)
+        if run_id is not None:
+            where.append("run_id=?")
+            params.append(run_id)
+        sql = (
+            "SELECT * FROM runtime_projection_outbox WHERE "
+            + " AND ".join(where)
+            + " ORDER BY created_at, event_id"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [
+            ProjectionOutboxEvent(
+                event_id=row["event_id"],
+                task_id=row["task_id"],
+                run_id=row["run_id"],
+                step_run_id=row["step_run_id"],
+                commit_id=row["commit_id"],
+                projection_type=row["projection_type"],
+                payload=json.loads(row["payload_json"] or "{}"),
+                status=row["status"],
+                attempt_count=int(row["attempt_count"] or 0),
+                last_error=row["last_error"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                applied_at=(
+                    datetime.fromisoformat(row["applied_at"])
+                    if row["applied_at"]
+                    else None
+                ),
+            )
+            for row in rows
+        ]
+
+    def mark_projection_event_applied(self, event_id: str) -> None:
+        now = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE runtime_projection_outbox
+                SET status='APPLIED', attempt_count=attempt_count+1,
+                    last_error=NULL, applied_at=?
+                WHERE event_id=?
+                """,
+                (now, event_id),
+            )
+
+    def mark_projection_event_pending(
+        self,
+        event_id: str,
+        error: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE runtime_projection_outbox
+                SET status='PENDING', attempt_count=attempt_count+1,
+                    last_error=?
+                WHERE event_id=?
+                """,
+                (error, event_id),
+            )
+
+    def save_legacy_projection_binding(
+        self,
+        binding: LegacyProjectionBinding,
+    ) -> LegacyProjectionBinding:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_legacy_projection_binding(
+                    binding_id, task_id, run_id, legacy_analysis_set_id,
+                    step_run_id, legacy_stage, projection_version,
+                    last_applied_commit_id, projection_status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(binding_id) DO UPDATE SET
+                    legacy_analysis_set_id=excluded.legacy_analysis_set_id,
+                    legacy_stage=excluded.legacy_stage,
+                    projection_version=excluded.projection_version,
+                    last_applied_commit_id=excluded.last_applied_commit_id,
+                    projection_status=excluded.projection_status,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    binding.binding_id,
+                    binding.task_id,
+                    binding.run_id,
+                    binding.legacy_analysis_set_id,
+                    binding.step_run_id,
+                    binding.legacy_stage,
+                    binding.projection_version,
+                    binding.last_applied_commit_id,
+                    binding.projection_status,
+                    binding.created_at.isoformat(),
+                    binding.updated_at.isoformat(),
+                ),
+            )
+        return binding
+
+    def get_legacy_binding_by_run(
+        self,
+        run_id: str,
+    ) -> LegacyProjectionBinding | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM runtime_legacy_projection_binding
+                WHERE run_id=? AND step_run_id IS NULL
+                """,
+                (run_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return LegacyProjectionBinding(
+            binding_id=row["binding_id"],
+            task_id=row["task_id"],
+            run_id=row["run_id"],
+            legacy_analysis_set_id=row["legacy_analysis_set_id"],
+            step_run_id=row["step_run_id"],
+            legacy_stage=row["legacy_stage"],
+            projection_version=row["projection_version"],
+            last_applied_commit_id=row["last_applied_commit_id"],
+            projection_status=row["projection_status"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def ensure_legacy_analysis_set(
+        self,
+        *,
+        legacy_analysis_set_id: str,
+        task_id: str,
+        run_id: str,
+        knowledge_id: str | None,
+        issue_version_id: str | None,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO legacy_quality_analysis_set_projection(
+                    legacy_analysis_set_id, task_id, run_id, knowledge_id,
+                    issue_version_id, status, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(legacy_analysis_set_id) DO UPDATE SET
+                    status=excluded.status,
+                    metadata_json=excluded.metadata_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    legacy_analysis_set_id,
+                    task_id,
+                    run_id,
+                    knowledge_id,
+                    issue_version_id,
+                    status,
+                    self._json(metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT * FROM legacy_quality_analysis_set_projection
+                WHERE legacy_analysis_set_id=?
+                """,
+                (legacy_analysis_set_id,),
+            ).fetchone()
+        result = dict(row)
+        result["metadata"] = json.loads(result.pop("metadata_json") or "{}")
+        return result
+
+    def get_legacy_analysis_set(
+        self,
+        legacy_analysis_set_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM legacy_quality_analysis_set_projection
+                WHERE legacy_analysis_set_id=?
+                """,
+                (legacy_analysis_set_id,),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["metadata"] = json.loads(result.pop("metadata_json") or "{}")
+        return result
+
+    def upsert_legacy_stage_projection(
+        self,
+        *,
+        legacy_analysis_set_id: str,
+        legacy_stage: str,
+        step_run_id: str,
+        commit_id: str | None,
+        status: str,
+        result_data: Any,
+        evidence: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO legacy_quality_stage_projection(
+                    legacy_analysis_set_id, legacy_stage, step_run_id,
+                    commit_id, status, result_json, evidence_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(legacy_analysis_set_id, legacy_stage) DO UPDATE SET
+                    step_run_id=excluded.step_run_id,
+                    commit_id=excluded.commit_id,
+                    status=excluded.status,
+                    result_json=excluded.result_json,
+                    evidence_json=excluded.evidence_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    legacy_analysis_set_id,
+                    legacy_stage,
+                    step_run_id,
+                    commit_id,
+                    status,
+                    self._json(result_data),
+                    self._json(evidence or []),
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT * FROM legacy_quality_stage_projection
+                WHERE legacy_analysis_set_id=? AND legacy_stage=?
+                """,
+                (legacy_analysis_set_id, legacy_stage),
+            ).fetchone()
+        result = dict(row)
+        result["result"] = json.loads(result.pop("result_json") or "null")
+        result["evidence"] = json.loads(result.pop("evidence_json") or "[]")
+        return result
+
+    def list_legacy_stage_projections(
+        self,
+        legacy_analysis_set_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM legacy_quality_stage_projection
+                WHERE legacy_analysis_set_id=?
+                ORDER BY legacy_stage
+                """,
+                (legacy_analysis_set_id,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            item = dict(row)
+            item["result"] = json.loads(item.pop("result_json") or "null")
+            item["evidence"] = json.loads(item.pop("evidence_json") or "[]")
+            results.append(item)
+        return results
 
     def get_task(self, task_id: str) -> TaskRecord | None:
         with self._connect() as conn:
