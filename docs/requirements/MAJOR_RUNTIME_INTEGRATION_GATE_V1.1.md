@@ -8,12 +8,19 @@ Business domain: `MAJOR_CASE`
 
 - Major Issue product baseline:
   - `fix/req022-release-gate@12ea090f911d376554e6accd3b4ca17386fe937c`
-- Unified Agent Runtime P0.3:
-  - `main@5f9d0a7093ef1ea2531767d84c05b234eb95335a`
+- Unified Agent Runtime current main:
+  - `main@1d1ab5fc7050f63b5ba18ce4902c4b658b49fd1f`
+- P0.3 original release commit:
+  - `5f9d0a7093ef1ea2531767d84c05b234eb95335a`
+- Agent Config PR #9: merged
+- Runtime secret hardening PR #14: merged
+- Storage × Runtime acceptance PR #15: merged
 - Integration branch:
   - `integration/major-runtime-v1.1`
-- Baseline merge commit:
+- Initial P0.3 alignment merge commit:
   - `d39b5a9e320586afb052bfabfc517456a1f1f971`
+- Latest-main alignment merge commit:
+  - `7763521f17a9b5fc48bbf5e66b40064047523711`
 - Alignment result:
   - versus Runtime main: behind = 0
   - versus REQ-022 release-gate: behind = 0
@@ -102,6 +109,8 @@ Required:
 Current existing major-case `builder/OpenAICompatibleClient` has its own retry loop.
 It therefore **must not be used as the final Runtime-managed Provider path**.
 
+Current main also contains a Storage-specific single-call real-provider adapter used by Storage E2E. It validates the required boundary pattern, but it is domain-specific and does not close the generic ORCH-B01 requirement for Major Issue.
+
 Public dependency:
 - GitHub Issue #11
 - `ORCH-B01 — Runtime Provider Execution Adapter`
@@ -112,12 +121,12 @@ No business-side workaround will be added.
 
 | Gate | Result | Evidence / conclusion |
 |---|---|---|
-| G01 Baseline | PASS | integration branch contains both P0.3 main and REQ-022 release-gate, both behind=0 |
+| G01 Baseline | PASS | integration branch contains current main `1d1ab5fc...` and REQ-022 release-gate; both compare results are behind=0 |
 | G02 Contract | PASS | canonical IDs, input/output semantics, deterministic request_id and event partition are frozen in runtime_integration.py |
 | G03 Provider Boundary | **BLOCKED** | ORCH-B01 / GitHub Issue #11; current legacy OpenAICompatibleClient has internal retry |
 | G04 Retry Ownership | PASS | contract freezes Runtime-only retry; Runtime D11 retry/hard-budget acceptance is included in integration CI |
 | G05 Long Content | PASS | SourceRef / LogicalUnit / AtomicGroup / Coverage / Business Merge / Business Gate defined and acceptance-tested |
-| G06 Snapshot / Secret | PASS_WITH_DEPENDENCY | P0.3 Canonical Direct snapshot contract is accepted; business adapter contains no secret; real Provider secret path remains part of ORCH-B01 |
+| G06 Snapshot / Secret | PASS | Agent Config and secret-hardening are now merged to main; business adapter contains no secret; Runtime config redacts secret-bearing success/error surfaces |
 | G07 Acceptance | PASS | Runtime D8 + Domain Gate + Runtime D11 + REQ-022 regression all pass |
 
 Overall Integration Gate: **BLOCKED by G03 only**.
@@ -126,7 +135,7 @@ Runtime Core new blocker: **0**.
 
 ## 7. Automated evidence
 
-Latest completed integration run before this document-only update:
+Latest completed integration run before latest-main re-alignment:
 
 - GitHub Actions Run: `35521969799`
 - Result: SUCCESS
@@ -169,7 +178,8 @@ Acceptance cases:
 ### C — public dependency
 
 - ORCH-B01 / Issue #11 Runtime Provider Execution Adapter.
-- Agent Config PR #9 remains optional fixed-head integration capability until merged to main; it does not block Canonical Direct preparation.
+- Agent Config PR #9 is now merged to main and is part of the current public baseline.
+- The only public dependency blocking this Gate is ORCH-B01 / Issue #11.
 
 ## 9. Entry condition for D01 real E2E
 
