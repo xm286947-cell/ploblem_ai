@@ -40,3 +40,7 @@ class MissingSharedContextError(ContentCoreError):
 
 class InvalidPartialResultError(ContentCoreError):
     code = "INVALID_PARTIAL_RESULT"
+
+
+class PartitionMismatchError(ContentCoreError):
+    code = "PARTITION_MISMATCH"
