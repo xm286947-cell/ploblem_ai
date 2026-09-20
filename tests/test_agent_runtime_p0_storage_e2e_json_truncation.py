@@ -4,6 +4,7 @@ import json
 
 from runtime import EvidenceLocator, EvidenceReference, SourceRef, SqliteTaskStore
 from runtime.engine import LightweightExecutionEngine
+from runtime.adapters import StorageFieldResult
 
 from storage_e2e import JsonTruncationAwareStorageAdapter, ProviderResponse
 
@@ -100,8 +101,7 @@ def test_storage_runtime_acceptance_truncated_then_runtime_retry_completes(tmp_p
     assert len(committed_keys) == 1
     committed = store.get_committed_execution(next(iter(committed_keys)))
     assert committed is not None
-    assert committed.result_data == golden
-
+    expected_committed = [\n        StorageFieldResult.model_validate(item).model_dump(mode="json")\n        for item in golden\n    ]\n    assert committed.result_data == expected_committed\n
 
 def test_storage_runtime_acceptance_normal_response_uses_one_provider_call(tmp_path):
     store = SqliteTaskStore(tmp_path / "runtime.db")
