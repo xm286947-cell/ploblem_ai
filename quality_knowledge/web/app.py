@@ -232,6 +232,23 @@ def create_app(db_path):
     from .scenario_asset_pages import create_asset_router
     app.include_router(create_asset_router(scenario_repo,tpl,scenario_generation_svc))
 
+    @app.get('/api/reverse-quality/{canonical_itr}')
+    def api_reverse_quality_result(canonical_itr: str):
+        result=reverse_quality_svc.get(canonical_itr)
+        if not result:
+            raise HTTPException(404,'REVERSE_QUALITY_RESULT_NOT_FOUND')
+        return result['result']
+
+    @app.get('/api/reverse-quality/{canonical_itr}/scenario-candidate')
+    def api_reverse_quality_scenario_candidate(canonical_itr: str):
+        result=reverse_quality_svc.get(canonical_itr)
+        if not result:
+            raise HTTPException(404,'REVERSE_QUALITY_RESULT_NOT_FOUND')
+        try:
+            return scenario_generation_svc.candidate_from_reverse_quality(result)
+        except ValueError as exc:
+            raise HTTPException(409,str(exc)) from exc
+
     @app.get('/reverse-quality/{material_id}', response_class=HTMLResponse, include_in_schema=False)
     def reverse_quality_page(request: Request, material_id: str, product_code: str = '', error: str = ''):
         try:facts=reverse_quality_svc.facts(material_id)
