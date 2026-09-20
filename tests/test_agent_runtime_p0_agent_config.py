@@ -761,3 +761,114 @@ providers:
     serialized = result.error.model_dump_json()
     assert direct_secret not in serialized
     assert "[REDACTED]" in serialized
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "qwen3-vl:8b-thinking-q4_K_M",
+        "qwen3-vl:8b-thinking-local",
+        "gemma4:e4b",
+    ],
+)
+def test_ollama_local_supports_auth_none_and_model_switching(
+    tmp_path,
+    model,
+):
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        """
+providers:
+  ollama_local:
+    type: openai_compatible
+    mode: direct
+    auth: none
+    base_url: http://192.168.1.100:11434/v1
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml(model=model).replace(
+            "provider_ref: qwen_prod",
+            "provider_ref: ollama_local",
+        ),
+        encoding="utf-8",
+    )
+
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        provider_profiles="providers.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        content_strategies=_strategy_registry(),
+        completeness_gates={
+            "storage_parameter_gate": lambda value: value,
+        },
+        environ={},
+    )
+    resolved = loader.load(config_path)
+
+    assert resolved.provider.mode == "direct"
+    assert resolved.provider.auth == "none"
+    assert resolved.provider.base_url == "http://192.168.1.100:11434/v1"
+    assert resolved.provider.api_key_env is None
+    assert resolved.provider.model == model
+
+    observed = {}
+    store = SqliteTaskStore(tmp_path / f"runtime-{model.replace(':', '-')}.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+
+    def handler(payload, context):
+        observed.update(context["runtime"]["provider_config"])
+        return payload
+
+    runtime.load_agent(config_path, handler)
+    result = runtime.invoke(
+        AgentRequest(
+            request_id=f"ollama-{model}",
+            agent_id="storage.emmc.parameter_extract",
+            input={"ok": True},
+        )
+    )
+
+    assert result.status == RuntimeStatus.COMPLETED
+    assert observed["auth"] == "none"
+    assert observed["api_key"] is None
+    assert observed["model"] == model
+    assert observed["sdk_retry"] == 0
+
+
+def test_auth_none_rejects_api_key_configuration(tmp_path):
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        """
+providers:
+  bad_ollama:
+    type: openai_compatible
+    mode: direct
+    auth: none
+    base_url: http://192.168.1.100:11434/v1
+    api_key: should-not-be-here
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml().replace(
+            "provider_ref: qwen_prod",
+            "provider_ref: bad_ollama",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigValidationError) as exc:
+        AgentConfigLoader(
+            root=tmp_path,
+            provider_profiles="providers.yaml",
+            schemas={"StorageFieldResult": StorageFieldResult},
+            content_strategies=_strategy_registry(),
+            completeness_gates={
+                "storage_parameter_gate": lambda value: value,
+            },
+            environ={},
+        )
+
+    assert exc.value.code == "CONFIG_VALIDATION_FAILED"
