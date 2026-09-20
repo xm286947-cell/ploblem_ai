@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from runtime.contracts import (
     AgentDefinition,
+    ErrorCategory,
     ExecutionMode,
     ExecutionPolicy,
     FailurePolicy,
@@ -22,6 +23,7 @@ from runtime.contracts import (
     WorkflowResult,
 )
 from runtime.engine import LightweightExecutionEngine
+from runtime.reliability import RuntimeStepError
 from runtime.store import SqliteTaskStore
 
 
@@ -218,13 +220,14 @@ class LegacyQualityIssueStageHandlerAdapter:
 
         selected = "" if str(agent_id).upper() == "DEFAULT" else str(agent_id)
         self.analyzers = {
-            "occurrence": OccurrenceAnalyzer(root, client, agent_id=selected),
-            "escape": EscapeAnalyzer(root, client, agent_id=selected),
-            "recurrence": RecurrenceAnalyzer(root, client, agent_id=selected),
+            "occurrence": OccurrenceAnalyzer(root, client, agent_id=selected, runtime_managed=True),
+            "escape": EscapeAnalyzer(root, client, agent_id=selected, runtime_managed=True),
+            "recurrence": RecurrenceAnalyzer(root, client, agent_id=selected, runtime_managed=True),
             "capability_gap": CapabilityGapAnalyzer(
                 root,
                 client,
                 agent_id=selected,
+                runtime_managed=True,
             ),
         }
 
@@ -250,7 +253,59 @@ class LegacyQualityIssueStageHandlerAdapter:
                     "recurrence", {}
                 )
 
-            result, _model, _debug = analyzer.analyze(payload)
+            runtime_ctx = dict(context.get("runtime") or {})
+            validation_cycle_no = int(
+                runtime_ctx.get("validation_cycle_no") or 1
+            )
+            try:
+                result, _model, _debug = analyzer.analyze(
+                    payload,
+                    validation_cycle_no=validation_cycle_no,
+                )
+            except Exception as exc:
+                from builder.ai_client import AIClientError
+                from quality_knowledge.analyzers import StageAnalysisError
+
+                if isinstance(exc, StageAnalysisError):
+                    cause = exc.cause
+                    message = str(cause)
+                    debug = dict(exc.debug or {})
+                    if isinstance(cause, AIClientError):
+                        if (
+                            "Token上限" in message
+                            or "JSON可能被截断" in message
+                            or debug.get("response_truncated")
+                        ):
+                            category = ErrorCategory.VALIDATION
+                            code = "LEGACY_OUTPUT_TRUNCATED"
+                        else:
+                            category = ErrorCategory.TRANSPORT
+                            code = "LEGACY_AI_TRANSPORT_ERROR"
+                        retryable = True
+                    elif (
+                        cause.__class__.__name__ == "ValidationError"
+                        or isinstance(cause, ValueError)
+                        or debug.get("raw_response") is not None
+                    ):
+                        category = ErrorCategory.VALIDATION
+                        code = "LEGACY_AI_VALIDATION_ERROR"
+                        retryable = True
+                    else:
+                        category = ErrorCategory.EXECUTION
+                        code = "LEGACY_STAGE_EXECUTION_ERROR"
+                        retryable = False
+                    raise RuntimeStepError(
+                        message,
+                        code=code,
+                        category=category,
+                        retryable=retryable,
+                        details={
+                            "stage": stage,
+                            "legacy_error_type": cause.__class__.__name__,
+                            "runtime_managed": True,
+                        },
+                    ) from exc
+                raise
             if isinstance(result, list):
                 return [
                     item.model_dump(mode="json")
