@@ -147,6 +147,35 @@ def run_occurrence(
     return store, result
 
 
+def run_raw_provider(
+    tmp_path: Path,
+    *,
+    client: OpenAICompatibleClient,
+    policy: ExecutionPolicy,
+    request_id: str,
+):
+    store = SqliteTaskStore(tmp_path / f"{request_id}.db")
+    engine = LightweightExecutionEngine(store)
+    client.max_retries = 0
+
+    def handler(payload, _context):
+        response = client.complete(
+            [{"role": "user", "content": str(payload.get("prompt", "hello"))}]
+        )
+        return response.content
+
+    engine.register_agent("raw.mock-http", handler)
+    result = engine.invoke(
+        AgentRequest(
+            request_id=request_id,
+            agent_id="raw.mock-http",
+            input={"prompt": "hello"},
+            execution_policy=policy,
+        )
+    )
+    return store, result
+
+
 def test_runtime_real_http_429_then_success_is_owned_by_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
     with running_server() as (host, port):
@@ -334,3 +363,140 @@ def test_runtime_real_http_timeout_is_classified_and_counted(tmp_path, monkeypat
         assert result.error is not None
         assert result.error.category.value == "TRANSPORT"
         assert "超时" in result.error.message or "timed out" in result.error.message.lower()
+
+
+def test_rt_mock_001_runtime_normal_text_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(host, port, payload="normal-text", behavior={})
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 2,
+                "max_retries": 0,
+            }
+        )
+        _, result = run_raw_provider(
+            tmp_path,
+            client=client,
+            policy=runtime_policy(transport=1, budget=1),
+            request_id="rt-mock-001-text",
+        )
+        assert result.status == RuntimeStatus.COMPLETED
+        assert result.data == "normal-text"
+        assert result.execution.provider_calls == 1
+
+
+def test_rt_mock_002_runtime_structured_payload_semantics_are_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    structured = {"answer": "ok", "items": [1, 2], "nested": {"enabled": True}}
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(host, port, payload=structured, behavior={})
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 2,
+                "max_retries": 0,
+            }
+        )
+        _, result = run_raw_provider(
+            tmp_path,
+            client=client,
+            policy=runtime_policy(transport=1, budget=1),
+            request_id="rt-mock-002-structured",
+        )
+        assert result.status == RuntimeStatus.COMPLETED
+        assert json.loads(result.data) == structured
+        assert result.execution.provider_calls == 1
+
+
+def test_rt_mock_008_connection_interruption_is_retryable_transport(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(
+            host,
+            port,
+            payload="{}",
+            behavior={"disconnect_before_response": True},
+        )
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 2,
+                "max_retries": 9,
+            }
+        )
+        _, result = run_occurrence(
+            tmp_path,
+            base_url=base_url,
+            client=client,
+            policy=runtime_policy(transport=2, budget=2),
+            request_id="rt-mock-008-connection-drop",
+        )
+        assert client.max_retries == 0
+        assert result.status == RuntimeStatus.FAILED
+        assert result.execution.provider_calls == 2
+        assert counters(host, port)["default"] == 2
+        assert result.error is not None
+
+
+def test_rt_mock_011_empty_response_is_not_misclassified_as_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(host, port, payload="", behavior={})
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 2,
+                "max_retries": 0,
+            }
+        )
+        _, result = run_occurrence(
+            tmp_path,
+            base_url=base_url,
+            client=client,
+            policy=runtime_policy(transport=1, budget=1),
+            request_id="rt-mock-011-empty",
+        )
+        assert result.status == RuntimeStatus.FAILED
+        assert result.execution.provider_calls == 1
+        assert counters(host, port)["default"] == 1
+
+
+def test_rt_mock_012_runtime_handles_very_long_mock_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    long_payload = "LONG-" + ("0123456789abcdef" * 32768)
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(host, port, payload=long_payload, behavior={})
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 3,
+                "max_retries": 0,
+            }
+        )
+        _, result = run_raw_provider(
+            tmp_path,
+            client=client,
+            policy=runtime_policy(transport=1, budget=1),
+            request_id="rt-mock-012-long",
+        )
+        assert result.status == RuntimeStatus.COMPLETED
+        assert result.data == long_payload
+        assert len(result.data) == len(long_payload)
+        assert result.execution.provider_calls == 1
