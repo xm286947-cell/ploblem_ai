@@ -398,6 +398,17 @@ class MajorKnowledgeRepository:
                 )
         return self.entry(entry_id) or {}
 
+    def _entry_scope_kind(self, connection: sqlite3.Connection, entry: dict) -> str:
+        if entry.get("event_id"):
+            return "EVENT"
+        shared = connection.execute(
+            """SELECT 1 FROM kb_tag_link tl JOIN kb_tag t ON t.tag_id=tl.tag_id
+               WHERE tl.target_type='ENTRY' AND tl.target_id=? AND tl.state='ACTIVE'
+                 AND t.namespace='SCOPE' AND t.code='CASE_SHARED'""",
+            (entry["entry_id"],),
+        ).fetchone()
+        return "CASE_SHARED" if shared else "UNSCOPED"
+
     def entry(self, entry_id: str) -> dict | None:
         with self.connect() as connection:
             row = connection.execute(
@@ -409,6 +420,7 @@ class MajorKnowledgeRepository:
                 item["evidence"] = [dict(ev) for ev in connection.execute(
                     "SELECT * FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id", (item["current_revision_id"],)
                 )]
+                item["scope_kind"] = self._entry_scope_kind(connection, item)
             return item
 
     def revise_entry(self, entry_id: str, content: str, status: str, reviewer: str, reason: str = "") -> dict:
@@ -448,8 +460,108 @@ class MajorKnowledgeRepository:
                 item["evidence"] = [dict(ev) for ev in connection.execute(
                     "SELECT * FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id", (item["current_revision_id"],)
                 )]
+                item["scope_kind"] = self._entry_scope_kind(connection, item)
                 result.append(item)
             return result
+
+    def entries_for_event(self, event_id: str) -> list[dict]:
+        event = self.event(event_id)
+        if not event:
+            raise KeyError(event_id)
+        case_entries = self.entries(event["case_id"])
+        event_count = len(self.events(event["case_id"]))
+        result = []
+        for item in case_entries:
+            if item["scope_kind"] == "EVENT" and item["event_id"] == event_id:
+                result.append(item)
+            elif item["scope_kind"] == "CASE_SHARED":
+                result.append(item)
+            elif item["scope_kind"] == "UNSCOPED" and event_count == 1:
+                # Compatibility for historical single-event cases created before
+                # event scoping was enforced.
+                result.append(item)
+        return result
+
+    def unscoped_confirmed_entries(self, case_id: str) -> list[dict]:
+        if len(self.events(case_id)) <= 1:
+            return []
+        return [
+            item for item in self.entries(case_id)
+            if item["scope_kind"] == "UNSCOPED"
+            and item["status"] in {"CONFIRMED", "CORRECTED"}
+        ]
+
+    def set_entry_scope(self, entry_id: str, *, scope: str, event_id: str | None = None) -> dict:
+        scope = scope.strip().upper()
+        if scope not in {"EVENT", "CASE_SHARED", "UNSCOPED"}:
+            raise ValueError("INVALID_ENTRY_SCOPE")
+        current = self.entry(entry_id)
+        if not current:
+            raise KeyError(entry_id)
+        if scope == "EVENT":
+            if not event_id:
+                raise ValueError("ENTRY_EVENT_SCOPE_REQUIRES_EVENT")
+            event = self.event(event_id)
+            if not event:
+                raise KeyError(event_id)
+            if event["case_id"] != current["case_id"]:
+                raise ValueError("ENTRY_EVENT_SCOPE_CASE_MISMATCH")
+        with self.transaction() as connection:
+            tag = connection.execute(
+                "SELECT tag_id FROM kb_tag WHERE namespace='SCOPE' AND code='CASE_SHARED'"
+            ).fetchone()
+            if not tag:
+                tag_id = _id("KTAG")
+                connection.execute(
+                    "INSERT INTO kb_tag(tag_id,namespace,code,label) VALUES(?,?,?,?)",
+                    (tag_id, "SCOPE", "CASE_SHARED", "案例级共享结论"),
+                )
+            else:
+                tag_id = tag["tag_id"]
+            connection.execute(
+                "DELETE FROM kb_tag_link WHERE tag_id=? AND target_type='ENTRY' AND target_id=?",
+                (tag_id, entry_id),
+            )
+            if scope == "EVENT":
+                connection.execute("UPDATE kb_entry SET event_id=? WHERE entry_id=?", (event_id, entry_id))
+            elif scope == "CASE_SHARED":
+                connection.execute("UPDATE kb_entry SET event_id=NULL WHERE entry_id=?", (entry_id,))
+                connection.execute(
+                    "INSERT INTO kb_tag_link(tag_link_id,tag_id,target_type,target_id,state,derived_from) VALUES(?,?,?,?,?,?)",
+                    (_id("KTL"), tag_id, "ENTRY", entry_id, "ACTIVE", "HUMAN_SCOPE"),
+                )
+            else:
+                connection.execute("UPDATE kb_entry SET event_id=NULL WHERE entry_id=?", (entry_id,))
+        return self.entry(entry_id) or {}
+
+    def infer_entry_event(self, case_id: str, evidence: Iterable[dict]) -> str | None:
+        events = self.events(case_id)
+        if len(events) == 1:
+            return events[0]["event_id"]
+        if not events:
+            return None
+        texts: list[str] = []
+        fragment_ids = []
+        for item in evidence:
+            excerpt = str(item.get("excerpt") or "")
+            if excerpt:
+                texts.append(excerpt)
+            if item.get("fragment_id"):
+                fragment_ids.append(str(item["fragment_id"]))
+        if fragment_ids:
+            placeholders = ",".join("?" for _ in fragment_ids)
+            with self.connect() as connection:
+                rows = connection.execute(
+                    f"SELECT text_content FROM kb_fragment WHERE fragment_id IN ({placeholders})",
+                    fragment_ids,
+                ).fetchall()
+            texts.extend(str(row["text_content"] or "") for row in rows)
+        haystack = "\n".join(texts).upper()
+        matched = [
+            event for event in events
+            if event.get("standard_itr") and str(event["standard_itr"]).upper() in haystack
+        ]
+        return matched[0]["event_id"] if len(matched) == 1 else None
 
     def clear_pending_ai_entries(self, case_id: str) -> None:
         with self.connect() as connection:
