@@ -19,6 +19,7 @@ class ReferenceConfig(ConfigModel):
 class ProviderConfig(ConfigModel):
     type: str
     mode: Literal["env", "direct"] = "env"
+    auth: Literal["api_key", "none"] = "api_key"
     base_url_env: str | None = None
     api_key_env: str | None = None
     base_url: str | None = None
@@ -33,18 +34,34 @@ class ProviderConfig(ConfigModel):
                 raise ValueError(
                     "env provider mode cannot configure direct api_key/base_url"
                 )
-            if self.type == "openai_compatible" and not self.api_key_env:
+            if self.type == "openai_compatible" and not self.base_url_env:
                 raise ValueError(
-                    "openai_compatible env provider requires api_key_env"
+                    "openai_compatible env provider requires base_url_env"
+                )
+            if self.auth == "api_key" and not self.api_key_env:
+                raise ValueError(
+                    "api_key auth in env mode requires api_key_env"
+                )
+            if self.auth == "none" and self.api_key_env is not None:
+                raise ValueError(
+                    "auth=none cannot configure api_key_env"
                 )
         else:
             if self.api_key_env is not None or self.base_url_env is not None:
                 raise ValueError(
                     "direct provider mode cannot configure *_env references"
                 )
-            if self.type == "openai_compatible" and not self.api_key:
+            if self.type == "openai_compatible" and not self.base_url:
                 raise ValueError(
-                    "openai_compatible direct provider requires api_key"
+                    "openai_compatible direct provider requires base_url"
+                )
+            if self.auth == "api_key" and not self.api_key:
+                raise ValueError(
+                    "api_key auth in direct mode requires api_key"
+                )
+            if self.auth == "none" and self.api_key is not None:
+                raise ValueError(
+                    "auth=none cannot configure api_key"
                 )
         return self
 
@@ -132,6 +149,7 @@ class ProviderProfilesConfig(ConfigModel):
 class ResolvedProviderConfig(ConfigModel):
     type: str
     mode: Literal["env", "direct"] = "env"
+    auth: Literal["api_key", "none"] = "api_key"
     profile_ref: str | None = None
     model: str
     base_url_env: str | None = None
