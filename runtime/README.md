@@ -1,65 +1,83 @@
 # Unified Agent Runtime — P0.3
 
-## Frozen engineering baseline
+## Baseline
 
 - Repository: `xm286947-cell/ploblem_ai`
 - Source branch: `main`
-- Base commit: `ec071ccf7ac5133b9ebd25e1b55dba47cc7e808f`
+- P0.3 base commit: `ec071ccf7ac5133b9ebd25e1b55dba47cc7e808f`
 - Work branch: `feature/agent-runtime-p0`
 - Contract baseline: `P0.2_CONTRACT_FROZEN_V1.0`
+- Validated contract state: `P0.2_CONTRACT_VALIDATED_V1.0`
 - Acceptance baseline: `P0.3_RUNTIME_ACCEPTANCE_MATRIX_V0.2`
-- Development plan: `RUNTIME_DEVELOPMENT_OBJECTIVES_AND_PLAN_V1.0_LOCKED`
 
-## Current implementation boundary
+## P0.3 status
 
-This branch is implementing the first P0.3 batch in the locked order:
+D0-D11 implementation and mandatory acceptance are complete on the P0.3 branch.
 
-1. D0 — engineering baseline lock.
-2. D1 — canonical contract skeleton + persistent SQLite TaskStore.
-3. D2 — minimal execution core.
+Validated scope:
 
-Implemented in D1/D2:
+- Canonical `AgentRequest / AgentResult / WorkflowRequest / WorkflowResult`.
+- Persistent `Task / Run / StepRun / Attempt / Checkpoint` state.
+- `SINGLE / SEQUENTIAL / PARALLEL` execution.
+- Request idempotency and stable `execution_key`.
+- Runtime-owned Retry Budget and provider-call hard caps.
+- Atomic commit, checkpoint, resume, and crash recovery.
+- Long-content projection, planning, AtomicGroup, and partial commits.
+- Coverage, Source Identity, Evidence, Merge, and Completeness Gate.
+- Immutable Execution Definition Snapshot.
+- Partition isolation.
+- Cooperative cancellation.
+- Legacy Quality Issue adapter and projection outbox.
+- MajorIssue D01 compatibility fixture.
+- Storage compatibility fixture.
+- Engine replacement comparison.
 
-- Canonical `AgentRequest / AgentResult`.
-- Canonical `WorkflowRequest / WorkflowResult`.
-- `Task / Run / StepRun / Attempt / Checkpoint` contract records.
-- Persistent SQLite `TaskStore`.
-- `invoke / execute / submit / get_task`.
-- `SINGLE / SEQUENTIAL / PARALLEL` execution modes.
-- `LightweightExecutionEngine`.
-- Generic D1/D2 tests, including SQLite reopen/read persistence.
+P0 default engine:
 
-## Explicitly not claimed yet
+- `LightweightExecutionEngine`
 
-The following belong to subsequent locked stages and are not considered complete in D1/D2:
+Validated alternative:
 
-- D3: request idempotency, stable execution keys, Retry Budget, atomic commit, checkpoint/resume, crash recovery.
-- D4: long-content strategy/planning/chunking.
-- D5: coverage/evidence/merge/completeness.
-- D6: immutable execution snapshot, partition isolation, full cooperative cancellation.
-- D7-D9: business fixtures/adapters.
-- D10: LangGraph engine comparison.
-- D11: full P0.3 acceptance.
+- `LangGraphExecutionEngine`
 
-No P0.2 frozen contract semantics may be silently changed during implementation.
+LangGraph is not a default production dependency. It is declared in
+`requirements-runtime-p0-test.txt` for D10 engine-comparison and P0 acceptance
+reproducibility.
 
+## Retry ownership
 
-## D3 reliability evidence
+For Runtime-managed adapters, Runtime is the single retry authority.
 
-- Request idempotency and fingerprint conflict.
-- Stable execution keys and provider-call hard budgets.
-- Atomic result/checkpoint/attempt commit marker.
-- Same Task + new Run resume.
-- Crash recovery at before-call, after-return-before-commit, and after-commit-before-status windows.
-- PR #3 CI evidence: 12 tests passed before D4 entry.
+- Provider/SDK hidden transport retry is disabled.
+- Legacy analyzer hidden validation retry is disabled.
+- Transport and validation failures are surfaced as categorized Runtime errors.
+- Every real provider request consumes Runtime provider-call budget.
 
-## D4 implementation
+Legacy non-Runtime call paths retain their existing behavior.
 
-- Explicit ContentStrategyRegistry / ContentProjector boundary.
-- SourceBundle / LogicalUnit / AtomicGroup contracts.
-- Deterministic ContentPlanner.
-- KEEP_TOGETHER / SAME_CONTEXT enforcement.
-- Chunk capacity and overlap planning.
-- PartialResultCommitter rejects schema-invalid or incomplete/truncated objects.
+## Acceptance
 
-D5 Coverage / Evidence / Merge remains intentionally outside the D4 implementation boundary.
+The pre-review P0.3 gate completed:
+
+- Mandatory Cases: 64 / 64 PASS
+- Final D1-D11 CI: 80 passed in 4.40s
+
+Final merge review then identified two engineering closure blockers:
+
+1. repository-declared LangGraph test dependency;
+2. Runtime-owned retry semantics on the real Legacy Quality Issue chain.
+
+Both are covered by `tests/test_agent_runtime_p0_merge_blockers.py` and must pass
+together with the original D1-D11 suite before merging to `main`.
+
+## Not claimed by P0.3
+
+P0.3 validation does **not** mean:
+
+- real business data acceptance is complete;
+- real-model quality/cost evaluation is complete;
+- Windows/PVE/production deployment is accepted;
+- all business domains are migrated;
+- distributed Worker/Queue/HA is implemented.
+
+Do not silently change frozen P0.2 Contract semantics during subsequent work.
