@@ -503,3 +503,21 @@ def test_control_plane_rejects_informational_final_status():
 
         assert status == 400
         assert "status must be >= 200" in json.loads(raw)["error"]
+
+
+def test_control_plane_rejects_non_failure_fail_status():
+    with running_server() as (host, port):
+        status, _, raw = request(
+            host,
+            port,
+            "POST",
+            "/__mock__/scenario",
+            {
+                "scenario_key": "invalid-fail-status",
+                "payload": "x",
+                "behavior": {"fail_first_n": 1, "fail_status": 200},
+            },
+        )
+
+        assert status == 400
+        assert "fail_status must be >= 400" in json.loads(raw)["error"]
