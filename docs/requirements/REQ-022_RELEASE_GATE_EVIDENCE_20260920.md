@@ -34,3 +34,12 @@ warning 均为 Starlette TestClient 使用 AnyIO 旧别名产生的弃用提示�
 - 正式发布结论：`NOT APPROVED`
 
 本记录只证明上述代码基线在本地自动测试范围内的结果，不将 Mock、合成数据或 macOS 测试冒充环境验收。CI 在变更分支上复跑后，以 GitHub Actions Artifact 作为远端可下载证据。
+
+## GitHub Actions 复跑
+
+- 验证提交：`85e1f99fbed99055b4d814630efb40a463910276`
+- REQ-022 Release Gate Run：`35498472707`，`SUCCESS`
+- Release Gate Job：`106045786751`，所有专项、累计回归、已知排除记录和证据上传步骤均为 `SUCCESS`
+- 原 REQ-022 Regression Run：`35498472671`，`SUCCESS`
+
+远端复跑环境为 GitHub Actions Ubuntu runner、Python 3.11。工作流将五类 JUnit、累计 JUnit 和 `KNOWN_EXCLUSIONS.txt` 上传为 90 天保留的证据 Artifact。
