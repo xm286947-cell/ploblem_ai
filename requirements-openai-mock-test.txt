@@ -1,2 +1,2 @@
 pytest>=8,<9
-openai>=3.16,<4
+openai==3.16.2
