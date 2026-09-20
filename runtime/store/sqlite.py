@@ -394,6 +394,7 @@ class SqliteTaskStore:
             (item.run_sequence for item in existing_runs),
             default=0,
         ) + 1
+        task = self.get_task(task_id)
         run = WorkflowRunRecord(
             run_id=f"run-{uuid4().hex}",
             task_id=task_id,
@@ -403,6 +404,9 @@ class SqliteTaskStore:
             input_hash=input_hash,
             run_sequence=run_sequence,
             resume_of_run_id=resume_of_run_id,
+            execution_snapshot_id=(
+                task.execution_snapshot_id if task is not None else None
+            ),
             started_at=started_at,
         )
         self.save_run(run)
