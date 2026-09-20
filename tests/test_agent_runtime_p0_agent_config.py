@@ -93,6 +93,7 @@ def _write_fixture(
 providers:
   qwen_prod:
     type: openai_compatible
+    mode: env
     base_url_env: DASHSCOPE_BASE_URL
     api_key_env: DASHSCOPE_API_KEY
 """.strip(),
@@ -570,3 +571,193 @@ def test_ac14_resume_keeps_original_snapshot_after_yaml_change(tmp_path):
 
     task_after = store.get_task(task.task_id)
     assert task_after.execution_snapshot_id == task.execution_snapshot_id
+
+
+@pytest.mark.parametrize(
+    ("provider_ref", "base_url", "api_key"),
+    [
+        ("qwen_test", "http://qwen.test/v1", "qwen-direct-key"),
+        ("zhipu_test", "http://zhipu.test/v1", "zhipu-direct-key"),
+        ("deepseek_test", "http://deepseek.test/v1", "deepseek-direct-key"),
+    ],
+)
+def test_provider_profiles_support_direct_test_mode_without_snapshot_secret(
+    tmp_path,
+    provider_ref,
+    base_url,
+    api_key,
+):
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        f"""
+providers:
+  {provider_ref}:
+    type: openai_compatible
+    mode: direct
+    base_url: {base_url}
+    api_key: {api_key}
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml().replace(
+            "provider_ref: qwen_prod",
+            f"provider_ref: {provider_ref}",
+        ),
+        encoding="utf-8",
+    )
+
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        provider_profiles="providers.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        content_strategies=_strategy_registry(),
+        completeness_gates={
+            "storage_parameter_gate": lambda value: value,
+        },
+        environ={},
+    )
+    resolved = loader.load(config_path)
+
+    assert resolved.provider.mode == "direct"
+    assert resolved.provider.base_url == base_url
+    assert resolved.provider.api_key_env is None
+    assert api_key not in resolved.model_dump_json()
+
+    observed = {}
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+
+    def handler(payload, context):
+        observed.update(context["runtime"]["provider_config"])
+        return payload
+
+    runtime.load_agent(config_path, handler)
+    result = runtime.invoke(
+        AgentRequest(
+            request_id=f"direct-{provider_ref}",
+            agent_id="storage.emmc.parameter_extract",
+            input={"ok": True},
+        )
+    )
+
+    assert result.status == RuntimeStatus.COMPLETED
+    assert observed["mode"] == "direct"
+    assert observed["base_url"] == base_url
+    assert observed["api_key"] == api_key
+    assert observed["sdk_retry"] == 0
+    snapshot = _snapshot(store, result)
+    assert api_key not in snapshot.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("provider_ref", "base_env", "key_env"),
+    [
+        ("qwen_prod", "DASHSCOPE_BASE_URL", "DASHSCOPE_API_KEY"),
+        ("zhipu_prod", "ZHIPU_BASE_URL", "ZHIPU_API_KEY"),
+        ("deepseek_prod", "DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY"),
+    ],
+)
+def test_provider_profiles_support_env_production_mode(
+    tmp_path,
+    provider_ref,
+    base_env,
+    key_env,
+):
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        f"""
+providers:
+  {provider_ref}:
+    type: openai_compatible
+    mode: env
+    base_url_env: {base_env}
+    api_key_env: {key_env}
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml().replace(
+            "provider_ref: qwen_prod",
+            f"provider_ref: {provider_ref}",
+        ),
+        encoding="utf-8",
+    )
+    secret = f"{provider_ref}-env-key"
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        provider_profiles="providers.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        content_strategies=_strategy_registry(),
+        completeness_gates={
+            "storage_parameter_gate": lambda value: value,
+        },
+        environ={
+            base_env: f"http://{provider_ref}.prod/v1",
+            key_env: secret,
+        },
+    )
+    resolved = loader.load(config_path)
+
+    assert resolved.provider.mode == "env"
+    assert resolved.provider.base_url_env == base_env
+    assert resolved.provider.api_key_env == key_env
+    assert secret not in resolved.model_dump_json()
+
+
+def test_direct_provider_secret_is_redacted_from_runtime_error(tmp_path):
+    direct_secret = "direct-provider-secret"
+    config_path = _write_fixture(tmp_path)
+    (tmp_path / "providers.yaml").write_text(
+        f"""
+providers:
+  qwen_test:
+    type: openai_compatible
+    mode: direct
+    base_url: http://qwen.test/v1
+    api_key: {direct_secret}
+""".strip(),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        _agent_yaml().replace(
+            "provider_ref: qwen_prod",
+            "provider_ref: qwen_test",
+        ),
+        encoding="utf-8",
+    )
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        provider_profiles="providers.yaml",
+        schemas={"StorageFieldResult": StorageFieldResult},
+        content_strategies=_strategy_registry(),
+        completeness_gates={
+            "storage_parameter_gate": lambda value: value,
+        },
+        environ={},
+    )
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+
+    def handler(_payload, _context):
+        raise RuntimeStepError(
+            f"provider rejected {direct_secret}",
+            code="PROVIDER_FAILURE",
+            category=ErrorCategory.EXECUTION,
+            retryable=False,
+            details={"raw": direct_secret},
+        )
+
+    runtime.load_agent(config_path, handler)
+    result = runtime.invoke(
+        AgentRequest(
+            request_id="direct-secret-redaction",
+            agent_id="storage.emmc.parameter_extract",
+            input={},
+        )
+    )
+
+    assert result.status == RuntimeStatus.FAILED
+    serialized = result.error.model_dump_json()
+    assert direct_secret not in serialized
+    assert "[REDACTED]" in serialized
