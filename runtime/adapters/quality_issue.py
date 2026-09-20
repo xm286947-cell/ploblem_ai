@@ -604,8 +604,22 @@ class LegacyQualityIssueRuntimeAdapter:
             "analysis_profile": analysis_profile or {},
             "human_confirmations": human_confirmations or [],
         }
+        analysis_identity = hashlib.sha256(
+            repr(
+                {
+                    "analysis_profile": analysis_profile or {},
+                    "human_confirmations": human_confirmations or [],
+                }
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        default_request_id = (
+            f"quality-issue:{knowledge_id}:"
+            f"{issue_version_id or 'CURRENT'}:"
+            f"{str(self.agent_id or 'DEFAULT').lower()}:"
+            f"{analysis_identity}"
+        )
         request = WorkflowRequest(
-            request_id=request_id or f"quality-issue:{knowledge_id}",
+            request_id=request_id or default_request_id,
             workflow_id=self.workflow.workflow_id,
             input=payload,
             execution_policy=self.workflow_policy,
