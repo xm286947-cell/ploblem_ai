@@ -12,6 +12,7 @@ from runtime.engine.runtime import (
     FaultInjector,
     LightweightExecutionEngine,
 )
+from runtime.reliability.errors import RuntimeExecutionException, RuntimeStepError
 from runtime.store import SqliteTaskStore
 
 
@@ -51,6 +52,26 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             "temperature": model_policy.get("temperature"),
         }
 
+    @staticmethod
+    def _redact_secret_values(value: Any, secrets: list[str]) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: ConfiguredAgentRuntime._redact_secret_values(item, secrets)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                ConfiguredAgentRuntime._redact_secret_values(item, secrets)
+                for item in value
+            ]
+        if isinstance(value, str):
+            redacted = value
+            for secret in secrets:
+                if secret:
+                    redacted = redacted.replace(secret, "[REDACTED]")
+            return redacted
+        return value
+
     def _wrap_handler(
         self,
         handler: AgentHandler,
@@ -74,7 +95,28 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
                 **context,
                 "runtime": runtime_context,
             }
-            return handler(payload, configured_context)
+            env_name = runtime_context["provider_config"].get("api_key_env")
+            secret_value = (
+                self.config_loader.environ.get(env_name)
+                if env_name
+                else None
+            )
+            secrets = [secret_value] if secret_value else []
+            try:
+                return handler(payload, configured_context)
+            except RuntimeExecutionException as exc:
+                raise RuntimeStepError(
+                    self._redact_secret_values(str(exc), secrets),
+                    code=exc.code,
+                    category=exc.category,
+                    retryable=exc.retryable,
+                    details=self._redact_secret_values(exc.details, secrets),
+                ) from exc
+            except Exception as exc:
+                raise RuntimeStepError(
+                    self._redact_secret_values(str(exc), secrets),
+                    retryable=False,
+                ) from exc
 
         return configured_handler
 
