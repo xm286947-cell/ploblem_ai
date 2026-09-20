@@ -27,10 +27,9 @@ const client = new OpenAI({
   maxRetries: 0,
 });
 
-await configure("js-responses", "JS responses OK");
+await configure("default", "JS responses OK");
 const response = await client.responses.create(
   {model: "mock-gpt", input: "hello"},
-  options("js-responses"),
 );
 assert.equal(response.output_text, "JS responses OK");
 
