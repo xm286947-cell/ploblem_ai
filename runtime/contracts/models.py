@@ -373,6 +373,39 @@ class CheckpointRecord(ContractModel):
     created_at: datetime
 
 
+class ExecutionCommit(ContractModel):
+    commit_id: str
+    task_id: str
+    run_id: str
+    step_run: StepRunRecord
+    attempt: AttemptRecord
+    checkpoint: CheckpointRecord
+    execution_key: str
+    result_data: Any = None
+    coverage: Coverage | None = None
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    status: RuntimeStatus = RuntimeStatus.COMPLETED
+
+
+class CommitResult(ContractModel):
+    commit_id: str
+    execution_key: str
+    inserted: bool
+
+
+class CommittedExecution(ContractModel):
+    commit_id: str
+    task_id: str
+    run_id: str
+    step_run_id: str
+    execution_key: str
+    result_data: Any = None
+    coverage: Coverage | None = None
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    status: RuntimeStatus
+    created_at: datetime
+
+
 class TaskHandle(ContractModel):
     task_id: str
     status: RuntimeStatus
