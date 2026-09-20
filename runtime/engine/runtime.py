@@ -1150,7 +1150,6 @@ class LightweightExecutionEngine:
 
         if (
             hard_budget_exhausted
-            and last_error.retryable
             and self.store.has_committed_progress(task.task_id)
         ):
             status = RuntimeStatus.PARTIAL
