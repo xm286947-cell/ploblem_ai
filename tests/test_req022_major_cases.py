@@ -501,6 +501,97 @@ def test_legacy_event_views_preserve_different_mechanisms_for_human_review(env) 
     assert stored["review_status"] == "PENDING"
 
 
+
+def _confirmed_scoped_entry(
+    repo: MajorKnowledgeRepository,
+    case_id: str,
+    entry_type: str,
+    content: str,
+    *,
+    event_id: str | None = None,
+) -> dict:
+    return repo.add_entry(
+        case_id,
+        entry_type,
+        content,
+        assertion_kind="FACT",
+        origin="HUMAN",
+        status="CONFIRMED",
+        event_id=event_id,
+    )
+
+
+def test_same_case_multi_itr_event_views_are_fact_isolated_and_shared_is_explicit(env) -> None:
+    tmp, _, repo, service = env
+    case = service.create_case("同一复盘多ITR", "G1")
+    event_a = repo.upsert_event(case["case_id"], standard_itr="ITR20261001", internal_event_key="ITR20261001")
+    event_b = repo.upsert_event(case["case_id"], standard_itr="ITR20261002", internal_event_key="ITR20261002")
+
+    _confirmed_scoped_entry(repo, case["case_id"], "ISSUE_FACT", "事件A：高速切换时电机抖动。", event_id=event_a["event_id"])
+    _confirmed_scoped_entry(repo, case["case_id"], "ROOT_CAUSE", "事件A根因：状态机边界竞争。", event_id=event_a["event_id"])
+    _confirmed_scoped_entry(repo, case["case_id"], "ACTION", "事件A措施：修正状态机。", event_id=event_a["event_id"])
+
+    _confirmed_scoped_entry(repo, case["case_id"], "ISSUE_FACT", "事件B：通信链路周期性断连。", event_id=event_b["event_id"])
+    _confirmed_scoped_entry(repo, case["case_id"], "ROOT_CAUSE", "事件B根因：连接器松动。", event_id=event_b["event_id"])
+    _confirmed_scoped_entry(repo, case["case_id"], "ACTION", "事件B措施：锁紧连接器。", event_id=event_b["event_id"])
+
+    shared = _confirmed_scoped_entry(repo, case["case_id"], "VERIFICATION", "共享结论：两项整改均完成回归验证。")
+    service.set_entry_scope(shared["entry_id"], scope="CASE_SHARED")
+
+    adapter = LegacyRepeatAdapter(repo, ROOT, tmp / "multi-itr-runs")
+    view_a = adapter.export_event_view(event_a["event_id"])
+    view_b = adapter.export_event_view(event_b["event_id"])
+    raw_a = json.dumps(view_a, ensure_ascii=False)
+    raw_b = json.dumps(view_b, ensure_ascii=False)
+
+    assert "事件A根因：状态机边界竞争" in raw_a
+    assert "事件A措施：修正状态机" in raw_a
+    assert "事件B根因：连接器松动" not in raw_a
+    assert "事件B措施：锁紧连接器" not in raw_a
+
+    assert "事件B根因：连接器松动" in raw_b
+    assert "事件B措施：锁紧连接器" in raw_b
+    assert "事件A根因：状态机边界竞争" not in raw_b
+    assert "事件A措施：修正状态机" not in raw_b
+
+    assert "共享结论：两项整改均完成回归验证" in raw_a
+    assert "共享结论：两项整改均完成回归验证" in raw_b
+
+    stored_shared = repo.entry(shared["entry_id"])
+    assert stored_shared["scope_kind"] == "CASE_SHARED"
+    assert stored_shared["event_id"] is None
+
+
+def test_multi_itr_unscoped_confirmed_entries_are_not_silently_copied(env) -> None:
+    tmp, _, repo, service = env
+    case = service.create_case("多ITR未定域", "G1")
+    event_a = repo.upsert_event(case["case_id"], standard_itr="ITR20261101", internal_event_key="ITR20261101")
+    event_b = repo.upsert_event(case["case_id"], standard_itr="ITR20261102", internal_event_key="ITR20261102")
+    unscoped = _confirmed_scoped_entry(repo, case["case_id"], "ROOT_CAUSE", "尚未确认属于哪个ITR的根因。")
+
+    adapter = LegacyRepeatAdapter(repo, ROOT, tmp / "unscoped-runs")
+    view_a = adapter.export_event_view(event_a["event_id"])
+    view_b = adapter.export_event_view(event_b["event_id"])
+
+    assert "尚未确认属于哪个ITR的根因" not in json.dumps(view_a, ensure_ascii=False)
+    assert "尚未确认属于哪个ITR的根因" not in json.dumps(view_b, ensure_ascii=False)
+    assert "UNSCOPED_EVENT_KNOWLEDGE" in view_a["knowledge"]["quality_flags"]
+    assert "UNSCOPED_EVENT_KNOWLEDGE" in view_b["knowledge"]["quality_flags"]
+    assert repo.entry(unscoped["entry_id"])["scope_kind"] == "UNSCOPED"
+
+
+def test_entry_event_scope_rejects_cross_case_event(env) -> None:
+    _, _, repo, service = env
+    case_a = service.create_case("案例A", "G1")
+    case_b = service.create_case("案例B", "G1")
+    event_a = repo.upsert_event(case_a["case_id"], standard_itr="ITR20261201", internal_event_key="ITR20261201")
+    event_b = repo.upsert_event(case_b["case_id"], standard_itr="ITR20261202", internal_event_key="ITR20261202")
+    entry = _confirmed_scoped_entry(repo, case_a["case_id"], "ISSUE_FACT", "A事件事实。", event_id=event_a["event_id"])
+
+    with pytest.raises(ValueError, match="ENTRY_EVENT_SCOPE_CASE_MISMATCH"):
+        service.set_entry_scope(entry["entry_id"], scope="EVENT", event_id=event_b["event_id"])
+
+
 def test_concurrent_run_directory_isolation(env) -> None:
     tmp, _, repo, service = env
     _, event1 = _active_case(service, repo, tmp, "案例A", "ITR20260001", "a")

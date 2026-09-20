@@ -390,6 +390,7 @@ class MajorReviewSkillRunner:
                 self.repository.clear_pending_ai_entries(case_id)
 
             for item in result.entries:
+                inferred_event_id = self.repository.infer_entry_event(case_id, item["evidence"])
                 self.repository.add_entry(
                     case_id,
                     item["entry_type"],
@@ -397,6 +398,7 @@ class MajorReviewSkillRunner:
                     assertion_kind=item["assertion_kind"],
                     origin="AI",
                     status=item["status"],
+                    event_id=inferred_event_id,
                     model_profile=model_profile,
                     skill_version_id=skill["skill_version_id"],
                     evidence=item["evidence"],

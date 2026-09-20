@@ -162,6 +162,9 @@ class MajorCaseService:
             self.repository.update_case_status(case_id, "ACTIVE")
         return result
 
+    def set_entry_scope(self, entry_id: str, *, scope: str, event_id: str | None = None) -> dict:
+        return self.repository.set_entry_scope(entry_id, scope=scope, event_id=event_id)
+
     def list_cases(self, **kwargs) -> dict:
         return self.repository.list_cases(**kwargs)
 

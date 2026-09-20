@@ -411,7 +411,8 @@
               "MISSING_ROOT_CAUSE",
               "MISSING_PREVENTIVE_ACTION",
               "REPORT_PARSE_WARNING",
-              "AI_ENRICH_WARNING"
+              "AI_ENRICH_WARNING",
+              "UNSCOPED_EVENT_KNOWLEDGE"
             ]
           },
           "uniqueItems": true

@@ -36,7 +36,13 @@ ASSETS = (
 
 
 def _entry_text(entries: Iterable[dict], types: set[str]) -> str:
-    return "\n".join(item["content"] for item in entries if item["entry_type"] in types and item["status"] in {"CONFIRMED", "CORRECTED"})
+    values = []
+    for item in entries:
+        if item["entry_type"] not in types or item["status"] not in {"CONFIRMED", "CORRECTED"}:
+            continue
+        prefix = "[CASE_SHARED] " if item.get("scope_kind") == "CASE_SHARED" else ""
+        values.append(prefix + item["content"])
+    return "\n".join(values)
 
 
 def _evidence_value(value: str) -> list[dict]:
@@ -118,7 +124,8 @@ class LegacyRepeatAdapter:
         if not event:
             raise KeyError(event_id)
         case = self.repository.get_case(event["case_id"])
-        entries = self.repository.entries(event["case_id"])
+        entries = self.repository.entries_for_event(event_id)
+        unscoped = self.repository.unscoped_confirmed_entries(event["case_id"])
         fact = _entry_text(entries, {"ISSUE_FACT"})
         cause = _entry_text(entries, {"ROOT_CAUSE"})
         action = _entry_text(entries, {"ACTION"})
@@ -130,7 +137,7 @@ class LegacyRepeatAdapter:
                 "itr_id": event["standard_itr"],
                 "assessment_year": "", "assessment_month": "", "report_filename": "",
                 "source_excel": "", "source_report": "REQ022_CONFIRMED_ENTRIES",
-                "builder_version": "REQ022-LEGACY-2", "schema_version": "1.0",
+                "builder_version": "REQ022-LEGACY-3", "schema_version": "1.0",
                 "fusion_rule_version": "REQ022-1", "prompt_version": "REQ022-1",
                 "model_version": "HUMAN_CONFIRMED", "source_file_version": str(max((item["revision_no"] for item in entries), default=0)),
                 "created_at": now, "updated_at": now, "generated_at": now,
@@ -167,7 +174,10 @@ class LegacyRepeatAdapter:
                 "failure_object_tags": [], "trigger_tags": [], "failure_mechanism_tags": [],
                 "cause_tags": [], "solution_tags": [], "keywords": [],
                 "retrieval_text": "\n".join(value for value in (fact, cause, action, verification) if value),
-                "quality_flags": [] if fact and cause else ["MISSING_ROOT_CAUSE"],
+                "quality_flags": (
+                    ([] if fact and cause else ["MISSING_ROOT_CAUSE"])
+                    + (["UNSCOPED_EVENT_KNOWLEDGE"] if unscoped else [])
+                ),
                 "ai_model": "", "prompt_version": "REQ022-1", "generated_at": now,
             },
         }
@@ -176,8 +186,8 @@ class LegacyRepeatAdapter:
             raise ValueError("LEGACY_STANDARD_CASE_INVALID:" + ";".join(errors))
         return standard_case
 
-    def _knowledge_fingerprint(self, case_id: str) -> str:
-        entries = self.repository.entries(case_id)
+    def _knowledge_fingerprint(self, case_id: str, event_id: str | None = None) -> str:
+        entries = self.repository.entries_for_event(event_id) if event_id else self.repository.entries(case_id)
         payload = []
         for item in entries:
             evidence = sorted(
@@ -204,6 +214,8 @@ class LegacyRepeatAdapter:
                 "current_revision_id": item["current_revision_id"],
                 "revision_no": item["revision_no"],
                 "content": item["content"],
+                "event_id": item.get("event_id"),
+                "scope_kind": item.get("scope_kind", "UNSCOPED"),
                 "evidence": evidence,
             })
         payload.sort(key=lambda item: (item["entry_type"], item["entry_id"]))
@@ -313,7 +325,7 @@ class LegacyRepeatAdapter:
             candidate["retrieval_score"] = float(item["score"])
             candidate["retrieval_score_breakdown"] = item.get("score_breakdown", {})
             candidate["retrieval_reasons"] = item.get("reasons", [])
-            candidate["knowledge_fingerprint"] = self._knowledge_fingerprint(candidate["case_id"])
+            candidate["knowledge_fingerprint"] = self._knowledge_fingerprint(candidate["case_id"], candidate["event_id"])
             ranked.append(candidate)
         return ranked
 
@@ -327,7 +339,7 @@ class LegacyRepeatAdapter:
         input_value = {
             "event": event_id,
             "revision": revision,
-            "current_knowledge_fingerprint": self._knowledge_fingerprint(current["case_id"]),
+            "current_knowledge_fingerprint": self._knowledge_fingerprint(current["case_id"], event_id),
             "candidates": [
                 {
                     "event_id": item["event_id"],
@@ -339,7 +351,7 @@ class LegacyRepeatAdapter:
                 for item in candidates
             ],
             "retrieval_config_hash": self._retrieval_config_hash(),
-            "adapter": "REQ022-LEGACY-2",
+            "adapter": "REQ022-LEGACY-3",
             "execution": "mock" if mock else ("skip-ai" if skip_ai else "configured-model"),
         }
         input_hash = hashlib.sha256(json.dumps(input_value, sort_keys=True).encode()).hexdigest()
@@ -353,7 +365,7 @@ class LegacyRepeatAdapter:
         root = self._prepare_root(run["run_id"])
         write_json(root / f"event_views/{event_id}.json", view)
         write_json(root / f"event_views/{event_id}.mapping.json", {
-            "adapter_version": "REQ022-LEGACY-2", "source_case_id": current["case_id"],
+            "adapter_version": "REQ022-LEGACY-3", "source_case_id": current["case_id"],
             "source_event_id": event_id, "group_code": current["group_code"], "revision": revision,
         })
         if not candidates:
@@ -371,7 +383,7 @@ class LegacyRepeatAdapter:
             case_id = candidate["event_id"]
             write_json(root / f"event_views/{case_id}.json", candidate_view)
             write_json(root / f"event_views/{case_id}.mapping.json", {
-                "adapter_version": "REQ022-LEGACY-2", "source_case_id": candidate["case_id"],
+                "adapter_version": "REQ022-LEGACY-3", "source_case_id": candidate["case_id"],
                 "source_event_id": candidate["event_id"], "group_code": candidate["group_code"],
                 "revision": int(candidate_view["metadata"]["source_file_version"] or 0),
             })
