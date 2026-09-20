@@ -257,3 +257,80 @@ def test_runtime_real_http_500_once_then_success(tmp_path, monkeypatch):
         assert result.status == RuntimeStatus.COMPLETED
         assert result.execution.provider_calls == 2
         assert counters(host, port)["default"] == 2
+
+
+def test_runtime_real_http_persistent_429_stops_at_hard_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(
+            host,
+            port,
+            payload="{}",
+            behavior={
+                "status": 429,
+                "retry_after": "0",
+            },
+        )
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 2,
+                "max_retries": 9,
+            }
+        )
+
+        _, result = run_occurrence(
+            tmp_path,
+            base_url=base_url,
+            client=client,
+            policy=runtime_policy(transport=5, budget=2),
+            request_id="mock-runtime-429-budget",
+        )
+
+        assert client.max_retries == 0
+        assert result.status == RuntimeStatus.FAILED
+        assert result.execution.provider_calls == 2
+        assert result.execution.retry_budget_exhausted is True
+        assert counters(host, port)["default"] == 2
+
+
+def test_runtime_real_http_timeout_is_classified_and_counted(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_MOCK_TEST_KEY", "mock-secret")
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        configure(
+            host,
+            port,
+            payload="{}",
+            behavior={
+                "delay_ms": 1500,
+            },
+        )
+        client = OpenAICompatibleClient(
+            {
+                "base_url": base_url,
+                "model": "mock-gpt",
+                "api_key_env": "OPENAI_MOCK_TEST_KEY",
+                "timeout_seconds": 1,
+                "max_retries": 9,
+            }
+        )
+
+        _, result = run_occurrence(
+            tmp_path,
+            base_url=base_url,
+            client=client,
+            policy=runtime_policy(transport=1, budget=1),
+            request_id="mock-runtime-timeout",
+        )
+
+        assert client.max_retries == 0
+        assert result.status == RuntimeStatus.FAILED
+        assert result.execution.provider_calls == 1
+        assert counters(host, port)["default"] == 1
+        assert result.error is not None
+        assert result.error.category.value == "TRANSPORT"
+        assert "超时" in result.error.message or "timed out" in result.error.message.lower()
