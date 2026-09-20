@@ -24,7 +24,9 @@ class FakeClient:
             'lifecycle_stage':{'value':'运行执行','evidence_ids':['cs.description','cs.phase'],'confidence':.85},
             'business_activity_scene':{'value':'掉电数据保持与上电恢复','evidence_ids':['cs.description'],'confidence':.9},
         },'lifecycle_code':'RUNTIME_EXECUTION','activity_code':'POWER_LOSS_RETENTION_RECOVERY',
-        'match_reason':'有掉电和重新上电的数据恢复证据','missing_condition':'掉电次数未知'})
+        'match_reason':'有掉电和重新上电的数据恢复证据','missing_condition':'系统规模未知',
+        'questions':[{'field_name':'scale_or_load','reason':'原始问题未给出系统规模',
+                      'question':'现场参与设备规模是多少？','evidence_needed':['现场拓扑或设备数量']} ]})
 
 
 def setup_case(tmp_path):
@@ -69,7 +71,22 @@ def test_reverse_quality_single_issue_analysis_review_and_source_preservation(tm
     assert saved['review']['recovery_method']['value']=='重新上电恢复运行'
     assert saved['review']['recovery_method']['evidence_ids']==['structured.recovery_measure']
     assert saved['scene_match_status']=='NEED_REVIEW'
-    assert client.get(f'/reverse-quality/{material_id}').status_code==200
+    assert len(saved['missing_information'])==1
+    missing=saved['missing_information'][0]
+    assert missing['field_name']=='scale_or_load'
+    assert missing['question']=='现场参与设备规模是多少？'
+    assert missing['evidence_needed']==['现场拓扑或设备数量']
+    page=client.get(f'/reverse-quality/{material_id}')
+    assert page.status_code==200
+    assert '现场参与设备规模是多少？' in page.text
+    resolved=client.post(f'/reverse-quality/{material_id}/missing-information',data={
+        'missing_id':missing['missing_id'],'status':'CONFIRMED','answer':'现场共 12 台设备','reviewer':'质量专家'
+    },follow_redirects=False)
+    assert resolved.status_code==303
+    saved=service.get('ITR20260918001')
+    assert saved['missing_information'][0]['status']=='CONFIRMED'
+    assert saved['missing_information'][0]['answer']=='现场共 12 台设备'
+    assert saved['missing_information'][0]['reviewer']=='质量专家'
     reviewed=client.post(f'/reverse-quality/{material_id}/review',data={'field_name':'expected_quality_state','action':'EDITED',
         'value':'重新上电后关键计数应保持一致','reviewer':'质量专家'},follow_redirects=False)
     assert reviewed.status_code==303
@@ -142,4 +159,32 @@ def test_reverse_quality_facts_include_v01_context_evidence(tmp_path):
         'structured.software_function':'掉电保持',
     }
     assert {key:facts['evidence'][key]['value'] for key in expected}==expected
+
+def test_reverse_quality_string_questions_are_persisted_backward_compatibly(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    class StringQuestionClient(FakeClient):
+        def complete(self,messages):
+            response=super().complete(messages)
+            payload=json.loads(response.content)
+            payload['questions']=['请确认现场系统规模']
+            return FakeResponse(payload)
+    service=app.state.reverse_quality_service
+    service.ai_client=StringQuestionClient()
+    service.analyse(material_id,'PLC')
+    missing=service.get('ITR20260918001')['missing_information']
+    assert len(missing)==1
+    assert missing[0]['field_name']==''
+    assert missing[0]['question']=='请确认现场系统规模'
+    assert missing[0]['status']=='PENDING'
+
+
+def test_reverse_quality_missing_information_confirmation_requires_answer(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    service=app.state.reverse_quality_service
+    service.analyse(material_id,'PLC')
+    missing=service.get('ITR20260918001')['missing_information'][0]
+    with pytest.raises(ValueError,match='请填写人工答案'):
+        service.review_missing_information(
+            'ITR20260918001',missing_id=missing['missing_id'],
+            status='CONFIRMED',answer='',reviewer='质量专家')
 
