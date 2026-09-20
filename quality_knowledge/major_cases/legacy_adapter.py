@@ -36,7 +36,13 @@ ASSETS = (
 
 
 def _entry_text(entries: Iterable[dict], types: set[str]) -> str:
-    return "\n".join(item["content"] for item in entries if item["entry_type"] in types and item["status"] in {"CONFIRMED", "CORRECTED"})
+    values = []
+    for item in entries:
+        if item["entry_type"] not in types or item["status"] not in {"CONFIRMED", "CORRECTED"}:
+            continue
+        prefix = "[CASE_SHARED] " if item.get("scope_kind") == "CASE_SHARED" else ""
+        values.append(prefix + item["content"])
+    return "\n".join(values)
 
 
 def _evidence_value(value: str) -> list[dict]:
