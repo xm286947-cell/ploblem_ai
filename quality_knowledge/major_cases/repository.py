@@ -341,6 +341,7 @@ class MajorKnowledgeRepository:
         params: list = [state, error_code, error_detail]
         if state == "RUNNING":
             parts.append("started_at=COALESCE(started_at,CURRENT_TIMESTAMP)")
+            parts.append("completed_at=NULL")
         if state in {"COMPLETED", "FAILED", "PARTIAL", "CANCELLED"}:
             parts.append("completed_at=CURRENT_TIMESTAMP")
         if coverage_total is not None:
@@ -451,6 +452,13 @@ class MajorKnowledgeRepository:
         with self.connect() as connection:
             connection.execute(
                 "UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP WHERE case_id=? AND status IN ('PENDING','MISSING') AND current_revision_id IN (SELECT revision_id FROM kb_entry_revision WHERE origin='AI')",
+                (case_id,),
+            )
+
+    def clear_missing_ai_entries(self, case_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP WHERE case_id=? AND status='MISSING' AND current_revision_id IN (SELECT revision_id FROM kb_entry_revision WHERE origin='AI')",
                 (case_id,),
             )
 
