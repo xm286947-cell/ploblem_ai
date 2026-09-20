@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from quality_knowledge.web.app import create_app
 from quality_knowledge.scenarios import ScenarioRepository
 from quality_knowledge.scenario_generation import ScenarioGenerationService
+from quality_knowledge.reverse_quality import _analysis_review_status
 
 
 class FakeResponse:
@@ -253,4 +254,27 @@ def test_reverse_quality_candidate_rejects_unknown_result_version(tmp_path):
     }
     with pytest.raises(ValueError,match='REVERSE_QUALITY_RESULT_VERSION_UNSUPPORTED'):
         service.candidate_from_reverse_quality(bad)
+
+def test_reverse_quality_confirmation_gate_requires_missing_information_resolution():
+    confirmed={name:{
+        'value':'x','source_type':'FACT','evidence_ids':['e1'],
+        'confidence':1.0,'review_status':'CONFIRMED','reviewer_edit':''
+    } for name in (
+        'customer_task','customer_experience','expected_quality_state',
+        'lifecycle_stage','business_activity_scene','failure_mode',
+        'capability_gap','quality_requirement_candidate'
+    )}
+    item={
+        'review':confirmed,
+        'match_reviewed':True,
+        'scene_match_status':'NOT_MATCHED',
+        'missing_information':[{
+            'missing_id':'M1','status':'PENDING','question':'请确认规模'
+        }],
+    }
+    assert _analysis_review_status(item)=='IN_REVIEW'
+    item['missing_information'][0]['status']='CONFIRMED'
+    assert _analysis_review_status(item)=='CONFIRMED'
+    item['missing_information'][0]['status']='NOT_APPLICABLE'
+    assert _analysis_review_status(item)=='CONFIRMED'
 
