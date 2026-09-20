@@ -16,3 +16,13 @@ from .major_issue import (
     MajorIssueObjectSpec,
     RepeatCaseRuntimeAdapter,
 )
+
+from .storage import (
+    StorageCompatibilityAdapter,
+    StorageFieldResult,
+    StorageGoldenDiff,
+    StorageGoldenDiffError,
+    StorageGoldenDiffReport,
+    StorageGoldenFieldComparator,
+    StorageLinkedFieldsProjector,
+)
