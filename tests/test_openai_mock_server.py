@@ -411,3 +411,95 @@ def test_parallel_scenario_keys_are_isolated():
         data = json.loads(raw)["data"]
         assert data["parallel-a"] == 20
         assert data["parallel-b"] == 20
+
+
+def test_configured_final_success_status_is_honored_after_fail_first_n():
+    with running_server() as (host, port):
+        configure(
+            host,
+            port,
+            key="status-after-retry",
+            payload="accepted",
+            behavior={
+                "fail_first_n": 1,
+                "fail_status": 429,
+                "status": 202,
+            },
+        )
+        headers = auth({"X-Mock-Scenario-Key": "status-after-retry"})
+        statuses = []
+        bodies = []
+        for _ in range(2):
+            status, _, raw = request(
+                host,
+                port,
+                "POST",
+                "/v1/responses",
+                {"model": "gpt-test", "input": "x"},
+                headers,
+            )
+            statuses.append(status)
+            bodies.append(raw)
+
+        assert statuses == [429, 202]
+        assert json.loads(bodies[1])["object"] == "response"
+
+
+def test_configured_success_status_is_honored_for_streaming():
+    with running_server() as (host, port):
+        configure(
+            host,
+            port,
+            payload="stream-status",
+            behavior={"status": 206, "chunk_size": 4},
+        )
+        status, headers, raw = request(
+            host,
+            port,
+            "POST",
+            "/v1/responses",
+            {"model": "gpt-test", "input": "x", "stream": True},
+            auth(),
+        )
+
+        assert status == 206
+        assert headers["Content-Type"].startswith("text/event-stream")
+        assert b"response.completed" in raw
+
+
+def test_configured_success_status_is_honored_for_models():
+    with running_server() as (host, port):
+        configure(
+            host,
+            port,
+            payload="ignored",
+            behavior={"status": 203},
+        )
+        status, _, raw = request(
+            host,
+            port,
+            "GET",
+            "/v1/models",
+            headers=auth(),
+        )
+
+        assert status == 203
+        assert json.loads(raw)["object"] == "list"
+
+
+def test_control_plane_rejects_informational_final_status():
+    with running_server() as (host, port):
+        status, _, raw = request(
+            host,
+            port,
+            "POST",
+            "/__mock__/scenario",
+            {
+                "scenario_key": "invalid-1xx",
+                "payload": "x",
+                "behavior": {"status": 199},
+            },
+        )
+
+        assert status == 400
+        assert "status must be >= 200" in json.loads(raw)["error"]
