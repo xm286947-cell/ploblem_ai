@@ -11,9 +11,20 @@ OpenAI Mock Test Service 是统一 Agent Runtime / 编排项目维护的公共�
 
 它不负责模拟模型智能，也不负责定义业务 JSON Schema。
 
-## 2. 启动
+## 2. 安装与启动
 
-在仓库根目录执行：
+Mock Service 本体只使用 Python 标准库，不要求额外安装 Web Framework。
+
+如需运行完整兼容性与验收测试，在仓库根目录执行：
+
+```bash
+python -m pip install -r requirements-openai-mock-test.txt
+python -m pip install -r requirements-runtime-p0-test.txt
+```
+
+启动 Mock Service：
+
+
 
 ```bash
 python -m tools.openai_mock.server --host 127.0.0.1 --port 8000
@@ -26,7 +37,27 @@ OpenAI Base URL: http://127.0.0.1:8000/v1
 Health:          http://127.0.0.1:8000/__mock__/health
 ```
 
-## 3. 使用原则
+## 3. Mock / Real Provider 切换
+
+业务调用代码不因为 Mock 改写请求结构，只切换 Provider 配置。
+
+Mock：
+
+```text
+base_url = http://127.0.0.1:8000/v1
+api_key = mock-key
+```
+
+Real Provider：
+
+```text
+base_url = <真实 Provider OpenAI-compatible Base URL>
+api_key = <由环境变量/Secret 管理提供>
+```
+
+推荐把两组配置放在不同的 model/profile 配置中，由测试环境选择 profile，而不是在业务代码里写 Mock 判断。
+
+## 4. 使用原则
 
 调用业务代码只切换 `base_url` 和测试用 `api_key`。
 
@@ -51,7 +82,7 @@ print(response.output_text)
 
 Runtime 场景建议保持 `max_retries=0`，由 Runtime 自己拥有 Retry Budget，避免 SDK 隐式重试干扰测试结论。
 
-## 4. Payload
+## 5. Payload
 
 Payload 完全由测试方构造，Mock 不检查业务结构。
 
@@ -65,7 +96,7 @@ Payload 完全由测试方构造，Mock 不检查业务结构。
 
 非字符串 JSON 值会被序列化成紧凑 JSON 文本作为模型输出；如果要精确模拟“半截 JSON”，请直接把半截内容作为字符串 Payload。
 
-## 5. 推荐测试分层
+## 6. 推荐测试分层
 
 开发期优先级：
 
@@ -81,7 +112,26 @@ OpenAI Mock
 
 大部分异常、边界和回归场景应在 Mock 层完成。真实 Provider 用于最终真实性验证，不承担高频可重复性回归。
 
-## 6. 安全
+## 7. 什么时候用 Mock / 什么时候必须用 Real Provider
+
+优先使用 Mock：
+- Retry / Retry Budget；
+- Timeout；
+- 429 / 5xx；
+- JSON 截断；
+- Streaming / 断流；
+- Secret 持久化；
+- Resume / Crash Recovery；
+- Parser 边界与稳定回归。
+
+必须保留 Real Provider E2E：
+- Provider 实际鉴权与网络连通；
+- 官方/厂商真实协议差异；
+- 模型真实输出质量；
+- Token、模型能力和供应商侧限制；
+- 发布前少量关键真实性验证。
+
+## 8. 安全
 
 Mock 请求历史不会保存 Bearer Token / API Key 明文。
 
@@ -92,7 +142,7 @@ Mock 请求历史不会保存 Bearer Token / API Key 明文。
 
 不要把生产 API Key 作为 Mock 测试凭据。
 
-## 7. 关闭
+## 9. 关闭
 
 前台运行时使用 Ctrl+C 关闭服务。
 
