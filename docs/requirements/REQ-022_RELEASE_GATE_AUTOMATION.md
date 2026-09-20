@@ -15,11 +15,14 @@
 
 CI 工作流为 `.github/workflows/req022-release-gate.yml`。每一类生成独立 JUnit XML，并统一上传为保留 90 天的 `req022-release-gate-evidence-<commit>` Artifact。
 
-## 已知排除项
+## 基线 tag 处置
 
-`tests/test_upgrade_package_dependencies.py` 依赖 Git 基线标签 `v1.1-p2-rc2-full-20260901`。该标签目前不存在于远端仓库，因此全量首轮会在读取版本差异时失败。Release Gate 的累计仓库回归暂时只排除这一项，并在 Artifact 中写入 `KNOWN_EXCLUSIONS.txt`。
+经 Git 历史核对，`v1.1-p2-rc2-full-20260901` 对应的真实正式基线是提交
+`a2593e1afb980ddb7c84ab1906c5a8d880e5b9ea`（2026-09-01 23:23，`chore: baseline P2 RC2 full package`）。
+该提交的 `BASELINE_VERSION` 为 `V1.1_P2_RC2_FULL_20260901`，与需求文档及升级脚本一致。
 
-该排除项不得记为通过。恢复缺失标签，或正式变更升级包基线并独立评审后，才可移除排除。
+Release Gate 已恢复完整历史 tag，检出时使用全历史和 tags；`tests/test_upgrade_package_dependencies.py`
+重新纳入累计仓库回归，不再作为 Known Exclusion。`KNOWN_EXCLUSIONS.txt` 保留为验证记录，不再记录排除项。
 
 ## 不属于自动 PASS 的验证
 

@@ -22,6 +22,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -104,15 +107,14 @@ jobs:
       - name: Run cumulative repository regression
         run: |
           python -m pytest tests -q \
-            --ignore=tests/test_upgrade_package_dependencies.py \
             --junitxml=test-results/release-gate/cumulative.xml
 
-      - name: Record known infrastructure exclusion
+      - name: Record baseline tag verification
         if: always()
         run: |
           printf '%s\n' \
-            'tests/test_upgrade_package_dependencies.py is excluded because its required base tag v1.1-p2-rc2-full-20260901 is absent from the remote repository.' \
-            'This exclusion is not a functional PASS and must remain visible until the baseline tag is restored or the package baseline is formally changed.' \
+            'Baseline tag v1.1-p2-rc2-full-20260901 is expected to resolve to the verified P2 RC2 full baseline commit.' \
+            'The upgrade-package dependency test is included in the cumulative regression; no known exclusion remains.' \
             > test-results/release-gate/KNOWN_EXCLUSIONS.txt
 
       - name: Upload release-gate evidence

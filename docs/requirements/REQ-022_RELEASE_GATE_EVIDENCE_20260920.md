@@ -35,6 +35,28 @@ warning 均为 Starlette TestClient 使用 AnyIO 旧别名产生的弃用提示�
 
 本记录只证明上述代码基线在本地自动测试范围内的结果，不将 Mock、合成数据或 macOS 测试冒充环境验收。CI 在变更分支上复跑后，以 GitHub Actions Artifact 作为远端可下载证据。
 
+## Known Exclusion 处置（2026-09-20）
+
+历史核对确认该问题是正式基线漏打 tag，而不是升级包测试引用错误版本：
+
+- 目标 tag：`v1.1-p2-rc2-full-20260901`
+- 准确 commit：`a2593e1afb980ddb7c84ab1906c5a8d880e5b9ea`
+- 提交时间：2026-09-01 23:23（Asia/Shanghai）
+- 提交说明：`chore: baseline P2 RC2 full package`
+- 基线文件：`BASELINE_VERSION = V1.1_P2_RC2_FULL_20260901`
+- 交叉证据：`docs/requirements/README.md`、`scripts/build_upgrade_package.py`、RC2 后续交付文档均引用同一版本
+
+本地已创建该 tag 并验证其指向上述 commit。Release Gate 工作流已改为获取完整 Git 历史和 tags，恢复执行升级包依赖测试，并移除累计回归中的排除项。远端 tag 推送及后续 CI 结果待具备仓库写权限后确认；在此之前 Release Gate 不宣称远端已通过。
+
+## 本地复验结果（tag 修复后）
+
+- 升级包依赖测试：`1 passed`
+- 全量 `pytest tests`：`537 passed, 1 warning`
+- warning：Starlette TestClient 使用 AnyIO 旧别名的弃用提示，不是功能失败
+- JUnit：`/tmp/req022-cumulative-after-tag.xml`（本地验证产物）
+
+本地累计回归已不再排除升级包测试；远端 Release Gate 仍需在 tag 和本次提交推送后由 GitHub Actions 复跑确认。
+
 ## GitHub Actions 复跑
 
 - 验证提交：`85e1f99fbed99055b4d814630efb40a463910276`
