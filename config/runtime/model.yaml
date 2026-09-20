@@ -1,0 +1,60 @@
+# Unified model configuration.
+# Business projects only choose model_ref. Runtime infers auth/mode internally.
+active_model: qwen_prod
+
+models:
+  # Qwen - production: endpoint/key from environment
+  qwen_prod:
+    provider: openai_compatible
+    base_url_env: DASHSCOPE_BASE_URL
+    api_key_env: DASHSCOPE_API_KEY
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+
+  # Qwen - test/integration: may be edited locally; do not commit a real key
+  qwen_test:
+    provider: openai_compatible
+    base_url: https://replace-with-qwen-test-endpoint.example/v1
+    api_key: __REPLACE_LOCALLY_FOR_TEST_ONLY__
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+
+  zhipu_prod:
+    provider: openai_compatible
+    base_url_env: ZHIPU_BASE_URL
+    api_key_env: ZHIPU_API_KEY
+    model: glm-4.5
+    temperature: 0
+    max_tokens: 8192
+
+  deepseek_prod:
+    provider: openai_compatible
+    base_url_env: DEEPSEEK_BASE_URL
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    temperature: 0
+    max_tokens: 8192
+
+  # Local Ollama: no api_key field means no authentication
+  ollama_qwen:
+    provider: openai_compatible
+    base_url: http://192.168.1.100:11434/v1
+    model: qwen3-vl:8b-thinking-q4_K_M
+    temperature: 0
+    max_tokens: 8192
+
+  ollama_qwen_local:
+    provider: openai_compatible
+    base_url: http://192.168.1.100:11434/v1
+    model: qwen3-vl:8b-thinking-local
+    temperature: 0
+    max_tokens: 8192
+
+  ollama_gemma:
+    provider: openai_compatible
+    base_url: http://192.168.1.100:11434/v1
+    model: gemma4:e4b
+    temperature: 0
+    max_tokens: 8192
