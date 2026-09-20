@@ -87,6 +87,12 @@ def test_reverse_quality_single_issue_analysis_review_and_source_preservation(tm
     assert saved['missing_information'][0]['status']=='CONFIRMED'
     assert saved['missing_information'][0]['answer']=='现场共 12 台设备'
     assert saved['missing_information'][0]['reviewer']=='质量专家'
+    with service.repository.connect() as connection:
+        audit=connection.execute(
+            "SELECT target_type,action,reviewer FROM reverse_quality_human_review "
+            "WHERE run_id=? ORDER BY review_id DESC LIMIT 1",(saved['run_id'],)
+        ).fetchone()
+    assert dict(audit)=={'target_type':'MISSING_INFORMATION','action':'CONFIRMED','reviewer':'质量专家'}
     reviewed=client.post(f'/reverse-quality/{material_id}/review',data={'field_name':'expected_quality_state','action':'EDITED',
         'value':'重新上电后关键计数应保持一致','reviewer':'质量专家'},follow_redirects=False)
     assert reviewed.status_code==303
