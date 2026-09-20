@@ -433,6 +433,115 @@ class TaskSnapshot(ContractModel):
     cancel_requested_at: datetime | None = None
 
 
+class AtomicGroupPolicy(str, Enum):
+    KEEP_TOGETHER = "KEEP_TOGETHER"
+    SAME_CONTEXT = "SAME_CONTEXT"
+
+
+class ContentStrategyDefinition(ContractModel):
+    strategy_id: str
+    version: str
+    projector_ref: str
+    planner_ref: str
+    merger_ref: str | None = None
+    grouping_ref: str | None = None
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def ref(self) -> str:
+        return f"{self.strategy_id}@{self.version}"
+
+
+class ContentSource(ContractModel):
+    source: SourceRef
+    content_ref: str | None = None
+    inline_content: Any = None
+    partition_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LogicalUnit(ContractModel):
+    unit_id: str
+    source_id: str
+    locator: dict[str, Any] = Field(default_factory=dict)
+    payload_ref: str | None = None
+    inline_payload: Any = None
+    group_id: str | None = None
+    context_refs: list[str] = Field(default_factory=list)
+    partition_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AtomicGroup(ContractModel):
+    group_id: str
+    unit_ids: list[str]
+    policy: AtomicGroupPolicy
+    grouping_hint: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceBundle(ContractModel):
+    bundle_id: str
+    sources: list[ContentSource]
+    logical_units: list[LogicalUnit]
+    atomic_groups: list[AtomicGroup] = Field(default_factory=list)
+    shared_context: dict[str, Any] = Field(default_factory=dict)
+    default_partition_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LongContentPolicy(ContractModel):
+    max_units_per_chunk: int = 8
+    max_payload_chars: int = 8000
+    overlap_units: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContentChunk(ContractModel):
+    chunk_id: str
+    bundle_id: str
+    partition_key: str | None = None
+    unit_ids: list[str]
+    overlap_unit_ids: list[str] = Field(default_factory=list)
+    shared_context: dict[str, Any] = Field(default_factory=dict)
+    estimated_payload_chars: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContentPlan(ContractModel):
+    plan_id: str
+    bundle_id: str
+    strategy_ref: str | None = None
+    chunks: list[ContentChunk]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PartialResultCandidate(ContractModel):
+    chunk_id: str
+    execution_key: str
+    unit_ids: list[str]
+    data: Any
+    partition_key: str | None = None
+    schema_valid: bool
+    complete_object: bool
+    finish_reason: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommittedPartialResult(ContractModel):
+    partial_id: str
+    chunk_id: str
+    execution_key: str
+    unit_ids: list[str]
+    data: Any
+    partition_key: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    committed_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     name
     for name, value in globals().items()
