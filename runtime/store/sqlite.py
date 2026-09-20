@@ -32,6 +32,8 @@ from runtime.contracts import (
     WorkflowRequest,
     WorkflowResult,
     WorkflowRunRecord,
+    canonical_request_payload,
+    strip_runtime_credentials,
 )
 from runtime.reliability.errors import IdempotencyConflictError
 from runtime.reliability.state import RuntimeStateMachine
@@ -263,6 +265,18 @@ class SqliteTaskStore:
     def _json(value: BaseModel | dict[str, Any] | list[Any] | None) -> str | None:
         if value is None:
             return None
+        if isinstance(value, (AgentRequest, WorkflowRequest)):
+            return json.dumps(
+                canonical_request_payload(value),
+                ensure_ascii=False,
+                default=str,
+            )
+        if isinstance(value, TaskRecord):
+            task_payload = value.model_dump(mode="json")
+            task_payload["metadata"] = strip_runtime_credentials(
+                task_payload["metadata"]
+            )
+            return json.dumps(task_payload, ensure_ascii=False, default=str)
         if isinstance(value, BaseModel):
             return value.model_dump_json()
         return json.dumps(value, ensure_ascii=False, default=str)
@@ -300,7 +314,7 @@ class SqliteTaskStore:
                 record.task_type.value,
                 record.status.value,
                 record.current_run_id,
-                record.model_dump_json(),
+                SqliteTaskStore._json(record),
                 request_json,
                 result_json,
                 error_json,
