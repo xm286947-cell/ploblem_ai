@@ -44,6 +44,7 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             "type": agent_definition.get("provider") or fallback.provider.type,
             "model": agent_definition.get("model") or fallback.provider.model,
             "profile_ref": metadata.get("provider_ref"),
+            "mode": metadata.get("provider_mode", fallback.provider.mode),
             "base_url_env": metadata.get("base_url_env"),
             "api_key_env": metadata.get("api_key_env"),
             "base_url": metadata.get("provider_base_url"),
@@ -82,25 +83,28 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             context: dict[str, Any],
         ) -> Any:
             runtime_context = dict(context.get("runtime", {}))
-            runtime_context["provider_config"] = self._snapshot_provider_config(
-                context,
-                resolved,
-            )
-            runtime_context["agent_config_hash"] = (
+            config_hash = (
                 (runtime_context.get("agent_definition") or {})
                 .get("metadata", {})
                 .get("agent_config_hash", resolved.config_hash)
             )
+            provider_config = self._snapshot_provider_config(
+                context,
+                resolved,
+            )
+            secret_value = self.config_loader.get_runtime_api_key(
+                config_hash,
+                api_key_env=provider_config.get("api_key_env"),
+            )
+            runtime_context["provider_config"] = {
+                **provider_config,
+                "api_key": secret_value,
+            }
+            runtime_context["agent_config_hash"] = config_hash
             configured_context = {
                 **context,
                 "runtime": runtime_context,
             }
-            env_name = runtime_context["provider_config"].get("api_key_env")
-            secret_value = (
-                self.config_loader.environ.get(env_name)
-                if env_name
-                else None
-            )
             secrets = [secret_value] if secret_value else []
             try:
                 return handler(payload, configured_context)
