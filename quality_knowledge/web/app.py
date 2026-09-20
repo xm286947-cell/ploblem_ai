@@ -261,6 +261,16 @@ def create_app(db_path):
             return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'error':str(exc)}),303)
         return RedirectResponse('/reverse-quality/'+material_id+'#'+field_name,303)
 
+    @app.post('/reverse-quality/{material_id}/missing-information', include_in_schema=False)
+    def reverse_quality_missing_information(material_id: str, missing_id: str = Form(...), status: str = Form(...), answer: str = Form(''), reviewer: str = Form('')):
+        try:
+            facts=reverse_quality_svc.facts(material_id)
+            reverse_quality_svc.review_missing_information(
+                facts['canonical_itr'],missing_id=missing_id,status=status,answer=answer,reviewer=reviewer)
+        except (ValueError,KeyError) as exc:
+            return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'error':str(exc)})+'#missing-information',303)
+        return RedirectResponse('/reverse-quality/'+material_id+'#missing-information',303)
+
     @app.post('/reverse-quality/{material_id}/match', include_in_schema=False)
     def reverse_quality_match(material_id: str, status: str = Form(...), scene_id: str = Form(''), reason: str = Form(''), missing_condition: str = Form(''), reviewer: str = Form('')):
         try:
