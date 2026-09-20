@@ -88,6 +88,19 @@ def create_major_case_router(
             raise HTTPException(400, str(exc)) from exc
         return RedirectResponse(f"/knowledge/major-cases/{case_id}#entries", 303)
 
+    @router.post("/knowledge/entries/{entry_id}/scope", include_in_schema=False)
+    def scope_entry(
+        entry_id: str,
+        case_id: str = Form(...),
+        scope: str = Form(...),
+        event_id: str = Form(""),
+    ):
+        try:
+            service.set_entry_scope(entry_id, scope=scope, event_id=event_id or None)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return RedirectResponse(f"/knowledge/major-cases/{case_id}#entries", 303)
+
     @router.post("/knowledge/events/{event_id}/repeat", include_in_schema=False)
     def run_repeat(event_id: str, use_mock: str = Form("1")):
         result = repeat.run(event_id, mock=use_mock == "1", skip_ai=use_mock != "1")
