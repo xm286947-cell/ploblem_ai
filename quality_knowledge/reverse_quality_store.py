@@ -175,6 +175,9 @@ class ReverseQualityRepository(ABC):
     def resolve_missing_information(self, canonical_itr: str, *, missing_id: str, status: str,
                                     answer: str, reviewer: str) -> dict[str, Any]: ...
 
+    @abstractmethod
+    def set_analysis_status(self, canonical_itr: str, status: str) -> None: ...
+
 
 class SQLiteReverseQualityRepository(ReverseQualityRepository):
     """SQLite implementation of the reverse-quality repository contract."""
@@ -633,12 +636,14 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                 (analysis_status, current["analysis_id"]),
             )
 
-    def _set_analysis_status(self, canonical_itr: str, status: str) -> None:
+    def set_analysis_status(self, canonical_itr: str, status: str) -> None:
         with self._transaction() as connection:
-            connection.execute(
+            result=connection.execute(
                 "UPDATE reverse_quality_analysis SET status=?,updated_at=CURRENT_TIMESTAMP WHERE canonical_itr=?",
                 (status, canonical_itr),
             )
+            if not result.rowcount:
+                raise KeyError(canonical_itr)
 
     def _discard_analysis(self, canonical_itr: str) -> None:
         with self._transaction() as connection:
@@ -731,7 +736,7 @@ class SQLiteReverseQualityRepository(ReverseQualityRepository):
                         canonical_itr, scene_match=new,
                         reviewer=review.get("reviewer") or "LEGACY_MIGRATION", analysis_status="IN_REVIEW",
                     )
-                self._set_analysis_status(canonical_itr, legacy.get("status") or "PENDING_REVIEW")
+                self.set_analysis_status(canonical_itr, legacy.get("status") or "PENDING_REVIEW")
                 migrated += 1
             except Exception as exc:
                 self._discard_analysis(canonical_itr)
