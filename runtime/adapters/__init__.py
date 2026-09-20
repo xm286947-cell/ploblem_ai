@@ -8,3 +8,11 @@ from .quality_issue import (
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]
+
+from .major_issue import (
+    MajorIssueD01Outcome,
+    MajorIssueD01RuntimeAdapter,
+    MajorIssueObjectCandidate,
+    MajorIssueObjectSpec,
+    RepeatCaseRuntimeAdapter,
+)
