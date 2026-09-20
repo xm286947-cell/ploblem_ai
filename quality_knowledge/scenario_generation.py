@@ -12,6 +12,7 @@ import yaml
 from builder.ai_client import OpenAICompatibleClient
 from builder.json_response import parse_json_object
 from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
+from quality_knowledge.reverse_quality_scenario_adapter import adapt_reverse_quality_result
 
 
 STANDARDIZATION_PROMPT = """/no_think
@@ -61,6 +62,21 @@ class ScenarioGenerationService:
         with self.scenarios.connect() as c:
             row=c.execute('SELECT records_json FROM scenario_generation_source WHERE generation_id=?',(generation_id,)).fetchone()
         return json.loads(row[0]) if row else []
+
+    def candidate_from_reverse_quality(self, result):
+        payload=result.get('result') if isinstance(result,dict) and isinstance(result.get('result'),dict) else result
+        if not isinstance(payload,dict):
+            raise ValueError('REVERSE_QUALITY_RESULT_INVALID')
+        identity=payload.get('identity') or {}
+        product=str(identity.get('product_code') or '').strip()
+        taxonomy_version_id=str(identity.get('taxonomy_version_id') or '').strip()
+        if not product:
+            raise ValueError('REVERSE_QUALITY_PRODUCT_REQUIRED')
+        taxonomy=(self.scenarios.taxonomy(taxonomy_version_id,product)
+                  if taxonomy_version_id else self.scenarios.taxonomy_active(product))
+        if not taxonomy:
+            raise ValueError('REVERSE_QUALITY_TAXONOMY_NOT_FOUND')
+        return adapt_reverse_quality_result(result,taxonomy).to_dict()
 
     @staticmethod
     def analysis_identity(row,taxonomy_version_id,product):
