@@ -9,12 +9,15 @@ production-release acceptance.
 """
 
 from runtime.contracts import *
+from runtime.config import AgentConfigLoader, ConfiguredAgentRuntime
 from runtime.engine import AgentRuntime, LightweightExecutionEngine
 from runtime.reliability import *
 from runtime.store import SqliteTaskStore
 
 __all__ = [
     "AgentRuntime",
+    "ConfiguredAgentRuntime",
+    "AgentConfigLoader",
     "LightweightExecutionEngine",
     "SqliteTaskStore",
 ] + [name for name in globals() if not name.startswith("_")]
