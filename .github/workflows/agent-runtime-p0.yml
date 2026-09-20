@@ -10,6 +10,7 @@ on:
       - feature/openai-mock-v0.1
     paths:
       - "runtime/**"
+      - "builder/ai_client.py"
       - "storage_e2e/**"
       - "tools/openai_mock/**"
       - "tests/test_agent_runtime_p0_*.py"
@@ -25,6 +26,7 @@ on:
       - feature/agent-config-001
     paths:
       - "runtime/**"
+      - "builder/ai_client.py"
       - "storage_e2e/**"
       - "tools/openai_mock/**"
       - "tests/test_agent_runtime_p0_*.py"
