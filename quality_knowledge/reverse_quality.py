@@ -42,12 +42,52 @@ PROMPT = '''/no_think
 recovery_method 只描述问题发生后的实际恢复方式，不等同于永久解决方案；客户质量要求不能复制解决措施；能力短板不能写成“代码有Bug/测试遗漏”；无证据不编失效机理或阈值。
 related_objects 只能引用结构化产品、型号、设备字段；环境/工况可引用描述、原因、TRC、现场记录。
 每个非空字段给出输入 facts 中真实存在的 evidence_ids。证据不足时 value 为空，不要写“未知”充数。
-输出严格 JSON：{"fields":{"字段名":{"value":"","evidence_ids":["证据ID"],"confidence":0.0}},"lifecycle_code":"词典code或空","activity_code":"词典code或空","match_reason":"","missing_condition":"","questions":["待人工确认事项"]}。
-fields 只使用输入 field_names，禁止自由新增；所有建议均为待评审，不是正式质量标准。'''
+输出严格 JSON：{"fields":{"字段名":{"value":"","evidence_ids":["证据ID"],"confidence":0.0}},"lifecycle_code":"词典code或空","activity_code":"词典code或空","match_reason":"","missing_condition":"","questions":[{"field_name":"field_names 中字段或空","reason":"为什么当前证据不足","question":"需要人工确认的问题","evidence_needed":["需要补充的证据类型"]}]}。
+questions 只用于证据不足时的待补信息；field_name 不确定可留空。fields 只使用输入 field_names，禁止自由新增；所有建议均为待评审，不是正式质量标准。'''
 
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _missing_information_from_questions(parsed):
+    questions=parsed.get('questions') or []
+    if not isinstance(questions,list):
+        return []
+    result=[];seen=set()
+    for raw in questions[:20]:
+        if isinstance(raw,str):
+            field_name=''
+            reason='AI识别为待补充信息'
+            question=raw.strip()
+            evidence_needed=[]
+        elif isinstance(raw,dict):
+            candidate=str(raw.get('field_name') or '').strip()
+            field_name=candidate if candidate in FIELD_NAMES else ''
+            reason=str(raw.get('reason') or '').strip()[:500]
+            question=str(raw.get('question') or '').strip()[:500]
+            needed=raw.get('evidence_needed') or []
+            if isinstance(needed,str):
+                needed=[needed]
+            evidence_needed=[str(x).strip()[:200] for x in needed if str(x).strip()][:8] if isinstance(needed,list) else []
+        else:
+            continue
+        if not question:
+            continue
+        key=(field_name,question)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({
+            'field_name':field_name,
+            'reason':reason,
+            'question':question,
+            'evidence_needed':evidence_needed,
+            'status':'PENDING',
+            'answer':'',
+            'reviewer':'',
+        })
+    return result
 
 
 class ReverseQualityService:
@@ -250,7 +290,7 @@ class ReverseQualityService:
             },
             model=response.model,
             input_payload=facts,
-            missing_information=[],
+            missing_information=_missing_information_from_questions(parsed),
         )
         return self.get(facts['canonical_itr'])
 
@@ -276,6 +316,20 @@ class ReverseQualityService:
         self.repository.save_field_review(
             item['canonical_itr'],field_name=name,action=action,old=old,new=new,
             reviewer=reviewer,analysis_status=status)
+        return self.get(canonical)
+
+    def review_missing_information(self, canonical, *, missing_id, status, answer, reviewer):
+        if status not in {'CONFIRMED','NOT_APPLICABLE'}:
+            raise ValueError('缺失信息确认状态无效')
+        reviewer=reviewer.strip()
+        if not reviewer:
+            raise ValueError('请填写审核人')
+        answer=answer.strip()
+        if status=='CONFIRMED' and not answer:
+            raise ValueError('确认缺失信息时请填写人工答案')
+        self.repository.resolve_missing_information(
+            normalize_itr(canonical),missing_id=missing_id,status=status,
+            answer=answer,reviewer=reviewer)
         return self.get(canonical)
 
     def review_match(self, canonical, *, status, scene_id, reason, missing_condition, reviewer):
