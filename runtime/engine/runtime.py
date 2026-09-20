@@ -837,7 +837,11 @@ class LightweightExecutionEngine:
                         )
                         if existing is not None:
                             value = existing.result_data
+                            step_run.status = RuntimeStatus.COMPLETED
+                            step_run.completed_at = finished
                             step_run.output_ref = f"commit:{existing.commit_id}"
+                            step_run.metadata["reused_committed_execution"] = True
+                            self.store.save_step_run(step_run)
 
                     self._inject("after_atomic_commit_before_status")
                     return RuntimeStatus.COMPLETED, value, None, step_run
