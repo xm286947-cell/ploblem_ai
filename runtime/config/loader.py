@@ -83,7 +83,15 @@ def _find_forbidden_secret_key(value: Any, path: str = "$") -> str | None:
     if isinstance(value, dict):
         for key, item in value.items():
             normalized = str(key).lower()
-            if normalized in _FORBIDDEN_SECRET_KEYS or normalized.endswith("_secret"):
+            direct_provider_api_key = (
+                normalized == "api_key"
+                and str(value.get("mode", "")).lower() == "direct"
+                and "type" in value
+            )
+            if (
+                normalized in _FORBIDDEN_SECRET_KEYS
+                or normalized.endswith("_secret")
+            ) and not direct_provider_api_key:
                 return f"{path}.{key}"
             found = _find_forbidden_secret_key(item, f"{path}.{key}")
             if found:
@@ -99,9 +107,10 @@ def _find_forbidden_secret_key(value: Any, path: str = "$") -> str | None:
 class AgentConfigLoader:
     """Load, validate and resolve immutable Runtime agent configuration.
 
-    Secret values are only checked for presence in the environment. They are
-    deliberately never retained on ResolvedAgentConfig, AgentDefinition or
-    ExecutionPolicy, so Runtime snapshots/logs cannot serialize them.
+    Provider credentials may come from environment references (production)
+    or direct provider config (test/integration only). Secret values are never
+    retained on ResolvedAgentConfig, AgentDefinition or ExecutionPolicy, so
+    Runtime snapshots/logs cannot serialize them.
     """
 
     def __init__(
@@ -120,6 +129,7 @@ class AgentConfigLoader:
         self.content_strategies = content_strategies
         self.completeness_gates = dict(completeness_gates or {})
         self.environ = environ if environ is not None else os.environ
+        self._runtime_api_keys: dict[str, str] = {}
 
     def _load_provider_profiles(
         self,
@@ -244,7 +254,20 @@ class AgentConfigLoader:
             raise SecretEnvNotFoundError(env_name)
         return value
 
-    def _resolve_provider(self, config: AgentConfig) -> ResolvedProviderConfig:
+    def get_runtime_api_key(
+        self,
+        config_hash: str,
+        *,
+        api_key_env: str | None = None,
+    ) -> str | None:
+        if api_key_env:
+            return self._require_env(api_key_env)
+        return self._runtime_api_keys.get(config_hash)
+
+    def _resolve_provider(
+        self,
+        config: AgentConfig,
+    ) -> tuple[ResolvedProviderConfig, str | None]:
         if config.provider_ref:
             provider = self.provider_profiles.get(config.provider_ref)
             if provider is None:
@@ -265,24 +288,26 @@ class AgentConfigLoader:
                 details={"agent_id": config.agent_id},
             )
 
-        if provider.type == "openai_compatible" and not provider.api_key_env:
-            raise ConfigValidationError(
-                "openai_compatible provider requires api_key_env",
-                details={"agent_id": config.agent_id},
-            )
+        if provider.mode == "env":
+            base_url = self._require_env(provider.base_url_env)
+            api_key = self._require_env(provider.api_key_env)
+        else:
+            base_url = provider.base_url
+            api_key = provider.api_key
 
-        base_url = self._require_env(provider.base_url_env)
-        self._require_env(provider.api_key_env)
-
-        return ResolvedProviderConfig(
-            type=provider.type,
-            profile_ref=profile_ref,
-            model=str(model),
-            base_url_env=provider.base_url_env,
-            api_key_env=provider.api_key_env,
-            base_url=base_url,
-            sdk_retry=0,
-            metadata=dict(provider.metadata),
+        return (
+            ResolvedProviderConfig(
+                type=provider.type,
+                mode=provider.mode,
+                profile_ref=profile_ref,
+                model=str(model),
+                base_url_env=provider.base_url_env,
+                api_key_env=provider.api_key_env,
+                base_url=base_url,
+                sdk_retry=0,
+                metadata=dict(provider.metadata),
+            ),
+            api_key,
         )
 
     @staticmethod
@@ -349,7 +374,7 @@ class AgentConfigLoader:
                 },
             ) from exc
 
-        provider = self._resolve_provider(config)
+        provider, runtime_api_key = self._resolve_provider(config)
         prompt = self._resolve_prompt(
             config.prompt.ref,
             config.prompt.version,
@@ -410,8 +435,12 @@ class AgentConfigLoader:
                 else None
             ),
         }
+        safe_config = config.model_dump(mode="json")
+        inline_provider = safe_config.get("provider")
+        if isinstance(inline_provider, dict) and "api_key" in inline_provider:
+            inline_provider["api_key"] = "[DIRECT_SECRET]"
         effective_material = {
-            "config": config.model_dump(mode="json"),
+            "config": safe_config,
             "provider": safe_provider,
             "execution_policy": execution_policy.model_dump(mode="json"),
             "references": reference_material,
@@ -419,6 +448,8 @@ class AgentConfigLoader:
         config_hash = _hash_bytes(
             _stable_json(effective_material).encode("utf-8")
         )
+        if runtime_api_key:
+            self._runtime_api_keys[config_hash] = runtime_api_key
 
         metadata = {
             **config.metadata,
@@ -426,6 +457,7 @@ class AgentConfigLoader:
             "agent_config_hash": config_hash,
             "provider_ref": provider.profile_ref,
             "provider_type": provider.type,
+            "provider_mode": provider.mode,
             "provider_base_url": provider.base_url,
             "base_url_env": provider.base_url_env,
             "api_key_env": provider.api_key_env,
