@@ -76,7 +76,19 @@ def _normalize_data(value: Any) -> Any:
     return value
 
 
-_SECRET_KEY_PARTS = ("secret", "password", "token", "api_key", "apikey", "credential")
+_SECRET_KEYS = {
+    "secret",
+    "client_secret",
+    "password",
+    "passwd",
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+    "bearer_token",
+    "credential",
+    "credentials",
+}
 
 
 def _strip_secrets(value: Any) -> Any:
@@ -86,7 +98,7 @@ def _strip_secrets(value: Any) -> Any:
         cleaned = {}
         for key, item in value.items():
             normalized = str(key).lower()
-            if any(part in normalized for part in _SECRET_KEY_PARTS):
+            if normalized in _SECRET_KEYS or normalized.endswith("_secret"):
                 continue
             cleaned[key] = _strip_secrets(item)
         return cleaned
