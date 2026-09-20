@@ -9,10 +9,10 @@ production-release acceptance.
 """
 
 from runtime.contracts import *
-from runtime.config import AgentConfigLoader, ConfiguredAgentRuntime
 from runtime.engine import AgentRuntime, LightweightExecutionEngine
 from runtime.reliability import *
 from runtime.store import SqliteTaskStore
+from runtime.config import AgentConfigLoader, ConfiguredAgentRuntime
 
 __all__ = [
     "AgentRuntime",
