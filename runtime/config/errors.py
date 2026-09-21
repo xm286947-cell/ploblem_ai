@@ -8,7 +8,7 @@ from runtime.reliability.errors import RuntimeExecutionException
 class AgentConfigError(RuntimeExecutionException):
     """Base error for configuration failures before provider execution."""
 
-    retryable = False
+    category = ErrorCategory.CONFIG\n    retryable = False
 
 
 class ConfigValidationError(AgentConfigError):
