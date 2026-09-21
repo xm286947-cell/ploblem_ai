@@ -554,6 +554,7 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
             "authorization": {"present": bool(authorization), "scheme": scheme},
             "header_names": header_names,
             "headers": redacted_headers,
+            "body": body if isinstance(body, dict) else None,
         }
         return self.server.state.register_call(key, record)
 
