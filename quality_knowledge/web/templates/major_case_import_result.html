@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}重大复盘知识库 / 批量导入 / 结果{% endblock %}
+{% block body %}
+<div class="page-header"><div><h1>重大问题导入结果</h1><p>批次 {{batch.batch_id}} · {{batch.status}}</p></div><div class="page-actions"><a class="btn" href="/knowledge/major-cases/import">继续导入</a><a class="btn btn-primary" href="/knowledge/major-cases">查看案例</a></div></div>
+<section class="card">
+  <div class="meta-grid">
+    {% for key,value in batch.result.items() if key not in ['errors','case_ids'] %}<div><span>{{key}}</span><b>{{value}}</b></div>{% endfor %}
+  </div>
+  {% if batch.result.errors %}<details open><summary>异常记录</summary><pre>{{batch.result.errors|json_zh}}</pre></details>{% endif %}
+  {% if batch.result.case_ids %}<h3>案例</h3><div>{% for case_id in batch.result.case_ids %}<a class="btn" href="/knowledge/major-cases/{{case_id}}">{{case_id}}</a> {% endfor %}</div>{% endif %}
+</section>
+{% endblock %}
