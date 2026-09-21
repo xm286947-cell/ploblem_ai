@@ -124,7 +124,7 @@ class MajorCaseRestoreService:
         self.project_root = Path(project_root).resolve()
         self.excel_parser = ExcelParser(self.project_root / "config/field_mapping.yaml")
         self.report_matcher = ReportMatcher(self.project_root / "config/report_matching.yaml")
-        self.staging_root = self.repository.attachment_root / "_major_import"
+        self.staging_root = self.repository.attachment_root.parent / "import_staging"
         self.staging_root.mkdir(parents=True, exist_ok=True)
 
     def _enrich_record(self, record: dict) -> dict:
@@ -294,7 +294,7 @@ class MajorCaseRestoreService:
                     excel_path.name,
                     group_code,
                     domain,
-                    str(root.relative_to(self.repository.attachment_root)),
+                    str(root),
                     _json(preview),
                 ),
             )
