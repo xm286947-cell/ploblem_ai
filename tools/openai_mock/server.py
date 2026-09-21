@@ -39,6 +39,7 @@ class Behavior:
     chunk_size: int = 16
     headers: dict[str, str] = field(default_factory=dict)
     raw_response_body: str | None = None
+    require_auth: bool = True
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "Behavior":
@@ -61,6 +62,9 @@ class Behavior:
             chunk_size=_as_int(raw.get("chunk_size", 16), "chunk_size", minimum=1),
             headers=_string_dict(raw.get("headers", {}), "headers"),
             raw_response_body=_as_optional_str(raw.get("raw_response_body"), "raw_response_body"),
+            require_auth=bool(
+                _as_optional_bool(raw.get("require_auth", True), "require_auth")
+            ),
         )
 
 
@@ -188,7 +192,8 @@ class OpenAIMockHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__mock__/reset":
             return self._reset()
         if parsed.path in {"/v1/responses", "/v1/chat/completions"}:
-            if not self._require_auth():
+            scenario = self.server.state.scenario(self._scenario_key())
+            if scenario.behavior.require_auth and not self._require_auth():
                 return
             body = self._read_json_body()
             if body is None:
