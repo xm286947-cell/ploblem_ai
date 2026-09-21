@@ -624,7 +624,7 @@ class MajorCaseRestoreService:
                        ORDER BY revision_no DESC LIMIT 1""",
                     (entry["entry_id"],),
                 ).fetchone()
-                if ai_row:
+                if ai_row and entry.get("status") not in {"REJECTED", "MISSING"}:
                     rev = self._revision_detail(connection, ai_row["revision_id"])
                     if rev.get("content"):
                         ai_features[feature_key] = {
