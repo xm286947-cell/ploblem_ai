@@ -4,7 +4,7 @@ import json
 import os
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from jsonschema import ValidationError as JsonSchemaValidationError
@@ -13,45 +13,10 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from runtime.reliability.errors import RuntimeStepError
 from runtime.contracts import ErrorCategory
+from runtime.providers.endpoint import ProviderEndpointError, ProviderEndpointResolver
 
 
 _RETRYABLE_HTTP = {408, 409, 425, 429, 500, 502, 503, 504}
-
-
-def _endpoint(base_url: str) -> str:
-    value = str(base_url or "").rstrip("/")
-    if value.endswith("/chat/completions"):
-        return value
-    return value + "/chat/completions"
-
-
-def _safe_http_url(value: str) -> str | None:
-    parsed = urlsplit(str(value or "").strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    host = parsed.hostname or ""
-    if parsed.port is not None:
-        host = f"{host}:{parsed.port}"
-    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
-
-
-def _validated_endpoint(base_url: str) -> str:
-    endpoint = _endpoint(base_url)
-    safe_endpoint = _safe_http_url(endpoint)
-    if safe_endpoint is None:
-        parsed = urlsplit(endpoint)
-        raise RuntimeStepError(
-            "provider base_url must be an absolute http(s) URL",
-            code="PROVIDER_BASE_URL_INVALID",
-            category=ErrorCategory.EXECUTION,
-            retryable=False,
-            details={
-                "scheme": parsed.scheme or None,
-                "has_netloc": bool(parsed.netloc),
-                "base_url_length": len(str(base_url or "")),
-            },
-        )
-    return endpoint
 
 
 def _provider_trace_enabled() -> bool:
@@ -70,7 +35,7 @@ def _trace_provider_request(
     if not _provider_trace_enabled():
         return
     parsed = urlsplit(endpoint)
-    safe_endpoint = _safe_http_url(endpoint)
+    safe_endpoint = endpoint
     diagnostic = {
         "provider": "openai_compatible",
         "provider_call_seq": runtime_context.get("provider_call_seq"),
@@ -222,7 +187,16 @@ class OpenAICompatibleProviderAdapter:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        endpoint = _validated_endpoint(base_url)
+        try:
+            endpoint = ProviderEndpointResolver.chat_completions_url(base_url)
+        except ProviderEndpointError as exc:
+            raise RuntimeStepError(
+                "provider base_url failed Runtime endpoint contract",
+                code="PROVIDER_BASE_URL_INVALID",
+                category=ErrorCategory.CONFIG,
+                retryable=False,
+                details=exc.details,
+            ) from exc
         _trace_provider_request(
             endpoint=endpoint,
             model=model,
