@@ -2,6 +2,15 @@ name: Storage Real Provider E2E
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "acceptance/orch-b01-live-provider"
+    paths:
+      - ".github/workflows/storage-real-provider-e2e.yml"
+      - "runtime/**"
+      - "config/runtime/**"
+      - "prompts/runtime/**"
+      - "tests/test_agent_runtime_p0_storage_real_provider_e2e.py"
 
 jobs:
   storage-real-provider-smoke:
