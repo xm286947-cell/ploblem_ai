@@ -251,6 +251,63 @@ CREATE TABLE IF NOT EXISTS kb_legacy_import(
   UNIQUE(legacy_case_id,source_hash)
 );
 
+CREATE TABLE IF NOT EXISTS kb_case_identity(
+  identity_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES kb_case(case_id),
+  group_code TEXT NOT NULL,
+  identity_type TEXT NOT NULL,
+  identity_value TEXT NOT NULL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(group_code,identity_type,identity_value),
+  UNIQUE(case_id,identity_type,identity_value)
+);
+
+CREATE TABLE IF NOT EXISTS kb_source_fact_revision(
+  source_fact_revision_id TEXT PRIMARY KEY,
+  case_id TEXT NOT NULL REFERENCES kb_case(case_id),
+  revision_no INTEGER NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'EXCEL',
+  source_ref TEXT NOT NULL DEFAULT '',
+  source_hash TEXT NOT NULL,
+  raw_json TEXT NOT NULL DEFAULT '{}',
+  normalized_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(case_id,revision_no),
+  UNIQUE(case_id,source_hash)
+);
+
+CREATE TABLE IF NOT EXISTS kb_entry_analysis_meta(
+  revision_id TEXT PRIMARY KEY REFERENCES kb_entry_revision(revision_id),
+  confidence REAL,
+  explanation TEXT NOT NULL DEFAULT '',
+  mechanism TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS kb_major_import_batch(
+  batch_id TEXT PRIMARY KEY,
+  source_file TEXT NOT NULL,
+  group_code TEXT NOT NULL,
+  domain TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'PREVIEW'
+    CHECK(status IN ('PREVIEW','COMMITTING','COMPLETED','PARTIAL','FAILED')),
+  staging_path TEXT NOT NULL DEFAULT '',
+  preview_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  committed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_case_identity_lookup
+ON kb_case_identity(group_code,identity_type,identity_value);
+CREATE INDEX IF NOT EXISTS idx_kb_source_fact_case_revision
+ON kb_source_fact_revision(case_id,revision_no DESC);
+CREATE INDEX IF NOT EXISTS idx_kb_major_import_status
+ON kb_major_import_batch(status,created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_kb_case_group_status ON kb_case(group_code,status,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kb_case_group_updated ON kb_case(group_code,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kb_document_hash ON kb_document_version(content_hash);
@@ -263,3 +320,4 @@ CREATE INDEX IF NOT EXISTS idx_kb_run_state ON kb_run(state,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kb_repeat_event ON kb_repeat_result(current_event_id,created_at DESC);
 
 INSERT OR IGNORE INTO kb_schema_version(version) VALUES(1);
+INSERT OR IGNORE INTO kb_schema_version(version) VALUES(2);
