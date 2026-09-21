@@ -208,7 +208,7 @@ def test_orch_b01_validation_retry_is_runtime_owned(tmp_path: Path) -> None:
             )
         )
 
-        assert result.status == RuntimeStatus.FAILED
+        assert result.status == RuntimeStatus.PARTIAL
         assert result.error is not None
         assert result.error.code == "INVALID_JSON"
         assert result.execution.provider_calls == 3
