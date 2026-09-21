@@ -14,7 +14,9 @@ from runtime.engine.runtime import (
     FaultInjector,
     LightweightExecutionEngine,
 )
+from runtime.providers import OpenAICompatibleProviderAdapter
 from runtime.reliability.errors import RuntimeExecutionException, RuntimeStepError
+from runtime.contracts import ErrorCategory
 from runtime.store import SqliteTaskStore
 
 
@@ -32,6 +34,7 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
         self.config_loader = config_loader
         self._resolved_agent_configs: dict[str, ResolvedAgentConfig] = {}
         self._business_handlers: dict[str, AgentHandler] = {}
+        self._provider_handlers_by_config_hash: dict[str, AgentHandler] = {}
 
     @staticmethod
     def _snapshot_provider_config(
@@ -140,6 +143,48 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
 
         return configured_handler
 
+
+    def _build_runtime_provider_handler(
+        self,
+        resolved: ResolvedAgentConfig,
+    ) -> AgentHandler | None:
+        if resolved.provider.type != "openai_compatible":
+            return None
+
+        adapter = OpenAICompatibleProviderAdapter(
+            system_prompt=self.config_loader.read_prompt_text(resolved),
+            output_schema=self.config_loader.get_output_schema(resolved),
+            timeout_seconds=resolved.execution_policy.timeout_seconds,
+            response_shape=resolved.definition.metadata.get(
+                "provider_response_shape"
+            ),
+        )
+        self._provider_handlers_by_config_hash[resolved.config_hash] = adapter
+
+        def dispatch(payload: Any, context: dict[str, Any]) -> Any:
+            runtime_context = context.get("runtime", {})
+            config_hash = str(
+                runtime_context.get("agent_config_hash")
+                or (
+                    (runtime_context.get("agent_definition") or {})
+                    .get("metadata", {})
+                    .get("agent_config_hash")
+                )
+                or resolved.config_hash
+            )
+            handler = self._provider_handlers_by_config_hash.get(config_hash)
+            if handler is None:
+                raise RuntimeStepError(
+                    "provider handler for execution snapshot is unavailable",
+                    code="PROVIDER_HANDLER_SNAPSHOT_MISSING",
+                    category=ErrorCategory.CONFIG,
+                    retryable=False,
+                    details={"config_hash": config_hash},
+                )
+            return handler(payload, context)
+
+        return dispatch
+
     def register_agent_from_config(
         self,
         path: str | Path,
@@ -158,7 +203,15 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
         business_handler = self._business_handlers.get(agent_id)
 
         if business_handler is None:
-            self.register_agent_definition(resolved.definition)
+            runtime_provider_handler = self._build_runtime_provider_handler(resolved)
+            if runtime_provider_handler is None:
+                self.register_agent_definition(resolved.definition)
+            else:
+                self.register_agent(
+                    agent_id,
+                    self._wrap_handler(runtime_provider_handler, resolved),
+                    resolved.definition,
+                )
         else:
             self.register_agent(
                 agent_id,
