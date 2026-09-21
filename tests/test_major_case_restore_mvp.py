@@ -4,6 +4,9 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from openpyxl import Workbook
+from fastapi.testclient import TestClient
+
+from quality_knowledge.web import create_app
 
 from quality_knowledge.major_cases.legacy_adapter import LegacyRepeatAdapter
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
@@ -300,3 +303,79 @@ def test_rejected_ai_falls_back_to_source_fact(tmp_path: Path) -> None:
     assert view["effective_features"]["issue_fact"]["value"] == "Excel原始事实"
     assert view["effective_features"]["issue_fact"]["source_layer"] == "SOURCE_FACT"
     assert "issue_fact" not in view["ai_analysis"]
+
+
+def test_web_batch_preview_confirm_and_case_feature_page(tmp_path: Path, monkeypatch) -> None:
+    major_root = tmp_path / "major-data"
+    monkeypatch.setenv("MAJOR_KNOWLEDGE_DATA_ROOT", str(major_root))
+    app = create_app(tmp_path / "business.db")
+    client = TestClient(app)
+
+    page = client.get("/knowledge/major-cases/import")
+    assert page.status_code == 200
+    assert "重大问题批量导入" in page.text
+
+    xlsx = _workbook(
+        tmp_path / "web-major.xlsx",
+        [{
+            "ITR单号": "ITR20260061",
+            "问题描述": "Web导入问题事实",
+            "TRC发生": "Web导入TRC",
+            "复盘报告": "web-review.docx",
+        }],
+    )
+    docx = _docx(tmp_path / "web-review.docx")
+    response = client.post(
+        "/knowledge/major-cases/import/preview",
+        files=[
+            (
+                "file",
+                (
+                    xlsx.name,
+                    xlsx.read_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            ),
+            (
+                "materials",
+                (
+                    docx.name,
+                    docx.read_bytes(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            ),
+        ],
+        data={"group_code": "G1", "domain": "SOFTWARE"},
+    )
+    assert response.status_code == 200
+    assert "重大问题导入预检" in response.text
+    assert "EXACT_FILENAME" in response.text
+    assert "IGR" in response.text
+
+    restore = app.state.major_case_restore_service
+    with restore.repository.connect() as connection:
+        batch_id = connection.execute(
+            "SELECT batch_id FROM kb_major_import_batch ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()[0]
+
+    confirmed = client.post(
+        "/knowledge/major-cases/import/confirm",
+        data={"batch_id": batch_id},
+        follow_redirects=False,
+    )
+    assert confirmed.status_code == 303
+    result = restore.batch(batch_id)
+    assert result["status"] == "COMPLETED"
+    case_id = result["result"]["case_ids"][0]
+
+    detail = client.get(f"/knowledge/major-cases/{case_id}")
+    assert detail.status_code == 200
+    assert "Web导入问题事实" in detail.text
+    assert "SOURCE_FACT" in detail.text
+    assert "IGR：无" in detail.text
+
+    feature_api = client.get(f"/api/knowledge/major-cases/{case_id}/features")
+    assert feature_api.status_code == 200
+    feature_view = feature_api.json()
+    assert feature_view["effective_features"]["issue_fact"]["value"] == "Web导入问题事实"
+    assert feature_view["case_identity"]["igr"] == ""
