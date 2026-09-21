@@ -1,6 +1,11 @@
 name: Major Issue Real Provider E2E
 
 on:
+  push:
+    branches:
+      - rcfg-02-major-runtime-config
+    paths:
+      - ".github/workflows/major-issue-real-provider-e2e.yml"
   workflow_dispatch:
 
 jobs:
