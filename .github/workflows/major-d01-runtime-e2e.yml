@@ -1,0 +1,73 @@
+name: Major D01 Runtime E2E
+
+on:
+  push:
+    branches:
+      - "feature/major-d01-runtime-e2e"
+  pull_request:
+    branches:
+      - "integration/major-runtime-v1.1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d01-runtime-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-runtime-p0-test.txt
+          python -m pip install -r requirements-openai-mock-test.txt
+
+      - name: Compile
+        run: |
+          python -m compileall -q runtime quality_knowledge tests
+
+      - name: Run Major D01 provider harness
+        run: |
+          mkdir -p test-results/major-d01
+          python -m pytest -q \
+            tests/test_major_d01_runtime_e2e.py \
+            --junitxml=test-results/major-d01/mock-e2e.xml
+
+      - name: Run Major integration contract
+        run: |
+          python -m pytest -q \
+            tests/test_major_runtime_integration_gate.py \
+            tests/test_agent_runtime_p0_d8.py \
+            tests/test_runtime_provider_adapter.py \
+            tests/test_agent_runtime_p0_d11_acceptance_gaps.py \
+            --junitxml=test-results/major-d01/integration.xml
+
+      - name: Run REQ-022 regression
+        run: |
+          python -m pytest -q tests/test_req022_major_cases.py \
+            --junitxml=test-results/major-d01/req022.xml
+
+      - name: Run real-provider test in opt-out mode
+        run: |
+          python -m pytest -q tests/test_major_d01_real_provider_e2e.py \
+            --junitxml=test-results/major-d01/real-provider-optout.xml
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-d01-runtime-e2e-${{ github.sha }}
+          path: test-results/major-d01/
+          if-no-files-found: error
+          retention-days: 90
