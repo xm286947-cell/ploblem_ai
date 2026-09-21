@@ -599,6 +599,22 @@ class MajorKnowledgeRepository:
                 (case_id,),
             )
 
+    def clear_pending_ai_entries_for_event(
+        self,
+        case_id: str,
+        event_id: str,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP
+                   WHERE case_id=? AND event_id=?
+                     AND status IN ('PENDING','MISSING')
+                     AND current_revision_id IN (
+                         SELECT revision_id FROM kb_entry_revision WHERE origin='AI'
+                     )""",
+                (case_id, event_id),
+            )
+
     def clear_missing_ai_entries(self, case_id: str) -> None:
         with self.connect() as connection:
             connection.execute(
