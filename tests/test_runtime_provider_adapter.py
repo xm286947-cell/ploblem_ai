@@ -391,7 +391,7 @@ def test_orch_b01_invalid_provider_base_url_fails_fast_before_http(monkeypatch) 
 
     assert called["value"] is False
     assert exc_info.value.code == "PROVIDER_BASE_URL_INVALID"
-    assert exc_info.value.category.value == "EXECUTION"
+    assert exc_info.value.category.value == "CONFIG"
     assert exc_info.value.retryable is False
     assert SECRET not in str(exc_info.value.details)
 
