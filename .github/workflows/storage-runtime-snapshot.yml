@@ -1,0 +1,49 @@
+name: Storage Runtime Snapshot
+
+on:
+  push:
+    branches:
+      - artifact/storage-runtime-snapshot
+  workflow_dispatch:
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-runtime-p0-test.txt -r requirements-openai-mock-test.txt
+      - name: Run Storage-facing Runtime acceptance
+        run: |
+          python -m pytest \
+            tests/test_runtime_provider_adapter.py \
+            tests/test_agent_runtime_p0_storage_e2e_json_truncation.py \
+            tests/test_openai_mock_storage_e2e.py \
+            tests/test_openai_mock_storage_m01_m08.py \
+            tests/test_agent_runtime_p0_storage_real_provider_e2e.py -q
+      - name: Package Runtime dependency snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact/unified_agent_runtime
+          cp -R runtime artifact/unified_agent_runtime/
+          mkdir -p artifact/unified_agent_runtime/config
+          cp -R config/runtime artifact/unified_agent_runtime/config/
+          mkdir -p artifact/unified_agent_runtime/tools
+          cp -R tools/openai_mock artifact/unified_agent_runtime/tools/
+          if [ -d prompts/runtime ]; then
+            mkdir -p artifact/unified_agent_runtime/prompts
+            cp -R prompts/runtime artifact/unified_agent_runtime/prompts/
+          fi
+          cp requirements-runtime-p0-test.txt artifact/unified_agent_runtime/
+          cp requirements-openai-mock-test.txt artifact/unified_agent_runtime/
+          printf '%s\n' "${GITHUB_SHA}" > artifact/unified_agent_runtime/RUNTIME_COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: storage-runtime-snapshot
+          path: artifact/unified_agent_runtime
+          if-no-files-found: error
