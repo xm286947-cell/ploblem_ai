@@ -8,13 +8,11 @@ import pytest
 from runtime import AgentRequest, RuntimeStatus, SqliteTaskStore
 from runtime.adapters import StorageFieldResult, StorageGoldenFieldComparator
 from runtime.config import AgentConfigLoader, ConfiguredAgentRuntime
-from storage_e2e import OpenAICompatibleStorageRealProvider
 
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_CONFIG = "config/runtime/agents/storage.emmc.parameter_extract.yaml"
 MODEL_CONFIG = "config/runtime/model.yaml"
-PROMPT_PATH = ROOT / "prompts/runtime/storage/emmc_parameter_extract.md"
 
 GOLDEN = [
     {
@@ -77,9 +75,7 @@ def test_storage_real_provider_e2e01_yaml_runtime_provider_schema_and_golden(tmp
     store = SqliteTaskStore(tmp_path / "runtime.db")
     loader = _loader()
     runtime = ConfiguredAgentRuntime(store, config_loader=loader)
-    handler = OpenAICompatibleStorageRealProvider(PROMPT_PATH)
-
-    resolved = runtime.load_agent(AGENT_CONFIG, handler)
+    resolved = runtime.load_agent(AGENT_CONFIG)
 
     assert resolved.provider.profile_ref == "qwen_prod"
     assert resolved.provider.model == "qwen3.8-max"

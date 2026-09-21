@@ -982,6 +982,14 @@ class LightweightExecutionEngine:
                     self._inject("before_provider_call")
 
                     provider_call_seq = consumed + 1
+                    snapshot = self._load_execution_snapshot(task)
+                    if snapshot.workflow_definition is not None:
+                        agent_snapshot = snapshot.metadata.get(
+                            "agent_definitions", {}
+                        ).get(definition.agent_id)
+                    else:
+                        agent_snapshot = snapshot.agent_definition
+                    safe_agent_snapshot = agent_snapshot or {}
                     attempt = AttemptRecord(
                         attempt_id=f"attempt-{uuid4().hex}",
                         step_run_id=step_run.step_run_id,
@@ -996,6 +1004,12 @@ class LightweightExecutionEngine:
                         validation_cycle_no=validation_cycle_no,
                         transport_attempt_no=transport_attempt_no,
                         provider_call_seq=provider_call_seq,
+                        model_name=safe_agent_snapshot.get("model"),
+                        provider=safe_agent_snapshot.get("provider"),
+                        execution_metrics={
+                            "provider_call_seq": provider_call_seq,
+                            "sdk_retry": 0,
+                        },
                         started_at=_now(),
                     )
                     self.store.save_attempt(attempt)
@@ -1025,13 +1039,6 @@ class LightweightExecutionEngine:
                                 },
                             },
                         }
-                        snapshot = self._load_execution_snapshot(task)
-                        if snapshot.workflow_definition is not None:
-                            agent_snapshot = snapshot.metadata.get(
-                                "agent_definitions", {}
-                            ).get(definition.agent_id)
-                        else:
-                            agent_snapshot = snapshot.agent_definition
                         handler_context["runtime"]["agent_definition"] = agent_snapshot
                         handler_context["runtime"]["model_policy"] = snapshot.model_policy
                         value = _normalize_data(

@@ -13,6 +13,7 @@ from runtime.engine import AgentRuntime, LightweightExecutionEngine
 from runtime.reliability import *
 from runtime.store import SqliteTaskStore
 from runtime.config import AgentConfigLoader, ConfiguredAgentRuntime
+from runtime.providers import OpenAICompatibleProviderAdapter
 
 __all__ = [
     "AgentRuntime",
@@ -20,4 +21,5 @@ __all__ = [
     "AgentConfigLoader",
     "LightweightExecutionEngine",
     "SqliteTaskStore",
+    "OpenAICompatibleProviderAdapter",
 ] + [name for name in globals() if not name.startswith("_")]
