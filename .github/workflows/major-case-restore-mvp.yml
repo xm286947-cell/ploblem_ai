@@ -1,0 +1,93 @@
+name: Major Case Restore MVP
+
+on:
+  push:
+    branches:
+      - "feature/major-case-restore-mvp"
+  pull_request:
+    branches:
+      - "integration/major-runtime-v1.1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-mvp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-runtime-p0-test.txt
+
+      - name: Compile
+        run: |
+          python -m compileall -q quality_knowledge runtime parser retriever builder
+
+      - name: Run restored Major Case acceptance
+        run: |
+          mkdir -p test-results/major-case-restore
+          python -m pytest tests/test_major_case_restore_mvp.py -q \
+            --junitxml=test-results/major-case-restore/restore-mvp.xml
+
+      - name: Run REQ-022 regression
+        run: |
+          python -m pytest tests/test_req022_major_cases.py -q \
+            --junitxml=test-results/major-case-restore/req022.xml
+
+      - name: Run Runtime integration contract
+        run: |
+          python -m pytest -q \
+            tests/test_major_runtime_integration_gate.py \
+            tests/test_agent_runtime_p0_d8.py \
+            tests/test_agent_runtime_p0_d11_acceptance_gaps.py \
+            --junitxml=test-results/major-case-restore/runtime.xml
+
+      - name: Run legacy Repeat M7/M8 regression
+        run: |
+          python -m pytest -q \
+            tests/test_analysis_pipeline_runner.py \
+            tests/test_m71_query_parser.py \
+            tests/test_m72_query_ai_enricher.py \
+            tests/test_m72_query_enricher_pipeline.py \
+            tests/test_m72_query_normalizer.py \
+            tests/test_m72_standard_query_builder.py \
+            tests/test_m73_retrieval_profile.py \
+            tests/test_m7_composite.py \
+            tests/test_m7_retriever.py \
+            tests/test_m81_candidate_loader.py \
+            tests/test_m82_similarity_analyzer.py \
+            tests/test_m83_solution_analyzer.py \
+            tests/test_m84_repeat_decision.py \
+            tests/test_m85_delivery.py \
+            --junitxml=test-results/major-case-restore/legacy-repeat.xml
+
+      - name: Run cumulative repository regression
+        run: |
+          python -m pytest tests -q \
+            --junitxml=test-results/major-case-restore/cumulative.xml
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-case-restore-evidence-${{ github.sha }}
+          path: test-results/major-case-restore/
+          if-no-files-found: error
+          retention-days: 90
