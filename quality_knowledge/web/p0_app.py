@@ -11,7 +11,11 @@ from fastapi.responses import RedirectResponse
 from quality_knowledge.model_config import ModelConfigError, load_quality_issue_ai_config, validate_quality_issue_ai_config
 from quality_knowledge.p0.initializer import P0InitializationError, P0Initializer
 from quality_knowledge.p0.repository import P0Repository
-from quality_knowledge.p0.stage_runner import ProductionV2StageRunner
+from quality_knowledge.p0.stage_runner import (
+    ProductionV2StageRunner,
+    RuntimeConfiguredV2StageRunner,
+)
+from runtime.config import AgentConfigError
 from quality_knowledge.web.api_v2 import create_v2_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
@@ -56,17 +60,31 @@ def create_p0_app(
             diagnostic = validate_quality_issue_ai_config(root, require_enabled=True)
             if diagnostic["ok"]:
                 ai_config, _ = load_quality_issue_ai_config(root)
-                stage_runner = ProductionV2StageRunner(repository, ai_config=ai_config)
+                fallback_runner = ProductionV2StageRunner(
+                    repository,
+                    ai_config=ai_config,
+                )
+                runtime_db_path = Path(db_path).with_name(
+                    Path(db_path).name + ".runtime.db"
+                )
+                stage_runner = RuntimeConfiguredV2StageRunner.from_project(
+                    repository,
+                    root=root,
+                    runtime_db_path=runtime_db_path,
+                    fallback_runner=fallback_runner,
+                )
             analysis_runtime_status = {
                 **diagnostic,
                 "ready": stage_runner is not None,
-                "source": "MODEL_CONFIG",
+                "source": "UNIFIED_RUNTIME+MODEL_CONFIG",
+                "migrated_agent": RuntimeConfiguredV2StageRunner.AGENT_ID,
             }
-        except (ModelConfigError, ValueError) as error:
+        except (ModelConfigError, AgentConfigError, ValueError) as error:
             stage_runner = None
             analysis_runtime_status = {
                 "ready": False,
-                "source": "MODEL_CONFIG",
+                "source": "UNIFIED_RUNTIME+MODEL_CONFIG",
+                "migrated_agent": RuntimeConfiguredV2StageRunner.AGENT_ID,
                 "errors": [str(error)],
             }
     else:
