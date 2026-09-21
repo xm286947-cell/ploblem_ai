@@ -28,7 +28,7 @@ def _row(row: sqlite3.Row | None) -> dict | None:
 
 
 class MajorKnowledgeRepository:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str | Path, attachment_root: str | Path):
         self.db_path = Path(db_path)
