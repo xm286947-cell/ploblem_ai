@@ -16,6 +16,7 @@ import pytest
 from quality_knowledge.models.analysis_v2 import OccurrenceAnalysisV2DTO
 from quality_knowledge.p0.stage_runner import RuntimeConfiguredV2StageRunner
 from quality_knowledge.services.v2_analysis_service import V2AnalysisService
+from quality_knowledge.web.p0_app import create_p0_app
 from runtime import AgentConfigLoader, ConfiguredAgentRuntime, SqliteTaskStore
 from tools.openai_mock.server import create_server
 
@@ -191,6 +192,32 @@ def test_rcfg02_major_occurrence_retry_is_runtime_owned(tmp_path):
         )
         task = store.get_task_by_request_id(request_id)
         assert store.count_task_provider_calls(task.task_id) == 2
+
+
+def test_rcfg02_default_p0_app_wires_occurrence_to_unified_runtime(
+    tmp_path,
+    monkeypatch,
+):
+    repository = make_repository(tmp_path)
+    monkeypatch.setenv("acca", "legacy-fallback-secret")
+    monkeypatch.setenv("DASHSCOPE_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", SECRET)
+
+    app = create_p0_app(repository.db_path)
+
+    assert isinstance(app.state.v2_stage_runner, RuntimeConfiguredV2StageRunner)
+    assert app.state.analysis_runtime_status["ready"] is True
+    assert app.state.analysis_runtime_status["source"] == (
+        "UNIFIED_RUNTIME+MODEL_CONFIG"
+    )
+    assert app.state.analysis_runtime_status["migrated_agent"] == (
+        "major_issue.v2.occurrence"
+    )
+    resolved = app.state.v2_stage_runner.resolved
+    assert resolved.definition.agent_id == "major_issue.v2.occurrence"
+    assert resolved.provider.profile_ref == "qwen_prod"
+    assert resolved.provider.api_key_env == "DASHSCOPE_API_KEY"
+    assert SECRET not in resolved.model_dump_json()
 
 
 def test_rcfg02_migrated_runner_has_no_business_provider_or_retry_construction():
