@@ -448,3 +448,59 @@ def test_orch_b01_provider_trace_prints_safe_resolved_endpoint(
     )
     assert '"auth": "bearer_present"' in trace
     assert SECRET not in trace
+
+
+
+def test_orch_b01_provider_trace_file_is_safe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    trace_file = tmp_path / "provider_runtime.log"
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE", "1")
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace_file))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {"value": 1},
+        {
+            "runtime": {
+                "provider_call_seq": 3,
+                "provider_config": {
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    text = trace_file.read_text(encoding="utf-8")
+    assert '"phase": "request"' in text
+    assert '"method": "POST"' in text
+    assert '"endpoint": "http://127.0.0.1:18080/v1/chat/completions"' in text
+    assert '"auth": "bearer_present"' in text
+    assert '"body_bytes":' in text
+    assert '"body_sha256":' in text
+    assert SECRET not in text
+    assert "Return strict JSON." not in text
