@@ -189,11 +189,16 @@ class MajorIssueD01RuntimeAdapter:
             if resolved.definition.agent_id != self.AGENT_ID:
                 raise ValueError("D01_AGENT_CONFIG_ID_MISMATCH")
             definition = resolved.definition
-            step_policy = step_policy.model_copy(
+            configured_budget = resolved.execution_policy.retry_budget.model_copy(
                 update={
-                    "model_policy": dict(
-                        resolved.execution_policy.model_policy
-                    )
+                    "max_provider_calls_per_step": self.max_provider_calls,
+                }
+            )
+            step_policy = resolved.execution_policy.model_copy(
+                update={
+                    "mode": ExecutionMode.SINGLE,
+                    "retry_budget": configured_budget,
+                    "failure_policy": FailurePolicy.PARTIAL,
                 }
             )
             workflow = workflow.model_copy(
