@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from runtime.contracts import ErrorCategory
 from runtime.reliability.errors import RuntimeExecutionException
 
 
 class AgentConfigError(RuntimeExecutionException):
     """Base error for configuration failures before provider execution."""
 
-    category = ErrorCategory.CONFIG\n    retryable = False
+    category = ErrorCategory.CONFIG
+    retryable = False
 
 
 class ConfigValidationError(AgentConfigError):
