@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from jsonschema import ValidationError as JsonSchemaValidationError
@@ -21,6 +23,70 @@ def _endpoint(base_url: str) -> str:
     if value.endswith("/chat/completions"):
         return value
     return value + "/chat/completions"
+
+
+def _safe_http_url(value: str) -> str | None:
+    parsed = urlsplit(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+
+def _validated_endpoint(base_url: str) -> str:
+    endpoint = _endpoint(base_url)
+    safe_endpoint = _safe_http_url(endpoint)
+    if safe_endpoint is None:
+        parsed = urlsplit(endpoint)
+        raise RuntimeStepError(
+            "provider base_url must be an absolute http(s) URL",
+            code="PROVIDER_BASE_URL_INVALID",
+            category=ErrorCategory.EXECUTION,
+            retryable=False,
+            details={
+                "scheme": parsed.scheme or None,
+                "has_netloc": bool(parsed.netloc),
+                "base_url_length": len(str(base_url or "")),
+            },
+        )
+    return endpoint
+
+
+def _provider_trace_enabled() -> bool:
+    value = os.environ.get("RUNTIME_PROVIDER_TRACE", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _trace_provider_request(
+    *,
+    endpoint: str,
+    model: str,
+    api_key_present: bool,
+    timeout_seconds: int,
+    runtime_context: dict[str, Any],
+) -> None:
+    if not _provider_trace_enabled():
+        return
+    parsed = urlsplit(endpoint)
+    safe_endpoint = _safe_http_url(endpoint)
+    diagnostic = {
+        "provider": "openai_compatible",
+        "provider_call_seq": runtime_context.get("provider_call_seq"),
+        "model": model,
+        "scheme": parsed.scheme,
+        "host": parsed.hostname,
+        "path": parsed.path,
+        "endpoint": safe_endpoint,
+        "auth": "bearer_present" if api_key_present else "none",
+        "timeout_seconds": timeout_seconds,
+        "sdk_retry": 0,
+    }
+    print(
+        "[runtime-provider] " + json.dumps(diagnostic, ensure_ascii=False, sort_keys=True),
+        flush=True,
+    )
 
 
 def _jsonable(value: Any) -> Any:
@@ -156,8 +222,16 @@ class OpenAICompatibleProviderAdapter:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
+        endpoint = _validated_endpoint(base_url)
+        _trace_provider_request(
+            endpoint=endpoint,
+            model=model,
+            api_key_present=bool(api_key),
+            timeout_seconds=self.timeout_seconds,
+            runtime_context=runtime_context,
+        )
         request = Request(
-            _endpoint(base_url),
+            endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             method="POST",
             headers=headers,
