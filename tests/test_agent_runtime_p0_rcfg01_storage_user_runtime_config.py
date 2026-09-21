@@ -75,7 +75,8 @@ def _configure_mock(host: str, port: int) -> None:
 
 def _raw_runtime_bytes(store: SqliteTaskStore) -> bytes:
     chunks: list[bytes] = []
-    for path in sorted(store.db_path.parent.glob(store.db_path.name + "*")):
+    db_path = Path(store.db_path)
+    for path in sorted(db_path.parent.glob(db_path.name + "*")):
         if path.is_file():
             chunks.append(path.read_bytes())
     return b"".join(chunks)
