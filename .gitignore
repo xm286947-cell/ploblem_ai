@@ -34,3 +34,6 @@ output/retrieval_results/*.json
 # REQ-022 independent runtime store (database, attachments and isolated M8 runs)
 data/knowledge/
 knowledge/major_knowledge/
+
+# Local Runtime model config may contain real provider credentials
+config/model.local.yaml
