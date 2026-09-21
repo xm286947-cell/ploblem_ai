@@ -124,6 +124,7 @@ class MajorIssueD01RuntimeAdapter:
         provider: MajorIssueProvider,
         *,
         max_provider_calls: int = 4,
+        agent_config_path: str | None = None,
     ):
         self.runtime = runtime
         self.store = store
@@ -133,30 +134,45 @@ class MajorIssueD01RuntimeAdapter:
         self.coverage_calculator = CoverageCalculator()
         self.gate_evaluator = CompletenessGateEvaluator()
 
-        step_policy = ExecutionPolicy(
-            mode=ExecutionMode.SINGLE,
-            transport_retry=RetryPolicy(max_attempts=1),
-            validation_retry=RetryPolicy(max_attempts=1),
-            step_retry=RetryPolicy(max_attempts=1),
-            retry_budget=RetryBudget(
-                max_provider_calls_per_step=self.max_provider_calls,
-                max_step_attempts=1,
-                max_validation_cycles_per_step_attempt=1,
-                max_transport_attempts_per_model_call=1,
-            ),
-            failure_policy=FailurePolicy.PARTIAL,
-        )
-        definition = AgentDefinition(
-            agent_id=self.AGENT_ID,
-            label="Major Issue D01 Structured Output",
-            output_schema="MajorIssueObjectCandidate[]",
-            content_strategy_ref="major_issue_d01@1",
-            metadata={
-                "business_domain": "MAJOR_CASE",
-                "fixture": "D01",
-                "object_level_partial_commit": True,
-            },
-        )
+        if agent_config_path is not None:
+            load_agent = getattr(self.runtime, "load_agent", None)
+            if not callable(load_agent):
+                raise TypeError(
+                    "agent_config_path requires ConfiguredAgentRuntime-compatible runtime"
+                )
+            resolved = load_agent(agent_config_path, self._handler)
+            step_policy = resolved.execution_policy.model_copy(
+                update={"failure_policy": FailurePolicy.PARTIAL}
+            )
+            definition = resolved.definition
+            self.max_provider_calls = (
+                step_policy.retry_budget.max_provider_calls_per_step
+            )
+        else:
+            step_policy = ExecutionPolicy(
+                mode=ExecutionMode.SINGLE,
+                transport_retry=RetryPolicy(max_attempts=1),
+                validation_retry=RetryPolicy(max_attempts=1),
+                step_retry=RetryPolicy(max_attempts=1),
+                retry_budget=RetryBudget(
+                    max_provider_calls_per_step=self.max_provider_calls,
+                    max_step_attempts=1,
+                    max_validation_cycles_per_step_attempt=1,
+                    max_transport_attempts_per_model_call=1,
+                ),
+                failure_policy=FailurePolicy.PARTIAL,
+            )
+            definition = AgentDefinition(
+                agent_id=self.AGENT_ID,
+                label="Major Issue D01 Structured Output",
+                output_schema="MajorIssueObjectCandidate[]",
+                content_strategy_ref="major_issue_d01@1",
+                metadata={
+                    "business_domain": "MAJOR_CASE",
+                    "fixture": "D01",
+                    "object_level_partial_commit": True,
+                },
+            )
         workflow = WorkflowDefinition(
             workflow_id=self.WORKFLOW_ID,
             version="1",
@@ -171,11 +187,12 @@ class MajorIssueD01RuntimeAdapter:
             failure_policy=FailurePolicy.PARTIAL,
             metadata={"business_domain": "MAJOR_CASE", "fixture": "D01"},
         )
-        self.runtime.register_agent(
-            self.AGENT_ID,
-            self._handler,
-            definition,
-        )
+        if agent_config_path is None:
+            self.runtime.register_agent(
+                self.AGENT_ID,
+                self._handler,
+                definition,
+            )
         self.runtime.register_workflow(workflow)
         self.workflow = workflow
         self.execution_policy = ExecutionPolicy(
