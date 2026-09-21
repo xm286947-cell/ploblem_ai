@@ -290,6 +290,36 @@ class AgentConfigLoader:
             raise SecretEnvNotFoundError(env_name)
         return value
 
+
+    def read_prompt_text(self, resolved: ResolvedAgentConfig) -> str:
+        """Read the exact prompt content resolved for one agent config."""
+        path = self._resolve_path(
+            resolved.prompt.ref,
+            Path(resolved.source_path),
+        )
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise ConfigReferenceNotFoundError("prompt", resolved.prompt.ref) from exc
+        if _hash_bytes(data) != resolved.prompt.content_hash:
+            raise ConfigValidationError(
+                "prompt content changed after agent config resolution",
+                details={
+                    "ref": resolved.prompt.ref,
+                    "expected_hash": resolved.prompt.content_hash,
+                    "actual_hash": _hash_bytes(data),
+                },
+            )
+        return data.decode("utf-8")
+
+    def get_output_schema(self, resolved: ResolvedAgentConfig) -> Any:
+        """Return the configured runtime schema object without serializing it."""
+        return self._registry_value(
+            "output_schema",
+            resolved.output_schema.ref,
+            self.schemas,
+        )
+
     def get_runtime_api_key(
         self,
         config_hash: str,
