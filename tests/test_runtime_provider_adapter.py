@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
 import threading
 from typing import Iterator
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
@@ -14,6 +16,7 @@ from pydantic import BaseModel
 from runtime import AgentConfigLoader, AgentRequest, ConfiguredAgentRuntime, RuntimeStatus, SqliteTaskStore
 from runtime.adapters import StorageFieldResult
 from runtime.reliability import RuntimeStepError
+from runtime.providers import OpenAICompatibleProviderAdapter
 from tools.openai_mock.server import create_server
 
 
@@ -356,3 +359,277 @@ def test_orch_b01_finish_reason_length_maps_to_runtime_truncation(tmp_path: Path
     assert result.error.code == "OUTPUT_TRUNCATED"
     assert result.error.category.value == "VALIDATION"
     assert result.execution.provider_calls == 1
+
+
+
+def test_orch_b01_invalid_provider_base_url_fails_fast_before_http(monkeypatch) -> None:
+    called = {"value": False}
+
+    def fake_urlopen(_request, timeout):
+        called["value"] = True
+        raise AssertionError("HTTP must not be attempted for invalid base_url")
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    with pytest.raises(RuntimeStepError) as exc_info:
+        adapter(
+            {"value": 1},
+            {
+                "runtime": {
+                    "provider_call_seq": 1,
+                    "provider_config": {
+                        "base_url": "workspace.example/compatible-mode/v1",
+                        "model": "qwen3.8-max",
+                        "api_key": SECRET,
+                    },
+                }
+            },
+        )
+
+    assert called["value"] is False
+    assert exc_info.value.code == "PROVIDER_BASE_URL_INVALID"
+    assert exc_info.value.category.value == "CONFIG"
+    assert exc_info.value.retryable is False
+    assert SECRET not in str(exc_info.value.details)
+
+
+def test_orch_b01_provider_trace_prints_safe_resolved_endpoint(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_urlopen(request, timeout):
+        assert request.full_url == (
+            "https://workspace.example/compatible-mode/v1/chat/completions"
+        )
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE", "1")
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {"value": 1},
+        {
+            "runtime": {
+                "provider_call_seq": 7,
+                "provider_config": {
+                    "base_url": "https://workspace.example/compatible-mode/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    trace = capsys.readouterr().out
+    assert "[runtime-provider]" in trace
+    assert '"provider_call_seq": 7' in trace
+    assert '"model": "qwen3.8-max"' in trace
+    assert (
+        '"endpoint": "https://workspace.example/compatible-mode/v1/chat/completions"'
+        in trace
+    )
+    assert '"auth": "bearer_present"' in trace
+    assert SECRET not in trace
+
+
+
+def test_orch_b01_provider_trace_file_is_safe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    trace_file = tmp_path / "provider_runtime.log"
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE", "1")
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace_file))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {"value": 1},
+        {
+            "runtime": {
+                "provider_call_seq": 3,
+                "provider_config": {
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    text = trace_file.read_text(encoding="utf-8")
+    assert '"phase": "request"' in text
+    assert '"method": "POST"' in text
+    assert '"endpoint": "http://127.0.0.1:18080/v1/chat/completions"' in text
+    assert '"auth": "bearer_present"' in text
+    assert '"body_bytes":' in text
+    assert '"body_sha256":' in text
+    assert SECRET not in text
+    assert "Return strict JSON." not in text
+
+
+
+def test_provider_diagnostics_prints_actual_request_body_with_secret_redaction(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_urlopen(request, timeout):
+        assert request.full_url == (
+            "https://workspace.example/compatible-mode/v1/chat/completions"
+        )
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_DIAGNOSTICS", "1")
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {
+            "normal": "visible-value",
+            "password": "BUSINESS_PASSWORD_MUST_NOT_LOG",
+            "api_key": "BUSINESS_API_KEY_MUST_NOT_LOG",
+        },
+        {
+            "runtime": {
+                "provider_call_seq": 11,
+                "provider_config": {
+                    "base_url": "https://workspace.example/compatible-mode/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                    "temperature": 0,
+                    "max_tokens": 8192,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    trace = capsys.readouterr().out
+    assert '"phase": "request"' in trace
+    assert '"headers": {"Authorization": "Bearer [REDACTED]", "Content-Type": "application/json"}' in trace
+    assert '"model": "qwen3.8-max"' in trace
+    assert '"temperature": 0' in trace
+    assert '"max_tokens": 8192' in trace
+    assert "visible-value" in trace
+    assert "Return strict JSON." in trace
+    assert "BUSINESS_PASSWORD_MUST_NOT_LOG" not in trace
+    assert "BUSINESS_API_KEY_MUST_NOT_LOG" not in trace
+    assert SECRET not in trace
+    assert "[REDACTED]" in trace
+
+
+def test_provider_diagnostics_captures_http_400_error_body_and_request_id(
+    monkeypatch,
+    capsys,
+) -> None:
+    error_payload = json.dumps(
+        {
+            "error": {
+                "code": "InvalidParameter",
+                "message": "invalid request: model is not supported",
+                "api_key": SECRET,
+            }
+        }
+    ).encode()
+
+    def fake_urlopen(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {
+                "Content-Type": "application/json",
+                "x-request-id": "req-agent-400-001",
+                "Set-Cookie": "MUST_NOT_LOG",
+            },
+            BytesIO(error_payload),
+        )
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_DIAGNOSTICS", "1")
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    with pytest.raises(RuntimeStepError) as exc_info:
+        adapter(
+            {"value": 1},
+            {
+                "runtime": {
+                    "provider_call_seq": 12,
+                    "provider_config": {
+                        "base_url": "https://workspace.example/compatible-mode/v1",
+                        "model": "qwen3.8-max",
+                        "api_key": SECRET,
+                    },
+                }
+            },
+        )
+
+    error = exc_info.value
+    assert error.code == "PROVIDER_HTTP_ERROR"
+    assert error.details["http_status"] == 400
+    assert error.details["provider_request_id"] == "req-agent-400-001"
+    assert error.retryable is False
+
+    trace = capsys.readouterr().out
+    assert '"phase": "http_error"' in trace
+    assert '"status": 400' in trace
+    assert '"provider_request_id": "req-agent-400-001"' in trace
+    assert "invalid request: model is not supported" in trace
+    assert '"api_key": "[REDACTED]"' in trace
+    assert "Set-Cookie" not in trace
+    assert "MUST_NOT_LOG" not in trace
+    assert SECRET not in trace

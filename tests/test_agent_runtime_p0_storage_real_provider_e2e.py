@@ -26,10 +26,27 @@ GOLDEN = [
 ]
 
 
+def _model_config_path() -> Path:
+    configured = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
+    if not configured:
+        return ROOT / MODEL_CONFIG
+
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = path.resolve()
+    if not path.is_file():
+        pytest.fail(f"STORAGE_MODEL_CONFIG does not exist: {path}")
+    return path
+
+
 def _require_real_provider() -> None:
     enabled = os.environ.get("STORAGE_REAL_E2E", "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         pytest.skip("STORAGE-REAL-E2E-01 opt-in disabled")
+
+    if os.environ.get("STORAGE_MODEL_CONFIG", "").strip():
+        _model_config_path()
+        return
 
     missing = [
         name
@@ -40,10 +57,14 @@ def _require_real_provider() -> None:
         pytest.skip("NOT_RUN_NO_SECRET_OR_ENDPOINT: " + ",".join(missing))
 
 
-def _loader() -> AgentConfigLoader:
+def _loader(
+    *,
+    model_config: Path | None = None,
+    environ=None,
+) -> AgentConfigLoader:
     return AgentConfigLoader(
         root=ROOT,
-        model_profiles=ROOT / MODEL_CONFIG,
+        model_profiles=model_config or _model_config_path(),
         schemas={"StorageFieldResult": StorageFieldResult},
         content_strategies={
             "storage_linked_fields@1": {
@@ -57,7 +78,7 @@ def _loader() -> AgentConfigLoader:
                 "kind": "storage_parameter_gate",
             }
         },
-        environ=os.environ,
+        environ=os.environ if environ is None else environ,
     )
 
 
@@ -69,6 +90,44 @@ def _raw_runtime_bytes(tmp_path: Path) -> bytes:
     return b"".join(chunks)
 
 
+def test_storage_external_model_config_resolves_qwen_without_provider_env(
+    tmp_path: Path,
+) -> None:
+    secret = "LOCAL_ONLY_TEST_SECRET"
+    model_config = tmp_path / "model.local.yaml"
+    model_config.write_text(
+        f"""
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: https://workspace.example/compatible-mode/v1
+    api_key: {secret}
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+        encoding="utf-8",
+    )
+
+    loader = _loader(model_config=model_config, environ={})
+    resolved = loader.load(AGENT_CONFIG)
+    resolved_secret = loader.get_runtime_api_key(
+        resolved.config_hash,
+        api_key_env=resolved.provider.api_key_env,
+    )
+
+    assert resolved.provider.profile_ref == "qwen_prod"
+    assert resolved.provider.model == "qwen3.8-max"
+    assert resolved.provider.base_url == (
+        "https://workspace.example/compatible-mode/v1"
+    )
+    assert resolved.provider.base_url_env is None
+    assert resolved.provider.api_key_env is None
+    assert resolved_secret == secret
+    assert secret not in resolved.model_dump_json()
+
+
 def test_storage_real_provider_e2e01_yaml_runtime_provider_schema_and_golden(tmp_path):
     _require_real_provider()
 
@@ -76,12 +135,17 @@ def test_storage_real_provider_e2e01_yaml_runtime_provider_schema_and_golden(tmp
     loader = _loader()
     runtime = ConfiguredAgentRuntime(store, config_loader=loader)
     resolved = runtime.load_agent(AGENT_CONFIG)
+    secret = loader.get_runtime_api_key(
+        resolved.config_hash,
+        api_key_env=resolved.provider.api_key_env,
+    )
 
     assert resolved.provider.profile_ref == "qwen_prod"
     assert resolved.provider.model == "qwen3.8-max"
-    assert resolved.provider.base_url_env == "DASHSCOPE_BASE_URL"
-    assert resolved.provider.api_key_env == "DASHSCOPE_API_KEY"
-    assert os.environ["DASHSCOPE_API_KEY"] not in resolved.model_dump_json()
+    assert resolved.provider.type == "openai_compatible"
+    assert resolved.provider.base_url
+    assert secret
+    assert secret not in resolved.model_dump_json()
 
     result = runtime.invoke(
         AgentRequest(
@@ -111,9 +175,9 @@ def test_storage_real_provider_e2e01_yaml_runtime_provider_schema_and_golden(tmp
 
     snapshot = store.get_execution_snapshot(result.execution.execution_snapshot_id)
     serialized_snapshot = snapshot.model_dump_json()
-    secret = os.environ["DASHSCOPE_API_KEY"]
 
     assert secret not in serialized_snapshot
     assert secret not in result.model_dump_json()
     assert secret.encode("utf-8") not in _raw_runtime_bytes(tmp_path)
-    assert "DASHSCOPE_API_KEY" in serialized_snapshot
+    if resolved.provider.api_key_env:
+        assert resolved.provider.api_key_env in serialized_snapshot

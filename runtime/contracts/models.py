@@ -45,6 +45,7 @@ class AttemptType(str, Enum):
 
 
 class ErrorCategory(str, Enum):
+    CONFIG = "CONFIG"
     TRANSPORT = "TRANSPORT"
     VALIDATION = "VALIDATION"
     EXECUTION = "EXECUTION"
