@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
@@ -124,6 +125,7 @@ class MajorIssueD01RuntimeAdapter:
         provider: MajorIssueProvider,
         *,
         max_provider_calls: int = 4,
+        agent_config_path: str | Path | None = None,
     ):
         self.runtime = runtime
         self.store = store
@@ -171,11 +173,43 @@ class MajorIssueD01RuntimeAdapter:
             failure_policy=FailurePolicy.PARTIAL,
             metadata={"business_domain": "MAJOR_CASE", "fixture": "D01"},
         )
-        self.runtime.register_agent(
-            self.AGENT_ID,
-            self._handler,
-            definition,
-        )
+        if agent_config_path is None:
+            self.runtime.register_agent(
+                self.AGENT_ID,
+                self._handler,
+                definition,
+            )
+        else:
+            load_agent = getattr(self.runtime, "load_agent", None)
+            if not callable(load_agent):
+                raise TypeError(
+                    "agent_config_path requires ConfiguredAgentRuntime-compatible load_agent"
+                )
+            resolved = load_agent(agent_config_path, self._handler)
+            if resolved.definition.agent_id != self.AGENT_ID:
+                raise ValueError("D01_AGENT_CONFIG_ID_MISMATCH")
+            definition = resolved.definition
+            configured_budget = resolved.execution_policy.retry_budget.model_copy(
+                update={
+                    "max_provider_calls_per_step": self.max_provider_calls,
+                }
+            )
+            step_policy = resolved.execution_policy.model_copy(
+                update={
+                    "mode": ExecutionMode.SINGLE,
+                    "retry_budget": configured_budget,
+                    "failure_policy": FailurePolicy.PARTIAL,
+                }
+            )
+            workflow = workflow.model_copy(
+                update={
+                    "steps": [
+                        workflow.steps[0].model_copy(
+                            update={"execution_policy": step_policy}
+                        )
+                    ]
+                }
+            )
         self.runtime.register_workflow(workflow)
         self.workflow = workflow
         self.execution_policy = ExecutionPolicy(
