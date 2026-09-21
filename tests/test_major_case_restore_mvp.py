@@ -257,3 +257,46 @@ def test_source_fact_revision_invalidates_repeat_fingerprint(tmp_path: Path) -> 
     assert first != second
     history = restore.source_fact_history(case["case_id"])
     assert [item["revision_no"] for item in history] == [2, 1]
+
+
+def test_rejected_ai_falls_back_to_source_fact(tmp_path: Path) -> None:
+    repo, service, restore = _env(tmp_path)
+    case = service.create_case("驳回AI", "G1", "SOFTWARE")
+    event = repo.upsert_event(
+        case["case_id"],
+        standard_itr="ITR20260051",
+        internal_event_key="ITR20260051",
+        title="ITR20260051",
+    )
+    restore.save_source_fact(
+        case["case_id"],
+        raw={"问题描述": "Excel原始事实"},
+        normalized={
+            "original_description": "Excel原始事实",
+            "trc_occurrence": "Excel原始TRC",
+        },
+        source_ref="major.xlsx#重大问题:2",
+    )
+    ai = repo.add_entry(
+        case["case_id"],
+        "ISSUE_FACT",
+        "AI错误判断",
+        assertion_kind="AI_INFERENCE",
+        origin="AI",
+        status="PENDING",
+        event_id=event["event_id"],
+        confidence=0.95,
+        evidence=[],
+    )
+    service.review_entry(
+        ai["entry_id"],
+        content="AI错误判断",
+        action="REJECT",
+        reviewer="tester",
+        reason="与原始证据冲突",
+    )
+
+    view = restore.feature_view(case["case_id"], event["event_id"])
+    assert view["effective_features"]["issue_fact"]["value"] == "Excel原始事实"
+    assert view["effective_features"]["issue_fact"]["source_layer"] == "SOURCE_FACT"
+    assert "issue_fact" not in view["ai_analysis"]
