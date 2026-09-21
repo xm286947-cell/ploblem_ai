@@ -1,0 +1,10 @@
+active_model: qwen_prod
+
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: https://YOUR_WORKSPACE.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    api_key: __REPLACE_IN_YOUR_LOCAL_COPY_ONLY__
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
