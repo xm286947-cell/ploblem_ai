@@ -20,11 +20,138 @@ from runtime.providers.endpoint import ProviderEndpointError, ProviderEndpointRe
 
 
 _RETRYABLE_HTTP = {408, 409, 425, 429, 500, 502, 503, 504}
+_DIAGNOSTIC_SECRET_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "password",
+    "passwd",
+    "secret",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "bearer_token",
+    "credential",
+    "credentials",
+}
+_REQUEST_ID_HEADERS = {
+    "request-id",
+    "x-request-id",
+    "x-requestid",
+    "trace-id",
+    "x-trace-id",
+    "x-dashscope-request-id",
+}
+
+
+def _env_enabled(name: str) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _provider_diagnostics_enabled() -> bool:
+    return _env_enabled("RUNTIME_PROVIDER_DIAGNOSTICS")
 
 
 def _provider_trace_enabled() -> bool:
-    value = os.environ.get("RUNTIME_PROVIDER_TRACE", "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    return _env_enabled("RUNTIME_PROVIDER_TRACE") or _provider_diagnostics_enabled()
+
+
+def _redact_diagnostic_value(value: Any, *, known_secrets: tuple[str, ...] = ()) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).strip().lower()
+            if normalized in _DIAGNOSTIC_SECRET_KEYS or normalized.endswith("_secret"):
+                redacted[str(key)] = "[REDACTED]"
+            else:
+                redacted[str(key)] = _redact_diagnostic_value(
+                    item,
+                    known_secrets=known_secrets,
+                )
+        return redacted
+    if isinstance(value, list):
+        return [
+            _redact_diagnostic_value(item, known_secrets=known_secrets)
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return [
+            _redact_diagnostic_value(item, known_secrets=known_secrets)
+            for item in value
+        ]
+    if isinstance(value, str):
+        text = value
+        for secret in known_secrets:
+            if secret:
+                text = text.replace(secret, "[REDACTED]")
+        return text
+    return value
+
+
+def _safe_request_body(
+    body: dict[str, Any],
+    *,
+    known_secrets: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    safe = _redact_diagnostic_value(body, known_secrets=known_secrets)
+    messages = safe.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            try:
+                parsed = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            message["content"] = json.dumps(
+                _redact_diagnostic_value(parsed, known_secrets=known_secrets),
+                ensure_ascii=False,
+                default=str,
+            )
+    return safe
+
+
+def _safe_error_body(
+    raw: bytes,
+    *,
+    known_secrets: tuple[str, ...] = (),
+) -> Any:
+    text = raw.decode("utf-8", errors="replace")
+    for secret in known_secrets:
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return text[:32768]
+    return _redact_diagnostic_value(parsed, known_secrets=known_secrets)
+
+
+def _safe_response_headers(headers: Any) -> dict[str, str]:
+    if headers is None:
+        return {}
+    result: dict[str, str] = {}
+    try:
+        items = headers.items()
+    except AttributeError:
+        return result
+    for name, value in items:
+        normalized = str(name).lower()
+        if normalized == "content-type" or normalized in _REQUEST_ID_HEADERS:
+            result[str(name)] = str(value)
+    return result
+
+
+def _provider_request_id(headers: Any) -> str | None:
+    safe_headers = _safe_response_headers(headers)
+    for name, value in safe_headers.items():
+        if str(name).lower() in _REQUEST_ID_HEADERS:
+            return value
+    return None
 
 
 def _safe_proxy(value: str) -> str:
@@ -61,9 +188,10 @@ def _trace_provider_request(
     *,
     endpoint: str,
     model: str,
-    api_key_present: bool,
+    api_key: str | None,
     timeout_seconds: int,
     runtime_context: dict[str, Any],
+    body: dict[str, Any],
     body_bytes: bytes,
 ) -> None:
     if not _provider_trace_enabled():
@@ -83,7 +211,7 @@ def _trace_provider_request(
         or (443 if parsed.scheme == "https" else 80 if parsed.scheme == "http" else None),
         "path": parsed.path,
         "endpoint": endpoint,
-        "auth": "bearer_present" if api_key_present else "none",
+        "auth": "bearer_present" if api_key else "none",
         "content_type": "application/json",
         "body_bytes": len(body_bytes),
         "body_sha256": hashlib.sha256(body_bytes).hexdigest()[:16],
@@ -93,6 +221,15 @@ def _trace_provider_request(
         "proxy_http": _safe_proxy(proxies.get("http", "")) if proxies.get("http") else None,
         "proxy_https": _safe_proxy(proxies.get("https", "")) if proxies.get("https") else None,
     }
+    if _provider_diagnostics_enabled():
+        diagnostic["headers"] = {
+            "Content-Type": "application/json",
+            **({"Authorization": "Bearer [REDACTED]"} if api_key else {}),
+        }
+        diagnostic["body"] = _safe_request_body(
+            body,
+            known_secrets=(api_key,) if api_key else (),
+        )
     _write_provider_trace(diagnostic)
 
 
@@ -243,9 +380,10 @@ class OpenAICompatibleProviderAdapter:
         _trace_provider_request(
             endpoint=endpoint,
             model=model,
-            api_key_present=bool(api_key),
+            api_key=api_key,
             timeout_seconds=self.timeout_seconds,
             runtime_context=runtime_context,
+            body=body,
             body_bytes=body_bytes,
         )
         request = Request(
@@ -274,22 +412,43 @@ class OpenAICompatibleProviderAdapter:
                     )
                 raw_body = response.read().decode("utf-8")
         except HTTPError as exc:
+            error_body = b""
+            try:
+                error_body = exc.read()
+            except Exception:
+                error_body = b""
+            request_id = _provider_request_id(getattr(exc, "headers", None))
             if _provider_trace_enabled():
-                _write_provider_trace(
-                    {
-                        "ts": datetime.now().isoformat(timespec="milliseconds"),
-                        "phase": "http_error",
-                        "provider_call_seq": runtime_context.get("provider_call_seq"),
-                        "status": int(exc.code),
-                        "endpoint": endpoint,
-                    }
-                )
+                diagnostic = {
+                    "ts": datetime.now().isoformat(timespec="milliseconds"),
+                    "phase": "http_error",
+                    "provider_call_seq": runtime_context.get("provider_call_seq"),
+                    "status": int(exc.code),
+                    "endpoint": endpoint,
+                    "response_headers": _safe_response_headers(
+                        getattr(exc, "headers", None)
+                    ),
+                    "provider_request_id": request_id,
+                }
+                if _provider_diagnostics_enabled():
+                    diagnostic["response_body"] = _safe_error_body(
+                        error_body,
+                        known_secrets=(api_key,) if api_key else (),
+                    )
+                _write_provider_trace(diagnostic)
             raise RuntimeStepError(
                 f"provider HTTP {exc.code}",
                 code="PROVIDER_HTTP_ERROR",
                 category=ErrorCategory.TRANSPORT,
                 retryable=exc.code in _RETRYABLE_HTTP,
-                details={"http_status": int(exc.code)},
+                details={
+                    "http_status": int(exc.code),
+                    **(
+                        {"provider_request_id": request_id}
+                        if request_id
+                        else {}
+                    ),
+                },
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             if _provider_trace_enabled():
