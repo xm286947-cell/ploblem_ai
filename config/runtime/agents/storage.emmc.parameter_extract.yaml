@@ -30,3 +30,4 @@ completeness_gate:
 metadata:
   business_domain: STORAGE
   acceptance_case: E2E-01
+  provider_response_shape: json_array
