@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}重大复盘知识库 / 批量导入 / Preview{% endblock %}
+{% block body %}
+<div class="page-header"><div><h1>重大问题导入预检</h1><p>{{result.source_file}} · {{result.total}} 行 · {{result.staged_material_count}} 份材料</p></div><a class="btn" href="/knowledge/major-cases/import">重新上传</a></div>
+<section class="card">
+  <div class="meta-grid">
+    <div><span>可导入</span><b>{{result.importable}}</b></div>
+    <div><span>Repeat 可召回</span><b>{{result.retrieval_ready}}</b></div>
+    <div><span>材料歧义</span><b>{{result.ambiguous}}</b></div>
+    <div><span>数据分组</span><b>{{result.group_code}}</b></div>
+  </div>
+</section>
+<section class="card">
+  <h2>行级预检</h2>
+  <div class="table-wrap"><table><thead><tr><th>行</th><th>IGR</th><th>ITR</th><th>问题</th><th>完整度</th><th>复盘材料</th></tr></thead><tbody>
+  {% for row in result.rows %}
+  <tr>
+    <td>{{row.excel_row}}</td>
+    <td>{{row.igr or '-'}}</td>
+    <td>{{row.itrs|join('、') if row.itrs else '-'}}</td>
+    <td>{{row.title}}</td>
+    <td>
+      {% if row.completeness.importable %}IMPORTABLE{% else %}NOT_IMPORTABLE{% endif %}
+      / {% if row.completeness.retrieval_ready %}RETRIEVAL_READY{% else %}RETRIEVAL_PENDING{% endif %}
+      <small>{{row.completeness.missing_features|join('、')}}</small>
+    </td>
+    <td>{{row.report_match.match_type}}{% if row.report_match.candidate_paths %}<small>{{row.report_match.candidate_paths|join('、')}}</small>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table></div>
+</section>
+<section class="card">
+  <form method="post" action="/knowledge/major-cases/import/confirm" onsubmit="return confirm('确认正式导入重大问题？Source Fact 将保留原始版本，不会被 AI 覆盖。')">
+    <input type="hidden" name="batch_id" value="{{result.batch_id}}">
+    <button class="btn btn-primary">确认正式导入</button>
+  </form>
+</section>
+{% endblock %}
