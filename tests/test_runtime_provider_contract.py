@@ -291,7 +291,7 @@ def test_pc12_api_key_mode_proves_bearer_authorization(tmp_path: Path) -> None:
 
 def test_pc13_auth_none_proves_authorization_absent(tmp_path: Path) -> None:
     with running_server() as (host, port):
-        configure(host, port)
+        configure(host, port, behavior={"require_auth": False})
         runtime = build_runtime(
             tmp_path / "app",
             SqliteTaskStore(tmp_path / "runtime.db"),
