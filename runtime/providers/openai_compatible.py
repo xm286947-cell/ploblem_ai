@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, getproxies, proxy_bypass, urlopen
 
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as validate_json_schema
@@ -59,6 +62,37 @@ def _provider_trace_enabled() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _safe_proxy(value: str) -> str:
+    parsed = urlsplit(str(value or ""))
+    if not parsed.scheme or not parsed.hostname:
+        return "<set>"
+    host = parsed.hostname
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return f"{parsed.scheme}://{host}"
+
+
+def _write_provider_trace(event: dict[str, Any]) -> None:
+    line = "[runtime-provider] " + json.dumps(
+        event,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    print(line, flush=True)
+    path = os.environ.get("RUNTIME_PROVIDER_TRACE_FILE", "").strip()
+    if not path:
+        return
+    try:
+        trace_path = Path(path)
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(line + "\n")
+            handle.flush()
+    except Exception:
+        # Provider diagnostics are best-effort and must never affect execution.
+        pass
+
+
 def _trace_provider_request(
     *,
     endpoint: str,
@@ -66,27 +100,41 @@ def _trace_provider_request(
     api_key_present: bool,
     timeout_seconds: int,
     runtime_context: dict[str, Any],
+    body_bytes: bytes,
 ) -> None:
     if not _provider_trace_enabled():
         return
     parsed = urlsplit(endpoint)
     safe_endpoint = _safe_http_url(endpoint)
+    proxies = getproxies()
     diagnostic = {
+        "ts": datetime.now().isoformat(timespec="milliseconds"),
+        "phase": "request",
         "provider": "openai_compatible",
         "provider_call_seq": runtime_context.get("provider_call_seq"),
+        "method": "POST",
         "model": model,
         "scheme": parsed.scheme,
         "host": parsed.hostname,
+        "port": parsed.port
+        or (443 if parsed.scheme == "https" else 80 if parsed.scheme == "http" else None),
         "path": parsed.path,
         "endpoint": safe_endpoint,
         "auth": "bearer_present" if api_key_present else "none",
+        "content_type": "application/json",
+        "body_bytes": len(body_bytes),
+        "body_sha256": hashlib.sha256(body_bytes).hexdigest()[:16],
         "timeout_seconds": timeout_seconds,
         "sdk_retry": 0,
+        "proxy_bypass": proxy_bypass(parsed.hostname) if parsed.hostname else False,
+        "proxy_http": _safe_proxy(proxies.get("http", ""))
+        if proxies.get("http")
+        else None,
+        "proxy_https": _safe_proxy(proxies.get("https", ""))
+        if proxies.get("https")
+        else None,
     }
-    print(
-        "[runtime-provider] " + json.dumps(diagnostic, ensure_ascii=False, sort_keys=True),
-        flush=True,
-    )
+    _write_provider_trace(diagnostic)
 
 
 def _jsonable(value: Any) -> Any:
@@ -223,24 +271,51 @@ class OpenAICompatibleProviderAdapter:
             headers["Authorization"] = f"Bearer {api_key}"
 
         endpoint = _validated_endpoint(base_url)
+        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
         _trace_provider_request(
             endpoint=endpoint,
             model=model,
             api_key_present=bool(api_key),
             timeout_seconds=self.timeout_seconds,
             runtime_context=runtime_context,
+            body_bytes=body_bytes,
         )
         request = Request(
             endpoint,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            data=body_bytes,
             method="POST",
             headers=headers,
         )
 
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
+                if _provider_trace_enabled():
+                    _write_provider_trace(
+                        {
+                            "ts": datetime.now().isoformat(timespec="milliseconds"),
+                            "phase": "response",
+                            "provider_call_seq": runtime_context.get("provider_call_seq"),
+                            "status": getattr(response, "status", None),
+                            "endpoint": _safe_http_url(endpoint),
+                            "content_type": (
+                                response.headers.get("Content-Type")
+                                if getattr(response, "headers", None)
+                                else None
+                            ),
+                        }
+                    )
                 raw_body = response.read().decode("utf-8")
         except HTTPError as exc:
+            if _provider_trace_enabled():
+                _write_provider_trace(
+                    {
+                        "ts": datetime.now().isoformat(timespec="milliseconds"),
+                        "phase": "http_error",
+                        "provider_call_seq": runtime_context.get("provider_call_seq"),
+                        "status": int(exc.code),
+                        "endpoint": _safe_http_url(endpoint),
+                    }
+                )
             raise RuntimeStepError(
                 f"provider HTTP {exc.code}",
                 code="PROVIDER_HTTP_ERROR",
@@ -249,6 +324,17 @@ class OpenAICompatibleProviderAdapter:
                 details={"http_status": int(exc.code)},
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
+            if _provider_trace_enabled():
+                _write_provider_trace(
+                    {
+                        "ts": datetime.now().isoformat(timespec="milliseconds"),
+                        "phase": "transport_error",
+                        "provider_call_seq": runtime_context.get("provider_call_seq"),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc).replace("\n", " ")[:500],
+                        "endpoint": _safe_http_url(endpoint),
+                    }
+                )
             raise RuntimeStepError(
                 f"provider transport failure: {type(exc).__name__}",
                 code="PROVIDER_TRANSPORT",
