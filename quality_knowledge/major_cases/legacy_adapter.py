@@ -18,6 +18,7 @@ from builder.retrieval_document_builder import RetrievalDocumentBuilder
 from retriever.case_retriever import CaseRetriever, QueryInput
 from parser.common import write_json
 from .repository import MajorKnowledgeRepository
+from .restore import MajorCaseRestoreService
 
 
 ASSETS = (
@@ -102,6 +103,7 @@ class LegacyRepeatAdapter:
         self.legacy_project_root = Path(legacy_project_root).resolve()
         self.run_root = Path(run_root).resolve()
         self.run_root.mkdir(parents=True, exist_ok=True)
+        self.features = MajorCaseRestoreService(repository, self.legacy_project_root)
 
     def _prepare_root(self, run_id: str) -> Path:
         root = self.run_root / run_id
@@ -126,54 +128,89 @@ class LegacyRepeatAdapter:
         case = self.repository.get_case(event["case_id"])
         entries = self.repository.entries_for_event(event_id)
         unscoped = self.repository.unscoped_confirmed_entries(event["case_id"])
-        fact = _entry_text(entries, {"ISSUE_FACT"})
-        cause = _entry_text(entries, {"ROOT_CAUSE"})
-        action = _entry_text(entries, {"ACTION"})
-        verification = _entry_text(entries, {"VERIFICATION"})
+        feature_view = self.features.feature_view(event["case_id"], event_id)
+        effective = feature_view.get("effective_features") or {}
+
+        def feature(name: str) -> str:
+            value = (effective.get(name) or {}).get("value")
+            if isinstance(value, list):
+                return "\n".join(str(item) for item in value if str(item).strip())
+            return str(value or "").strip()
+
+        fact = feature("issue_fact") or _entry_text(entries, {"ISSUE_FACT"})
+        cause = feature("root_cause") or feature("failure_mechanism") or _entry_text(entries, {"ROOT_CAUSE"})
+        action = feature("solution") or _entry_text(entries, {"ACTION"})
+        verification = feature("verification") or _entry_text(entries, {"VERIFICATION"})
+        source_fact = feature_view.get("source_fact") or {}
+        documents = feature_view.get("document_evidence") or []
         now = datetime.now(timezone.utc).isoformat()
         standard_case = {
             "metadata": {
                 "case_id": f"{event['case_id']}::{event_id}",
                 "itr_id": event["standard_itr"],
-                "assessment_year": "", "assessment_month": "", "report_filename": "",
-                "source_excel": "", "source_report": "REQ022_CONFIRMED_ENTRIES",
-                "builder_version": "REQ022-LEGACY-3", "schema_version": "1.0",
-                "fusion_rule_version": "REQ022-1", "prompt_version": "REQ022-1",
-                "model_version": "HUMAN_CONFIRMED", "source_file_version": str(max((item["revision_no"] for item in entries), default=0)),
+                "assessment_year": feature("assessment_year"), "assessment_month": feature("assessment_month"),
+                "report_filename": feature("report_filename"),
+                "source_excel": str(source_fact.get("source_ref") or ""),
+                "source_report": ",".join(doc.get("filename", "") for doc in documents if doc.get("filename")) or "REQ022_CASE_FEATURE_VIEW",
+                "builder_version": "REQ022-LEGACY-4", "schema_version": "1.0",
+                "fusion_rule_version": "REQ022-2", "prompt_version": "REQ022-1",
+                "model_version": "CASE_FEATURE_VIEW",
+                "source_file_version": str(max(
+                    [int(source_fact.get("revision_no") or 0)]
+                    + [int(item["revision_no"]) for item in entries]
+                )),
                 "created_at": now, "updated_at": now, "generated_at": now,
                 "parse_status": "SUCCESS", "evidence_status": "HUMAN_CONFIRMED",
             },
             "business_context": {
-                "ipmt": "", "spdt": "", "responsible_department_level2": "",
-                "organization_path": [], "product": "", "domain": case["domain"],
+                "ipmt": feature("ipmt"), "spdt": feature("spdt"),
+                "responsible_department_level2": feature("responsible_department"),
+                "organization_path": [value for value in (feature("ipmt"), feature("spdt"), feature("responsible_department")) if value],
+                "product": feature("product"), "domain": case["domain"],
             },
             "problem": {
                 "original_description": fact, "report_description": fact, "standard_description": fact,
-                "problem_summary": fact, "phenomenon": _evidence_value(fact), "failure_object": [],
-                "trigger_condition": [], "impact": [], "event_replay": [],
+                "problem_summary": fact, "phenomenon": _evidence_value(fact),
+                "failure_object": _evidence_value(feature("component")),
+                "trigger_condition": _evidence_value(feature("trigger_condition")), "impact": [], "event_replay": [],
             },
             "analysis": {
-                "trc": {"occurrence": _cause_detail(cause), "escape": _cause_detail()},
-                "mrc": {"occurrence": _cause_detail(cause), "escape": _cause_detail()},
-                "five_why": [], "root_cause": _evidence_value(cause),
-                "failure_mechanism": _evidence_value(cause), "contributing_factors": [],
+                "trc": {
+                    "occurrence": _cause_detail(feature("trc_occurrence") or cause),
+                    "escape": _cause_detail(feature("trc_escape")),
+                },
+                "mrc": {
+                    "occurrence": _cause_detail(feature("mrc_occurrence")),
+                    "escape": _cause_detail(feature("mrc_escape")),
+                },
+                "five_why": [], "root_cause": _evidence_value(feature("root_cause") or cause),
+                "failure_mechanism": _evidence_value(feature("failure_mechanism") or cause), "contributing_factors": [],
             },
             "classification": {
-                "original": {"cause_level1": "", "cause_level2": ""},
-                "report_verified": {"cause_level1": "", "cause_level2": "", "evidence_refs": []},
+                "original": {"cause_level1": feature("classification_l1"), "cause_level2": feature("classification_l2")},
+                "report_verified": {"cause_level1": feature("classification_l1"), "cause_level2": feature("classification_l2"), "evidence_refs": []},
                 "ai_inferred": {"cause_level1": "", "cause_level2": "", "reason": "", "confidence": 0.0},
                 "classification_conflict": False, "conflict_description": "",
             },
             "solution": {
                 "original_solution": _evidence_value(action), "corrective_actions": _evidence_value(action),
-                "preventive_actions": [], "management_actions": [], "technical_actions": [],
+                "preventive_actions": [], "management_actions": _evidence_value(feature("mrc_occurrence")),
+                "technical_actions": _evidence_value(feature("trc_occurrence")),
                 "reusable_actions": _evidence_value(action), "action_status": [],
             },
             "knowledge": {
                 "case_summary": fact, "normalized_problem": fact, "phenomenon_tags": [],
                 "failure_object_tags": [], "trigger_tags": [], "failure_mechanism_tags": [],
                 "cause_tags": [], "solution_tags": [], "keywords": [],
-                "retrieval_text": "\n".join(value for value in (fact, cause, action, verification) if value),
+                "retrieval_text": "\n".join(
+                    value for value in (
+                        fact, feature("product"), feature("module"), feature("component"),
+                        feature("trc_occurrence"), feature("trc_escape"),
+                        feature("mrc_occurrence"), feature("mrc_escape"),
+                        cause, feature("failure_mechanism"), feature("trigger_condition"),
+                        action, verification,
+                    ) if value
+                ),
                 "quality_flags": (
                     ([] if fact and cause else ["MISSING_ROOT_CAUSE"])
                     + (["UNSCOPED_EVENT_KNOWLEDGE"] if unscoped else [])
@@ -219,7 +256,21 @@ class LegacyRepeatAdapter:
                 "evidence": evidence,
             })
         payload.sort(key=lambda item: (item["entry_type"], item["entry_id"]))
-        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        feature_view = self.features.feature_view(case_id, event_id)
+        feature_payload = {
+            key: {
+                "value": item.get("value"),
+                "source_layer": item.get("source_layer"),
+                "revision": item.get("revision"),
+            }
+            for key, item in (feature_view.get("effective_features") or {}).items()
+        }
+        fingerprint_payload = {
+            "entries": payload,
+            "source_fact_revision": (feature_view.get("source_fact") or {}).get("revision_no"),
+            "effective_features": feature_payload,
+        }
+        return hashlib.sha256(json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
     def _retrieval_config_hash(self) -> str:
         payload = {

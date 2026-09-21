@@ -233,14 +233,18 @@ def create_app(db_path):
     from .scenario_asset_pages import create_asset_router
     app.include_router(create_asset_router(scenario_repo,tpl,scenario_generation_svc))
     from quality_knowledge.major_cases import MajorCaseService, MajorKnowledgeRepository, SqliteBusinessSourceGateway
+    from quality_knowledge.major_cases.restore import MajorCaseRestoreService
     from .major_case_pages import create_major_case_router
     major_root = Path(os.environ.get('MAJOR_KNOWLEDGE_DATA_ROOT') or (Path(db_path).parent / 'major_knowledge'))
     major_repo = MajorKnowledgeRepository(major_root / 'knowledge.sqlite3', major_root / 'attachments')
     major_service = MajorCaseService(major_repo, SqliteBusinessSourceGateway(db_path))
+    major_restore = MajorCaseRestoreService(major_repo, BASE.parent.parent)
     app.state.major_knowledge_repository = major_repo
     app.state.major_case_service = major_service
+    app.state.major_case_restore_service = major_restore
     app.include_router(create_major_case_router(
-        major_repo, major_service, tpl, BASE.parent.parent, major_root / 'legacy_runs'
+        major_repo, major_service, tpl, BASE.parent.parent, major_root / 'legacy_runs',
+        restore_service=major_restore,
     ))
 
     @app.get('/reverse-quality/{material_id}', response_class=HTMLResponse, include_in_schema=False)

@@ -16,9 +16,78 @@ def create_major_case_router(
     templates,
     project_root: str | Path,
     run_root: str | Path,
+    restore_service=None,
 ) -> APIRouter:
     router = APIRouter()
     repeat = LegacyRepeatAdapter(repository, project_root, run_root)
+
+    @router.get("/knowledge/major-cases/import", response_class=HTMLResponse, include_in_schema=False)
+    def import_page(request: Request):
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_CASE_RESTORE_NOT_CONFIGURED")
+        return templates.TemplateResponse(request, "major_case_import.html", {})
+
+    @router.post("/knowledge/major-cases/import/preview", response_class=HTMLResponse, include_in_schema=False)
+    async def import_preview(
+        request: Request,
+        file: UploadFile = File(...),
+        materials: list[UploadFile] = File(default=[]),
+        group_code: str = Form(...),
+        domain: str = Form(""),
+    ):
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_CASE_RESTORE_NOT_CONFIGURED")
+        if Path(file.filename or "").suffix.lower() not in {".xlsx", ".xlsm"}:
+            raise HTTPException(400, "仅支持 .xlsx / .xlsm 重大问题维护表")
+        excel_content = await file.read()
+        if len(excel_content) > 100 * 1024 * 1024:
+            raise HTTPException(413, "Excel文件超过100MB限制")
+        material_payload = []
+        for material in materials:
+            content = await material.read()
+            if len(content) > 100 * 1024 * 1024:
+                raise HTTPException(413, f"材料超过100MB限制: {material.filename}")
+            if Path(material.filename or "").suffix.lower() not in {".pdf", ".docx", ".doc"}:
+                raise HTTPException(400, f"不支持的复盘材料类型: {material.filename}")
+            material_payload.append((material.filename or "material.bin", content))
+        try:
+            result = restore_service.stage_upload(
+                file.filename or "major_cases.xlsx",
+                excel_content,
+                material_payload,
+                group_code=group_code,
+                domain=domain,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return templates.TemplateResponse(
+            request,
+            "major_case_import_preview.html",
+            {"result": result},
+        )
+
+    @router.post("/knowledge/major-cases/import/confirm", include_in_schema=False)
+    def import_confirm(batch_id: str = Form(...)):
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_CASE_RESTORE_NOT_CONFIGURED")
+        try:
+            restore_service.commit(batch_id, service)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return RedirectResponse(f"/knowledge/major-cases/import/{batch_id}", 303)
+
+    @router.get("/knowledge/major-cases/import/{batch_id}", response_class=HTMLResponse, include_in_schema=False)
+    def import_result(request: Request, batch_id: str):
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_CASE_RESTORE_NOT_CONFIGURED")
+        result = restore_service.batch(batch_id)
+        if not result:
+            raise HTTPException(404, "重大问题导入批次不存在")
+        return templates.TemplateResponse(
+            request,
+            "major_case_import_result.html",
+            {"batch": result},
+        )
 
     @router.get("/knowledge/major-cases", response_class=HTMLResponse, include_in_schema=False)
     def cases_page(request: Request, group: str = "", status: str = "", tag: str = "", page: int = 1):
@@ -40,7 +109,12 @@ def create_major_case_router(
         case = service.detail(case_id)
         if not case:
             raise HTTPException(404, "重大案例不存在")
-        return templates.TemplateResponse(request, "major_case_detail.html", {"case": case, "message": message})
+        feature_view = restore_service.feature_view(case_id) if restore_service is not None else {}
+        return templates.TemplateResponse(
+            request,
+            "major_case_detail.html",
+            {"case": case, "message": message, "feature_view": feature_view},
+        )
 
     @router.post("/knowledge/major-cases/{case_id}/documents", include_in_schema=False)
     async def upload_document(
@@ -161,6 +235,15 @@ def create_major_case_router(
     @router.get("/api/knowledge/major-cases")
     def api_cases(group: str = "", status: str = "", tag: str = "", page: int = 1, page_size: int = 20):
         return service.list_cases(group_code=group, status=status, tag=tag, page=page, page_size=page_size)
+
+    @router.get("/api/knowledge/major-cases/{case_id}/features")
+    def api_case_features(case_id: str, event_id: str = ""):
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_CASE_RESTORE_NOT_CONFIGURED")
+        try:
+            return restore_service.feature_view(case_id, event_id or None)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @router.get("/api/knowledge/major-cases/{case_id}")
     def api_case(case_id: str):

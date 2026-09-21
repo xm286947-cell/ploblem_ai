@@ -614,7 +614,7 @@ def test_backup_restore_and_legacy_import_preview_idempotency(env) -> None:
     backup = create_backup(repo, tmp / "backup.zip")
     assert backup["attachments"] == 1
     restored = restore_backup(tmp / "backup.zip", tmp / "restored" / "knowledge.sqlite3", tmp / "restored" / "attachments")
-    assert restored["schema_version"] == 1 and restored["attachment_count"] == 1
+    assert restored["schema_version"] == MajorKnowledgeRepository.SCHEMA_VERSION and restored["attachment_count"] == 1
     restored_repo = MajorKnowledgeRepository(restored["database"], restored["attachments"])
     assert restored_repo.list_cases()["total"] == 1
 

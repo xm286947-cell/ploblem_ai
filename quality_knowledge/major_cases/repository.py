@@ -28,7 +28,7 @@ def _row(row: sqlite3.Row | None) -> dict | None:
 
 
 class MajorKnowledgeRepository:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str | Path, attachment_root: str | Path):
         self.db_path = Path(db_path)
@@ -381,7 +381,7 @@ class MajorKnowledgeRepository:
             )
             return dict(connection.execute("SELECT * FROM kb_step WHERE run_id=? AND step_code=?", (run_id, step_code)).fetchone())
 
-    def add_entry(self, case_id: str, entry_type: str, content: str, *, assertion_kind: str, origin: str, status: str, event_id: str | None = None, applicability: str = "", limitations: str = "", model_profile: str = "", skill_version_id: str | None = None, evidence: Iterable[dict] = ()) -> dict:
+    def add_entry(self, case_id: str, entry_type: str, content: str, *, assertion_kind: str, origin: str, status: str, event_id: str | None = None, applicability: str = "", limitations: str = "", model_profile: str = "", skill_version_id: str | None = None, evidence: Iterable[dict] = (), confidence: float | None = None, explanation: str = "", mechanism: str = "", analysis_metadata: dict | None = None) -> dict:
         entry_id, revision_id = _id("KENTRY"), _id("KREV")
         with self.transaction() as connection:
             connection.execute("INSERT INTO kb_entry(entry_id,case_id,event_id,entry_type,status) VALUES(?,?,?,?,?)", (entry_id, case_id, event_id, entry_type, status))
@@ -391,6 +391,13 @@ class MajorKnowledgeRepository:
                 (revision_id, entry_id, content, applicability, limitations, assertion_kind, origin, model_profile, skill_version_id),
             )
             connection.execute("UPDATE kb_entry SET current_revision_id=? WHERE entry_id=?", (revision_id, entry_id))
+            if confidence is not None or explanation or mechanism or analysis_metadata:
+                connection.execute(
+                    """INSERT INTO kb_entry_analysis_meta(
+                         revision_id,confidence,explanation,mechanism,metadata_json)
+                       VALUES(?,?,?,?,?)""",
+                    (revision_id, confidence, explanation, mechanism, _json(analysis_metadata or {})),
+                )
             for item in evidence:
                 connection.execute(
                     "INSERT INTO kb_evidence(evidence_id,revision_id,fragment_id,source_link_id,locator,excerpt) VALUES(?,?,?,?,?,?)",
@@ -420,6 +427,14 @@ class MajorKnowledgeRepository:
                 item["evidence"] = [dict(ev) for ev in connection.execute(
                     "SELECT * FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id", (item["current_revision_id"],)
                 )]
+                meta = connection.execute(
+                    "SELECT confidence,explanation,mechanism,metadata_json FROM kb_entry_analysis_meta WHERE revision_id=?",
+                    (item["current_revision_id"],),
+                ).fetchone()
+                item["confidence"] = meta["confidence"] if meta else None
+                item["explanation"] = meta["explanation"] if meta else ""
+                item["mechanism"] = meta["mechanism"] if meta else ""
+                item["analysis_metadata"] = json.loads(meta["metadata_json"] or "{}") if meta else {}
                 item["scope_kind"] = self._entry_scope_kind(connection, item)
             return item
 
@@ -440,6 +455,12 @@ class MajorKnowledgeRepository:
                     "INSERT INTO kb_evidence(evidence_id,revision_id,fragment_id,source_link_id,locator,excerpt) VALUES(?,?,?,?,?,?)",
                     (_id("KEV"), revision_id, evidence.get("fragment_id"), evidence.get("source_link_id"), evidence.get("locator", ""), evidence.get("excerpt", "")),
                 )
+            connection.execute(
+                """INSERT INTO kb_entry_analysis_meta(
+                     revision_id,confidence,explanation,mechanism,metadata_json)
+                   VALUES(?,?,?,?,?)""",
+                (revision_id, 1.0, reason, "", _json({"reviewer": reviewer, "review_status": status})),
+            )
             connection.execute("UPDATE kb_entry SET current_revision_id=?,status=? WHERE entry_id=?", (revision_id, status, entry_id))
             connection.execute(
                 "INSERT INTO kb_review(review_id,target_type,target_id,action,before_json,after_json,reason,reviewer) VALUES(?,?,?,?,?,?,?,?)",
@@ -460,6 +481,14 @@ class MajorKnowledgeRepository:
                 item["evidence"] = [dict(ev) for ev in connection.execute(
                     "SELECT * FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id", (item["current_revision_id"],)
                 )]
+                meta = connection.execute(
+                    "SELECT confidence,explanation,mechanism,metadata_json FROM kb_entry_analysis_meta WHERE revision_id=?",
+                    (item["current_revision_id"],),
+                ).fetchone()
+                item["confidence"] = meta["confidence"] if meta else None
+                item["explanation"] = meta["explanation"] if meta else ""
+                item["mechanism"] = meta["mechanism"] if meta else ""
+                item["analysis_metadata"] = json.loads(meta["metadata_json"] or "{}") if meta else {}
                 item["scope_kind"] = self._entry_scope_kind(connection, item)
                 result.append(item)
             return result

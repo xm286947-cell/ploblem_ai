@@ -134,6 +134,9 @@ class MajorReviewSkillRunner:
                 "entries_item": {
                     "required": ["entry_type", "content", "fragment_ids"],
                     "fragment_ids": "must only reference fragment_id values from the provided fragments",
+                    "confidence": "optional number between 0 and 1",
+                    "explanation": "optional concise basis for the conclusion",
+                    "mechanism": "optional causal/mechanism explanation",
                 },
             },
             "fragments": [
@@ -149,8 +152,10 @@ class MajorReviewSkillRunner:
         system = (
             skill["prompt_rules"]
             + "\n你是重大复盘知识提取器。只输出严格JSON对象，格式为"
-              '{"entries":[{"entry_type":"...","content":"...","fragment_ids":["..."]}]}。'
+              '{"entries":[{"entry_type":"...","content":"...","fragment_ids":["..."],'
+              '"confidence":0.0,"explanation":"...","mechanism":"..."}]}。'
               "不得引用输入中不存在的fragment_id；没有证据时保留对应entry_type但fragment_ids为空。"
+              "confidence必须在0到1之间，explanation说明结论依据，mechanism只在材料支持时填写。"
         )
         response = self._real_client().complete([
             {"role": "system", "content": system},
@@ -186,12 +191,20 @@ class MajorReviewSkillRunner:
                     "excerpt": fragment["text_content"][:500],
                 })
             supported = bool(content and evidence)
+            raw_confidence = (candidate or {}).get("confidence")
+            try:
+                confidence = max(0.0, min(1.0, float(raw_confidence))) if raw_confidence is not None else (0.7 if supported else 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.7 if supported else 0.0
             entries.append({
                 "entry_type": entry_type,
                 "content": content if supported else "材料中未形成可核验模型结论",
                 "assertion_kind": "AI_INFERENCE" if supported else "UNKNOWN",
                 "status": "PENDING" if supported else "MISSING",
                 "evidence": evidence if supported else [],
+                "confidence": confidence,
+                "explanation": str((candidate or {}).get("explanation") or ("基于所引用复盘材料片段形成" if supported else "缺少可核验证据")),
+                "mechanism": str((candidate or {}).get("mechanism") or ""),
             })
         return (
             ExtractionResult(
@@ -253,6 +266,7 @@ class MajorReviewSkillRunner:
                 entries.append({
                     "entry_type": spec["entry_type"], "content": "材料中未找到可核验内容",
                     "assertion_kind": "UNKNOWN", "status": "MISSING", "evidence": [],
+                    "confidence": 0.0, "explanation": "未找到匹配章节或证据片段", "mechanism": "",
                 })
                 continue
             evidence = []
@@ -271,6 +285,9 @@ class MajorReviewSkillRunner:
             entries.append({
                 "entry_type": spec["entry_type"], "content": "\n".join(content_parts)[:2000],
                 "assertion_kind": "AI_INFERENCE", "status": "PENDING", "evidence": evidence,
+                "confidence": 0.7,
+                "explanation": "Mock验收：基于匹配章节与证据片段形成",
+                "mechanism": "",
             })
         return (
             ExtractionResult(entries, [item["fragment_id"] for item in selected], truncated, total, sum(len(item["text_content"]) for item in selected)),
@@ -402,6 +419,10 @@ class MajorReviewSkillRunner:
                     model_profile=model_profile,
                     skill_version_id=skill["skill_version_id"],
                     evidence=item["evidence"],
+                    confidence=item.get("confidence"),
+                    explanation=item.get("explanation", ""),
+                    mechanism=item.get("mechanism", ""),
+                    analysis_metadata={"execution_mode": execution_mode},
                 )
                 if item["status"] == "PENDING":
                     label = skill["tag_dictionary"].get(item["entry_type"])
