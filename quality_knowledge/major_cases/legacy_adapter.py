@@ -214,7 +214,6 @@ class LegacyRepeatAdapter:
                 "quality_flags": (
                     ([] if fact and cause else ["MISSING_ROOT_CAUSE"])
                     + (["UNSCOPED_EVENT_KNOWLEDGE"] if unscoped else [])
-                    + [f"MISSING_FEATURE:{name}" for name in feature_view.get("completeness", {}).get("missing_features", [])]
                 ),
                 "ai_model": "", "prompt_version": "REQ022-1", "generated_at": now,
             },
