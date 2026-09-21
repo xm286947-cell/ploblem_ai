@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}重大复盘知识库 / 批量导入{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div><h1>重大问题批量导入</h1><p>复用原 Excel 主数据机制：维护表负责结构化事实，复盘材料负责证据与深度分析。</p></div>
+  <div class="page-actions"><a class="btn" href="/knowledge/major-cases">返回案例库</a></div>
+</div>
+<section class="card">
+  <h2>Excel + 复盘材料</h2>
+  <form method="post" enctype="multipart/form-data" action="/knowledge/major-cases/import/preview" class="form-grid">
+    <label>重大问题维护表
+      <input type="file" name="file" accept=".xlsx,.xlsm" required>
+      <small>支持原 ITR/TRC/MRC/分类/复盘报告字段；IGR 可选。</small>
+    </label>
+    <label>数据分组<input name="group_code" required placeholder="例如 SW"></label>
+    <label>领域<input name="domain" placeholder="例如 SOFTWARE / HARDWARE"></label>
+    <label>复盘材料（可多选）
+      <input type="file" name="materials" accept=".pdf,.docx,.doc" multiple>
+      <small>按复盘报告字段优先匹配；文档内无需强制存在 ITR。</small>
+    </label>
+    <button class="btn btn-primary">开始预检</button>
+  </form>
+</section>
+<section class="card">
+  <h2>导入原则</h2>
+  <p>Excel 原值进入 Source Fact Revision，AI 不覆盖；材料匹配采用精确文件名 → 规范化文件名 → Stem → ITR fallback，多匹配进入 AMBIGUOUS 人工处理。</p>
+</section>
+{% endblock %}
