@@ -255,3 +255,65 @@ def test_major_d01_rejects_unknown_evidence_fragment_under_runtime_retry(tmp_pat
         assert counters(host, port)["default"] == 2
         assert result["persisted_entry_ids"] == []
         assert repo.entries_for_event(event["event_id"]) == []
+
+
+def test_major_d01_external_model_config_without_provider_env(tmp_path: Path) -> None:
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        model_config = tmp_path / "model.local.yaml"
+        model_config.write_text(
+            f"""
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: {base_url}
+    api_key: LOCAL_RUNTIME_SECRET
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+            encoding="utf-8",
+        )
+
+        repo = MajorKnowledgeRepository(
+            tmp_path / "knowledge.sqlite3",
+            tmp_path / "attachments",
+        )
+        case_service = MajorCaseService(repo)
+        case = case_service.create_case("D01外部模型配置", "G1", "SOFTWARE")
+        ingest = case_service.ingest(
+            case["case_id"],
+            _docx(tmp_path / "review-local.docx"),
+            current_itrs=["ITR2026092203"],
+        )
+        version_id = ingest["version_id"]
+        event = repo.events(case["case_id"])[0]
+        fragments = repo.fragments(version_id)
+        configure(host, port, _payload_for_fragments(fragments))
+
+        loader = AgentConfigLoader(
+            root=ROOT,
+            model_profiles=model_config,
+            schemas={"MajorD01ProviderObject": MajorD01ProviderObject},
+            environ={},
+        )
+        store = SqliteTaskStore(tmp_path / "runtime-local.db")
+        runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+        service = MajorD01RuntimeService(
+            repo,
+            runtime,
+            store,
+            agent_config_path=AGENT_CONFIG,
+        )
+
+        result = service.execute(
+            case_id=case["case_id"],
+            version_id=version_id,
+            event_id=event["event_id"],
+        )
+
+        assert result["outcome"]["status"] == RuntimeStatus.COMPLETED.value
+        assert result["outcome"]["provider_calls"] == 1
+        assert counters(host, port)["default"] == 1
+        assert "LOCAL_RUNTIME_SECRET" not in _raw_database_dump(store.db_path)
