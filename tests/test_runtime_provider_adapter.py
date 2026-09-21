@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
 import threading
 from typing import Iterator
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
@@ -501,3 +503,133 @@ def test_orch_b01_provider_trace_file_is_safe(
     assert '"body_sha256":' in text
     assert SECRET not in text
     assert "Return strict JSON." not in text
+
+
+
+def test_provider_diagnostics_prints_actual_request_body_with_secret_redaction(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_urlopen(request, timeout):
+        assert request.full_url == (
+            "https://workspace.example/compatible-mode/v1/chat/completions"
+        )
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_DIAGNOSTICS", "1")
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {
+            "normal": "visible-value",
+            "password": "BUSINESS_PASSWORD_MUST_NOT_LOG",
+            "api_key": "BUSINESS_API_KEY_MUST_NOT_LOG",
+        },
+        {
+            "runtime": {
+                "provider_call_seq": 11,
+                "provider_config": {
+                    "base_url": "https://workspace.example/compatible-mode/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                    "temperature": 0,
+                    "max_tokens": 8192,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    trace = capsys.readouterr().out
+    assert '"phase": "request"' in trace
+    assert '"headers": {"Authorization": "Bearer [REDACTED]", "Content-Type": "application/json"}' in trace
+    assert '"model": "qwen3.8-max"' in trace
+    assert '"temperature": 0' in trace
+    assert '"max_tokens": 8192' in trace
+    assert "visible-value" in trace
+    assert "Return strict JSON." in trace
+    assert "BUSINESS_PASSWORD_MUST_NOT_LOG" not in trace
+    assert "BUSINESS_API_KEY_MUST_NOT_LOG" not in trace
+    assert SECRET not in trace
+    assert "[REDACTED]" in trace
+
+
+def test_provider_diagnostics_captures_http_400_error_body_and_request_id(
+    monkeypatch,
+    capsys,
+) -> None:
+    error_payload = json.dumps(
+        {
+            "error": {
+                "code": "InvalidParameter",
+                "message": "invalid request: model is not supported",
+                "api_key": SECRET,
+            }
+        }
+    ).encode()
+
+    def fake_urlopen(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {
+                "Content-Type": "application/json",
+                "x-request-id": "req-agent-400-001",
+                "Set-Cookie": "MUST_NOT_LOG",
+            },
+            BytesIO(error_payload),
+        )
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setenv("RUNTIME_PROVIDER_DIAGNOSTICS", "1")
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    with pytest.raises(RuntimeStepError) as exc_info:
+        adapter(
+            {"value": 1},
+            {
+                "runtime": {
+                    "provider_call_seq": 12,
+                    "provider_config": {
+                        "base_url": "https://workspace.example/compatible-mode/v1",
+                        "model": "qwen3.8-max",
+                        "api_key": SECRET,
+                    },
+                }
+            },
+        )
+
+    error = exc_info.value
+    assert error.code == "PROVIDER_HTTP_ERROR"
+    assert error.details["http_status"] == 400
+    assert error.details["provider_request_id"] == "req-agent-400-001"
+    assert error.retryable is False
+
+    trace = capsys.readouterr().out
+    assert '"phase": "http_error"' in trace
+    assert '"status": 400' in trace
+    assert '"provider_request_id": "req-agent-400-001"' in trace
+    assert "invalid request: model is not supported" in trace
+    assert '"api_key": "[REDACTED]"' in trace
+    assert "Set-Cookie" not in trace
+    assert "MUST_NOT_LOG" not in trace
+    assert SECRET not in trace
