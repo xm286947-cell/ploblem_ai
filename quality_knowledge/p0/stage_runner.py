@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from builder.ai_client import OpenAICompatibleClient
+from quality_knowledge.models.analysis_v2 import OccurrenceAnalysisV2DTO
 from quality_knowledge.response_normalizer_v2 import normalize_stage_v2
+from runtime import (
+    AgentConfigLoader,
+    AgentRequest,
+    ConfiguredAgentRuntime,
+    RuntimeStatus,
+    SqliteTaskStore,
+)
 
 
 @dataclass(frozen=True)
@@ -88,8 +97,8 @@ class ProductionV2StageRunner:
         raise AssertionError("unreachable")
 
     @staticmethod
-    def _messages(prompt: dict[str, Any], context: Any) -> list[dict[str, str]]:
-        user_input = {
+    def _user_input(prompt: dict[str, Any], context: Any) -> dict[str, Any]:
+        return {
             "contract_version": "2.0.0",
             "stage": context.stage,
             "analysis_set_id": context.analysis_set_id,
@@ -104,6 +113,10 @@ class ProductionV2StageRunner:
             "human_confirmation_context": context.human_confirmation_context,
             "completed_stages": context.completed_stages,
         }
+
+    @staticmethod
+    def _messages(prompt: dict[str, Any], context: Any) -> list[dict[str, str]]:
+        user_input = ProductionV2StageRunner._user_input(prompt, context)
         return [
             {"role": "system", "content": prompt["prompt_text"]},
             {
@@ -146,3 +159,133 @@ class ProductionV2StageRunner:
         if stage == "capability_gap":
             return {"capability_gaps": [item.model_dump(mode="json") for item in parsed]}
         return parsed.model_dump(mode="json")
+
+
+class RuntimeConfiguredV2StageRunner:
+    """Hybrid V2 runner with occurrence migrated to the canonical Runtime config.
+
+    RCFG-02 intentionally migrates one real Major Issue agent only. The other
+    V2 stages continue through the injected fallback runner until their own
+    migration tasks are approved. The migrated occurrence path never creates a
+    provider client or retry policy in business code.
+    """
+
+    AGENT_ID = "major_issue.v2.occurrence"
+    AGENT_CONFIG = "config/runtime/agents/major_issue.v2.occurrence.yaml"
+
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        runtime: ConfiguredAgentRuntime,
+        fallback_runner: Any,
+    ) -> None:
+        self.repository = repository
+        self.runtime = runtime
+        self.fallback_runner = fallback_runner
+        self.resolved = self.runtime.load_agent(self.AGENT_CONFIG)
+
+    @classmethod
+    def from_project(
+        cls,
+        repository: Any,
+        *,
+        root: str | Path,
+        runtime_db_path: str | Path,
+        fallback_runner: Any,
+    ) -> "RuntimeConfiguredV2StageRunner":
+        project_root = Path(root)
+        loader = AgentConfigLoader(
+            root=project_root,
+            model_profiles=project_root / "config/runtime/model.yaml",
+            schemas={"OccurrenceAnalysisV2DTO": OccurrenceAnalysisV2DTO},
+        )
+        runtime = ConfiguredAgentRuntime(
+            SqliteTaskStore(runtime_db_path),
+            config_loader=loader,
+        )
+        return cls(
+            repository,
+            runtime=runtime,
+            fallback_runner=fallback_runner,
+        )
+
+    def run_stage(self, *, stage: str, context: Any) -> StageExecutionResult:
+        if stage != "occurrence":
+            return self.fallback_runner.run_stage(stage=stage, context=context)
+
+        prompt = self.repository.get_active_prompt(stage)
+        self._assert_prompt_contract(prompt)
+        request_id = (
+            f"major-issue-occurrence:{context.analysis_set_id}:{context.input_hash}"
+        )
+        result = self.runtime.invoke(
+            AgentRequest(
+                request_id=request_id,
+                agent_id=self.AGENT_ID,
+                input=ProductionV2StageRunner._user_input(prompt, context),
+                metadata={
+                    "business_domain": "MAJOR_ISSUE",
+                    "analysis_set_id": context.analysis_set_id,
+                    "stage": stage,
+                },
+            )
+        )
+        if result.status != RuntimeStatus.COMPLETED:
+            error = result.error
+            raise ProductionStageRunnerError(
+                "V2_STAGE_RUNTIME_FAILED",
+                {
+                    "retry_errors": [
+                        error.code if error is not None else str(result.status)
+                    ],
+                    "runtime_status": str(result.status),
+                    "runtime_task_id": result.task_id,
+                    "provider_calls": result.execution.provider_calls,
+                    "prompt_version_id": prompt["prompt_version_id"],
+                },
+            )
+
+        parsed = normalize_stage_v2(stage, result.data)
+        payload = ProductionV2StageRunner._normalized_payload(stage, parsed)
+        return StageExecutionResult(
+            payload=payload,
+            raw_response=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            model_name=self.resolved.definition.model,
+            debug={
+                "attempt": result.execution.provider_calls,
+                "retry_errors": [],
+                "prompt_version_id": prompt["prompt_version_id"],
+                "prompt_content_hash": prompt["content_hash"],
+                "runtime_task_id": result.task_id,
+                "runtime_run_id": result.run_id,
+                "runtime_execution_snapshot_id": (
+                    result.execution.execution_snapshot_id
+                ),
+                "runtime_agent_id": self.AGENT_ID,
+                "runtime_agent_config_hash": self.resolved.config_hash,
+                "provider_calls": result.execution.provider_calls,
+                "sdk_retry": 0,
+            },
+        )
+
+    def _assert_prompt_contract(self, prompt: dict[str, Any]) -> None:
+        configured_prompt = self.runtime.config_loader.read_prompt_text(self.resolved)
+        if prompt.get("prompt_version_id") != self.resolved.prompt.version:
+            raise ProductionStageRunnerError(
+                "V2_RUNTIME_PROMPT_VERSION_MISMATCH",
+                {
+                    "retry_errors": [],
+                    "active_prompt_version_id": prompt.get("prompt_version_id"),
+                    "runtime_prompt_version": self.resolved.prompt.version,
+                },
+            )
+        if prompt.get("prompt_text") != configured_prompt:
+            raise ProductionStageRunnerError(
+                "V2_RUNTIME_PROMPT_CONTENT_MISMATCH",
+                {
+                    "retry_errors": [],
+                    "prompt_version_id": prompt.get("prompt_version_id"),
+                    "runtime_prompt_hash": self.resolved.prompt.content_hash,
+                },
+            )
