@@ -137,8 +137,7 @@ def test_rcfg02_major_occurrence_mock_e2e_uses_canonical_runtime(tmp_path):
         )
         task = store.get_task_by_request_id(request_id)
         assert task is not None
-        run = store.list_runs(task.task_id)[0]
-        assert run.provider_calls == 1
+        assert store.count_task_provider_calls(task.task_id) == 1
 
         snapshot = store.get_execution_snapshot(task.execution_snapshot_id)
         serialized = snapshot.model_dump_json()
@@ -189,8 +188,7 @@ def test_rcfg02_major_occurrence_retry_is_runtime_owned(tmp_path):
             f"major-issue-occurrence:{result.analysis_set_id}:{result.input_hash}"
         )
         task = store.get_task_by_request_id(request_id)
-        run = store.list_runs(task.task_id)[0]
-        assert run.provider_calls == 2
+        assert store.count_task_provider_calls(task.task_id) == 2
 
 
 def test_rcfg02_migrated_runner_has_no_business_provider_or_retry_construction():
@@ -243,8 +241,7 @@ def test_rcfg02_major_occurrence_real_provider_golden_smoke(tmp_path):
     )
     task = store.get_task_by_request_id(request_id)
     assert task is not None
-    run = store.list_runs(task.task_id)[0]
-    assert 1 <= run.provider_calls <= 2
+    assert 1 <= store.count_task_provider_calls(task.task_id) <= 2
     secret = os.environ["DASHSCOPE_API_KEY"]
     assert secret not in store.get_execution_snapshot(
         task.execution_snapshot_id
