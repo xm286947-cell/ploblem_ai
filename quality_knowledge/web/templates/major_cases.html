@@ -1,8 +1,7 @@
 {% extends 'base.html' %}
 {% block breadcrumb %}重大复盘知识库{% endblock %}
 {% block body %}
-<h1>重大复盘知识库</h1>
-<p class="muted">文档库与业务库独立；列表只读取摘要、状态和派生标签。</p>
+<div class="page-header"><div><h1>重大复盘知识库</h1><p class="muted">Excel结构化事实 + 复盘材料 + AI分析 + 人工确认；单条补录仍保留。</p></div><div class="page-actions"><a class="btn btn-primary" href="/knowledge/major-cases/import">重大问题批量导入</a></div></div>
 <form method="post" action="/knowledge/major-cases" class="card form-grid">
   <h2>新建重大案例</h2>
   <label>标题<input name="title" required></label><label>数据分组<input name="group_code" required placeholder="例如 SW"></label>
