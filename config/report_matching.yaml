@@ -1,7 +1,7 @@
 version: "1.0"
 
 matching:
-  extensions: [".pdf"]
+  extensions: [".pdf", ".docx", ".doc"]
   case_sensitive: false
   trim_whitespace: true
   normalize_full_width: true
