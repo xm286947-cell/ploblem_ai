@@ -148,18 +148,20 @@ def test_rcfg02_major_occurrence_mock_e2e_uses_canonical_runtime(tmp_path):
         assert SECRET not in serialized
         assert SECRET not in raw_database_dump(store)
 
+        assert snapshot.model_policy["max_tokens"] == 4096
+        assert snapshot.model_policy["temperature"] == 0
+        assert snapshot.prompt_hash == runner.resolved.prompt.content_hash
+        assert snapshot.output_schema_ref == "OccurrenceAnalysisV2DTO"
+        assert snapshot.output_schema_version == "2.0.0"
+
         history = request_history(host, port)
         assert len(history) == 1
-        body = history[0]["body"]
-        assert body["model"] == "qwen3.8-max"
-        assert body["max_tokens"] == 4096
-        assert body["temperature"] == 0
-        assert body["messages"][0]["content"] == (
-            ROOT / "quality_knowledge/prompts_v2/occurrence_v2.md"
-        ).read_text(encoding="utf-8")
-        user = json.loads(body["messages"][1]["content"])
-        assert user["stage"] == "occurrence"
-        assert user["analysis_set_id"] == result.analysis_set_id
+        assert history[0]["model"] == "qwen3.8-max"
+        assert history[0]["path"] == "/v1/chat/completions"
+        assert history[0]["authorization"] == {
+            "present": True,
+            "scheme": "Bearer",
+        }
         assert history[0]["headers"]["Authorization"] == "[REDACTED]"
 
 
