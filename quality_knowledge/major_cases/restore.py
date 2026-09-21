@@ -149,7 +149,7 @@ class MajorCaseRestoreService:
         if igr:
             source_key = f"IGR:{igr}"
         elif itr_values:
-            source_key = "ITR:" + "|".join(itr_values)
+            source_key = "ITR:" + "|".join(sorted(itr_values))
         else:
             source_key = (
                 f"ROW:{Path(record['source_excel']).name}:"
@@ -337,6 +337,21 @@ class MajorCaseRestoreService:
         if not value:
             return
         with self.repository.connect() as connection:
+            if identity_type == "IGR":
+                existing = connection.execute(
+                    """SELECT identity_value FROM kb_case_identity
+                       WHERE case_id=? AND identity_type='IGR'""",
+                    (case_id,),
+                ).fetchone()
+                if existing and existing["identity_value"] != value:
+                    raise ValueError("CASE_IGR_CONFLICT")
+            owner = connection.execute(
+                """SELECT case_id FROM kb_case_identity
+                   WHERE group_code=? AND identity_type=? AND identity_value=?""",
+                (group_code, identity_type, value),
+            ).fetchone()
+            if owner and owner["case_id"] != case_id:
+                raise ValueError("CASE_IDENTITY_OWNED_BY_OTHER_CASE")
             connection.execute(
                 """INSERT OR IGNORE INTO kb_case_identity(
                      identity_id,case_id,group_code,identity_type,identity_value,is_primary)
@@ -451,10 +466,11 @@ class MajorCaseRestoreService:
                 group_code = preview["group_code"]
                 igr = str(row.get("igr") or "")
                 source_key = str(row["source_key"])
-                case_id = (
-                    self._identity_case(group_code, "IGR", igr)
-                    or self._identity_case(group_code, "SOURCE_KEY", source_key)
-                )
+                igr_case = self._identity_case(group_code, "IGR", igr)
+                source_case = self._identity_case(group_code, "SOURCE_KEY", source_key)
+                if igr_case and source_case and igr_case != source_case:
+                    raise ValueError("CASE_IDENTITY_CONFLICT")
+                case_id = igr_case or source_case
                 if case_id:
                     stats["reused_cases"] += 1
                 else:
