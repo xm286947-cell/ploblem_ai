@@ -163,6 +163,49 @@ def test_storage_real_provider_e2e01_yaml_runtime_provider_schema_and_golden(tmp
     assert result.status == RuntimeStatus.COMPLETED
     assert 1 <= result.execution.provider_calls <= 4
 
+    run = store.list_runs(result.task_id)[0]
+    step = store.list_step_runs(run.run_id)[0]
+    attempts = store.list_attempts(step.step_run_id)
+    completed_attempts = [
+        attempt
+        for attempt in attempts
+        if attempt.status == RuntimeStatus.COMPLETED
+    ]
+    assert completed_attempts, "real Provider run must persist one completed attempt"
+    provider_evidence = completed_attempts[-1].execution_metrics.get(
+        "provider_evidence"
+    )
+    assert isinstance(provider_evidence, dict)
+    assert provider_evidence["resolved_model"] == resolved.provider.model
+    assert provider_evidence["model_ref"] == resolved.provider.profile_ref
+    assert provider_evidence["config_hash"] == resolved.config_hash
+    assert provider_evidence["agent_config_source"] == resolved.source_path
+    assert provider_evidence["model_config_source"] == str(
+        _model_config_path().resolve()
+    )
+    assert provider_evidence["resolved_max_tokens"] == (
+        resolved.execution_policy.model_policy.get("max_tokens")
+    )
+    assert (
+        provider_evidence["request_max_tokens"] != "NOT_SENT"
+        or provider_evidence["request_max_completion_tokens"] != "NOT_SENT"
+    )
+    assert provider_evidence["raw_usage"] != "NOT_RETURNED"
+    assert provider_evidence["raw_finish_reason"] != "NOT_RETURNED"
+    assert provider_evidence["structured_output_capability"] in {
+        "SUPPORTED_AND_REQUESTED",
+        "SUPPORTED_NOT_REQUESTED",
+        "UNSUPPORTED",
+        "UNKNOWN",
+    }
+    assert provider_evidence["structured_output_request"] in {
+        "NONE",
+        "response_format/json_object",
+        "response_format/json_schema",
+    }
+    assert provider_evidence["streaming"] is False
+    assert provider_evidence["chunk_diagnostics"] == "NOT_APPLICABLE"
+
     actual = [StorageFieldResult.model_validate(item) for item in result.data]
     report = StorageGoldenFieldComparator().compare(
         GOLDEN,
