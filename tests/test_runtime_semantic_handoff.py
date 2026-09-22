@@ -253,9 +253,9 @@ def test_openai_mock_semantic_handoff_contract_matrix(
 
         content_ref = details["content_ref"]
         assert (
-            store.read_semantic_handoff_content(
-                content_ref,
+            runtime.read_semantic_handoff_content(
                 task_id=result.task_id,
+                content_ref=content_ref,
             )
             == payload
         )
