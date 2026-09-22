@@ -49,8 +49,8 @@ jobs:
           set -euo pipefail
           echo "$ZIP_SHA256  .validation-input/reverse-quality-v01-final-integrated-patch.zip" | sha256sum -c -
           echo "$PATCH_SHA256  .validation-input/reverse-quality-v01-final-integrated-patch/reverse-quality-v0.1-final-integrated.patch" | sha256sum -c -
-          printf '%s  reverse-quality-v0.1-final-integrated.patch\n' "$PATCH_SHA256" > /tmp/expected.sha
-          diff -u /tmp/expected.sha .validation-input/reverse-quality-v01-final-integrated-patch/SHA256SUMS.txt
+          printf '%s  reverse-quality-v0.1-final-integrated.patch\n' "$PATCH_SHA256" > /tmp/expected.sha256
+          diff -u /tmp/expected.sha256 .validation-input/reverse-quality-v01-final-integrated-patch/SHA256SUMS.txt
           echo "Final Integrated Patch hashes verified"
 
       - name: Apply Final Integrated Patch
@@ -67,26 +67,22 @@ jobs:
           set -euo pipefail
           EXPECTED=.validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt
 
-          awk '$1 == "A" {print $2}' "$EXPECTED" | while read -r path; do
-            [ -n "$path" ] || continue
-            git add -N -- "$path"
-          done
-
-          git diff --name-status HEAD | sort > /tmp/changed.actual
-          sort "$EXPECTED" > /tmp/changed.expected
-          diff -u /tmp/changed.expected /tmp/changed.actual
-          test "$(git diff --name-only HEAD | wc -l | tr -d ' ')" = "14"
+          cut -f2- "$EXPECTED" | sort > /tmp/expected.paths
+          git status --porcelain=v1 | awk '{print $2}' | sort > /tmp/actual.paths
+          diff -u /tmp/expected.paths /tmp/actual.paths
+          test "$(wc -l < /tmp/actual.paths | tr -d ' ')" = "14"
 
           git fetch --no-tags --depth=1 origin "$FINAL_SHA"
           git cat-file -e "$FINAL_SHA^{commit}"
-          cut -f2- "$EXPECTED" | while read -r path; do
+
+          while read -r path; do
             [ -n "$path" ] || continue
             actual="$(git hash-object "$path")"
             expected="$(git rev-parse "$FINAL_SHA:$path")"
             test "$actual" = "$expected"
-          done
+          done < /tmp/expected.paths
 
-          cp /tmp/changed.actual CHANGED_FILES_ACTUAL.txt
+          cp /tmp/actual.paths CHANGED_FILES_ACTUAL.txt
           echo "14-file scope and FINAL file content verified"
 
       - name: Checkout validated Runtime dependency
@@ -140,28 +136,9 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: |
           set -euo pipefail
-          total=0
-
-          run_suite() {
-            test_file="$1"
-            out="$(python -m pytest "$test_file" -q 2>&1)"
-            printf '%s\n' "$out"
-            count="$(printf '%s\n' "$out" | sed -nE 's/^([0-9]+) passed.*$/\1/p' | tail -1)"
-            test -n "$count"
-            total=$((total + count))
-          }
-
-          run_suite tests/test_reverse_quality_runtime_integration.py
-          run_suite tests/test_reverse_quality_store.py
-          run_suite tests/test_reverse_quality.py
-          run_suite tests/test_quality_scenario_generation.py
-          run_suite tests/test_quality_scenario_library.py
-          run_suite tests/test_scenario_multisource_dedup.py
-          run_suite tests/test_scenario_operation_sources.py
-
-          test "$total" -eq 81
-          printf 'TOTAL: %s passed / 0 failed\n' "$total"
-          printf '%s\n' "$total" > TEST_TOTAL.txt
+          python -m pytest             tests/test_reverse_quality_runtime_integration.py             tests/test_reverse_quality_store.py             tests/test_reverse_quality.py             tests/test_quality_scenario_generation.py             tests/test_quality_scenario_library.py             tests/test_scenario_multisource_dedup.py             tests/test_scenario_operation_sources.py             -q | tee PYTEST_RESULT.txt
+          grep -E '^81 passed(,| in )' PYTEST_RESULT.txt
+          echo "81" > TEST_TOTAL.txt
 
       - name: Build validation evidence
         if: always()
@@ -169,6 +146,7 @@ jobs:
           mkdir -p integration-validation-001-evidence
           cp CHANGED_FILES_ACTUAL.txt integration-validation-001-evidence/ 2>/dev/null || true
           cp TEST_TOTAL.txt integration-validation-001-evidence/ 2>/dev/null || true
+          cp PYTEST_RESULT.txt integration-validation-001-evidence/ 2>/dev/null || true
           cat > integration-validation-001-evidence/VALIDATION_RESULT.md <<EOF
           # INTEGRATION-VALIDATION-001
 
@@ -177,11 +155,9 @@ jobs:
           - Runtime: $RUNTIME_SHA
           - Patch SHA-256: $PATCH_SHA256
           - ZIP SHA-256: $ZIP_SHA256
-          - Scope: 14 files
-          - Patch apply check: PASS if job succeeded
-          - Applied content == FINAL: PASS if job succeeded
-          - Compile: PASS if job succeeded
-          - Target Gate: 81 passed / 0 failed
+          - Scope target: 14 files
+          - Gate target: 81 passed / 0 failed
+          - GitHub run conclusion is authoritative for PASS/FAIL.
           EOF
 
       - name: Upload validation evidence
