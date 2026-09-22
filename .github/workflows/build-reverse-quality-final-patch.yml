@@ -1,0 +1,136 @@
+name: Build Reverse Quality Final Patch
+
+on:
+  push:
+    branches:
+      - artifact/reverse-quality-v01-final-patch
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build integrated patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=c7aa3017e07f46d1b010c90300becdae9ccd7005
+          FINAL=f970dbabdf111e816e6361cd97a85e32a7385f2f
+          DIR=reverse-quality-v01-final-integrated-patch
+          mkdir -p "$DIR"
+          git diff --binary "$BASE" "$FINAL" > "$DIR/reverse-quality-v0.1-final-integrated.patch"
+          git diff --name-status "$BASE" "$FINAL" > "$DIR/CHANGED_FILES.txt"
+          git diff --stat "$BASE" "$FINAL" > "$DIR/DIFF_STAT.txt"
+          cat > "$DIR/PATCH_MANIFEST.md" <<'EOF'
+          # PATCH_MANIFEST — Reverse Quality V0.1 Final Integrated Patch
+
+          - Repository: `xm286947-cell/ploblem_ai`
+          - Base: `c7aa3017e07f46d1b010c90300becdae9ccd7005`
+          - Final accepted head: `f970dbabdf111e816e6361cd97a85e32a7385f2f`
+          - Runtime dependency: `main@0959da43008307398a9cac0f9abfc7fec26dcb8a`
+          - RC1 acceptance: 75 passed / 0 failed
+          - RCFG-03 acceptance: 81 passed / 0 failed
+          - RCFG-03 PR #40: MERGED
+          - RCFG-03 Issue #33: COMPLETED
+
+          ## Scenario-library boundary
+          Existing `ScenarioGenerationService.generate()` flow remains unchanged.
+          The integrated patch only adds `candidate_from_reverse_quality()` as a deterministic ReverseQualityResult -> Scenario Candidate entry.
+          Existing scenario-generation/library regression files are not modified by this patch.
+
+          ## Validation
+          Apply on the declared base with `git apply --check` first, then run the commands in `ACCEPTANCE.md`.
+          EOF
+          cat > "$DIR/APPLY_GUIDE.md" <<'EOF'
+          # APPLY_GUIDE
+
+          ```bash
+          git rev-parse HEAD
+          # expected base: c7aa3017e07f46d1b010c90300becdae9ccd7005
+
+          git apply --check reverse-quality-v0.1-final-integrated.patch
+          git apply reverse-quality-v0.1-final-integrated.patch
+
+          git status --short
+          git diff --stat
+          ```
+
+          Unified Runtime dependency for Runtime-enabled validation:
+          `0959da43008307398a9cac0f9abfc7fec26dcb8a`
+          EOF
+          cat > "$DIR/ROLLBACK_GUIDE.md" <<'EOF'
+          # ROLLBACK_GUIDE
+
+          Before commit:
+          ```bash
+          git apply -R --check reverse-quality-v0.1-final-integrated.patch
+          git apply -R reverse-quality-v0.1-final-integrated.patch
+          ```
+
+          After commit, revert the integration commit using the normal reviewed Git flow.
+          EOF
+          cat > "$DIR/ACCEPTANCE.md" <<'EOF'
+          # ACCEPTANCE
+
+          ## Business RC1 gate
+          ```bash
+          python -m pytest tests/test_reverse_quality_store.py -q
+          python -m pytest tests/test_reverse_quality.py -q
+          python -m pytest tests/test_quality_scenario_generation.py -q
+          python -m pytest tests/test_quality_scenario_library.py -q
+          python -m pytest tests/test_scenario_multisource_dedup.py -q
+          python -m pytest tests/test_scenario_operation_sources.py -q
+          ```
+
+          ## Runtime integration gate
+          ```bash
+          python -m pytest tests/test_reverse_quality_runtime_integration.py -q
+          ```
+
+          Known accepted evidence:
+          - RC1: 75 passed / 0 failed
+          - RCFG-03 + RC1: 81 passed / 0 failed
+          EOF
+          (cd "$DIR" && sha256sum reverse-quality-v0.1-final-integrated.patch > SHA256SUMS.txt)
+          zip -r reverse-quality-v01-final-integrated-patch.zip "$DIR" >/dev/null
+          sha256sum reverse-quality-v01-final-integrated-patch.zip > ZIP_SHA256.txt
+
+      - name: Validate patch reversibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=c7aa3017e07f46d1b010c90300becdae9ccd7005
+          PATCH=reverse-quality-v01-final-integrated-patch/reverse-quality-v0.1-final-integrated.patch
+          git switch --detach "$BASE"
+          git apply --check "$PATCH"
+          git apply "$PATCH"
+          git diff --exit-code f970dbabdf111e816e6361cd97a85e32a7385f2f -- \
+            .github/workflows/rcfg-03-reverse-runtime.yml \
+            .github/workflows/reverse-quality-rc1.yml \
+            config/runtime/agents/reverse_quality.single_issue.analyze.yaml \
+            prompts/runtime/reverse_quality/single_issue_v01.md \
+            quality_knowledge/reverse_quality.py \
+            quality_knowledge/reverse_quality_runtime.py \
+            quality_knowledge/reverse_quality_scenario_adapter.py \
+            quality_knowledge/reverse_quality_store.py \
+            quality_knowledge/scenario_generation.py \
+            quality_knowledge/web/app.py \
+            quality_knowledge/web/templates/reverse_quality_issue.html \
+            tests/test_reverse_quality.py \
+            tests/test_reverse_quality_runtime_integration.py \
+            tests/test_reverse_quality_store.py
+          git apply -R --check "$PATCH"
+
+      - name: Upload integrated patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverse-quality-v01-final-integrated-patch
+          path: |
+            reverse-quality-v01-final-integrated-patch/
+            reverse-quality-v01-final-integrated-patch.zip
+            ZIP_SHA256.txt
+          retention-days: 30
