@@ -307,19 +307,22 @@ def test_finish_reason_length_is_semantic_repair_required(monkeypatch) -> None:
 
 
 def test_transport_reconstruction_recovers_only_complete_reordered_chunks() -> None:
-    content, evidence = reconstruct_transport_content(
+    validated, evidence = adapter().validate_transport_chunks(
         [
             {"sequence": 1, "content": "true}"},
             {"sequence": 0, "content": '{"ok":'},
         ]
     )
 
-    assert content == '{"ok":true}'
-    assert json.loads(content) == {"ok": True}
+    assert validated == {"ok": True}
     assert evidence["recovered"] is True
     assert evidence["recovery_type"] == "TRANSPORT_RECONSTRUCTION"
     assert evidence["chunk_order_valid"] is False
     assert evidence["missing_chunk_detected"] is False
+    assert evidence["strict_parse_after_recovery"] == "PASS"
+    assert evidence["schema_validation_after_recovery"] == "PASS"
+    assert [item["sequence"] for item in evidence["chunks"]] == [1, 0]
+    assert all(item["length"] > 0 and item["hash"] for item in evidence["chunks"])
 
 
 def test_transport_reconstruction_rejects_missing_chunk() -> None:
