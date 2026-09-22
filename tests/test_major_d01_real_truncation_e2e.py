@@ -122,8 +122,21 @@ def test_truncation_golden_config_is_isolated_from_production() -> None:
     assert truncation.definition.agent_id == production.definition.agent_id
     assert production.execution_policy.model_policy["max_tokens"] == 8192
     assert truncation.execution_policy.model_policy["max_tokens"] == 192
-    assert truncation.execution_policy.retry_budget.validation_attempts == 1
-    assert truncation.execution_policy.retry_budget.max_provider_calls_per_step == 1
+    assert (
+        truncation.execution_policy.retry_budget
+        .max_validation_cycles_per_step_attempt
+        == 1
+    )
+    assert (
+        truncation.execution_policy.retry_budget
+        .max_transport_attempts_per_model_call
+        == 1
+    )
+    assert (
+        truncation.execution_policy.retry_budget
+        .max_provider_calls_per_step
+        == 1
+    )
     assert truncation.definition.metadata["acceptance_only"] is True
     assert (
         truncation.definition.metadata["expected_signal"]
