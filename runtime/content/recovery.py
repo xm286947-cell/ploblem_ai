@@ -716,6 +716,9 @@ class LongContentRecoveryExecutor:
 
 
 __all__ = [
+    "AdaptiveLongContentRecoveryExecutor",
+    "AdaptiveLongContentRecoveryOutcome",
+    "AdaptiveLongContentRecoveryPolicy",
     "BusinessGate",
     "ChunkPayloadBuilder",
     "FinalValidator",
@@ -723,3 +726,515 @@ __all__ = [
     "LongContentRecoveryOutcome",
     "PartialCandidateBuilder",
 ]
+
+
+class AdaptiveLongContentRecoveryPolicy(BaseModel):
+    """Deterministic Runtime policy for truncation-triggered re-planning."""
+
+    max_replans: int = Field(default=4, ge=0, le=16)
+    max_provider_calls: int = Field(default=12, ge=1)
+    shrink_factor: float = Field(default=0.5, gt=0.0, lt=1.0)
+    min_units_per_chunk: int = Field(default=1, ge=1)
+    min_payload_chars: int = Field(default=256, ge=1)
+
+
+class AdaptiveLongContentRecoveryOutcome(BaseModel):
+    recovery_request_id: str
+    status: RuntimeStatus
+    task_ids: list[str] = Field(default_factory=list)
+    plan_ids: list[str] = Field(default_factory=list)
+    committed_partials: list[CommittedPartialResult] = Field(default_factory=list)
+    coverages: list[Coverage] = Field(default_factory=list)
+    merge: MergeResult | None = None
+    gate: CompletenessGateResult
+    business_consumable: bool = False
+    provider_calls: int = 0
+    replans: int = 0
+    truncated_task_ids: list[str] = Field(default_factory=list)
+    terminal_error: RuntimeErrorInfo | None = None
+
+
+AdaptiveFaultInjector = Callable[[str, dict[str, Any]], None]
+
+
+class AdaptiveLongContentRecoveryExecutor:
+    """Adaptive Runtime long-content recovery over persisted generation tasks.
+
+    The first generation uses the caller's LongContentPolicy. If a Runtime
+    chunk ends with OUTPUT_TRUNCATED, already committed chunks remain durable.
+    Only uncovered LogicalUnits are re-planned with smaller chunk limits.
+
+    Each generation uses a deterministic request id, so re-running the same
+    recovery request reconstructs prior progress from Runtime Task/Partial
+    state instead of repeating completed provider calls.
+    """
+
+    def __init__(
+        self,
+        executor: LongContentRecoveryExecutor,
+        *,
+        recovery_policy: AdaptiveLongContentRecoveryPolicy | None = None,
+        fault_injector: AdaptiveFaultInjector | None = None,
+    ) -> None:
+        self.executor = executor
+        self.runtime = executor.runtime
+        self.store = executor.store
+        self.recovery_policy = (
+            recovery_policy or AdaptiveLongContentRecoveryPolicy()
+        )
+        self.fault_injector = fault_injector
+
+    def _inject(self, point: str, context: dict[str, Any]) -> None:
+        if self.fault_injector is not None:
+            self.fault_injector(point, context)
+
+    @staticmethod
+    def _generation_request_id(
+        recovery_request_id: str,
+        generation: int,
+    ) -> str:
+        return (
+            f"{recovery_request_id}:long-content:g{generation}:"
+            + _stable_hash(
+                {
+                    "recovery_request_id": recovery_request_id,
+                    "generation": generation,
+                }
+            )[:12]
+        )
+
+    @staticmethod
+    def _pending_bundle(
+        bundle: SourceBundle,
+        covered_unit_ids: set[str],
+    ) -> SourceBundle:
+        pending_units = [
+            item
+            for item in bundle.logical_units
+            if item.unit_id not in covered_unit_ids
+        ]
+        pending_ids = {item.unit_id for item in pending_units}
+        pending_groups = []
+        for group in bundle.atomic_groups:
+            remaining = [
+                unit_id
+                for unit_id in group.unit_ids
+                if unit_id in pending_ids
+            ]
+            if not remaining:
+                continue
+            # A committed KEEP_TOGETHER group must have been committed as one
+            # chunk. Seeing only part of it pending would violate the business
+            # atomicity contract and must never be silently reinterpreted.
+            if (
+                str(group.policy.value) == "KEEP_TOGETHER"
+                and len(remaining) != len(group.unit_ids)
+            ):
+                raise RuntimeError(
+                    "LONG_CONTENT_ATOMIC_GROUP_PARTIAL_STATE:"
+                    + group.group_id
+                )
+            pending_groups.append(
+                group.model_copy(update={"unit_ids": remaining})
+            )
+
+        return bundle.model_copy(
+            update={
+                "logical_units": pending_units,
+                "atomic_groups": pending_groups,
+                "metadata": {
+                    **bundle.metadata,
+                    "adaptive_pending_units": sorted(pending_ids),
+                },
+            }
+        )
+
+    @staticmethod
+    def _atomic_floors(bundle: SourceBundle) -> tuple[int, int]:
+        unit_map = {item.unit_id: item for item in bundle.logical_units}
+
+        def unit_size(unit_id: str) -> int:
+            unit = unit_map[unit_id]
+            if "estimated_payload_chars" in unit.metadata:
+                return max(
+                    0,
+                    int(unit.metadata["estimated_payload_chars"]),
+                )
+            if unit.inline_payload is None:
+                return 0
+            return len(
+                json.dumps(
+                    unit.inline_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                    separators=(",", ":"),
+                )
+            )
+
+        min_units = 1
+        min_chars = 1
+        for group in bundle.atomic_groups:
+            if str(group.policy.value) != "KEEP_TOGETHER":
+                continue
+            min_units = max(min_units, len(group.unit_ids))
+            min_chars = max(
+                min_chars,
+                sum(
+                    unit_size(unit_id)
+                    for unit_id in group.unit_ids
+                    if unit_id in unit_map
+                ),
+            )
+        return min_units, min_chars
+
+    def _generation_policy(
+        self,
+        initial: LongContentPolicy,
+        *,
+        generation: int,
+        bundle: SourceBundle,
+    ) -> LongContentPolicy:
+        factor = self.recovery_policy.shrink_factor ** generation
+        atomic_units, atomic_chars = self._atomic_floors(bundle)
+        max_units = max(
+            self.recovery_policy.min_units_per_chunk,
+            atomic_units,
+            int(initial.max_units_per_chunk * factor),
+        )
+        max_chars = max(
+            self.recovery_policy.min_payload_chars,
+            atomic_chars,
+            int(initial.max_payload_chars * factor),
+        )
+        return initial.model_copy(
+            update={
+                "max_units_per_chunk": max_units,
+                "max_payload_chars": max_chars,
+            }
+        )
+
+    @staticmethod
+    def _dedupe_partials(
+        items: list[CommittedPartialResult],
+    ) -> list[CommittedPartialResult]:
+        by_id: dict[str, CommittedPartialResult] = {}
+        for item in items:
+            by_id[item.partial_id] = item
+        return list(by_id.values())
+
+    def _existing_generation_outcome(
+        self,
+        request_id: str,
+    ) -> LongContentRecoveryOutcome | None:
+        task = self.store.get_task_by_request_id(request_id)
+        if task is None:
+            return None
+        return self.executor.outcome(task.task_id)
+
+    def _finalize(
+        self,
+        *,
+        recovery_request_id: str,
+        bundle: SourceBundle,
+        task_ids: list[str],
+        plan_ids: list[str],
+        partials: list[CommittedPartialResult],
+        provider_calls: int,
+        replans: int,
+        truncated_task_ids: list[str],
+        terminal_error: RuntimeErrorInfo | None,
+    ) -> AdaptiveLongContentRecoveryOutcome:
+        partials = self._dedupe_partials(partials)
+        coverages = self.executor._coverages(bundle, partials)
+        coverage_complete = bool(coverages) and all(
+            item.complete for item in coverages
+        )
+
+        merge: MergeResult | None = None
+        if coverage_complete:
+            partitions = {item.partition_key for item in partials}
+            merge = MergeCoordinator(self.store).merge_and_commit(
+                self.executor.merger,
+                partials,
+                MergeContext(
+                    merge_key=(
+                        "adaptive-long-content-merge-"
+                        + _stable_hash(
+                            {
+                                "recovery_request_id": recovery_request_id,
+                                "bundle_id": bundle.bundle_id,
+                            }
+                        )
+                    ),
+                    expected_partial_ids=[
+                        item.partial_id for item in partials
+                    ],
+                    partition_key=(
+                        next(iter(partitions))
+                        if len(partitions) == 1
+                        else None
+                    ),
+                    partition_policy=(
+                        "ISOLATED"
+                        if len(partitions) <= 1
+                        else "CROSS_PARTITION"
+                    ),
+                    metadata={
+                        "runtime_long_content": True,
+                        "adaptive_recovery": True,
+                        "recovery_request_id": recovery_request_id,
+                        "replans": replans,
+                    },
+                ),
+            )
+
+        schema_valid = True
+        if (
+            merge is not None
+            and self.executor.final_validator is not None
+        ):
+            try:
+                schema_valid = bool(
+                    self.executor.final_validator(merge.data)
+                )
+            except Exception:
+                schema_valid = False
+
+        business_gate_passed: bool | None = None
+        if (
+            merge is not None
+            and self.executor.business_gate is not None
+        ):
+            business_gate_passed = self.executor.business_gate(
+                merge,
+                coverages,
+                bundle,
+                ContentPlan(
+                    plan_id=(
+                        plan_ids[-1]
+                        if plan_ids
+                        else "adaptive-empty"
+                    ),
+                    bundle_id=bundle.bundle_id,
+                    chunks=[],
+                    metadata={
+                        "adaptive_recovery": True,
+                        "generation_plan_ids": list(plan_ids),
+                    },
+                ),
+            )
+
+        gate = self.executor.gate_evaluator.evaluate(
+            coverage=coverages,
+            schema_valid=schema_valid,
+            merge_result=merge,
+            merge_complete=(
+                merge is not None
+                and merge.complete
+                and coverage_complete
+            ),
+            evidence_integrity=True,
+            business_gate_passed=business_gate_passed,
+            gate_ref="RUNTIME_ADAPTIVE_LONG_CONTENT_RECOVERY",
+            gate_version="1",
+        )
+
+        status = (
+            RuntimeStatus.COMPLETED
+            if gate.passed and terminal_error is None
+            else RuntimeStatus.PARTIAL
+        )
+        return AdaptiveLongContentRecoveryOutcome(
+            recovery_request_id=recovery_request_id,
+            status=status,
+            task_ids=list(dict.fromkeys(task_ids)),
+            plan_ids=list(plan_ids),
+            committed_partials=partials,
+            coverages=coverages,
+            merge=merge,
+            gate=gate,
+            business_consumable=bool(
+                status == RuntimeStatus.COMPLETED
+                and gate.passed
+            ),
+            provider_calls=provider_calls,
+            replans=replans,
+            truncated_task_ids=list(
+                dict.fromkeys(truncated_task_ids)
+            ),
+            terminal_error=terminal_error,
+        )
+
+    def execute(
+        self,
+        bundle: SourceBundle,
+        *,
+        recovery_request_id: str,
+        initial_policy: LongContentPolicy | dict[str, Any] | None = None,
+        strategy_ref: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> AdaptiveLongContentRecoveryOutcome:
+        if not bundle.logical_units:
+            raise ValueError("LONG_CONTENT_SOURCE_BUNDLE_EMPTY")
+
+        initial = (
+            initial_policy
+            if isinstance(initial_policy, LongContentPolicy)
+            else LongContentPolicy.model_validate(
+                initial_policy or {}
+            )
+        )
+        committed: list[CommittedPartialResult] = []
+        covered: set[str] = set()
+        task_ids: list[str] = []
+        plan_ids: list[str] = []
+        truncated_task_ids: list[str] = []
+        provider_calls = 0
+        terminal_error: RuntimeErrorInfo | None = None
+        replans = 0
+
+        for generation in range(
+            self.recovery_policy.max_replans + 1
+        ):
+            pending = self._pending_bundle(bundle, covered)
+            if not pending.logical_units:
+                break
+
+            remaining_budget = (
+                self.recovery_policy.max_provider_calls
+                - provider_calls
+            )
+            if remaining_budget <= 0:
+                terminal_error = RuntimeErrorInfo(
+                    code="RETRY_BUDGET_EXHAUSTED",
+                    category="EXECUTION",
+                    message=(
+                        "adaptive long-content provider-call budget exhausted"
+                    ),
+                    retryable=True,
+                    details={
+                        "max_provider_calls": (
+                            self.recovery_policy.max_provider_calls
+                        ),
+                        "provider_calls": provider_calls,
+                    },
+                )
+                break
+
+            generation_policy = self._generation_policy(
+                initial,
+                generation=generation,
+                bundle=pending,
+            )
+            generation_request_id = self._generation_request_id(
+                recovery_request_id,
+                generation,
+            )
+
+            outcome = self._existing_generation_outcome(
+                generation_request_id
+            )
+            if outcome is None:
+                outcome = self.executor.execute(
+                    pending,
+                    request_id=generation_request_id,
+                    policy=generation_policy,
+                    strategy_ref=strategy_ref,
+                    max_provider_calls_per_task=remaining_budget,
+                    metadata={
+                        **(metadata or {}),
+                        "adaptive_recovery": True,
+                        "recovery_request_id": recovery_request_id,
+                        "generation": generation,
+                    },
+                )
+
+            task_ids.append(outcome.task_id)
+            plan_ids.append(outcome.plan_id)
+            provider_calls += outcome.provider_calls
+            committed.extend(outcome.committed_partials)
+            covered.update(
+                unit_id
+                for partial in outcome.committed_partials
+                for unit_id in partial.unit_ids
+            )
+
+            self._inject(
+                "after_generation",
+                {
+                    "generation": generation,
+                    "task_id": outcome.task_id,
+                    "plan_id": outcome.plan_id,
+                    "covered_unit_ids": sorted(covered),
+                    "provider_calls": provider_calls,
+                },
+            )
+
+            if outcome.status == RuntimeStatus.COMPLETED:
+                continue
+
+            error = outcome.runtime_error
+            if (
+                error is not None
+                and error.code == "OUTPUT_TRUNCATED"
+            ):
+                truncated_task_ids.append(outcome.task_id)
+                if generation >= self.recovery_policy.max_replans:
+                    terminal_error = error
+                    break
+
+                next_policy = self._generation_policy(
+                    initial,
+                    generation=generation + 1,
+                    bundle=self._pending_bundle(bundle, covered),
+                )
+                if (
+                    next_policy.max_units_per_chunk
+                    >= generation_policy.max_units_per_chunk
+                    and next_policy.max_payload_chars
+                    >= generation_policy.max_payload_chars
+                ):
+                    terminal_error = RuntimeErrorInfo(
+                        code="LONG_CONTENT_ATOMIC_UNIT_STILL_TRUNCATED",
+                        category="VALIDATION",
+                        message=(
+                            "truncated content cannot be split further "
+                            "without violating atomic-group limits"
+                        ),
+                        retryable=False,
+                        details={
+                            "generation": generation,
+                            "max_units_per_chunk": (
+                                generation_policy.max_units_per_chunk
+                            ),
+                            "max_payload_chars": (
+                                generation_policy.max_payload_chars
+                            ),
+                        },
+                    )
+                    break
+
+                replans += 1
+                continue
+
+            terminal_error = error or RuntimeErrorInfo(
+                code="LONG_CONTENT_GENERATION_INCOMPLETE",
+                category="EXECUTION",
+                message="long-content generation did not complete",
+                retryable=True,
+                details={"generation": generation},
+            )
+            break
+
+        return self._finalize(
+            recovery_request_id=recovery_request_id,
+            bundle=bundle,
+            task_ids=task_ids,
+            plan_ids=plan_ids,
+            partials=committed,
+            provider_calls=provider_calls,
+            replans=replans,
+            truncated_task_ids=truncated_task_ids,
+            terminal_error=terminal_error,
+        )
