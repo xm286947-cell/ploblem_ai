@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import pytest
+
 from runtime import (
     AtomicGroup,
     AtomicGroupPolicy,
@@ -18,7 +20,11 @@ from runtime import (
     SourceRef,
     SqliteTaskStore,
 )
-from runtime.content import LongContentRecoveryExecutor
+from runtime.content import (
+    AdaptiveLongContentRecoveryExecutor,
+    AdaptiveLongContentRecoveryPolicy,
+    LongContentRecoveryExecutor,
+)
 from runtime.engine import LightweightExecutionEngine
 
 
@@ -391,3 +397,254 @@ def test_orch_b02_final_business_gate_can_block_consumption_after_merge(
     assert outcome.gate.business_gate_passed is False
     assert "BUSINESS_GATE_FAILED" in outcome.gate.reasons
     assert outcome.business_consumable is False
+
+
+
+def test_orch_b02_adaptive_replan_keeps_completed_chunks_and_splits_only_pending(
+    tmp_path,
+) -> None:
+    store = SqliteTaskStore(tmp_path / "adaptive.db")
+    runtime = LightweightExecutionEngine(store)
+    calls: list[tuple[str, ...]] = []
+
+    def provider(payload, context):
+        key = _chunk_units(payload)
+        calls.append(key)
+        if key == ("u3", "u4"):
+            raise RuntimeStepError(
+                "truncated",
+                code="OUTPUT_TRUNCATED",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+                details={"finish_reason": "length"},
+            )
+        return {"unit_ids": list(key)}
+
+    base = LongContentRecoveryExecutor(
+        runtime,
+        store,
+        step_execution_policy=_policy(
+            validation_attempts=1,
+            per_step_budget=1,
+            task_budget=None,
+        ),
+    )
+    base.bind_agent(
+        agent_id="test.adaptive",
+        provider_handler=provider,
+        execution_policy=base.step_execution_policy,
+    )
+    adaptive = AdaptiveLongContentRecoveryExecutor(
+        base,
+        recovery_policy=AdaptiveLongContentRecoveryPolicy(
+            max_replans=3,
+            max_provider_calls=8,
+            shrink_factor=0.5,
+        ),
+    )
+
+    outcome = adaptive.execute(
+        _bundle(4),
+        recovery_request_id="orch-b02-adaptive",
+        initial_policy=LongContentPolicy(
+            max_units_per_chunk=2,
+            max_payload_chars=1000,
+        ),
+        strategy_ref="adaptive@1",
+    )
+
+    assert outcome.status == RuntimeStatus.COMPLETED
+    assert outcome.provider_calls == 4
+    assert outcome.replans == 1
+    assert calls == [
+        ("u1", "u2"),
+        ("u3", "u4"),
+        ("u3",),
+        ("u4",),
+    ]
+    # The successful first chunk is never re-requested after truncation.
+    assert calls.count(("u1", "u2")) == 1
+    assert sorted(
+        unit_id
+        for partial in outcome.committed_partials
+        for unit_id in partial.unit_ids
+    ) == ["u1", "u2", "u3", "u4"]
+    assert all(item.complete for item in outcome.coverages)
+    assert outcome.merge is not None and outcome.merge.complete is True
+    assert outcome.gate.passed is True
+    assert outcome.business_consumable is True
+    assert len(outcome.truncated_task_ids) == 1
+
+
+def test_orch_b02_adaptive_restart_reconstructs_generation_without_recalling_provider(
+    tmp_path,
+) -> None:
+    store = SqliteTaskStore(tmp_path / "adaptive-resume.db")
+    runtime = LightweightExecutionEngine(store)
+    calls: list[tuple[str, ...]] = []
+
+    def provider(payload, context):
+        key = _chunk_units(payload)
+        calls.append(key)
+        if key == ("u3", "u4"):
+            raise RuntimeStepError(
+                "truncated",
+                code="OUTPUT_TRUNCATED",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+                details={"finish_reason": "length"},
+            )
+        return {"unit_ids": list(key)}
+
+    base = LongContentRecoveryExecutor(
+        runtime,
+        store,
+        step_execution_policy=_policy(
+            validation_attempts=1,
+            per_step_budget=1,
+            task_budget=None,
+        ),
+    )
+    base.bind_agent(
+        agent_id="test.adaptive.resume",
+        provider_handler=provider,
+        execution_policy=base.step_execution_policy,
+    )
+
+    crashed = {"done": False}
+
+    def fault(point, context):
+        if (
+            point == "after_generation"
+            and context["generation"] == 0
+            and not crashed["done"]
+        ):
+            crashed["done"] = True
+            raise RuntimeError("SIMULATED_ADAPTIVE_CRASH")
+
+    adaptive = AdaptiveLongContentRecoveryExecutor(
+        base,
+        recovery_policy=AdaptiveLongContentRecoveryPolicy(
+            max_replans=3,
+            max_provider_calls=8,
+            shrink_factor=0.5,
+        ),
+        fault_injector=fault,
+    )
+
+    with pytest.raises(RuntimeError, match="SIMULATED_ADAPTIVE_CRASH"):
+        adaptive.execute(
+            _bundle(4),
+            recovery_request_id="orch-b02-adaptive-resume",
+            initial_policy=LongContentPolicy(
+                max_units_per_chunk=2,
+                max_payload_chars=1000,
+            ),
+            strategy_ref="adaptive@1",
+        )
+
+    assert calls == [("u1", "u2"), ("u3", "u4")]
+
+    adaptive.fault_injector = None
+    resumed = adaptive.execute(
+        _bundle(4),
+        recovery_request_id="orch-b02-adaptive-resume",
+        initial_policy=LongContentPolicy(
+            max_units_per_chunk=2,
+            max_payload_chars=1000,
+        ),
+        strategy_ref="adaptive@1",
+    )
+
+    assert resumed.status == RuntimeStatus.COMPLETED
+    assert resumed.provider_calls == 4
+    # Generation 0 is reconstructed from persisted Runtime state.
+    assert calls == [
+        ("u1", "u2"),
+        ("u3", "u4"),
+        ("u3",),
+        ("u4",),
+    ]
+    assert len(resumed.task_ids) == 2
+    assert resumed.gate.passed is True
+
+
+def test_orch_b02_adaptive_never_breaks_keep_together_group_to_escape_truncation(
+    tmp_path,
+) -> None:
+    store = SqliteTaskStore(tmp_path / "adaptive-atomic.db")
+    runtime = LightweightExecutionEngine(store)
+    calls: list[tuple[str, ...]] = []
+
+    def provider(payload, context):
+        key = _chunk_units(payload)
+        calls.append(key)
+        if key == ("u3", "u4"):
+            raise RuntimeStepError(
+                "truncated",
+                code="OUTPUT_TRUNCATED",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+                details={"finish_reason": "length"},
+            )
+        return {"unit_ids": list(key)}
+
+    base = LongContentRecoveryExecutor(
+        runtime,
+        store,
+        step_execution_policy=_policy(
+            validation_attempts=1,
+            per_step_budget=1,
+            task_budget=None,
+        ),
+    )
+    base.bind_agent(
+        agent_id="test.adaptive.atomic",
+        provider_handler=provider,
+        execution_policy=base.step_execution_policy,
+    )
+    adaptive = AdaptiveLongContentRecoveryExecutor(
+        base,
+        recovery_policy=AdaptiveLongContentRecoveryPolicy(
+            max_replans=3,
+            max_provider_calls=8,
+            shrink_factor=0.5,
+        ),
+    )
+
+    outcome = adaptive.execute(
+        _bundle(
+            4,
+            atomic_groups=[
+                AtomicGroup(
+                    group_id="g34",
+                    unit_ids=["u3", "u4"],
+                    policy=AtomicGroupPolicy.KEEP_TOGETHER,
+                )
+            ],
+        ),
+        recovery_request_id="orch-b02-adaptive-atomic",
+        initial_policy=LongContentPolicy(
+            max_units_per_chunk=2,
+            max_payload_chars=1000,
+        ),
+        strategy_ref="adaptive@1",
+    )
+
+    assert outcome.status == RuntimeStatus.PARTIAL
+    assert outcome.provider_calls == 2
+    assert calls == [("u1", "u2"), ("u3", "u4")]
+    assert outcome.terminal_error is not None
+    assert (
+        outcome.terminal_error.code
+        == "LONG_CONTENT_ATOMIC_UNIT_STILL_TRUNCATED"
+    )
+    assert not any(
+        key in {("u3",), ("u4",)}
+        for key in calls
+    )
+    assert sorted(
+        unit_id
+        for partial in outcome.committed_partials
+        for unit_id in partial.unit_ids
+    ) == ["u1", "u2"]
