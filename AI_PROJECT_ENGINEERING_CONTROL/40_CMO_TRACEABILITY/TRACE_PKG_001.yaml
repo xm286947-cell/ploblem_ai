@@ -1,0 +1,35 @@
+schema_version: "1.0"
+trace_id: TRACE-PKG-001
+project_id: AI_PROJECT_ENGINEERING_CONTROL
+subject: "Storage Packaging 能力公共化"
+
+requirement:
+  requirement_id: REQ-PKG-001
+  status: ACCEPTED
+  title: "统一各项目出包机制，并优先复用 Storage 已验证打包能力"
+
+solution:
+  solution_id: SOL-PKG-001
+  status: DEFINED
+  title: "Storage Reference Implementation → Packaging Core + Package Profile + Release Manifest"
+  source_refs:
+    - "AI_PROJECT_ENGINEERING_CONTROL/50_RELEASE_PACKAGING/STORAGE_PACKAGING_REFERENCE_ASSESSMENT_V0.1.md"
+
+change:
+  change_id: CHG-PKG-001
+  status: PLANNED
+
+verification:
+  verification_id: VER-PKG-001
+  status: NOT_RUN
+  required_tests:
+    - "Storage reference package rebuild equivalence"
+    - "Manifest completeness"
+    - "Secret/data exclusion gate"
+    - "Package SHA256"
+
+baseline:
+  status: NOT_BASELINED
+
+trace_status: SOLUTION_DEFINED
+next_action: "定位 Storage 真实 build entry/include-exclude 源规则，再冻结公共 Profile/Manifest。"
