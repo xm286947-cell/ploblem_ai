@@ -685,6 +685,34 @@ class LongContentRecoveryExecutor:
             step_chunk_map=step_chunk_map,
         )
 
+    def outcome(self, task_id: str) -> LongContentRecoveryOutcome:
+        request = self.store.load_request(task_id)
+        if not isinstance(request, WorkflowRequest):
+            raise TypeError(
+                "long-content recovery task must be a WorkflowRequest"
+            )
+        payload = dict(request.input or {})
+        bundle = SourceBundle.model_validate(payload["bundle"])
+        plan = ContentPlan.model_validate(payload["plan"])
+        step_chunk_map = {
+            str(key): str(value)
+            for key, value in (
+                payload.get("step_chunk_map") or {}
+            ).items()
+        }
+        snapshot = self.runtime.get_task(task_id)
+        result = snapshot.result
+        if not isinstance(result, WorkflowResult):
+            raise RuntimeError(
+                "LONG_CONTENT_OUTCOME_RESULT_MISSING"
+            )
+        return self._finalize(
+            result=result,
+            bundle=bundle,
+            plan=plan,
+            step_chunk_map=step_chunk_map,
+        )
+
     def resume(self, task_id: str) -> LongContentRecoveryOutcome:
         request = self.store.load_request(task_id)
         if not isinstance(request, WorkflowRequest):
@@ -701,18 +729,7 @@ class LongContentRecoveryExecutor:
             ).items()
         }
         self.runtime.resume(task_id)
-        snapshot = self.runtime.get_task(task_id)
-        result = snapshot.result
-        if not isinstance(result, WorkflowResult):
-            raise RuntimeError(
-                "LONG_CONTENT_RESUME_RESULT_MISSING"
-            )
-        return self._finalize(
-            result=result,
-            bundle=bundle,
-            plan=plan,
-            step_chunk_map=step_chunk_map,
-        )
+        return self.outcome(task_id)
 
 
 __all__ = [
