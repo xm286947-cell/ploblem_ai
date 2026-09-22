@@ -59,9 +59,11 @@ jobs:
           python -m pytest -q tests/test_req022_major_cases.py \
             --junitxml=test-results/major-d01/req022.xml
 
-      - name: Run real-provider test in opt-out mode
+      - name: Run real-provider tests in opt-out mode
         run: |
-          python -m pytest -q tests/test_major_d01_real_provider_e2e.py \
+          python -m pytest -q \
+            tests/test_major_d01_real_provider_e2e.py \
+            tests/test_major_d01_real_truncation_e2e.py \
             --junitxml=test-results/major-d01/real-provider-optout.xml
 
       - name: Upload evidence
