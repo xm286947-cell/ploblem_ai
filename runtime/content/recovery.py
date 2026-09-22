@@ -446,10 +446,21 @@ class LongContentRecoveryCoordinator:
         )
         self._validate_resume_bundle(committed, bundle_fingerprint)
 
-        provider_calls = 0
-        child_task_ids: list[str] = []
-        seen_child_tasks: set[str] = set()
-        warnings: list[str] = []
+        ledger = self.store.list_long_content_children(operation_id)
+        provider_calls = sum(int(item["provider_calls"]) for item in ledger)
+        child_task_ids = list(
+            dict.fromkeys(
+                str(item["task_id"])
+                for item in ledger
+                if item.get("task_id")
+            )
+        )
+        seen_child_tasks: set[str] = set(child_task_ids)
+        warnings: list[str] = [
+            f"OUTPUT_TRUNCATED:{item['chunk_id']}"
+            for item in ledger
+            if item.get("error_code") == "OUTPUT_TRUNCATED"
+        ]
         global_limit = self._budget_limit(recovery_budget)
         base_policy = self._base_execution_policy()
 
@@ -527,6 +538,15 @@ class LongContentRecoveryCoordinator:
             )
             result = self._existing_or_invoke(request)
 
+            self.store.upsert_long_content_child(
+                operation_id=operation_id,
+                request_id=request_id,
+                chunk_id=chunk.chunk_id,
+                task_id=result.task_id,
+                status=result.status.value,
+                provider_calls=int(result.execution.provider_calls),
+                error_code=(result.error.code if result.error else None),
+            )
             if result.task_id not in seen_child_tasks:
                 provider_calls += int(result.execution.provider_calls)
                 child_task_ids.append(result.task_id)
