@@ -20,15 +20,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Require live provider configuration
+      - name: Require GitHub env-profile configuration
         shell: bash
         run: |
           if [ -z "$DASHSCOPE_BASE_URL" ]; then
-            echo "::error::Repository variable DASHSCOPE_BASE_URL is not configured."
+            echo "::error::This GitHub-hosted acceptance path uses the optional env profile and requires repository variable DASHSCOPE_BASE_URL. Local/product acceptance may instead use a non-committed Runtime model config via MAJOR_MODEL_CONFIG/config/model.local.yaml."
             exit 2
           fi
           if [ -z "$DASHSCOPE_API_KEY" ]; then
-            echo "::error::Repository secret DASHSCOPE_API_KEY is not configured."
+            echo "::error::This GitHub-hosted acceptance path uses the optional env profile and requires repository secret DASHSCOPE_API_KEY. This is not the only supported Runtime configuration mode."
             exit 2
           fi
 
