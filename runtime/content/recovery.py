@@ -628,7 +628,28 @@ class LongContentRecoveryCoordinator:
                 result.error is not None
                 and result.error.code == "OUTPUT_TRUNCATED"
             ):
-                children = self._split_chunk(chunk, bundle)
+                try:
+                    children = self._split_chunk(chunk, bundle)
+                except RuntimeStepError as exc:
+                    coverage = self._coverage(
+                        bundle=bundle,
+                        source=source,
+                        partials=committed,
+                        partition_key=partition_key,
+                    )
+                    return LongContentRecoveryOutcome(
+                        operation_id=operation_id,
+                        status=RuntimeStatus.PARTIAL,
+                        provider_calls=provider_calls,
+                        child_task_ids=child_task_ids,
+                        committed_partials=committed,
+                        coverage=coverage,
+                        pending_unit_ids=list(coverage.pending_units),
+                        warnings=warnings + [
+                            f"OUTPUT_TRUNCATED:{chunk.chunk_id}"
+                        ],
+                        error=exc.as_error_info(),
+                    )
                 warnings.append(
                     f"OUTPUT_TRUNCATED:{chunk.chunk_id}"
                 )
