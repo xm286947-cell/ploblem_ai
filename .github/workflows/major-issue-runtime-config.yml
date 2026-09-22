@@ -1,0 +1,54 @@
+name: Major Issue Runtime Config Gate
+
+on:
+  push:
+    branches:
+      - rcfg-02-major-runtime-config
+    paths:
+      - "config/runtime/**"
+      - "quality_knowledge/p0/stage_runner.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "quality_knowledge/prompts_v2/**"
+      - "quality_knowledge/models/analysis_v2.py"
+      - "tests/test_rcfg02_major_runtime_config.py"
+      - "tests/test_quality_capability_production_runner_p0.py"
+      - "tests/test_quality_capability_v2_analysis_p0.py"
+      - ".github/workflows/major-issue-runtime-config.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "config/runtime/**"
+      - "quality_knowledge/p0/stage_runner.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "quality_knowledge/prompts_v2/**"
+      - "quality_knowledge/models/analysis_v2.py"
+      - "tests/test_rcfg02_major_runtime_config.py"
+      - "tests/test_quality_capability_production_runner_p0.py"
+      - "tests/test_quality_capability_v2_analysis_p0.py"
+      - ".github/workflows/major-issue-runtime-config.yml"
+  workflow_dispatch:
+
+jobs:
+  major-runtime-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Run RCFG-02 contract, mock and regression gates
+        run: >
+          python -m pytest
+          tests/test_rcfg02_major_runtime_config.py
+          tests/test_quality_capability_production_runner_p0.py
+          tests/test_quality_capability_v2_analysis_p0.py
+          -q
