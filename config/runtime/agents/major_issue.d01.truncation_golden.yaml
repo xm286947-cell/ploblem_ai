@@ -1,0 +1,31 @@
+agent_id: major_issue.d01.extract
+version: truncation-golden-v1
+label: Major Issue D01 Real Truncation Golden
+model_ref: qwen_prod
+
+prompt:
+  ref: prompts/runtime/major_issue/d01_extract.md
+  version: v1
+
+output_schema:
+  ref: MajorD01ProviderObject
+  version: v1
+
+execution:
+  timeout_seconds: 120
+  retry:
+    transport_attempts: 2
+    validation_attempts: 1
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 1
+  model:
+    max_tokens: 192
+    temperature: 0
+
+metadata:
+  business_domain: MAJOR_CASE
+  acceptance_case: MAJOR-D01-REAL-TRUNCATION-GOLDEN-001
+  provider_response_shape: json_array
+  acceptance_only: true
+  expected_signal: finish_reason_length
