@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,47 @@ class RuntimeConfiguredV2StageRunner:
         self.fallback_runner = fallback_runner
         self.resolved = self.runtime.load_agent(self.AGENT_CONFIG)
 
+    @staticmethod
+    def resolve_model_config(
+        root: str | Path,
+        model_config_path: str | Path | None = None,
+    ) -> Path:
+        """Resolve Runtime model config using the Storage-proven precedence.
+
+        1. explicit caller path;
+        2. MAJOR_MODEL_CONFIG selection;
+        3. non-committed config/model.local.yaml when present;
+        4. shared config/runtime/model.yaml fallback.
+
+        Provider credentials remain a Runtime concern. The selected profile may
+        use direct values or *_env references according to Runtime rules.
+        """
+        project_root = Path(root).resolve()
+        selected: str | Path | None = model_config_path
+        if selected is None:
+            configured = os.environ.get("MAJOR_MODEL_CONFIG", "").strip()
+            if configured:
+                selected = configured
+
+        if selected is not None:
+            path = Path(selected).expanduser()
+            if not path.is_absolute():
+                path = project_root / path
+            path = path.resolve()
+            if not path.is_file():
+                raise ValueError(
+                    f"MAJOR_MODEL_CONFIG_NOT_FOUND:{path}"
+                )
+            return path
+
+        local_path = project_root / "config/model.local.yaml"
+        if local_path.is_file():
+            return local_path.resolve()
+
+        return (
+            project_root / "config/runtime/model.yaml"
+        ).resolve()
+
     @classmethod
     def from_project(
         cls,
@@ -193,22 +235,29 @@ class RuntimeConfiguredV2StageRunner:
         root: str | Path,
         runtime_db_path: str | Path,
         fallback_runner: Any,
+        model_config_path: str | Path | None = None,
     ) -> "RuntimeConfiguredV2StageRunner":
-        project_root = Path(root)
+        project_root = Path(root).resolve()
+        resolved_model_config = cls.resolve_model_config(
+            project_root,
+            model_config_path,
+        )
         loader = AgentConfigLoader(
             root=project_root,
-            model_profiles=project_root / "config/runtime/model.yaml",
+            model_profiles=resolved_model_config,
             schemas={"OccurrenceAnalysisV2DTO": OccurrenceAnalysisV2DTO},
         )
         runtime = ConfiguredAgentRuntime(
             SqliteTaskStore(runtime_db_path),
             config_loader=loader,
         )
-        return cls(
+        runner = cls(
             repository,
             runtime=runtime,
             fallback_runner=fallback_runner,
         )
+        runner.model_config_path = resolved_model_config
+        return runner
 
     def run_stage(self, *, stage: str, context: Any) -> StageExecutionResult:
         if stage != "occurrence":
