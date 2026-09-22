@@ -11,9 +11,28 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from runtime.adapters import MajorIssueD01RuntimeAdapter
-from runtime.contracts import EvidenceLocator, EvidenceReference, RuntimeStatus, SourceRef
+from runtime.content import (
+    AdaptiveLongContentRecoveryExecutor,
+    AdaptiveLongContentRecoveryPolicy,
+    LongContentRecoveryExecutor,
+)
+from runtime.contracts import (
+    CommittedPartialResult,
+    ContentChunk,
+    ContentPlan,
+    ErrorCategory,
+    EvidenceLocator,
+    EvidenceReference,
+    LongContentPolicy,
+    MergeContext,
+    MergeResult,
+    PartialResultCandidate,
+    RuntimeStatus,
+    SourceBundle,
+    SourceRef,
+)
 from runtime.providers import OpenAICompatibleProviderAdapter
+from runtime.reliability import RuntimeStepError
 from runtime.store import SqliteTaskStore
 
 from .runtime_integration import MajorCaseRuntimeDomainAdapter
