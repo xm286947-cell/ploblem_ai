@@ -51,6 +51,7 @@ jobs:
             tests/test_agent_runtime_p0_d8.py \
             tests/test_runtime_provider_adapter.py \
             tests/test_agent_runtime_p0_d11_acceptance_gaps.py \
+            tests/test_rcfg02_major_runtime_config.py \
             --junitxml=test-results/major-d01/integration.xml
 
       - name: Run REQ-022 regression
