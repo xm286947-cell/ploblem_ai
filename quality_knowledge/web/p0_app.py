@@ -29,6 +29,7 @@ def create_p0_app(
     *,
     stage_runner: Any | None = None,
     project_root: str | Path = PROJECT_ROOT,
+    runtime_model_config: str | Path | None = None,
 ) -> FastAPI:
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
@@ -72,12 +73,19 @@ def create_p0_app(
                     root=root,
                     runtime_db_path=runtime_db_path,
                     fallback_runner=fallback_runner,
+                    model_config_path=runtime_model_config,
                 )
             analysis_runtime_status = {
                 **diagnostic,
                 "ready": stage_runner is not None,
                 "source": "UNIFIED_RUNTIME+MODEL_CONFIG",
                 "migrated_agent": RuntimeConfiguredV2StageRunner.AGENT_ID,
+                "model_config_path": (
+                    str(stage_runner.model_config_path)
+                    if stage_runner is not None
+                    and hasattr(stage_runner, "model_config_path")
+                    else None
+                ),
             }
         except (ModelConfigError, AgentConfigError, ValueError) as error:
             stage_runner = None
