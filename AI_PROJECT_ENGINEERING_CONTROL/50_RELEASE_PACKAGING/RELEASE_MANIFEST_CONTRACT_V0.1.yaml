@@ -1,0 +1,54 @@
+schema_version: "0.1"
+manifest_contract_id: RELEASE_MANIFEST_V0.1
+status: DRAFT
+required:
+  package_id: string
+  package_type: "FULL | PATCH | VALIDATION | RC | RELEASE"
+  release_status: string
+  project_id: string
+  version: string
+  build_commit: string
+  build_time: string
+  startup: string_or_null
+  acceptance: string_or_null
+
+  source_components:
+    type: array
+    item:
+      component_id: string
+      repository: string_or_null
+      ref: string_or_null
+      commit: string
+      artifact_digest: string_or_null
+
+  traceability:
+    trace_ids: array
+    requirement_ids: array
+    solution_ids: array
+    change_ids: array
+    verification_ids: array
+    baseline_ids: array
+
+  validation:
+    status: "NOT_RUN | BLOCKED | PASS | FAIL"
+    evidence_refs: array
+    known_failures: array
+    external_field_gate: "NOT_REQUIRED | NOT_RUN | PENDING | PASS | FAIL"
+
+  packaging:
+    profile_id: string
+    required_files_gate: bool
+    secret_scan: "PASS | FAIL"
+    absolute_path_scan: "PASS | FAIL"
+    portable: bool
+
+  integrity:
+    files_manifest: string_or_null
+    package_sha256: string
+
+rules:
+  - "Verification 未满足发布门禁时不得伪装成 RELEASE。"
+  - "环境/现场验证未执行必须显式 NOT_RUN/PENDING。"
+  - "不得记录 Secret 值。"
+  - "不得用构建环境结果替代现场环境结果。"
+  - "多组件来源必须逐项记录，不压成单一 commit。"

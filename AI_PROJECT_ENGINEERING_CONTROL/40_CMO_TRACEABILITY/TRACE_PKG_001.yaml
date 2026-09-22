@@ -13,11 +13,14 @@ solution:
   status: DEFINED
   title: "Storage Reference Implementation → Packaging Core + Package Profile + Release Manifest"
   source_refs:
-    - "AI_PROJECT_ENGINEERING_CONTROL/50_RELEASE_PACKAGING/STORAGE_PACKAGING_REFERENCE_ASSESSMENT_V0.1.md"
+    - "AI_PROJECT_ENGINEERING_CONTROL/50_RELEASE_PACKAGING/STORAGE_PACKAGING_REFERENCE_ASSESSMENT_V0.2.md"
+    - "AI_PROJECT_ENGINEERING_CONTROL/50_RELEASE_PACKAGING/STORAGE_REFERENCE_PACKAGE_PROFILE_V0.1.yaml"
+    - "AI_PROJECT_ENGINEERING_CONTROL/50_RELEASE_PACKAGING/RELEASE_MANIFEST_CONTRACT_V0.1.yaml"
 
 change:
   change_id: CHG-PKG-001
   status: PLANNED
+  note: "公共 Packaging Core 尚未编码；先冻结 Profile/Manifest。"
 
 verification:
   verification_id: VER-PKG-001
@@ -25,11 +28,15 @@ verification:
   required_tests:
     - "Storage reference package rebuild equivalence"
     - "Manifest completeness"
-    - "Secret/data exclusion gate"
+    - "Secret/data/log exclusion gate"
     - "Package SHA256"
 
 baseline:
   status: NOT_BASELINED
 
 trace_status: SOLUTION_DEFINED
-next_action: "定位 Storage 真实 build entry/include-exclude 源规则，再冻结公共 Profile/Manifest。"
+facts:
+  build_entry: "scripts/ukci07_delivery.py::build_package"
+  include_exclude_source: CONFIRMED
+  reference_package_id: "STORAGE_UKCI_WINDOWS_RC_V0.1"
+next_action: "以现有 Storage builder 语义为基准，实现最小 Packaging Core Adapter，并用 Storage 做等价性验证。"
