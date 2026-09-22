@@ -155,6 +155,20 @@ def test_orch_b01_storage_calls_provider_without_business_http_handler(tmp_path:
         assert attempt.model_name == "qwen3.8-max"
         assert attempt.provider_call_seq == 1
         assert attempt.execution_metrics["sdk_retry"] == 0
+        provider_evidence = attempt.execution_metrics["provider_evidence"]
+        assert provider_evidence["resolved_model"] == "qwen3.8-max"
+        assert provider_evidence["model_ref"] == "qwen_prod"
+        assert provider_evidence["resolved_max_tokens"] == 8192
+        assert provider_evidence["request_max_tokens"] == 8192
+        assert provider_evidence["request_max_completion_tokens"] == "NOT_SENT"
+        assert provider_evidence["raw_finish_reason"] == "stop"
+        assert provider_evidence["raw_usage"]["completion_tokens"] == 0
+        assert provider_evidence["structured_output_capability"] == "UNKNOWN"
+        assert provider_evidence["structured_output_request"] == "NONE"
+        assert provider_evidence["streaming"] is False
+        serialized_evidence = json.dumps(provider_evidence, ensure_ascii=False)
+        assert storage_payload()["source_text"] not in serialized_evidence
+        assert "Return only strict JSON" not in serialized_evidence
 
         assert SECRET not in result.model_dump_json()
         assert SECRET not in raw_database_dump(store)
