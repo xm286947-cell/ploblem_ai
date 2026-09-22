@@ -170,6 +170,21 @@ class SqliteTaskStore:
                 CREATE INDEX IF NOT EXISTS idx_runtime_partial_task_partition
                     ON runtime_partial_commit(task_id, partition_key, created_at);
 
+                CREATE TABLE IF NOT EXISTS runtime_long_content_child (
+                    operation_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    chunk_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    provider_calls INTEGER NOT NULL DEFAULT 0,
+                    error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(operation_id, request_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_long_content_operation
+                    ON runtime_long_content_child(operation_id, created_at);
+
                 CREATE TABLE IF NOT EXISTS runtime_execution_snapshot (
                     snapshot_id TEXT PRIMARY KEY,
                     fingerprint TEXT NOT NULL,
@@ -980,6 +995,63 @@ class SqliteTaskStore:
                     return MergeResult.model_validate_json(existing["result_json"])
                 raise
         return result
+
+    def upsert_long_content_child(
+        self,
+        *,
+        operation_id: str,
+        request_id: str,
+        chunk_id: str,
+        task_id: str,
+        status: str,
+        provider_calls: int,
+        error_code: str | None = None,
+    ) -> None:
+        now = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_long_content_child(
+                    operation_id, request_id, chunk_id, task_id,
+                    status, provider_calls, error_code, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(operation_id, request_id) DO UPDATE SET
+                    chunk_id=excluded.chunk_id,
+                    task_id=excluded.task_id,
+                    status=excluded.status,
+                    provider_calls=excluded.provider_calls,
+                    error_code=excluded.error_code,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    operation_id,
+                    request_id,
+                    chunk_id,
+                    task_id,
+                    status,
+                    int(provider_calls),
+                    error_code,
+                    now,
+                    now,
+                ),
+            )
+
+    def list_long_content_children(
+        self,
+        operation_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT operation_id,request_id,chunk_id,task_id,status,
+                       provider_calls,error_code,created_at,updated_at
+                FROM runtime_long_content_child
+                WHERE operation_id=?
+                ORDER BY created_at,request_id
+                """,
+                (operation_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_run(self, run_id: str) -> WorkflowRunRecord | None:
         with self._connect() as conn:
