@@ -154,6 +154,7 @@ class MajorCaseRuntimeDomainAdapter:
                 section_members[section].append(str(fragment["fragment_id"]))
 
         group_for_unit: dict[str, str] = {}
+        section_context: dict[str, dict[str, str]] = {}
         atomic_groups: list[AtomicGroup] = []
         for section, unit_ids in sorted(section_members.items()):
             if len(unit_ids) < 2:
@@ -165,6 +166,7 @@ class MajorCaseRuntimeDomainAdapter:
                     "section": section,
                 }
             )[:16]
+            section_context[section] = {"section_path": section}
             atomic_groups.append(
                 AtomicGroup(
                     group_id=group_id,
@@ -200,7 +202,7 @@ class MajorCaseRuntimeDomainAdapter:
                         "text_content": fragment.get("text_content") or "",
                     },
                     group_id=group_for_unit.get(fragment_id),
-                    context_refs=[f"case:{case_id}", f"event:{event_id}"],
+                    context_refs=["case_id", "event_id"],
                     partition_key=event_id,
                     metadata={
                         "business_domain": BUSINESS_DOMAIN,
@@ -243,6 +245,7 @@ class MajorCaseRuntimeDomainAdapter:
                     "dedup": "same entry_type + evidence identity",
                     "conflict": "preserve conflicting evidence for human review",
                 },
+                **section_context,
             },
             default_partition_key=event_id,
             metadata={

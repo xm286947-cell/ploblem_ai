@@ -10,6 +10,8 @@ from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 from runtime import AgentConfigLoader, ConfiguredAgentRuntime, RuntimeStatus, SqliteTaskStore
+from runtime.contracts import ErrorCategory
+from runtime.reliability import RuntimeStepError
 from tools.openai_mock.server import create_server
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from quality_knowledge.major_cases.service import MajorCaseService
@@ -317,3 +319,159 @@ models:
         assert result["outcome"]["provider_calls"] == 1
         assert counters(host, port)["default"] == 1
         assert "LOCAL_RUNTIME_SECRET" not in _raw_database_dump(store.db_path)
+
+
+
+def test_major_d01_truncation_replans_only_uncovered_fragments(
+    tmp_path: Path,
+) -> None:
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        repo = MajorKnowledgeRepository(
+            tmp_path / "knowledge.sqlite3",
+            tmp_path / "attachments",
+        )
+        case_service = MajorCaseService(repo)
+        case = case_service.create_case(
+            "D01长文本截断恢复",
+            "G1",
+            "SOFTWARE",
+        )
+        ingest = case_service.ingest(
+            case["case_id"],
+            _docx(tmp_path / "review-long.docx"),
+            current_itrs=["ITR2026092204"],
+        )
+        version_id = ingest["version_id"]
+        event = repo.events(case["case_id"])[0]
+
+        store, runtime = _runtime(tmp_path, base_url)
+        service = MajorD01RuntimeService(
+            repo,
+            runtime,
+            store,
+            agent_config_path=AGENT_CONFIG,
+            max_provider_calls=8,
+            initial_max_units_per_chunk=2,
+            initial_max_payload_chars=100000,
+        )
+
+        calls: list[tuple[str, ...]] = []
+
+        def classify(fragment: dict) -> str:
+            text = (
+                str(fragment.get("section_path") or "")
+                + "\n"
+                + str(fragment.get("text_content") or "")
+            )
+            if "验证" in text:
+                return "VERIFICATION"
+            if "整改" in text or "措施" in text:
+                return "ACTION"
+            if "根因" in text:
+                return "ROOT_CAUSE"
+            return "ISSUE_FACT"
+
+        def fake_provider(payload, context):
+            fragments = list(payload.get("fragments") or [])
+            object_ids = tuple(
+                classify(fragment)
+                for fragment in fragments
+            )
+            calls.append(object_ids)
+
+            if (
+                len(object_ids) > 1
+                and set(object_ids)
+                == {"ACTION", "VERIFICATION"}
+            ):
+                raise RuntimeStepError(
+                    "provider output truncated",
+                    code="OUTPUT_TRUNCATED",
+                    category=ErrorCategory.VALIDATION,
+                    retryable=True,
+                    details={"finish_reason": "length"},
+                )
+
+            result = []
+            for fragment in fragments:
+                object_id = classify(fragment)
+                content_by_type = {
+                    "ISSUE_FACT": "运行中掉电后配置损坏且重启无法恢复。",
+                    "ROOT_CAUSE": "配置写入非原子，掉电窗口形成半写入状态。",
+                    "ACTION": "采用临时文件加原子替换并补充掉电保护。",
+                    "VERIFICATION": "连续掉电恢复验证72小时未再复现。",
+                }
+                result.append(
+                    {
+                        "object_id": object_id,
+                        "content": content_by_type[object_id],
+                        "fragment_ids": [fragment["fragment_id"]],
+                        "confidence": 0.9,
+                        "explanation": (
+                            "基于当前Runtime chunk中的证据片段。"
+                        ),
+                        "mechanism": (
+                            "非原子写入在掉电窗口形成半写入状态。"
+                            if object_id == "ROOT_CAUSE"
+                            else ""
+                        ),
+                    }
+                )
+            return result
+
+        service._generic_provider = fake_provider
+
+        result = service.execute(
+            case_id=case["case_id"],
+            version_id=version_id,
+            event_id=event["event_id"],
+        )
+
+        outcome = result["outcome"]
+        assert outcome["status"] == RuntimeStatus.COMPLETED.value
+        assert outcome["provider_calls"] == 5
+        assert outcome["replans"] == 1
+        assert len(outcome["task_ids"]) == 2
+        assert len(outcome["truncated_task_ids"]) == 1
+        assert len(outcome["committed_objects"]) == 4
+        assert {
+            item["object_id"]
+            for item in outcome["committed_objects"]
+        } == {
+            "ISSUE_FACT",
+            "ROOT_CAUSE",
+            "ACTION",
+            "VERIFICATION",
+        }
+
+        assert calls.count(("ISSUE_FACT", "ROOT_CAUSE")) == 1
+        assert calls.count(("ACTION", "VERIFICATION")) == 2
+        assert calls.count(("ACTION",)) == 1
+        assert calls.count(("VERIFICATION",)) == 1
+
+        entries = repo.entries_for_event(event["event_id"])
+        assert {item["entry_type"] for item in entries} == {
+            "ISSUE_FACT",
+            "ROOT_CAUSE",
+            "ACTION",
+            "VERIFICATION",
+        }
+        assert all(item["evidence"] for item in entries)
+        assert all(
+            item["analysis_metadata"]["runtime_replans"] == 1
+            for item in entries
+        )
+        assert all(
+            len(
+                item["analysis_metadata"][
+                    "runtime_truncated_task_ids"
+                ]
+            )
+            == 1
+            for item in entries
+        )
+        assert result["business_consumable"] is False
+        assert result["business_gate"]["reasons"] == [
+            "HUMAN_REVIEW_INCOMPLETE"
+        ]
