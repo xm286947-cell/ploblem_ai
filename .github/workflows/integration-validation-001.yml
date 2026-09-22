@@ -20,6 +20,7 @@ jobs:
       RUNTIME_SHA: 0959da43008307398a9cac0f9abfc7fec26dcb8a
       PATCH_SHA256: 5ee8fd181891a830c6fb530f213bcd50ebc80ce1e00d7a412f198216e9951919
       ZIP_SHA256: ec3616b6e7a097681db05343221fa783b680312c32e21e9991a8afb173d570f6
+
     steps:
       - name: Checkout declared BASE
         uses: actions/checkout@v4
@@ -48,7 +49,8 @@ jobs:
           set -euo pipefail
           echo "$ZIP_SHA256  .validation-input/reverse-quality-v01-final-integrated-patch.zip" | sha256sum -c -
           echo "$PATCH_SHA256  .validation-input/reverse-quality-v01-final-integrated-patch/reverse-quality-v0.1-final-integrated.patch" | sha256sum -c -
-          diff -u             <(printf '%s  reverse-quality-v0.1-final-integrated.patch\n' "$PATCH_SHA256")             .validation-input/reverse-quality-v01-final-integrated-patch/SHA256SUMS.txt
+          printf '%s  reverse-quality-v0.1-final-integrated.patch\n' "$PATCH_SHA256" > /tmp/expected.sha
+          diff -u /tmp/expected.sha .validation-input/reverse-quality-v01-final-integrated-patch/SHA256SUMS.txt
           echo "Final Integrated Patch hashes verified"
 
       - name: Apply Final Integrated Patch
@@ -139,138 +141,11 @@ jobs:
         run: |
           set -euo pipefail
           total=0
+
           run_suite() {
-            local test_file="$1"
-            local out
+            test_file="$1"
             out="$(python -m pytest "$test_file" -q 2>&1)"
             printf '%s\n' "$out"
-            local count
-            count="$(printf '%s\n' "$out" | sed -nE 's/^([0-9]+) passed.*$/\1/p' | tail -1)"
-            test -n "$count"
-            total=$((total + count))
-          }
-
-          run_suite tests/test_reverse_quality_runtime_integration.py
-          run_suite tests/test_reverse_quality_store.py
-          run_suite tests/test_reverse_quality.py
-          run_suite tests/test_quality_scenario_generation.py
-          run_suite tests/test_quality_scenario_library.py
-          run_suite tests/test_scenario_multisource_dedup.py
-          run_suite tests/test_scenario_operation_sources.py
-
-          test "$total" -eq 81
-          printf 'TOTAL: %s passed / 0 failed\n' "$total"
-          printf '%s\n' "$total" > TEST_TOTAL.txt
-
-      - name: Build validation evidence
-        if: always()
-        run: |
-          mkdir -p integration-validation-001-evidence
-          cp CHANGED_FILES_ACTUAL.txt integration-validation-001-evidence/ 2>/dev/null || true
-          cp TEST_TOTAL.txt integration-validation-001-evidence/ 2>/dev/null || true
-          cat > integration-validation-001-evidence/VALIDATION_RESULT.md <<EOF
-          # INTEGRATION-VALIDATION-001
-
-          - BASE: $BASE_SHA
-          - FINAL: $FINAL_SHA
-          - Runtime: $RUNTIME_SHA
-          - Patch SHA-256: $PATCH_SHA256
-          - ZIP SHA-256: $ZIP_SHA256
-          - Scope: 14 files
-          - Patch apply check: PASS if job succeeded
-          - Applied content == FINAL: PASS if job succeeded
-          - Compile: PASS if job succeeded
-          - Target Gate: 81 passed / 0 failed
-          EOF
-
-      - name: Upload validation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-validation-001-evidence
-          path: integration-validation-001-evidence
-          retention-days: 30
-\t' read -r status path; do
-            [ -n "$path" ] || continue
-            if [ "$status" = "A" ]; then
-              git add -N -- "$path"
-            fi
-          done < "$EXPECTED"
-          git diff --name-status HEAD | sort > /tmp/changed.actual
-          sort "$EXPECTED" > /tmp/changed.expected
-          diff -u /tmp/changed.expected /tmp/changed.actual
-          test "$(git diff --name-only HEAD | wc -l | tr -d ' ')" = "14"
-
-          git fetch --no-tags --depth=1 origin "$FINAL_SHA"
-          git cat-file -e "$FINAL_SHA^{commit}"
-          while IFS=$'\t' read -r status path; do
-            [ -n "$path" ] || continue
-            actual="$(git hash-object "$path")"
-            expected="$(git rev-parse "$FINAL_SHA:$path")"
-            test "$actual" = "$expected"
-          done < "$EXPECTED"
-
-          cp /tmp/changed.actual CHANGED_FILES_ACTUAL.txt
-          echo "14-file scope and FINAL file content verified"
-
-      - name: Checkout validated Runtime dependency
-        uses: actions/checkout@v4
-        with:
-          repository: xm286947-cell/ploblem_ai
-          ref: 0959da43008307398a9cac0f9abfc7fec26dcb8a
-          path: .deps/unified-agent-runtime
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install Reverse Quality dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Install Runtime dependencies
-        run: python -m pip install -r .deps/unified-agent-runtime/requirements-runtime-p0-test.txt
-
-      - name: Isolate Runtime package only
-        run: |
-          mkdir -p .runtime-dep
-          cp -R .deps/unified-agent-runtime/runtime .runtime-dep/runtime
-
-      - name: Verify Runtime dependency boundary
-        env:
-          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
-        run: |
-          python - <<'PY'
-          import quality_knowledge
-          import runtime
-          from pathlib import Path
-
-          root = Path.cwd().resolve()
-          q = Path(quality_knowledge.__file__).resolve()
-          r = Path(runtime.__file__).resolve()
-          assert str(q).startswith(str(root)), q
-          assert ".runtime-dep" in str(r), r
-          print("quality_knowledge:", q)
-          print("runtime:", r)
-          PY
-
-      - name: Compile
-        env:
-          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
-        run: python -m compileall -q quality_knowledge builder
-
-      - name: Full 81 Case Gate
-        env:
-          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
-        run: |
-          set -euo pipefail
-          total=0
-          run_suite() {
-            local test_file="$1"
-            local out
-            out="$(python -m pytest "$test_file" -q 2>&1)"
-            printf '%s\n' "$out"
-            local count
             count="$(printf '%s\n' "$out" | sed -nE 's/^([0-9]+) passed.*$/\1/p' | tail -1)"
             test -n "$count"
             total=$((total + count))
