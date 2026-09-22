@@ -27,6 +27,7 @@ from runtime.contracts import (
     RuntimeErrorInfo,
     RuntimeStatus,
     RuntimeWarning,
+    SemanticFailureHandoff,
     StepDefinition,
     StepResultSummary,
     StepRunRecord,
@@ -849,6 +850,96 @@ class LightweightExecutionEngine:
         return f"exec-{digest}"
 
     @staticmethod
+    def _semantic_handoff_context(
+        record: SemanticFailureHandoff,
+    ) -> dict[str, Any]:
+        return {
+            "recoverable_content_available": record.recoverable_content_available,
+            "content_ref": record.content_ref,
+            "content_hash": record.content_hash,
+            "content_length": record.content_length,
+            "content_access_scope": record.access_scope,
+            "raw_finish_reason": record.raw_finish_reason,
+            "raw_usage": record.raw_usage,
+            "request_max_tokens": record.request_max_tokens,
+            "request_max_completion_tokens": record.request_max_completion_tokens,
+            "structured_output_capability": record.structured_output_capability,
+            "structured_output_request": record.structured_output_request,
+            "response_format_type": record.response_format_type,
+        }
+
+    def _persist_semantic_handoff(
+        self,
+        *,
+        task: TaskRecord,
+        run: WorkflowRunRecord,
+        step_run: StepRunRecord,
+        attempt: AttemptRecord,
+        execution_key: str,
+        provider_call_seq: int,
+        provider_evidence: dict[str, Any],
+        handoff_buffer: dict[str, Any],
+    ) -> tuple[SemanticFailureHandoff | None, SemanticFailureHandoff | None]:
+        content = handoff_buffer.get("content")
+        if not isinstance(content, str) or not content:
+            return None, self.store.get_first_semantic_handoff(
+                task_id=task.task_id,
+                step_run_id=step_run.step_run_id,
+            )
+
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        record = SemanticFailureHandoff(
+            content_ref=f"semantic-handoff:{uuid4().hex}",
+            task_id=task.task_id,
+            run_id=run.run_id,
+            step_run_id=step_run.step_run_id,
+            attempt_id=attempt.attempt_id,
+            execution_key=execution_key,
+            provider_call_seq=provider_call_seq,
+            content_hash=content_hash,
+            content_length=len(content),
+            recoverable_content_available=True,
+            raw_finish_reason=provider_evidence.get(
+                "raw_finish_reason",
+                "NOT_RETURNED",
+            ),
+            raw_usage=provider_evidence.get("raw_usage", "NOT_RETURNED"),
+            request_max_tokens=provider_evidence.get(
+                "request_max_tokens",
+                "NOT_SENT",
+            ),
+            request_max_completion_tokens=provider_evidence.get(
+                "request_max_completion_tokens",
+                "NOT_SENT",
+            ),
+            structured_output_capability=str(
+                provider_evidence.get(
+                    "structured_output_capability",
+                    "UNKNOWN",
+                )
+            ),
+            structured_output_request=str(
+                provider_evidence.get(
+                    "structured_output_request",
+                    "NONE",
+                )
+            ),
+            response_format_type=str(
+                provider_evidence.get(
+                    "response_format_type",
+                    "NOT_SENT",
+                )
+            ),
+            created_at=_now(),
+        )
+        self.store.save_semantic_handoff(record, content=content)
+        first = self.store.get_first_semantic_handoff(
+            task_id=task.task_id,
+            step_run_id=step_run.step_run_id,
+        )
+        return record, first or record
+
+    @staticmethod
     def _attempt_type(error: RuntimeErrorInfo | None) -> AttemptType:
         if error is None:
             return AttemptType.STEP
@@ -991,6 +1082,7 @@ class LightweightExecutionEngine:
                         agent_snapshot = snapshot.agent_definition
                     safe_agent_snapshot = agent_snapshot or {}
                     provider_evidence: dict[str, Any] = {}
+                    semantic_handoff_buffer: dict[str, Any] = {}
                     attempt = AttemptRecord(
                         attempt_id=f"attempt-{uuid4().hex}",
                         step_run_id=step_run.step_run_id,
@@ -1039,6 +1131,7 @@ class LightweightExecutionEngine:
                                     "adapter_must_report_actual_provider_requests": True,
                                 },
                                 "provider_evidence": provider_evidence,
+                                "semantic_handoff": semantic_handoff_buffer,
                             },
                         }
                         handler_context["runtime"]["agent_definition"] = agent_snapshot
@@ -1049,6 +1142,78 @@ class LightweightExecutionEngine:
                     except Exception as exc:
                         finished = _now()
                         error = self._error_info(exc)
+
+                        if error.code in {
+                            "SEMANTIC_REPAIR_REQUIRED",
+                            "OUTPUT_TRUNCATED",
+                        }:
+                            current_handoff, canonical_handoff = (
+                                self._persist_semantic_handoff(
+                                    task=task,
+                                    run=run,
+                                    step_run=step_run,
+                                    attempt=attempt,
+                                    execution_key=execution_key,
+                                    provider_call_seq=provider_call_seq,
+                                    provider_evidence=provider_evidence,
+                                    handoff_buffer=semantic_handoff_buffer,
+                                )
+                            )
+                            if current_handoff is not None:
+                                attempt.raw_response_ref = current_handoff.content_ref
+                                attempt.execution_metrics[
+                                    "semantic_handoff_ref"
+                                ] = current_handoff.content_ref
+                            if canonical_handoff is not None:
+                                error.details.update(
+                                    self._semantic_handoff_context(
+                                        canonical_handoff
+                                    )
+                                )
+                            else:
+                                error.details.update(
+                                    {
+                                        "recoverable_content_available": False,
+                                        "content_ref": None,
+                                        "content_hash": provider_evidence.get(
+                                            "content_hash"
+                                        ),
+                                        "content_length": provider_evidence.get(
+                                            "content_length",
+                                            0,
+                                        ),
+                                        "content_access_scope": "TASK",
+                                        "raw_finish_reason": provider_evidence.get(
+                                            "raw_finish_reason",
+                                            "NOT_RETURNED",
+                                        ),
+                                        "raw_usage": provider_evidence.get(
+                                            "raw_usage",
+                                            "NOT_RETURNED",
+                                        ),
+                                        "request_max_tokens": provider_evidence.get(
+                                            "request_max_tokens",
+                                            "NOT_SENT",
+                                        ),
+                                        "request_max_completion_tokens": provider_evidence.get(
+                                            "request_max_completion_tokens",
+                                            "NOT_SENT",
+                                        ),
+                                        "structured_output_capability": provider_evidence.get(
+                                            "structured_output_capability",
+                                            "UNKNOWN",
+                                        ),
+                                        "structured_output_request": provider_evidence.get(
+                                            "structured_output_request",
+                                            "NONE",
+                                        ),
+                                        "response_format_type": provider_evidence.get(
+                                            "response_format_type",
+                                            "NOT_SENT",
+                                        ),
+                                    }
+                                )
+
                         last_error = error
                         attempt.status = RuntimeStatus.FAILED
                         attempt.execution_metrics["provider_evidence"] = dict(
