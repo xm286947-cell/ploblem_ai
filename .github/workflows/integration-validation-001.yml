@@ -64,19 +64,25 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED=.validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt
-          while IFS=
+
+          awk '$1 == "A" {print $2}' "$EXPECTED" | while read -r path; do
+            [ -n "$path" ] || continue
+            git add -N -- "$path"
+          done
+
+          git diff --name-status HEAD | sort > /tmp/changed.actual
           sort "$EXPECTED" > /tmp/changed.expected
           diff -u /tmp/changed.expected /tmp/changed.actual
           test "$(git diff --name-only HEAD | wc -l | tr -d ' ')" = "14"
 
           git fetch --no-tags --depth=1 origin "$FINAL_SHA"
           git cat-file -e "$FINAL_SHA^{commit}"
-          while IFS=$'\t' read -r status path; do
+          cut -f2- "$EXPECTED" | while read -r path; do
             [ -n "$path" ] || continue
             actual="$(git hash-object "$path")"
             expected="$(git rev-parse "$FINAL_SHA:$path")"
             test "$actual" = "$expected"
-          done < "$EXPECTED"
+          done
 
           cp /tmp/changed.actual CHANGED_FILES_ACTUAL.txt
           echo "14-file scope and FINAL file content verified"
