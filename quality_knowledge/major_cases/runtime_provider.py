@@ -191,6 +191,170 @@ class MajorD01ProviderBridge:
         return results
 
 
+class MajorD01ResultMerger:
+    """Major-domain merge semantics over Runtime committed chunk partials.
+
+    Runtime owns chunk execution/persistence. This merger owns only the
+    business meaning of combining D01 candidates across chunks.
+    """
+
+    def __init__(self, expected_object_ids: list[str]) -> None:
+        self.expected_object_ids = list(expected_object_ids)
+        self._expected = set(self.expected_object_ids)
+
+    @staticmethod
+    def _normalized_content(value: str) -> str:
+        return " ".join(str(value or "").split())
+
+    def merge(
+        self,
+        inputs: list[CommittedPartialResult],
+        context: MergeContext,
+    ) -> MergeResult:
+        partitions = {item.partition_key for item in inputs}
+        if (
+            context.partition_policy == "ISOLATED"
+            and len(partitions) > 1
+        ):
+            raise ValueError("D01_CROSS_EVENT_MERGE_FORBIDDEN")
+
+        present_ids = {item.partial_id for item in inputs}
+        expected_partial_ids = set(context.expected_partial_ids)
+        missing_partials = sorted(expected_partial_ids - present_ids)
+
+        grouped: dict[str, list[MajorD01ProviderObject]] = {
+            object_id: []
+            for object_id in self.expected_object_ids
+        }
+        for partial in inputs:
+            payload = partial.data or []
+            if not isinstance(payload, list):
+                raise ValueError("D01_PARTIAL_PAYLOAD_MUST_BE_LIST")
+            for raw in payload:
+                item = MajorD01ProviderObject.model_validate(raw)
+                if item.object_id not in self._expected:
+                    raise ValueError(
+                        "D01_UNEXPECTED_OBJECT_IN_MERGE:"
+                        + item.object_id
+                    )
+                grouped[item.object_id].append(item)
+
+        merged_objects: list[dict[str, Any]] = []
+        conflict_object_ids: list[str] = []
+        for object_id in self.expected_object_ids:
+            candidates = grouped[object_id]
+            if not candidates:
+                continue
+
+            by_content: dict[str, MajorD01ProviderObject] = {}
+            for candidate in candidates:
+                normalized = self._normalized_content(
+                    candidate.content
+                )
+                existing = by_content.get(normalized)
+                if (
+                    existing is None
+                    or (candidate.confidence or 0.0)
+                    > (existing.confidence or 0.0)
+                ):
+                    by_content[normalized] = candidate
+
+            unique = list(by_content.values())
+            unique.sort(
+                key=lambda item: (
+                    -(item.confidence or 0.0),
+                    self._normalized_content(item.content),
+                )
+            )
+            primary = unique[0]
+            conflict = len(unique) > 1
+            if conflict:
+                conflict_object_ids.append(object_id)
+
+            fragment_ids = list(
+                dict.fromkeys(
+                    fragment_id
+                    for candidate in candidates
+                    for fragment_id in candidate.fragment_ids
+                )
+            )
+            explanations = list(
+                dict.fromkeys(
+                    item.explanation.strip()
+                    for item in candidates
+                    if item.explanation.strip()
+                )
+            )
+            mechanisms = list(
+                dict.fromkeys(
+                    item.mechanism.strip()
+                    for item in candidates
+                    if item.mechanism.strip()
+                )
+            )
+            alternatives = [
+                {
+                    "content": item.content,
+                    "confidence": item.confidence,
+                    "fragment_ids": list(item.fragment_ids),
+                    "explanation": item.explanation,
+                    "mechanism": item.mechanism,
+                }
+                for item in unique
+            ]
+
+            merged_objects.append(
+                {
+                    "object_id": object_id,
+                    "data": {
+                        "content": primary.content,
+                        "confidence": primary.confidence,
+                        "explanation": " | ".join(explanations),
+                        "mechanism": " | ".join(mechanisms),
+                        "fragment_ids": fragment_ids,
+                        "conflict": conflict,
+                        "alternatives": alternatives,
+                    },
+                    "metadata": {
+                        "business_domain": "MAJOR_CASE",
+                        "merge_rule": "object_id+evidence",
+                        "candidate_count": len(candidates),
+                        "unique_content_count": len(unique),
+                        "conflict": conflict,
+                    },
+                }
+            )
+
+        return MergeResult(
+            merge_key=context.merge_key,
+            data=merged_objects,
+            evidence=[],
+            derived_from_partial_ids=[
+                item.partial_id for item in inputs
+            ],
+            complete=not missing_partials,
+            missing_partial_ids=missing_partials,
+            warnings=(
+                [
+                    "D01_CONFLICT_REQUIRES_HUMAN_REVIEW:"
+                    + object_id
+                    for object_id in conflict_object_ids
+                ]
+                + (
+                    ["MISSING_COMMITTED_PARTIAL"]
+                    if missing_partials
+                    else []
+                )
+            ),
+            metadata={
+                "business_domain": "MAJOR_CASE",
+                "expected_object_ids": self.expected_object_ids,
+                "conflict_object_ids": conflict_object_ids,
+                "partition_policy": context.partition_policy,
+            },
+        )
+
+
 class MajorD01RuntimeService:
     """Execute D01 through ConfiguredAgentRuntime and persist review candidates."""
 
