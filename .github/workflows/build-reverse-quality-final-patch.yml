@@ -108,21 +108,25 @@ jobs:
           git switch --detach "$BASE"
           git apply --check "$PATCH"
           git apply "$PATCH"
-          git diff --exit-code f970dbabdf111e816e6361cd97a85e32a7385f2f -- \
-            .github/workflows/rcfg-03-reverse-runtime.yml \
-            .github/workflows/reverse-quality-rc1.yml \
-            config/runtime/agents/reverse_quality.single_issue.analyze.yaml \
-            prompts/runtime/reverse_quality/single_issue_v01.md \
-            quality_knowledge/reverse_quality.py \
-            quality_knowledge/reverse_quality_runtime.py \
-            quality_knowledge/reverse_quality_scenario_adapter.py \
-            quality_knowledge/reverse_quality_store.py \
-            quality_knowledge/scenario_generation.py \
-            quality_knowledge/web/app.py \
-            quality_knowledge/web/templates/reverse_quality_issue.html \
-            tests/test_reverse_quality.py \
-            tests/test_reverse_quality_runtime_integration.py \
+          TARGETS=(
+            .github/workflows/rcfg-03-reverse-runtime.yml
+            .github/workflows/reverse-quality-rc1.yml
+            config/runtime/agents/reverse_quality.single_issue.analyze.yaml
+            prompts/runtime/reverse_quality/single_issue_v01.md
+            quality_knowledge/reverse_quality.py
+            quality_knowledge/reverse_quality_runtime.py
+            quality_knowledge/reverse_quality_scenario_adapter.py
+            quality_knowledge/reverse_quality_store.py
+            quality_knowledge/scenario_generation.py
+            quality_knowledge/web/app.py
+            quality_knowledge/web/templates/reverse_quality_issue.html
+            tests/test_reverse_quality.py
+            tests/test_reverse_quality_runtime_integration.py
             tests/test_reverse_quality_store.py
+          )
+          git add -- "${TARGETS[@]}"
+          git diff --cached --exit-code f970dbabdf111e816e6361cd97a85e32a7385f2f -- "${TARGETS[@]}"
+          git reset -- "${TARGETS[@]}"
           git apply -R --check "$PATCH"
 
       - name: Upload integrated patch artifact
