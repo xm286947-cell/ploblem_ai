@@ -1,0 +1,42 @@
+name: Major Issue Real Provider E2E
+
+on:
+  workflow_dispatch:
+
+jobs:
+  major-real-provider-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MAJOR_ISSUE_REAL_E2E: "1"
+      DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require GitHub env-profile configuration
+        shell: bash
+        run: |
+          if [ -z "$DASHSCOPE_BASE_URL" ]; then
+            echo "::error::This GitHub-hosted acceptance path uses the optional env profile and requires repository variable DASHSCOPE_BASE_URL. Local/product acceptance may instead use a non-committed Runtime model config via MAJOR_MODEL_CONFIG/config/model.local.yaml."
+            exit 2
+          fi
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::This GitHub-hosted acceptance path uses the optional env profile and requires repository secret DASHSCOPE_API_KEY. This is not the only supported Runtime configuration mode."
+            exit 2
+          fi
+
+      - name: Install minimal dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Run RCFG-02 real provider golden smoke
+        run: >
+          python -m pytest
+          tests/test_rcfg02_major_runtime_config.py::test_rcfg02_major_occurrence_real_provider_golden_smoke
+          -q

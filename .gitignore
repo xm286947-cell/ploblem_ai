@@ -29,3 +29,6 @@ baseline_release/
 knowledge/raw_evidence/*.json
 knowledge/raw_excel/*.json
 output/retrieval_results/*.json
+
+# Local Runtime model config may contain real provider credentials
+config/model.local.yaml
