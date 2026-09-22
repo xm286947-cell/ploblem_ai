@@ -29,6 +29,10 @@ TRUNCATION_AGENT_CONFIG = (
     ROOT
     / "config/runtime/agents/major_issue.d01.truncation_golden.yaml"
 )
+PRODUCTION_AGENT_CONFIG = (
+    ROOT
+    / "config/runtime/agents/major_issue.d01.extract.yaml"
+)
 
 
 def _require_real_provider() -> Path:
@@ -98,6 +102,33 @@ def _raw_database_dump(path: Path) -> str:
     with sqlite3.connect(path) as connection:
         return "\n".join(connection.iterdump())
 
+
+
+def test_truncation_golden_config_is_isolated_from_production() -> None:
+    loader = AgentConfigLoader(
+        root=ROOT,
+        model_profiles=ROOT / "config/runtime/model.yaml",
+        schemas={"MajorD01ProviderObject": MajorD01ProviderObject},
+        environ={
+            "DASHSCOPE_BASE_URL": "http://127.0.0.1:9/v1",
+            "DASHSCOPE_API_KEY": "TEST_ONLY",
+        },
+    )
+
+    production = loader.load(PRODUCTION_AGENT_CONFIG)
+    truncation = loader.load(TRUNCATION_AGENT_CONFIG)
+
+    assert production.definition.agent_id == "major_issue.d01.extract"
+    assert truncation.definition.agent_id == production.definition.agent_id
+    assert production.execution_policy.model_policy["max_tokens"] == 8192
+    assert truncation.execution_policy.model_policy["max_tokens"] == 192
+    assert truncation.execution_policy.retry_budget.validation_attempts == 1
+    assert truncation.execution_policy.retry_budget.max_provider_calls_per_step == 1
+    assert truncation.definition.metadata["acceptance_only"] is True
+    assert (
+        truncation.definition.metadata["expected_signal"]
+        == "finish_reason_length"
+    )
 
 def test_major_d01_real_provider_truncation_recovers_by_replanning(
     tmp_path: Path,
