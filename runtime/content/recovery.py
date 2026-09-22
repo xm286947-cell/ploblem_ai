@@ -1144,6 +1144,11 @@ class AdaptiveLongContentRecoveryExecutor:
                 generation=generation,
                 bundle=pending,
             )
+            generation_plan = self.executor.planner.plan(
+                pending,
+                generation_policy,
+                strategy_ref=strategy_ref,
+            )
             generation_request_id = self._generation_request_id(
                 recovery_request_id,
                 generation,
@@ -1201,16 +1206,45 @@ class AdaptiveLongContentRecoveryExecutor:
                     terminal_error = error
                     break
 
+                next_pending = self._pending_bundle(bundle, covered)
                 next_policy = self._generation_policy(
                     initial,
                     generation=generation + 1,
-                    bundle=self._pending_bundle(bundle, covered),
+                    bundle=next_pending,
+                )
+                next_plan = self.executor.planner.plan(
+                    next_pending,
+                    next_policy,
+                    strategy_ref=strategy_ref,
+                )
+                current_failed = next(
+                    (
+                        chunk
+                        for chunk in generation_plan.chunks
+                        if not set(chunk.unit_ids).issubset(covered)
+                    ),
+                    None,
+                )
+                next_first = (
+                    next_plan.chunks[0]
+                    if next_plan.chunks
+                    else None
+                )
+                no_effective_split = bool(
+                    current_failed is not None
+                    and next_first is not None
+                    and current_failed.unit_ids == next_first.unit_ids
+                    and current_failed.overlap_unit_ids
+                    == next_first.overlap_unit_ids
                 )
                 if (
-                    next_policy.max_units_per_chunk
-                    >= generation_policy.max_units_per_chunk
-                    and next_policy.max_payload_chars
-                    >= generation_policy.max_payload_chars
+                    no_effective_split
+                    or (
+                        next_policy.max_units_per_chunk
+                        >= generation_policy.max_units_per_chunk
+                        and next_policy.max_payload_chars
+                        >= generation_policy.max_payload_chars
+                    )
                 ):
                     terminal_error = RuntimeErrorInfo(
                         code="LONG_CONTENT_ATOMIC_UNIT_STILL_TRUNCATED",
@@ -1227,6 +1261,16 @@ class AdaptiveLongContentRecoveryExecutor:
                             ),
                             "max_payload_chars": (
                                 generation_policy.max_payload_chars
+                            ),
+                            "failed_unit_ids": (
+                                list(current_failed.unit_ids)
+                                if current_failed is not None
+                                else []
+                            ),
+                            "next_unit_ids": (
+                                list(next_first.unit_ids)
+                                if next_first is not None
+                                else []
                             ),
                         },
                     )
