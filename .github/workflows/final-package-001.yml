@@ -1,0 +1,342 @@
+name: FINAL-PACKAGE-001
+
+on:
+  push:
+    branches:
+      - final-package-001
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  final-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BASE_SHA: c7aa3017e07f46d1b010c90300becdae9ccd7005
+      FINAL_SHA: f970dbabdf111e816e6361cd97a85e32a7385f2f
+      RUNTIME_SHA: 0959da43008307398a9cac0f9abfc7fec26dcb8a
+      PATCH_SHA256: 5ee8fd181891a830c6fb530f213bcd50ebc80ce1e00d7a412f198216e9951919
+      PATCH_ZIP_SHA256: ec3616b6e7a097681db05343221fa783b680312c32e21e9991a8afb173d570f6
+      VALIDATION_RUN: "35715480357"
+      PACKAGE_NAME: reverse-quality-v0.1-full-package
+
+    steps:
+      - name: Checkout declared BASE
+        uses: actions/checkout@v4
+        with:
+          ref: c7aa3017e07f46d1b010c90300becdae9ccd7005
+          fetch-depth: 1
+
+      - name: Verify target baseline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test -z "$(git status --porcelain)"
+          echo "BASE verified: $BASE_SHA"
+
+      - name: Download validated Final Integrated Patch
+        uses: actions/download-artifact@v4
+        with:
+          name: reverse-quality-v01-final-integrated-patch
+          path: .validation-input
+          repository: xm286947-cell/ploblem_ai
+          run-id: 35706343551
+          github-token: ${{ github.token }}
+
+      - name: Download integration validation evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-validation-001-evidence
+          path: .validation-evidence
+          repository: xm286947-cell/ploblem_ai
+          run-id: 35715480357
+          github-token: ${{ github.token }}
+
+      - name: Verify release input and apply
+        run: |
+          set -euo pipefail
+          ZIP=.validation-input/reverse-quality-v01-final-integrated-patch.zip
+          PATCH=.validation-input/reverse-quality-v01-final-integrated-patch/reverse-quality-v0.1-final-integrated.patch
+          echo "$PATCH_ZIP_SHA256  $ZIP" | sha256sum -c -
+          echo "$PATCH_SHA256  $PATCH" | sha256sum -c -
+          git apply --check "$PATCH"
+          git apply "$PATCH"
+          git apply -R --check "$PATCH"
+
+          EXPECTED=.validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt
+          cut -f2- "$EXPECTED" | sort > /tmp/expected.paths
+          {
+            git diff --name-only HEAD
+            git ls-files --others --exclude-standard
+          } | grep -v '^\.validation-input/' | grep -v '^\.validation-evidence/' | sort -u > /tmp/actual.paths
+          diff -u /tmp/expected.paths /tmp/actual.paths
+          test "$(wc -l < /tmp/actual.paths | tr -d ' ')" = "14"
+
+          git fetch --no-tags --depth=1 origin "$FINAL_SHA"
+          while read -r path; do
+            actual="$(git hash-object "$path")"
+            expected="$(git rev-parse "$FINAL_SHA:$path")"
+            test "$actual" = "$expected"
+          done < /tmp/expected.paths
+          echo "Release input verified and applied"
+
+      - name: Checkout validated Runtime dependency
+        uses: actions/checkout@v4
+        with:
+          repository: xm286947-cell/ploblem_ai
+          ref: 0959da43008307398a9cac0f9abfc7fec26dcb8a
+          path: .deps/unified-agent-runtime
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r .deps/unified-agent-runtime/requirements-runtime-p0-test.txt
+          mkdir -p .runtime-dep
+          cp -R .deps/unified-agent-runtime/runtime .runtime-dep/runtime
+
+      - name: Release dependency boundary and compile
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import quality_knowledge
+          import runtime
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          q = Path(quality_knowledge.__file__).resolve()
+          r = Path(runtime.__file__).resolve()
+          assert str(q).startswith(str(root)), q
+          assert ".runtime-dep" in str(r), r
+          print("quality_knowledge:", q)
+          print("runtime:", r)
+          PY
+          python -m compileall -q quality_knowledge builder
+
+      - name: Final release gate - 81 cases
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: |
+          set -euo pipefail
+          python -m pytest             tests/test_reverse_quality_runtime_integration.py             tests/test_reverse_quality_store.py             tests/test_reverse_quality.py             tests/test_quality_scenario_generation.py             tests/test_quality_scenario_library.py             tests/test_scenario_multisource_dedup.py             tests/test_scenario_operation_sources.py             -q | tee FINAL_RELEASE_GATE.txt
+          grep -E '^81 passed(,| in )' FINAL_RELEASE_GATE.txt
+
+      - name: Build Full Package from validated workspace
+        run: |
+          set -euo pipefail
+          ROOT="dist/$PACKAGE_NAME"
+          PRODUCT="$ROOT/product"
+          RELEASE="$ROOT/release"
+          mkdir -p "$PRODUCT" "$RELEASE/evidence/integration-validation-001" "$RELEASE/final-integrated-patch"
+
+          rsync -a ./ "$PRODUCT/"             --exclude='.git/'             --exclude='.deps/'             --exclude='.runtime-dep/'             --exclude='.validation-input/'             --exclude='.validation-evidence/'             --exclude='dist/'             --exclude='.pytest_cache/'             --exclude='__pycache__/'             --exclude='.env'             --exclude='.env.*'             --exclude='sources/'             --exclude='input/'             --exclude='outputs/'             --exclude='*.db'             --exclude='*.sqlite'             --exclude='*.sqlite3'             --exclude='*.pyc'             --exclude='*.pyo'
+
+          find "$PRODUCT" -type f \( -name '*.xlsx' -o -name '*.xls' -o -name '*.pdf' \) -delete
+          find "$PRODUCT" -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -prune -exec rm -rf {} +
+
+          cp .validation-input/reverse-quality-v01-final-integrated-patch/reverse-quality-v0.1-final-integrated.patch "$RELEASE/final-integrated-patch/"
+          cp .validation-input/reverse-quality-v01-final-integrated-patch/PATCH_MANIFEST.md "$RELEASE/final-integrated-patch/"
+          cp .validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt "$RELEASE/final-integrated-patch/"
+          cp .validation-input/reverse-quality-v01-final-integrated-patch/SHA256SUMS.txt "$RELEASE/final-integrated-patch/"
+          cp -R .validation-evidence/. "$RELEASE/evidence/integration-validation-001/"
+          cp FINAL_RELEASE_GATE.txt "$RELEASE/evidence/FINAL_RELEASE_GATE.txt"
+
+          cat > "$RELEASE/BASELINE.lock" <<EOF
+          BASE=$BASE_SHA
+          FINAL=$FINAL_SHA
+          FINAL_INTEGRATED_PATCH_SHA256=$PATCH_SHA256
+          FINAL_INTEGRATED_PATCH_ZIP_SHA256=$PATCH_ZIP_SHA256
+          INTEGRATION_VALIDATION_RUN=$VALIDATION_RUN
+          EOF
+
+          cat > "$RELEASE/RUNTIME_DEPENDENCY.lock" <<EOF
+          REPOSITORY=xm286947-cell/ploblem_ai
+          REF=main@$RUNTIME_SHA
+          COMMIT=$RUNTIME_SHA
+          INTEGRATION_MODE=external_dependency
+          RUNTIME_SOURCE_COPIED_INTO_BUSINESS_PRODUCT=false
+          EOF
+
+          cat > "$RELEASE/CONFIG_PROMPT_SCHEMA_INDEX.md" <<'EOF'
+          # Config / Prompt / Schema Index
+
+          - Agent config: product/config/runtime/agents/reverse_quality.single_issue.analyze.yaml
+          - Business prompt: product/prompts/runtime/reverse_quality/single_issue_v01.md
+          - Runtime adapter: product/quality_knowledge/reverse_quality_runtime.py
+          - ReverseQualityResult V0.1 contract: product/quality_knowledge/reverse_quality.py
+          - Reverse Quality Store / Repository: product/quality_knowledge/reverse_quality_store.py
+          - ReverseQualityResult -> Scenario Candidate adapter: product/quality_knowledge/reverse_quality_scenario_adapter.py
+          - Scenario Candidate entry: product/quality_knowledge/scenario_generation.py
+          - Reverse Quality API: product/quality_knowledge/web/app.py
+
+          Runtime provider/retry/timeout/budget/secret behavior is supplied by the separately locked Unified Agent Runtime dependency, not copied into the business source tree.
+          EOF
+
+          cat > "$RELEASE/APPLY.md" <<EOF
+          # Apply
+
+          ## Clean deployment
+          Use the product/ directory as the complete Reverse Quality V0.1 product snapshot corresponding to:
+          - FINAL: $FINAL_SHA
+          - Runtime: $RUNTIME_SHA
+
+          ## Upgrade from declared BASE
+          1. Confirm current business baseline is exactly $BASE_SHA.
+          2. Back up runtime data, especially the Reverse Quality SQLite database. Databases are intentionally not included in this package.
+          3. Verify the integrated patch SHA-256 is $PATCH_SHA256.
+          4. Run git apply --check release/final-integrated-patch/reverse-quality-v0.1-final-integrated.patch.
+          5. Apply the patch.
+          6. Resolve Unified Agent Runtime to commit $RUNTIME_SHA as an external dependency.
+          7. Install product and Runtime requirements.
+          8. Execute the Acceptance gate in ACCEPTANCE.md before release.
+          EOF
+
+          cat > "$RELEASE/ROLLBACK.md" <<EOF
+          # Rollback
+
+          Code rollback is defined only for a workspace that was upgraded from BASE $BASE_SHA with the packaged Final Integrated Patch.
+
+          1. Stop writes to Reverse Quality Store.
+          2. Back up the current SQLite database and audit data.
+          3. Run git apply -R --check release/final-integrated-patch/reverse-quality-v0.1-final-integrated.patch.
+          4. Run git apply -R release/final-integrated-patch/reverse-quality-v0.1-final-integrated.patch.
+          5. Restore the previously approved Runtime dependency if it was changed outside this package.
+
+          This rollback reverses code changes only. It does not destructively downgrade or delete persisted Reverse Quality Store data/schema.
+          EOF
+
+          cat > "$RELEASE/ACCEPTANCE.md" <<EOF
+          # Acceptance
+
+          Release is accepted only when all checks pass:
+
+          - Business BASE verified: $BASE_SHA
+          - Final Integrated Patch SHA-256 verified: $PATCH_SHA256
+          - Patch apply check / apply / reverse apply check: PASS
+          - Exact changed scope: 14 files
+          - Applied target content equals FINAL: $FINAL_SHA
+          - Unified Runtime dependency: $RUNTIME_SHA
+          - Runtime dependency isolation: PASS
+          - Compile: PASS
+          - Runtime Mock E2E + Reverse Quality + Scenario regressions: 81 passed / 0 failed
+          - Full Package extracted product snapshot re-test: 81 passed / 0 failed
+          - Package integrity manifest verification: PASS
+          - No .git, .env, database, cache, sources/, input/, outputs/, XLS/XLSX/PDF runtime/business data in product snapshot
+          EOF
+
+          cat > "$RELEASE/RELEASE_MANIFEST.md" <<EOF
+          # Reverse Quality V0.1 Full Package
+
+          Status: RELEASE_CANDIDATE_FULL_PACKAGE
+          Source rule: generated only after applying the validated Final Integrated Patch in a controlled BASE workspace; not assembled from a development branch.
+
+          Business BASE: $BASE_SHA
+          Business FINAL: $FINAL_SHA
+          Unified Runtime: main@$RUNTIME_SHA
+          Integration validation run: $VALIDATION_RUN
+          Final package release gate: 81 passed / 0 failed
+
+          Contents:
+          - product/: complete deployable product snapshot with runtime/business data exclusions
+          - release/BASELINE.lock
+          - release/RUNTIME_DEPENDENCY.lock
+          - release/CONFIG_PROMPT_SCHEMA_INDEX.md
+          - release/APPLY.md
+          - release/ROLLBACK.md
+          - release/ACCEPTANCE.md
+          - release/final-integrated-patch/
+          - release/evidence/
+
+          Quality scenario boundary remains frozen:
+          ScenarioGenerationService.generate() is not redesigned by this release. Reverse Quality adds the deterministic ReverseQualityResult -> candidate_from_reverse_quality() -> Scenario Candidate path.
+          EOF
+
+      - name: Package snapshot safety and content checks
+        run: |
+          set -euo pipefail
+          ROOT="dist/$PACKAGE_NAME"
+          PRODUCT="$ROOT/product"
+
+          test -f "$PRODUCT/quality_knowledge/reverse_quality.py"
+          test -f "$PRODUCT/quality_knowledge/reverse_quality_store.py"
+          test -f "$PRODUCT/quality_knowledge/reverse_quality_runtime.py"
+          test -f "$PRODUCT/config/runtime/agents/reverse_quality.single_issue.analyze.yaml"
+          test -f "$PRODUCT/prompts/runtime/reverse_quality/single_issue_v01.md"
+
+          test ! -e "$PRODUCT/.git"
+          test ! -e "$PRODUCT/sources"
+          test ! -e "$PRODUCT/input"
+          test ! -e "$PRODUCT/outputs"
+          if find "$PRODUCT" -type f \( -name '.env' -o -name '.env.*' -o -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.xlsx' -o -name '*.xls' -o -name '*.pdf' \) | grep -q .; then
+            echo "Excluded runtime/business file detected"
+            exit 1
+          fi
+          if grep -RIl --binary-files=without-match '-----BEGIN .*PRIVATE KEY-----' "$PRODUCT" | grep -q .; then
+            echo "Private key material detected"
+            exit 1
+          fi
+
+          cut -f2- .validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt | while read -r path; do
+            [ -n "$path" ] || continue
+            actual="$(git hash-object "$PRODUCT/$path")"
+            expected="$(git rev-parse "$FINAL_SHA:$path")"
+            test "$actual" = "$expected"
+          done
+          echo "Package snapshot safety/content checks PASS"
+
+      - name: Re-test packaged product snapshot - 81 cases
+        env:
+          PYTHONPATH: ${{ github.workspace }}/dist/reverse-quality-v0.1-full-package/product:${{ github.workspace }}/.runtime-dep
+        run: |
+          set -euo pipefail
+          cd "dist/$PACKAGE_NAME/product"
+          python -m compileall -q quality_knowledge builder
+          python -m pytest             tests/test_reverse_quality_runtime_integration.py             tests/test_reverse_quality_store.py             tests/test_reverse_quality.py             tests/test_quality_scenario_generation.py             tests/test_quality_scenario_library.py             tests/test_scenario_multisource_dedup.py             tests/test_scenario_operation_sources.py             -q | tee ../release/evidence/PACKAGED_PRODUCT_GATE.txt
+          grep -E '^81 passed(,| in )' ../release/evidence/PACKAGED_PRODUCT_GATE.txt
+          cd ../../..
+          find "dist/$PACKAGE_NAME/product" -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -prune -exec rm -rf {} +
+          find "dist/$PACKAGE_NAME/product" -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -delete
+
+      - name: Create file manifest and final ZIP
+        run: |
+          set -euo pipefail
+          ROOT="dist/$PACKAGE_NAME"
+          (
+            cd "$ROOT"
+            find . -type f ! -name 'FILE_MANIFEST.sha256' -print0 | sort -z | xargs -0 sha256sum > FILE_MANIFEST.sha256
+            sha256sum -c FILE_MANIFEST.sha256
+          )
+          (
+            cd dist
+            zip -X -r "$PACKAGE_NAME.zip" "$PACKAGE_NAME" >/dev/null
+            sha256sum "$PACKAGE_NAME.zip" > "$PACKAGE_NAME.zip.sha256"
+            unzip -t "$PACKAGE_NAME.zip" >/dev/null
+          )
+
+          rm -rf /tmp/rq-full-package-check
+          mkdir -p /tmp/rq-full-package-check
+          unzip -q "dist/$PACKAGE_NAME.zip" -d /tmp/rq-full-package-check
+          (
+            cd "/tmp/rq-full-package-check/$PACKAGE_NAME"
+            sha256sum -c FILE_MANIFEST.sha256
+          )
+
+          echo "FULL_PACKAGE_SHA256=$(cut -d' ' -f1 "dist/$PACKAGE_NAME.zip.sha256")"
+          echo "FULL_PACKAGE_FILE_COUNT=$(find "$ROOT" -type f | wc -l | tr -d ' ')"
+
+      - name: Upload Reverse Quality V0.1 Full Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverse-quality-v0.1-full-package
+          path: |
+            dist/reverse-quality-v0.1-full-package.zip
+            dist/reverse-quality-v0.1-full-package.zip.sha256
+          retention-days: 30
