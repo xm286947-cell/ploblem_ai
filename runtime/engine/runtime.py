@@ -1067,6 +1067,15 @@ class LightweightExecutionEngine:
                             continue
 
                         if (
+                            error.code == "OUTPUT_TRUNCATED"
+                            and bool(policy.long_content_policy.get("enabled"))
+                        ):
+                            # Long-content recovery must change the execution
+                            # unit/chunk. Retrying the identical oversized input
+                            # wastes provider budget and cannot make progress.
+                            retry_validation = False
+                            retry_step = False
+                        elif (
                             error.category == ErrorCategory.VALIDATION
                             and validation_cycle_no < validation_limit
                         ):
