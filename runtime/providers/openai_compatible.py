@@ -178,6 +178,24 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _stage_semantic_handoff(
+    runtime_context: dict[str, Any],
+    content: str,
+) -> None:
+    handoff = runtime_context.get("semantic_handoff")
+    if not isinstance(handoff, dict):
+        return
+    handoff.clear()
+    handoff.update(
+        {
+            "content": content,
+            "content_hash": _sha256_text(content),
+            "content_length": len(content),
+            "recoverable_content_available": bool(content),
+        }
+    )
+
+
 def _safe_usage(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _safe_usage(item) for key, item in value.items()}
@@ -850,6 +868,7 @@ class OpenAICompatibleProviderAdapter:
 
         if str(finish_reason or "").lower() == "length":
             evidence["recovery_classification"] = "SEMANTIC_REPAIR_REQUIRED"
+            _stage_semantic_handoff(runtime_context, content)
             raise RuntimeStepError(
                 "provider output was truncated",
                 code="OUTPUT_TRUNCATED",
@@ -869,6 +888,7 @@ class OpenAICompatibleProviderAdapter:
             recovered_content = _deterministic_wrapper_recovery(content)
             if recovered_content is None:
                 evidence["recovery_classification"] = "SEMANTIC_REPAIR_REQUIRED"
+                _stage_semantic_handoff(runtime_context, content)
                 raise RuntimeStepError(
                     "provider content requires semantic repair",
                     code="SEMANTIC_REPAIR_REQUIRED",
