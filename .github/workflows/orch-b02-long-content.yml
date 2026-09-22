@@ -1,0 +1,65 @@
+name: ORCH-B02 Long Content Recovery
+
+on:
+  push:
+    branches:
+      - "fix/orch-b02-long-content-recovery"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  orch-b02:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-runtime-p0-test.txt
+
+      - name: Compile Runtime
+        run: python -m compileall -q runtime tests
+
+      - name: Run ORCH-B02 acceptance
+        run: |
+          mkdir -p test-results/orch-b02
+          python -m pytest -q tests/test_runtime_long_content_recovery.py \
+            --junitxml=test-results/orch-b02/orch-b02.xml
+
+      - name: Run Runtime D4 and truncation regression
+        run: |
+          python -m pytest -q \
+            tests/test_agent_runtime_p0_d4.py \
+            tests/test_agent_runtime_p0_storage_e2e_json_truncation.py \
+            tests/test_runtime_provider_adapter.py \
+            --junitxml=test-results/orch-b02/runtime-regression.xml
+
+      - name: Run Runtime reliability regression
+        run: |
+          python -m pytest -q \
+            tests/test_agent_runtime_p0_d3.py \
+            tests/test_agent_runtime_p0_d11_acceptance_gaps.py \
+            --junitxml=test-results/orch-b02/reliability.xml
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orch-b02-${{ github.sha }}
+          path: test-results/orch-b02/
+          if-no-files-found: error
+          retention-days: 90

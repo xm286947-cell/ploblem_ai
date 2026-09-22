@@ -1025,6 +1025,8 @@ class LightweightExecutionEngine:
                                 "task_id": task.task_id,
                                 "run_id": run.run_id,
                                 "step_run_id": step_run.step_run_id,
+                                "step_id": definition.step_id,
+                                "agent_id": definition.agent_id,
                                 "execution_key": execution_key,
                                 "provider_call_seq": provider_call_seq,
                                 "step_attempt_no": step_attempt_no,

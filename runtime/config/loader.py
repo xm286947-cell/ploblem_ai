@@ -23,6 +23,7 @@ from runtime.config.errors import (
     ConfigValidationError,
     SecretEnvNotFoundError,
 )
+from runtime.providers.endpoint import ProviderEndpointError, ProviderEndpointResolver
 from runtime.config.models import (
     AgentConfig,
     ModelProfileConfig,
@@ -330,6 +331,21 @@ class AgentConfigLoader:
             return self._require_env(api_key_env)
         return self._runtime_api_keys.get(config_hash)
 
+    @staticmethod
+    def _validate_provider_base_url(
+        provider_type: str,
+        base_url: str | None,
+    ) -> None:
+        if provider_type != "openai_compatible":
+            return
+        try:
+            ProviderEndpointResolver.validate_base_url(base_url)
+        except ProviderEndpointError as exc:
+            raise ConfigValidationError(
+                "invalid openai_compatible provider base_url",
+                details=exc.details,
+            ) from exc
+
     def _resolve_provider(
         self,
         config: AgentConfig,
@@ -364,6 +380,7 @@ class AgentConfigLoader:
                 if profile.api_key_env
                 else profile.api_key
             )
+            self._validate_provider_base_url(profile.provider, base_url)
 
             return (
                 ResolvedProviderConfig(
@@ -421,6 +438,7 @@ class AgentConfigLoader:
         else:
             base_url = provider.base_url
             api_key = provider.api_key if provider.auth == "api_key" else None
+        self._validate_provider_base_url(provider.type, base_url)
 
         return (
             ResolvedProviderConfig(
