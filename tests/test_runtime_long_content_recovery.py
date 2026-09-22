@@ -648,3 +648,79 @@ def test_orch_b02_adaptive_never_breaks_keep_together_group_to_escape_truncation
         for partial in outcome.committed_partials
         for unit_id in partial.unit_ids
     ) == ["u1", "u2"]
+
+
+
+def test_orch_b02_adaptive_final_business_gate_aggregates_across_generations(
+    tmp_path,
+) -> None:
+    store = SqliteTaskStore(tmp_path / "adaptive-business-gate.db")
+    runtime = LightweightExecutionEngine(store)
+    calls: list[tuple[str, ...]] = []
+
+    def provider(payload, context):
+        key = _chunk_units(payload)
+        calls.append(key)
+        if key == ("u3", "u4"):
+            raise RuntimeStepError(
+                "truncated",
+                code="OUTPUT_TRUNCATED",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+                details={"finish_reason": "length"},
+            )
+        return {"unit_ids": list(key)}
+
+    def business_gate(merge, coverages, bundle, plan):
+        seen: set[str] = set()
+        for item in merge.data or []:
+            if isinstance(item, dict):
+                seen.update(item.get("unit_ids") or [])
+        return seen == {"u1", "u2", "u3", "u4"}
+
+    base = LongContentRecoveryExecutor(
+        runtime,
+        store,
+        step_execution_policy=_policy(
+            validation_attempts=1,
+            per_step_budget=1,
+            task_budget=None,
+        ),
+        business_gate=business_gate,
+    )
+    base.bind_agent(
+        agent_id="test.adaptive.business-gate",
+        provider_handler=provider,
+        execution_policy=base.step_execution_policy,
+    )
+    adaptive = AdaptiveLongContentRecoveryExecutor(
+        base,
+        recovery_policy=AdaptiveLongContentRecoveryPolicy(
+            max_replans=3,
+            max_provider_calls=8,
+            shrink_factor=0.5,
+        ),
+    )
+
+    outcome = adaptive.execute(
+        _bundle(4),
+        recovery_request_id="orch-b02-adaptive-business-gate",
+        initial_policy=LongContentPolicy(
+            max_units_per_chunk=2,
+            max_payload_chars=1000,
+        ),
+        strategy_ref="adaptive@1",
+    )
+
+    assert calls == [
+        ("u1", "u2"),
+        ("u3", "u4"),
+        ("u3",),
+        ("u4",),
+    ]
+    assert outcome.status == RuntimeStatus.COMPLETED
+    assert outcome.replans == 1
+    assert outcome.provider_calls == 4
+    assert outcome.gate.business_gate_passed is True
+    assert outcome.gate.passed is True
+    assert outcome.business_consumable is True
