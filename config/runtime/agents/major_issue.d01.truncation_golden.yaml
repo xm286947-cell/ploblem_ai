@@ -14,7 +14,7 @@ output_schema:
 execution:
   timeout_seconds: 120
   retry:
-    transport_attempts: 2
+    transport_attempts: 1
     validation_attempts: 1
     step_attempts: 1
   budget:
