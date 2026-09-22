@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -277,4 +279,46 @@ def test_reverse_quality_confirmation_gate_requires_missing_information_resoluti
     assert _analysis_review_status(item)=='CONFIRMED'
     item['missing_information'][0]['status']='NOT_APPLICABLE'
     assert _analysis_review_status(item)=='CONFIRMED'
+
+def test_reverse_quality_default_business_path_uses_runtime_executor(tmp_path):
+    app,material_id=setup_case(tmp_path)
+    service=app.state.reverse_quality_service
+    service.ai_client=None
+
+    class FakeRuntimeExecutor:
+        def __init__(self):
+            self.calls=[]
+        def execute(self,payload,*,request_id):
+            self.calls.append((payload,request_id))
+            fake=json.loads(FakeClient().complete([]).content)
+            return SimpleNamespace(data=fake,model='runtime-test-model')
+
+    runtime=FakeRuntimeExecutor()
+    service._runtime_executor=runtime
+    saved=service.analyse(material_id,'PLC')
+    assert len(runtime.calls)==1
+    payload,request_id=runtime.calls[0]
+    assert payload['facts']['canonical_itr']=='ITR20260918001'
+    assert payload['field_names']
+    assert request_id.startswith('reverse-quality:ITR20260918001:')
+    assert saved['result']['model']=='runtime-test-model'
+
+
+def test_reverse_quality_runtime_adoption_has_no_business_provider_or_retry_path():
+    root=Path(__file__).resolve().parents[1]
+    service=(root/'quality_knowledge'/'reverse_quality.py').read_text(encoding='utf-8')
+    integration=(root/'quality_knowledge'/'reverse_quality_runtime.py').read_text(encoding='utf-8')
+    agent=(root/'config'/'runtime'/'agents'/'reverse_quality.single_issue.analyze.yaml').read_text(encoding='utf-8')
+
+    assert 'OpenAICompatibleClient' not in service
+    assert 'load_quality_issue_ai_config' not in service
+    assert 'OpenAICompatibleClient' not in integration
+    assert 'urllib' not in integration
+    assert 'requests' not in integration
+    assert 'httpx' not in integration
+    assert integration.count('AgentConfigLoader(')==1
+    assert 'ConfiguredAgentRuntime(' in integration
+    assert 'model_ref: qwen_prod' in agent
+    assert 'base_url:' not in agent
+    assert 'api_key:' not in agent
 
