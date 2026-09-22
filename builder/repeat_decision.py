@@ -8,7 +8,7 @@ import json
 
 import yaml
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from builder.ai_client import AIClientError, MockAIClient
 from builder.validators import validate_json
@@ -81,6 +81,156 @@ def _empty_decision(reason: str = "证据不足，未执行AI判定") -> dict[st
         "risks": [],
         "recommended_actions": [],
     }
+
+
+class RepeatEvidenceDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: str
+    strength: Literal["STRONG", "MEDIUM", "WEAK"]
+    query_evidence: list[str] = Field(default_factory=list)
+    case_evidence: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class RepeatDecisionDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal[
+        "REPEAT_CASE",
+        "LIKELY_REPEAT",
+        "RELATED_CASE",
+        "NEW_CASE",
+        "INSUFFICIENT_EVIDENCE",
+    ]
+    confidence: float = Field(ge=0.0, le=1.0)
+    decision_reason: str = ""
+    evidence_chain: list[RepeatEvidenceDTO] = Field(default_factory=list)
+    key_differences: list[str] = Field(default_factory=list)
+    validation_required: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
+class RepeatRuntimeDecisionError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        *,
+        provider_calls: int = 0,
+        runtime_status: str = "",
+    ) -> None:
+        self.code = code
+        self.provider_calls = provider_calls
+        self.runtime_status = runtime_status
+        super().__init__(code)
+
+
+class RuntimeRepeatDecisionAgent:
+    """Runtime-owned provider execution for one Repeat Case candidate."""
+
+    AGENT_ID = "major_issue.repeat_case"
+    AGENT_CONFIG = "config/runtime/agents/major_issue.repeat_case.yaml"
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        runtime: ConfiguredAgentRuntime,
+    ) -> None:
+        self.root = Path(root).resolve()
+        self.runtime = runtime
+        self.resolved = self.runtime.load_agent(self.AGENT_CONFIG)
+        self.model_name = str(self.resolved.definition.model or "")
+
+    @classmethod
+    def from_project(
+        cls,
+        root: str | Path,
+        *,
+        model_config_path: str | Path | None = None,
+        runtime_db_path: str | Path | None = None,
+    ) -> "RuntimeRepeatDecisionAgent":
+        project_root = Path(root).resolve()
+        model_config = resolve_major_runtime_model_config(
+            project_root,
+            model_config_path,
+        )
+        loader = AgentConfigLoader(
+            root=project_root,
+            model_profiles=model_config,
+            schemas={"RepeatDecisionDTO": RepeatDecisionDTO},
+        )
+        db_path = (
+            Path(runtime_db_path)
+            if runtime_db_path is not None
+            else project_root / "data/runtime/repeat_decision.sqlite3"
+        )
+        if not db_path.is_absolute():
+            db_path = project_root / db_path
+        db_path = db_path.resolve()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime = ConfiguredAgentRuntime(
+            SqliteTaskStore(db_path),
+            config_loader=loader,
+        )
+        instance = cls(project_root, runtime=runtime)
+        instance.model_config_path = model_config
+        return instance
+
+    @staticmethod
+    def _request_id(
+        query_id: str,
+        case_id: str,
+        payload: dict[str, Any],
+    ) -> str:
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"major-repeat:{query_id}:{case_id}:{fingerprint}"
+
+    def decide(
+        self,
+        payload: dict[str, Any],
+        *,
+        query_id: str,
+        case_id: str,
+    ) -> tuple[dict[str, Any], Any]:
+        result = self.runtime.invoke(
+            AgentRequest(
+                request_id=self._request_id(
+                    query_id,
+                    case_id,
+                    payload,
+                ),
+                agent_id=self.AGENT_ID,
+                input=payload,
+                metadata={
+                    "business_domain": "MAJOR_CASE",
+                    "analysis_stage": "repeat_decision",
+                    "query_id": query_id,
+                    "case_id": case_id,
+                    "partition_key": query_id,
+                },
+            )
+        )
+        if result.status != RuntimeStatus.COMPLETED:
+            error = result.error
+            raise RepeatRuntimeDecisionError(
+                error.code if error is not None else str(result.status),
+                provider_calls=result.execution.provider_calls,
+                runtime_status=str(result.status),
+            )
+        decision = RepeatDecisionDTO.model_validate(
+            result.data
+        ).model_dump(mode="json")
+        return decision, result
 
 
 class RepeatDecisionEngine:
