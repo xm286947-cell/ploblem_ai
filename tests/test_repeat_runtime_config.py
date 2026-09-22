@@ -15,6 +15,7 @@ from builder.repeat_decision import (
     RepeatDecisionEngine,
     RuntimeRepeatDecisionAgent,
 )
+from runtime import AgentConfigLoader, ConfiguredAgentRuntime, SqliteTaskStore
 from tools.openai_mock.server import create_server
 
 
@@ -312,3 +313,64 @@ def test_repeat_disabled_still_skips_without_runtime(tmp_path: Path) -> None:
         item["code"] == "DECISION_AI_SKIPPED"
         for item in warnings
     )
+
+
+
+def test_repeat_explicit_runtime_executes_while_repository_default_stays_disabled(
+    tmp_path: Path,
+) -> None:
+    prepare_runtime_root(tmp_path)
+    cfg = yaml.safe_load(
+        (tmp_path / "config/model.yaml").read_text(encoding="utf-8")
+    )
+    cfg["repeat_decision_ai"]["enabled"] = False
+    (tmp_path / "config/model.yaml").write_text(
+        yaml.safe_dump(
+            cfg,
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with running_server() as (host, port):
+        base_url = f"http://{host}:{port}/v1"
+        config = model_config(tmp_path, base_url)
+        configure(host, port, decision_payload())
+
+        loader = AgentConfigLoader(
+            root=tmp_path,
+            model_profiles=config,
+            schemas={
+                "RepeatDecisionDTO": __import__(
+                    "builder.repeat_decision",
+                    fromlist=["RepeatDecisionDTO"],
+                ).RepeatDecisionDTO
+            },
+            environ={},
+        )
+        runtime = ConfiguredAgentRuntime(
+            SqliteTaskStore(tmp_path / "explicit-runtime.db"),
+            config_loader=loader,
+        )
+        engine = RepeatDecisionEngine(
+            tmp_path,
+            runtime=runtime,
+        )
+        context, similarity, solution = context_payload()
+
+        decision, status, warnings = engine.decide_candidate(
+            context,
+            similarity,
+            solution,
+        )
+
+        assert status == "SUCCESS"
+        assert decision["decision"] == "LIKELY_REPEAT"
+        assert warnings == []
+        assert engine.runtime_agent is not None
+        assert counters(host, port)["default"] == 1
+
+    # A separate default engine still honors repository enabled=false.
+    default_engine = RepeatDecisionEngine(tmp_path)
+    assert default_engine.runtime_agent is None

@@ -56,6 +56,12 @@ jobs:
             tests/test_agent_runtime_p0_d8.py \
             --junitxml=test-results/major-repeat/major-runtime.xml
 
+      - name: Run Repeat real-provider test in opt-out mode
+        run: |
+          python -m pytest -q \
+            tests/test_repeat_real_provider_e2e.py \
+            --junitxml=test-results/major-repeat/real-provider-optout.xml
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
