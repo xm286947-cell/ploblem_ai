@@ -1193,7 +1193,29 @@ class AdaptiveLongContentRecoveryExecutor:
                 },
             )
 
-            if outcome.status == RuntimeStatus.COMPLETED:
+            generation_technically_complete = bool(
+                outcome.runtime_status == RuntimeStatus.COMPLETED
+                and outcome.runtime_error is None
+                and outcome.merge is not None
+                and outcome.merge.complete
+                and outcome.coverages
+                and all(
+                    coverage.complete
+                    for coverage in outcome.coverages
+                )
+                and outcome.gate.schema_valid
+                and outcome.gate.merge_complete
+                and outcome.gate.evidence_integrity
+            )
+            if (
+                outcome.status == RuntimeStatus.COMPLETED
+                or generation_technically_complete
+            ):
+                # A recovery generation may be technically complete while its
+                # business gate is intentionally incomplete: for example, the
+                # generation only covers objects/fragments left after an earlier
+                # truncation. Final business completeness must be evaluated
+                # across all durable partials after generations are aggregated.
                 continue
 
             error = outcome.runtime_error
