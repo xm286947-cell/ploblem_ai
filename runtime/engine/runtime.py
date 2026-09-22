@@ -990,6 +990,7 @@ class LightweightExecutionEngine:
                     else:
                         agent_snapshot = snapshot.agent_definition
                     safe_agent_snapshot = agent_snapshot or {}
+                    provider_evidence: dict[str, Any] = {}
                     attempt = AttemptRecord(
                         attempt_id=f"attempt-{uuid4().hex}",
                         step_run_id=step_run.step_run_id,
@@ -1037,6 +1038,7 @@ class LightweightExecutionEngine:
                                     "implicit_retry_enabled": False,
                                     "adapter_must_report_actual_provider_requests": True,
                                 },
+                                "provider_evidence": provider_evidence,
                             },
                         }
                         handler_context["runtime"]["agent_definition"] = agent_snapshot
@@ -1049,6 +1051,9 @@ class LightweightExecutionEngine:
                         error = self._error_info(exc)
                         last_error = error
                         attempt.status = RuntimeStatus.FAILED
+                        attempt.execution_metrics["provider_evidence"] = dict(
+                            provider_evidence
+                        )
                         attempt.attempt_type = self._attempt_type(error)
                         attempt.trigger_error_category = error.category.value
                         attempt.error = error
@@ -1079,6 +1084,9 @@ class LightweightExecutionEngine:
 
                     finished = _now()
                     attempt.status = RuntimeStatus.COMPLETED
+                    attempt.execution_metrics["provider_evidence"] = dict(
+                        provider_evidence
+                    )
                     attempt.completed_at = finished
                     step_run.status = RuntimeStatus.COMPLETED
                     step_run.completed_at = finished
