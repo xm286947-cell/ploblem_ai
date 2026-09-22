@@ -672,6 +672,8 @@ def test_orch_b02_adaptive_final_business_gate_aggregates_across_generations(
         return {"unit_ids": list(key)}
 
     def business_gate(merge, coverages, bundle, plan):
+        if merge is None:
+            return False
         seen: set[str] = set()
         for item in merge.data or []:
             if isinstance(item, dict):
