@@ -20,20 +20,6 @@ from runtime.providers.endpoint import ProviderEndpointError, ProviderEndpointRe
 
 
 _RETRYABLE_HTTP = {408, 409, 425, 429, 500, 502, 503, 504}
-_DIAGNOSTIC_SECRET_KEYS = {
-    "api_key",
-    "apikey",
-    "authorization",
-    "password",
-    "passwd",
-    "secret",
-    "client_secret",
-    "access_token",
-    "refresh_token",
-    "bearer_token",
-    "credential",
-    "credentials",
-}
 _REQUEST_ID_HEADERS = {
     "request-id",
     "x-request-id",
@@ -55,80 +41,6 @@ def _provider_diagnostics_enabled() -> bool:
 
 def _provider_trace_enabled() -> bool:
     return _env_enabled("RUNTIME_PROVIDER_TRACE") or _provider_diagnostics_enabled()
-
-
-def _redact_diagnostic_value(value: Any, *, known_secrets: tuple[str, ...] = ()) -> Any:
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for key, item in value.items():
-            normalized = str(key).strip().lower()
-            if normalized in _DIAGNOSTIC_SECRET_KEYS or normalized.endswith("_secret"):
-                redacted[str(key)] = "[REDACTED]"
-            else:
-                redacted[str(key)] = _redact_diagnostic_value(
-                    item,
-                    known_secrets=known_secrets,
-                )
-        return redacted
-    if isinstance(value, list):
-        return [
-            _redact_diagnostic_value(item, known_secrets=known_secrets)
-            for item in value
-        ]
-    if isinstance(value, tuple):
-        return [
-            _redact_diagnostic_value(item, known_secrets=known_secrets)
-            for item in value
-        ]
-    if isinstance(value, str):
-        text = value
-        for secret in known_secrets:
-            if secret:
-                text = text.replace(secret, "[REDACTED]")
-        return text
-    return value
-
-
-def _safe_request_body(
-    body: dict[str, Any],
-    *,
-    known_secrets: tuple[str, ...] = (),
-) -> dict[str, Any]:
-    safe = _redact_diagnostic_value(body, known_secrets=known_secrets)
-    messages = safe.get("messages")
-    if isinstance(messages, list):
-        for message in messages:
-            if not isinstance(message, dict) or message.get("role") != "user":
-                continue
-            content = message.get("content")
-            if not isinstance(content, str):
-                continue
-            try:
-                parsed = json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            message["content"] = json.dumps(
-                _redact_diagnostic_value(parsed, known_secrets=known_secrets),
-                ensure_ascii=False,
-                default=str,
-            )
-    return safe
-
-
-def _safe_error_body(
-    raw: bytes,
-    *,
-    known_secrets: tuple[str, ...] = (),
-) -> Any:
-    text = raw.decode("utf-8", errors="replace")
-    for secret in known_secrets:
-        if secret:
-            text = text.replace(secret, "[REDACTED]")
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return text[:32768]
-    return _redact_diagnostic_value(parsed, known_secrets=known_secrets)
 
 
 def _safe_response_headers(headers: Any) -> dict[str, str]:
