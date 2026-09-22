@@ -509,6 +509,14 @@ def reconstruct_transport_content(
     evidence = {
         "chunk_count": len(chunks),
         "chunk_sequence": sequences,
+        "chunks": [
+            {
+                "sequence": sequence,
+                "length": len(content),
+                "hash": _sha256_text(content),
+            }
+            for sequence, content in normalized
+        ],
         "chunk_order_valid": sequences == expected,
         "missing_chunk_detected": False,
         "duplicate_chunk_detected": False,
@@ -545,6 +553,47 @@ class OpenAICompatibleProviderAdapter:
         self.output_schema = output_schema
         self.timeout_seconds = int(timeout_seconds or 120)
         self.response_shape = str(response_shape or "").strip().lower() or None
+
+    def validate_transport_chunks(
+        self,
+        chunks: list[dict[str, Any]],
+    ) -> tuple[Any, dict[str, Any]]:
+        arrival_content = "".join(
+            str(chunk.get("content") or "")
+            for chunk in chunks
+        )
+        recovered_content, evidence = reconstruct_transport_content(chunks)
+        evidence.update(
+            {
+                "original_content_length": len(arrival_content),
+                "original_content_hash": _sha256_text(arrival_content),
+                "recovered_content_length": len(recovered_content),
+                "recovered_content_hash": _sha256_text(recovered_content),
+                "recovery_classification": (
+                    "TRANSPORT_RECONSTRUCTION"
+                    if evidence.get("recovered")
+                    else "NONE"
+                ),
+            }
+        )
+        try:
+            parsed = json.loads(recovered_content)
+        except json.JSONDecodeError as exc:
+            evidence["strict_parse_after_recovery"] = "FAIL"
+            raise RuntimeStepError(
+                "transport reconstruction did not produce strict JSON",
+                code="TRANSPORT_RECONSTRUCTION_FAILED",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+            ) from exc
+        evidence["strict_parse_after_recovery"] = "PASS"
+        try:
+            validated = self._validate_output(parsed)
+        except RuntimeStepError:
+            evidence["schema_validation_after_recovery"] = "FAIL"
+            raise
+        evidence["schema_validation_after_recovery"] = "PASS"
+        return validated, evidence
 
     def _validate_shape(self, parsed: Any) -> None:
         if self.response_shape in {"json_array", "array", "list"} and not isinstance(parsed, list):
