@@ -9,6 +9,7 @@ on:
       - integration/storage-runtime-acceptance
       - feature/openai-mock-v0.1
       - fix/orch-b01-runtime-provider-adapter
+      - feature/storage-semantic-second-pass-001
     paths:
       - "runtime/**"
       - "builder/ai_client.py"
