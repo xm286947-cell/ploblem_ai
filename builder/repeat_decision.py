@@ -278,18 +278,21 @@ class RepeatDecisionEngine:
             self.client = MockAIClient(
                 self.root / "tests/samples/mock_repeat_decision_response.json"
             )
+        elif runtime is not None:
+            # Explicit Runtime injection is an execution-time opt-in. It is
+            # used by controlled acceptance/product wiring without changing
+            # the repository default repeat_decision_ai.enabled=false.
+            self.runtime_agent = RuntimeRepeatDecisionAgent(
+                self.root,
+                runtime=runtime,
+            )
+            self.prompt_version = self.runtime_agent.resolved.prompt.version
         elif bool(self.ai_cfg.get("enabled", False)):
-            if runtime is not None:
-                self.runtime_agent = RuntimeRepeatDecisionAgent(
-                    self.root,
-                    runtime=runtime,
-                )
-            else:
-                self.runtime_agent = RuntimeRepeatDecisionAgent.from_project(
-                    self.root,
-                    model_config_path=model_config_path,
-                    runtime_db_path=runtime_db_path,
-                )
+            self.runtime_agent = RuntimeRepeatDecisionAgent.from_project(
+                self.root,
+                model_config_path=model_config_path,
+                runtime_db_path=runtime_db_path,
+            )
             self.prompt_version = self.runtime_agent.resolved.prompt.version
 
     @staticmethod
