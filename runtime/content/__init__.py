@@ -5,6 +5,7 @@ from .evidence import EvidenceIntegrityError, EvidenceRegistry
 from .merger import ListResultMerger, MergeCoordinator, ResultMerger
 from .partials import PartialResultCommitter
 from .planner import ContentPlanner
+from .recovery import LongContentRecoveryExecutor, LongContentRecoveryOutcome
 from .registry import (
     CallableContentProjector,
     ContentProjector,
