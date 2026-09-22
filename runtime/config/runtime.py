@@ -247,6 +247,28 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
         except KeyError as exc:
             raise KeyError(f"configured agent not found: {agent_id}") from exc
 
+    def get_semantic_handoff(
+        self,
+        *,
+        task_id: str,
+        content_ref: str,
+    ):
+        return self.store.get_semantic_handoff(
+            content_ref,
+            task_id=task_id,
+        )
+
+    def read_semantic_handoff_content(
+        self,
+        *,
+        task_id: str,
+        content_ref: str,
+    ) -> str | None:
+        return self.store.read_semantic_handoff_content(
+            content_ref,
+            task_id=task_id,
+        )
+
     def invoke(self, request: AgentRequest):
         resolved = self._resolved_agent_configs.get(request.agent_id)
         if resolved is not None:
