@@ -356,7 +356,13 @@ class MajorD01ResultMerger:
 
 
 class MajorD01RuntimeService:
-    """Execute D01 through ConfiguredAgentRuntime and persist review candidates."""
+    """Execute D01 through Runtime adaptive long-content orchestration.
+
+    Major owns SourceBundle projection, D01 schema/evidence semantics and the
+    business merge. Runtime owns provider execution, retry/budget, chunk
+    planning, partial persistence, crash/restart, adaptive truncation recovery,
+    coverage and merge orchestration.
+    """
 
     def __init__(
         self,
@@ -365,52 +371,262 @@ class MajorD01RuntimeService:
         store: SqliteTaskStore,
         *,
         agent_config_path: str | Path,
-        max_provider_calls: int = 4,
+        max_provider_calls: int = 12,
+        initial_max_units_per_chunk: int = 8,
+        initial_max_payload_chars: int = 24000,
     ):
         self.repository = repository
         self.runtime = runtime
         self.store = store
         self.domain = MajorCaseRuntimeDomainAdapter(repository)
         self.agent_config_path = Path(agent_config_path)
-
-        resolved = runtime.config_loader.load(self.agent_config_path)
-        generic_provider = OpenAICompatibleProviderAdapter(
-            system_prompt=runtime.config_loader.read_prompt_text(resolved),
-            output_schema=runtime.config_loader.get_output_schema(resolved),
-            timeout_seconds=resolved.execution_policy.timeout_seconds,
-            response_shape=resolved.definition.metadata.get(
-                "provider_response_shape"
+        self.max_provider_calls = max(1, int(max_provider_calls))
+        self.initial_policy = LongContentPolicy(
+            max_units_per_chunk=max(
+                1,
+                int(initial_max_units_per_chunk),
             ),
+            max_payload_chars=max(
+                1,
+                int(initial_max_payload_chars),
+            ),
+            overlap_units=0,
+            metadata={
+                "business_domain": "MAJOR_CASE",
+                "strategy": "major_issue_d01@2",
+            },
         )
-        self.model_name = resolved.definition.model or ""
-        self.provider_bridge = MajorD01ProviderBridge(generic_provider)
-        self.d01 = MajorIssueD01RuntimeAdapter(
+
+        self.expected_specs = self.domain.expected_objects()
+        self.expected_object_ids = [
+            item.object_id for item in self.expected_specs
+        ]
+        self._expected_object_id_set = set(
+            self.expected_object_ids
+        )
+
+        self.long_content = LongContentRecoveryExecutor(
             runtime,
             store,
-            self.provider_bridge,
-            max_provider_calls=max_provider_calls,
-            agent_config_path=self.agent_config_path,
+            chunk_payload_builder=self._chunk_payload,
+            partial_candidate_builder=self._partial_candidate,
+            merger=MajorD01ResultMerger(
+                self.expected_object_ids
+            ),
+            final_validator=self._validate_merged_output,
+            business_gate=self._extraction_gate,
+        )
+        resolved = self.long_content.bind_configured_agent(
+            self.agent_config_path
+        )
+        self.model_name = resolved.definition.model or ""
+
+        generic_provider = self.long_content.provider_handler
+        if generic_provider is None:
+            raise RuntimeError("D01_RUNTIME_PROVIDER_NOT_BOUND")
+        self._generic_provider = generic_provider
+        self.long_content.provider_handler = (
+            self._validated_chunk_provider
         )
 
-    def _provider_input(
+        self.adaptive = AdaptiveLongContentRecoveryExecutor(
+            self.long_content,
+            recovery_policy=AdaptiveLongContentRecoveryPolicy(
+                max_replans=4,
+                max_provider_calls=self.max_provider_calls,
+                shrink_factor=0.5,
+                min_units_per_chunk=1,
+                min_payload_chars=512,
+            ),
+        )
+
+    def _chunk_payload(
         self,
-        *,
-        version_id: str,
-        source: SourceRef,
+        bundle: SourceBundle,
+        plan: ContentPlan,
+        chunk: ContentChunk,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
-        fragments = self.repository.fragments(version_id)
+        units = {
+            item.unit_id: item
+            for item in bundle.logical_units
+        }
+        ordered_ids = list(chunk.unit_ids) + [
+            item
+            for item in chunk.overlap_unit_ids
+            if item not in chunk.unit_ids
+        ]
+        fragments: list[dict[str, Any]] = []
+        for unit_id in ordered_ids:
+            unit = units.get(unit_id)
+            if unit is None:
+                continue
+            payload = dict(unit.inline_payload or {})
+            fragments.append(
+                {
+                    "fragment_id": str(
+                        payload.get("fragment_id")
+                        or unit.unit_id
+                    ),
+                    "section_path": str(
+                        payload.get("section_path")
+                        or unit.locator.get("section_path")
+                        or ""
+                    ),
+                    "location_ref": str(
+                        payload.get("location_ref")
+                        or unit.locator.get("location_ref")
+                        or ""
+                    ),
+                    "text_content": str(
+                        payload.get("text_content") or ""
+                    ),
+                }
+            )
+
+        source = bundle.sources[0].source
         return {
             "source": source.model_dump(mode="json"),
-            "fragments": [
-                {
-                    "fragment_id": item["fragment_id"],
-                    "section_path": item.get("section_path") or "",
-                    "location_ref": item.get("location_ref") or "",
-                    "text_content": item.get("text_content") or "",
-                }
-                for item in fragments
+            "pending_objects": [
+                item.model_dump(mode="json")
+                for item in self.expected_specs
             ],
+            "fragments": fragments,
+            "chunk": {
+                "chunk_id": chunk.chunk_id,
+                "unit_ids": list(chunk.unit_ids),
+                "overlap_unit_ids": list(
+                    chunk.overlap_unit_ids
+                ),
+                "partition_key": chunk.partition_key,
+                "plan_id": plan.plan_id,
+            },
+            "rules": {
+                "only_pending_object_ids": True,
+                "fragment_ids_must_exist": True,
+                "evidence_required_per_object": True,
+                "omit_unsupported_objects": True,
+            },
         }
+
+    def _validated_chunk_provider(
+        self,
+        payload: Any,
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        raw_items = self._generic_provider(payload, context)
+        if not isinstance(raw_items, list):
+            raise RuntimeStepError(
+                "D01 provider result must be a JSON array",
+                code="D01_PROVIDER_RESULT_NOT_ARRAY",
+                category=ErrorCategory.VALIDATION,
+                retryable=True,
+            )
+
+        allowed_fragment_ids = {
+            str(item.get("fragment_id") or "")
+            for item in (
+                dict(payload or {}).get("fragments") or []
+            )
+            if str(item.get("fragment_id") or "")
+        }
+        result: list[dict[str, Any]] = []
+        for raw in raw_items:
+            item = MajorD01ProviderObject.model_validate(raw)
+            if item.object_id not in self._expected_object_id_set:
+                raise RuntimeStepError(
+                    "provider returned unrequested D01 object",
+                    code="D01_UNBOUND_OBJECT",
+                    category=ErrorCategory.VALIDATION,
+                    retryable=False,
+                    details={"object_id": item.object_id},
+                )
+            unknown = [
+                fragment_id
+                for fragment_id in item.fragment_ids
+                if fragment_id not in allowed_fragment_ids
+            ]
+            if unknown:
+                raise RuntimeStepError(
+                    "provider referenced fragment outside current chunk",
+                    code="D01_EVIDENCE_FRAGMENT_UNKNOWN",
+                    category=ErrorCategory.VALIDATION,
+                    retryable=True,
+                    details={
+                        "object_id": item.object_id,
+                        "fragment_ids": unknown,
+                    },
+                )
+            result.append(item.model_dump(mode="json"))
+        return result
+
+    @staticmethod
+    def _partial_candidate(
+        chunk: ContentChunk,
+        data: Any,
+        execution_key: str,
+        step_id: str,
+    ) -> PartialResultCandidate:
+        return PartialResultCandidate(
+            chunk_id=chunk.chunk_id,
+            execution_key=execution_key,
+            unit_ids=list(chunk.unit_ids),
+            data=data,
+            partition_key=chunk.partition_key,
+            schema_valid=True,
+            complete_object=True,
+            finish_reason="stop",
+            evidence_ids=[],
+            metadata={
+                "step_id": step_id,
+                "business_domain": "MAJOR_CASE",
+                "strategy": "major_issue_d01@2",
+                "overlap_unit_ids": list(
+                    chunk.overlap_unit_ids
+                ),
+            },
+        )
+
+    def _validate_merged_output(self, data: Any) -> bool:
+        if not isinstance(data, list):
+            return False
+        seen: set[str] = set()
+        for raw in data:
+            if not isinstance(raw, dict):
+                return False
+            object_id = str(raw.get("object_id") or "")
+            payload = raw.get("data")
+            if (
+                object_id not in self._expected_object_id_set
+                or not isinstance(payload, dict)
+            ):
+                return False
+            if not str(payload.get("content") or "").strip():
+                return False
+            fragment_ids = payload.get("fragment_ids") or []
+            if not isinstance(fragment_ids, list) or not fragment_ids:
+                return False
+            seen.add(object_id)
+        return bool(seen)
+
+    def _extraction_gate(
+        self,
+        merge: MergeResult | None,
+        coverages,
+        bundle: SourceBundle,
+        plan: ContentPlan,
+    ) -> bool:
+        if merge is None or not merge.complete:
+            return False
+        data = merge.data
+        if not self._validate_merged_output(data):
+            return False
+        present = {
+            str(item.get("object_id") or "")
+            for item in data
+            if isinstance(item, dict)
+        }
+        return self._expected_object_id_set.issubset(present)
 
     def _persist_outcome(
         self,
@@ -420,7 +636,11 @@ class MajorD01RuntimeService:
         version_id: str,
         outcome,
     ) -> list[str]:
-        if outcome.status != RuntimeStatus.COMPLETED:
+        if (
+            outcome.status != RuntimeStatus.COMPLETED
+            or outcome.merge is None
+            or not outcome.gate.passed
+        ):
             return []
 
         fragments = {
@@ -436,7 +656,7 @@ class MajorD01RuntimeService:
             clear_for_event(case_id, event_id)
 
         entry_ids: list[str] = []
-        for obj in outcome.committed_objects:
+        for obj in outcome.merge.data or []:
             data = dict(obj.get("data") or {})
             fragment_ids = [
                 str(item)
@@ -450,10 +670,37 @@ class MajorD01RuntimeService:
                 evidence.append(
                     {
                         "fragment_id": fragment_id,
-                        "locator": str(fragment.get("location_ref") or ""),
-                        "excerpt": str(fragment.get("text_content") or "")[:500],
+                        "locator": str(
+                            fragment.get("location_ref") or ""
+                        ),
+                        "excerpt": str(
+                            fragment.get("text_content") or ""
+                        )[:500],
                     }
                 )
+
+            metadata = dict(obj.get("metadata") or {})
+            metadata.update(
+                {
+                    "runtime_task_ids": list(outcome.task_ids),
+                    "runtime_plan_ids": list(outcome.plan_ids),
+                    "runtime_provider_calls": (
+                        outcome.provider_calls
+                    ),
+                    "runtime_replans": outcome.replans,
+                    "runtime_truncated_task_ids": list(
+                        outcome.truncated_task_ids
+                    ),
+                    "source_version_id": version_id,
+                    "merge_conflict": bool(
+                        data.get("conflict")
+                        or metadata.get("conflict")
+                    ),
+                    "alternatives": list(
+                        data.get("alternatives") or []
+                    ),
+                }
+            )
             entry = self.repository.add_entry(
                 case_id,
                 str(obj["object_id"]),
@@ -465,17 +712,37 @@ class MajorD01RuntimeService:
                 model_profile=f"runtime:{self.model_name}",
                 evidence=evidence,
                 confidence=data.get("confidence"),
-                explanation=str(data.get("explanation") or ""),
+                explanation=str(
+                    data.get("explanation") or ""
+                ),
                 mechanism=str(data.get("mechanism") or ""),
-                analysis_metadata={
-                    "runtime_task_id": outcome.task_id,
-                    "runtime_run_id": outcome.run_id,
-                    "runtime_provider_calls": outcome.provider_calls,
-                    "source_version_id": version_id,
-                },
+                analysis_metadata=metadata,
             )
             entry_ids.append(entry["entry_id"])
         return entry_ids
+
+    def _compat_outcome(self, outcome) -> dict[str, Any]:
+        payload = outcome.model_dump(mode="json")
+        committed_objects = (
+            list(outcome.merge.data or [])
+            if outcome.merge is not None
+            else []
+        )
+        payload["committed_objects"] = committed_objects
+        payload["task_id"] = (
+            outcome.task_ids[-1]
+            if outcome.task_ids
+            else ""
+        )
+        payload["run_id"] = ""
+        if outcome.task_ids:
+            snapshot = self.runtime.get_task(
+                outcome.task_ids[-1]
+            )
+            payload["run_id"] = (
+                snapshot.current_run_id or ""
+            )
+        return payload
 
     def execute(
         self,
@@ -485,7 +752,16 @@ class MajorD01RuntimeService:
         event_id: str,
         skill_version_id: str = "",
     ) -> dict[str, Any]:
-        source = self.domain.source_ref(case_id, version_id, event_id)
+        source = self.domain.source_ref(
+            case_id,
+            version_id,
+            event_id,
+        )
+        bundle = self.domain.build_source_bundle(
+            case_id,
+            version_id,
+            event_id,
+        )
         request_id = self.domain.request_id(
             case_id=case_id,
             version_id=version_id,
@@ -493,17 +769,18 @@ class MajorD01RuntimeService:
             source_fingerprint=source.fingerprint,
             skill_version_id=skill_version_id,
         )
-        outcome = self.d01.execute_partition(
-            case_id=case_id,
-            issue_version_id=version_id,
-            partition_key=event_id,
-            source=source,
-            expected_objects=self.domain.expected_objects(),
-            provider_input=self._provider_input(
-                version_id=version_id,
-                source=source,
-            ),
-            request_id=request_id,
+        outcome = self.adaptive.execute(
+            bundle,
+            recovery_request_id=request_id,
+            initial_policy=self.initial_policy,
+            strategy_ref="major_issue_d01@2",
+            metadata={
+                "business_domain": "MAJOR_CASE",
+                "case_id": case_id,
+                "version_id": version_id,
+                "event_id": event_id,
+                "skill_version_id": skill_version_id,
+            },
         )
         persisted_entry_ids = self._persist_outcome(
             case_id=case_id,
@@ -513,7 +790,7 @@ class MajorD01RuntimeService:
         )
         business_gate = self.domain.business_gate(case_id)
         return {
-            "outcome": outcome.model_dump(mode="json"),
+            "outcome": self._compat_outcome(outcome),
             "persisted_entry_ids": persisted_entry_ids,
             "business_gate": business_gate,
             "business_consumable": bool(
