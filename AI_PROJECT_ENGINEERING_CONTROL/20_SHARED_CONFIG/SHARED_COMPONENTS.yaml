@@ -1,0 +1,53 @@
+schema_version: "0.2"
+updated_at: "2026-09-20"
+
+shared_components:
+  - component_id: SHARED_MODEL_RUNTIME
+    type: runtime_config_and_client
+    current_reference:
+      repository: "xm286947-cell/ploblem_ai"
+      paths:
+        - "config/model.yaml"
+        - "quality_knowledge/model_config.py"
+        - "builder/ai_client.py"
+        - "builder/json_response.py"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    status: ACTIVE
+
+  - component_id: SHARED_QUALITY_ANALYSIS
+    type: analysis_runtime
+    current_reference:
+      repository: "xm286947-cell/ploblem_ai"
+      paths:
+        - "quality_knowledge/analyzers.py"
+        - "quality_knowledge/services/v2_analysis_service.py"
+        - "quality_knowledge/services/v2_batch_analysis_service.py"
+    consumers:
+      - MAJOR_PROBLEM_AGENT
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+    status: ACTIVE
+
+  - component_id: SHARED_CONTRACTS
+    type: contract
+    current_reference:
+      repository: "xm286947-cell/ploblem_ai"
+      paths:
+        - "contracts/**"
+        - "schema/**"
+      versions:
+        dto: "1.0.0"
+        schema: "1.0.0"
+        contract: "1.0.0"
+    status: ACTIVE
+
+  - component_id: AGENT_SCHEMA
+    type: contract
+    version: null
+    status: PENDING_DEFINITION
+
+  - component_id: AI_API_CONTRACT
+    type: contract
+    version: null
+    status: PENDING_DEFINITION

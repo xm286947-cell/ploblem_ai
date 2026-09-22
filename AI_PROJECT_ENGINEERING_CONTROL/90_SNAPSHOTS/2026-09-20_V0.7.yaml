@@ -1,0 +1,32 @@
+snapshot_version: "0.7"
+snapshot_date: "2026-09-20"
+focus: "SECOND_EXECUTION_ENGINE_CONSUMER"
+
+control_branch: "feature/engineering-control-v0.1"
+implementation:
+  project: QUALITY_SCENARIO_AND_CASE_LIBRARY
+  base_branch: "feature/reverse-quality-v01"
+  base_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+  branch: "feature/execution-engine-scenario-adapter-v0.7"
+  commit: "477da757c0059c5e78c036469d6cf281920c7f48"
+  draft_pr: 2
+
+execution_engine_capabilities_now_required:
+  - ORDERED_MAP
+  - COMPLETION_ORDER_ITERATION
+  - FAIL_FAST
+  - CONTINUE_WITH_PER_ITEM_ERROR
+
+migrated_consumer:
+  - "quality_knowledge/scenario_generation.py::generate"
+  - "quality_knowledge/scenario_generation.py::standardize_existing"
+
+validation:
+  static_readback: PASS
+  isolated_engine_semantics_smoke: PASS
+  repository_ci: NOT_AVAILABLE
+  quality_scenario_regression: NOT_RUN
+
+next:
+  - "先补质量场景相关回归证据"
+  - "回归通过后评估 v2_batch_job_service"

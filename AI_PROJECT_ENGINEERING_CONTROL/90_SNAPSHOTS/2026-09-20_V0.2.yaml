@@ -1,0 +1,30 @@
+snapshot_version: "0.2"
+snapshot_date: "2026-09-20"
+
+managed_repository:
+  full_name: "xm286947-cell/ploblem_ai"
+
+project_baselines:
+  QUALITY_SCENARIO_AND_CASE_LIBRARY:
+    branch: "feature/reverse-quality-v01"
+    commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+  MAJOR_PROBLEM_AGENT:
+    branch: "handoff/req022-rc1-failed-acceptance"
+    commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+    parent_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+    delta_commits: 1
+
+shared_risk_points:
+  - SHARED_MODEL_RUNTIME
+  - SHARED_QUALITY_ANALYSIS
+  - SHARED_MATERIAL_AND_ISSUE_DATA
+  - SHARED_WEB_SHELL
+  - SHARED_CONTRACTS
+
+boundary_review:
+  - YAML_CONFIG_LOADING
+  - PACKAGING_AND_RELEASE
+
+pending_registration:
+  - AI_ORCHESTRATOR
+  - STORAGE_LIFE_SPECIALTY

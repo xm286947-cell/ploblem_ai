@@ -1,0 +1,81 @@
+schema_version: "0.4"
+policy_id: PACKAGING_POLICY
+status: DESIGN_FROZEN
+owner_target: ENGINEERING_CONTROL
+
+package_types:
+  - FULL
+  - DELTA
+  - PROJECT_DELTA
+
+mandatory_manifest:
+  schema_version: string
+  package_type: string
+  package_version: string
+  project_id: string
+  repository: string
+  source_commit: string
+  base_commit: string
+  created_at: string
+  contains_runtime_data: boolean
+  files:
+    path: string
+    sha256: string
+    size: integer
+
+mandatory_excludes:
+  prefixes:
+    - ".git/"
+    - "knowledge/"
+    - "output/"
+    - "outputs/"
+    - "data/"
+    - "sources/"
+    - "baseline_release/"
+    - "releases/"
+  names:
+    - ".env"
+    - ".DS_Store"
+  suffixes:
+    - ".db"
+    - ".sqlite"
+    - ".sqlite3"
+    - ".log"
+    - ".zip"
+    - ".pyc"
+    - ".pyo"
+  secret_patterns:
+    - "*token*"
+    - "*apikey*"
+    - "*api_key*"
+    - "*password*"
+
+profile_contract:
+  required:
+    profile_id: string
+    project_id: string
+    package_type: string
+    version: string
+  optional:
+    base_ref: string
+    include_paths: array
+    required_paths: array
+    extra_excludes: array
+    include_all_templates: boolean
+    readme_template: string
+    output_name: string
+
+current_profiles_to_migrate:
+  - source: "scripts/build_baseline_package.py"
+    target_profile: FULL_BASELINE
+  - source: "scripts/build_upgrade_package.py"
+    target_profile: QUALITY_SCENARIO_CUMULATIVE_DELTA
+  - source: "scripts/build_req022_package.py"
+    target_profile: REQ022_PROJECT_DELTA
+
+rules:
+  common_policy_must_not_be_duplicated_in_project_profile: true
+  sources_directory_always_forbidden: true
+  runtime_data_default_forbidden: true
+  manifest_sha256_required: true
+  package_build_must_fail_on_missing_required_path: true

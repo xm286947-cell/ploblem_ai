@@ -1,0 +1,58 @@
+project_id: STORAGE_LIFE_SPECIALTY
+name: "存储写入寿命专项"
+
+repository:
+  full_name: null
+  status: PENDING_REGISTRATION
+  required_before_code_migration:
+    - SOURCE_BRANCH
+    - BASE_COMMIT_SHA
+
+drive:
+  workspace_id: "16J0LfQrtsUL0bYoR4x2o952qnavEB8RR"
+  control_folder_id: "1yRpylZvgWmVVVZ7UVomeZFIGJbl-nX3s"
+  integration_entry_doc_id: "1IVtYWAh62a5LNds78aOojsNWbe2vuU2mpTCi5rV7G84"
+
+current_state:
+  status: DEVELOPMENT
+  integration_status: EARLY_INTEGRATION_ACTIVE
+  frozen_business_baselines:
+    - RC3_D1
+    - RC3_D2
+  d1_1_runtime_work: DESIGN_HOLD
+
+scope_note: "独立专项；器件寿命知识库与案例库/重大问题数据源保持边界。"
+
+domain_ownership:
+  keep_in_storage:
+    - DEVICE_PROFILE
+    - FIELD_PROFILE
+    - SEMANTIC_GROUP
+    - LINKED_FIELDS
+    - READ_PLAN
+    - SOURCE_SELECTION
+    - EXTRACTION_SCHEMA
+    - EVIDENCE_RESOLVER
+    - NORMALIZER_VALIDATOR
+    - REVIEW_GATE
+    - REVIEWED_SPECIFICATION
+    - DEVICE_CONCLUSION
+    - GOLDEN_SAMPLE
+
+dependencies:
+  ai_orchestrator:
+    current_state: EARLY_CONTRACT_INTEGRATION
+    target_state: UNIFIED_RUNTIME_CONSUMER
+    strategy: ADAPTER_FIRST
+    formal_cutover_gate: FOUR_DEVICE_GOLDEN_NO_REGRESSION
+    integration_design:
+      drive_doc_id: "1ZcBfNn7DEnMwfbNpHgrkZ-398xVtacBrjJFIM9k-95A"
+      status: FAST_TRACK
+    contract_gate:
+      status: RECONCILIATION_REQUIRED
+      reason: "Drive P0.2 AgentRequest/AgentResult and Engineering Control V0.4 AIRequest/AIResult must converge to one canonical public contract before the Storage adapter is frozen."
+    early_validation:
+      phase: P0_3_RUNTIME_POC
+      testcase: TC11_STORAGE_CONTRACT_COMPATIBILITY
+      sample: PUBLIC_EMMC_PLUS_FROZEN_GOLDEN
+      internal_customer_data: FORBIDDEN

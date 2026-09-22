@@ -1,0 +1,72 @@
+schema_version: "0.4"
+contract_id: EXECUTION_ENGINE_CONTRACT
+status: DESIGN_FROZEN
+owner_target: AI_ORCHESTRATOR
+
+plan:
+  required:
+    execution_id: string
+    mode: "SEQUENTIAL | PARALLEL | PIPELINE"
+    items: array
+  optional:
+    max_concurrency: integer
+    timeout_seconds: integer
+    retry:
+      max_retries: integer
+      backoff: "NONE | FIXED | EXPONENTIAL"
+    fail_policy: "FAIL_FAST | CONTINUE | PARTIAL_SUCCESS"
+    preserve_input_order: boolean
+    idempotency_key: string
+    checkpoint:
+      enabled: boolean
+      resume_from: string
+    progress:
+      enabled: boolean
+
+result:
+  fields:
+    execution_id: string
+    status: "QUEUED | RUNNING | COMPLETED | PARTIAL_FAILED | FAILED"
+    total: integer
+    completed: integer
+    succeeded: integer
+    failed: integer
+    skipped: integer
+    items: array
+    started_at: string
+    completed_at: string
+    error_summary: object
+
+business_policy_boundary:
+  engine_owns:
+    - concurrency_control
+    - thread_or_async_executor
+    - retry_mechanics
+    - timeout_mechanics
+    - generic_progress
+    - generic_status
+    - checkpoint_mechanics
+    - exception_isolation
+  business_owns:
+    - stage_definition
+    - stage_business_order
+    - same_issue_same_agent_rule
+    - evidence_validation
+    - domain_persistence
+    - business_success_criteria
+
+migration_sources:
+  - path: "builder/parallel_execution.py"
+    current_role: SIMPLE_ORDERED_PARALLEL
+    migration_priority: P0
+  - path: "quality_knowledge/scenario_generation.py"
+    current_role: DOMAIN_PARALLEL_EXECUTION
+    migration_priority: P0
+  - path: "quality_knowledge/services/v2_batch_job_service.py"
+    current_role: OBSERVABLE_BATCH_EXECUTION
+    migration_priority: P0
+
+guardrails:
+  new_threadpool_implementation: FORBIDDEN_AFTER_ENGINE_AVAILABLE
+  business_specific_status_fields: ALLOWED_AS_EXTENSION
+  generic_execution_state_duplication: FORBIDDEN_AFTER_MIGRATION

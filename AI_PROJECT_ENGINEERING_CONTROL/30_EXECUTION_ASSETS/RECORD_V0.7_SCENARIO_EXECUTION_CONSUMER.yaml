@@ -1,0 +1,78 @@
+schema_version: "0.7"
+record_id: V0.7_SCENARIO_EXECUTION_CONSUMER
+project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+
+baseline:
+  branch: "feature/reverse-quality-v01"
+  commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+
+implementation:
+  branch: "feature/execution-engine-scenario-adapter-v0.7"
+  commit: "477da757c0059c5e78c036469d6cf281920c7f48"
+  pull_request: "https://github.com/xm286947-cell/ploblem_ai/pull/2"
+
+target:
+  objective: "将质量场景两处直接线程池执行迁移到共享 Execution Engine，不改变领域行为。"
+  acceptance:
+    - "generate 不再直接使用 ThreadPoolExecutor/as_completed"
+    - "standardize_existing 不再直接使用 ThreadPoolExecutor/as_completed"
+    - "单项失败继续隔离，不拖垮整批"
+    - "完成一项即可处理并刷新进度"
+    - "Agent分配、缓存、claim、持久化和最终状态逻辑不变"
+  out_of_scope:
+    - "不迁 v2_batch_job_service"
+    - "不新增 retry/checkpoint"
+    - "不改数据库/model.yaml/main"
+
+effective_evidence:
+  - evidence_id: EVD-V07-001
+    type: SCAN
+    result: "scenario_generation.py readback 已无 ThreadPoolExecutor/as_completed 直接引用。"
+    source: "implementation branch static readback"
+    reusable: true
+  - evidence_id: EVD-V07-002
+    type: TEST
+    result: "Execution Engine completion-order + per-item failure isolation 独立语义 smoke 通过。"
+    source: "isolated execution semantics validation"
+    reusable: true
+  - evidence_id: EVD-V07-003
+    type: AUDIT
+    result: "迁移后领域层仍负责 Agent 规则、缓存/claim、进度文案、场景持久化与最终状态；共享层只负责执行机制。"
+    source: "scenario_generation.py delta review"
+    reusable: true
+  - evidence_id: EVD-V07-004
+    type: ENVIRONMENT
+    result: "Gemma4 e4b + Codex CLI 正确触发环境熔断：pytest 缺失，三组专项回归均未执行；未修改代码。"
+    source: "PR #2 regression execution report"
+    reusable: true
+
+validation_gap:
+  repository_ci: NOT_AVAILABLE
+  quality_scenario_regression: BLOCKED_ENVIRONMENT
+  note: "专项回归尚未执行；执行环境缺少 pytest，已按熔断规则停止。该资产当前不作为发布验收证据。"
+  environment_blocker:
+    code: "CIRCUIT_BREAKER: BASELINE_OR_ENVIRONMENT_FAILURE"
+    reason: "pytest command not found; python3 -m pytest also unavailable because pytest is not installed"
+    introduced_by_pr2: false
+    code_changes_made: false
+    compileall: PASS
+    required_next_step: "安装仓库测试依赖后重新执行三个专项测试套件"
+
+reusable_decisions:
+  - decision_id: DEC-V07-001
+    conclusion: "第二个 consumer 证明 Execution Engine 需要 completion-order 与 CONTINUE 异常隔离；这两项属于共享执行机制，不属于质量场景业务逻辑。"
+    applies_to:
+      - AI_ORCHESTRATOR
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+      - MAJOR_PROBLEM_AGENT
+    invalidation:
+      - "EXECUTION_ENGINE_CONTRACT_CHANGED"
+
+result:
+  status: VALIDATION_BLOCKED_ENVIRONMENT
+  changed_files:
+    - "builder/execution_engine.py"
+    - "builder/parallel_execution.py"
+    - "quality_knowledge/scenario_generation.py"
+    - "tests/test_execution_engine.py"
+  next_action: "先恢复 pytest/仓库测试依赖，再原样重跑三组专项测试；通过前不迁移 v2_batch_job_service。"

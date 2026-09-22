@@ -1,0 +1,65 @@
+schema_version: "0.4"
+contract_id: AI_RUNTIME_CONTRACT
+status: DESIGN_FROZEN
+owner_target: AI_ORCHESTRATOR
+
+principle: "业务层声明能力和输入，不感知底层 Provider/密钥/HTTP Client。"
+
+request:
+  required:
+    request_id: string
+    capability: string
+    payload: object
+  optional:
+    agent_selector:
+      mode: "DEFAULT | EXPLICIT | DYNAMIC"
+      agent_id: string
+    messages: array
+    prompt_ref: string
+    response_contract:
+      schema_id: string
+      schema_version: string
+    runtime:
+      timeout_seconds: integer
+      max_retries: integer
+      max_tokens: integer
+      temperature: number
+    trace:
+      project_id: string
+      business_key: string
+      parent_trace_id: string
+      idempotency_key: string
+
+response:
+  fields:
+    request_id: string
+    trace_id: string
+    status: "SUCCEEDED | FAILED | PARTIAL | MOCK"
+    output: any
+    agent_id: string
+    provider: string
+    model: string
+    is_mock: boolean
+    elapsed_ms: integer
+    error:
+      category: string
+      message: string
+      retryable: boolean
+    metadata: object
+
+governance:
+  secrets:
+    plaintext_key_in_config: FORBIDDEN
+    env_reference: REQUIRED
+  direct_provider_client_from_business: DEPRECATED_TARGET
+  mock_must_be_explicit: true
+  response_schema_validation: REQUIRED_WHEN_SCHEMA_PROVIDED
+  provider_errors_must_be_structured: true
+
+current_adapters:
+  - current_path: "builder/ai_client.py"
+    target_role: PROVIDER_ADAPTER
+  - current_path: "quality_knowledge/model_config.py"
+    target_role: RUNTIME_CONFIG_ADAPTER
+  - current_path: "config/model.yaml"
+    target_role: RUNTIME_CONFIG_SOURCE

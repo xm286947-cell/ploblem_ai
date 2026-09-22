@@ -1,0 +1,82 @@
+schema_version: "0.4"
+updated_at: "2026-09-20"
+policy: "候选项不是重复代码定论；必须经项目确认或进一步代码级比较后才能删除/合并实现。"
+
+candidates:
+  - candidate_id: DUP-001_CONFIG_LOADING
+    category: CONFIGURATION
+    paths:
+      - "common/config_loader.py"
+      - "quality_knowledge/config_loader.py"
+    observation: "存在两个 YAML 配置加载入口；前者为通用缓存加载器，后者包含质量业务字段映射逻辑。"
+    duplication_probability: MEDIUM
+    convergence_decision: BOUNDARY_FIRST
+    recommended_action: "明确 generic loader 与 domain config adapter 的职责边界；优先复用 common.ConfigLoader，不直接合并业务逻辑。"
+    status: PENDING_CONFIRMATION
+
+  - candidate_id: DUP-002_PARALLEL_EXECUTION
+    category: ORCHESTRATION
+    paths:
+      - "builder/parallel_execution.py"
+      - "quality_knowledge/scenario_generation.py"
+      - "quality_knowledge/services/v2_batch_job_service.py"
+    observation: "至少三处承担线程池/并发调度职责。"
+    duplication_probability: HIGH
+    convergence_decision: APPROVED_FOR_SHARED_ENGINE_DESIGN
+    target_component: EXECUTION_ENGINE
+    migration_phase: P1_EXECUTION_ADAPTER
+    status: DESIGN_FROZEN
+
+  - candidate_id: DUP-003_RESPONSE_NORMALIZER
+    category: AI_RESPONSE
+    paths:
+      - "quality_knowledge/response_normalizer.py"
+      - "quality_knowledge/response_normalizer_v2.py"
+    observation: "V1 与 V2 正规化逻辑并存；V2 基于 analysis_v2 DTO。"
+    duplication_probability: MEDIUM
+    convergence_decision: VERSION_LIFECYCLE_FIRST
+    status: PENDING_CONFIRMATION
+
+  - candidate_id: DUP-004_ANALYSIS_SERVICE_VERSIONS
+    category: APPLICATION_SERVICE
+    paths:
+      - "quality_knowledge/services/analysis_service.py"
+      - "quality_knowledge/services/v1_analysis_service.py"
+      - "quality_knowledge/services/v2_analysis_service.py"
+    observation: "基础分析服务、V1、V2 同时存在。"
+    duplication_probability: MEDIUM
+    convergence_decision: VERSION_LIFECYCLE_FIRST
+    status: PENDING_CONFIRMATION
+
+  - candidate_id: DUP-005_PARSER_NAMESPACE
+    category: PARSING
+    paths:
+      - "parser/**"
+      - "parsing/**"
+    observation: "parser 偏输入证据解析；parsing 偏 AI JSON 输出提取/修复。"
+    duplication_probability: LOW
+    convergence_decision: DOCUMENT_BOUNDARY
+    status: PENDING_CONFIRMATION
+
+  - candidate_id: DUP-006_REPOSITORY_NAMESPACES
+    category: DATA_ACCESS
+    paths:
+      - "repositories/json_repository.py"
+      - "quality_knowledge/repositories/**"
+    observation: "根级通用 JSON Artifact Repository 与质量域 SQLite Repository 并存。"
+    duplication_probability: LOW
+    convergence_decision: DOCUMENT_BOUNDARY
+    status: PENDING_CONFIRMATION
+
+  - candidate_id: DUP-007_PACKAGING
+    category: RELEASE
+    paths:
+      - "scripts/build_baseline_package.py"
+      - "scripts/build_upgrade_package.py"
+      - "scripts/build_req022_package.py"
+    observation: "存在多个独立打包入口，共同维护排除规则、Manifest与ZIP构建。"
+    duplication_probability: HIGH
+    convergence_decision: APPROVED_FOR_SHARED_POLICY_DESIGN
+    target_component: PACKAGING_ENGINE
+    migration_phase: P3_PACKAGING_POLICY
+    status: DESIGN_FROZEN

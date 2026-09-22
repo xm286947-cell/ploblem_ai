@@ -1,0 +1,85 @@
+schema_version: "0.9"
+updated_at: "2026-09-20"
+owner: "CMO"
+purpose: "维护需求→方案→变更→代码→验证→基线的可追溯关系；只保存引用、状态和证据，不复制正文。"
+
+id_model:
+  trace: "TRACE-<DOMAIN>-NNN"
+  requirement: "REQ-<DOMAIN>-NNN"
+  solution: "SOL-<DOMAIN>-NNN"
+  change: "CHG-<DOMAIN>-NNN"
+  verification: "VER-<DOMAIN>-NNN"
+
+statuses:
+  - PLANNED
+  - SOLUTION_DEFINED
+  - IMPLEMENTED
+  - VALIDATION_BLOCKED
+  - VERIFIED
+  - BASELINED
+  - SUPERSEDED
+
+rules:
+  no_content_duplication: true
+  code_change_requires_trace_id: true
+  read_only_task_requires_trace_id: false
+  verified_requires_test_evidence: true
+  baselined_requires_verified: true
+
+traces:
+  - trace_id: TRACE-EXEC-001
+    project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    subject: "质量场景接入共享 Execution Engine"
+
+    requirement:
+      requirement_id: REQ-EXEC-001
+      status: ACCEPTED
+      title: "统一通用执行机制，业务项目保留领域策略"
+      source_refs:
+        - "AI_PROJECT_ENGINEERING_CONTROL/05_DESIGN/SHARED_COMPONENT_CONVERGENCE_V0.4.md"
+        - "AI_PROJECT_ENGINEERING_CONTROL/20_SHARED_CONFIG/EXECUTION_ENGINE_CONTRACT.yaml"
+
+    solution:
+      solution_id: SOL-EXEC-001
+      status: IMPLEMENTED
+      title: "Adapter First：先提供共享 Execution Engine，再逐 consumer 迁移"
+      source_refs:
+        - "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/MIGRATION_PLAN_V0.4.yaml"
+        - "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.6_EXECUTION_ENGINE_ADAPTER.yaml"
+        - "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.7_SCENARIO_EXECUTION_CONSUMER.yaml"
+
+    change:
+      change_id: CHG-EXEC-001
+      status: IMPLEMENTED
+      repository: "xm286947-cell/ploblem_ai"
+      branch: "feature/execution-engine-scenario-adapter-v0.7"
+      commit: "477da757c0059c5e78c036469d6cf281920c7f48"
+      pull_request: 2
+      changed_files:
+        - "builder/execution_engine.py"
+        - "builder/parallel_execution.py"
+        - "quality_knowledge/scenario_generation.py"
+        - "tests/test_execution_engine.py"
+
+    verification:
+      verification_id: VER-EXEC-001
+      status: BLOCKED_ENVIRONMENT
+      required_tests:
+        - "tests/test_execution_engine.py"
+        - "tests/test_parallel_ai_execution.py"
+        - "tests/test_quality_scenario_generation.py"
+      evidence_refs:
+        - "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.7_SCENARIO_EXECUTION_CONSUMER.yaml"
+      blocker: "pytest unavailable in execution environment"
+      code_failure_confirmed: false
+
+    baseline:
+      source_baseline_id: REVERSE_QUALITY_V01
+      source_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+      target_baseline_id: null
+      status: NOT_BASELINED
+      rule: "VER-EXEC-001 通过前不得形成新发布/开发基线结论。"
+
+    trace_status: VALIDATION_BLOCKED
+    missing_links: []
+    next_action: "恢复 pytest/测试依赖，原样执行三组专项测试；PASS 后将 verification→VERIFIED，再决定是否纳入新基线。"
