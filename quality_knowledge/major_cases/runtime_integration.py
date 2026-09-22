@@ -166,14 +166,13 @@ class MajorCaseRuntimeDomainAdapter:
                     "section": section,
                 }
             )[:16]
-            context_key = f"context:{group_id}"
-            section_context[context_key] = {"section_path": section}
+            section_context[section] = {"section_path": section}
             atomic_groups.append(
                 AtomicGroup(
                     group_id=group_id,
                     unit_ids=unit_ids,
                     policy=AtomicGroupPolicy.SAME_CONTEXT,
-                    grouping_hint=context_key,
+                    grouping_hint=section,
                     metadata={
                         "business_domain": BUSINESS_DOMAIN,
                         "reason": "fragments share one business section",
