@@ -68,7 +68,10 @@ jobs:
           EXPECTED=.validation-input/reverse-quality-v01-final-integrated-patch/CHANGED_FILES.txt
 
           cut -f2- "$EXPECTED" | sort > /tmp/expected.paths
-          git status --porcelain=v1 | awk '{print $2}' | sort > /tmp/actual.paths
+          {
+            git diff --name-only HEAD
+            git ls-files --others --exclude-standard
+          } | grep -v '^\.validation-input/' | sort -u > /tmp/actual.paths
           diff -u /tmp/expected.paths /tmp/actual.paths
           test "$(wc -l < /tmp/actual.paths | tr -d ' ')" = "14"
 
