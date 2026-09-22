@@ -1,0 +1,66 @@
+name: Major Repeat Runtime Decision
+
+on:
+  push:
+    branches:
+      - "feature/major-repeat-runtime-decision"
+  pull_request:
+    branches:
+      - "integration/major-runtime-v1.1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeat-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-runtime-p0-test.txt
+          python -m pip install -r requirements-openai-mock-test.txt
+
+      - name: Compile
+        run: python -m compileall -q builder runtime quality_knowledge tests
+
+      - name: Run Repeat Runtime acceptance
+        run: |
+          mkdir -p test-results/major-repeat
+          python -m pytest -q \
+            tests/test_repeat_runtime_config.py \
+            --junitxml=test-results/major-repeat/runtime.xml
+
+      - name: Run Repeat M8.4 regression
+        run: |
+          python -m pytest -q \
+            tests/test_m84_repeat_decision.py \
+            --junitxml=test-results/major-repeat/m84.xml
+
+      - name: Run Major Runtime config regression
+        run: |
+          python -m pytest -q \
+            tests/test_rcfg02_major_runtime_config.py \
+            tests/test_agent_runtime_p0_d8.py \
+            --junitxml=test-results/major-repeat/major-runtime.xml
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-runtime-${{ github.sha }}
+          path: test-results/major-repeat/
+          if-no-files-found: error
+          retention-days: 90
