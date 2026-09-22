@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "fix/orch-b02-long-content-recovery"
+      - "fix/orch-b02-generation-gate"
   pull_request:
     branches:
       - main
