@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - "feature/major-d01-runtime-e2e"
-      - "feature/major-d01-long-content"
   pull_request:
     branches:
       - "integration/major-runtime-v1.1"
