@@ -250,6 +250,29 @@ class RuntimeErrorInfo(ContractModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class SemanticFailureHandoff(ContractModel):
+    content_ref: str
+    task_id: str
+    run_id: str
+    step_run_id: str
+    attempt_id: str
+    execution_key: str
+    provider_call_seq: int
+    content_hash: str
+    content_length: int
+    recoverable_content_available: bool = True
+    access_scope: Literal["TASK"] = "TASK"
+    media_type: str = "text/plain; charset=utf-8"
+    raw_finish_reason: Any = "NOT_RETURNED"
+    raw_usage: Any = "NOT_RETURNED"
+    request_max_tokens: Any = "NOT_SENT"
+    request_max_completion_tokens: Any = "NOT_SENT"
+    structured_output_capability: str = "UNKNOWN"
+    structured_output_request: str = "NONE"
+    response_format_type: str = "NOT_SENT"
+    created_at: datetime
+
+
 class RuntimeWarning(ContractModel):
     code: str
     message: str
