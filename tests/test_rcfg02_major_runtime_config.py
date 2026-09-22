@@ -220,6 +220,58 @@ def test_rcfg02_default_p0_app_wires_occurrence_to_unified_runtime(
     assert SECRET not in resolved.model_dump_json()
 
 
+def test_rcfg02_external_model_config_works_without_provider_env(
+    tmp_path,
+    monkeypatch,
+):
+    repository = make_repository(tmp_path)
+    monkeypatch.delenv("DASHSCOPE_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.delenv("MAJOR_MODEL_CONFIG", raising=False)
+
+    with running_server() as (host, port):
+        model_config = tmp_path / "model.local.yaml"
+        model_config.write_text(
+            f"""
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: http://{host}:{port}/v1
+    api_key: RCFG02_LOCAL_MODEL_SECRET
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+            encoding="utf-8",
+        )
+        configure(host, port, occurrence_payload())
+
+        runner = RuntimeConfiguredV2StageRunner.from_project(
+            repository,
+            root=ROOT,
+            runtime_db_path=tmp_path / "runtime-local.db",
+            fallback_runner=FakeStageRunner(),
+            model_config_path=model_config,
+        )
+        result = V2AnalysisService(repository, runner).run("K-V2-1")
+
+        assert result.status == "COMPLETED"
+        assert counters(host, port)["default"] == 1
+        assert runner.model_config_path == model_config.resolve()
+        assert runner.resolved.provider.mode == "direct"
+        assert runner.resolved.provider.base_url == (
+            f"http://{host}:{port}/v1"
+        )
+        assert runner.resolved.provider.api_key_env is None
+        assert "RCFG02_LOCAL_MODEL_SECRET" not in (
+            runner.resolved.model_dump_json()
+        )
+
+        store = runner.runtime.store
+        assert "RCFG02_LOCAL_MODEL_SECRET" not in raw_database_dump(store)
+
+
 def test_rcfg02_migrated_runner_has_no_business_provider_or_retry_construction():
     source = inspect.getsource(RuntimeConfiguredV2StageRunner)
     assert "OpenAICompatibleClient(" not in source
@@ -234,18 +286,28 @@ def test_rcfg02_migrated_runner_has_no_business_provider_or_retry_construction()
     reason="MAJOR_ISSUE_REAL_E2E opt-in disabled",
 )
 def test_rcfg02_major_occurrence_real_provider_golden_smoke(tmp_path):
-    missing = [
-        name
-        for name in ("DASHSCOPE_BASE_URL", "DASHSCOPE_API_KEY")
-        if not os.environ.get(name)
-    ]
-    if missing:
-        pytest.skip("NOT_RUN_NO_SECRET_OR_ENDPOINT: " + ",".join(missing))
+    explicit = os.environ.get("MAJOR_MODEL_CONFIG", "").strip()
+    local_config = ROOT / "config/model.local.yaml"
+    uses_external_config = bool(explicit) or local_config.is_file()
+
+    if not uses_external_config:
+        missing = [
+            name
+            for name in ("DASHSCOPE_BASE_URL", "DASHSCOPE_API_KEY")
+            if not os.environ.get(name)
+        ]
+        if missing:
+            pytest.skip(
+                "NOT_RUN_NO_RUNTIME_MODEL_CONFIG: provide "
+                "MAJOR_MODEL_CONFIG/config/model.local.yaml or configure "
+                + ",".join(missing)
+            )
 
     repository = make_repository(tmp_path)
+    model_config = RuntimeConfiguredV2StageRunner.resolve_model_config(ROOT)
     loader = AgentConfigLoader(
         root=ROOT,
-        model_profiles=ROOT / "config/runtime/model.yaml",
+        model_profiles=model_config,
         schemas={"OccurrenceAnalysisV2DTO": OccurrenceAnalysisV2DTO},
         environ=os.environ,
     )
@@ -256,6 +318,7 @@ def test_rcfg02_major_occurrence_real_provider_golden_smoke(tmp_path):
         runtime=runtime,
         fallback_runner=FakeStageRunner(),
     )
+    runner.model_config_path = model_config
 
     result = V2AnalysisService(repository, runner).run(
         "K-V2-1",
@@ -271,8 +334,12 @@ def test_rcfg02_major_occurrence_real_provider_golden_smoke(tmp_path):
     task = store.get_task_by_request_id(request_id)
     assert task is not None
     assert 1 <= store.count_task_provider_calls(task.task_id) <= 2
-    secret = os.environ["DASHSCOPE_API_KEY"]
-    assert secret not in store.get_execution_snapshot(
-        task.execution_snapshot_id
-    ).model_dump_json()
-    assert secret not in raw_database_dump(store)
+    secret = loader.get_runtime_api_key(
+        runner.resolved.config_hash,
+        api_key_env=runner.resolved.provider.api_key_env,
+    )
+    if secret:
+        assert secret not in store.get_execution_snapshot(
+            task.execution_snapshot_id
+        ).model_dump_json()
+        assert secret not in raw_database_dump(store)
