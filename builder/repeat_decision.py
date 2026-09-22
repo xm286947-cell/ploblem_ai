@@ -2,18 +2,28 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import hashlib
 import json
 
 import yaml
 
-from builder.ai_client import AIClientError, MockAIClient, OpenAICompatibleClient
+from pydantic import BaseModel, Field
+
+from builder.ai_client import AIClientError, MockAIClient
 from builder.validators import validate_json
 from builder.json_response import parse_json_object, save_raw_response
 from builder.similarity_score import calculate_similarity_score, dimension_scores
 from builder.confidence_calculator import calculate_confidence
 from builder.context_filter import evaluate_context
+from quality_knowledge.runtime_model_config import resolve_major_runtime_model_config
+from runtime import (
+    AgentConfigLoader,
+    AgentRequest,
+    ConfiguredAgentRuntime,
+    RuntimeStatus,
+    SqliteTaskStore,
+)
 
 REPEAT_DECISION_VERSION = "M8.4-D1"
 DECISIONS = {"REPEAT_CASE", "LIKELY_REPEAT", "RELATED_CASE", "NEW_CASE", "INSUFFICIENT_EVIDENCE"}
