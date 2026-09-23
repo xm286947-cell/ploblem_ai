@@ -110,3 +110,83 @@ class RepeatQueryTraceRepository:
                 (subject_ref,),
             ).fetchone()
         return self.get(row["query_id"]) if row else None
+
+
+    def save_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        required = {
+            "query_id",
+            "contract_version",
+            "result_status",
+            "search_status",
+            "generated_at",
+        }
+        missing = sorted(key for key in required if not result.get(key))
+        if missing:
+            raise ValueError("REPEAT_RESULT_FIELDS_REQUIRED:" + ",".join(missing))
+
+        with self.connect() as connection:
+            exists = connection.execute(
+                "SELECT query_id FROM repeat_result_snapshot WHERE query_id=?",
+                (result["query_id"],),
+            ).fetchone()
+            if exists:
+                raise ValueError("REPEAT_RESULT_ALREADY_EXISTS")
+            connection.execute(
+                """INSERT INTO repeat_result_snapshot(
+                       query_id,result_version,result_status,search_status,result_json,
+                       human_decision,generated_at
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                (
+                    result["query_id"],
+                    result["contract_version"],
+                    result["result_status"],
+                    result["search_status"],
+                    self._dump(result),
+                    "PENDING",
+                    result["generated_at"],
+                ),
+            )
+        return self.get_result(result["query_id"]) or {}
+
+    def get_result(self, query_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM repeat_result_snapshot WHERE query_id=?",
+                (query_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        raw = dict(row)
+        result = self._load(raw["result_json"]) or {}
+        result["human_decision"] = {
+            "decision": raw["human_decision"],
+            "decided_by": raw["decided_by"],
+            "reason": raw["decision_reason"],
+            "decided_at": raw["decided_at"],
+        }
+        return result
+
+    def save_human_decision(
+        self,
+        query_id: str,
+        decision: str,
+        *,
+        decided_by: str,
+        reason: str = "",
+        decided_at: str,
+    ) -> dict[str, Any]:
+        allowed = {"REPEAT", "SIMILAR", "NOT_REPEAT", "INSUFFICIENT_EVIDENCE"}
+        if decision not in allowed:
+            raise ValueError("INVALID_REPEAT_DECISION")
+        if not str(decided_by or "").strip():
+            raise ValueError("DECIDED_BY_REQUIRED")
+        with self.connect() as connection:
+            updated = connection.execute(
+                """UPDATE repeat_result_snapshot
+                   SET human_decision=?,decided_by=?,decision_reason=?,decided_at=?
+                   WHERE query_id=?""",
+                (decision, decided_by.strip(), reason.strip(), decided_at, query_id),
+            ).rowcount
+        if not updated:
+            raise KeyError(query_id)
+        return self.get_result(query_id) or {}
