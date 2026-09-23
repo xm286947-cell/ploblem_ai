@@ -156,3 +156,13 @@ def test_missing_itr_fails_closed(tmp_path):
         service.create_query("ITR-NOT-FOUND")
 
     assert error.value.code == "ITR_NOT_FOUND"
+
+
+def test_repeat_query_trace_database_releases_file_handle(tmp_path):
+    db_path = tmp_path / "repeat-risk.sqlite3"
+    repository = RepeatQueryTraceRepository(db_path)
+    service = RepeatITRService(FakeITRSource(), repository)
+    service.create_query("ITR-2001")
+
+    db_path.unlink()
+    assert not db_path.exists()
