@@ -1,0 +1,20 @@
+{% extends "kp_base.html" %}
+{% block title %}Published Knowledge{% endblock %}
+{% block content %}
+<div class="card"><h2>Published Knowledge</h2><p class="muted">这里只展示已通过 Human Review + Publish Gate 的正式知识；Candidate 不会自动出现在这里。</p></div>
+<table>
+<thead><tr><th>Object</th><th>Version</th><th>Status</th><th>Type</th><th>Source</th><th>Evidence</th></tr></thead>
+<tbody>
+{% for o in objects %}
+<tr>
+  <td>{{ o.title }}<br><code>{{ o.object_id }}</code></td>
+  <td>v{{ o.object_version }}</td>
+  <td>{{ o.status.value }}</td>
+  <td>{{ o.object_type.value }}</td>
+  <td>{{ o.candidate_source_type.value }}{% if o.business_source_type %} / {{ o.business_source_type.value }}{% endif %}</td>
+  <td>{{ o.evidence_refs|length }}</td>
+</tr>
+{% else %}<tr><td colspan="6" class="muted">暂无 Published Knowledge。</td></tr>{% endfor %}
+</tbody>
+</table>
+{% endblock %}
