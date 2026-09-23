@@ -66,6 +66,18 @@ def _pick(mapping: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _collect(mapping: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        value = mapping.get(key)
+        if value in (None, "", [], {}):
+            continue
+        for item in _flatten_text(value):
+            if item not in values:
+                values.append(item)
+    return values
+
+
 class RepeatHistoricalCaseSearchService:
     """REPEAT-SEARCH-001 implementation.
 
@@ -179,8 +191,7 @@ class RepeatHistoricalCaseSearchService:
         scene = _text(snapshot.get("scene"))
         text = "\n".join(part for part in (primary_text, scene) if part)
 
-        cause_parts: list[str] = []
-        cause_value = _pick(
+        cause_parts = _collect(
             existing,
             "root_cause",
             "cause_description",
@@ -188,31 +199,26 @@ class RepeatHistoricalCaseSearchService:
             "technical_cause",
             "management_cause",
         )
-        cause_parts.extend(_flatten_text(cause_value))
         if trace.get("include_missed_test"):
-            cause_parts.extend(
-                _flatten_text(
-                    _pick(
-                        missed_snapshot,
-                        "description",
-                        "problem_description",
-                        "test_gap",
-                        "escape_cause",
-                        "root_cause",
-                    )
-                )
-            )
+            for item in _collect(
+                missed_snapshot,
+                "description",
+                "problem_description",
+                "test_gap",
+                "escape_cause",
+                "root_cause",
+            ):
+                if item not in cause_parts:
+                    cause_parts.append(item)
 
-        solution_parts = _flatten_text(
-            _pick(
-                existing,
-                "solution",
-                "action",
-                "actions",
-                "measure",
-                "measures",
-                "corrective_action",
-            )
+        solution_parts = _collect(
+            existing,
+            "solution",
+            "action",
+            "actions",
+            "measure",
+            "measures",
+            "corrective_action",
         )
 
         return QueryInput(
