@@ -155,6 +155,20 @@ def test_orch_b01_storage_calls_provider_without_business_http_handler(tmp_path:
         assert attempt.model_name == "qwen3.8-max"
         assert attempt.provider_call_seq == 1
         assert attempt.execution_metrics["sdk_retry"] == 0
+        provider_evidence = attempt.execution_metrics["provider_evidence"]
+        assert provider_evidence["resolved_model"] == "qwen3.8-max"
+        assert provider_evidence["model_ref"] == "qwen_prod"
+        assert provider_evidence["resolved_max_tokens"] == 8192
+        assert provider_evidence["request_max_tokens"] == 8192
+        assert provider_evidence["request_max_completion_tokens"] == "NOT_SENT"
+        assert provider_evidence["raw_finish_reason"] == "stop"
+        assert provider_evidence["raw_usage"]["completion_tokens"] == 0
+        assert provider_evidence["structured_output_capability"] == "UNKNOWN"
+        assert provider_evidence["structured_output_request"] == "NONE"
+        assert provider_evidence["streaming"] is False
+        serialized_evidence = json.dumps(provider_evidence, ensure_ascii=False)
+        assert storage_payload()["source_text"] not in serialized_evidence
+        assert "Return only strict JSON" not in serialized_evidence
 
         assert SECRET not in result.model_dump_json()
         assert SECRET not in raw_database_dump(store)
@@ -213,7 +227,7 @@ def test_orch_b01_validation_retry_is_runtime_owned(tmp_path: Path) -> None:
 
         assert result.status == RuntimeStatus.PARTIAL
         assert result.error is not None
-        assert result.error.code == "INVALID_JSON"
+        assert result.error.code == "SEMANTIC_REPAIR_REQUIRED"
         assert result.execution.provider_calls == 3
         assert counters(host, port)["default"] == 3
 
@@ -560,8 +574,9 @@ def test_provider_diagnostics_prints_actual_request_body_with_secret_redaction(
     assert '"model": "qwen3.8-max"' in trace
     assert '"temperature": 0' in trace
     assert '"max_tokens": 8192' in trace
-    assert "visible-value" in trace
-    assert "Return strict JSON." in trace
+    assert '"request_contract":' in trace
+    assert "visible-value" not in trace
+    assert "Return strict JSON." not in trace
     assert "BUSINESS_PASSWORD_MUST_NOT_LOG" not in trace
     assert "BUSINESS_API_KEY_MUST_NOT_LOG" not in trace
     assert SECRET not in trace
@@ -628,8 +643,10 @@ def test_provider_diagnostics_captures_http_400_error_body_and_request_id(
     assert '"phase": "http_error"' in trace
     assert '"status": 400' in trace
     assert '"provider_request_id": "req-agent-400-001"' in trace
-    assert "invalid request: model is not supported" in trace
-    assert '"api_key": "[REDACTED]"' in trace
+    assert '"response_body_length":' in trace
+    assert '"response_body_hash":' in trace
+    assert "invalid request: model is not supported" not in trace
+    assert '"api_key": "[REDACTED]"' not in trace
     assert "Set-Cookie" not in trace
     assert "MUST_NOT_LOG" not in trace
     assert SECRET not in trace
