@@ -136,6 +136,7 @@ class AgentConfigLoader:
         environ: Mapping[str, str] | None = None,
     ):
         self.root = Path(root).resolve() if root is not None else None
+        self.model_profiles_source = self._config_source_label(model_profiles)
         self.model_profiles, self.active_model = self._load_model_profiles(
             model_profiles
         )
@@ -145,6 +146,19 @@ class AgentConfigLoader:
         self.completeness_gates = dict(completeness_gates or {})
         self.environ = environ if environ is not None else os.environ
         self._runtime_api_keys: dict[str, str] = {}
+
+    def _config_source_label(
+        self,
+        source: Mapping[str, Any] | str | Path | None,
+    ) -> str | None:
+        if source is None:
+            return None
+        if isinstance(source, Mapping):
+            return "INLINE"
+        path = Path(source)
+        if not path.is_absolute() and self.root is not None:
+            path = self.root / path
+        return str(path.resolve())
 
     def _load_model_profiles(
         self,
@@ -613,7 +627,14 @@ class AgentConfigLoader:
             **config.metadata,
             "agent_config_version": config.version,
             "agent_config_hash": config_hash,
+            "agent_config_source": str(config_path),
+            "model_config_source": self.model_profiles_source,
             "model_ref": provider.profile_ref,
+            "provider_capabilities": provider.metadata.get("capabilities", {}),
+            "provider_capability_source": provider.metadata.get(
+                "capability_source",
+                "CONFIGURED" if provider.metadata.get("capabilities") else "UNKNOWN",
+            ),
             "provider_ref": provider.profile_ref,
             "provider_type": provider.type,
             "provider_mode": provider.mode,
