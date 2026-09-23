@@ -116,15 +116,52 @@ class KnowledgeExtractionService:
         self,
         source_document: SourceDocument,
         structured_document: StructuredDocument,
+        *,
+        requested_topics: list[str] | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
             raise KnowledgeExtractionError("PDF_PARSE_FAILED")
 
+        topics = list(
+            dict.fromkeys(
+                item.strip()
+                for item in (requested_topics or [])
+                if item and item.strip()
+            )
+        )
+        selected_blocks = list(structured_document.blocks)
+        if topics:
+            lowered = [item.lower() for item in topics]
+            selected_blocks = [
+                block
+                for block in structured_document.blocks
+                if any(
+                    topic in (
+                        (block.source_text or "")
+                        + "\n"
+                        + (block.section or "")
+                    ).lower()
+                    for topic in lowered
+                )
+            ]
+            if not selected_blocks:
+                raise KnowledgeExtractionError("EVIDENCE_MISSING")
+
+        focus_hash = hashlib.sha256(
+            json.dumps(
+                topics,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+
         request = AgentRequest(
             request_id=(
                 f"knowledge-extract:{source_document.source_id}:"
-                f"{source_document.source_version}:{source_document.content_hash[:12]}"
+                f"{source_document.source_version}:"
+                f"{source_document.content_hash[:12]}:{focus_hash}"
             ),
             agent_id=self.agent_id,
             input={
@@ -136,6 +173,7 @@ class KnowledgeExtractionService:
                     "document_type": source_document.document_type,
                     "language": source_document.language,
                 },
+                "requested_topics": topics,
                 "structured_document": {
                     "source_id": structured_document.source_id,
                     "source_version": structured_document.source_version,
@@ -146,7 +184,7 @@ class KnowledgeExtractionService:
                             "source_anchor": block.source_anchor,
                             "text": block.source_text,
                         }
-                        for block in structured_document.blocks
+                        for block in selected_blocks
                     ],
                 },
             },
