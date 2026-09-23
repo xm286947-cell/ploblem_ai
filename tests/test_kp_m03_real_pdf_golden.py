@@ -25,14 +25,7 @@ TOPICS = [
 ]
 
 
-@pytest.mark.skipif(
-    os.environ.get("KNOWLEDGE_PRODUCTION_REAL_E2E", "").lower()
-    not in {"1", "true", "yes", "on"},
-    reason="KNOWLEDGE_PRODUCTION_REAL_E2E opt-in disabled",
-)
-def test_kp_first_golden_real_pdf_to_candidate_evidence(
-    tmp_path: Path,
-) -> None:
+def _ingest_real_pdf(tmp_path: Path):
     pdf_path = Path(os.environ["KP_REAL_PDF"]).resolve()
     assert pdf_path.is_file()
 
@@ -50,13 +43,37 @@ def test_kp_first_golden_real_pdf_to_candidate_evidence(
         ),
         language="en",
     )
+    return repository, source, structured
 
+
+def _assert_real_pdf_source(source, structured) -> None:
     assert source.content_hash == EXPECTED_SHA256
     assert source.retrieval_status == "PARSED"
     assert structured.page_count == 33
     parsed_text = "\n".join(block.source_text for block in structured.blocks)
     for topic in TOPICS:
         assert topic in parsed_text
+
+
+def test_kp_first_golden_real_pdf_source_parse(
+    tmp_path: Path,
+) -> None:
+    repository, source, structured = _ingest_real_pdf(tmp_path)
+
+    _assert_real_pdf_source(source, structured)
+    assert repository.resolve(source.local_cache_ref).is_file()
+
+
+@pytest.mark.skipif(
+    os.environ.get("KNOWLEDGE_PRODUCTION_REAL_E2E", "").lower()
+    not in {"1", "true", "yes", "on"},
+    reason="KNOWLEDGE_PRODUCTION_REAL_E2E opt-in disabled",
+)
+def test_kp_first_golden_real_pdf_to_candidate_evidence(
+    tmp_path: Path,
+) -> None:
+    repository, source, structured = _ingest_real_pdf(tmp_path)
+    _assert_real_pdf_source(source, structured)
 
     loader = AgentConfigLoader(
         root=ROOT,
