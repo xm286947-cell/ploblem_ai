@@ -5,7 +5,7 @@ import hashlib
 from repositories import JsonArtifactRepository, RepositoryError
 from runtime.contracts import EvidenceLocator, EvidenceReference, SourceRef
 
-from .models import EvidenceLocation, KnowledgeCandidate
+from .models import CandidateSourceType, EvidenceLocation, KnowledgeCandidate
 
 
 class KnowledgeCandidateError(RuntimeError):
@@ -18,6 +18,15 @@ class KnowledgeCandidateError(RuntimeError):
 
 def source_ref_key(source_id: str, source_version: str) -> str:
     return f"{source_id}@{source_version}"
+
+
+def business_source_ref_key(
+    source_type: str,
+    source_id: str,
+    source_version: str | None,
+) -> str:
+    version = source_version or "UNVERSIONED"
+    return f"{source_type}:{source_id}@{version}"
 
 
 def _stable_evidence_id(location: EvidenceLocation, content_hash: str) -> str:
@@ -35,11 +44,12 @@ def _stable_evidence_id(location: EvidenceLocation, content_hash: str) -> str:
 
 
 class KnowledgeCandidateService:
-    """Bind trusted source evidence and persist evidence-backed candidates.
+    """Persist both external and business candidates in one store.
 
-    This service reuses the Runtime EvidenceReference contract.  The caller may
-    provide only source location.  Evidence text is always rebound from the
-    parsed SourceDocument and is never accepted from AI output.
+    External candidates retain strict SourceDocument/Evidence validation.
+    Business candidates retain authoritative business provenance without
+    requiring a copied SourceDocument. Evidence completeness for business
+    candidates is evaluated later by KP-D02 rather than fabricated here.
     """
 
     def __init__(self, repository: JsonArtifactRepository) -> None:
@@ -157,6 +167,29 @@ class KnowledgeCandidateService:
                 raise KnowledgeCandidateError("EVIDENCE_MISSING")
             evidence_payloads.append(payload)
 
+        if candidate.candidate_source_type == CandidateSourceType.EXTERNAL_SOURCE:
+            self._validate_external_trace(candidate, evidence_payloads)
+        else:
+            self._validate_business_trace(candidate)
+
+        candidate_path = (
+            f"knowledge/production/candidates/{candidate.candidate_id}.json"
+        )
+        payload = candidate.model_dump(mode="json")
+        existing = self.repository.load(candidate_path)
+        if existing is not None and existing != payload:
+            raise KnowledgeCandidateError("CANDIDATE_ID_CONFLICT")
+        self.repository.save(candidate_path, payload)
+        return candidate
+
+    def _validate_external_trace(
+        self,
+        candidate: KnowledgeCandidate,
+        evidence_payloads: list[dict],
+    ) -> None:
+        if not evidence_payloads:
+            raise KnowledgeCandidateError("EVIDENCE_MISSING")
+
         expected_source_refs: set[str] = set()
         for evidence in evidence_payloads:
             source = evidence.get("source")
@@ -181,12 +214,14 @@ class KnowledgeCandidateService:
             ) is None:
                 raise KnowledgeCandidateError("SOURCE_UNAVAILABLE")
 
-        candidate_path = (
-            f"knowledge/production/candidates/{candidate.candidate_id}.json"
+    @staticmethod
+    def _validate_business_trace(candidate: KnowledgeCandidate) -> None:
+        assert candidate.business_source_type is not None
+        assert candidate.business_source_id is not None
+        expected = business_source_ref_key(
+            candidate.business_source_type.value,
+            candidate.business_source_id,
+            candidate.business_source_version,
         )
-        payload = candidate.model_dump(mode="json")
-        existing = self.repository.load(candidate_path)
-        if existing is not None and existing != payload:
-            raise KnowledgeCandidateError("CANDIDATE_ID_CONFLICT")
-        self.repository.save(candidate_path, payload)
-        return candidate
+        if expected not in candidate.source_refs:
+            raise KnowledgeCandidateError("BUSINESS_PROVENANCE_INVALID")
