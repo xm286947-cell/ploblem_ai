@@ -71,6 +71,28 @@ class QualityScenarioV1WorkflowService:
             q=q,
         )
 
+    def scenario_facets(self) -> dict[str, list[dict[str, str]]]:
+        items = self.repository.list()
+
+        def options(code_key: str, name_key: str) -> list[dict[str, str]]:
+            values: dict[str, str] = {}
+            for item in items:
+                code = str(getattr(item, code_key, "") or "").strip()
+                name = str(getattr(item, name_key, "") or "").strip()
+                if code:
+                    values[code] = name or code
+            return [
+                {"code": code, "name": values[code]}
+                for code in sorted(values, key=lambda value: (values[value].lower(), value.lower()))
+            ]
+
+        return {
+            "products": options("product_code", "product_name"),
+            "lifecycles": options("lifecycle_stage_code", "lifecycle_stage_name"),
+            "activities": options("business_activity_code", "business_activity_name"),
+            "quality_concerns": options("quality_concern_code", "quality_concern_name"),
+        }
+
     @staticmethod
     def _expect_version(item: QualityScenarioV1, expected_scenario_version: int) -> None:
         if expected_scenario_version <= 0:
