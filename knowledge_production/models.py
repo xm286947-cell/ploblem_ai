@@ -164,7 +164,7 @@ class KnowledgeCandidate(StrictModel):
 
 class BusinessCandidateInput(StrictModel):
     candidate_id: str = Field(min_length=1)
-    candidate_source_type: Literal["BUSINESS"] = "BUSINESS"
+    candidate_source_type: Literal["BUSINESS"]
     business_source_type: BusinessSourceType
     business_source_id: str = Field(min_length=1)
     business_source_version: str | None = None
@@ -177,15 +177,12 @@ class BusinessCandidateInput(StrictModel):
     conditions: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
-    source_refs: list[str] = Field(default_factory=list)
-    evidence_refs: list[str] = Field(default_factory=list)
+    source_refs: list[str]
+    evidence_refs: list[str]
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime
     producer: str = Field(min_length=1)
-    contract_version: str = Field(
-        default=KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
-        pattern=r"^knowledge-candidate/v1$",
-    )
+    contract_version: str = Field(pattern=r"^knowledge-candidate/v1$")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
