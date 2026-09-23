@@ -9,6 +9,7 @@ on:
       - "config/runtime/agents/knowledge.production.extract.yaml"
       - "prompts/runtime/knowledge_production/**"
       - "tests/test_kp_m0*.py"
+      - "tests/test_kp_d0*.py"
       - "tests/knowledge/**"
       - ".github/workflows/knowledge-production-mvp.yml"
   pull_request:
@@ -17,6 +18,7 @@ on:
       - "config/runtime/agents/knowledge.production.extract.yaml"
       - "prompts/runtime/knowledge_production/**"
       - "tests/test_kp_m0*.py"
+      - "tests/test_kp_d0*.py"
       - "tests/knowledge/**"
 
 jobs:
@@ -41,6 +43,7 @@ jobs:
             tests/test_kp_m01_source_document.py \
             tests/test_kp_m02_candidate_evidence.py \
             tests/test_kp_m03_ai_extraction.py \
+            tests/test_kp_d01_business_candidate_intake.py \
             tests/knowledge/test_knowledge_service.py
 
   kp-first-golden-source:
