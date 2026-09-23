@@ -220,6 +220,16 @@ def test_unknown_support_field_blocks_trace_integrity(tmp_path):
 def test_inline_source_text_is_distinguished_from_controlled_content_ref(tmp_path):
     db_path, _, scenario = _setup(tmp_path)
     repository = SQLiteQualityScenarioV1Repository(db_path)
+    service = QualityScenarioTraceabilityService(repository)
+
+    before = service.trace(scenario["scenario_id"])
+    assert before["integrity"]["status"] == "PASS"
+    assert before["evidence"]
+    assert all(
+        x["content_status"] == "CONTROLLED_CONTENT_REF"
+        for x in before["evidence"]
+    )
+
     item = repository.get(scenario["scenario_id"])
     assert item is not None
     payload = item.model_dump(mode="json")
@@ -227,17 +237,10 @@ def test_inline_source_text_is_distinguished_from_controlled_content_ref(tmp_pat
     changed = QualityScenarioV1.model_validate(payload)
     repository.save(changed, actor="HUMAN")
 
-    trace = QualityScenarioTraceabilityService(repository).trace(scenario["scenario_id"])
-    assert trace["integrity"]["status"] == "PASS"
-    assert any(
-        x["content_status"] == "INLINE_SOURCE_TEXT"
-        and x["source_text"].startswith("原始问题中明确记录")
-        for x in trace["evidence"]
-    )
-    assert any(
-        x["content_status"] == "CONTROLLED_CONTENT_REF"
-        for x in trace["evidence"][1:]
-    )
+    after = service.trace(scenario["scenario_id"])
+    assert after["integrity"]["status"] == "PASS"
+    assert after["evidence"][0]["content_status"] == "INLINE_SOURCE_TEXT"
+    assert after["evidence"][0]["source_text"].startswith("原始问题中明确记录")
 
 
 def test_traceability_api_404_and_source_ref_validation(tmp_path):
