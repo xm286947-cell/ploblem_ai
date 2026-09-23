@@ -1,5 +1,7 @@
 # Historical Case Consumer Contract
 
+> 产品定位：这是统一“案例库”的公共消费契约。案例库本身不绑定某一个知识来源；当前重大问题通过 CASE-PUBLISH 作为第一条标准化来源通道进入同一 Historical Case 资产。后续新增漏测问题或其他来源时，消费者仍通过本契约访问案例，而不感知内部来源存储。
+
 `contract_version = historical-case/v1`
 
 ## SDK surface
