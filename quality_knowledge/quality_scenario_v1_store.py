@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS quality_scenario_v1(
  scenario_description TEXT NOT NULL DEFAULT '',
  quality_concern_code TEXT NOT NULL DEFAULT '',
  quality_concern_name TEXT NOT NULL DEFAULT '',
+ trigger_source TEXT NOT NULL DEFAULT '',
+ trigger_reason TEXT NOT NULL DEFAULT '',
  trigger_condition TEXT NOT NULL DEFAULT '',
  expected_result TEXT NOT NULL DEFAULT '',
  applicability_scope TEXT NOT NULL DEFAULT '',
@@ -50,6 +52,11 @@ CREATE TABLE IF NOT EXISTS quality_scenario_v1(
  reviewer TEXT NOT NULL DEFAULT '',
  reviewed_at TEXT NOT NULL DEFAULT '',
  review_comment TEXT NOT NULL DEFAULT '',
+ quality_confirmed_by TEXT NOT NULL DEFAULT '',
+ quality_confirmed_at TEXT NOT NULL DEFAULT '',
+ technical_confirmed_by TEXT NOT NULL DEFAULT '',
+ technical_confirmed_at TEXT NOT NULL DEFAULT '',
+ confirmation_note TEXT NOT NULL DEFAULT '',
  created_by TEXT NOT NULL DEFAULT '',
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL,
@@ -163,10 +170,33 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=NORMAL")
             connection.executescript(SCHEMA)
+            self._ensure_v02_columns(connection)
             connection.execute(
                 "INSERT OR IGNORE INTO quality_scenario_v1_meta(schema_version) VALUES(?)",
                 (SCHEMA_VERSION,),
             )
+
+    @staticmethod
+    def _ensure_v02_columns(connection: sqlite3.Connection) -> None:
+        """Idempotent additive migration from the initial QS-MVP-02 candidate schema."""
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(quality_scenario_v1)")
+        }
+        additions = {
+            "trigger_source": "TEXT NOT NULL DEFAULT ''",
+            "trigger_reason": "TEXT NOT NULL DEFAULT ''",
+            "quality_confirmed_by": "TEXT NOT NULL DEFAULT ''",
+            "quality_confirmed_at": "TEXT NOT NULL DEFAULT ''",
+            "technical_confirmed_by": "TEXT NOT NULL DEFAULT ''",
+            "technical_confirmed_at": "TEXT NOT NULL DEFAULT ''",
+            "confirmation_note": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, ddl in additions.items():
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE quality_scenario_v1 ADD COLUMN {name} {ddl}"
+                )
 
     @contextmanager
     def _transaction(self):
@@ -236,6 +266,8 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
             "scenario_description": row["scenario_description"],
             "quality_concern_code": row["quality_concern_code"],
             "quality_concern_name": row["quality_concern_name"],
+            "trigger_source": row["trigger_source"] or None,
+            "trigger_reason": row["trigger_reason"],
             "trigger_condition": row["trigger_condition"],
             "expected_result": row["expected_result"],
             "applicability_scope": row["applicability_scope"],
@@ -248,6 +280,13 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                 "reviewer": row["reviewer"],
                 "reviewed_at": row["reviewed_at"],
                 "comment": row["review_comment"],
+            },
+            "confirmation": {
+                "quality_confirmed_by": row["quality_confirmed_by"],
+                "quality_confirmed_at": row["quality_confirmed_at"],
+                "technical_confirmed_by": row["technical_confirmed_by"],
+                "technical_confirmed_at": row["technical_confirmed_at"],
+                "confirmation_note": row["confirmation_note"],
             },
             "version": {
                 "created_by": row["created_by"],
@@ -299,6 +338,8 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                 "scenario_description": scenario.scenario_description,
                 "quality_concern_code": scenario.quality_concern_code,
                 "quality_concern_name": scenario.quality_concern_name,
+                "trigger_source": scenario.trigger_source.value if scenario.trigger_source else "",
+                "trigger_reason": scenario.trigger_reason,
                 "trigger_condition": scenario.trigger_condition,
                 "expected_result": scenario.expected_result,
                 "applicability_scope": scenario.applicability_scope,
@@ -311,6 +352,11 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                 "reviewer": scenario.review.reviewer,
                 "reviewed_at": scenario.review.reviewed_at,
                 "review_comment": scenario.review.comment,
+                "quality_confirmed_by": scenario.confirmation.quality_confirmed_by,
+                "quality_confirmed_at": scenario.confirmation.quality_confirmed_at,
+                "technical_confirmed_by": scenario.confirmation.technical_confirmed_by,
+                "technical_confirmed_at": scenario.confirmation.technical_confirmed_at,
+                "confirmation_note": scenario.confirmation.confirmation_note,
                 "created_by": scenario.version.created_by,
                 "created_at": scenario.version.created_at,
                 "updated_at": scenario.version.updated_at,
@@ -363,7 +409,11 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                    DO UPDATE SET snapshot_json=excluded.snapshot_json""",
                 (scenario.scenario_id, scenario.scenario_version, snapshot),
             )
-            if scenario.review.review_status.value != "PENDING":
+            if (
+                scenario.review.review_status.value != "PENDING"
+                or scenario.confirmation.quality_confirmed
+                or scenario.confirmation.technical_confirmed
+            ):
                 connection.execute(
                     """INSERT INTO quality_scenario_v1_review(
                            review_id,scenario_id,scenario_version,review_json)
@@ -372,7 +422,13 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                         f"QSRV-{uuid.uuid4().hex}",
                         scenario.scenario_id,
                         scenario.scenario_version,
-                        json.dumps(scenario.review.model_dump(mode="json"), ensure_ascii=False),
+                        json.dumps(
+                            {
+                                "review": scenario.review.model_dump(mode="json"),
+                                "confirmation": scenario.confirmation.model_dump(mode="json"),
+                            },
+                            ensure_ascii=False,
+                        ),
                     ),
                 )
         saved = self.get(scenario.scenario_id)
