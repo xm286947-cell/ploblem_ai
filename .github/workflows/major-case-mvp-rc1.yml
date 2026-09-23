@@ -1,0 +1,82 @@
+name: Major Case MVP RC1
+
+on:
+  push:
+    branches:
+      - "release/major-case-mvp-rc1"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/sqlite_tuning.py"
+      - "services/historical_case_contract.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "scripts/major_case_mvp_smoke.py"
+      - "scripts/build_major_case_mvp_package.py"
+      - "run_major_case_mvp_smoke.bat"
+      - "run_major_case_mvp_smoke.sh"
+      - "MAJOR_CASE_MVP_RC1_DELIVERY.md"
+      - ".github/workflows/major-case-mvp-rc1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  closeout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile
+        run: python -m compileall -q quality_knowledge/major_cases services scripts/major_case_mvp_smoke.py
+
+      - name: Contract tests
+        run: python -m pytest -q tests/test_historical_case_consumer_contract.py
+
+      - name: Publish adapter tests
+        run: python -m pytest -q tests/test_case_publish_adapter.py
+
+      - name: Publish service tests
+        run: python -m pytest -q tests/test_case_publish_service.py
+
+      - name: Golden Path smoke
+        run: python scripts/major_case_mvp_smoke.py
+
+      - name: Build RC package
+        run: python scripts/build_major_case_mvp_package.py
+
+      - name: Package integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(ls dist/MAJOR_CASE_MVP_RC1_*.zip)"
+          sha256sum -c dist/MAJOR_CASE_MVP_RC1_*.zip.sha256
+          unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep PACKAGE_MANIFEST.json
+          ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '(^|/)(input|output|outputs|knowledge)/'
+          ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db$'
+
+      - name: Upload RC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-case-mvp-rc1-${{ github.sha }}
+          path: |
+            dist/MAJOR_CASE_MVP_RC1_*.zip
+            dist/MAJOR_CASE_MVP_RC1_*.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
