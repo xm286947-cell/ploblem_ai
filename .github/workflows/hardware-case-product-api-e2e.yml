@@ -1,0 +1,28 @@
+name: Hardware Case Product API E2E Prep
+
+on:
+  pull_request:
+    paths:
+      - "tests/test_hardware_case_product_api_e2e.py"
+      - "quality_knowledge/web/hardware_case_api.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "repositories/hardware_case_repository.py"
+      - "services/hardware_case_backend.py"
+      - "services/hardware_case_contract.py"
+      - ".github/workflows/hardware-case-product-api-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install unified app dependencies
+        run: python -m pip install -r requirements-runtime-p0-test.txt "fastapi>=0.115,<1" "httpx>=0.27,<1" "jinja2>=3.1,<4" "python-multipart>=0.0.9" "openpyxl>=3.1,<4"
+      - name: Run unified app Hardware Case Golden Path
+        run: python -m pytest -q --noconftest tests/test_hardware_case_product_api_e2e.py
+      - name: Run Hardware Case regression
+        run: python -m pytest -q --noconftest tests/test_hardware_case_contract.py tests/test_hardware_case_backend.py tests/test_hardware_case_ai_adapter.py tests/test_hardware_case_web_api.py
