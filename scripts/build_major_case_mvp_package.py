@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
-STAGE = DIST / "MAJOR_CASE_MVP_RC1"
+STAGE = DIST / "CASE_LIBRARY_MVP_RC1"
 
 INCLUDE_DIRS = [
     "builder",
@@ -33,6 +33,7 @@ INCLUDE_FILES = [
     "run_major_case_mvp_smoke.bat",
     "run_major_case_mvp_smoke.sh",
     "MAJOR_CASE_MVP_RC1_DELIVERY.md",
+    "docs/product/CASE_LIBRARY_PRODUCT_BOUNDARY_V1.md",
 ]
 
 EXCLUDED_NAMES = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".DS_Store"}
@@ -94,11 +95,17 @@ def main() -> int:
 
     source_commit = os.getenv("GITHUB_SHA", "LOCAL")
     manifest = {
-        "package": "MAJOR_CASE_MVP_RC1",
+        "package": "CASE_LIBRARY_MVP_RC1",
+        "product": "CASE_LIBRARY",
+        "product_positioning": "ONE_CASE_LIBRARY_MULTIPLE_KNOWLEDGE_SOURCES",
+        "source_channel": "MAJOR_EVENT",
+        "standalone_major_case_product": False,
         "source_commit": source_commit,
         "contract_version": "historical-case/v1",
         "golden_path": "Major Confirmed -> Publish -> Search -> Detail -> Evidence",
         "scope": [
+            "Unified Historical Case assets and consumer contract",
+            "Major Event source channel via CASE-PUBLISH",
             "Major Knowledge Repository + independent SQLite schema",
             "CASE-PUBLISH-001 adapter and publisher",
             "Historical Case consumer contract",
@@ -118,7 +125,7 @@ def main() -> int:
     )
 
     short = source_commit[:12] if source_commit != "LOCAL" else "LOCAL"
-    archive = DIST / f"MAJOR_CASE_MVP_RC1_{short}.zip"
+    archive = DIST / f"CASE_LIBRARY_MVP_RC1_{short}.zip"
     if archive.exists():
         archive.unlink()
 
