@@ -14,6 +14,8 @@ from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
 from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
 from quality_knowledge.product_report import ProductQualityReportService, ProductReportError
+from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
+from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
 from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
@@ -56,6 +58,7 @@ def create_v2_router(
     fields = StandardFieldRepository(repository.db_path)
     analysis_jobs = V2BatchAnalysisJobManager(repository, stage_runner)
     reports = ProductQualityReportService(repository)
+    scenario_candidates = CandidateV1Service(SQLiteQualityScenarioV1Repository(repository.db_path))
 
     @router.get("/product-reports/precheck")
     def report_precheck(product_code: str, start_month: str, end_month: str) -> dict[str, Any]:
@@ -607,5 +610,53 @@ def create_v2_router(
             )
         except P0InsightError as error:
             raise _http_error(error) from error
+
+
+    @router.post("/quality-scenarios/candidates/from-reverse")
+    def create_quality_scenario_candidate(payload: dict[str, Any]) -> dict[str, Any]:
+        result = payload.get("reverse_quality_result")
+        taxonomy = payload.get("taxonomy")
+        if not isinstance(result, dict):
+            raise HTTPException(400, "REVERSE_QUALITY_RESULT_REQUIRED")
+        if not isinstance(taxonomy, dict):
+            raise HTTPException(400, "SCENARIO_TAXONOMY_REQUIRED")
+        try:
+            produced = scenario_candidates.create_from_reverse(
+                result,
+                taxonomy,
+                trigger_source=payload.get("trigger_source"),
+                trigger_reason=str(payload.get("trigger_reason") or ""),
+                created_by=str(payload.get("created_by") or ""),
+            )
+            return produced.to_dict()
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.get("/quality-scenarios/candidates")
+    def quality_scenario_candidates(
+        product_code: str = "",
+        lifecycle_stage_code: str = "",
+        business_activity_code: str = "",
+        quality_concern_code: str = "",
+        q: str = "",
+    ) -> dict[str, Any]:
+        items = scenario_candidates.list_candidates(
+            product_code=product_code,
+            lifecycle_stage_code=lifecycle_stage_code,
+            business_activity_code=business_activity_code,
+            quality_concern_code=quality_concern_code,
+            q=q,
+        )
+        return {
+            "items": [item.model_dump(mode="json") for item in items],
+            "total": len(items),
+        }
+
+    @router.get("/quality-scenarios/candidates/{scenario_id}")
+    def quality_scenario_candidate(scenario_id: str) -> dict[str, Any]:
+        item = scenario_candidates.get_candidate(scenario_id)
+        if item is None:
+            raise HTTPException(404, "QUALITY_SCENARIO_V1_CANDIDATE_NOT_FOUND")
+        return item.model_dump(mode="json")
 
     return router
