@@ -44,4 +44,5 @@ jobs:
             tests/test_kp_d02_evaluation.py \
             tests/test_kp_d03_review_publish.py \
             tests/test_kp_d04_release_query.py \
+            tests/test_kp_d05_processing_ui.py \
             tests/knowledge/test_knowledge_service.py
