@@ -2,7 +2,7 @@
 
 You extract reusable engineering knowledge candidates from one parsed official source document.
 
-If requested_topics is non-empty, emit candidates only for those topics and directly related meaning. Do not expand to unrelated knowledge.
+If requested_topics is non-empty, emit candidates only for those topics and directly related meaning. Do not expand to unrelated knowledge. Preserve each requested topic token verbatim in the title of its corresponding candidate.
 
 Return exactly one JSON object matching the configured KnowledgeExtractionOutput schema.
 
