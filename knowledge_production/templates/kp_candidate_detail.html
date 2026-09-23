@@ -1,0 +1,112 @@
+{% extends "kp_base.html" %}
+{% block title %}{{ detail.candidate.title }}｜Candidate{% endblock %}
+{% block content %}
+{% if error %}<div class="error">操作被 Domain Gate 阻断：<strong>{{ error }}</strong></div>{% endif %}
+{% if message %}<div class="ok">{{ message }}</div>{% endif %}
+
+<div class="card">
+  <h2>Knowledge Candidate</h2>
+  <div class="grid">
+    <div><strong>ID</strong><br><code>{{ detail.candidate.candidate_id }}</code></div>
+    <div><strong>Object Type</strong><br>{{ detail.candidate.object_type.value }}</div>
+    <div><strong>Source Type</strong><br>{{ detail.candidate.candidate_source_type.value }}</div>
+    <div><strong>Business Source</strong><br>
+      {% if detail.candidate.business_source_type %}
+      {{ detail.candidate.business_source_type.value }} / {{ detail.candidate.business_source_id }} / {{ detail.candidate.business_source_version or 'UNVERSIONED' }}
+      {% else %}—{% endif %}
+    </div>
+  </div>
+  <h3>{{ detail.candidate.title }}</h3>
+  <p>{{ detail.candidate.content }}</p>
+  <div><strong>Scope</strong> {{ detail.candidate.scope|join(", ") }}</div>
+  <div><strong>Tags</strong> {{ detail.candidate.tags|join(", ") }}</div>
+  <div><strong>Source References</strong><pre>{{ detail.candidate.source_refs|join("\n") }}</pre></div>
+</div>
+
+<div class="card">
+  <h2>Evidence</h2>
+  {% for e in detail.evidences %}
+    <div class="card">
+      <strong>{{ e.evidence_id }}</strong>
+      {% if e.available %}
+        <div>Source: {{ e.payload.source.source_type }} / {{ e.payload.source.source_id }} / {{ e.payload.source.revision }}</div>
+        <div>Locator: {{ e.payload.locator.type }} — {{ e.payload.locator.value }}</div>
+        <blockquote>{{ e.payload.excerpt }}</blockquote>
+      {% else %}
+        <div class="error">EVIDENCE_MISSING</div>
+      {% endif %}
+    </div>
+  {% else %}<p class="muted">无 Evidence。</p>{% endfor %}
+</div>
+
+<div class="card">
+  <h2>Evaluation / Dedup / Conflict</h2>
+  {% if detail.latest_evaluation %}
+    {% set ev = detail.latest_evaluation %}
+    <div class="grid">
+      <div>Evidence <strong>{{ ev.evidence_status.value }}</strong></div>
+      <div>Source Valid <strong>{{ ev.source_valid }}</strong></div>
+      <div>Duplicate <strong>{{ ev.duplicate_status.value }}</strong></div>
+      <div>Conflict <strong>{{ ev.conflict_status.value }}</strong></div>
+      <div>Review Ready <strong>{{ ev.review_ready }}</strong></div>
+      <div>Publish Readiness <strong>{{ ev.publish_readiness }}</strong></div>
+    </div>
+    <p>Reasons: {{ ev.reasons|join(", ") or "NONE" }}</p>
+  {% else %}
+    <p class="muted">尚未 Evaluation。</p>
+    <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/evaluate">
+      <button type="submit">执行 Evaluation</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if detail.latest_evaluation %}
+<div class="card">
+  <h2>Human Review</h2>
+  <p class="muted">页面只提交 Review 命令；状态迁移与校验均由 Domain/Application Service 执行。</p>
+  <div class="grid">
+    <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/confirm">
+      <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
+      <label>Reviewed By<input name="reviewed_by" required></label>
+      <label>Note<textarea name="review_note"></textarea></label>
+      <button type="submit">CONFIRM</button>
+    </form>
+    <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/reject">
+      <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
+      <label>Reviewed By<input name="reviewed_by" required></label>
+      <label>Note<textarea name="review_note"></textarea></label>
+      <button class="danger" type="submit">REJECT</button>
+    </form>
+  </div>
+  <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/edit">
+    <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
+    <h3>EDIT</h3>
+    <label>Reviewed By<input name="reviewed_by" required></label>
+    <label>Title<input name="title" value="{{ detail.candidate.title }}"></label>
+    <label>Content<textarea name="content" rows="5" required>{{ detail.candidate.content }}</textarea></label>
+    <label>Note<textarea name="review_note"></textarea></label>
+    <button class="secondary" type="submit">EDIT & CONFIRM</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Review Status</h2>
+  {% if detail.latest_review %}
+    <p><strong>{{ detail.latest_review.review_status.value }}</strong> / {{ detail.latest_review.action.value }} / {{ detail.latest_review.reviewed_by }}</p>
+    <p>{{ detail.latest_review.review_note or "" }}</p>
+  {% else %}<p class="muted">NOT_REVIEWED</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Publish Gate</h2>
+  {% if detail.published %}
+    <div class="ok">Published Knowledge：{{ detail.published.object_id }} / v{{ detail.published.object_version }} / {{ detail.published.status.value }}</div>
+  {% else %}
+    <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/publish">
+      <label>Published By<input name="published_by" required></label>
+      <button type="submit">PUBLISH</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
