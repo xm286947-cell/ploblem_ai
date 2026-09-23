@@ -223,7 +223,7 @@ def test_history_api_not_found_is_v1_404(tmp_path):
 
 
 def test_p03_is_read_only_and_renders_required_trace_semantics():
-    html = (WEB / "templates/p0_quality_scenario_detail_placeholder.html").read_text(encoding="utf-8")
+    html = (WEB / "templates/p0_quality_scenario_detail.html").read_text(encoding="utf-8")
     js = (WEB / "static/p0_scenario_detail.js").read_text(encoding="utf-8")
     css = (WEB / "static/p0_scenario_detail.css").read_text(encoding="utf-8")
 
