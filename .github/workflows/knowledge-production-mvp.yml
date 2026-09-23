@@ -80,7 +80,9 @@ jobs:
           curl -L --fail --retry 3 \
             "https://www.skyhighmemory.com/download/eMMC_16GB_STD_PKG_S40FC016C3_002_01118.pdf?v=D" \
             -o "$KP_REAL_PDF"
-          ACTUAL_SHA256="$(sha256sum "$KP_REAL_PDF" | awk '{print $1}')"\n          echo "ACTUAL_SHA256=$ACTUAL_SHA256"\n          test "$ACTUAL_SHA256" = "5a96380388d53e7a3ac430547b71769e7408f5d811cb0ffa77855005517f7609"
+          ACTUAL_SHA256="$(sha256sum "$KP_REAL_PDF" | awk '{print $1}')"
+          echo "ACTUAL_SHA256=$ACTUAL_SHA256"
+          test "$ACTUAL_SHA256" = "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978"
 
       - name: Validate real PDF source and parse
         if: steps.golden.outputs.run == 'true'
@@ -141,7 +143,9 @@ jobs:
           curl -L --fail --retry 3 \
             "https://www.skyhighmemory.com/download/eMMC_16GB_STD_PKG_S40FC016C3_002_01118.pdf?v=D" \
             -o "$KP_REAL_PDF"
-          ACTUAL_SHA256="$(sha256sum "$KP_REAL_PDF" | awk '{print $1}')"\n          echo "ACTUAL_SHA256=$ACTUAL_SHA256"\n          test "$ACTUAL_SHA256" = "5a96380388d53e7a3ac430547b71769e7408f5d811cb0ffa77855005517f7609"
+          ACTUAL_SHA256="$(sha256sum "$KP_REAL_PDF" | awk '{print $1}')"
+          echo "ACTUAL_SHA256=$ACTUAL_SHA256"
+          test "$ACTUAL_SHA256" = "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978"
 
       - name: Run first real-PDF Golden Path
         if: steps.golden.outputs.run == 'true'
