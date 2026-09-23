@@ -1,0 +1,28 @@
+{
+  "source_dir": "D:/company/hardware_case/word",
+  "recursive": false,
+  "max_cases": 30,
+  "output_db": "D:/company/hardware_case/output/hardware_case_validation.sqlite3",
+  "output_report": "D:/company/hardware_case/output/hardware_case_validation_metrics.json",
+  "structurer": "company_runtime_adapter:structure_hardware_case",
+  "trees": [
+    {
+      "tree_type": "CIRCUIT_FEATURE",
+      "path": "D:/company/hardware_case/tree/circuit_feature.xlsx",
+      "sheet": "Sheet1",
+      "path_columns": ["A", "B", "C"],
+      "start_row": 2,
+      "id_column": null,
+      "active_column": null
+    },
+    {
+      "tree_type": "MATERIAL_DEVICE",
+      "path": "D:/company/hardware_case/tree/material_device.xlsx",
+      "sheet": "Sheet1",
+      "path_columns": ["A", "B", "C", "D", "E"],
+      "start_row": 2,
+      "id_column": null,
+      "active_column": null
+    }
+  ]
+}
