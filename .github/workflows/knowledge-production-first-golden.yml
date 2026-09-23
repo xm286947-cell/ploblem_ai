@@ -10,7 +10,28 @@ on:
       - ".github/workflows/knowledge-production-first-golden.yml"
 
 jobs:
-  real-pdf-golden:
+  real-pdf-source-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate real PDF source and parse
+        run: |
+          python -m pytest -q \
+            tests/test_kp_first_real_pdf_golden.py::test_kp_first_real_pdf_source_parse_preflight
+
+  real-provider-golden:
+    needs: real-pdf-source-preflight
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -42,6 +63,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run first real PDF golden path
+      - name: Run real PDF plus real provider golden path
         run: |
-          python -m pytest -q tests/test_kp_first_real_pdf_golden.py
+          python -m pytest -q \
+            tests/test_kp_first_real_pdf_golden.py::test_kp_first_real_pdf_golden_path
