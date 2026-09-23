@@ -1,0 +1,21 @@
+{
+  "dimensions": {
+    "problem_object": {"score": 95, "assessment": "HIGHLY_SIMILAR", "query_evidence": ["消息接收处理模块"], "case_evidence": ["CAN接收模块"], "reason": "均为CAN消息接收处理对象"},
+    "phenomenon": {"score": 92, "assessment": "HIGHLY_SIMILAR", "query_evidence": ["消息处理拥堵", "系统重启"], "case_evidence": ["接收拥堵后重启"], "reason": "核心失效表现一致"},
+    "trigger_condition": {"score": 88, "assessment": "SIMILAR", "query_evidence": ["高负载消息输入"], "case_evidence": ["总线报文数量过多"], "reason": "均由高报文负载触发"},
+    "impact": {"score": 85, "assessment": "SIMILAR", "query_evidence": ["业务处理中断"], "case_evidence": ["设备重启导致业务中断"], "reason": "影响一致"},
+    "failure_mechanism": {"score": 90, "assessment": "HIGHLY_SIMILAR", "query_evidence": ["队列堆积并触发保护重启"], "case_evidence": ["接收处理拥堵触发保护"], "reason": "机理基本一致"},
+    "trc": {"score": 86, "assessment": "SIMILAR", "query_evidence": ["缺少流量控制或队列保护"], "case_evidence": ["CAN接收未做拥堵控制"], "reason": "技术根因方向一致"},
+    "mrc": {"score": 0, "assessment": "UNKNOWN", "query_evidence": [], "case_evidence": [], "reason": "新问题MRC缺失"},
+    "root_cause": {"score": 82, "assessment": "SIMILAR", "query_evidence": ["处理能力与输入速率不匹配"], "case_evidence": ["报文过多导致处理不及时"], "reason": "根因语义相近"},
+    "classification": {"score": 90, "assessment": "HIGHLY_SIMILAR", "query_evidence": ["软件设计/资源管理/消息队列"], "case_evidence": ["软件设计/资源管理"], "reason": "主要分类一致"},
+    "organization_context": {"score": 75, "assessment": "SIMILAR", "query_evidence": ["IPMT-A/SPDT-A"], "case_evidence": ["IPMT-A/SPDT-A"], "reason": "组织上下文一致"}
+  },
+  "overall_score": 88,
+  "overall_level": "HIGH",
+  "key_similarities": ["均在CAN高负载下发生接收拥堵", "均触发系统保护重启", "技术根因均指向流量与队列控制不足"],
+  "key_differences": ["新问题缺少MRC证据"],
+  "evidence_gaps": ["新问题MRC未提供"],
+  "analysis_summary": "候选案例与新问题在对象、现象、触发条件和技术根因方面高度相似。",
+  "confidence": 0.91
+}

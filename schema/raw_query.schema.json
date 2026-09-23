@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "REPEAT_CASE Raw Query V2.0",
+  "type": "object",
+  "required": ["query_id", "source_excel", "sheet_name", "excel_row", "raw_fields", "mapped_fields", "parse_status", "parse_warnings", "parser_version", "generated_at"],
+  "properties": {
+    "query_id": {"type": "string"},
+    "source_excel": {"type": "string"},
+    "sheet_name": {"type": "string"},
+    "excel_row": {"type": "integer", "minimum": 1},
+    "raw_fields": {"type": "object", "additionalProperties": true},
+    "mapped_fields": {
+      "type": "object",
+      "required": ["itr_id", "ipmt", "spdt", "responsible_department_level2", "product", "domain", "problem_description", "cause_description", "cause_level1", "cause_level2", "cause_level3", "cause_level4", "corrective_action", "preventive_action", "remark"],
+      "properties": {
+        "itr_id": {"type": "string"}, "ipmt": {"type": "string"}, "spdt": {"type": "string"},
+        "responsible_department_level2": {"type": "string"}, "product": {"type": "string"}, "domain": {"type": "string"},
+        "problem_description": {"type": "string"}, "cause_description": {"type": "string"},
+        "cause_level1": {"type": "string"}, "cause_level2": {"type": "string"}, "cause_level3": {"type": "string"}, "cause_level4": {"type": "string"},
+        "corrective_action": {"type": "string"}, "preventive_action": {"type": "string"}, "remark": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "parse_status": {"enum": ["SUCCESS", "PARTIAL_SUCCESS", "QUERY_PARSE_FAILED"]},
+    "parse_warnings": {"type": "array", "items": {"type": "string"}},
+    "parser_version": {"type": "string"},
+    "generated_at": {"type": "string"}
+  },
+  "additionalProperties": false
+}

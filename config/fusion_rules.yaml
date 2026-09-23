@@ -1,0 +1,45 @@
+version: '1.1'
+facts_only: true
+identity_fields:
+  priority:
+  - EXCEL
+organization_fields:
+  priority:
+  - EXCEL
+problem_description:
+  original_source: EXCEL
+  report_source: PDF:problem_description
+  standard_value: ''
+cause_fields:
+  trc_occurrence:
+    excel_field: trc_occurrence
+    pdf_section: trc_occurrence
+  trc_escape:
+    excel_field: trc_escape
+    pdf_section: trc_escape
+  mrc_occurrence:
+    excel_field: mrc_occurrence
+    pdf_section: mrc_occurrence
+  mrc_escape:
+    excel_field: mrc_escape
+    pdf_section: mrc_escape
+section_mapping:
+  event_replay: problem.event_replay
+  impact: problem.impact
+  five_why: analysis.five_why
+  root_cause: analysis.root_cause
+  corrective_actions: solution.corrective_actions
+  preventive_actions: solution.preventive_actions
+  management_actions: solution.management_actions
+  technical_actions: solution.technical_actions
+  action_status: solution.action_status
+classification:
+  original_source: EXCEL
+  report_verified_default_empty: true
+  ai_inferred_default_empty: true
+  detect_conflict_only_when_both_present: true
+quality_flags:
+  missing_report: REPORT_MISSING
+  missing_root_cause: MISSING_ROOT_CAUSE
+  missing_preventive_action: MISSING_PREVENTIVE_ACTION
+  report_parse_warning: REPORT_PARSE_WARNING

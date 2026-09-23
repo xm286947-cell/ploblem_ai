@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block breadcrumb %}管理 / 字段映射配置{% endblock %}
+{% block body %}
+<div class="di-pagehead">
+  <div><h1>字段映射配置</h1><span class="sr-only">源字段映射配置</span><p>管理 {{product.product_name}}（{{business_type}}）Excel 字段进入 Knowledge 的长期规则。运行时只使用数据库中的 ACTIVE Mapping。</p></div>
+  <a class="btn" href="/import">返回数据接入</a>
+</div>
+
+<div class="map-business-tabs">{% for p in products %}<a class="{% if business_type==p.product_code %}active{% endif %}" href="/settings/mapping?business_type={{p.product_code}}">{{p.product_name}}<small>· {{p.product_code}}</small></a>{% endfor %}</div>
+
+<section class="di-card map-compare-card">
+  <div class="di-cardhead"><div><h2>打开 Excel 对比表头</h2><p>读取实际表头并与 {{business_type}} ACTIVE Mapping 比较，只处理新增、缺失、疑似改名和冲突字段。</p></div><span class="di-safe-chip">不会直接修改 ACTIVE</span></div>
+  <form method="post" action="/settings/mapping/preview" enctype="multipart/form-data" class="map-compare-form">
+    <input type="hidden" name="business_type" value="{{business_type}}">{% if selected %}<input type="hidden" name="config_id" value="{{selected.config_id}}">{% endif %}<label><span>选择 Excel 文件</span><input type="file" name="file" accept=".xlsx,.xlsm" required></label><button class="btn btn-primary">读取表头并比较差异</button>
+  </form>
+</section>
+
+{% if not selected %}
+<section class="di-card"><div class="di-empty"><h2>{{product.product_name}} Mapping 尚未初始化</h2><p>系统会从 HMI / PLC / IFA 的公共字段库生成初始 Draft，复用统一标准字段和 Alias；新产品的 Excel 源字段仍需按真实表头单独配置。</p><form method="post" action="/settings/mapping/{{business_type}}/bootstrap"><button class="btn btn-primary">从公共字段库创建 {{business_type}} Mapping Draft</button></form></div></section>
+{% else %}
+<section class="di-card map-current-card">
+  <div class="di-cardhead"><div><h2>当前 Mapping</h2><p>正式版本用于 Web Import、CLI Import 与 Mapping Preview。</p></div><span class="map-status-chip {{selected.status|lower}}">{{selected.status}}</span></div>
+  <div class="map-current-grid">
+    <div><span>当前查看</span><strong>{{business_type}} Mapping V{{selected.version}}</strong></div>
+    <div><span>运行时 ACTIVE</span><strong>{% if effective %}V{{effective.version}}{% else %}未初始化{% endif %}</strong></div>
+    <div><span>来源</span><strong>{% if selected.source_type=='YAML_MIGRATION' %}YAML Migration{% else %}{{selected.source_type}}{% endif %}</strong></div>
+    <div><span>字段映射</span><strong>{{selected.mappings|length}} 项</strong>{% if selected.metadata.catalog_field_count %}<small>其中 {{selected.metadata.catalog_field_count}} 项来自公共字段库</small>{% endif %}</div>
+    <div><span>更新时间</span><strong>{{selected.updated_at or '-'}}</strong></div>
+  </div>
+</section>
+
+<section class="di-card map-action-card">
+  <div class="di-cardhead"><div><h2>配置操作</h2><p>ACTIVE 版本不可直接编辑；修改会产生新的 Draft。</p></div></div>
+  <div class="map-workflow">
+    <div class="{% if selected.status=='ACTIVE' %}active{% endif %}"><b>正式版本</b><small>V{{effective.version if effective else '-'}}</small></div><i>→</i>
+    <div class="{% if selected.status=='DRAFT' %}active{% endif %}"><b>Draft 修改</b><small>{% if selected.status=='DRAFT' %}V{{selected.version}}{% else %}需要时创建{% endif %}</small></div><i>→</i>
+    <div><b>Validate</b><small>检查冲突与必填</small></div><i>→</i>
+    <div><b>Activate</b><small>显式切换生效版本</small></div>
+  </div>
+  <div class="di-actions map-actions">
+    {% if selected.status=='DRAFT' and selected.source_type=='BOOTSTRAP' %}<form method="post" action="/settings/mapping/{{business_type}}/bootstrap"><button class="btn">从公共字段库补齐字段</button></form>{% endif %}
+    {% if selected.status!='DRAFT' %}<form method="post" action="/settings/mapping/{{selected.config_id}}/draft"><button class="btn btn-primary">基于此版本创建 Draft</button></form>{% endif %}
+    {% if selected.status=='DRAFT' %}<form method="post" action="/settings/mapping/{{selected.config_id}}/validate"><button class="btn">校验 Draft</button></form><form method="post" action="/settings/mapping/{{selected.config_id}}/activate"><button class="btn btn-primary">激活 V{{selected.version}}</button></form>{% endif %}
+    <a class="btn" href="/settings/mapping/{{selected.config_id}}/export?format=yaml">导出 YAML</a><a class="btn" href="/settings/mapping/{{selected.config_id}}/export?format=json">导出 JSON</a>
+  </div>
+</section>
+
+{% if validation %}
+<section class="di-card"><div class="di-cardhead"><div><h2>Mapping 校验结果</h2><p>存在 ERROR 时不得激活。</p></div></div><div class="map-validation-list">{% for v in validation %}<div class="{{v.level|lower}}"><b>{{v.level}}</b><span>{{v.message}}</span><small>{{v.code}}</small></div>{% endfor %}</div></section>
+{% endif %}
+
+<section class="di-card">
+  <div class="di-cardhead"><div><h2>字段映射明细</h2><p>源字段 / Alias → 标准字段 → Knowledge 目标。中文业务含义优先，技术 Key 保留用于追溯。</p></div><span>{{selected.mappings|length}} 项</span></div>
+  <form method="post" action="/settings/mapping/{{selected.config_id}}/save">
+    <div class="table-wrap map-table-wrap"><table class="mapping-table map-ued-table"><thead><tr><th>标准字段</th><th>Excel 源字段 / Alias</th><th>目标域</th><th>目标字段</th><th>必填</th><th>启用</th></tr></thead><tbody>
+    {% for m in selected.mappings %}<tr>
+      <td><input name="canonical_{{m.mapping_id}}" value="{{m.canonical_field}}" {% if selected.status!='DRAFT' %}disabled{% endif %}><small>Canonical Field</small></td>
+      <td><div class="map-source-edit"><label><span>Excel 源字段</span><textarea aria-label="Excel 源字段" name="headers_{{m.mapping_id}}" {% if selected.status!='DRAFT' %}disabled{% endif %}>{{m.source_headers|join('\n')}}</textarea></label><label><span>业务别名 Alias</span><textarea aria-label="业务别名 Alias" name="aliases_{{m.mapping_id}}" {% if selected.status!='DRAFT' %}disabled{% endif %} placeholder="每行一个业务别名">{{m.aliases|join('\n')}}</textarea></label></div></td>
+      <td><select name="domain_{{m.mapping_id}}" {% if selected.status!='DRAFT' %}disabled{% endif %}>{% for d in target_domains %}<option value="{{d}}" {% if d==m.target_domain %}selected{% endif %}>{% if d=='PRODUCT_EXTENSION' %}产品扩展字段{% elif d=='ISSUE_FACT' %}问题事实{% elif d=='PRODUCT_CONTEXT' %}产品上下文{% elif d=='OCCURRENCE' %}发生信息{% elif d=='ESCAPE' %}流出信息{% elif d=='SOLUTION' %}解决措施{% elif d=='VERIFICATION' %}验证信息{% elif d=='RECURRENCE' %}再发信息{% else %}{{d}}{% endif %}</option>{% endfor %}</select><small>{{m.target_domain}}</small></td>
+      <td><input name="target_{{m.mapping_id}}" value="{{m.target_field}}" {% if selected.status!='DRAFT' %}disabled{% endif %}></td>
+      <td class="map-check"><input type="checkbox" name="required_{{m.mapping_id}}" {% if m.required %}checked{% endif %} {% if selected.status!='DRAFT' %}disabled{% endif %}></td>
+      <td class="map-check"><input type="checkbox" name="enabled_{{m.mapping_id}}" {% if m.enabled %}checked{% endif %} {% if selected.status!='DRAFT' %}disabled{% endif %}></td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+    {% if selected.status=='DRAFT' %}<div class="di-actions map-savebar"><span>修改只保存到 Draft V{{selected.version}}，不会立即影响正式导入。</span><button class="btn btn-primary">保存 Draft</button></div>{% endif %}
+  </form>
+</section>
+
+<section class="di-card">
+  <div class="di-cardhead"><div><h2>版本历史</h2><p>Mapping 版本与来源可追溯；历史版本不会被新版本覆盖。</p></div></div>
+  <div class="table-wrap"><table class="data-table map-version-table"><thead><tr><th>版本</th><th>状态</th><th>来源</th><th>更新时间</th><th>激活时间</th><th></th></tr></thead><tbody>{% for c in configs %}<tr><td><b>V{{c.version}}</b></td><td><span class="map-status-chip {{c.status|lower}}">{{c.status}}</span></td><td>{% if c.source_type=='YAML_MIGRATION' %}YAML Migration{% else %}{{c.source_type}}{% endif %}</td><td>{{c.updated_at}}</td><td>{{c.activated_at or '-'}}</td><td><a href="/settings/mapping?business_type={{business_type}}&config_id={{c.config_id}}">查看 →</a></td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+<section class="di-card map-tech-trace"><details><summary>来源与技术追溯</summary><div class="map-trace-grid"><div><span>Source File</span><code>{{selected.source_file or '-'}}</code></div><div><span>Source Hash</span><code>{{(selected.source_hash or '-')[:32]}}</code></div><div><span>Migration Time</span><b>{{migration.completed_at if migration else '-'}}</b></div><div><span>Activated At</span><b>{{selected.activated_at or '-'}}</b></div></div></details></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,46 @@
+{
+  "case_id": "CASE-000004",
+  "source_excel": "/Users/xiamin/.codex/.chatgpt-projects/g-p-6a8704863f9481918a817037d9468f7e/p0_integration/KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.1_QUALITY_CAPABILITY_P0_RC1/tests/samples/cases_m2.xlsx",
+  "sheet_name": "Sheet1",
+  "excel_row": 5,
+  "raw_fields": {
+    "ITR单号": "ITR-004",
+    "考核年份": "2026",
+    "考核月份": "7",
+    "IPMT": "IPMT-B",
+    "SPDT": "SPDT-C",
+    "责任部门(二级)": "部门C",
+    "问题描述": "问题四",
+    "TRC发生": "",
+    "TRC流出": "",
+    "MRC发生": "",
+    "MRC流出": "",
+    "复盘报告": "dup.pdf",
+    "原因一级分类": "",
+    "原因二级分类": ""
+  },
+  "mapped_fields": {
+    "itr_id": "ITR-004",
+    "assessment_year": "2026",
+    "assessment_month": "7",
+    "ipmt": "IPMT-B",
+    "spdt": "SPDT-C",
+    "responsible_department_level2": "部门C",
+    "original_description": "问题四",
+    "trc_occurrence": "",
+    "trc_escape": "",
+    "mrc_occurrence": "",
+    "mrc_escape": "",
+    "report_filename": "dup.pdf",
+    "cause_level1": "",
+    "cause_level2": "",
+    "cause_level3": "",
+    "cause_level4": ""
+  },
+  "parse_status": "PARTIAL_SUCCESS",
+  "parse_warnings": [
+    "MISSING_COLUMN:原因三级分类",
+    "MISSING_COLUMN:原因四级分类"
+  ],
+  "generated_at": "2026-08-24T05:27:32.515990+00:00"
+}

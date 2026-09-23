@@ -1,0 +1,96 @@
+excel:
+  sheet_name: null
+  header_row: null
+  auto_detect:
+    enabled: true
+    scan_rows: 20
+    minimum_required_matches: 2
+    preferred_fields:
+    - ITR单号
+    - 问题描述
+    - IPMT
+    - SPDT
+    - 复盘报告
+  column_aliases:
+    ITR单号:
+    - ITR单号
+    - ITR编号
+    - ITR
+    - 问题单号
+    考核年份:
+    - 考核年份
+    - 年份
+    - 考核年
+    考核月份:
+    - 考核月份
+    - 月份
+    - 考核月
+    IPMT:
+    - IPMT
+    - 一级组织
+    SPDT:
+    - SPDT
+    - 二级组织
+    责任部门(二级):
+    - 责任部门(二级)
+    - 责任部门（二级）
+    - 责任部门二级
+    - 责任部门
+    问题描述:
+    - 问题描述
+    - 问题现象
+    - 问题概述
+    TRC发生:
+    - TRC发生
+    - 发生TRC
+    - 技术发生根因
+    TRC流出:
+    - TRC流出
+    - 流出TRC
+    - 技术流出根因
+    MRC发生:
+    - MRC发生
+    - 发生MRC
+    - 管理发生根因
+    MRC流出:
+    - MRC流出
+    - 流出MRC
+    - 管理流出根因
+    复盘报告:
+    - 复盘报告
+    - 复盘材料
+    - 8D报告
+    - 报告文件名
+    原因一级分类:
+    - 原因一级分类
+    - 一级原因分类
+    - 原因分类一级
+    原因二级分类:
+    - 原因二级分类
+    - 二级原因分类
+    - 原因分类二级
+    原因三级分类:
+    - 原因三级分类
+    - 三级原因分类
+    - 原因分类三级
+    原因四级分类:
+    - 原因四级分类
+    - 四级原因分类
+    - 原因分类四级
+  fields:
+    itr_id: ITR单号
+    assessment_year: 考核年份
+    assessment_month: 考核月份
+    ipmt: IPMT
+    spdt: SPDT
+    responsible_department_level2: 责任部门(二级)
+    original_description: 问题描述
+    trc_occurrence: TRC发生
+    trc_escape: TRC流出
+    mrc_occurrence: MRC发生
+    mrc_escape: MRC流出
+    report_filename: 复盘报告
+    cause_level1: 原因一级分类
+    cause_level2: 原因二级分类
+    cause_level3: 原因三级分类
+    cause_level4: 原因四级分类

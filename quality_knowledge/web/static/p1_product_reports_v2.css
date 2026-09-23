@@ -1,0 +1,13 @@
+.qr-ai-story>h2{margin:20px 0 2px}.qr-ai-story>p{margin:0 0 12px;color:var(--text-secondary)}
+.qr-diagnosis{border-top:4px solid var(--brand-500)}
+.qr-diagnosis>article{padding:10px 0;border-bottom:1px solid var(--divider)}
+.qr-diagnosis>article:last-child{border-bottom:0}.qr-diagnosis article b{font-size:14px}
+.qr-diagnosis article p{margin:5px 0;color:var(--text-secondary);line-height:1.65}
+.qr-diagnosis article small{display:block;margin-top:7px;color:var(--text-tertiary)}
+.qr-diagnosis article small a{margin-right:4px}
+.qr-diagnosis.landscape{border-top-color:#4b5fb4;background:linear-gradient(180deg,#f7f8fd,#fff 80px)}
+.qr-diagnosis.occurrence{border-top-color:#d97706;background:linear-gradient(180deg,#fff9ef,#fff 80px)}
+.qr-diagnosis.escape{border-top-color:#7c55b5;background:linear-gradient(180deg,#faf6fd,#fff 80px)}
+.qr-diagnosis.engineering{border-top-color:#1677c8;background:linear-gradient(180deg,#f3f9fd,#fff 80px)}
+.qr-diagnosis.management{border-top-color:#16865c;background:linear-gradient(180deg,#f2faf6,#fff 80px)}
+.qr-conflict p strong{color:var(--text-primary)}.qr-conflict small a{color:var(--danger)}

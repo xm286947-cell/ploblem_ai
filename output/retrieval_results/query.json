@@ -1,0 +1,18 @@
+{
+  "text": "CAN报文过多，接收处理拥堵后软件重启",
+  "cause_description": "",
+  "solution": "",
+  "organization": {
+    "ipmt": "传动IPMT",
+    "spdt": "低压变频器SPDT",
+    "responsible_department_level2": ""
+  },
+  "filters": {
+    "product": "",
+    "domain": ""
+  },
+  "classification": {
+    "cause_level1": "",
+    "cause_level2": ""
+  }
+}

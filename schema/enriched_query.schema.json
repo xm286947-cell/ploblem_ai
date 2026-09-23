@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "enriched_query.schema.json",
+  "title": "Enriched Query",
+  "type": "object",
+  "required": [
+    "metadata",
+    "original",
+    "normalized",
+    "extensions",
+    "inferred",
+    "ai_warnings",
+    "enrich_status"
+  ],
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "required": [
+        "value",
+        "evidence_type",
+        "confidence",
+        "reason"
+      ],
+      "properties": {
+        "value": {},
+        "evidence_type": {
+          "enum": [
+            "EXPLICIT",
+            "SUMMARIZED",
+            "INFERRED",
+            "UNKNOWN"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "factArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fact"
+      }
+    }
+  },
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "query_id",
+        "ai_enricher_version",
+        "prompt_version",
+        "model_provider",
+        "model_name",
+        "generated_at"
+      ],
+      "properties": {
+        "query_id": {
+          "type": "string"
+        },
+        "source_normalized_query": {
+          "type": "string"
+        },
+        "normalizer_version": {
+          "type": "string"
+        },
+        "normalization_config_version": {
+          "type": "string"
+        },
+        "ai_enricher_version": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "model_provider": {
+          "type": "string"
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "original": {
+      "type": "object"
+    },
+    "normalized": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "inferred": {
+      "type": "object",
+      "required": [
+        "problem_summary",
+        "standard_problem_description",
+        "failure_objects",
+        "phenomena",
+        "trigger_conditions",
+        "impacts",
+        "operating_context",
+        "trc",
+        "mrc",
+        "root_causes",
+        "failure_mechanisms",
+        "contributing_factors",
+        "classification",
+        "keywords",
+        "tags",
+        "solution",
+        "information_gaps",
+        "overall_confidence"
+      ],
+      "properties": {
+        "problem_summary": {
+          "$ref": "#/$defs/fact"
+        },
+        "standard_problem_description": {
+          "$ref": "#/$defs/fact"
+        },
+        "failure_objects": {
+          "$ref": "#/$defs/factArray"
+        },
+        "phenomena": {
+          "$ref": "#/$defs/factArray"
+        },
+        "trigger_conditions": {
+          "$ref": "#/$defs/factArray"
+        },
+        "impacts": {
+          "$ref": "#/$defs/factArray"
+        },
+        "operating_context": {
+          "$ref": "#/$defs/factArray"
+        },
+        "trc": {
+          "$ref": "#/$defs/fact"
+        },
+        "mrc": {
+          "$ref": "#/$defs/fact"
+        },
+        "root_causes": {
+          "$ref": "#/$defs/factArray"
+        },
+        "failure_mechanisms": {
+          "$ref": "#/$defs/factArray"
+        },
+        "contributing_factors": {
+          "$ref": "#/$defs/factArray"
+        },
+        "classification": {
+          "type": "object",
+          "required": [
+            "cause_level1",
+            "cause_level2",
+            "cause_level3",
+            "cause_level4"
+          ],
+          "properties": {
+            "cause_level1": {
+              "$ref": "#/$defs/fact"
+            },
+            "cause_level2": {
+              "$ref": "#/$defs/fact"
+            },
+            "cause_level3": {
+              "$ref": "#/$defs/fact"
+            },
+            "cause_level4": {
+              "$ref": "#/$defs/fact"
+            }
+          },
+          "additionalProperties": false
+        },
+        "keywords": {
+          "$ref": "#/$defs/factArray"
+        },
+        "tags": {
+          "$ref": "#/$defs/factArray"
+        },
+        "solution": {
+          "type": "object",
+          "required": [
+            "current_solution",
+            "solution_object",
+            "solution_mechanism",
+            "expected_effect"
+          ],
+          "properties": {
+            "current_solution": {
+              "$ref": "#/$defs/fact"
+            },
+            "solution_object": {
+              "$ref": "#/$defs/fact"
+            },
+            "solution_mechanism": {
+              "$ref": "#/$defs/fact"
+            },
+            "expected_effect": {
+              "$ref": "#/$defs/fact"
+            }
+          },
+          "additionalProperties": false
+        },
+        "information_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "description"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "MISSING_TRC",
+                  "MISSING_MRC",
+                  "MISSING_VERSION",
+                  "MISSING_TRIGGER",
+                  "MISSING_ENVIRONMENT",
+                  "MISSING_REPRODUCTION_STEPS",
+                  "OTHER"
+                ]
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "overall_confidence": {
+          "$ref": "#/$defs/fact"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ai_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "enrich_status": {
+      "enum": [
+        "SUCCESS",
+        "PARTIAL_SUCCESS",
+        "SKIPPED",
+        "AI_ENRICH_FAILED",
+        "AI_OUTPUT_INVALID"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

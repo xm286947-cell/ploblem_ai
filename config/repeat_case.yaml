@@ -1,0 +1,25 @@
+version: "2.1.1"
+
+workspace:
+  input: input
+  output: output
+  knowledge: knowledge
+  logs: output/logs
+  temp: workspace/temp
+  reports: output/reports
+
+analysis:
+  input_excel: input/new_cases.xlsx
+  top_k: 5
+  overwrite: false
+  skip_ai: false
+  mock_ai: false
+
+candidate_filter:
+  department:
+    enabled: true
+    mode: preferred
+
+report:
+  show_department: false
+  archive_by_run: true

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Raw Excel Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "source_excel",
+    "sheet_name",
+    "excel_row",
+    "raw_fields",
+    "mapped_fields",
+    "parse_status",
+    "parse_warnings",
+    "generated_at"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string"
+    },
+    "source_excel": {
+      "type": "string"
+    },
+    "sheet_name": {
+      "type": "string"
+    },
+    "excel_row": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "raw_fields": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "mapped_fields": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "parse_status": {
+      "type": "string",
+      "enum": [
+        "SUCCESS",
+        "PARTIAL_SUCCESS",
+        "FAILED"
+      ]
+    },
+    "parse_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "generated_at": {
+      "type": "string"
+    }
+  }
+}

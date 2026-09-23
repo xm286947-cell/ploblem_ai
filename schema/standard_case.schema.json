@@ -1,0 +1,631 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schema/standard_case.schema.json",
+  "title": "REPEAT_CASE Standard Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "business_context",
+    "problem",
+    "analysis",
+    "classification",
+    "solution",
+    "knowledge"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "itr_id",
+        "assessment_year",
+        "assessment_month",
+        "report_filename",
+        "source_excel",
+        "source_report",
+        "builder_version",
+        "schema_version",
+        "fusion_rule_version",
+        "prompt_version",
+        "model_version",
+        "source_file_version",
+        "created_at",
+        "updated_at",
+        "generated_at",
+        "parse_status",
+        "evidence_status"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "itr_id": {
+          "type": "string"
+        },
+        "assessment_year": {
+          "type": "string"
+        },
+        "assessment_month": {
+          "type": "string"
+        },
+        "report_filename": {
+          "type": "string"
+        },
+        "source_excel": {
+          "type": "string"
+        },
+        "source_report": {
+          "type": "string"
+        },
+        "builder_version": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "fusion_rule_version": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "source_file_version": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "parse_status": {
+          "type": "string",
+          "enum": [
+            "SUCCESS",
+            "PARTIAL_SUCCESS",
+            "NO_REPORT",
+            "REPORT_NOT_FOUND",
+            "REPORT_PARSE_FAILED",
+            "AI_ENRICH_FAILED",
+            "SCHEMA_INVALID",
+            "BUILD_FAILED"
+          ]
+        },
+        "evidence_status": {
+          "type": "string"
+        }
+      }
+    },
+    "business_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ipmt",
+        "spdt",
+        "responsible_department_level2",
+        "organization_path",
+        "product",
+        "domain"
+      ],
+      "properties": {
+        "ipmt": {
+          "type": "string"
+        },
+        "spdt": {
+          "type": "string"
+        },
+        "responsible_department_level2": {
+          "type": "string"
+        },
+        "organization_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "product": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        }
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_description",
+        "report_description",
+        "standard_description",
+        "problem_summary",
+        "phenomenon",
+        "failure_object",
+        "trigger_condition",
+        "impact",
+        "event_replay"
+      ],
+      "properties": {
+        "original_description": {
+          "type": "string"
+        },
+        "report_description": {
+          "type": "string"
+        },
+        "standard_description": {
+          "type": "string"
+        },
+        "problem_summary": {
+          "type": "string"
+        },
+        "phenomenon": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "failure_object": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "trigger_condition": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "impact": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "event_replay": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trc",
+        "mrc",
+        "five_why",
+        "root_cause",
+        "failure_mechanism",
+        "contributing_factors"
+      ],
+      "properties": {
+        "trc": {
+          "$ref": "#/$defs/cause_group"
+        },
+        "mrc": {
+          "$ref": "#/$defs/cause_group"
+        },
+        "five_why": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "root_cause": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "failure_mechanism": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "contributing_factors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original",
+        "report_verified",
+        "ai_inferred",
+        "classification_conflict",
+        "conflict_description"
+      ],
+      "properties": {
+        "original": {
+          "$ref": "#/$defs/classification_original"
+        },
+        "report_verified": {
+          "$ref": "#/$defs/classification_report"
+        },
+        "ai_inferred": {
+          "$ref": "#/$defs/classification_ai"
+        },
+        "classification_conflict": {
+          "type": "boolean"
+        },
+        "conflict_description": {
+          "type": "string"
+        }
+      }
+    },
+    "solution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_solution",
+        "corrective_actions",
+        "preventive_actions",
+        "management_actions",
+        "technical_actions",
+        "reusable_actions",
+        "action_status"
+      ],
+      "properties": {
+        "original_solution": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "corrective_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "preventive_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "management_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "technical_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "reusable_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        },
+        "action_status": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_value"
+          }
+        }
+      }
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_summary",
+        "normalized_problem",
+        "phenomenon_tags",
+        "failure_object_tags",
+        "trigger_tags",
+        "failure_mechanism_tags",
+        "cause_tags",
+        "solution_tags",
+        "keywords",
+        "retrieval_text",
+        "quality_flags",
+        "ai_model",
+        "prompt_version",
+        "generated_at"
+      ],
+      "properties": {
+        "case_summary": {
+          "type": "string"
+        },
+        "normalized_problem": {
+          "type": "string"
+        },
+        "phenomenon_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failure_object_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "trigger_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failure_mechanism_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cause_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "solution_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retrieval_text": {
+          "type": "string"
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "REPORT_MISSING",
+              "LOW_CONFIDENCE_TRC",
+              "LOW_CONFIDENCE_MRC",
+              "CLASSIFICATION_CONFLICT",
+              "MISSING_ROOT_CAUSE",
+              "MISSING_PREVENTIVE_ACTION",
+              "REPORT_PARSE_WARNING",
+              "AI_ENRICH_WARNING"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "ai_model": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_type",
+        "source_location",
+        "quote"
+      ],
+      "properties": {
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "EXCEL",
+            "PDF",
+            "AI",
+            "SYSTEM"
+          ]
+        },
+        "source_location": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "source_type",
+        "source_location",
+        "confidence",
+        "evidence_refs"
+      ],
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "EXCEL",
+            "PDF",
+            "AI",
+            "FUSED",
+            "SYSTEM"
+          ]
+        },
+        "source_location": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_ref"
+          }
+        }
+      }
+    },
+    "cause_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original",
+        "report",
+        "standard",
+        "confidence",
+        "evidence_refs"
+      ],
+      "properties": {
+        "original": {
+          "type": "string"
+        },
+        "report": {
+          "type": "string"
+        },
+        "standard": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_ref"
+          }
+        }
+      }
+    },
+    "cause_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "occurrence",
+        "escape"
+      ],
+      "properties": {
+        "occurrence": {
+          "$ref": "#/$defs/cause_detail"
+        },
+        "escape": {
+          "$ref": "#/$defs/cause_detail"
+        }
+      }
+    },
+    "classification_original": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cause_level1",
+        "cause_level2"
+      ],
+      "properties": {
+        "cause_level1": {
+          "type": "string"
+        },
+        "cause_level2": {
+          "type": "string"
+        },
+        "cause_level3": {
+          "type": "string"
+        },
+        "cause_level4": {
+          "type": "string"
+        }
+      }
+    },
+    "classification_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cause_level1",
+        "cause_level2",
+        "evidence_refs"
+      ],
+      "properties": {
+        "cause_level1": {
+          "type": "string"
+        },
+        "cause_level2": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_ref"
+          }
+        },
+        "cause_level3": {
+          "type": "string"
+        },
+        "cause_level4": {
+          "type": "string"
+        }
+      }
+    },
+    "classification_ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cause_level1",
+        "cause_level2",
+        "reason",
+        "confidence"
+      ],
+      "properties": {
+        "cause_level1": {
+          "type": "string"
+        },
+        "cause_level2": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "cause_level3": {
+          "type": "string"
+        },
+        "cause_level4": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

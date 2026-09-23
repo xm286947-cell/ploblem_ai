@@ -1,0 +1,52 @@
+query_excel:
+  sheet_name: null
+  header_row: null
+  header_rows: auto
+  auto_detect:
+    enabled: true
+    scan_rows: 20
+    scan_columns: 64
+    minimum_required_matches: 2
+    preferred_fields:
+      - 查询编号
+      - 问题描述
+      - ITR单号
+      - IPMT
+      - SPDT
+  required_fields:
+    - query_id
+    - problem_description
+  fields:
+    query_id: 查询编号
+    itr_id: ITR单号
+    ipmt: IPMT
+    spdt: SPDT
+    responsible_department_level2: 责任部门（二级）
+    product: 产品
+    domain: 领域
+    problem_description: 问题描述
+    cause_description: 原因描述
+    cause_level1: 原因一级分类
+    cause_level2: 原因二级分类
+    cause_level3: 原因三级分类
+    cause_level4: 原因四级分类
+    corrective_action: 纠正措施
+    preventive_action: 预防措施
+    remark: 备注
+  column_aliases:
+    查询编号: [Query ID, QueryID, 分析编号, 任务编号]
+    ITR单号: [ITR, ITR编号, 问题单号, 单号]
+    IPMT: [一级组织]
+    SPDT: [二级组织]
+    责任部门（二级）: [责任部门(二级), 责任部门, 二级责任部门]
+    产品: [产品名称, 产品线]
+    领域: [技术领域, 业务领域]
+    问题描述: [问题现象, 现象描述, 故障描述, 问题说明]
+    原因描述: [原因定位, 根因描述, 原因分析, TRC描述]
+    原因一级分类: [原因一级, 一级原因分类]
+    原因二级分类: [原因二级, 二级原因分类]
+    原因三级分类: [原因三级, 三级原因分类]
+    原因四级分类: [原因四级, 四级原因分类]
+    纠正措施: [解决措施, 纠正行动, 临时措施]
+    预防措施: [防复发措施, 预防行动]
+    备注: [补充说明, 说明]

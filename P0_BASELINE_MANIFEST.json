@@ -1,0 +1,52 @@
+{
+  "manifest_version": "1.0",
+  "release": "KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.1_QUALITY_CAPABILITY_P0_RC1",
+  "created_at": "2026-08-23T15:41:54+0800",
+  "status": "G0_COMPLETED_G1_REVISED_V1_1_FROZEN",
+  "source_directory": "p2_baseline/KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.0_P2_DATA_INTAKE_MAPPING_UED_RC1",
+  "source_effective_file_count": 453,
+  "source_normalized_sha256": "a16535966c00aa951aa909a73f7272f0fa1fb495a3ea4b9ec64d0e44d1d9da38",
+  "source_full_zip": "deliverables/KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.0_UED_COMMON_GAP_RC2_FULL.zip",
+  "source_full_zip_sha256": "8f4a9f17f9b6ffeba0366fc408499bbde8dea968ab13d3d1e21b409cd78f8145",
+  "copy_verification": "FULL_RECURSIVE_DIFF_EQUAL_BEFORE_MANIFEST",
+  "requirements": {
+    "file": "deliverables/QUALITY_ENGINEERING_MANAGEMENT_FORWARD_RISK_REQUIREMENTS_V1.0.md",
+    "sha256": "1b1a08dc084f8ada93de150429c094ad31631cdc829836519bba4545a95a4bc2"
+  },
+  "task_baseline": {
+    "file": "deliverables/QUALITY_CAPABILITY_P0_TASK_BASELINE_V1.0.md",
+    "sha256": "326746136f4765ccd6bda1d69050b75f5cc908d53b4eca11d435ae943da76086"
+  },
+  "scope_baseline": {
+    "file": "deliverables/QUALITY_CAPABILITY_P0_P1_SCOPE_BASELINE_V1.0.md",
+    "sha256": "69c0c87341bd151ce84ed07c202d0e58dd8ea2d3cd7f2738c2d09154f27da34d"
+  },
+  "scope_decision": {
+    "file": "deliverables/QUALITY_CAPABILITY_P0_SCOPE_DECISION_20260823.md",
+    "sha256": "879bd91c7658d3440893658ea74d0d570da527e4ccdedc27355d6db7331aa5f3"
+  },
+  "implementation_design": {
+    "file": "deliverables/QUALITY_CAPABILITY_P0_IMPLEMENTATION_DESIGN_V1.1.md",
+    "sha256": "20a9df693a9a2330184db17a52453dac91cc9b86d904e06f8698ca0004904849"
+  },
+  "implementation_design_addendum": {
+    "file": "deliverables/QUALITY_CAPABILITY_P0_DESIGN_ADDENDUM_V1.1.2.md",
+    "sha256": "1c33f20eebc3f1c51b3bb62d29ec22a7ceacc15ab49a1a025b3ac3578d4e4de7"
+  },
+  "plc_baseline_seed": {
+    "file": "quality_knowledge/config/plc_fields.yaml",
+    "sha256": "443101e36d2c5b610bc62d130701ed7352175a12696bfc20fd9c5fe47fa411c3",
+    "seed_defined_items": 60,
+    "active_business_standard_fields": 59,
+    "excluded_technical_columns": ["SourceID"],
+    "aliases": 111,
+    "required_field": "ISSUE_FACT.business_issue_id"
+  },
+  "development_rules": {
+    "p2_baseline_read_only": true,
+    "sources_read_only": true,
+    "legacy_validation_database_compatibility_required": false,
+    "p1_implementation_allowed": false,
+    "shared_file_write_lock_required": true
+  }
+}

@@ -1,0 +1,59 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_insights.css?v=p0-insights-patch02">{% endblock %}
+{% block breadcrumb %}质量洞察{% endblock %}
+{% block body %}<main class="p0-shell" data-p0-insights data-api-prefix="{{ api_prefix }}">
+    <header class="p0-header">
+      <div>
+        <h1>质量洞察</h1>
+        <p>从质量工程能力与质量管理能力两个视角识别业务关键矛盾。</p>
+      </div>
+      <div><div class="p0-scope" data-scope-summary aria-live="polite">正在读取数据口径…</div></div>
+    </header>
+
+    <section class="p0-card p0-filters" aria-labelledby="filter-title">
+      <div class="p0-card-head"><div><h2 id="filter-title">分析范围</h2><p>筛选会同时作用于矛盾排名、矩阵和关联问题。</p></div><button type="button" class="p0-ghost" data-reset>重置</button></div>
+      <form data-filter-form>
+        <label>业务 / 产品<select name="business_type" data-products><option value="">全部业务</option></select></label>
+        <label>月份<select name="month" data-months><option value="">全部月份</option></select></label>
+        <label>问题领域<select name="issue_domain" data-taxonomy="issue_domain"><option value="">全部领域</option></select></label>
+        <label>生命周期<select name="lifecycle_phase" data-taxonomy="lifecycle_phase"><option value="">全部阶段</option></select></label>
+        <button class="p0-primary" type="submit">应用筛选</button>
+      </form>
+      <div class="p0-status-line" data-status-line role="status"></div>
+    </section>
+
+    <section class="p0-card p0-overview" data-overview aria-live="polite">
+      <div class="p0-loading">正在加载质量洞察…</div>
+    </section>
+
+    <section class="p0-columns" data-rankings hidden>
+      <article class="p0-card p0-ranking" data-ranking="engineering">
+        <div class="p0-card-head"><div><span class="p0-kicker">QUALITY ENGINEERING</span><h2>质量工程关键矛盾</h2><p>需求、设计、实现、集成、测试、发布及软硬协同等工程能力。</p></div><span class="p0-count" data-ranking-count></span></div>
+        <div class="p0-ranking-list" data-ranking-list></div>
+      </article>
+      <article class="p0-card p0-ranking" data-ranking="management">
+        <div class="p0-card-head"><div><span class="p0-kicker">QUALITY MANAGEMENT</span><h2>质量管理关键矛盾</h2><p>基线、变更、配置、门禁、已知问题和横向复制等管理机制。</p></div><span class="p0-count" data-ranking-count></span></div>
+        <div class="p0-ranking-list" data-ranking-list></div>
+      </article>
+    </section>
+
+    <section class="p0-matrices" data-matrices hidden>
+      <article class="p0-card"><div class="p0-card-head"><div><h2>MRC × 质量能力</h2><p>观察发生/流出 MRC 与工程或管理能力的交叉集中区。</p></div></div><div class="p0-table-wrap" data-matrix="mrc_x_capability"></div></article>
+      <article class="p0-card"><div class="p0-card-head"><div><h2>生命周期 × 质量能力</h2><p>定位问题在哪个生命周期阶段形成能力缺口。</p></div></div><div class="p0-table-wrap" data-matrix="lifecycle_x_capability"></div></article>
+    </section>
+
+    <section class="p0-card p0-empty" data-state="empty" hidden><h2>当前范围暂无可用数据</h2><p>调整业务、月份、领域或生命周期后重试。</p></section>
+    <section class="p0-card p0-error" data-state="error" hidden><h2>质量洞察暂时不可用</h2><p data-error-message>请稍后重试。</p><button class="p0-primary" type="button" data-retry>重新加载</button></section>
+    <section class="p0-card p0-partial" data-state="partial" hidden><strong>数据覆盖不完整</strong><span data-partial-message>部分问题尚未完成分析，排名可能低估。</span></section>
+  </main>
+
+  <aside class="p0-drawer" data-drawer hidden aria-labelledby="drawer-title">
+    <div class="p0-drawer-head"><div><span class="p0-kicker">关联问题</span><h2 id="drawer-title" data-drawer-title>相关问题</h2></div><button type="button" class="p0-close" data-drawer-close aria-label="关闭">×</button></div>
+    <div class="p0-drawer-meta" data-drawer-meta></div>
+    <div class="p0-drawer-body" data-drawer-body><div class="p0-loading">正在加载关联问题…</div></div>
+    <nav class="p0-pagination" data-drawer-pagination hidden><button type="button" data-page-prev>上一页</button><span data-page-label></span><button type="button" data-page-next>下一页</button></nav>
+  </aside>
+  <div class="p0-backdrop" data-backdrop hidden></div>
+{% endblock %}
+{% block page_scripts %}<script>window.P0_INSIGHTS_API={{ api_prefix|tojson }};</script><script src="/p0/static/p0_insights.js?v=p0-insights-patch02" defer></script>{% endblock %}

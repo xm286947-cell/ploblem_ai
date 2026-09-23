@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retrieval Document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_id",
+    "case_id",
+    "itr_id",
+    "source_case_path",
+    "organization",
+    "classification",
+    "filters",
+    "title",
+    "text",
+    "tags",
+    "quality_flags",
+    "content_hash",
+    "generated_at"
+  ],
+  "properties": {
+    "document_id": {
+      "type": "string"
+    },
+    "case_id": {
+      "type": "string"
+    },
+    "itr_id": {
+      "type": "string"
+    },
+    "source_case_path": {
+      "type": "string"
+    },
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ipmt",
+        "spdt",
+        "responsible_department_level2"
+      ],
+      "properties": {
+        "ipmt": {
+          "type": "string"
+        },
+        "spdt": {
+          "type": "string"
+        },
+        "responsible_department_level2": {
+          "type": "string"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cause_level1",
+        "cause_level2",
+        "source"
+      ],
+      "properties": {
+        "cause_level1": {
+          "type": "string"
+        },
+        "cause_level2": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "AI",
+            "REPORT",
+            "ORIGINAL",
+            "EMPTY"
+          ]
+        }
+      }
+    },
+    "filters": {
+      "type": "object"
+    },
+    "title": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "quality_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "content_hash": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    }
+  }
+}

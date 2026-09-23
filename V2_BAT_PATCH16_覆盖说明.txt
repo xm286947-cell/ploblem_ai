@@ -1,0 +1,22 @@
+V2 BAT 启动版 PATCH16
+
+适用目录：你当前正在使用的 V2 完整包根目录。
+判断方式：该目录中应当存在 start_quality_capability_p1.bat。
+
+安装：
+1. 关闭正在运行的服务。
+2. 将本 ZIP 中的全部内容解压到 V2 完整包根目录，保持目录结构并覆盖同名文件。
+3. 双击 start_quality_capability_p1.bat 启动。
+4. 不需要执行 Python 命令，不需要 init，不需要迁移数据库。
+
+入口：
+- 问题工作台：http://127.0.0.1:8080/issues
+- 质量洞察：http://127.0.0.1:8080/statistics
+- 产品综合报告：http://127.0.0.1:8080/product-reports
+
+Prompt 的正确位置：
+quality_knowledge\prompts\product_quality_report.md
+
+注意：
+- legacy_service.py 仅是内部兼容适配器文件名，不代表旧版本入口。
+- 本补丁以 V2 的 start_quality_capability_p1.bat 为唯一启动方式。

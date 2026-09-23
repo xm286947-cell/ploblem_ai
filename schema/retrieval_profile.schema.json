@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "retrieval_profile.schema.json",
+  "title": "Retrieval Profile",
+  "type": "object",
+  "required": ["metadata", "query_id", "product_profile", "filter", "high_weight", "medium_weight", "low_weight", "channels", "profile_quality", "warnings", "lineage", "build_status"],
+  "$defs": {
+    "profileField": {
+      "type": "object",
+      "required": ["field", "values", "source", "confidence", "completeness", "base_weight", "effective_weight"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "values": {"type": "array", "items": {"type": ["string", "number", "boolean"]}},
+        "source": {"enum": ["ORIGINAL", "NORMALIZED", "INFERRED", "EMPTY", "DIRECT"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "completeness": {"type": "number", "minimum": 0, "maximum": 1},
+        "base_weight": {"type": "number", "minimum": 0},
+        "effective_weight": {"type": "number", "minimum": 0},
+        "filter_mode": {"enum": ["HARD", "SOFT", "PREFER", "EXPANDABLE"]},
+        "evidence_type": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["source_standard_query", "profile_builder_version", "profile_schema_version", "profile_config_version", "generated_at"],
+      "additionalProperties": {"type": "string"}
+    },
+    "query_id": {"type": "string", "minLength": 1},
+    "product_profile": {"type": "string"},
+    "filter": {"type": "array", "items": {"$ref": "#/$defs/profileField"}},
+    "high_weight": {"type": "array", "items": {"$ref": "#/$defs/profileField"}},
+    "medium_weight": {"type": "array", "items": {"$ref": "#/$defs/profileField"}},
+    "low_weight": {"type": "array", "items": {"$ref": "#/$defs/profileField"}},
+    "channels": {
+      "type": "object",
+      "required": ["keyword", "bm25", "embedding", "llm_rerank"],
+      "properties": {
+        "keyword": {"type": "array", "items": {"type": "string"}},
+        "bm25": {"type": "array", "items": {"type": "string"}},
+        "embedding": {"type": "array", "items": {"type": "string"}},
+        "llm_rerank": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "profile_quality": {
+      "type": "object",
+      "required": ["available_fields", "configured_fields", "coverage", "weighted_coverage"],
+      "properties": {
+        "available_fields": {"type": "integer", "minimum": 0},
+        "configured_fields": {"type": "integer", "minimum": 1},
+        "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "weighted_coverage": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "warnings": {"type": "array", "items": {"type": "object"}},
+    "lineage": {"type": "object", "additionalProperties": {"type": "string"}},
+    "build_status": {"enum": ["SUCCESS", "PARTIAL_SUCCESS", "RETRIEVAL_PROFILE_BUILD_FAILED"]}
+  },
+  "additionalProperties": false
+}

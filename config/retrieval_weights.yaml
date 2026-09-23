@@ -1,0 +1,16 @@
+version: "1.0"
+weights:
+  organization_ipmt: 0.0
+  organization_spdt: 0.0
+  cause_level1: 0.0
+  cause_level2: 0.0
+  phenomenon: 0.0
+  failure_object: 0.0
+  trigger_condition: 0.0
+  trc: 0.0
+  mrc: 0.0
+  failure_mechanism: 0.0
+  keywords: 0.0
+  case_quality_adjustment: 0.0
+notes:
+  - V1.0仅冻结评分结构，不冻结具体权重。

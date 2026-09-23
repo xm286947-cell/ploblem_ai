@@ -1,0 +1,69 @@
+{
+  "case_id": "CASE-M3TEST",
+  "report_filename": "m3-sample.pdf",
+  "matched_report_path": "/Users/xiamin/.codex/.chatgpt-projects/g-p-6a8704863f9481918a817037d9468f7e/p0_integration/KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.1_QUALITY_CAPABILITY_P0_RC1/tests/samples/reports/m3-sample.pdf",
+  "candidate_paths": [
+    "/Users/xiamin/.codex/.chatgpt-projects/g-p-6a8704863f9481918a817037d9468f7e/p0_integration/KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_ENGINE_V1.1_QUALITY_CAPABILITY_P0_RC1/tests/samples/reports/m3-sample.pdf"
+  ],
+  "match_type": "EXACT_FILENAME",
+  "file_hash": "test",
+  "file_size": 3013,
+  "parse_status": "PARSED",
+  "sections": [
+    {
+      "section_type": "problem_description",
+      "title": "Problem Description",
+      "content": "Controller restarts when CAN message volume increases.",
+      "page_refs": [
+        1
+      ],
+      "block_refs": [
+        "P0001-B0001"
+      ],
+      "confidence": 1.0
+    },
+    {
+      "section_type": "trc_occurrence",
+      "title": "TRC Occurrence",
+      "content": "The receive queue has no bounded filtering and protection bit handling is incorrect.",
+      "page_refs": [
+        2
+      ],
+      "block_refs": [
+        "P0002-B0001"
+      ],
+      "confidence": 1.0
+    },
+    {
+      "section_type": "root_cause",
+      "title": "Root Cause",
+      "content": "All bus IDs are processed, causing congestion and self-protection restart.",
+      "page_refs": [
+        3
+      ],
+      "block_refs": [
+        "P0003-B0001"
+      ],
+      "confidence": 1.0
+    },
+    {
+      "section_type": "preventive_actions",
+      "title": "Preventive Actions",
+      "content": "Add ID whitelist, queue limit, overload monitoring and stress tests.",
+      "page_refs": [
+        4
+      ],
+      "block_refs": [
+        "P0004-B0001"
+      ],
+      "confidence": 1.0
+    }
+  ],
+  "unclassified_blocks": [],
+  "parse_warnings": [],
+  "generated_at": "2026-07-22T00:00:00Z",
+  "page_count": 4,
+  "total_characters": 345,
+  "tables": [],
+  "parsed_at": "2026-08-24T05:27:32.570789+00:00"
+}

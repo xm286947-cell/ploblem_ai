@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}数据接入 / 字段预检{% endblock %}
+{% block body %}
+<div class="di-pagehead">
+  <div><h1>字段映射预检</h1><p>检查 Excel 字段最终进入 Knowledge 的位置。当前仍是 Preview，尚未写入正式 Knowledge。</p></div>
+  <a class="btn" href="{% if mapping_preview_only %}/settings/mapping?business_type={{result.detected_business_type}}&config_id={{result.mapping_config_id}}{% else %}/import{% endif %}">{% if mapping_preview_only %}返回 Mapping 配置{% else %}重新上传{% endif %}</a>
+</div>
+{% if mapping_preview_only %}<div class="di-alert warning"><b>Mapping 配置预览</b><span>当前使用 Mapping V{{result.mapping_config_version}}（{{result.mapping_config_status}}）进行表头比对；请完成 Draft 修改、校验和激活后，再从“数据接入”正式导入。</span></div>{% endif %}
+<div class="di-diagnostic">诊断 ID：<code>{{result.diagnostic_id}}</code> · 日志：<code>{{result.diagnostic_log}}</code></div>
+
+<section class="di-flow" aria-label="数据接入步骤">
+  <div class="di-step done"><span>✓</span><div><b>上传数据</b><small>{{result.source_file}}</small></div></div><i></i>
+  <div class="di-step active"><span>2</span><div><b>字段预检</b><small>{{result.detected_business_type}} · Mapping V{{result.mapping_config_version}}</small></div></div><i></i>
+  <div class="di-step"><span>3</span><div><b>确认导入</b><small>{{result.data_row_count}} 条数据</small></div></div>
+</section>
+
+{% set differences=result.fields|selectattr('mapping_status','in',['UNMATCHED','CONFLICT'])|list %}
+{% if differences or result.missing_mapping_fields %}
+<section class="di-card diff-workbench">
+  <div class="di-cardhead"><div><h2>④ 字段差异处理</h2><p>仅显示 Excel 与当前 Mapping 的差异；提交后自动创建 Draft，不会直接修改正式版本。</p></div><span class="di-import-state warning">{{result.difference_count}} 项差异</span></div>
+  <form method="post" action="/import/mapping-differences/apply">
+    <input type="hidden" name="intake_session_id" value="{{result.intake_session_id}}"><input type="hidden" name="difference_count" value="{{differences|length}}">
+    <div class="diff-field-toolbar"><label>检索已有标准字段 <input id="diff-field-search" type="search" placeholder="中文名、Alias、Key 均可搜索"></label><small>选项显示中文业务名、标准 Key 和目标位置；输入关键词可快速筛选。</small></div>
+    <div class="table-wrap"><table class="data-table diff-table"><thead><tr><th>Excel 新增/冲突字段</th><th>建议</th><th>处理方式</th><th>目标字段</th><th>扩展 Key</th></tr></thead><tbody>
+    {% for f in differences %}<tr><td><b>{{f.source_header}}</b><input type="hidden" name="source_{{loop.index0}}" value="{{f.source_header}}"><small>{{f.mapping_status}}</small></td><td>{% for s in f.suggestions %}<span class="diff-suggestion">{{s.canonical_field}} · {{s.score}}%</span>{% else %}<span class="di-muted">无相似建议</span>{% endfor %}</td><td><select class="diff-action" name="action_{{loop.index0}}"><option value="IGNORE">暂不处理</option><option value="ALIAS">作为已有字段 Alias</option><option value="EXTENSION">新增产品扩展字段</option><option value="RAW_ONLY">仅保留 Raw</option></select></td><td><select class="diff-target-field" name="target_{{loop.index0}}"><option value="">选择已有字段</option>{% for c in result.mapping_choices %}<option value="{{c.mapping_id}}" data-search="{{c.search_text}}">{{c.display_name}}（{{c.canonical_field}}）→ {{c.target_domain}}.{{c.target_field}}{% if c.aliases_preview %} · {{c.aliases_preview}}{% endif %}</option>{% endfor %}</select></td><td><input name="extension_key_{{loop.index0}}" placeholder="自动生成或填写 Key"></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if result.missing_mapping_fields %}<div class="diff-missing"><h3>当前 Excel 未出现的 Mapping 字段</h3><p>可选择在新 Draft 中停用；必填字段不能在这里停用。</p><div>{% for m in result.missing_mapping_fields %}<label class="{% if m.required %}required{% endif %}"><input type="checkbox" name="disable_mapping_id" value="{{m.mapping_id}}" {% if m.required %}disabled{% endif %}> <b>{{m.canonical_field}}</b><small>{{m.target_domain}}.{{m.target_field}}{% if m.required %} · 必填，禁止停用{% endif %}</small></label>{% endfor %}</div></div>{% endif %}
+    <div class="di-actions diff-actions"><span>未选择的字段保持 Raw/现状</span><button class="btn btn-primary">生成 Mapping Draft</button></div>
+  </form>
+</section>
+{% endif %}
+
+<section class="di-card">
+  <div class="di-cardhead">
+    <div><h2>② 文件识别结果</h2><p>{{result.source_file}} · {{result.source_sheet}}</p></div>
+    <span class="di-import-state {% if result.conflict or result.required_missing %}danger{% elif result.unmatched %}warning{% else %}ok{% endif %}">{% if result.conflict or result.required_missing %}当前不可导入{% elif result.unmatched %}建议检查后导入{% else %}可以导入{% endif %}</span>
+  </div>
+  <div class="di-filefacts">
+    <div><span>业务类型</span><b>{{result.detected_business_type}}</b></div>
+    <div><span>选中 Sheet</span><b>{{result.source_sheet}}</b><small>候选：{{result.available_sheets|join('、') if result.available_sheets else result.source_sheet}}</small></div>
+    <div><span>数据行</span><b>{{result.data_row_count}}</b></div>
+    <div><span>当前映射</span><b>{{result.detected_business_type}} Mapping V{{result.mapping_config_version}} · {{result.mapping_config_status}}</b></div>
+  </div>
+</section>
+
+<section class="di-card">
+  <div class="di-cardhead"><div><h2>③ 字段覆盖情况</h2><p>异常字段优先处理；Raw 原始数据始终完整保留。</p></div></div>
+  <div class="di-coverage">
+    <div><span>源字段</span><strong>{{result.total_source_fields}}</strong><small>Excel Header</small></div>
+    <div class="good"><span>已结构化</span><strong>{{result.matched_structured}}</strong><small>进入公共 Knowledge</small></div>
+    <div class="good"><span>扩展字段</span><strong>{{result.matched_extension}}</strong><small>进入产品扩展</small></div>
+    <div class="{% if result.unmatched %}warn{% endif %}"><span>未匹配</span><strong>{{result.unmatched}}</strong><small>保留 Raw，可进一步配置</small></div>
+    <div class="{% if result.conflict %}bad{% endif %}"><span>冲突</span><strong>{{result.conflict}}</strong><small>正式导入前必须解决</small></div>
+    <div class="{% if result.required_missing %}bad{% endif %}"><span>必填缺失</span><strong>{{result.required_missing}}</strong><small>阻止正式导入</small></div>
+    <div class="coverage-main"><span>总体覆盖率</span><strong>{{result.coverage_percent}}%</strong><small>{% if result.conflict or result.required_missing %}存在阻塞项{% elif result.unmatched %}建议检查未匹配字段{% else %}字段接入完整{% endif %}</small></div>
+  </div>
+</section>
+
+<section class="di-card">
+  <div class="di-cardhead di-preview-head">
+    <div><h2>⑤ 字段映射 Preview</h2><p>Excel 原字段 → 业务标准字段 → Knowledge 目标。</p></div>
+    <div class="di-preview-search"><input id="di-field-search" placeholder="搜索源字段…"><a class="btn" href="/settings/mapping?business_type={{result.detected_business_type}}">配置字段映射</a></div>
+  </div>
+  <div class="di-filterbar" id="di-filterbar">
+    <button class="active" data-filter="ALL">全部 <b>{{result.total_source_fields}}</b></button>
+    <button data-filter="MATCHED_STRUCTURED">已匹配 <b>{{result.matched_structured}}</b></button>
+    <button data-filter="MATCHED_EXTENSION">扩展字段 <b>{{result.matched_extension}}</b></button>
+    <button data-filter="UNMATCHED">未匹配 <b>{{result.unmatched}}</b></button>
+    <button data-filter="CONFLICT">冲突 <b>{{result.conflict}}</b></button>
+    <button data-filter="REQUIRED_MISSING">必填缺失 <b>{{result.required_missing}}</b></button>
+  </div>
+  <div class="table-wrap di-preview-tablewrap">
+    <table class="data-table di-preview-table">
+      <thead><tr><th>Excel 原字段</th><th>标准字段</th><th>Knowledge 目标</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for f in result.fields %}
+      <tr data-status="{{f.mapping_status}}" data-search="{{f.source_header}} {{f.canonical_header}} {{f.target_field or ''}} {{f.target_domain or ''}}">
+        <td><b>{{f.source_header}}</b></td>
+        <td>{{f.canonical_header or '-'}}</td>
+        <td><b>{{f.target_field or '-'}}</b><small>{% if f.target_domain %}{{f.target_domain|replace('_',' ')|title}}{% else %}Raw Only / 未映射{% endif %}</small></td>
+        <td><span class="di-mapstate {{f.mapping_status|lower}}">{% if f.mapping_status=='MATCHED_STRUCTURED' %}已匹配{% elif f.mapping_status=='MATCHED_EXTENSION' %}扩展字段{% elif f.mapping_status=='UNMATCHED' %}未匹配{% elif f.mapping_status=='CONFLICT' %}冲突{% elif f.mapping_status=='REQUIRED_MISSING' %}必填缺失{% else %}{{f.mapping_status}}{% endif %}</span></td>
+        <td>{% if f.mapping_status in ['UNMATCHED','CONFLICT','REQUIRED_MISSING'] %}<a class="di-rowaction" href="/settings/mapping?business_type={{result.detected_business_type}}">处理 →</a>{% else %}<span class="di-muted">查看</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if not mapping_preview_only %}<section class="di-card di-commit-card">
+  <div class="di-commit-info"><span>⑥ 准备正式导入</span><strong>{{result.source_file}}</strong><small>{{result.detected_business_type}} · Mapping V{{result.mapping_config_version}} · {{result.data_row_count}} 条 · Coverage {{result.coverage_percent}}%</small></div>
+  <div class="di-actions">
+    {% if result.conflict or result.required_missing %}
+      <a class="btn btn-primary" href="/settings/mapping?business_type={{result.detected_business_type}}">先处理字段映射</a>
+    {% else %}
+      <form method="post" action="/import/confirm" onsubmit="return confirm('确认使用 {{result.detected_business_type}} Mapping V{{result.mapping_config_version}} 正式导入 {{result.data_row_count}} 条数据？')"><input type="hidden" name="intake_session_id" value="{{result.intake_session_id}}"><button class="btn btn-primary">确认正式导入</button></form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<script>
+(function(){
+  const rows=[...document.querySelectorAll('.di-preview-table tbody tr')];
+  const search=document.getElementById('di-field-search');
+  const filters=[...document.querySelectorAll('#di-filterbar button')];
+  let active='ALL';
+  function render(){const q=(search.value||'').trim().toLowerCase();rows.forEach(r=>{const okStatus=active==='ALL'||r.dataset.status===active;const okSearch=!q||(r.dataset.search||'').toLowerCase().includes(q);r.hidden=!(okStatus&&okSearch);});}
+  filters.forEach(b=>b.addEventListener('click',()=>{active=b.dataset.filter;filters.forEach(x=>x.classList.toggle('active',x===b));render();}));
+  search.addEventListener('input',render);
+  const fieldSearch=document.getElementById('diff-field-search');
+  if(fieldSearch){fieldSearch.addEventListener('input',function(){const q=(this.value||'').trim().toLowerCase();document.querySelectorAll('.diff-target-field option').forEach(o=>{if(!o.value){o.hidden=false;return;}o.hidden=!!q&&!((o.dataset.search||o.textContent||'').toLowerCase().includes(q));});});}
+})();
+</script>
+{% endblock %}

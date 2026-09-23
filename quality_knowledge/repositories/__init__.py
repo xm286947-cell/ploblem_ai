@@ -1,0 +1,2 @@
+from .sqlite_repository import SqliteIssueKnowledgeRepository
+from .v1_repository import IssueKnowledgeRepository

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "normalized_query.schema.json",
+  "title": "Normalized Query",
+  "type": "object",
+  "required": ["metadata", "original", "normalized", "extensions", "normalization_trace", "normalization_warnings", "normalize_status"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["query_id", "normalizer_version", "normalization_config_version", "generated_at"],
+      "properties": {
+        "query_id": {"type": "string"},
+        "source_raw_query": {"type": "string"},
+        "raw_query_version": {"type": "string"},
+        "normalizer_version": {"type": "string"},
+        "normalization_config_version": {"type": "string"},
+        "generated_at": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "original": {"type": "object"},
+    "normalized": {"type": "object"},
+    "extensions": {"type": "object"},
+    "normalization_trace": {"type": "object"},
+    "normalization_warnings": {"type": "array", "items": {"type": "object"}},
+    "normalize_status": {"enum": ["SUCCESS", "PARTIAL_SUCCESS", "NORMALIZATION_FAILED"]}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,16 @@
+retrieval:
+  top_k: 10
+  recall_k: 100
+  minimum_score: 0.05
+  minimum_returned_candidates: 5
+  filter_mode: soft
+  weights:
+    problem: 0.40
+    cause: 0.35
+    classification: 0.05
+    solution: 0.15
+    organization: 0.05
+  organization_weights:
+    ipmt: 0.35
+    spdt: 0.45
+    responsible_department_level2: 0.2

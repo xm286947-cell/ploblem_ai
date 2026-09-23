@@ -1,0 +1,253 @@
+{
+  "metadata": {
+    "query_id": "QUERY001",
+    "source_normalized_query": "knowledge/normalized_query/QUERY001.json",
+    "normalizer_version": "M7.2-N1",
+    "normalization_config_version": "1.0",
+    "ai_enricher_version": "M7.2-A1",
+    "prompt_version": "1.0",
+    "model_provider": "openai_compatible",
+    "model_name": "mock-model",
+    "generated_at": "2026-07-23T16:13:58.560685+00:00"
+  },
+  "original": {
+    "itr_id": "ITR-NEW-001",
+    "ipmt": "IPMT-A",
+    "spdt": "SPDT-A",
+    "responsible_department_level2": "软件部",
+    "product": "产品A",
+    "domain": "通信",
+    "problem_description": "CAN报文过多时软件异常重启",
+    "cause_description": "接收队列拥堵导致任务阻塞",
+    "cause_level1": "软件设计",
+    "cause_level2": "资源管理",
+    "cause_level3": "消息队列",
+    "cause_level4": "CAN接收缓存",
+    "corrective_action": "增加队列水位监控",
+    "preventive_action": "增加报文限流和压力测试",
+    "remark": "M7.1示例",
+    "query_id": "QUERY001"
+  },
+  "normalized": {
+    "itr_id": "ITR-NEW-001",
+    "ipmt": "IPMT-A",
+    "spdt": "SPDT-A",
+    "responsible_department_level2": "软件部",
+    "product": "产品A",
+    "domain": "通信",
+    "problem_description": "CAN报文过多时软件异常重启",
+    "cause_description": "接收队列拥堵导致任务阻塞",
+    "cause_level1": "软件设计",
+    "cause_level2": "资源管理",
+    "cause_level3": "消息队列",
+    "cause_level4": "CAN接收缓存",
+    "corrective_action": "增加队列水位监控",
+    "preventive_action": "增加报文限流和压力测试",
+    "remark": "M7.1示例",
+    "query_id": "QUERY001"
+  },
+  "extensions": {},
+  "inferred": {
+    "problem_summary": {
+      "value": "高负载下消息处理拥堵并触发重启",
+      "evidence_type": "SUMMARIZED",
+      "confidence": 0.96,
+      "reason": "由问题描述归纳"
+    },
+    "standard_problem_description": {
+      "value": "系统在高负载消息输入条件下出现处理拥堵，随后触发保护性重启。",
+      "evidence_type": "SUMMARIZED",
+      "confidence": 0.95,
+      "reason": "标准化问题表达"
+    },
+    "failure_objects": [
+      {
+        "value": "消息接收处理模块",
+        "evidence_type": "INFERRED",
+        "confidence": 0.82,
+        "reason": "根据消息处理拥堵推断"
+      }
+    ],
+    "phenomena": [
+      {
+        "value": "消息处理拥堵",
+        "evidence_type": "EXPLICIT",
+        "confidence": 0.99,
+        "reason": "输入明确描述"
+      },
+      {
+        "value": "系统重启",
+        "evidence_type": "EXPLICIT",
+        "confidence": 0.99,
+        "reason": "输入明确描述"
+      }
+    ],
+    "trigger_conditions": [
+      {
+        "value": "高负载消息输入",
+        "evidence_type": "EXPLICIT",
+        "confidence": 0.97,
+        "reason": "输入明确描述"
+      }
+    ],
+    "impacts": [
+      {
+        "value": "业务处理中断",
+        "evidence_type": "INFERRED",
+        "confidence": 0.74,
+        "reason": "由系统重启推断"
+      }
+    ],
+    "operating_context": [],
+    "trc": {
+      "value": "消息接收缺少有效流量控制或队列保护",
+      "evidence_type": "INFERRED",
+      "confidence": 0.72,
+      "reason": "候选技术原因"
+    },
+    "mrc": {
+      "value": "",
+      "evidence_type": "UNKNOWN",
+      "confidence": 0.0,
+      "reason": "输入不足"
+    },
+    "root_causes": [
+      {
+        "value": "高负载场景下处理能力与输入速率不匹配",
+        "evidence_type": "INFERRED",
+        "confidence": 0.68,
+        "reason": "候选根因"
+      }
+    ],
+    "failure_mechanisms": [
+      {
+        "value": "输入速率持续高于处理速率导致队列堆积并触发保护重启",
+        "evidence_type": "INFERRED",
+        "confidence": 0.8,
+        "reason": "失效链推断"
+      }
+    ],
+    "contributing_factors": [],
+    "classification": {
+      "cause_level3": {
+        "value": "",
+        "evidence_type": "UNKNOWN",
+        "confidence": 0.0,
+        "reason": "无法判断"
+      },
+      "cause_level4": {
+        "value": "",
+        "evidence_type": "UNKNOWN",
+        "confidence": 0.0,
+        "reason": "无法判断"
+      },
+      "cause_level1": {
+        "value": "软件设计",
+        "evidence_type": "INFERRED",
+        "confidence": 0.62,
+        "reason": "候选分类"
+      },
+      "cause_level2": {
+        "value": "资源与流量控制",
+        "evidence_type": "INFERRED",
+        "confidence": 0.55,
+        "reason": "候选分类"
+      }
+    },
+    "keywords": [
+      {
+        "value": "高负载",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      },
+      {
+        "value": "消息拥堵",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      },
+      {
+        "value": "队列堆积",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      },
+      {
+        "value": "重启",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      }
+    ],
+    "tags": [
+      {
+        "value": "性能",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      },
+      {
+        "value": "稳定性",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      },
+      {
+        "value": "流量控制",
+        "evidence_type": "INFERRED",
+        "confidence": 0.5,
+        "reason": ""
+      }
+    ],
+    "solution": {
+      "current_solution": {
+        "value": "",
+        "evidence_type": "UNKNOWN",
+        "confidence": 0.0,
+        "reason": "输入未提供"
+      },
+      "solution_object": {
+        "value": "消息接收队列",
+        "evidence_type": "INFERRED",
+        "confidence": 0.66,
+        "reason": "候选治理对象"
+      },
+      "expected_effect": {
+        "value": "降低队列持续堆积和保护重启概率",
+        "evidence_type": "INFERRED",
+        "confidence": 0.64,
+        "reason": "候选预期效果"
+      },
+      "solution_mechanism": {
+        "value": "限流与削峰缓冲",
+        "evidence_type": "INFERRED",
+        "confidence": 0.64,
+        "reason": "候选措施机理"
+      }
+    },
+    "information_gaps": [
+      {
+        "type": "MISSING_MRC",
+        "description": "缺少管理根因信息"
+      },
+      {
+        "type": "MISSING_REPRODUCTION_STEPS",
+        "description": "缺少完整复现步骤"
+      }
+    ],
+    "overall_confidence": {
+      "value": 0.78,
+      "evidence_type": "INFERRED",
+      "confidence": 0.5,
+      "reason": ""
+    }
+  },
+  "ai_warnings": [
+    {
+      "code": "AI_EVIDENCE_SCHEMA_MIGRATED",
+      "message": "AI输出字段形态已迁移为统一Evidence结构"
+    }
+  ],
+  "enrich_status": "SUCCESS"
+}

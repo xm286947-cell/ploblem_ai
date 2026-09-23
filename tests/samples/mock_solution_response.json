@@ -1,0 +1,15 @@
+{
+  "historical_solution_summary": "历史案例通过修正接收队列边界判断并增加拥堵保护与压力测试完成闭环。",
+  "corrective_actions": ["修正CAN接收队列控制位判断逻辑", "增加队列满保护与异常恢复"],
+  "preventive_actions": ["补充高报文量压力测试", "增加队列深度与丢帧监控"],
+  "verification_evidence": ["修复后完成高负载回归测试且未复现"],
+  "closure_status": "CLOSED",
+  "effectiveness": "EFFECTIVE",
+  "applicability": "PARTIAL_REUSE",
+  "reusable_actions": ["复用队列满保护设计", "复用高报文量压力测试方法"],
+  "adaptation_required": ["根据当前产品队列深度和任务周期调整阈值"],
+  "reuse_risks": ["若当前根因不是队列控制异常，直接复制修复代码可能无效"],
+  "evidence_gaps": [],
+  "analysis_summary": "历史措施有验证证据，可部分复用，但需结合当前队列参数和根因确认后实施。",
+  "confidence": 0.9
+}

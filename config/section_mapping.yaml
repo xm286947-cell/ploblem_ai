@@ -1,0 +1,90 @@
+version: '1.0'
+section_types:
+  problem_description:
+    titles:
+    - 问题描述
+    - 问题概述
+    - 故障描述
+    - 现象描述
+    - Problem Description
+  event_replay:
+    titles:
+    - 问题发生过程
+    - 问题回放
+    - 事件经过
+    - 故障过程
+    - 现场回溯
+    - 过程回放
+  impact:
+    titles:
+    - 问题影响
+    - 影响范围
+    - 客户影响
+    - 业务影响
+  trc_occurrence:
+    titles:
+    - TRC发生
+    - 发生TRC
+    - 技术发生根因
+    - 技术根因-发生
+    - TRC Occurrence
+  trc_escape:
+    titles:
+    - TRC流出
+    - 流出TRC
+    - 技术流出根因
+    - 技术根因-流出
+  mrc_occurrence:
+    titles:
+    - MRC发生
+    - 发生MRC
+    - 管理发生根因
+    - 管理根因-发生
+  mrc_escape:
+    titles:
+    - MRC流出
+    - 流出MRC
+    - 管理流出根因
+    - 管理根因-流出
+  five_why:
+    titles:
+    - 5Why
+    - 5 Why
+    - 五问分析
+    - Why分析
+  root_cause:
+    titles:
+    - Root Cause
+    - 根因
+    - 根本原因
+    - 最终根因
+  corrective_actions:
+    titles:
+    - 纠正措施
+    - 临时措施
+    - 整改措施
+  preventive_actions:
+    titles:
+    - 预防措施
+    - 防复发措施
+    - 长期措施
+    - Preventive Actions
+  management_actions:
+    titles:
+    - 管理措施
+    - 管理改进
+  technical_actions:
+    titles:
+    - 技术措施
+    - 技术改进
+  action_status:
+    titles:
+    - 措施闭环状态
+    - 闭环状态
+    - 完成状态
+classifier:
+  exact_title_score: 1.0
+  prefix_title_score: 0.95
+  contains_title_score: 0.85
+  minimum_score: 0.7
+  max_title_length: 40

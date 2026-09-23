@@ -1,0 +1,25 @@
+.p0-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  background: #f8fbff;
+  border-bottom: 1px solid var(--line);
+}
+.p0-batch-bar label { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.p0-batch-bar select { height: 34px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; padding: 0 8px; }
+.p0-batch-bar .p0-primary:disabled { opacity: .45; cursor: not-allowed; }
+.p0-batch-result { color: var(--muted); }
+.p0-check-column { width: 54px; text-align: center !important; }
+.p0-check-column input { width: 17px; height: 17px; cursor: pointer; }
+.p0-job { margin-top: 18px; overflow: hidden; }
+.p0-progress { height: 8px; background: #e8eef5; margin: 0 20px 18px; border-radius: 8px; overflow: hidden; }
+.p0-progress i { display: block; width: 0; height: 100%; background: var(--primary); transition: width .25s ease; }
+.p0-stage { display: inline-flex; padding: 3px 8px; border-radius: 999px; background: #eef2f7; color: #64748b; font-size: 11px; font-weight: 700; }
+.p0-stage-running { background: #dbeafe; color: #1d4ed8; }
+.p0-stage-completed { background: #dcfce7; color: #166534; }
+.p0-stage-partial, .p0-stage-partial_failed { background: #fef3c7; color: #92400e; }
+.p0-stage-failed { background: #fee2e2; color: #b91c1c; }
+.p0-stage-not_run { background: #f1f5f9; color: #94a3b8; }
+.p0-error-text { display: block; color: #b91c1c; max-width: 280px; margin-top: 4px; }

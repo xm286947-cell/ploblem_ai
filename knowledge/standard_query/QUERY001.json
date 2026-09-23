@@ -1,0 +1,347 @@
+{
+  "metadata": {
+    "query_id": "QUERY001",
+    "source_enriched_query": "knowledge/enriched_query/QUERY001.json",
+    "standard_builder_version": "M7.2-B1",
+    "standard_query_schema_version": "1.0",
+    "generated_at": "2026-07-23T16:13:58.566135+00:00"
+  },
+  "organization": {
+    "ipmt": {
+      "original": "IPMT-A",
+      "normalized": "IPMT-A",
+      "inferred": "",
+      "effective": "IPMT-A",
+      "effective_source": "NORMALIZED"
+    },
+    "spdt": {
+      "original": "SPDT-A",
+      "normalized": "SPDT-A",
+      "inferred": "",
+      "effective": "SPDT-A",
+      "effective_source": "NORMALIZED"
+    },
+    "responsible_department_level2": {
+      "original": "软件部",
+      "normalized": "软件部",
+      "inferred": "",
+      "effective": "软件部",
+      "effective_source": "NORMALIZED"
+    },
+    "product": {
+      "original": "产品A",
+      "normalized": "产品A",
+      "inferred": "",
+      "effective": "产品A",
+      "effective_source": "NORMALIZED"
+    },
+    "domain": {
+      "original": "通信",
+      "normalized": "通信",
+      "inferred": "",
+      "effective": "通信",
+      "effective_source": "NORMALIZED"
+    }
+  },
+  "problem": {
+    "query_id": {
+      "original": "QUERY001",
+      "normalized": "QUERY001",
+      "inferred": "",
+      "effective": "QUERY001",
+      "effective_source": "NORMALIZED"
+    },
+    "itr_id": {
+      "original": "ITR-NEW-001",
+      "normalized": "ITR-NEW-001",
+      "inferred": "",
+      "effective": "ITR-NEW-001",
+      "effective_source": "NORMALIZED"
+    },
+    "problem_description": {
+      "original": "CAN报文过多时软件异常重启",
+      "normalized": "CAN报文过多时软件异常重启",
+      "inferred": "",
+      "effective": "CAN报文过多时软件异常重启",
+      "effective_source": "NORMALIZED"
+    },
+    "problem_summary": {
+      "original": "",
+      "normalized": "",
+      "inferred": "高负载下消息处理拥堵并触发重启",
+      "effective": "高负载下消息处理拥堵并触发重启",
+      "effective_source": "INFERRED",
+      "confidence": 0.96,
+      "evidence_type": "SUMMARIZED",
+      "inference_reason": "由问题描述归纳"
+    },
+    "standard_problem_description": {
+      "original": "",
+      "normalized": "",
+      "inferred": "系统在高负载消息输入条件下出现处理拥堵，随后触发保护性重启。",
+      "effective": "系统在高负载消息输入条件下出现处理拥堵，随后触发保护性重启。",
+      "effective_source": "INFERRED",
+      "confidence": 0.95,
+      "evidence_type": "SUMMARIZED",
+      "inference_reason": "标准化问题表达"
+    },
+    "failure_objects": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "消息接收处理模块"
+      ],
+      "effective": [
+        "消息接收处理模块"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "phenomena": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "消息处理拥堵",
+        "系统重启"
+      ],
+      "effective": [
+        "消息处理拥堵",
+        "系统重启"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "trigger_conditions": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "高负载消息输入"
+      ],
+      "effective": [
+        "高负载消息输入"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "impacts": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "业务处理中断"
+      ],
+      "effective": [
+        "业务处理中断"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "operating_context": {
+      "original": [],
+      "normalized": [],
+      "inferred": [],
+      "effective": [],
+      "effective_source": "EMPTY"
+    }
+  },
+  "analysis": {
+    "cause_description": {
+      "original": "接收队列拥堵导致任务阻塞",
+      "normalized": "接收队列拥堵导致任务阻塞",
+      "inferred": "",
+      "effective": "接收队列拥堵导致任务阻塞",
+      "effective_source": "NORMALIZED"
+    },
+    "trc": {
+      "original": "",
+      "normalized": "",
+      "inferred": "消息接收缺少有效流量控制或队列保护",
+      "effective": "消息接收缺少有效流量控制或队列保护",
+      "effective_source": "INFERRED",
+      "confidence": 0.72,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选技术原因"
+    },
+    "mrc": {
+      "original": "",
+      "normalized": "",
+      "inferred": "",
+      "effective": "",
+      "effective_source": "EMPTY",
+      "confidence": 0.0,
+      "evidence_type": "UNKNOWN",
+      "inference_reason": "输入不足"
+    },
+    "root_causes": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "高负载场景下处理能力与输入速率不匹配"
+      ],
+      "effective": [
+        "高负载场景下处理能力与输入速率不匹配"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "failure_mechanisms": {
+      "original": [],
+      "normalized": [],
+      "inferred": [
+        "输入速率持续高于处理速率导致队列堆积并触发保护重启"
+      ],
+      "effective": [
+        "输入速率持续高于处理速率导致队列堆积并触发保护重启"
+      ],
+      "effective_source": "INFERRED"
+    },
+    "contributing_factors": {
+      "original": [],
+      "normalized": [],
+      "inferred": [],
+      "effective": [],
+      "effective_source": "EMPTY"
+    }
+  },
+  "classification": {
+    "cause_level1": {
+      "original": "软件设计",
+      "normalized": "软件设计",
+      "inferred": "软件设计",
+      "effective": "软件设计",
+      "effective_source": "NORMALIZED",
+      "confidence": 0.62,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选分类"
+    },
+    "cause_level2": {
+      "original": "资源管理",
+      "normalized": "资源管理",
+      "inferred": "资源与流量控制",
+      "effective": "资源管理",
+      "effective_source": "NORMALIZED",
+      "confidence": 0.55,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选分类"
+    },
+    "cause_level3": {
+      "original": "消息队列",
+      "normalized": "消息队列",
+      "inferred": "",
+      "effective": "消息队列",
+      "effective_source": "NORMALIZED",
+      "confidence": 0.0,
+      "evidence_type": "UNKNOWN",
+      "inference_reason": "无法判断"
+    },
+    "cause_level4": {
+      "original": "CAN接收缓存",
+      "normalized": "CAN接收缓存",
+      "inferred": "",
+      "effective": "CAN接收缓存",
+      "effective_source": "NORMALIZED",
+      "confidence": 0.0,
+      "evidence_type": "UNKNOWN",
+      "inference_reason": "无法判断"
+    }
+  },
+  "solution": {
+    "corrective_action": {
+      "original": "增加队列水位监控",
+      "normalized": "增加队列水位监控",
+      "inferred": "",
+      "effective": "增加队列水位监控",
+      "effective_source": "NORMALIZED"
+    },
+    "preventive_action": {
+      "original": "增加报文限流和压力测试",
+      "normalized": "增加报文限流和压力测试",
+      "inferred": "",
+      "effective": "增加报文限流和压力测试",
+      "effective_source": "NORMALIZED"
+    },
+    "current_solution": {
+      "original": "",
+      "normalized": "",
+      "inferred": "",
+      "effective": "",
+      "effective_source": "EMPTY",
+      "confidence": 0.0,
+      "evidence_type": "UNKNOWN",
+      "inference_reason": "输入未提供"
+    },
+    "solution_object": {
+      "original": "",
+      "normalized": "",
+      "inferred": "消息接收队列",
+      "effective": "消息接收队列",
+      "effective_source": "INFERRED",
+      "confidence": 0.66,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选治理对象"
+    },
+    "solution_mechanism": {
+      "original": "",
+      "normalized": "",
+      "inferred": "限流与削峰缓冲",
+      "effective": "限流与削峰缓冲",
+      "effective_source": "INFERRED",
+      "confidence": 0.64,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选措施机理"
+    },
+    "expected_effect": {
+      "original": "",
+      "normalized": "",
+      "inferred": "降低队列持续堆积和保护重启概率",
+      "effective": "降低队列持续堆积和保护重启概率",
+      "effective_source": "INFERRED",
+      "confidence": 0.64,
+      "evidence_type": "INFERRED",
+      "inference_reason": "候选预期效果"
+    }
+  },
+  "knowledge": {
+    "keywords": [
+      "高负载",
+      "消息拥堵",
+      "队列堆积",
+      "重启"
+    ],
+    "tags": [
+      "性能",
+      "稳定性",
+      "流量控制"
+    ],
+    "information_gaps": [
+      {
+        "type": "MISSING_MRC",
+        "description": "缺少管理根因信息"
+      },
+      {
+        "type": "MISSING_REPRODUCTION_STEPS",
+        "description": "缺少完整复现步骤"
+      }
+    ],
+    "overall_confidence": 0.78
+  },
+  "extensions": {},
+  "completeness": {
+    "input_completeness": 1.0,
+    "analysis_completeness": 0.9,
+    "input_fields_present": 12,
+    "input_fields_total": 12,
+    "analysis_fields_present": 9,
+    "analysis_fields_total": 10
+  },
+  "quality_flags": [
+    "INFORMATION_GAPS_PRESENT"
+  ],
+  "lineage": {
+    "raw_query_version": "",
+    "field_mapping_config_version": "",
+    "normalizer_version": "M7.2-N1",
+    "normalization_config_version": "1.0",
+    "ai_enricher_version": "M7.2-A1",
+    "prompt_version": "1.0",
+    "model_provider": "openai_compatible",
+    "model_name": "mock-model",
+    "standard_builder_version": "M7.2-B1",
+    "standard_query_schema_version": "1.0"
+  },
+  "build_status": "PARTIAL_SUCCESS"
+}

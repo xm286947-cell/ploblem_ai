@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retrieval Query",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "query_id",
+    "ipmt",
+    "spdt",
+    "problem_description",
+    "trc",
+    "mrc",
+    "cause_level1",
+    "cause_level2",
+    "top_n"
+  ],
+  "properties": {
+    "query_id": {
+      "type": "string"
+    },
+    "ipmt": {
+      "type": "string"
+    },
+    "spdt": {
+      "type": "string"
+    },
+    "problem_description": {
+      "type": "string"
+    },
+    "trc": {
+      "type": "string"
+    },
+    "mrc": {
+      "type": "string"
+    },
+    "cause_level1": {
+      "type": "string"
+    },
+    "cause_level2": {
+      "type": "string"
+    },
+    "top_n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  }
+}

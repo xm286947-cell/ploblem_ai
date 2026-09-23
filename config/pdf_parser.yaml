@@ -1,0 +1,21 @@
+version: "1.0"
+extractor: pypdf
+
+text:
+  minimum_page_characters: 20
+  minimum_document_characters: 80
+  normalize_whitespace: true
+  preserve_page_breaks: true
+
+blocks:
+  blank_line_split: true
+  max_block_characters: 6000
+  merge_short_lines: true
+
+section_merge:
+  merge_same_type_across_pages: true
+  max_page_gap: 1
+
+scanned_detection:
+  enabled: true
+  low_text_page_ratio: 0.70

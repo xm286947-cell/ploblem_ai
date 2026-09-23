@@ -1,0 +1,45 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_console.css">{% endblock %}
+{% block breadcrumb %}{{'字段映射与产品配置' if mode=='settings' else '数据接入'}}{% endblock %}
+{% block body %}<main class="console" data-p0-console data-api-prefix="{{api_prefix}}" data-mode="{{mode}}">
+  <header class="head"><div><h1>{{page_title}}</h1><p>统一标准字段，按产品维护源表头；正式写入前必须完成 Preview 与确认。</p></div></header>
+
+  <section class="card" data-settings {% if mode!='settings' %}hidden{% endif %}>
+    <div class="card-head"><div><h2>① 产品配置</h2><p>产品不是固定枚举；新增后自动进入工作台、洞察和数据接入选择器。</p></div><span data-product-total></span></div>
+    <form class="inline-form" data-product-form><input name="product_code" required placeholder="产品编码，如 ROBOT"><input name="product_name" required placeholder="中文名称，如 机器人"><select name="product_type"><option value="SOFTWARE">软件</option><option value="EMBEDDED_SOFTWARE">嵌入式+软件</option><option value="HARDWARE">硬件</option><option value="MECHANICAL">机械</option><option value="MECHATRONIC">机电一体化</option></select><button>新增产品</button></form>
+    <div class="product-list" data-product-list><p class="muted">正在读取产品…</p></div>
+  </section>
+
+  <section class="card" data-settings {% if mode!='settings' %}hidden{% endif %}>
+    <div class="card-head"><div><h2>② 新增统一标准字段</h2><p>新增字段经过 Draft、审批、校验和激活，全程留痕；激活后可同步到产品 Mapping Draft。</p></div><span data-field-total></span></div>
+    <form class="inline-form" data-standard-field-form>
+      <input name="label_zh" required placeholder="中文名，如 固件版本">
+      <select name="proposed_domain" required><option value="ISSUE_FACT">问题事实</option><option value="PRODUCT_CONTEXT">产品上下文</option><option value="OCCURRENCE">发生原因</option><option value="ESCAPE">流出原因</option><option value="SOLUTION">解决措施</option><option value="VERIFICATION">验证信息</option><option value="PRODUCT_EXTENSION">产品扩展</option></select>
+      <input name="proposed_field" required pattern="[a-z][a-z0-9_]*" placeholder="英文 Key，如 firmware_version">
+      <input name="definition_zh" required placeholder="字段定义">
+      <select name="data_type"><option value="string">文本</option><option value="integer">整数</option><option value="number">数值</option><option value="boolean">布尔</option><option value="date">日期</option></select>
+      <select name="product_code" data-field-product><option value="">同步到产品（可选）</option></select>
+      <button>新增并激活</button>
+    </form>
+    <p class="muted" data-field-result>适用于所有产品；选择产品后会同时创建或同步该产品的 Mapping Draft。</p>
+  </section>
+
+  <section class="card" data-settings {% if mode!='settings' %}hidden{% endif %}>
+    <div class="card-head"><div><h2>③ 字段映射</h2><p>统一字段初始基线为 59 个，实际数量动态读取；正式版本只读，点击按钮可基于当前正式版创建可编辑 Draft，并保留已有源表头。</p></div><div><select data-mapping-product><option value="">选择产品</option></select><button type="button" data-create-draft>创建/打开可编辑 Draft</button></div></div>
+    <div class="mapping-toolbar" data-mapping-toolbar hidden><input data-field-search placeholder="搜索中文名、Key、Domain、源表头"><span data-mapping-status></span><button type="button" data-save-mapping>保存 Draft</button><button type="button" data-validate-mapping>Validate</button><button type="button" data-activate-mapping>Activate</button></div>
+    <div class="table-wrap"><table data-mapping-table hidden><thead><tr><th>统一标准字段</th><th>目标路径</th><th>Excel 源表头</th><th>必填</th><th>启用</th></tr></thead><tbody data-mapping-rows></tbody></table></div>
+    <div class="empty" data-mapping-empty>选择产品后查看 Mapping；没有版本时创建 Starter Draft。</div>
+  </section>
+
+  <section class="card" data-intake {% if mode!='intake' %}hidden{% endif %}>
+    <div class="card-head"><div><h2>① 上传并预检</h2><p>上传只产生 Preview，不写入正式问题库。</p></div></div>
+    <form class="inline-form" data-intake-form><select name="business_type" required data-intake-product><option value="">选择业务/产品</option></select><input name="file" type="file" accept=".xlsx,.xlsm" required><input name="sheet" placeholder="Sheet（可选）"><button>生成 Preview</button></form>
+    <div data-preview hidden><div class="metrics" data-preview-metrics></div><div class="alert" data-preview-alert></div><div class="difference-note" data-difference-note hidden>差异字段可直接选择已有标准字段，或明确保留在 Raw。提交后只生成 Mapping Draft，不会写入问题库。</div><div class="table-wrap"><table><thead><tr><th>Excel 表头</th><th>状态</th><th>当前目标/候选</th><th>差异处理</th><th>选择已有字段</th></tr></thead><tbody data-preview-rows></tbody></table></div><datalist data-standard-field-options id="p0-standard-field-options"></datalist><div class="actions"><button type="button" data-create-difference-draft hidden>生成 Mapping Draft</button><button type="button" data-confirm-import>确认正式导入</button><a href="/p0/settings">进入字段映射配置</a></div></div>
+    <div class="empty" data-preview-empty>请选择已激活 Mapping 的产品并上传 Excel。</div>
+  </section>
+
+  <section class="card result" data-result hidden><h2 data-result-title>处理结果</h2><p data-result-message></p><a href="/p0/issues">查看问题工作台 →</a></section>
+  <div class="toast" data-toast hidden></div>
+</main>{% endblock %}
+{% block page_scripts %}<script>window.P0_CONSOLE_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_console.js" defer></script>{% endblock %}
