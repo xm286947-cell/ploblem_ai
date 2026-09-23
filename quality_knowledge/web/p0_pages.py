@@ -68,6 +68,42 @@ def create_p0_insights_router(
             },
         )
 
+
+    @router.get("/p0/quality-scenarios/workbench", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_workbench(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_workbench.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "page_title": "场景工作台 · 质量能力",
+            },
+        )
+
+
+    @router.get("/p0/quality-scenarios", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_library(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_library.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "page_title": "质量场景库 · 质量能力",
+            },
+        )
+
+    @router.get("/p0/quality-scenarios/{scenario_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_detail(request: Request, scenario_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_detail.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "scenario_id": scenario_id,
+                "page_title": "场景详情 · 质量能力",
+            },
+        )
+
     @router.get("/p0/settings", response_class=HTMLResponse, include_in_schema=False)
     async def p0_settings(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(

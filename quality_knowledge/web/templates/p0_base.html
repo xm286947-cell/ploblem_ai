@@ -17,6 +17,8 @@
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/batch-analysis') %}active{% endif %}" href="/p0/batch-analysis">批量 AI 分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
+      <a class="nav-item {% if request.url.path == '/p0/quality-scenarios/workbench' %}active{% endif %}" href="/p0/quality-scenarios/workbench">场景工作台</a>
+      <a class="nav-item {% if request.url.path == '/p0/quality-scenarios' or (request.url.path.startswith('/p0/quality-scenarios/') and request.url.path != '/p0/quality-scenarios/workbench') %}active{% endif %}" href="/p0/quality-scenarios">质量场景库</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/product-reports') %}active{% endif %}" href="/p1/product-reports">产品综合报告</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/data-intake') %}active{% endif %}" href="/p0/data-intake">数据接入</a>
       <div class="nav-divider"></div>

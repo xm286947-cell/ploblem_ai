@@ -3,6 +3,7 @@ import hashlib, json, sqlite3, uuid
 from pathlib import Path
 from typing import Any
 from quality_knowledge.issue_period import normalize_month, normalize_year, parse_itr_period
+from quality_knowledge.sqlite_tuning import configure_connection
 
 SCHEMA='''
 PRAGMA foreign_keys=ON;
@@ -74,7 +75,7 @@ class IssueKnowledgeRepository:
             acols={r['name'] for r in c.execute('PRAGMA table_info(analysis_run)').fetchall()}
             if 'analysis_profile_json' not in acols: c.execute('ALTER TABLE analysis_run ADD COLUMN analysis_profile_json TEXT')
     def connect(self):
-        c=sqlite3.connect(self.db_path); c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');return c
+        c=sqlite3.connect(self.db_path); c.row_factory=sqlite3.Row;return configure_connection(c)
     def begin_import(self,batch_id,source_file,business_type,diagnostics=None):
         with self.connect() as c:c.execute('INSERT INTO import_batch_v1(batch_id,source_file,business_type,diagnostics_json) VALUES(?,?,?,?)',(batch_id,source_file,business_type or 'AUTO',_dump(diagnostics or {})))
     def finish_import(self,batch_id,stats,status='COMPLETED',diagnostics=None):

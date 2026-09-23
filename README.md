@@ -4,6 +4,7 @@
 **Status:** Release Candidate + Field Configuration Initial Baseline  
 **Design Baseline:** `KNOWLEDGE_QUALITY_ISSUE_ANALYSIS_DESIGN_V1.0` (Frozen)  
 **Existing Capability Baseline:** `REPEAT_CASE_ENGINE_V2.4_M6_SOLUTION_OPTIMIZED`
+**Latest cumulative patch:** `V1.1_P2_RC2_PATCH58_20260918`（单问题逆向质量分析 Demo；证据与人工审核分离）
 
 ## 1. 用途
 

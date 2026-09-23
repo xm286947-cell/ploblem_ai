@@ -1,4 +1,5 @@
 from pathlib import Path
+from quality_knowledge.web.app import _safe_json
 
 ROOT=Path(__file__).parents[1]
 TPL=(ROOT/'quality_knowledge/web/templates/issue_detail.html').read_text(encoding='utf-8')
@@ -27,6 +28,13 @@ def test_original_and_normalized_have_business_readable_rows():
     assert "'normalized_rows': _readable_rows" in APP
     assert 'readable-kv' in TPL
     assert 'Raw JSON' not in TPL.split('<section class="compact-section human-section"')[1].split('<section id="trace"')[0]
+
+def test_original_json_is_parsed_and_all_fields_are_rendered():
+    assert _safe_json('{"问题描述":"原始问题事实","自定义字段":"必须可见"}') == {
+        '问题描述': '原始问题事实', '自定义字段': '必须可见'
+    }
+    assert 'original_rows[:8]' not in TPL
+    assert '{% for r in original_rows %}' in TPL
 
 def test_raw_data_remains_in_traceability_only():
     trace=TPL.split('<section id="trace"')[1]
