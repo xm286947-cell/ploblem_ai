@@ -255,6 +255,12 @@ class ReviewStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+class KnowledgeObjectStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    STALE = "STALE"
+    DEPRECATED = "DEPRECATED"
+
+
 class ReviewRecord(StrictModel):
     review_id: str = Field(min_length=1)
     candidate_id: str = Field(min_length=1)
@@ -276,7 +282,7 @@ class KnowledgeObject(StrictModel):
         default=KNOWLEDGE_OBJECT_CONTRACT_VERSION,
         pattern=r"^knowledge-object/v1$",
     )
-    status: Literal["ACTIVE"] = "ACTIVE"
+    status: KnowledgeObjectStatus = KnowledgeObjectStatus.ACTIVE
     candidate_id: str = Field(min_length=1)
     review_id: str = Field(min_length=1)
     evaluation_id: str = Field(min_length=1)
