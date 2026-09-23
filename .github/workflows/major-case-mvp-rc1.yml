@@ -5,6 +5,7 @@ on:
     branches:
       - "release/major-case-mvp-rc1"
       - "patch/case-library-positioning-rc1-patch01"
+      - "fix/case-library-windows-sqlite-close"
   pull_request:
     branches:
       - main
@@ -18,6 +19,9 @@ on:
       - "scripts/build_major_case_mvp_package.py"
       - "scripts/build_case_library_positioning_patch.py"
       - "CASE_LIBRARY_MVP_RC1_PATCH01.md"
+      - "CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE.md"
+      - "scripts/build_case_library_windows_sqlite_patch.py"
+      - "tests/test_major_repository_connection_lifecycle.py"
       - "run_major_case_mvp_smoke.bat"
       - "run_major_case_mvp_smoke.sh"
       - "MAJOR_CASE_MVP_RC1_DELIVERY.md"
@@ -60,6 +64,9 @@ jobs:
       - name: Publish service tests
         run: python -m pytest -q tests/test_case_publish_service.py
 
+      - name: Windows SQLite handle lifecycle gate
+        run: python -m pytest -q tests/test_major_repository_connection_lifecycle.py
+
       - name: Golden Path smoke
         run: python scripts/major_case_mvp_smoke.py
 
@@ -89,6 +96,18 @@ jobs:
           (cd dist && sha256sum -c "$(basename "$PATCH_ZIP").sha256")
           unzip -l "$PATCH_ZIP" | grep PATCH_MANIFEST.json
 
+      - name: Build Windows SQLite patch
+        run: python scripts/build_case_library_windows_sqlite_patch.py
+
+      - name: Windows SQLite patch integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH2_ZIP="$(ls dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip | head -n1)"
+          test -n "$PATCH2_ZIP"
+          (cd dist && sha256sum -c "$(basename "$PATCH2_ZIP").sha256")
+          unzip -l "$PATCH2_ZIP" | grep PATCH_MANIFEST.json
+
       - name: Upload RC and patch artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -98,5 +117,7 @@ jobs:
             dist/CASE_LIBRARY_MVP_RC1_[0-9a-f]*.zip.sha256
             dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip
             dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip.sha256
+            dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip
+            dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip.sha256
           if-no-files-found: error
           retention-days: 90

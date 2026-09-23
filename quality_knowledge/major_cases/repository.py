@@ -27,6 +27,17 @@ def _row(row: sqlite3.Row | None) -> dict | None:
     return dict(row) if row else None
 
 
+
+class _ClosingSQLiteConnection(sqlite3.Connection):
+    """sqlite3 connection whose context manager also releases the file handle."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class MajorKnowledgeRepository:
     SCHEMA_VERSION = 2
 
@@ -41,7 +52,11 @@ class MajorKnowledgeRepository:
             connection.executescript(schema)
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30.0)
+        connection = sqlite3.connect(
+            self.db_path,
+            timeout=30.0,
+            factory=_ClosingSQLiteConnection,
+        )
         connection.row_factory = sqlite3.Row
         return configure_connection(connection)
 
