@@ -1,0 +1,43 @@
+name: REPEAT-ITR-001 Gate
+
+on:
+  push:
+    branches:
+      - "feature/repeat-itr-001"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "quality_knowledge/repeat_risk/**"
+      - "docs/contracts/REPEAT_ITR_001.md"
+      - "tests/test_repeat_itr_subject.py"
+      - ".github/workflows/repeat-itr-001.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeat-itr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile
+        run: python -m compileall -q quality_knowledge/repeat_risk
+
+      - name: REPEAT-ITR-001 contract tests
+        run: python -m pytest -q tests/test_repeat_itr_subject.py
+
+      - name: Case Publish regression
+        run: python -m pytest -q tests/test_historical_case_consumer_contract.py tests/test_case_publish_adapter.py tests/test_case_publish_service.py
