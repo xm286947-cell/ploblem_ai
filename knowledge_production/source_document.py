@@ -44,6 +44,50 @@ def _detect_section(text: str, previous: str | None) -> str | None:
     return previous
 
 
+def _table_text_by_page(extraction: PdfExtractionResult) -> dict[int, str]:
+    """Project parsed PDF tables back into page-scoped source text.
+
+    PdfExtractor already obtains table cells through pdfplumber.  The
+    StructuredDocument fact layer must not drop that source evidence merely
+    because pypdf's free-text extraction omits or mangles table field IDs.
+    """
+    grouped: dict[int, list[str]] = {}
+    for table in extraction.tables:
+        if not isinstance(table, dict):
+            continue
+        page_ref = table.get("page_ref")
+        rows = table.get("rows")
+        if not isinstance(page_ref, int) or page_ref < 1:
+            continue
+        if not isinstance(rows, list):
+            continue
+
+        lines: list[str] = []
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            cells = [str(cell or "").strip() for cell in row]
+            if any(cells):
+                lines.append("\t".join(cells))
+        if not lines:
+            continue
+
+        table_index = table.get("table_index")
+        label = (
+            f"[TABLE {table_index}]"
+            if isinstance(table_index, int)
+            else "[TABLE]"
+        )
+        grouped.setdefault(page_ref, []).append(
+            label + "\n" + "\n".join(lines)
+        )
+
+    return {
+        page: "\n\n".join(chunks)
+        for page, chunks in grouped.items()
+    }
+
+
 class SourceDocumentService:
     """Immutable official-source ingestion and page-traceable parsing."""
 
@@ -136,17 +180,28 @@ class SourceDocumentService:
     ) -> StructuredDocument:
         blocks: list[StructuredTextBlock] = []
         current_section: str | None = None
+        table_text = _table_text_by_page(extraction)
+
         for page in extraction.pages:
             current_section = _detect_section(page.text, current_section)
+            page_table_text = table_text.get(page.page_number, "")
+            source_text = page.text
+            if page_table_text:
+                source_text = "\n\n".join(
+                    value
+                    for value in (page.text, page_table_text)
+                    if value
+                )
+
             blocks.append(
                 StructuredTextBlock(
                     source_id=document.source_id,
                     source_version=document.source_version,
                     page=page.page_number,
                     section=current_section,
-                    source_text=page.text,
+                    source_text=source_text,
                     source_anchor=f"page:{page.page_number}",
-                    content_hash=_sha256_text(page.text),
+                    content_hash=_sha256_text(source_text),
                 )
             )
         return StructuredDocument(
