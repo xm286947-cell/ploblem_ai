@@ -705,6 +705,13 @@ def create_v2_router(
         except ValueError as error:
             raise _http_error(error) from error
 
+    @router.get("/quality-scenarios/{scenario_id}/history")
+    def quality_scenario_v1_history(scenario_id: str) -> dict[str, Any]:
+        try:
+            return scenario_workflow.history(scenario_id)
+        except ValueError as error:
+            raise _http_error(error) from error
+
     @router.post("/quality-scenarios/{scenario_id}/review")
     def review_quality_scenario(scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:

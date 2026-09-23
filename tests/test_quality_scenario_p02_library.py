@@ -259,13 +259,14 @@ def test_p02_is_read_only_and_rows_target_the_reserved_p03_route():
     assert "删除" not in html
 
 
-def test_p03_reserved_route_never_falls_back_to_legacy_scenario_detail(tmp_path):
+def test_p03_route_never_falls_back_to_legacy_scenario_detail(tmp_path):
     client = _client(tmp_path)
     page = client.get("/p0/quality-scenarios/QSV1C-DEMO")
     assert page.status_code == 200
-    assert "P03 正式详情页将在 QS-MVP-05C 承接" in page.text
-    assert "QSV1C-DEMO" in page.text
-    assert "不跳转旧 Scenario 对象" in page.text
+    assert "标准质量场景" in page.text
+    assert "来源问题与 Evidence" in page.text
+    assert 'data-scenario-id="QSV1C-DEMO"' in page.text
+    assert "/p0/static/p0_scenario_detail.js" in page.text
 
 
 def test_p02_has_loading_empty_no_result_error_and_1280_safe_layout():

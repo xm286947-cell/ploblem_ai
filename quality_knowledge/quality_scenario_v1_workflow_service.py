@@ -51,6 +51,10 @@ class QualityScenarioV1WorkflowService:
             raise ValueError("QUALITY_SCENARIO_V1_NOT_FOUND")
         return item
 
+    def history(self, scenario_id: str) -> dict[str, Any]:
+        self.get(scenario_id)
+        return self.repository.history(scenario_id)
+
     def list_scenarios(
         self,
         *,

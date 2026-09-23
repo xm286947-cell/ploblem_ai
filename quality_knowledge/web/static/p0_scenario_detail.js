@@ -1,0 +1,39 @@
+(function(){
+'use strict';
+const root=document.querySelector('[data-qsd-page]');if(!root)return;
+const api=(window.QS_DETAIL_API||root.dataset.apiPrefix||'/api/v2').replace(/\/$/,'');
+const id=root.dataset.scenarioId;
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const loading=root.querySelector('[data-loading]'),detail=root.querySelector('[data-detail]'),error=root.querySelector('[data-error]');
+async function request(path){const r=await fetch(api+path);const data=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(data.detail||('HTTP_'+r.status));e.status=r.status;throw e}return data}
+function fmt(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return value;return new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d)}
+function trigger(v){return ({HIGH_PERCEPTION:'高感知问题',RND_VALUE:'研发价值'})[v]||v||'—'}
+function text(sel,value){const x=root.querySelector(sel);if(x)x.textContent=value||'—'}
+function renderCurrent(x){
+ text('[data-title]',x.scenario_name);const st=root.querySelector('[data-status]');st.textContent=x.status;st.className='qsd-status '+x.status;text('[data-version]','V'+x.scenario_version);
+ const tags=[
+  ['产品',x.product_name||x.product_code],['生命周期',x.lifecycle_stage_name||x.lifecycle_stage_code],
+  ['业务活动',x.business_activity_name||x.business_activity_code],['质量关注',x.quality_concern_name||x.quality_concern_code]
+ ].filter(v=>v[1]);root.querySelector('[data-tags]').innerHTML=tags.map(v=>'<span class="qsd-tag">'+esc(v[0]+'：'+v[1])+'</span>').join('');
+ text('[data-trigger-source]',trigger(x.trigger_source));text('[data-trigger-reason]',x.trigger_reason);text('[data-updated-at]',fmt(x.version&&x.version.updated_at));text('[data-published-at]',fmt(x.version&&x.version.published_at));
+ text('[data-field="scenario_description"]',x.scenario_description);text('[data-field="business_goal"]',x.business_goal);text('[data-field="quality_concern"]',x.quality_concern_name||x.quality_concern_code);text('[data-field="trigger_condition"]',x.trigger_condition);text('[data-field="expected_result"]',x.expected_result);text('[data-field="applicability_scope"]',x.applicability_scope);
+ const r=x.review||{},c=x.confirmation||{};text('[data-review-status]',r.review_status);text('[data-reviewer]',r.reviewer);text('[data-reviewed-at]',fmt(r.reviewed_at));text('[data-review-comment]',r.comment);text('[data-quality-confirmed-by]',c.quality_confirmed_by);text('[data-quality-confirmed-at]',fmt(c.quality_confirmed_at));text('[data-technical-confirmed-by]',c.technical_confirmed_by);text('[data-technical-confirmed-at]',fmt(c.technical_confirmed_at));text('[data-confirmation-note]',c.confirmation_note);
+ const missing=x.missing_information||[],blockers=x.blockers||[];const open=root.querySelector('[data-open-issues]');open.hidden=!missing.length&&!blockers.length;
+ root.querySelector('[data-missing-list]').innerHTML=missing.map(m=>'<article class="qsd-open-item"><strong>'+esc(m.field_name||'待补充信息')+' · '+esc(m.status)+'</strong><p>'+esc(m.question)+'</p><small>'+esc(m.answer||m.reason||'')+'</small></article>').join('');
+ root.querySelector('[data-blocker-list]').innerHTML=blockers.map(b=>'<article class="qsd-open-item"><strong>BLOCKER</strong><p>'+esc(b)+'</p></article>').join('');
+ renderTrace(x)
+}
+function renderTrace(x){const sources=x.source_problem_refs||[],evidence=x.evidence_refs||[];text('[data-source-count]',String(sources.length));text('[data-evidence-count]',String(evidence.length));
+ root.querySelector('[data-source-list]').innerHTML=sources.length?sources.map(s=>'<details class="qsd-trace-card"><summary><h4>'+esc(s.canonical_itr||s.source_id)+'</h4><p>'+esc(s.source_type)+' · '+esc(s.relation_type)+'</p></summary><small>'+esc(s.source_ref)+'</small><p>source_id：'+esc(s.source_id)+'</p><p>产品：'+esc(s.product_code||'—')+' '+esc(s.product_version||'')+'</p></details>').join(''):'<div class="qsd-trace-card"><p>Source Missing：当前场景未关联来源问题。</p></div>';
+ root.querySelector('[data-evidence-list]').innerHTML=evidence.length?evidence.map(e=>'<article class="qsd-trace-card"><span class="qsd-provenance '+esc(e.source_type)+'">'+esc(e.source_type)+'</span><h4>'+esc(e.evidence_id)+'</h4><p>'+esc(e.source_text||'原文未内嵌；请按受控 content_ref 追溯。')+'</p><small>'+esc(e.content_ref||e.source_ref)+'</small><div class="qsd-supports">'+(e.supports||[]).map(s=>'<span>'+esc(s)+'</span>').join('')+'</div></article>').join(''):'<div class="qsd-trace-card"><p>Evidence Missing：当前场景没有可用Evidence。</p></div>'
+}
+function reviewFor(history,version){return (history.reviews||[]).find(r=>Number(r.scenario_version)===Number(version))}
+function renderHistory(history){const versions=history.versions||[];text('[data-history-count]',versions.length+' 个版本 · '+(history.reviews||[]).length+' 条确认记录');root.querySelector('[data-history-empty]').hidden=!!versions.length;
+ root.querySelector('[data-history-list]').innerHTML=versions.map(v=>{const s=v.snapshot||{},rv=reviewFor(history,v.scenario_version)||{},r=rv.review||{},c=rv.confirmation||{},ver=s.version||{};
+  return '<details class="qsd-history-item" '+(v.scenario_version===versions[0].scenario_version?'open':'')+'><summary><strong>V'+esc(v.scenario_version)+'</strong><span class="qsd-status '+esc(s.status||'')+'">'+esc(s.status||'—')+'</span><span>'+esc(fmt(ver.updated_at||v.created_at))+'</span><span>'+esc(ver.change_summary||'—')+'</span><span>'+esc(ver.published_at?('发布 '+fmt(ver.published_at)):'未发布')+'</span></summary><div class="qsd-history-body"><div class="qsd-history-block"><span>版本快照</span><p><b>场景：</b>'+esc(s.scenario_name||'—')+'</p><p><b>描述：</b>'+esc(s.scenario_description||'—')+'</p><p><b>期望：</b>'+esc(s.expected_result||'—')+'</p></div><div class="qsd-history-block"><span>Review / 确认</span><p><b>Review：</b>'+esc(r.review_status||'无记录')+' · '+esc(r.reviewer||'—')+' · '+esc(fmt(r.reviewed_at))+'</p><p>'+esc(r.comment||'')+'</p><p><b>专业质量：</b>'+esc(c.quality_confirmed_by||'—')+' · '+esc(fmt(c.quality_confirmed_at))+'</p><p><b>研发技术：</b>'+esc(c.technical_confirmed_by||'—')+' · '+esc(fmt(c.technical_confirmed_at))+'</p><p>'+esc(c.confirmation_note||'')+'</p></div></div></details>'
+ }).join('')
+}
+async function load(){loading.hidden=false;detail.hidden=true;error.hidden=true;try{const [current,history]=await Promise.all([request('/quality-scenarios/'+encodeURIComponent(id)),request('/quality-scenarios/'+encodeURIComponent(id)+'/history')]);renderCurrent(current);renderHistory(history);loading.hidden=true;detail.hidden=false}catch(e){loading.hidden=true;error.hidden=false;text('[data-error-title]',e.status===404?'质量场景不存在':'场景详情读取失败');text('[data-error-message]',e.status===404?'该scenario_id不存在于QualityScenario V1正式库。':e.message)}}
+root.querySelector('[data-retry]').addEventListener('click',load);
+load();
+})();
