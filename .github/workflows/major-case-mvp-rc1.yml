@@ -5,6 +5,7 @@ on:
     branches:
       - "release/major-case-mvp-rc1"
       - "patch/case-library-positioning-rc1-patch01"
+      - "fix/case-library-windows-sqlite-close"
   pull_request:
     branches:
       - main
@@ -18,6 +19,9 @@ on:
       - "scripts/build_major_case_mvp_package.py"
       - "scripts/build_case_library_positioning_patch.py"
       - "CASE_LIBRARY_MVP_RC1_PATCH01.md"
+      - "CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE.md"
+      - "scripts/build_case_library_windows_sqlite_patch.py"
+      - "tests/test_major_repository_connection_lifecycle.py"
       - "run_major_case_mvp_smoke.bat"
       - "run_major_case_mvp_smoke.sh"
       - "MAJOR_CASE_MVP_RC1_DELIVERY.md"
@@ -59,6 +63,9 @@ jobs:
 
       - name: Publish service tests
         run: python -m pytest -q tests/test_case_publish_service.py
+
+      - name: Windows SQLite handle lifecycle gate
+        run: python -m pytest -q tests/test_major_repository_connection_lifecycle.py
 
       - name: Golden Path smoke
         run: python scripts/major_case_mvp_smoke.py
