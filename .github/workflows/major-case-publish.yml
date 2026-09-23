@@ -1,0 +1,67 @@
+name: Major Case Publish Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/sqlite_tuning.py"
+      - "services/historical_case_contract.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "services/__init__.py"
+      - "tests/test_historical_case_consumer_contract.py"
+      - "tests/test_case_publish_adapter.py"
+      - "tests/test_case_publish_service.py"
+      - ".github/workflows/major-case-publish.yml"
+  push:
+    branches:
+      - "feature/major-domain-case-publish-main-promotion"
+    paths:
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/sqlite_tuning.py"
+      - "services/historical_case_contract.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "services/__init__.py"
+      - "tests/test_historical_case_consumer_contract.py"
+      - "tests/test_case_publish_adapter.py"
+      - "tests/test_case_publish_service.py"
+      - ".github/workflows/major-case-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  major-case-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile promoted modules
+        run: |
+          python -m compileall -q quality_knowledge/major_cases services
+
+      - name: Run Historical Case contract gate
+        run: python -m pytest -q tests/test_historical_case_consumer_contract.py
+
+      - name: Run CASE-PUBLISH adapter gate
+        run: python -m pytest -q tests/test_case_publish_adapter.py
+
+      - name: Run CASE-PUBLISH publisher gate
+        run: python -m pytest -q tests/test_case_publish_service.py
