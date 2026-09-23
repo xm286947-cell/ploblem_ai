@@ -9,7 +9,13 @@ from pydantic import ValidationError
 from repositories import JsonArtifactRepository
 
 from .evaluation import KnowledgeEvaluationError, KnowledgeEvaluationService
-from .models import KnowledgeCandidate, KnowledgeObject, ReviewRecord, SourceDocument
+from .models import (
+    KnowledgeCandidate,
+    KnowledgeEvaluation,
+    KnowledgeObject,
+    ReviewRecord,
+    SourceDocument,
+)
 from .publish import KnowledgePublishError, KnowledgePublishService
 from .review import KnowledgeReviewError, KnowledgeReviewService
 
@@ -246,13 +252,9 @@ class KnowledgeProcessingService:
             if not isinstance(payload, dict):
                 continue
             try:
-                rows.append(self.evaluations.evaluate_by_id(candidate_id).__class__.model_validate(payload))
-            except Exception:
-                from .models import KnowledgeEvaluation
-                try:
-                    rows.append(KnowledgeEvaluation.model_validate(payload))
-                except ValidationError:
-                    continue
+                rows.append(KnowledgeEvaluation.model_validate(payload))
+            except ValidationError:
+                continue
         return rows
 
     def _list_reviews(self, candidate_id: str) -> list[ReviewRecord]:
