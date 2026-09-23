@@ -1,0 +1,77 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_detail.css?v=qs-mvp-05c">{% endblock %}
+{% block breadcrumb %}质量场景 / 场景详情{% endblock %}
+{% block body %}
+<main class="qsd-page" data-qsd-page data-api-prefix="{{api_prefix}}" data-scenario-id="{{scenario_id}}">
+  <div class="qsd-loading" data-loading>正在读取 QualityScenario V1…</div>
+
+  <section class="qsd-state qsd-error" data-error hidden>
+    <strong data-error-title>场景详情读取失败</strong>
+    <span data-error-message>请稍后重试。</span>
+    <div><a class="btn" href="/p0/quality-scenarios">返回质量场景库</a><button class="btn btn-primary" type="button" data-retry>重新加载</button></div>
+  </section>
+
+  <div data-detail hidden>
+    <header class="qsd-head">
+      <div>
+        <a class="qsd-back" href="/p0/quality-scenarios">← 返回质量场景库</a>
+        <div class="qsd-title-line"><h1 data-title>—</h1><span class="qsd-status" data-status>—</span><span class="qsd-version" data-version>V—</span></div>
+        <div class="qsd-tags" data-tags></div>
+      </div>
+      <a class="btn" href="/p0/quality-scenarios/workbench" data-workbench-link>进入场景工作台</a>
+    </header>
+
+    <section class="qsd-trigger">
+      <div><span>触发来源</span><strong data-trigger-source>—</strong></div>
+      <div><span>触发原因</span><strong data-trigger-reason>—</strong></div>
+      <div><span>最近更新时间</span><strong data-updated-at>—</strong></div>
+      <div><span>发布时间</span><strong data-published-at>—</strong></div>
+    </section>
+
+    <div class="qsd-main-grid">
+      <section class="qsd-panel qsd-scenario-panel">
+        <div class="qsd-panel-head"><div><h2>标准质量场景</h2><p>当前 QualityScenario V1 正式对象</p></div></div>
+        <div class="qsd-facts">
+          <article class="qsd-wide"><span>场景描述</span><p data-field="scenario_description">—</p></article>
+          <article><span>业务目标</span><p data-field="business_goal">—</p></article>
+          <article><span>质量关注</span><p data-field="quality_concern">—</p></article>
+          <article class="qsd-wide"><span>触发 / 异常条件</span><p data-field="trigger_condition">—</p></article>
+          <article class="qsd-wide"><span>期望质量结果</span><p data-field="expected_result">—</p></article>
+          <article class="qsd-wide"><span>适用范围</span><p data-field="applicability_scope">—</p></article>
+        </div>
+
+        <div class="qsd-subsection" data-review-section>
+          <div class="qsd-section-title"><h3>当前 Review 与确认事实</h3><span>事实留痕，不是审批流</span></div>
+          <div class="qsd-confirm-grid">
+            <div><span>Review</span><strong data-review-status>—</strong><small data-reviewer>—</small><small data-reviewed-at>—</small></div>
+            <div><span>专业质量确认</span><strong data-quality-confirmed-by>—</strong><small data-quality-confirmed-at>—</small></div>
+            <div><span>研发技术确认</span><strong data-technical-confirmed-by>—</strong><small data-technical-confirmed-at>—</small></div>
+          </div>
+          <div class="qsd-note"><span>确认说明</span><p data-confirmation-note>—</p></div>
+          <div class="qsd-note"><span>Review说明</span><p data-review-comment>—</p></div>
+        </div>
+
+        <div class="qsd-subsection" data-open-issues>
+          <div class="qsd-section-title"><h3>缺失信息与阻断项</h3><span>仅在存在时显示</span></div>
+          <div data-missing-list></div>
+          <div data-blocker-list></div>
+        </div>
+      </section>
+
+      <aside class="qsd-panel qsd-trace-panel">
+        <div class="qsd-panel-head"><div><h2>来源问题与 Evidence</h2><p>来源事实与AI推断分开追溯</p></div></div>
+        <section class="qsd-trace-section"><div class="qsd-section-title"><h3>来源问题</h3><span data-source-count>0</span></div><div data-source-list></div></section>
+        <section class="qsd-trace-section"><div class="qsd-section-title"><h3>Evidence</h3><span data-evidence-count>0</span></div><div data-evidence-list></div></section>
+      </aside>
+    </div>
+
+    <section class="qsd-panel qsd-history-panel">
+      <div class="qsd-panel-head"><div><h2>版本与确认记录</h2><p>来自 quality_scenario_v1_version / quality_scenario_v1_review，只读审计链</p></div><span data-history-count>—</span></div>
+      <div class="qsd-history-empty" data-history-empty hidden>当前没有历史版本或确认记录。</div>
+      <div class="qsd-history-list" data-history-list></div>
+    </section>
+  </div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.QS_DETAIL_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_detail.js?v=qs-mvp-05c" defer></script>{% endblock %}
