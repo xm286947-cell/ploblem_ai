@@ -148,8 +148,14 @@ class KnowledgeEvaluationService:
         evaluation_id = self._evaluation_id(
             candidate,
             compared_ids,
-            duplicate_status,
-            conflict_status,
+            evidence_status=evidence_status,
+            source_valid=source_valid,
+            contract_valid=contract_valid,
+            scope_valid=scope_valid,
+            candidate_complete=candidate_complete,
+            duplicate_status=duplicate_status,
+            conflict_status=conflict_status,
+            reasons=list(dict.fromkeys(reasons)),
         )
         result = KnowledgeEvaluation(
             evaluation_id=evaluation_id,
@@ -324,14 +330,27 @@ class KnowledgeEvaluationService:
     def _evaluation_id(
         candidate: KnowledgeCandidate,
         compared_ids: list[str],
+        *,
+        evidence_status: EvidenceValidationStatus,
+        source_valid: bool,
+        contract_valid: bool,
+        scope_valid: bool,
+        candidate_complete: bool,
         duplicate_status: DuplicateStatus,
         conflict_status: ConflictStatus,
+        reasons: list[str],
     ) -> str:
         material = {
             "candidate": candidate.model_dump(mode="json"),
             "compared_ids": compared_ids,
+            "evidence_status": evidence_status.value,
+            "source_valid": source_valid,
+            "contract_valid": contract_valid,
+            "scope_valid": scope_valid,
+            "candidate_complete": candidate_complete,
             "duplicate_status": duplicate_status.value,
             "conflict_status": conflict_status.value,
+            "reasons": reasons,
             "version": KnowledgeEvaluationService.EVALUATION_VERSION,
         }
         digest = hashlib.sha256(
