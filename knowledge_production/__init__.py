@@ -29,13 +29,27 @@ from .models import (
     KnowledgeEvaluation,
     KnowledgeExtractionCandidateDraft,
     KnowledgeExtractionOutput,
+    KnowledgeObject,
+    KnowledgeObjectStatus,
     KnowledgeObjectType,
     KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
+    KNOWLEDGE_OBJECT_CONTRACT_VERSION,
     RetrievalStatus,
+    ReviewAction,
+    ReviewRecord,
+    ReviewStatus,
     SourceDocument,
     SourceStatus,
     StructuredDocument,
     StructuredTextBlock,
+)
+from .publish import (
+    KnowledgePublishError,
+    KnowledgePublishService,
+)
+from .review import (
+    KnowledgeReviewError,
+    KnowledgeReviewService,
 )
 from .source_document import SourceDocumentError, SourceDocumentService
 
@@ -58,10 +72,20 @@ __all__ = [
     "KnowledgeExtractionOutput",
     "KnowledgeExtractionError",
     "KnowledgeExtractionService",
+    "KnowledgeObject",
+    "KnowledgeObjectStatus",
     "KnowledgeObjectType",
     "KNOWLEDGE_CANDIDATE_CONTRACT_VERSION",
+    "KNOWLEDGE_OBJECT_CONTRACT_VERSION",
     "KnowledgeCandidateError",
     "KnowledgeCandidateService",
+    "KnowledgePublishError",
+    "KnowledgePublishService",
+    "KnowledgeReviewError",
+    "KnowledgeReviewService",
+    "ReviewAction",
+    "ReviewRecord",
+    "ReviewStatus",
     "business_source_ref_key",
     "source_ref_key",
     "RetrievalStatus",
