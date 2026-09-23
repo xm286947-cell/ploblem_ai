@@ -85,7 +85,12 @@ class KnowledgeEvaluationService:
     def __init__(self, repository: JsonArtifactRepository) -> None:
         self.repository = repository
 
-    def evaluate(self, candidate: KnowledgeCandidate) -> KnowledgeEvaluation:
+    def evaluate(
+        self,
+        candidate: KnowledgeCandidate,
+        *,
+        exclude_object_ids: set[str] | None = None,
+    ) -> KnowledgeEvaluation:
         evidence_status, evidence_reasons = self._validate_evidence(candidate)
         source_valid, source_reasons = self._validate_source(candidate)
         contract_valid = candidate.contract_version == "knowledge-candidate/v1"
@@ -98,7 +103,12 @@ class KnowledgeEvaluationService:
             and candidate.source_refs
         )
 
-        published = self._published_objects()
+        excluded = set(exclude_object_ids or set())
+        published = [
+            (fallback, payload)
+            for fallback, payload in self._published_objects()
+            if _object_id(payload, fallback) not in excluded
+        ]
         duplicate_status, duplicate_ids = self._detect_duplicates(
             candidate, published
         )
