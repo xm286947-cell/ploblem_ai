@@ -5,6 +5,7 @@ from quality_knowledge.quality_scenario_v1 import (
     QualityScenarioV1,
     ScenarioActor,
     ScenarioCandidateV1,
+    ScenarioConfirmationMetadata,
     ScenarioEvidenceReference,
     ScenarioMissingInformation,
     ScenarioProvenanceType,
@@ -12,6 +13,7 @@ from quality_knowledge.quality_scenario_v1 import (
     ScenarioReviewStatus,
     ScenarioSourceReference,
     ScenarioStatus,
+    ScenarioTriggerSource,
     ScenarioVersionMetadata,
     scenario_from_candidate,
     validate_status_transition,
@@ -56,6 +58,8 @@ def candidate(**overrides):
         "scenario_name": "掉电后关键数据恢复",
         "scenario_description": "运行中掉电后关键计数丢失",
         "quality_concern_name": "数据完整性",
+        "trigger_source": "HIGH_PERCEPTION",
+        "trigger_reason": "客户生产中断，属于高感知质量问题",
         "trigger_condition": "运行中异常掉电",
         "expected_result": "重新上电后关键计数正确恢复",
         "applicability_scope": "PLC运行过程",
@@ -77,6 +81,13 @@ def test_candidate_v1_serialization_roundtrip():
 def test_candidate_required_field_missing_is_rejected():
     with pytest.raises(ValidationError):
         ScenarioCandidateV1(candidate_id="X", product_code="PLC")
+
+
+def test_trigger_source_is_two-track_business_source_not_workflow_state():
+    assert candidate(trigger_source="HIGH_PERCEPTION").trigger_source == ScenarioTriggerSource.HIGH_PERCEPTION
+    assert candidate(trigger_source="RND_VALUE").trigger_source == ScenarioTriggerSource.RND_VALUE
+    with pytest.raises(ValidationError):
+        candidate(trigger_source="WAIT_APPROVAL")
 
 
 def test_evidence_requires_source_text_or_content_ref():
@@ -147,6 +158,41 @@ def test_formal_scenario_requires_review_source_and_evidence():
         QualityScenarioV1.model_validate(
             {**base.model_dump(mode="json"), "status": "CONFIRMED"}
         )
+
+
+def test_formal_scenario_requires_quality_and_technical_confirmation_facts():
+    base = scenario_from_candidate(candidate(), "QSV1-2", created_by="AI")
+    payload = base.model_dump(mode="json")
+    payload["status"] = "CONFIRMED"
+    payload["review"] = {
+        "review_status": "CONFIRMED",
+        "reviewer": "QUALITY_OWNER",
+        "reviewed_at": "2026-09-23T12:00:00Z",
+        "comment": "",
+    }
+    with pytest.raises(ValidationError, match="SCENARIO_QUALITY_CONFIRMATION_REQUIRED"):
+        QualityScenarioV1.model_validate(payload)
+
+    payload["confirmation"] = {
+        "quality_confirmed_by": "QUALITY_OWNER",
+        "quality_confirmed_at": "2026-09-23T12:00:00Z",
+        "technical_confirmed_by": "",
+        "technical_confirmed_at": "",
+        "confirmation_note": "场景事实已确认",
+    }
+    with pytest.raises(ValidationError, match="SCENARIO_TECHNICAL_CONFIRMATION_REQUIRED"):
+        QualityScenarioV1.model_validate(payload)
+
+    payload["confirmation"]["technical_confirmed_by"] = "RND_OWNER"
+    payload["confirmation"]["technical_confirmed_at"] = "2026-09-23T12:05:00Z"
+    confirmed = QualityScenarioV1.model_validate(payload)
+    assert confirmed.confirmation.quality_confirmed
+    assert confirmed.confirmation.technical_confirmed
+
+
+def test_confirmation_actor_and_time_must_be_paired():
+    with pytest.raises(ValidationError, match="SCENARIO_QUALITY_CONFIRMATION_ACTOR_TIME_PAIR_REQUIRED"):
+        ScenarioConfirmationMetadata(quality_confirmed_by="QUALITY_OWNER")
 
 
 def reverse_result(lifecycle="运行执行", activity="掉电数据保持与上电恢复"):
@@ -220,12 +266,19 @@ def taxonomy():
 
 
 def test_reverse_quality_result_maps_to_candidate_v1_without_second_ai_pass():
-    item = scenario_candidate_v1_from_reverse_quality(reverse_result(), taxonomy())
+    item = scenario_candidate_v1_from_reverse_quality(
+        reverse_result(),
+        taxonomy(),
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="客户生产中断，进入高感知问题深挖",
+    )
     assert item.status == ScenarioStatus.CANDIDATE
     assert item.product_code == "PLC"
     assert item.lifecycle_stage_code == "RUNTIME_EXECUTION"
     assert item.business_activity_code == "POWER_LOSS_RETENTION_RECOVERY"
     assert item.expected_result == "重新上电后计数正确恢复"
+    assert item.trigger_source == ScenarioTriggerSource.HIGH_PERCEPTION
+    assert item.trigger_reason == "客户生产中断，进入高感知问题深挖"
     assert item.source_problem_refs[0].canonical_itr == "ITR-001"
     assert item.evidence_refs
     assert "EVIDENCE_REQUIRED" not in item.blockers
@@ -235,11 +288,21 @@ def test_unmapped_lifecycle_activity_blockers_are_not_swallowed():
     item = scenario_candidate_v1_from_reverse_quality(
         reverse_result("不存在阶段", "不存在活动"),
         taxonomy(),
+        trigger_source="RND_VALUE",
+        trigger_reason="研发判断存在跨产品复用价值",
     )
     assert "ACTIVITY_NOT_MAPPED" in item.blockers
     assert "LIFECYCLE_NOT_MAPPED" in item.blockers
     assert item.lifecycle_stage_code == ""
     assert item.business_activity_code == ""
+
+
+def test_reverse_mapping_does_not_guess_missing_trigger_context():
+    item = scenario_candidate_v1_from_reverse_quality(reverse_result(), taxonomy())
+    assert item.trigger_source is None
+    assert item.trigger_reason == ""
+    assert "TRIGGER_SOURCE_REQUIRED" in item.blockers
+    assert "TRIGGER_REASON_REQUIRED" in item.blockers
 
 
 def test_legacy_scenario_mapping_is_explicit_read_only_compatibility():
@@ -260,4 +323,8 @@ def test_legacy_scenario_mapping_is_explicit_read_only_compatibility():
     assert view["status"] == "PUBLISHED"
     assert view["legacy_status"] == "PUBLISHED"
     assert view["source_problem_refs"] == []
+    assert view["trigger_source"] is None
+    assert view["confirmation"]["quality_confirmed_by"] == ""
     assert "SOURCE_EVIDENCE_REQUIRES_EXPLICIT_V1_MIGRATION" in view["compatibility_warnings"]
+    assert "TRIGGER_CONTEXT_REQUIRES_EXPLICIT_V1_INPUT" in view["compatibility_warnings"]
+    assert "DUAL_CONFIRMATION_REQUIRES_EXPLICIT_V1_REVIEW" in view["compatibility_warnings"]
