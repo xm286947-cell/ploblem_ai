@@ -29,6 +29,20 @@ def main() -> int:
             internal_event_key="ITR-MVP-DEMO-001",
             title="ITR-MVP-DEMO-001",
         )
+        source_link = major.add_source_link(
+            case["case_id"],
+            event["event_id"],
+            {
+                "record_id": "ITR-MVP-DEMO-001",
+                "source_type": "ITR",
+                "source_system": "DEMO",
+                "group_code": "DEMO",
+                "url": "demo://itr/ITR-MVP-DEMO-001",
+            },
+            standard_itr="ITR-MVP-DEMO-001",
+            role="CURRENT_EVENT",
+            status="LINKED",
+        )
 
         def add(entry_type: str, content: str) -> None:
             major.add_entry(
@@ -40,6 +54,7 @@ def main() -> int:
                 status="CONFIRMED",
                 event_id=event["event_id"],
                 evidence=[{
+                    "source_link_id": source_link["source_link_id"],
                     "locator": entry_type.lower(),
                     "excerpt": f"证据：{content}",
                 }],
