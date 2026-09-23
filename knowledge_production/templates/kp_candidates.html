@@ -1,0 +1,31 @@
+{% extends "kp_base.html" %}
+{% block title %}Candidate｜Knowledge Processing{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Candidate｜统一知识候选</h2>
+  <p class="muted">External Source 与 Business Candidate 在此进入同一后续 Evaluation / Review / Publish 流程。</p>
+</div>
+<table>
+<thead><tr><th>Candidate</th><th>类型</th><th>来源</th><th>Evidence</th><th>Evaluation</th><th>Review</th></tr></thead>
+<tbody>
+{% for c in candidates %}
+<tr>
+  <td><a href="/knowledge-production/candidates/{{ c.candidate_id }}">{{ c.title }}</a><br><code>{{ c.candidate_id }}</code></td>
+  <td>{{ c.object_type }}</td>
+  <td>{{ c.source_type }}{% if c.business_source_type %} / {{ c.business_source_type }}{% endif %}</td>
+  <td>{{ c.evidence_count }}</td>
+  <td>
+    {% if c.evaluation %}
+      {{ c.evaluation.evidence_status.value }} /
+      {{ c.evaluation.duplicate_status.value }} /
+      {{ c.evaluation.conflict_status.value }}
+    {% else %}<span class="muted">NOT_EVALUATED</span>{% endif %}
+  </td>
+  <td>{% if c.review %}{{ c.review.review_status.value }}{% else %}<span class="muted">NOT_REVIEWED</span>{% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">暂无 Knowledge Candidate。</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

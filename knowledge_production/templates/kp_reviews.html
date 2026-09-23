@@ -1,0 +1,20 @@
+{% extends "kp_base.html" %}
+{% block title %}Review｜Knowledge Processing{% endblock %}
+{% block content %}
+<div class="card"><h2>Review｜Human Gate</h2><p class="muted">Review 是独立审计记录，不覆盖原始 Candidate。</p></div>
+<table>
+<thead><tr><th>Candidate</th><th>Action</th><th>Status</th><th>Reviewer</th><th>Time</th><th>Note</th></tr></thead>
+<tbody>
+{% for r in reviews %}
+<tr>
+  <td><a href="/knowledge-production/candidates/{{ r.candidate_id }}">{{ r.candidate_id }}</a></td>
+  <td>{{ r.action.value }}</td>
+  <td>{{ r.review_status.value }}</td>
+  <td>{{ r.reviewed_by }}</td>
+  <td>{{ r.reviewed_at }}</td>
+  <td>{{ r.review_note or "" }}</td>
+</tr>
+{% else %}<tr><td colspan="6" class="muted">暂无 Review 记录。</td></tr>{% endfor %}
+</tbody>
+</table>
+{% endblock %}

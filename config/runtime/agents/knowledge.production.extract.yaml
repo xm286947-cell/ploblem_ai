@@ -1,0 +1,29 @@
+agent_id: knowledge.production.extract
+version: v1
+label: Knowledge Production Extraction
+model_ref: qwen_prod
+
+prompt:
+  ref: prompts/runtime/knowledge_production/knowledge_extract.md
+  version: KP-M03-PROMPT-V1
+
+output_schema:
+  ref: KnowledgeExtractionOutput
+  version: v1
+
+execution:
+  timeout_seconds: 120
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 8192
+
+metadata:
+  business_domain: KNOWLEDGE_PRODUCTION
+  provider_response_shape: json_object
+  what_how_boundary: RUNTIME_EXECUTION_ONLY
