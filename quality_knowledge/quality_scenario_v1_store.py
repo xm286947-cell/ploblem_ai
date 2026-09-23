@@ -461,11 +461,13 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
             ("product_code", product_code),
             ("lifecycle_stage_code", lifecycle_stage_code),
             ("business_activity_code", business_activity_code),
-            ("quality_concern_code", quality_concern_code),
         ):
             if value:
                 clauses.append(f"{column}=?")
                 params.append(value)
+        if quality_concern_code:
+            clauses.append("(quality_concern_code=? OR quality_concern_name=?)")
+            params.extend([quality_concern_code, quality_concern_code])
         if status:
             clauses.append("status=?")
             params.append(ScenarioStatus(status).value)
