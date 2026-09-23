@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Any
 
 
+class _ClosingSQLiteConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class RepeatQueryTraceRepository:
     """Repeat-domain persistence for immutable query snapshots only.
 
@@ -22,7 +30,11 @@ class RepeatQueryTraceRepository:
             connection.executescript(schema)
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30.0)
+        connection = sqlite3.connect(
+            self.db_path,
+            timeout=30.0,
+            factory=_ClosingSQLiteConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 30000")
