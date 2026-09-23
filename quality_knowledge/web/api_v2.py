@@ -672,6 +672,32 @@ def create_v2_router(
             raise HTTPException(400, "EXPECTED_SCENARIO_VERSION_REQUIRED")
         return value
 
+
+    @router.get("/quality-scenarios")
+    def quality_scenarios_v1(
+        product_code: str = "",
+        lifecycle_stage_code: str = "",
+        business_activity_code: str = "",
+        quality_concern_code: str = "",
+        status: str = "",
+        q: str = "",
+    ) -> dict[str, Any]:
+        try:
+            items = scenario_workflow.list_scenarios(
+                product_code=product_code,
+                lifecycle_stage_code=lifecycle_stage_code,
+                business_activity_code=business_activity_code,
+                quality_concern_code=quality_concern_code,
+                status=status or None,
+                q=q,
+            )
+        except ValueError as error:
+            raise _http_error(error) from error
+        return {
+            "items": [item.model_dump(mode="json") for item in items],
+            "total": len(items),
+        }
+
     @router.get("/quality-scenarios/{scenario_id}")
     def quality_scenario_v1_detail(scenario_id: str) -> dict[str, Any]:
         try:
