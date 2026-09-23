@@ -83,7 +83,7 @@ def test_candidate_required_field_missing_is_rejected():
         ScenarioCandidateV1(candidate_id="X", product_code="PLC")
 
 
-def test_trigger_source_is_two-track_business_source_not_workflow_state():
+def test_trigger_source_is_two_track_business_source_not_workflow_state():
     assert candidate(trigger_source="HIGH_PERCEPTION").trigger_source == ScenarioTriggerSource.HIGH_PERCEPTION
     assert candidate(trigger_source="RND_VALUE").trigger_source == ScenarioTriggerSource.RND_VALUE
     with pytest.raises(ValidationError):
