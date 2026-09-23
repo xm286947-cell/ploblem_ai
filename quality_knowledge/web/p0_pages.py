@@ -93,10 +93,10 @@ def create_p0_insights_router(
         )
 
     @router.get("/p0/quality-scenarios/{scenario_id}", response_class=HTMLResponse, include_in_schema=False)
-    async def p0_quality_scenario_detail_placeholder(request: Request, scenario_id: str) -> HTMLResponse:
+    async def p0_quality_scenario_detail(request: Request, scenario_id: str) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
-            "p0_quality_scenario_detail_placeholder.html",
+            "p0_quality_scenario_detail.html",
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "scenario_id": scenario_id,
