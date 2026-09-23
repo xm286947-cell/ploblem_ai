@@ -14,4 +14,19 @@ __all__ = [
     "RepeatITRService",
     "RepeatQuerySubject",
     "RepeatQueryTraceRepository",
+    "RepeatHistoricalCaseSearchService",
+    "RepeatSearchContractError",
+    "SEARCH_SUCCESS",
+    "SEARCH_NO_CANDIDATES",
+    "SEARCH_UNAVAILABLE",
+    "SEARCH_INCOMPLETE",
 ]
+
+from .search import (
+    SEARCH_INCOMPLETE,
+    SEARCH_NO_CANDIDATES,
+    SEARCH_SUCCESS,
+    SEARCH_UNAVAILABLE,
+    RepeatHistoricalCaseSearchService,
+    RepeatSearchContractError,
+)
