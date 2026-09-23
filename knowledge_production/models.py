@@ -113,3 +113,22 @@ class KnowledgeCandidate(StrictModel):
         if len(set(self.source_refs)) != len(self.source_refs):
             raise ValueError("duplicate source_refs")
         return self
+
+
+class KnowledgeExtractionCandidateDraft(StrictModel):
+    object_type: KnowledgeObjectType
+    title: str = Field(min_length=1)
+    summary: str | None = None
+    content: str = Field(min_length=1)
+    device_type: str | None = None
+    scope: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    evidence_locations: list[EvidenceLocation] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class KnowledgeExtractionOutput(StrictModel):
+    candidates: list[KnowledgeExtractionCandidateDraft] = Field(default_factory=list)
+    unknowns_or_gaps: list[str] = Field(default_factory=list)
