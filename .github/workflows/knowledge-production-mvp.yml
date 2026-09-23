@@ -42,3 +42,63 @@ jobs:
             tests/test_kp_m02_candidate_evidence.py \
             tests/test_kp_m03_ai_extraction.py \
             tests/knowledge/test_knowledge_service.py
+
+  kp-first-golden-real:
+    needs: kp-m01-m03
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KNOWLEDGE_PRODUCTION_REAL_E2E: "1"
+      DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      KP_REAL_PDF: /tmp/S40FC016_002_01118_RevD.pdf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check one-time golden marker
+        id: golden
+        shell: bash
+        run: |
+          if [ -f knowledge_production/.first_golden_pending ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.golden.outputs.run == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Require live provider configuration
+        if: steps.golden.outputs.run == 'true'
+        shell: bash
+        run: |
+          if [ -z "$DASHSCOPE_BASE_URL" ]; then
+            echo "::error::Repository variable DASHSCOPE_BASE_URL is not configured."
+            exit 2
+          fi
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::Repository secret DASHSCOPE_API_KEY is not configured."
+            exit 2
+          fi
+
+      - name: Install dependencies
+        if: steps.golden.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download official SkyHigh eMMC PDF
+        if: steps.golden.outputs.run == 'true'
+        shell: bash
+        run: |
+          curl -L --fail --retry 3 \
+            "https://www.skyhighmemory.com/download/eMMC_16GB_STD_PKG_S40FC016C3_002_01118.pdf?v=D" \
+            -o "$KP_REAL_PDF"
+          echo "5a96380388d53e7a3ac430547b71769e7408f5d811cb0ffa77855005517f7609  $KP_REAL_PDF" | sha256sum -c -
+
+      - name: Run first real-PDF Golden Path
+        if: steps.golden.outputs.run == 'true'
+        run: |
+          python -m pytest -q tests/test_kp_m03_real_pdf_golden.py
