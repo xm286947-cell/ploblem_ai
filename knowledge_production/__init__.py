@@ -50,6 +50,10 @@ from .models import (
     StructuredDocument,
     StructuredTextBlock,
 )
+from .processing import (
+    KnowledgeProcessingError,
+    KnowledgeProcessingService,
+)
 from .publish import (
     KnowledgePublishError,
     KnowledgePublishService,
@@ -67,6 +71,7 @@ from .review import (
     KnowledgeReviewService,
 )
 from .source_document import SourceDocumentError, SourceDocumentService
+from .web import create_processing_app
 
 __all__ = [
     "BusinessCandidateInput",
@@ -105,6 +110,8 @@ __all__ = [
     "ReleasedKnowledgeObject",
     "KnowledgeCandidateError",
     "KnowledgeCandidateService",
+    "KnowledgeProcessingError",
+    "KnowledgeProcessingService",
     "KnowledgePublishError",
     "KnowledgePublishService",
     "KnowledgeReviewError",
@@ -121,4 +128,5 @@ __all__ = [
     "StructuredTextBlock",
     "SourceDocumentError",
     "SourceDocumentService",
+    "create_processing_app",
 ]
