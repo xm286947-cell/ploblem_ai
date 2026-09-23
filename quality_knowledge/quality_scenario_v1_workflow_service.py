@@ -139,7 +139,11 @@ class QualityScenarioV1WorkflowService:
                 ).model_dump(mode="json"),
             },
         )
-        saved=self.repository.save(saved, actor=ScenarioActor.HUMAN)
+        saved=self.repository.save(
+            saved,
+            actor=ScenarioActor.HUMAN,
+            expected_scenario_version=current.scenario_version,
+        )
         return ScenarioMutationResult(saved, "REVIEW", True)
 
     @staticmethod
@@ -204,7 +208,11 @@ class QualityScenarioV1WorkflowService:
                 ).model_dump(mode="json"),
             },
         )
-        confirmed=self.repository.save(confirmed, actor=ScenarioActor.HUMAN)
+        confirmed=self.repository.save(
+            confirmed,
+            actor=ScenarioActor.HUMAN,
+            expected_scenario_version=current.scenario_version,
+        )
         return ScenarioMutationResult(confirmed, "CONFIRM", True)
 
     def reject(
@@ -244,7 +252,11 @@ class QualityScenarioV1WorkflowService:
                 ).model_dump(mode="json"),
             },
         )
-        rejected=self.repository.save(rejected, actor=ScenarioActor.HUMAN)
+        rejected=self.repository.save(
+            rejected,
+            actor=ScenarioActor.HUMAN,
+            expected_scenario_version=current.scenario_version,
+        )
         return ScenarioMutationResult(rejected, "REJECT", True)
 
     def publish(
@@ -278,7 +290,11 @@ class QualityScenarioV1WorkflowService:
                 ).model_dump(mode="json"),
             },
         )
-        published=self.repository.save(published, actor=ScenarioActor.SYSTEM)
+        published=self.repository.save(
+            published,
+            actor=ScenarioActor.SYSTEM,
+            expected_scenario_version=current.scenario_version,
+        )
         return ScenarioMutationResult(published, "PUBLISH", True)
 
 
