@@ -12,6 +12,10 @@ from .extraction import (
     KnowledgeExtractionError,
     KnowledgeExtractionService,
 )
+from .historical_case_adapter import (
+    HistoricalCaseCandidateError,
+    HistoricalCaseCandidateProducer,
+)
 from .intake import (
     BusinessCandidateIntakeError,
     BusinessCandidateIntakeService,
@@ -71,12 +75,19 @@ from .review import (
     KnowledgeReviewService,
 )
 from .source_document import SourceDocumentError, SourceDocumentService
+from .storage_compat import (
+    StorageKnowledgeCompatibilityError,
+    StorageKnowledgeCompatibilityService,
+)
+from .api import create_knowledge_api_app
 from .web import create_processing_app
 
 __all__ = [
     "BusinessCandidateInput",
     "BusinessCandidateIntakeError",
     "BusinessCandidateIntakeService",
+    "HistoricalCaseCandidateError",
+    "HistoricalCaseCandidateProducer",
     "BusinessSourceType",
     "CandidateSourceType",
     "CandidateStatus",
@@ -128,5 +139,8 @@ __all__ = [
     "StructuredTextBlock",
     "SourceDocumentError",
     "SourceDocumentService",
+    "StorageKnowledgeCompatibilityError",
+    "StorageKnowledgeCompatibilityService",
+    "create_knowledge_api_app",
     "create_processing_app",
 ]
