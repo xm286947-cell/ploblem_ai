@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "hardware-case/v1",
+  "$id": "https://contracts.local/hardware-case/v1",
   "title": "Hardware Case MVP V0.1 Contract",
   "type": "object",
   "$defs": {
