@@ -203,3 +203,39 @@ class KnowledgeExtractionCandidateDraft(StrictModel):
 class KnowledgeExtractionOutput(StrictModel):
     candidates: list[KnowledgeExtractionCandidateDraft] = Field(default_factory=list)
     unknowns_or_gaps: list[str] = Field(default_factory=list)
+
+
+class EvidenceValidationStatus(str, Enum):
+    VALID = "VALID"
+    PARTIAL = "PARTIAL"
+    INVALID = "INVALID"
+
+
+class DuplicateStatus(str, Enum):
+    NEW = "NEW"
+    POSSIBLE_DUPLICATE = "POSSIBLE_DUPLICATE"
+    DUPLICATE = "DUPLICATE"
+
+
+class ConflictStatus(str, Enum):
+    NONE = "NONE"
+    CONFLICT = "CONFLICT"
+
+
+class KnowledgeEvaluation(StrictModel):
+    evaluation_id: str = Field(min_length=1)
+    candidate_id: str = Field(min_length=1)
+    evidence_status: EvidenceValidationStatus
+    source_valid: bool
+    contract_valid: bool
+    scope_valid: bool
+    candidate_complete: bool
+    duplicate_status: DuplicateStatus
+    duplicate_object_ids: list[str] = Field(default_factory=list)
+    conflict_status: ConflictStatus
+    conflict_object_ids: list[str] = Field(default_factory=list)
+    publish_readiness: bool
+    review_ready: bool
+    reasons: list[str] = Field(default_factory=list)
+    evaluated_against_object_ids: list[str] = Field(default_factory=list)
+    evaluation_version: str = "kp-d02-v1"
