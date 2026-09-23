@@ -4,6 +4,7 @@ import pytest
 
 from quality_knowledge.quality_scenario_v1 import (
     ScenarioCandidateV1,
+    ScenarioConfirmationMetadata,
     ScenarioEvidenceReference,
     ScenarioReviewMetadata,
     ScenarioReviewStatus,
@@ -28,6 +29,8 @@ def candidate(candidate_id="C-1", product="PLC"):
         scenario_description="运行中异常掉电后数据恢复",
         quality_concern_code="DATA_INTEGRITY",
         quality_concern_name="数据完整性",
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="客户生产中断，属于高感知质量问题",
         trigger_condition="运行中异常掉电",
         expected_result="重新上电后数据正确恢复",
         applicability_scope="PLC",
@@ -101,6 +104,13 @@ def test_repository_enforces_candidate_confirmed_published_path(tmp_path):
                 reviewer="QUALITY_OWNER",
                 reviewed_at="2026-09-23T12:00:00Z",
             ),
+            "confirmation": ScenarioConfirmationMetadata(
+                quality_confirmed_by="QUALITY_OWNER",
+                quality_confirmed_at="2026-09-23T12:00:00Z",
+                technical_confirmed_by="RND_OWNER",
+                technical_confirmed_at="2026-09-23T12:05:00Z",
+                confirmation_note="专业质量确认场景事实；研发确认技术判断",
+            ),
             "version": ScenarioVersionMetadata(
                 created_by=item.version.created_by,
                 created_at=item.version.created_at,
@@ -112,6 +122,17 @@ def test_repository_enforces_candidate_confirmed_published_path(tmp_path):
     )
     saved = repo.save(confirmed, actor="HUMAN")
     assert saved.status == ScenarioStatus.CONFIRMED
+    assert saved.confirmation.quality_confirmed_by == "QUALITY_OWNER"
+    assert saved.confirmation.technical_confirmed_by == "RND_OWNER"
+
+    with repo.connect() as connection:
+        review_rows = connection.execute(
+            "SELECT review_json FROM quality_scenario_v1_review WHERE scenario_id=?",
+            ("QSV1-STATE",),
+        ).fetchall()
+    assert review_rows
+    assert '"quality_confirmed_by": "QUALITY_OWNER"' in review_rows[-1][0]
+    assert '"technical_confirmed_by": "RND_OWNER"' in review_rows[-1][0]
 
     published = saved.model_copy(
         update={
@@ -149,6 +170,12 @@ def test_repository_rejects_direct_initial_publish(tmp_path):
                 review_status="CONFIRMED",
                 reviewer="OWNER",
                 reviewed_at="2026-09-23T12:00:00Z",
+            ),
+            "confirmation": ScenarioConfirmationMetadata(
+                quality_confirmed_by="OWNER",
+                quality_confirmed_at="2026-09-23T12:00:00Z",
+                technical_confirmed_by="RND_OWNER",
+                technical_confirmed_at="2026-09-23T12:01:00Z",
             ),
             "version": ScenarioVersionMetadata(
                 published_at="2026-09-23T12:00:00Z"
@@ -191,3 +218,17 @@ def test_repository_initialization_is_idempotent_and_does_not_mutate_legacy_tabl
     assert "idx_qsv1_lifecycle" in indexes
     assert "idx_qsv1_activity" in indexes
     assert "idx_qsv1_concern" in indexes
+
+    with sqlite3.connect(db) as connection:
+        qsv1_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info('quality_scenario_v1')")
+        }
+    assert {
+        "trigger_source",
+        "trigger_reason",
+        "quality_confirmed_by",
+        "quality_confirmed_at",
+        "technical_confirmed_by",
+        "technical_confirmed_at",
+        "confirmation_note",
+    }.issubset(qsv1_columns)
