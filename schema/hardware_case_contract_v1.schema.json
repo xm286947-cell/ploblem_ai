@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hardware-case/v1",
+  "title": "Hardware Case MVP V0.1 Contract",
+  "type": "object",
+  "$defs": {
+    "CaseField": {
+      "type": "object",
+      "required": ["candidate_value", "confirmed_value", "review_disposition", "evidence_refs"],
+      "properties": {
+        "candidate_value": {},
+        "confirmed_value": {},
+        "review_disposition": {
+          "enum": ["UNREVIEWED", "CONFIRMED", "CONFIRMED_UNKNOWN", "DEFERRED"]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "HardwareCase": {
+      "type": "object",
+      "required": [
+        "case_id",
+        "title",
+        "case_status",
+        "processing_status",
+        "source_refs",
+        "facts"
+      ],
+      "properties": {
+        "contract_version": {"const": "hardware-case/v1"},
+        "case_id": {"type": "string", "minLength": 1},
+        "title": {"type": "string", "minLength": 1},
+        "case_status": {
+          "enum": [
+            "PENDING_ANALYSIS",
+            "ANALYZING",
+            "PENDING_REVIEW",
+            "CONFIRMED",
+            "PUBLISHED",
+            "DEPRECATED"
+          ]
+        },
+        "processing_status": {
+          "enum": ["READY", "STRUCTURE_EXTRACTION_FAILED"]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "product_context": {"type": "object"},
+        "facts": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/CaseField"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "TreeNode": {
+      "type": "object",
+      "required": ["node_id", "tree_type", "name", "path"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
+        "name": {"type": "string", "minLength": 1},
+        "parent_id": {"type": ["string", "null"]},
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"}
+        },
+        "description": {"type": ["string", "null"]},
+        "source_ref": {"type": ["string", "null"]},
+        "active": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "Mapping": {
+      "type": "object",
+      "required": [
+        "mapping_id",
+        "case_id",
+        "tree_type",
+        "node_id",
+        "relation_role",
+        "mapping_status"
+      ],
+      "properties": {
+        "mapping_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
+        "node_id": {"type": "string", "minLength": 1},
+        "node_path": {"type": "string"},
+        "relation_role": {"enum": ["PRIMARY", "SECONDARY"]},
+        "mapping_status": {"enum": ["SUGGESTED", "CONFIRMED"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "basis_refs": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "Evidence": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "case_id",
+        "source_ref",
+        "evidence_type",
+        "locator",
+        "evidence_status"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "source_ref": {"type": "string", "minLength": 1},
+        "evidence_type": {"enum": ["TEXT", "TABLE", "IMAGE", "FILE"]},
+        "locator": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "section": {"type": "string"},
+            "paragraph": {"type": ["integer", "string"]},
+            "page": {"type": "integer", "minimum": 1},
+            "table": {"type": ["integer", "string"]},
+            "image": {"type": ["integer", "string"]}
+          },
+          "additionalProperties": true
+        },
+        "excerpt_or_caption": {"type": ["string", "null"]},
+        "evidence_status": {"enum": ["AVAILABLE", "SOURCE_UNAVAILABLE"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": ["contract_version", "entity_type", "payload"],
+  "properties": {
+    "contract_version": {"const": "hardware-case/v1"},
+    "entity_type": {"enum": ["CASE", "TREE_NODE", "MAPPING", "EVIDENCE"]},
+    "payload": {
+      "oneOf": [
+        {"$ref": "#/$defs/HardwareCase"},
+        {"$ref": "#/$defs/TreeNode"},
+        {"$ref": "#/$defs/Mapping"},
+        {"$ref": "#/$defs/Evidence"}
+      ]
+    }
+  },
+  "additionalProperties": false
+}
