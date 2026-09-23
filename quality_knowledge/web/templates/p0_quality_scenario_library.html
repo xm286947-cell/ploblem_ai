@@ -1,0 +1,54 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_library.css?v=qs-mvp-05b">{% endblock %}
+{% block breadcrumb %}质量场景 / 质量场景库{% endblock %}
+{% block body %}
+<main class="qsl-page" data-qsl-page data-api-prefix="{{api_prefix}}">
+  <header class="qsl-head">
+    <div>
+      <h1>质量场景库</h1>
+      <p>查询与复用正式 QualityScenario V1；默认只展示已发布场景。</p>
+    </div>
+    <div class="qsl-head-metric"><span>当前结果</span><strong data-result-count>—</strong><small>Quality Scenario</small></div>
+  </header>
+
+  <section class="qsl-filter-card">
+    <form data-filter-form>
+      <label class="qsl-search">关键词<input name="q" placeholder="场景名称、质量关注、业务活动、触发条件"></label>
+      <label>产品<select name="product_code" data-product-filter><option value="">全部产品</option></select></label>
+      <label>生命周期<select name="lifecycle_stage_code" data-lifecycle-filter><option value="">全部生命周期</option></select></label>
+      <label>业务活动<select name="business_activity_code" data-activity-filter><option value="">全部业务活动</option></select></label>
+      <label>质量关注<select name="quality_concern_code" data-quality-filter><option value="">全部质量关注</option></select></label>
+      <label>状态<select name="status"><option value="PUBLISHED" selected>PUBLISHED</option><option value="CONFIRMED">CONFIRMED</option><option value="CANDIDATE">CANDIDATE</option><option value="REJECTED">REJECTED</option><option value="">全部状态</option></select></label>
+      <div class="qsl-filter-actions"><button class="btn btn-primary" type="submit">查询</button><button class="btn" type="button" data-reset>重置</button></div>
+    </form>
+    <div class="qsl-filter-foot"><span data-filter-summary>默认范围：PUBLISHED</span><span data-load-status role="status"></span></div>
+  </section>
+
+  <section class="qsl-table-card">
+    <div class="qsl-card-head">
+      <div><h2>场景清单</h2><p>正式库默认显示 PUBLISHED；其他状态仅用于查询定位，不在本页修改。</p></div>
+      <a class="btn" href="/p0/quality-scenarios/workbench">进入场景工作台</a>
+    </div>
+    <div class="qsl-table-wrap">
+      <table class="qsl-table">
+        <thead><tr>
+          <th>场景名称</th>
+          <th>产品</th>
+          <th>生命周期</th>
+          <th>业务活动</th>
+          <th>质量关注</th>
+          <th class="qsl-num">来源问题</th>
+          <th>状态</th>
+          <th>最近更新时间</th>
+        </tr></thead>
+        <tbody data-rows><tr><td colspan="8" class="qsl-loading">正在读取质量场景…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="qsl-state" data-empty-state hidden><strong>正式场景库暂无内容</strong><span>完成 Candidate 确认并发布后，PUBLISHED 场景会出现在这里。</span></div>
+    <div class="qsl-state" data-no-result-state hidden><strong>当前条件没有匹配结果</strong><span>调整产品、生命周期、业务活动、质量关注或关键词后重试。</span></div>
+    <div class="qsl-state qsl-error" data-error-state hidden><strong>场景列表读取失败</strong><span data-error-message>请稍后重试。</span><button class="btn btn-primary" type="button" data-retry>重新加载</button></div>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.QS_LIBRARY_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_library.js?v=qs-mvp-05b" defer></script>{% endblock %}
