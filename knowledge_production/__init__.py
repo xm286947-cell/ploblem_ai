@@ -3,10 +3,16 @@ from .candidate import (
     KnowledgeCandidateService,
     source_ref_key,
 )
+from .extraction import (
+    KnowledgeExtractionError,
+    KnowledgeExtractionService,
+)
 from .models import (
     CandidateStatus,
     EvidenceLocation,
     KnowledgeCandidate,
+    KnowledgeExtractionCandidateDraft,
+    KnowledgeExtractionOutput,
     KnowledgeObjectType,
     RetrievalStatus,
     SourceDocument,
@@ -20,6 +26,10 @@ __all__ = [
     "CandidateStatus",
     "EvidenceLocation",
     "KnowledgeCandidate",
+    "KnowledgeExtractionCandidateDraft",
+    "KnowledgeExtractionOutput",
+    "KnowledgeExtractionError",
+    "KnowledgeExtractionService",
     "KnowledgeObjectType",
     "KnowledgeCandidateError",
     "KnowledgeCandidateService",
