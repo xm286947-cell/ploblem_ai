@@ -4,6 +4,10 @@ from .candidate import (
     business_source_ref_key,
     source_ref_key,
 )
+from .evaluation import (
+    KnowledgeEvaluationError,
+    KnowledgeEvaluationService,
+)
 from .extraction import (
     KnowledgeExtractionError,
     KnowledgeExtractionService,
@@ -17,8 +21,12 @@ from .models import (
     BusinessSourceType,
     CandidateSourceType,
     CandidateStatus,
+    ConflictStatus,
+    DuplicateStatus,
     EvidenceLocation,
+    EvidenceValidationStatus,
     KnowledgeCandidate,
+    KnowledgeEvaluation,
     KnowledgeExtractionCandidateDraft,
     KnowledgeExtractionOutput,
     KnowledgeObjectType,
@@ -38,8 +46,14 @@ __all__ = [
     "BusinessSourceType",
     "CandidateSourceType",
     "CandidateStatus",
+    "ConflictStatus",
+    "DuplicateStatus",
     "EvidenceLocation",
+    "EvidenceValidationStatus",
     "KnowledgeCandidate",
+    "KnowledgeEvaluation",
+    "KnowledgeEvaluationError",
+    "KnowledgeEvaluationService",
     "KnowledgeExtractionCandidateDraft",
     "KnowledgeExtractionOutput",
     "KnowledgeExtractionError",
