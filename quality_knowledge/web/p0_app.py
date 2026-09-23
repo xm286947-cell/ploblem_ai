@@ -17,8 +17,11 @@ from quality_knowledge.p0.stage_runner import (
 )
 from runtime.config import AgentConfigError
 from quality_knowledge.web.api_v2 import create_v2_router
+from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
+from repositories.hardware_case_repository import HardwareCaseRepository
+from services.hardware_case_backend import HardwareCaseBackendService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +33,7 @@ def create_p0_app(
     stage_runner: Any | None = None,
     project_root: str | Path = PROJECT_ROOT,
     runtime_model_config: str | Path | None = None,
+    hardware_case_db_path: str | Path | None = None,
 ) -> FastAPI:
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
@@ -105,12 +109,24 @@ def create_p0_app(
     app.state.p0_repository = repository
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
+
+    hardware_db = (
+        Path(hardware_case_db_path)
+        if hardware_case_db_path is not None
+        else Path(db_path).with_name("hardware_case_mvp.db")
+    )
+    hardware_case_repository = HardwareCaseRepository(hardware_db)
+    hardware_case_service = HardwareCaseBackendService(hardware_case_repository)
+    app.state.hardware_case_repository = hardware_case_repository
+    app.state.hardware_case_service = hardware_case_service
+
     app.include_router(create_v2_router(
         repository,
         stage_runner=stage_runner,
         initialization_status=status,
         analysis_runtime_status=analysis_runtime_status,
     ))
+    app.include_router(create_hardware_case_router(hardware_case_service))
     app.include_router(create_p0_insights_router())
     app.include_router(create_p1_router())
 
