@@ -7,6 +7,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+KNOWLEDGE_CANDIDATE_CONTRACT_VERSION = "knowledge-candidate/v1"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
@@ -78,6 +81,19 @@ class CandidateStatus(str, Enum):
     DEPRECATED = "DEPRECATED"
 
 
+class CandidateSourceType(str, Enum):
+    EXTERNAL_SOURCE = "EXTERNAL_SOURCE"
+    BUSINESS = "BUSINESS"
+
+
+class BusinessSourceType(str, Enum):
+    STORAGE = "STORAGE"
+    MAJOR_ISSUE = "MAJOR_ISSUE"
+    HISTORICAL_CASE = "HISTORICAL_CASE"
+    HARDWARE_CASE = "HARDWARE_CASE"
+    OTHER = "OTHER"
+
+
 class EvidenceLocation(StrictModel):
     """A model-provided locator only; source text is never accepted here."""
 
@@ -90,6 +106,10 @@ class EvidenceLocation(StrictModel):
 
 class KnowledgeCandidate(StrictModel):
     candidate_id: str = Field(min_length=1)
+    candidate_source_type: CandidateSourceType = CandidateSourceType.EXTERNAL_SOURCE
+    business_source_type: BusinessSourceType | None = None
+    business_source_id: str | None = None
+    business_source_version: str | None = None
     object_type: KnowledgeObjectType
     title: str = Field(min_length=1)
     summary: str | None = None
@@ -99,20 +119,74 @@ class KnowledgeCandidate(StrictModel):
     conditions: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
-    evidence_refs: list[str] = Field(min_length=1)
+    evidence_refs: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(min_length=1)
-    extraction_version: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
+    extraction_version: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     status: CandidateStatus = CandidateStatus.CANDIDATE
+    producer: str = Field(default="KNOWLEDGE_EXTRACTION", min_length=1)
+    contract_version: str = Field(
+        default=KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
+        pattern=r"^knowledge-candidate/v1$",
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def unique_references(self) -> "KnowledgeCandidate":
+    def validate_candidate_source(self) -> "KnowledgeCandidate":
         if len(set(self.evidence_refs)) != len(self.evidence_refs):
             raise ValueError("duplicate evidence_refs")
         if len(set(self.source_refs)) != len(self.source_refs):
             raise ValueError("duplicate source_refs")
+
+        if self.candidate_source_type == CandidateSourceType.EXTERNAL_SOURCE:
+            if any(
+                value is not None
+                for value in (
+                    self.business_source_type,
+                    self.business_source_id,
+                    self.business_source_version,
+                )
+            ):
+                raise ValueError("external candidate cannot carry business provenance")
+            if not self.extraction_version:
+                raise ValueError("external candidate requires extraction_version")
+            if not self.evidence_refs:
+                raise ValueError("external candidate requires evidence_refs")
+            return self
+
+        if self.business_source_type is None:
+            raise ValueError("business candidate requires business_source_type")
+        if not self.business_source_id:
+            raise ValueError("business candidate requires business_source_id")
         return self
+
+
+class BusinessCandidateInput(StrictModel):
+    candidate_id: str = Field(min_length=1)
+    candidate_source_type: Literal["BUSINESS"] = "BUSINESS"
+    business_source_type: BusinessSourceType
+    business_source_id: str = Field(min_length=1)
+    business_source_version: str | None = None
+    object_type: KnowledgeObjectType
+    title: str = Field(min_length=1)
+    summary: str | None = None
+    content: str = Field(min_length=1)
+    device_type: str | None = None
+    scope: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    producer: str = Field(min_length=1)
+    contract_version: str = Field(
+        default=KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
+        pattern=r"^knowledge-candidate/v1$",
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeExtractionCandidateDraft(StrictModel):
