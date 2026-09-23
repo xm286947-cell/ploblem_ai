@@ -1,9 +1,10 @@
-name: Major Case MVP RC1
+name: Case Library MVP RC1
 
 on:
   push:
     branches:
       - "release/major-case-mvp-rc1"
+      - "patch/case-library-positioning-rc1-patch01"
   pull_request:
     branches:
       - main
@@ -18,6 +19,8 @@ on:
       - "run_major_case_mvp_smoke.bat"
       - "run_major_case_mvp_smoke.sh"
       - "MAJOR_CASE_MVP_RC1_DELIVERY.md"
+      - "docs/product/CASE_LIBRARY_PRODUCT_BOUNDARY_V1.md"
+      - "docs/consumers/HISTORICAL_CASE_V1.md"
       - ".github/workflows/major-case-mvp-rc1.yml"
   workflow_dispatch:
 
@@ -65,18 +68,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(ls dist/MAJOR_CASE_MVP_RC1_*.zip)"
-          (cd dist && sha256sum -c MAJOR_CASE_MVP_RC1_*.zip.sha256)
-          unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep PACKAGE_MANIFEST.json
-          ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '(^|/)(input|output|outputs|knowledge)/'
-          ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db$'
+          test -n "$(ls dist/CASE_LIBRARY_MVP_RC1_*.zip)"
+          (cd dist && sha256sum -c CASE_LIBRARY_MVP_RC1_*.zip.sha256)
+          unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep PACKAGE_MANIFEST.json
+          ! unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep -E '(^|/)(input|output|outputs|knowledge)/'
+          ! unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db$'
 
       - name: Upload RC artifact
         uses: actions/upload-artifact@v4
         with:
-          name: major-case-mvp-rc1-${{ github.sha }}
+          name: case-library-mvp-rc1-${{ github.sha }}
           path: |
-            dist/MAJOR_CASE_MVP_RC1_*.zip
-            dist/MAJOR_CASE_MVP_RC1_*.zip.sha256
+            dist/CASE_LIBRARY_MVP_RC1_*.zip
+            dist/CASE_LIBRARY_MVP_RC1_*.zip.sha256
           if-no-files-found: error
           retention-days: 90
