@@ -256,6 +256,7 @@ class KnowledgeExtractionService:
                     draft_payload,
                     evidence_ids,
                 ),
+                candidate_source_type="EXTERNAL_SOURCE",
                 object_type=draft.object_type,
                 title=draft.title,
                 summary=draft.summary,
@@ -270,6 +271,9 @@ class KnowledgeExtractionService:
                 extraction_version=self.extraction_version,
                 confidence=draft.confidence,
                 status="CANDIDATE",
+                producer="KNOWLEDGE_EXTRACTION",
+                contract_version="knowledge-candidate/v1",
+                created_at=source_document.created_at,
                 metadata={
                     "runtime_task_id": getattr(
                         result, "task_id", None
