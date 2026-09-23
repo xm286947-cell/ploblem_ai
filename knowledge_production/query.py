@@ -61,21 +61,30 @@ class KnowledgeQueryService:
         objects_payload = self.repository.load(f"{base}/knowledge_objects.json")
         evidence_payload = self.repository.load(f"{base}/evidences.json")
         source_payload = self.repository.load(f"{base}/source_references.json")
-        if not isinstance(objects_payload, list):
+        if not isinstance(objects_payload, dict):
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
-        if not isinstance(evidence_payload, list):
+        if not isinstance(evidence_payload, dict):
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
-        if not isinstance(source_payload, list):
+        if not isinstance(source_payload, dict):
+            raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
+        raw_objects = objects_payload.get("objects")
+        raw_evidences = evidence_payload.get("evidences")
+        raw_sources = source_payload.get("source_references")
+        if not isinstance(raw_objects, list):
+            raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
+        if not isinstance(raw_evidences, list):
+            raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
+        if not isinstance(raw_sources, list):
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
 
         try:
             objects = [
                 ReleasedKnowledgeObject.model_validate(item)
-                for item in objects_payload
+                for item in raw_objects
             ]
             sources = [
                 KnowledgeSourceReference.model_validate(item)
-                for item in source_payload
+                for item in raw_sources
             ]
         except ValidationError as exc:
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID") from exc
@@ -83,7 +92,7 @@ class KnowledgeQueryService:
         selected = [item for item in objects if self._matches(item, query)]
         evidence_by_id = {
             str(item.get("evidence_id") or ""): item
-            for item in evidence_payload
+            for item in raw_evidences
             if isinstance(item, dict) and item.get("evidence_id")
         }
         source_by_ref = {item.source_ref: item for item in sources}
@@ -141,9 +150,12 @@ class KnowledgeQueryService:
                 f"{knowledge_release_version}/evidences.json"
             )
         )
-        if not isinstance(payload, list):
+        if not isinstance(payload, dict):
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_NOT_FOUND")
-        for evidence in payload:
+        evidences = payload.get("evidences")
+        if not isinstance(evidences, list):
+            raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
+        for evidence in evidences:
             if (
                 isinstance(evidence, dict)
                 and evidence.get("evidence_id") == evidence_id
@@ -162,9 +174,12 @@ class KnowledgeQueryService:
                 f"{knowledge_release_version}/source_references.json"
             )
         )
-        if not isinstance(payload, list):
+        if not isinstance(payload, dict):
             raise KnowledgeQueryError("KNOWLEDGE_RELEASE_NOT_FOUND")
-        for item in payload:
+        sources = payload.get("source_references")
+        if not isinstance(sources, list):
+            raise KnowledgeQueryError("KNOWLEDGE_RELEASE_INVALID")
+        for item in sources:
             if isinstance(item, dict) and item.get("source_ref") == source_ref:
                 try:
                     return KnowledgeSourceReference.model_validate(item)
