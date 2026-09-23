@@ -1,9 +1,0 @@
-{% extends 'base.html' %}
-{% block breadcrumb %}质量场景资产 / 客户与行业质量画像 / 归档{% endblock %}
-{% block body %}
-<div class="di-pagehead"><div><a class="mw-back" href="/quality-scenario-assets/portrait">← 返回客户 / 行业画像</a><h1>质量画像归档</h1><p>保留生成结果、分析触发原因、筛选条件和当时使用的问题证据快照。</p></div></div>
-<section class="di-card"><div class="table-wrap"><table class="qs-table"><thead><tr><th>画像名称</th><th>触发原因</th><th>触发条件</th><th>输入 / 来源</th><th>模型与时间</th><th>操作</th></tr></thead><tbody>
-{% for job in archives %}<tr><td><b>{{job.archive_name}}</b><small>{{job.job_id}}</small></td><td>{{job.archive_reason}}</td><td>{% for row in job.archive_snapshot.trigger_conditions %}<span class="tag">{{row.label}}：{{row.value}}</span> {% else %}未限定条件{% endfor %}</td><td>{{job.archive_snapshot.input_count}} 个问题<small>已有场景 {{job.archive_snapshot.evidence_counts.EXISTING_SCENARIO or 0}} / 问题补充 {{job.archive_snapshot.evidence_counts.MARKET_PROBLEM_SUPPLEMENT or 0}}</small></td><td>{{job.archive_snapshot.model or '未记录模型'}}<small>归档：{{job.archived_at}}</small></td><td><a href="/quality-scenario-interpretations/{{job.job_id}}">查看归档画像 →</a></td></tr>
-{% else %}<tr><td colspan="6" class="di-empty">尚无归档画像。请先完成人工触发分析，再在画像详情中归档。</td></tr>{% endfor %}
-</tbody></table></div></section>
-{% endblock %}
