@@ -1,0 +1,23 @@
+name: Hardware Case M1 Contract
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_case_contract.py"
+      - "schema/hardware_case_contract_v1.schema.json"
+      - "tests/test_hardware_case_contract.py"
+      - ".github/workflows/hardware-case-m1.yml"
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install contract test dependencies
+        run: python -m pip install "pytest>=8,<9" "jsonschema>=4.21,<5" "PyYAML>=6,<7"
+      - name: Run Hardware Case M1 contract tests
+        run: python -m pytest -q --noconftest tests/test_hardware_case_contract.py
