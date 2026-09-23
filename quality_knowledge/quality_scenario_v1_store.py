@@ -140,6 +140,9 @@ class QualityScenarioV1Repository(ABC):
     ) -> list[QualityScenarioV1]: ...
 
     @abstractmethod
+    def history(self, scenario_id: str) -> dict[str, list[dict]]: ...
+
+    @abstractmethod
     def delete(self, scenario_id: str) -> bool: ...
 
 
@@ -444,6 +447,49 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
     def get(self, scenario_id: str) -> QualityScenarioV1 | None:
         with self.connect() as connection:
             return self._load(connection, scenario_id)
+
+    def history(self, scenario_id: str) -> dict[str, list[dict]]:
+        with self.connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM quality_scenario_v1 WHERE scenario_id=?",
+                (scenario_id,),
+            ).fetchone()
+            if exists is None:
+                return {"versions": [], "reviews": []}
+            versions = []
+            for row in connection.execute(
+                """SELECT scenario_version,snapshot_json,created_at
+                   FROM quality_scenario_v1_version
+                   WHERE scenario_id=?
+                   ORDER BY scenario_version DESC""",
+                (scenario_id,),
+            ):
+                versions.append(
+                    {
+                        "scenario_version": int(row["scenario_version"]),
+                        "created_at": row["created_at"],
+                        "snapshot": json.loads(row["snapshot_json"] or "{}"),
+                    }
+                )
+            reviews = []
+            for row in connection.execute(
+                """SELECT review_id,scenario_version,review_json,created_at
+                   FROM quality_scenario_v1_review
+                   WHERE scenario_id=?
+                   ORDER BY scenario_version DESC,created_at DESC""",
+                (scenario_id,),
+            ):
+                payload = json.loads(row["review_json"] or "{}")
+                reviews.append(
+                    {
+                        "review_id": row["review_id"],
+                        "scenario_version": int(row["scenario_version"]),
+                        "created_at": row["created_at"],
+                        "review": payload.get("review") or {},
+                        "confirmation": payload.get("confirmation") or {},
+                    }
+                )
+            return {"versions": versions, "reviews": reviews}
 
     def list(
         self,
