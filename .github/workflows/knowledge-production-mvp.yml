@@ -43,4 +43,5 @@ jobs:
             tests/test_kp_d01_business_candidate_intake.py \
             tests/test_kp_d02_evaluation.py \
             tests/test_kp_d03_review_publish.py \
+            tests/test_kp_d04_release_query.py \
             tests/knowledge/test_knowledge_service.py
