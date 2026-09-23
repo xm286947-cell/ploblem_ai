@@ -26,6 +26,11 @@ class ScenarioStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ScenarioTriggerSource(StrEnum):
+    HIGH_PERCEPTION = "HIGH_PERCEPTION"
+    RND_VALUE = "RND_VALUE"
+
+
 class ScenarioActor(StrEnum):
     AI = "AI"
     HUMAN = "HUMAN"
@@ -108,6 +113,34 @@ class ScenarioReviewMetadata(BaseModel):
         return self
 
 
+class ScenarioConfirmationMetadata(BaseModel):
+    """Lightweight dual-role confirmation facts, not an approval workflow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quality_confirmed_by: str = Field(default="", max_length=120)
+    quality_confirmed_at: str = Field(default="", max_length=64)
+    technical_confirmed_by: str = Field(default="", max_length=120)
+    technical_confirmed_at: str = Field(default="", max_length=64)
+    confirmation_note: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def require_actor_time_pairs(self):
+        if bool(self.quality_confirmed_by.strip()) != bool(self.quality_confirmed_at.strip()):
+            raise ValueError("SCENARIO_QUALITY_CONFIRMATION_ACTOR_TIME_PAIR_REQUIRED")
+        if bool(self.technical_confirmed_by.strip()) != bool(self.technical_confirmed_at.strip()):
+            raise ValueError("SCENARIO_TECHNICAL_CONFIRMATION_ACTOR_TIME_PAIR_REQUIRED")
+        return self
+
+    @property
+    def quality_confirmed(self) -> bool:
+        return bool(self.quality_confirmed_by.strip() and self.quality_confirmed_at.strip())
+
+    @property
+    def technical_confirmed(self) -> bool:
+        return bool(self.technical_confirmed_by.strip() and self.technical_confirmed_at.strip())
+
+
 class ScenarioVersionMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +167,8 @@ class QualityScenarioFieldsV1(BaseModel):
     scenario_description: str = Field(default="", max_length=4000)
     quality_concern_code: str = Field(default="", max_length=120)
     quality_concern_name: str = Field(default="", max_length=400)
+    trigger_source: ScenarioTriggerSource | None = None
+    trigger_reason: str = Field(default="", max_length=1000)
     trigger_condition: str = Field(default="", max_length=2000)
     expected_result: str = Field(default="", max_length=2000)
     applicability_scope: str = Field(default="", max_length=2000)
@@ -198,6 +233,7 @@ class QualityScenarioV1(QualityScenarioFieldsV1):
     missing_information: list[ScenarioMissingInformation] = Field(default_factory=list)
 
     review: ScenarioReviewMetadata = Field(default_factory=ScenarioReviewMetadata)
+    confirmation: ScenarioConfirmationMetadata = Field(default_factory=ScenarioConfirmationMetadata)
     version: ScenarioVersionMetadata = Field(default_factory=ScenarioVersionMetadata)
 
     @model_validator(mode="after")
@@ -221,6 +257,10 @@ class QualityScenarioV1(QualityScenarioFieldsV1):
             raise ValueError("SCENARIO_FORMAL_FIELD_REQUIRED:" + ",".join(missing))
         if not self.quality_concern_code.strip() and not self.quality_concern_name.strip():
             raise ValueError("SCENARIO_QUALITY_CONCERN_REQUIRED")
+        if self.trigger_source is None:
+            raise ValueError("SCENARIO_TRIGGER_SOURCE_REQUIRED")
+        if not self.trigger_reason.strip():
+            raise ValueError("SCENARIO_TRIGGER_REASON_REQUIRED")
         if not self.source_problem_refs:
             raise ValueError("SCENARIO_SOURCE_PROBLEM_REQUIRED")
         if not self.evidence_refs:
@@ -231,6 +271,10 @@ class QualityScenarioV1(QualityScenarioFieldsV1):
             raise ValueError("SCENARIO_MISSING_INFORMATION_PENDING")
         if self.review.review_status != ScenarioReviewStatus.CONFIRMED:
             raise ValueError("SCENARIO_REVIEW_NOT_CONFIRMED")
+        if not self.confirmation.quality_confirmed:
+            raise ValueError("SCENARIO_QUALITY_CONFIRMATION_REQUIRED")
+        if not self.confirmation.technical_confirmed:
+            raise ValueError("SCENARIO_TECHNICAL_CONFIRMATION_REQUIRED")
 
 
 ALLOWED_STATUS_TRANSITIONS: dict[ScenarioStatus, set[ScenarioStatus]] = {
@@ -300,6 +344,7 @@ def scenario_from_candidate(
 __all__ = [
     "SCHEMA_VERSION",
     "ScenarioStatus",
+    "ScenarioTriggerSource",
     "ScenarioActor",
     "ScenarioReviewStatus",
     "ScenarioProvenanceType",
@@ -308,6 +353,7 @@ __all__ = [
     "ScenarioEvidenceReference",
     "ScenarioMissingInformation",
     "ScenarioReviewMetadata",
+    "ScenarioConfirmationMetadata",
     "ScenarioVersionMetadata",
     "QualityScenarioFieldsV1",
     "ScenarioCandidateV1",
