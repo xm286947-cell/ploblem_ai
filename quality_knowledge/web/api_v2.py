@@ -16,6 +16,7 @@ from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
 from quality_knowledge.product_report import ProductQualityReportService, ProductReportError
 from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
 from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
+from quality_knowledge.quality_scenario_v1_workflow_service import QualityScenarioV1WorkflowService
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
 from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
@@ -29,11 +30,12 @@ def _http_error(error: Exception) -> HTTPException:
         "ISSUE_NOT_FOUND", "V2_ANALYSIS_NOT_AVAILABLE", "ANALYSIS_SET_NOT_FOUND", "ANALYSIS_JOB_NOT_FOUND",
         "RISK_CASE_SOURCE_ISSUE_NOT_FOUND", "RISK_CASE_MERGE_TARGET_NOT_FOUND", "ASSESSMENT_NOT_FOUND",
         "ASSESSMENT_VERSION_NOT_FOUND", "RISK_RESULT_NOT_FOUND",
-        "REPORT_NOT_FOUND",
+        "REPORT_NOT_FOUND", "QUALITY_SCENARIO_V1_NOT_FOUND",
     }:
         return HTTPException(404, code)
     if code in {"HUMAN_CONFIRMATION_STALE", "HUMAN_CONFIRMATION_VERSION_CONFLICT", "INSIGHT_SCOPE_CHANGED",
-                "ASSESSMENT_MATERIAL_UNCHANGED"}:
+                "ASSESSMENT_MATERIAL_UNCHANGED", "SCENARIO_VERSION_CONFLICT",
+                "SCENARIO_CONFIRM_STATE_CONFLICT", "SCENARIO_REJECT_STATE_CONFLICT"}:
         return HTTPException(409, code)
     if code in {"ANALYSIS_RUNNER_NOT_CONFIGURED", "AI_CONFIGURATION_NOT_CONFIGURED"}:
         return HTTPException(503, code)
@@ -59,6 +61,7 @@ def create_v2_router(
     analysis_jobs = V2BatchAnalysisJobManager(repository, stage_runner)
     reports = ProductQualityReportService(repository)
     scenario_candidates = CandidateV1Service(SQLiteQualityScenarioV1Repository(repository.db_path))
+    scenario_workflow = QualityScenarioV1WorkflowService(scenario_candidates.repository)
 
     @router.get("/product-reports/precheck")
     def report_precheck(product_code: str, start_month: str, end_month: str) -> dict[str, Any]:
@@ -658,5 +661,77 @@ def create_v2_router(
         if item is None:
             raise HTTPException(404, "QUALITY_SCENARIO_V1_CANDIDATE_NOT_FOUND")
         return item.model_dump(mode="json")
+
+
+    def _expected_version(payload: dict[str, Any]) -> int:
+        try:
+            value = int(payload.get("expected_scenario_version") or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            raise HTTPException(400, "EXPECTED_SCENARIO_VERSION_REQUIRED")
+        return value
+
+    @router.get("/quality-scenarios/{scenario_id}")
+    def quality_scenario_v1_detail(scenario_id: str) -> dict[str, Any]:
+        try:
+            return scenario_workflow.get(scenario_id).model_dump(mode="json")
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.post("/quality-scenarios/{scenario_id}/review")
+    def review_quality_scenario(scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return scenario_workflow.review_candidate(
+                scenario_id,
+                expected_scenario_version=_expected_version(payload),
+                patch=payload.get("patch") if isinstance(payload.get("patch"), dict) else {},
+                review_status=str(payload.get("review_status") or "PENDING"),
+                reviewer=str(payload.get("reviewer") or ""),
+                reviewed_at=str(payload.get("reviewed_at") or ""),
+                comment=str(payload.get("comment") or ""),
+            ).to_dict()
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.post("/quality-scenarios/{scenario_id}/confirm")
+    def confirm_quality_scenario(scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return scenario_workflow.confirm(
+                scenario_id,
+                expected_scenario_version=_expected_version(payload),
+                quality_confirmed_by=str(payload.get("quality_confirmed_by") or ""),
+                quality_confirmed_at=str(payload.get("quality_confirmed_at") or ""),
+                technical_confirmed_by=str(payload.get("technical_confirmed_by") or ""),
+                technical_confirmed_at=str(payload.get("technical_confirmed_at") or ""),
+                confirmation_note=str(payload.get("confirmation_note") or ""),
+            ).to_dict()
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.post("/quality-scenarios/{scenario_id}/reject")
+    def reject_quality_scenario(scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return scenario_workflow.reject(
+                scenario_id,
+                expected_scenario_version=_expected_version(payload),
+                reviewer=str(payload.get("reviewer") or ""),
+                reviewed_at=str(payload.get("reviewed_at") or ""),
+                comment=str(payload.get("comment") or ""),
+            ).to_dict()
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.post("/quality-scenarios/{scenario_id}/publish")
+    def publish_quality_scenario(scenario_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return scenario_workflow.publish(
+                scenario_id,
+                expected_scenario_version=_expected_version(payload),
+                published_by=str(payload.get("published_by") or ""),
+                published_at=str(payload.get("published_at") or ""),
+            ).to_dict()
+        except ValueError as error:
+            raise _http_error(error) from error
 
     return router
