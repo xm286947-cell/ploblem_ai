@@ -121,6 +121,7 @@ class QualityScenarioV1Repository(ABC):
         scenario: QualityScenarioV1,
         *,
         actor: ScenarioActor | str = ScenarioActor.HUMAN,
+        expected_scenario_version: int | None = None,
     ) -> QualityScenarioV1: ...
 
     @abstractmethod
@@ -304,11 +305,15 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
         scenario: QualityScenarioV1,
         *,
         actor: ScenarioActor | str = ScenarioActor.HUMAN,
+        expected_scenario_version: int | None = None,
     ) -> QualityScenarioV1:
         scenario = QualityScenarioV1.model_validate(scenario)
         actor_type = ScenarioActor(actor)
         with self._transaction() as connection:
             existing = self._load(connection, scenario.scenario_id)
+            if expected_scenario_version is not None:
+                if existing is None or existing.scenario_version != expected_scenario_version:
+                    raise ValueError("SCENARIO_VERSION_CONFLICT")
             if existing is None:
                 if scenario.status != ScenarioStatus.CANDIDATE:
                     raise ValueError("SCENARIO_INITIAL_STATUS_MUST_BE_CANDIDATE")
