@@ -92,9 +92,11 @@ class KnowledgeReleaseService:
             return manifest
 
         files: dict[str, bytes] = {
-            "knowledge_objects.json": _canonical_bytes(object_payload),
-            "evidences.json": _canonical_bytes(evidence_payload),
-            "source_references.json": _canonical_bytes(source_payload),
+            "knowledge_objects.json": _canonical_bytes({"objects": object_payload}),
+            "evidences.json": _canonical_bytes({"evidences": evidence_payload}),
+            "source_references.json": _canonical_bytes(
+                {"source_references": source_payload}
+            ),
         }
         migration_notes = (
             "No migration from chunk/retrieval contracts is implied. "
