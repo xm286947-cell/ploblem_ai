@@ -239,3 +239,62 @@ class KnowledgeEvaluation(StrictModel):
     reasons: list[str] = Field(default_factory=list)
     evaluated_against_object_ids: list[str] = Field(default_factory=list)
     evaluation_version: str = "kp-d02-v1"
+
+
+KNOWLEDGE_OBJECT_CONTRACT_VERSION = "knowledge-object/v1"
+
+
+class ReviewAction(str, Enum):
+    CONFIRM = "CONFIRM"
+    EDIT = "EDIT"
+    REJECT = "REJECT"
+
+
+class ReviewStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+
+
+class ReviewRecord(StrictModel):
+    review_id: str = Field(min_length=1)
+    candidate_id: str = Field(min_length=1)
+    action: ReviewAction
+    review_status: ReviewStatus
+    reviewed_by: str = Field(min_length=1)
+    reviewed_at: datetime
+    review_note: str | None = None
+    input_evaluation_id: str = Field(min_length=1)
+    effective_evaluation_id: str | None = None
+    effective_snapshot_ref: str | None = None
+    edit_fields: list[str] = Field(default_factory=list)
+
+
+class KnowledgeObject(StrictModel):
+    object_id: str = Field(min_length=1)
+    object_version: int = Field(ge=1)
+    contract_version: str = Field(
+        default=KNOWLEDGE_OBJECT_CONTRACT_VERSION,
+        pattern=r"^knowledge-object/v1$",
+    )
+    status: Literal["ACTIVE"] = "ACTIVE"
+    candidate_id: str = Field(min_length=1)
+    review_id: str = Field(min_length=1)
+    evaluation_id: str = Field(min_length=1)
+    candidate_source_type: CandidateSourceType
+    business_source_type: BusinessSourceType | None = None
+    business_source_id: str | None = None
+    business_source_version: str | None = None
+    object_type: KnowledgeObjectType
+    title: str = Field(min_length=1)
+    summary: str | None = None
+    content: str = Field(min_length=1)
+    device_type: str | None = None
+    scope: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(min_length=1)
+    source_refs: list[str] = Field(min_length=1)
+    producer: str = Field(min_length=1)
+    published_by: str = Field(min_length=1)
+    published_at: datetime
