@@ -20,6 +20,14 @@ __all__ = [
     "SEARCH_NO_CANDIDATES",
     "SEARCH_UNAVAILABLE",
     "SEARCH_INCOMPLETE",
+    "RepeatResultService",
+    "RepeatResultContractError",
+    "RESULT_CONTRACT_VERSION",
+    "RESULT_READY_FOR_REVIEW",
+    "RESULT_NO_CANDIDATES",
+    "RESULT_SEARCH_UNAVAILABLE",
+    "RESULT_INCOMPLETE",
+    "HUMAN_DECISIONS",
 ]
 
 from .search import (
@@ -29,4 +37,15 @@ from .search import (
     SEARCH_UNAVAILABLE,
     RepeatHistoricalCaseSearchService,
     RepeatSearchContractError,
+)
+
+from .result import (
+    HUMAN_DECISIONS,
+    RESULT_CONTRACT_VERSION,
+    RESULT_INCOMPLETE,
+    RESULT_NO_CANDIDATES,
+    RESULT_READY_FOR_REVIEW,
+    RESULT_SEARCH_UNAVAILABLE,
+    RepeatResultContractError,
+    RepeatResultService,
 )
