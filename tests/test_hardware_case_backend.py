@@ -247,7 +247,7 @@ def test_m2_search_covers_confirmed_fact_product_and_tree_path(tmp_path: Path):
 
     assert service.search_cases("浪涌触发保护")["results"][0]["case_id"] == "HC-M2-001"
     assert service.search_cases("工业控制器")["results"][0]["case_id"] == "HC-M2-001"
-    assert service.search_cases("电源/DC-DC")["results"][0]["case_id"] == "HC-M2-001"
+    assert service.search_cases("电源/DC/DC")["results"][0]["case_id"] == "HC-M2-001"
 
 
 def test_m2_candidate_value_never_leaks_to_consumer_search_or_detail(tmp_path: Path):
