@@ -17,6 +17,7 @@ from quality_knowledge.product_report import ProductQualityReportService, Produc
 from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
 from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
 from quality_knowledge.quality_scenario_v1_workflow_service import QualityScenarioV1WorkflowService
+from quality_knowledge.quality_scenario_traceability_service import QualityScenarioTraceabilityService
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
 from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
@@ -62,6 +63,7 @@ def create_v2_router(
     reports = ProductQualityReportService(repository)
     scenario_candidates = CandidateV1Service(SQLiteQualityScenarioV1Repository(repository.db_path))
     scenario_workflow = QualityScenarioV1WorkflowService(scenario_candidates.repository)
+    scenario_traceability = QualityScenarioTraceabilityService(scenario_candidates.repository)
 
     @router.get("/product-reports/precheck")
     def report_precheck(product_code: str, start_month: str, end_month: str) -> dict[str, Any]:
@@ -673,6 +675,13 @@ def create_v2_router(
         return value
 
 
+    @router.get("/quality-scenario-sources/scenarios")
+    def quality_scenarios_for_source(source_ref: str = "") -> dict[str, Any]:
+        try:
+            return scenario_traceability.scenarios_for_source(source_ref)
+        except ValueError as error:
+            raise _http_error(error) from error
+
     @router.get("/quality-scenarios")
     def quality_scenarios_v1(
         product_code: str = "",
@@ -702,6 +711,13 @@ def create_v2_router(
     def quality_scenario_v1_detail(scenario_id: str) -> dict[str, Any]:
         try:
             return scenario_workflow.get(scenario_id).model_dump(mode="json")
+        except ValueError as error:
+            raise _http_error(error) from error
+
+    @router.get("/quality-scenarios/{scenario_id}/traceability")
+    def quality_scenario_v1_traceability(scenario_id: str) -> dict[str, Any]:
+        try:
+            return scenario_traceability.trace(scenario_id)
         except ValueError as error:
             raise _http_error(error) from error
 
