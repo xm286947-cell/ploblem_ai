@@ -304,3 +304,73 @@ class KnowledgeObject(StrictModel):
     producer: str = Field(min_length=1)
     published_by: str = Field(min_length=1)
     published_at: datetime
+
+
+KNOWLEDGE_QUERY_CONTRACT_VERSION = "knowledge-query/v1"
+
+
+class KnowledgeSourceKind(str, Enum):
+    EXTERNAL_SOURCE_DOCUMENT = "EXTERNAL_SOURCE_DOCUMENT"
+    BUSINESS_OBJECT = "BUSINESS_OBJECT"
+
+
+class KnowledgeSourceReference(StrictModel):
+    source_ref: str = Field(min_length=1)
+    source_kind: KnowledgeSourceKind
+    source_id: str = Field(min_length=1)
+    source_version: str | None = None
+    source_type: str = Field(min_length=1)
+    title: str | None = None
+    publisher: str | None = None
+    official_url: str | None = None
+    source_ref_uri: str | None = None
+    content_hash: str | None = None
+
+
+class ReleasedKnowledgeObject(KnowledgeObject):
+    knowledge_release_version: str = Field(min_length=1)
+
+
+class KnowledgeQuery(StrictModel):
+    knowledge_release_version: str = Field(min_length=1)
+    object_ids: list[str] = Field(default_factory=list)
+    object_types: list[KnowledgeObjectType] = Field(default_factory=list)
+    device_types: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    topic: str | None = None
+
+
+class KnowledgeQueryResult(StrictModel):
+    contract_version: str = Field(
+        default=KNOWLEDGE_QUERY_CONTRACT_VERSION,
+        pattern=r"^knowledge-query/v1$",
+    )
+    knowledge_release_version: str = Field(min_length=1)
+    objects: list[ReleasedKnowledgeObject] = Field(default_factory=list)
+    evidences: list[dict[str, Any]] = Field(default_factory=list)
+    source_references: list[KnowledgeSourceReference] = Field(default_factory=list)
+    unknowns_or_gaps: list[str] = Field(default_factory=list)
+
+
+class KnowledgeReleaseManifest(StrictModel):
+    knowledge_release_version: str = Field(min_length=1)
+    contract_version: str = Field(
+        default=KNOWLEDGE_QUERY_CONTRACT_VERSION,
+        pattern=r"^knowledge-query/v1$",
+    )
+    object_contract_version: str = Field(
+        default=KNOWLEDGE_OBJECT_CONTRACT_VERSION,
+        pattern=r"^knowledge-object/v1$",
+    )
+    candidate_contract_version: str = Field(
+        default=KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
+        pattern=r"^knowledge-candidate/v1$",
+    )
+    created_at: datetime
+    snapshot_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    object_count: int = Field(ge=0)
+    evidence_count: int = Field(ge=0)
+    source_reference_count: int = Field(ge=0)
+    files: list[dict[str, Any]] = Field(default_factory=list)
+    migration_notes: str
+    compatibility_notes: str
