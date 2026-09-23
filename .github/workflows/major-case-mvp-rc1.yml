@@ -63,28 +63,19 @@ jobs:
       - name: Golden Path smoke
         run: python scripts/major_case_mvp_smoke.py
 
-      - name: Build RC package
+      - name: Build unified Case Library RC package
         run: python scripts/build_major_case_mvp_package.py
 
-      - name: Package integrity
+      - name: Full package integrity
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(ls dist/CASE_LIBRARY_MVP_RC1_*.zip)"
-          (cd dist && sha256sum -c CASE_LIBRARY_MVP_RC1_*.zip.sha256)
-          unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep PACKAGE_MANIFEST.json
-          ! unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep -E '(^|/)(input|output|outputs|knowledge)/'
-          ! unzip -l dist/CASE_LIBRARY_MVP_RC1_*.zip | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db        uses: actions/upload-artifact@v4
-        with:
-          name: case-library-mvp-rc1-${{ github.sha }}
-          path: |
-            dist/CASE_LIBRARY_MVP_RC1_*.zip
-            dist/CASE_LIBRARY_MVP_RC1_*.zip.sha256
-            dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip
-            dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip.sha256
-          if-no-files-found: error
-          retention-days: 90
-
+          FULL_ZIP="$(ls dist/CASE_LIBRARY_MVP_RC1_[0-9a-f]*.zip | head -n1)"
+          test -n "$FULL_ZIP"
+          (cd dist && sha256sum -c "$(basename "$FULL_ZIP").sha256")
+          unzip -l "$FULL_ZIP" | grep PACKAGE_MANIFEST.json
+          ! unzip -l "$FULL_ZIP" | grep -E '(^|/)(input|output|outputs|knowledge)/'
+          ! unzip -l "$FULL_ZIP" | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db$'
 
       - name: Build positioning patch
         run: python scripts/build_case_library_positioning_patch.py
@@ -93,16 +84,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(ls dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip)"
-          (cd dist && sha256sum -c CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip.sha256)
-          unzip -l dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip | grep PATCH_MANIFEST.json
+          PATCH_ZIP="$(ls dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip | head -n1)"
+          test -n "$PATCH_ZIP"
+          (cd dist && sha256sum -c "$(basename "$PATCH_ZIP").sha256")
+          unzip -l "$PATCH_ZIP" | grep PATCH_MANIFEST.json
 
-      - name: Upload RC artifact
+      - name: Upload RC and patch artifacts
         uses: actions/upload-artifact@v4
         with:
           name: case-library-mvp-rc1-${{ github.sha }}
           path: |
-            dist/CASE_LIBRARY_MVP_RC1_*.zip
-            dist/CASE_LIBRARY_MVP_RC1_*.zip.sha256
+            dist/CASE_LIBRARY_MVP_RC1_[0-9a-f]*.zip
+            dist/CASE_LIBRARY_MVP_RC1_[0-9a-f]*.zip.sha256
+            dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip
+            dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip.sha256
           if-no-files-found: error
           retention-days: 90
