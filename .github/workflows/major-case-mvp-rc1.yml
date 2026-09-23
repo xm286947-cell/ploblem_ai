@@ -96,6 +96,18 @@ jobs:
           (cd dist && sha256sum -c "$(basename "$PATCH_ZIP").sha256")
           unzip -l "$PATCH_ZIP" | grep PATCH_MANIFEST.json
 
+      - name: Build Windows SQLite patch
+        run: python scripts/build_case_library_windows_sqlite_patch.py
+
+      - name: Windows SQLite patch integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH2_ZIP="$(ls dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip | head -n1)"
+          test -n "$PATCH2_ZIP"
+          (cd dist && sha256sum -c "$(basename "$PATCH2_ZIP").sha256")
+          unzip -l "$PATCH2_ZIP" | grep PATCH_MANIFEST.json
+
       - name: Upload RC and patch artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -105,5 +117,7 @@ jobs:
             dist/CASE_LIBRARY_MVP_RC1_[0-9a-f]*.zip.sha256
             dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip
             dist/CASE_LIBRARY_MVP_RC1_PATCH01_POSITIONING_*.zip.sha256
+            dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip
+            dist/CASE_LIBRARY_MVP_RC1_PATCH02_WINDOWS_SQLITE_*.zip.sha256
           if-no-files-found: error
           retention-days: 90
