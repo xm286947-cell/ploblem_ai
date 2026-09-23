@@ -257,6 +257,32 @@ def test_stale_review_is_rejected_by_optimistic_concurrency(tmp_path):
     assert svc.get(item.scenario_id).scenario_description == "V2"
 
 
+
+def test_repository_expected_version_is_checked_inside_write_transaction(tmp_path):
+    repo,svc,item=make_services(tmp_path)
+    reviewed=svc.review_candidate(
+        item.scenario_id,
+        expected_scenario_version=1,
+        patch={"scenario_description":"V2"},
+        review_status="PENDING",
+    ).scenario
+    stale=reviewed.model_copy(
+        update={
+            "scenario_version":3,
+            "scenario_description":"stale direct save",
+        }
+    )
+    with pytest.raises(ValueError, match="SCENARIO_VERSION_CONFLICT"):
+        repo.save(
+            stale,
+            actor="HUMAN",
+            expected_scenario_version=1,
+        )
+    stored=repo.get(item.scenario_id)
+    assert stored is not None
+    assert stored.scenario_version == 2
+    assert stored.scenario_description == "V2"
+
 def test_publish_creates_version_and_repeat_publish_is_idempotent(tmp_path):
     _,svc,item=make_services(tmp_path)
     confirmed=confirm_ready(svc,item)
@@ -280,10 +306,14 @@ def test_publish_creates_version_and_repeat_publish_is_idempotent(tmp_path):
 
 
 class PublishFailRepository(SQLiteQualityScenarioV1Repository):
-    def save(self, scenario, *, actor="HUMAN"):
+    def save(self, scenario, *, actor="HUMAN", expected_scenario_version=None):
         if scenario.status == ScenarioStatus.PUBLISHED:
             raise RuntimeError("SIMULATED_PUBLISH_FAILURE")
-        return super().save(scenario, actor=actor)
+        return super().save(
+            scenario,
+            actor=actor,
+            expected_scenario_version=expected_scenario_version,
+        )
 
 
 def test_publish_failure_leaves_original_confirmed(tmp_path):
