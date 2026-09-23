@@ -448,6 +448,29 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
         with self.connect() as connection:
             return self._load(connection, scenario_id)
 
+    def list_by_source(self, source_ref: str) -> list[QualityScenarioV1]:
+        source_ref = str(source_ref or "").strip()
+        if not source_ref:
+            return []
+        with self.connect() as connection:
+            ids = [
+                row["scenario_id"]
+                for row in connection.execute(
+                    """SELECT source.scenario_id
+                       FROM quality_scenario_v1_source source
+                       JOIN quality_scenario_v1 scenario
+                         ON scenario.scenario_id=source.scenario_id
+                       WHERE source.source_ref=?
+                       ORDER BY scenario.updated_at DESC,source.scenario_id""",
+                    (source_ref,),
+                )
+            ]
+            return [
+                item
+                for item in (self._load(connection, scenario_id) for scenario_id in ids)
+                if item is not None
+            ]
+
     def history(self, scenario_id: str) -> dict[str, list[dict]]:
         with self.connect() as connection:
             exists = connection.execute(

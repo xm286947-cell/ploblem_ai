@@ -1,6 +1,6 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_detail.css?v=qs-mvp-05c">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_detail.css?v=qs-mvp-06">{% endblock %}
 {% block breadcrumb %}质量场景 / 场景详情{% endblock %}
 {% block body %}
 <main class="qsd-page" data-qsd-page data-api-prefix="{{api_prefix}}" data-scenario-id="{{scenario_id}}">
@@ -61,6 +61,7 @@
 
       <aside class="qsd-panel qsd-trace-panel">
         <div class="qsd-panel-head"><div><h2>来源问题与 Evidence</h2><p>来源事实与AI推断分开追溯</p></div></div>
+        <div class="qsd-integrity" data-trace-integrity><span>Evidence完整性</span><strong data-integrity-status>检查中</strong><small data-integrity-summary>正在校验来源、支撑字段与内容指针…</small></div>
         <section class="qsd-trace-section"><div class="qsd-section-title"><h3>来源问题</h3><span data-source-count>0</span></div><div data-source-list></div></section>
         <section class="qsd-trace-section"><div class="qsd-section-title"><h3>Evidence</h3><span data-evidence-count>0</span></div><div data-evidence-list></div></section>
       </aside>
@@ -74,4 +75,4 @@
   </div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script>window.QS_DETAIL_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_detail.js?v=qs-mvp-05c" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.QS_DETAIL_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_detail.js?v=qs-mvp-06" defer></script>{% endblock %}
