@@ -42,4 +42,5 @@ jobs:
             tests/test_kp_m03_ai_extraction.py \
             tests/test_kp_d01_business_candidate_intake.py \
             tests/test_kp_d02_evaluation.py \
+            tests/test_kp_d03_review_publish.py \
             tests/knowledge/test_knowledge_service.py
