@@ -1,0 +1,122 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_workbench.css?v=qs-mvp-05a">{% endblock %}
+{% block breadcrumb %}质量场景 / 场景工作台{% endblock %}
+{% block body %}
+<main class="qs-workbench" data-qs-workbench data-api-prefix="{{api_prefix}}">
+  <header class="qs-page-head">
+    <div>
+      <h1>场景工作台</h1>
+      <p>从 AI Candidate 到人工确认与发布；场景事实、来源与 Evidence 在同一工作上下文中核对。</p>
+    </div>
+    <div class="qs-head-stat"><span>待处理</span><strong data-pending-count>—</strong><small>Candidate</small></div>
+  </header>
+
+  <section class="qs-filter-bar" aria-label="场景筛选">
+    <form data-filter-form>
+      <label>产品<input name="product_code" list="qs-products" placeholder="全部产品"></label>
+      <datalist id="qs-products" data-product-options></datalist>
+      <label>生命周期<input name="lifecycle_stage_code" list="qs-lifecycles" placeholder="全部生命周期"></label>
+      <datalist id="qs-lifecycles" data-lifecycle-options></datalist>
+      <label>状态<select name="status"><option value="CANDIDATE" selected>Candidate</option><option value="CONFIRMED">Confirmed</option><option value="PUBLISHED">Published</option><option value="REJECTED">Rejected</option><option value="">全部状态</option></select></label>
+      <label class="qs-filter-search">关键词<input name="q" placeholder="场景名称 / 描述 / 质量关注"></label>
+      <button class="btn btn-primary" type="submit">筛选</button>
+      <button class="btn" type="button" data-reset>重置</button>
+    </form>
+    <div class="qs-inline-status" data-global-status role="status"></div>
+  </section>
+
+  <div class="qs-workbench-grid">
+    <aside class="qs-panel qs-queue-panel" aria-label="场景队列">
+      <div class="qs-panel-head"><div><h2>场景队列</h2><p data-list-summary>正在读取…</p></div><button class="qs-icon-button" type="button" data-refresh-list title="刷新">↻</button></div>
+      <div class="qs-queue" data-queue><div class="qs-loading">正在加载 Candidate…</div></div>
+      <div class="qs-empty" data-list-empty hidden><strong>当前筛选暂无场景</strong><span>调整筛选条件后重试。</span></div>
+    </aside>
+
+    <section class="qs-panel qs-editor-panel" aria-label="质量场景编辑区">
+      <div class="qs-editor-empty" data-editor-empty>
+        <strong>选择一个场景开始处理</strong>
+        <span>左侧选择 Candidate 后，可在这里核对字段、修订并进入确认/发布。</span>
+      </div>
+      <div data-editor hidden>
+        <div class="qs-panel-head qs-editor-head">
+          <div><div class="qs-title-line"><h2 data-scenario-title>—</h2><span class="qs-status-chip" data-scenario-status>—</span></div><p><span data-scenario-id>—</span> · V<span data-scenario-version>—</span></p></div>
+          <div class="qs-provenance-row" data-provenance-row></div>
+        </div>
+
+        <div class="qs-trigger-strip">
+          <div><span>触发来源</span><strong data-trigger-source>—</strong></div>
+          <div><span>触发原因</span><strong data-trigger-reason>—</strong></div>
+        </div>
+
+        <form class="qs-scenario-form" data-scenario-form>
+          <section class="qs-form-section">
+            <div class="qs-section-title"><h3>场景归属与业务活动</h3><span>QualityScenario V1</span></div>
+            <div class="qs-field-grid">
+              <label>产品编码<input data-field="product_code"></label>
+              <label>产品名称<input data-field="product_name"></label>
+              <label>生命周期编码<input data-field="lifecycle_stage_code"></label>
+              <label>生命周期名称<input data-field="lifecycle_stage_name"></label>
+              <label>业务活动编码<input data-field="business_activity_code"></label>
+              <label>业务活动名称<input data-field="business_activity_name"></label>
+              <label class="qs-span-2">业务目标<textarea data-field="business_goal" rows="2"></textarea></label>
+            </div>
+          </section>
+
+          <section class="qs-form-section">
+            <div class="qs-section-title"><h3>标准质量场景</h3><span>人工可修订</span></div>
+            <div class="qs-field-grid">
+              <label class="qs-span-2">场景名称<input data-field="scenario_name"></label>
+              <label class="qs-span-2">场景描述<textarea data-field="scenario_description" rows="3"></textarea></label>
+              <label>质量关注编码<input data-field="quality_concern_code"></label>
+              <label>质量关注名称<input data-field="quality_concern_name"></label>
+              <label class="qs-span-2">触发 / 异常条件<textarea data-field="trigger_condition" rows="2"></textarea></label>
+              <label class="qs-span-2">期望质量结果<textarea data-field="expected_result" rows="2"></textarea></label>
+              <label class="qs-span-2">适用范围<textarea data-field="applicability_scope" rows="2"></textarea></label>
+            </div>
+          </section>
+
+          <section class="qs-form-section qs-confirm-section">
+            <div class="qs-section-title"><div><h3>人工 Review 与共同确认</h3><p>场景事实由专业质量主确认；失效模式 / 机理由研发技术确认；完整 V1 遵循共同确认。</p></div></div>
+            <div class="qs-field-grid">
+              <label>专业质量确认人<input data-quality-actor placeholder="姓名 / 工号"></label>
+              <label>研发技术确认人<input data-technical-actor placeholder="姓名 / 工号"></label>
+              <label class="qs-span-2">确认说明<textarea data-confirmation-note rows="2" placeholder="可选；Reject 时请填写拒绝原因"></textarea></label>
+            </div>
+            <div class="qs-confirm-facts" data-confirmation-facts></div>
+          </section>
+        </form>
+
+        <div class="qs-action-bar">
+          <div class="qs-action-message" data-action-message role="status"></div>
+          <div class="qs-actions">
+            <button class="btn btn-danger" type="button" data-action="reject">拒绝</button>
+            <button class="btn" type="button" data-action="save">保存修订</button>
+            <button class="btn btn-primary" type="button" data-action="confirm">确认</button>
+            <button class="btn btn-primary" type="button" data-action="publish">发布</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="qs-panel qs-trace-panel" aria-label="来源与 Evidence">
+      <div class="qs-panel-head"><div><h2>来源与 Evidence</h2><p>事实与 AI 推断分开呈现</p></div></div>
+      <div class="qs-trace-empty" data-trace-empty>选择场景后显示来源、Evidence、缺失信息与阻断项。</div>
+      <div data-trace hidden>
+        <section class="qs-trace-section"><div class="qs-section-title"><h3>来源问题</h3><span data-source-count>0</span></div><div data-source-list></div></section>
+        <section class="qs-trace-section"><div class="qs-section-title"><h3>Evidence</h3><span data-evidence-count>0</span></div><div data-evidence-list></div></section>
+        <section class="qs-trace-section"><div class="qs-section-title"><h3>待补充信息</h3><span data-missing-count>0</span></div><div data-missing-list></div></section>
+        <section class="qs-trace-section"><div class="qs-section-title"><h3>阻断项</h3><span data-blocker-count>0</span></div><div data-blocker-list></div></section>
+      </div>
+    </aside>
+  </div>
+
+  <div class="qs-toast" data-toast hidden></div>
+  <div class="qs-drawer-backdrop" data-drawer-backdrop hidden></div>
+  <aside class="qs-drawer" data-source-drawer aria-label="来源问题详情" aria-hidden="true">
+    <div class="qs-drawer-head"><div><span>来源问题</span><h2 data-drawer-title>—</h2></div><button type="button" data-close-drawer>×</button></div>
+    <div class="qs-drawer-body" data-drawer-body></div>
+  </aside>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.QS_WORKBENCH_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_workbench.js?v=qs-mvp-05a" defer></script>{% endblock %}

@@ -68,6 +68,18 @@ def create_p0_insights_router(
             },
         )
 
+
+    @router.get("/p0/quality-scenarios/workbench", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_workbench(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_workbench.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "page_title": "场景工作台 · 质量能力",
+            },
+        )
+
     @router.get("/p0/settings", response_class=HTMLResponse, include_in_schema=False)
     async def p0_settings(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(

@@ -51,6 +51,26 @@ class QualityScenarioV1WorkflowService:
             raise ValueError("QUALITY_SCENARIO_V1_NOT_FOUND")
         return item
 
+    def list_scenarios(
+        self,
+        *,
+        product_code: str = "",
+        lifecycle_stage_code: str = "",
+        business_activity_code: str = "",
+        quality_concern_code: str = "",
+        status: ScenarioStatus | str | None = None,
+        q: str = "",
+    ) -> list[QualityScenarioV1]:
+        status_value = ScenarioStatus(status) if status else None
+        return self.repository.list(
+            product_code=product_code,
+            lifecycle_stage_code=lifecycle_stage_code,
+            business_activity_code=business_activity_code,
+            quality_concern_code=quality_concern_code,
+            status=status_value,
+            q=q,
+        )
+
     @staticmethod
     def _expect_version(item: QualityScenarioV1, expected_scenario_version: int) -> None:
         if expected_scenario_version <= 0:
@@ -226,6 +246,9 @@ class QualityScenarioV1WorkflowService:
     ) -> ScenarioMutationResult:
         current=self.get(scenario_id)
         reviewer=reviewer.strip()
+        comment=comment.strip()
+        if not reviewer or not comment:
+            raise ValueError("SCENARIO_REJECT_REVIEWER_COMMENT_REQUIRED")
         if current.status == ScenarioStatus.REJECTED:
             if current.review.reviewer == reviewer and current.review.comment == comment:
                 return ScenarioMutationResult(current, "REJECT", False)
