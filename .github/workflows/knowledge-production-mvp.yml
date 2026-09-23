@@ -1,0 +1,44 @@
+name: Knowledge Production MVP
+
+on:
+  push:
+    branches:
+      - feature/knowledge-production-mvp-001
+    paths:
+      - "knowledge_production/**"
+      - "config/runtime/agents/knowledge.production.extract.yaml"
+      - "prompts/runtime/knowledge_production/**"
+      - "tests/test_kp_m0*.py"
+      - "tests/knowledge/**"
+      - ".github/workflows/knowledge-production-mvp.yml"
+  pull_request:
+    paths:
+      - "knowledge_production/**"
+      - "config/runtime/agents/knowledge.production.extract.yaml"
+      - "prompts/runtime/knowledge_production/**"
+      - "tests/test_kp_m0*.py"
+      - "tests/knowledge/**"
+
+jobs:
+  kp-m01-m03:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Run Knowledge Production gates
+        run: |
+          python -m pytest -q \
+            tests/test_kp_m01_source_document.py \
+            tests/test_kp_m02_candidate_evidence.py \
+            tests/test_kp_m03_ai_extraction.py \
+            tests/knowledge/test_knowledge_service.py
