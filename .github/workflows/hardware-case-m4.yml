@@ -1,0 +1,26 @@
+name: Hardware Case M4 AI Adapter
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_case_word.py"
+      - "services/hardware_case_ai_adapter.py"
+      - "tests/test_hardware_case_ai_adapter.py"
+      - "repositories/hardware_case_repository.py"
+      - "services/hardware_case_backend.py"
+      - "services/hardware_case_contract.py"
+      - ".github/workflows/hardware-case-m4.yml"
+  workflow_dispatch:
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install "pytest>=8,<9" "jsonschema>=4.21,<5" "PyYAML>=6,<7"
+      - name: Run Hardware Case M1 M2 M4 tests
+        run: python -m pytest -q --noconftest tests/test_hardware_case_contract.py tests/test_hardware_case_backend.py tests/test_hardware_case_ai_adapter.py
