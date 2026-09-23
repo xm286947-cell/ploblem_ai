@@ -246,6 +246,9 @@ class QualityScenarioV1WorkflowService:
     ) -> ScenarioMutationResult:
         current=self.get(scenario_id)
         reviewer=reviewer.strip()
+        comment=comment.strip()
+        if not reviewer or not comment:
+            raise ValueError("SCENARIO_REJECT_REVIEWER_COMMENT_REQUIRED")
         if current.status == ScenarioStatus.REJECTED:
             if current.review.reviewer == reviewer and current.review.comment == comment:
                 return ScenarioMutationResult(current, "REJECT", False)
