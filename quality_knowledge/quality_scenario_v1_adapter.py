@@ -18,6 +18,7 @@ from quality_knowledge.quality_scenario_v1 import (
     ScenarioRelationType,
     ScenarioSourceReference,
     ScenarioStatus,
+    ScenarioTriggerSource,
 )
 from quality_knowledge.reverse_quality_scenario_adapter import adapt_reverse_quality_result
 
@@ -56,8 +57,21 @@ def _support_path(candidate_field: str) -> str:
 def scenario_candidate_v1_from_reverse_quality(
     result: dict[str, Any],
     taxonomy: dict[str, Any],
+    *,
+    trigger_source: ScenarioTriggerSource | str | None = None,
+    trigger_reason: str = "",
 ) -> ScenarioCandidateV1:
+    """Map an accepted ReverseQualityResult to Candidate V1.
+
+    Trigger context belongs to the upstream business trigger, not to
+    ReverseQualityResult. Missing trigger context is therefore surfaced as a
+    Candidate blocker instead of being guessed from reverse-analysis content.
+    """
     adapted = adapt_reverse_quality_result(result, taxonomy)
+    normalized_trigger = (
+        ScenarioTriggerSource(trigger_source) if trigger_source else None
+    )
+    normalized_reason = str(trigger_reason or "").strip()
     old = adapted.candidate
 
     source_ref = f"ITR:{adapted.canonical_itr}" if adapted.canonical_itr else "ITR:UNRESOLVED"
@@ -132,6 +146,10 @@ def scenario_candidate_v1_from_reverse_quality(
         blockers.append("EXPECTED_RESULT_REQUIRED")
     if not evidence_refs:
         blockers.append("EVIDENCE_REQUIRED")
+    if normalized_trigger is None:
+        blockers.append("TRIGGER_SOURCE_REQUIRED")
+    if not normalized_reason:
+        blockers.append("TRIGGER_REASON_REQUIRED")
 
     missing = []
     payload = result.get("result") if isinstance(result.get("result"), dict) else result
@@ -180,6 +198,8 @@ def scenario_candidate_v1_from_reverse_quality(
         scenario_description=scenario_description,
         quality_concern_code=concern_code,
         quality_concern_name=concern_name,
+        trigger_source=normalized_trigger,
+        trigger_reason=normalized_reason,
         trigger_condition="；".join(
             dict.fromkeys(
                 x for x in (
@@ -247,6 +267,8 @@ def legacy_scenario_to_v1_view(legacy: dict[str, Any]) -> dict[str, Any]:
         "quality_concern_name": str(
             legacy.get("concern_points") or legacy.get("quality_attribute") or ""
         ),
+        "trigger_source": None,
+        "trigger_reason": "",
         "trigger_condition": str(
             legacy.get("trigger_conditions") or legacy.get("preconditions") or ""
         ),
@@ -254,9 +276,18 @@ def legacy_scenario_to_v1_view(legacy: dict[str, Any]) -> dict[str, Any]:
         "applicability_scope": str(legacy.get("applicable_boundary") or ""),
         "source_problem_refs": [],
         "evidence_refs": [],
+        "confirmation": {
+            "quality_confirmed_by": "",
+            "quality_confirmed_at": "",
+            "technical_confirmed_by": "",
+            "technical_confirmed_at": "",
+            "confirmation_note": "",
+        },
         "compatibility_warnings": [
             "LEGACY_READ_ONLY",
             "SOURCE_EVIDENCE_REQUIRES_EXPLICIT_V1_MIGRATION",
+            "TRIGGER_CONTEXT_REQUIRES_EXPLICIT_V1_INPUT",
+            "DUAL_CONFIRMATION_REQUIRES_EXPLICIT_V1_REVIEW",
         ],
     }
 
