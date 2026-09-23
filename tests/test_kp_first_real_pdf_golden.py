@@ -46,12 +46,7 @@ def _download_pdf(target: Path) -> None:
     target.write_bytes(payload)
 
 
-@pytest.mark.skipif(
-    os.environ.get("KNOWLEDGE_PRODUCTION_REAL_GOLDEN", "").lower()
-    not in {"1", "true", "yes", "on"},
-    reason="real Knowledge Production golden path is opt-in",
-)
-def test_kp_first_real_pdf_golden_path(tmp_path: Path) -> None:
+def _ingest_real_pdf(tmp_path: Path):
     pdf = tmp_path / "KIOXIA_THGAMRG7T13BAIL.pdf"
     _download_pdf(pdf)
 
@@ -67,7 +62,10 @@ def test_kp_first_real_pdf_golden_path(tmp_path: Path) -> None:
         source_ref=PDF_URL,
         language="en",
     )
+    return pdf, repository, source, structured
 
+
+def _assert_real_source_parse(pdf, repository, source, structured) -> None:
     assert source.retrieval_status == "PARSED"
     assert source.content_hash == hashlib.sha256(pdf.read_bytes()).hexdigest()
     assert repository.resolve(source.local_cache_ref).is_file()
@@ -79,6 +77,25 @@ def test_kp_first_real_pdf_golden_path(tmp_path: Path) -> None:
     ]
     assert health_blocks, "parsed PDF did not preserve the eMMC health fields"
     assert any(block.page == 7 for block in health_blocks)
+
+
+def test_kp_first_real_pdf_source_parse_preflight(tmp_path: Path) -> None:
+    pdf, repository, source, structured = _ingest_real_pdf(tmp_path)
+    _assert_real_source_parse(
+        pdf, repository, source, structured
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get("KNOWLEDGE_PRODUCTION_REAL_GOLDEN", "").lower()
+    not in {"1", "true", "yes", "on"},
+    reason="real Knowledge Production golden path is opt-in",
+)
+def test_kp_first_real_pdf_golden_path(tmp_path: Path) -> None:
+    pdf, repository, source, structured = _ingest_real_pdf(tmp_path)
+    _assert_real_source_parse(
+        pdf, repository, source, structured
+    )
 
     loader = AgentConfigLoader(
         root=ROOT,
