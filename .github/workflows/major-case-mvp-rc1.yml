@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$(ls dist/MAJOR_CASE_MVP_RC1_*.zip)"
-          sha256sum -c dist/MAJOR_CASE_MVP_RC1_*.zip.sha256
+          (cd dist && sha256sum -c MAJOR_CASE_MVP_RC1_*.zip.sha256)
           unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep PACKAGE_MANIFEST.json
           ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '(^|/)(input|output|outputs|knowledge)/'
           ! unzip -l dist/MAJOR_CASE_MVP_RC1_*.zip | grep -E '\.env($|\.)|\.local\.ya?ml$|\.sqlite3?$|\.db$'
