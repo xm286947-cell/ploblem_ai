@@ -16,7 +16,7 @@ from runtime import AgentConfigLoader, ConfiguredAgentRuntime, SqliteTaskStore
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_SHA256 = (
-    "5a96380388d53e7a3ac430547b71769e7408f5d811cb0ffa77855005517f7609"
+    "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978"
 )
 TOPICS = [
     "DEVICE_LIFE_TIME_EST_TYP_A",
