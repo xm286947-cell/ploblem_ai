@@ -257,11 +257,25 @@ class HardwareCaseContractService:
                 for item in self.mappings
                 if item.get("case_id") == case.get("case_id")
             ]
+            if role == "MAINTAINER":
+                raw_facts = case.get("facts") if isinstance(case.get("facts"), dict) else {}
+                fact_values: list[str] = []
+                for field in raw_facts.values():
+                    if not isinstance(field, dict):
+                        continue
+                    fact_values.extend(
+                        [
+                            _text(field.get("candidate_value")),
+                            _text(field.get("confirmed_value")),
+                        ]
+                    )
+            else:
+                fact_values = [_text(value) for value in projection["facts"].values()]
             searchable = [
-                _text(projection.get("title")),
-                *[_text(value) for value in projection["facts"].values()],
+                _text(case.get("title")),
+                *fact_values,
                 *mapping_paths,
-                *[_text(value) for value in projection["product_context"].values()],
+                *[_text(value) for value in (case.get("product_context") or {}).values()],
             ]
             if needle and not any(needle in value.lower() for value in searchable if value):
                 continue
