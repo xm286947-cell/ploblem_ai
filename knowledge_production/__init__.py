@@ -32,8 +32,15 @@ from .models import (
     KnowledgeObject,
     KnowledgeObjectStatus,
     KnowledgeObjectType,
+    KnowledgeQuery,
+    KnowledgeQueryResult,
+    KnowledgeReleaseManifest,
+    KnowledgeSourceKind,
+    KnowledgeSourceReference,
     KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
     KNOWLEDGE_OBJECT_CONTRACT_VERSION,
+    KNOWLEDGE_QUERY_CONTRACT_VERSION,
+    ReleasedKnowledgeObject,
     RetrievalStatus,
     ReviewAction,
     ReviewRecord,
@@ -46,6 +53,14 @@ from .models import (
 from .publish import (
     KnowledgePublishError,
     KnowledgePublishService,
+)
+from .query import (
+    KnowledgeQueryError,
+    KnowledgeQueryService,
+)
+from .release import (
+    KnowledgeReleaseError,
+    KnowledgeReleaseService,
 )
 from .review import (
     KnowledgeReviewError,
@@ -75,8 +90,19 @@ __all__ = [
     "KnowledgeObject",
     "KnowledgeObjectStatus",
     "KnowledgeObjectType",
+    "KnowledgeQuery",
+    "KnowledgeQueryError",
+    "KnowledgeQueryResult",
+    "KnowledgeQueryService",
+    "KnowledgeReleaseError",
+    "KnowledgeReleaseManifest",
+    "KnowledgeReleaseService",
+    "KnowledgeSourceKind",
+    "KnowledgeSourceReference",
     "KNOWLEDGE_CANDIDATE_CONTRACT_VERSION",
     "KNOWLEDGE_OBJECT_CONTRACT_VERSION",
+    "KNOWLEDGE_QUERY_CONTRACT_VERSION",
+    "ReleasedKnowledgeObject",
     "KnowledgeCandidateError",
     "KnowledgeCandidateService",
     "KnowledgePublishError",
