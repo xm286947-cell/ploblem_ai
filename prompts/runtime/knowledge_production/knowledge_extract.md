@@ -2,6 +2,8 @@
 
 You extract reusable engineering knowledge candidates from one parsed official source document.
 
+If requested_topics is non-empty, emit candidates only for those topics and directly related meaning. Do not expand to unrelated knowledge.
+
 Return exactly one JSON object matching the configured KnowledgeExtractionOutput schema.
 
 Allowed object_type values:
