@@ -37,7 +37,11 @@ Problem / ITR
 - `schema_version`: always `quality-scenario-v1`.
 - `scenario_version`: integer revision, starts at 1.
 - `status`: CANDIDATE / CONFIRMED / PUBLISHED / REJECTED.
-- `review`: review_status / reviewer / reviewed_at / comment.
+- `review`: candidate-level human review result; it is not an approval workflow.
+- `confirmation`: lightweight professional confirmation facts:
+  - `quality_confirmed_by` / `quality_confirmed_at`;
+  - `technical_confirmed_by` / `technical_confirmed_at`;
+  - optional `confirmation_note`.
 - `version`: created_by / created_at / updated_at / published_at /
   parent_scenario_version / change_summary.
 
@@ -51,6 +55,8 @@ Problem / ITR
 - `scenario_name`
 - `scenario_description`
 - `quality_concern_code` / `quality_concern_name`
+- `trigger_source`: `HIGH_PERCEPTION` / `RND_VALUE`
+- `trigger_reason`
 - `trigger_condition`
 - `expected_result`
 - `applicability_scope`
@@ -65,6 +71,10 @@ Problem / ITR
 
 Candidate may contain blockers or pending missing information. CONFIRMED and
 PUBLISHED may not.
+
+`trigger_source` records why the problem entered deep scenario analysis. It is
+business-source metadata only; it does not create a second workflow or state
+machine. RC1 has exactly two values: `HIGH_PERCEPTION` and `RND_VALUE`.
 
 ## 3. ScenarioCandidateV1
 
@@ -132,14 +142,39 @@ CONFIRMED/PUBLISHED gates:
 - lifecycle and business activity are mapped;
 - expected_result is present;
 - quality concern has code or name;
+- `trigger_source` is one of HIGH_PERCEPTION / RND_VALUE;
+- `trigger_reason` is present;
 - source problem exists;
 - evidence exists;
-- human review is CONFIRMED.
+- human review is CONFIRMED;
+- professional-quality confirmation has actor + time;
+- R&D technical confirmation has actor + time.
+
+The two confirmation records are business facts, not approval states. They do
+not introduce WAIT_APPROVAL / WAIT_QUALITY_APPROVAL / WAIT_RND_APPROVAL or any
+other state outside the four-state MVP machine.
 
 Publishing failure must leave the object in CONFIRMED; the publish action itself
 belongs to QS-MVP-04, not QS-MVP-02.
 
 ## 7. SQLite / Repository V1
+
+The frozen V0.2 requirement adds the following persisted columns to
+`quality_scenario_v1`:
+
+- `trigger_source`
+- `trigger_reason`
+- `quality_confirmed_by`
+- `quality_confirmed_at`
+- `technical_confirmed_by`
+- `technical_confirmed_at`
+- `confirmation_note`
+
+Initialization includes an idempotent additive migration for a database created
+by the earlier QS-MVP-02 candidate schema. Legacy `quality_scenario` remains
+untouched.
+
+
 
 Recommended database: `quality_scenario_v1.db`.
 
@@ -187,11 +222,16 @@ mapping. V1 promotes its output as follows:
 | experience_requirement | expected_result |
 | boundary/environment/condition/objects/scale | applicability_scope |
 | canonical_itr | source_problem_refs |
+| upstream trigger context | trigger_source / trigger_reason |
 | field_evidence.evidence_ids | evidence_refs |
 | adapter blockers | blockers |
 | Reverse missing_information | missing_information |
 
 Lifecycle/activity mapping blockers are preserved and never silently removed.
+ReverseQualityResult does not own the two-track trigger decision, so the V1
+adapter accepts trigger context explicitly. If that context is absent it emits
+`TRIGGER_SOURCE_REQUIRED` / `TRIGGER_REASON_REQUIRED` blockers rather than
+guessing from AI output.
 
 ## 9. Legacy compatibility
 
@@ -203,8 +243,10 @@ unchanged in QS-MVP-02.
 - PUBLISHED -> PUBLISHED
 - RETIRED -> REJECTED (compatibility view only)
 
-Legacy rows are **not** automatically migrated into V1 because old Evidence and
-state semantics are not equivalent. An explicit migration can be designed later.
+Legacy rows are **not** automatically migrated into V1 because old Evidence,
+trigger-source and confirmation semantics are not equivalent. The read-only
+compatibility view exposes those gaps explicitly. An explicit migration can be
+designed later.
 
 ## 10. Example
 
@@ -225,6 +267,8 @@ state semantics are not equivalent. An explicit migration can be designed later.
   "scenario_description": "运行中异常掉电，重新上电后关键计数应保持一致",
   "quality_concern_code": "DATA_INTEGRITY",
   "quality_concern_name": "数据完整性",
+  "trigger_source": "HIGH_PERCEPTION",
+  "trigger_reason": "客户生产中断，属于高感知质量问题",
   "trigger_condition": "PLC运行中发生异常掉电",
   "expected_result": "重新上电后关键计数和状态正确恢复",
   "applicability_scope": "PLC运行执行阶段",
@@ -258,6 +302,13 @@ state semantics are not equivalent. An explicit migration can be designed later.
     "reviewer": "",
     "reviewed_at": "",
     "comment": ""
+  },
+  "confirmation": {
+    "quality_confirmed_by": "",
+    "quality_confirmed_at": "",
+    "technical_confirmed_by": "",
+    "technical_confirmed_at": "",
+    "confirmation_note": ""
   },
   "version": {
     "created_by": "reverse-quality-scenario-adapter-v0.1",
