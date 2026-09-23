@@ -1,0 +1,29 @@
+name: Hardware Case M2 Backend
+
+on:
+  pull_request:
+    paths:
+      - "repositories/hardware_case_repository.py"
+      - "services/hardware_case_backend.py"
+      - "services/hardware_case_contract.py"
+      - "schema/hardware_case_contract_v1.schema.json"
+      - "tests/test_hardware_case_contract.py"
+      - "tests/test_hardware_case_backend.py"
+      - ".github/workflows/hardware-case-m2.yml"
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install "pytest>=8,<9" "jsonschema>=4.21,<5" "PyYAML>=6,<7"
+      - name: Run M1 contract regression and M2 backend tests
+        run: >-
+          python -m pytest -q --noconftest
+          tests/test_hardware_case_contract.py
+          tests/test_hardware_case_backend.py
