@@ -215,11 +215,6 @@ def test_p03_current_detail_contains_trigger_source_evidence_and_confirmation(tm
     assert item["version"]["published_at"]
 
 
-def test_history_api_404_never_falls_back_to_legacy():
-    client = TestClient(create_p0_app.__wrapped__) if hasattr(create_p0_app, "__wrapped__") else None
-    # The actual app-specific 404 is covered below with an initialized app.
-
-
 def test_history_api_not_found_is_v1_404(tmp_path):
     client = _client(tmp_path)
     response = client.get("/api/v2/quality-scenarios/NOT-V1/history")
