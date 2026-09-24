@@ -87,6 +87,78 @@ class HardwareTreeExcelParser:
         if path.suffix.lower() not in {".xlsx", ".xlsm"}:
             raise HardwareTreeImportContractError("EXCEL_FORMAT_UNSUPPORTED")
 
+    def preview_rows(
+        self,
+        path: str | Path,
+        *,
+        sheet_name: str,
+        header_row: int,
+        max_rows: int = 20,
+    ) -> dict[str, Any]:
+        """Return a bounded raw workbook preview for the P07 Mapping UI.
+
+        This is intentionally read-only and data-bounded. It does not infer
+        hierarchy roles or persist any import decision.
+        """
+        source = Path(path)
+        self._validate_file(source)
+        if not isinstance(header_row, int) or header_row < 1:
+            raise HardwareTreeImportContractError("HEADER_ROW_INVALID")
+        max_rows = max(1, min(int(max_rows), 50))
+        try:
+            workbook = openpyxl.load_workbook(
+                source, read_only=True, data_only=True
+            )
+        except Exception as exc:
+            raise HardwareTreeImportContractError("EXCEL_PARSE_FAILED") from exc
+        try:
+            if sheet_name not in workbook.sheetnames:
+                raise HardwareTreeImportContractError("TREE_SHEET_NOT_FOUND")
+            sheet = workbook[sheet_name]
+            if header_row > sheet.max_row:
+                raise HardwareTreeImportContractError("HEADER_ROW_OUT_OF_RANGE")
+            header_cells = next(
+                sheet.iter_rows(min_row=header_row, max_row=header_row)
+            )
+            headers = [_clean(cell.value) for cell in header_cells]
+            columns = []
+            for index, name in enumerate(headers, start=1):
+                columns.append(
+                    {
+                        "column_index": index,
+                        "column_name": name,
+                        "column_key": openpyxl.utils.get_column_letter(index),
+                    }
+                )
+            rows = []
+            for excel_row, row in enumerate(
+                sheet.iter_rows(
+                    min_row=header_row + 1,
+                    max_row=min(sheet.max_row, header_row + max_rows),
+                ),
+                start=header_row + 1,
+            ):
+                values = [
+                    _clean(cell.value if hasattr(cell, "value") else cell)
+                    for cell in row
+                ]
+                rows.append(
+                    {
+                        "row_number": excel_row,
+                        "values": values[: len(headers)],
+                    }
+                )
+            return {
+                "filename": source.name,
+                "sheet_name": sheet_name,
+                "header_row": header_row,
+                "columns": columns,
+                "rows": rows,
+                "total_rows": max(sheet.max_row - header_row, 0),
+            }
+        finally:
+            workbook.close()
+
     def parse(
         self,
         path: str | Path,
@@ -541,6 +613,21 @@ class HardwareTreeImportAnalyzer:
 
     def inspect(self, path: str | Path) -> dict[str, Any]:
         return self.parser.inspect_workbook(path)
+
+    def preview_rows(
+        self,
+        path: str | Path,
+        *,
+        sheet_name: str,
+        header_row: int,
+        max_rows: int = 20,
+    ) -> dict[str, Any]:
+        return self.parser.preview_rows(
+            path,
+            sheet_name=sheet_name,
+            header_row=header_row,
+            max_rows=max_rows,
+        )
 
     def analyze(
         self,
