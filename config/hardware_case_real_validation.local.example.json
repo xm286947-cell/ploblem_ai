@@ -4,6 +4,7 @@
   "max_cases": 30,
   "output_db": "../data/output/hardware_case_validation.sqlite3",
   "output_report": "../data/output/hardware_case_validation_metrics.json",
+  "source_root": "../data/evidence_sources",
   "structurer": "services.hardware_case_runtime_adapter:build_hardware_case_structurer",
   "trees": [
     {
