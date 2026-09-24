@@ -233,6 +233,8 @@ def validate_extracted(
         "SPAWNED_PROCESS_EXITED",
         "HEALTH_OWNERSHIP_MISMATCH",
         "PID_PORT_OWNERSHIP",
+        "_existing_listener",
+        "socket.create_connection",
         "check-free",
         "wait-owned",
     )
