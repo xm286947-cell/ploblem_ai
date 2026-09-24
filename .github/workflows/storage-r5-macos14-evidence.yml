@@ -1,0 +1,62 @@
+name: Storage R5 macOS14 Native Evidence Fallback
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r5-macos14-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_COMMIT: 2f75be9caa057269f9f152896291d4006c0c3ebc
+  R5_EXPECTED_SHA256: cc94485a06e55c904024c04484df60a673514ca4a419e3d122aeb5eb9143cc02
+  R5_PACKAGE: STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip
+  SOURCE_RUN_ID: "36030896530"
+
+jobs:
+  macos14-native-evidence:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout frozen R5 source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Download exact Linux-built R5 artifact from frozen source run
+        uses: actions/download-artifact@v4
+        with:
+          name: storage-r5-linux-package-and-evidence
+          path: _r5_artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Verify exact R5 SHA256
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          R5="$(find _r5_artifact -type f -name "$R5_PACKAGE" -print -quit)"
+          test -n "$R5"
+          ACTUAL="$(shasum -a 256 "$R5" | awk '{print $1}')"
+          echo "MACOS_R5_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$R5_EXPECTED_SHA256"
+          echo "package=$R5" >> "$GITHUB_OUTPUT"
+
+      - name: Native macOS fresh-extract/no-chmod/port/selfcheck gate
+        shell: bash
+        run: |
+          set -o pipefail
+          bash delivery/storage_rc1_r4/tools/platform_gate_macos.sh             "${{ steps.locate.outputs.package }}"             "$R5_EXPECTED_SHA256"             2>&1 | tee macos_r5_platform_gate.log
+
+      - name: Publish macOS R5 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-macos14-native-evidence
+          path: macos_r5_platform_gate.log
