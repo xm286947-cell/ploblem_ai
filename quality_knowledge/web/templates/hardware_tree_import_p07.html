@@ -1,0 +1,174 @@
+{% extends "p0_base.html" %}
+{% block title %}基础数据管理 · 硬件案例库{% endblock %}
+{% block breadcrumb %}硬件案例库 / 基础数据管理{% endblock %}
+{% block page_styles %}
+<link rel="stylesheet" href="/p0/static/hardware_tree_import_p07.css?v=hc-tree-m3b-001">
+{% endblock %}
+{% block body %}
+<div id="hc-tree-p07" class="hc-tree-page" data-api-prefix="{{ api_prefix }}">
+  <section class="page-header">
+    <div>
+      <h1>基础数据管理</h1>
+      <p>维护电路/特性树与物料/器件树。上传、预览与审核不会直接修改 ACTIVE Tree，只有 Atomic Apply 成功后才会生成新版本。</p>
+    </div>
+    <div class="hc-role-chip">维护角色 · MAINTAINER</div>
+  </section>
+
+  <div id="hc-alert" class="hc-alert" hidden></div>
+
+  <section id="hc-home" class="hc-section">
+    <div class="hc-section-head">
+      <div><h2>P07 基础数据</h2><p>先确认两棵树当前 ACTIVE Version 与最近导入状态。</p></div>
+      <button id="hc-refresh-home" class="btn">刷新</button>
+    </div>
+    <div class="hc-tree-cards">
+      <article class="hc-tree-card" data-tree-card="CIRCUIT_FEATURE">
+        <div class="hc-tree-card-head"><span class="hc-tree-icon">C</span><div><h3>电路 / 特性树</h3><p>CIRCUIT_FEATURE</p></div></div>
+        <div class="hc-kpi-row">
+          <div><span>ACTIVE Version</span><strong data-field="version">—</strong></div>
+          <div><span>节点数</span><strong data-field="nodes">—</strong></div>
+          <div><span>最近导入</span><strong data-field="last-job">—</strong></div>
+          <div><span>异常</span><strong data-field="issues">—</strong></div>
+        </div>
+        <div class="hc-card-actions">
+          <button class="btn btn-primary" data-start-import="CIRCUIT_FEATURE">导入 / 更新</button>
+          <button class="btn" data-show-history="CIRCUIT_FEATURE">导入历史</button>
+        </div>
+      </article>
+
+      <article class="hc-tree-card" data-tree-card="MATERIAL_DEVICE">
+        <div class="hc-tree-card-head"><span class="hc-tree-icon">M</span><div><h3>物料 / 器件树</h3><p>MATERIAL_DEVICE</p></div></div>
+        <div class="hc-kpi-row">
+          <div><span>ACTIVE Version</span><strong data-field="version">—</strong></div>
+          <div><span>节点数</span><strong data-field="nodes">—</strong></div>
+          <div><span>最近导入</span><strong data-field="last-job">—</strong></div>
+          <div><span>异常</span><strong data-field="issues">—</strong></div>
+        </div>
+        <div class="hc-card-actions">
+          <button class="btn btn-primary" data-start-import="MATERIAL_DEVICE">导入 / 更新</button>
+          <button class="btn" data-show-history="MATERIAL_DEVICE">导入历史</button>
+        </div>
+      </article>
+    </div>
+
+    <div class="hc-panel">
+      <div class="hc-panel-head"><div><h3>最近导入任务</h3><p>失败、排除与成功状态独立展示。</p></div></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>任务 ID</th><th>树类型</th><th>文件</th><th>时间</th><th>结果</th><th>新版本</th><th>异常</th><th>操作者</th></tr></thead>
+          <tbody id="hc-recent-imports"><tr><td colspan="8" class="muted">正在加载…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="hc-workflow" class="hc-section" hidden>
+    <div class="hc-workflow-top">
+      <button id="hc-back-home" class="btn">← 返回基础数据管理</button>
+      <div id="hc-job-meta" class="hc-job-meta"></div>
+    </div>
+
+    <ol class="hc-steps" aria-label="导入步骤">
+      <li data-step="1" class="active"><span>1</span><b>Excel 上传</b></li>
+      <li data-step="2"><span>2</span><b>Sheet / Header / Mapping</b></li>
+      <li data-step="3"><span>3</span><b>Preview / Validation</b></li>
+      <li data-step="4"><span>4</span><b>Change Diff / Conflict</b></li>
+      <li data-step="5"><span>5</span><b>Confirm Apply</b></li>
+      <li data-step="6"><span>6</span><b>Version / History</b></li>
+    </ol>
+
+    <div id="hc-step-1" class="hc-step-panel">
+      <div class="hc-panel">
+        <div class="hc-panel-head"><div><h3>Step 1 · 选择 Excel</h3><p>上传完成 ≠ 生效。文件只进入当前导入任务的 staging。</p></div></div>
+        <form id="hc-upload-form" class="hc-form-grid">
+          <label>树类型<select id="hc-tree-type" required>
+            <option value="CIRCUIT_FEATURE">电路 / 特性树</option>
+            <option value="MATERIAL_DEVICE">物料 / 器件树</option>
+          </select></label>
+          <label>操作者<input id="hc-operator" type="text" required placeholder="例如 maintainer-01"></label>
+          <label class="span-2">Excel 文件<input id="hc-file" type="file" accept=".xlsx" required></label>
+          <div class="span-2 hc-form-note">仅接受 .xlsx。服务端会校验文件、计算 hash，并返回 Workbook Sheet 信息。</div>
+          <div class="span-2 hc-actions"><button type="submit" class="btn btn-primary">上传并检查工作簿</button><button type="button" id="hc-cancel-upload" class="btn">取消</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div id="hc-step-2" class="hc-step-panel" hidden>
+      <div class="hc-panel">
+        <div class="hc-panel-head"><div><h3>Step 2 · Sheet / Header / 动态 Mapping</h3><p>不假设固定层级数。原始列 → 角色 → 层级顺序由维护人员配置。</p></div></div>
+        <div class="hc-form-grid">
+          <label>Sheet<select id="hc-sheet"></select></label>
+          <label>表头行<input id="hc-header-row" type="number" min="1" value="1"></label>
+          <label class="span-2">原始列名
+            <div class="hc-inline-input"><input id="hc-column-name" type="text" placeholder="输入 Excel 表头中的原始列名"><button id="hc-add-column" type="button" class="btn">加入 Mapping</button></div>
+          </label>
+        </div>
+        <div class="hc-mapping-title">
+          <span>原始列</span><span>角色</span><span>顺序 / 操作</span>
+        </div>
+        <div id="hc-mapping-builder" class="hc-mapping-builder"></div>
+        <div class="hc-callout">Mapping Builder 只描述列角色；真正的 Excel 解析、Validation 与 Diff 全部由 M3A API 执行。</div>
+        <div class="hc-actions"><button id="hc-run-analysis" class="btn btn-primary">生成 Preview / Validation</button></div>
+      </div>
+    </div>
+
+    <div id="hc-step-3" class="hc-step-panel" hidden>
+      <div class="hc-three-column">
+        <div class="hc-panel">
+          <div class="hc-panel-head"><div><h3>树预览</h3><p>Candidate Tree，仅供确认。</p></div></div>
+          <div id="hc-tree-preview" class="hc-tree-preview"></div>
+        </div>
+        <div class="hc-panel">
+          <div class="hc-panel-head"><div><h3>原始数据 / Mapping</h3><p>本次 Mapping Profile 与解析统计。</p></div></div>
+          <div id="hc-source-preview" class="hc-source-preview"></div>
+        </div>
+        <div class="hc-panel">
+          <div class="hc-panel-head"><div><h3>Validation</h3><p>问题必须定位到 Sheet / Row / Column。</p></div><span id="hc-validation-count" class="badge badge-neutral">0</span></div>
+          <div id="hc-validation-list" class="hc-validation-list"></div>
+        </div>
+      </div>
+      <div class="hc-actions"><button id="hc-to-diff" class="btn btn-primary">进入 Change Diff</button></div>
+    </div>
+
+    <div id="hc-step-4" class="hc-step-panel" hidden>
+      <div class="hc-panel">
+        <div class="hc-panel-head"><div><h3>Step 4 · Change Diff / Conflict</h3><p>正式 Tree Change Type：ADD / UPDATE / RENAME / MOVE / DEPRECATE / NO_CHANGE / CONFLICT。EXCLUDE 仅是排除动作。</p></div></div>
+        <div id="hc-change-summary" class="hc-change-summary"></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Change Type</th><th>Node / Path</th><th>Before</th><th>After</th><th>处理状态</th><th>操作</th></tr></thead>
+            <tbody id="hc-change-table"></tbody>
+          </table>
+        </div>
+        <div id="hc-conflict-gate" class="hc-gate-note"></div>
+        <div class="hc-actions"><button id="hc-ready-apply" class="btn btn-primary">冲突清零，进入确认 Apply</button></div>
+      </div>
+    </div>
+
+    <div id="hc-step-5" class="hc-step-panel" hidden>
+      <div class="hc-panel">
+        <div class="hc-panel-head"><div><h3>Step 5 · Confirm Apply</h3><p>Apply 将创建新的 Tree Version；若失败，当前 ACTIVE Version 保持不变。</p></div></div>
+        <div id="hc-apply-summary" class="hc-apply-summary"></div>
+        <div class="hc-danger-note">Atomic Apply：任一正式变更失败即整体失败，不生成新 ACTIVE Version，绝不显示“部分成功”。</div>
+        <div class="hc-actions"><button id="hc-confirm-apply" class="btn btn-primary">确认生效</button><button id="hc-back-diff" class="btn">返回 Change Diff</button></div>
+      </div>
+      <div id="hc-apply-result"></div>
+    </div>
+
+    <div id="hc-step-6" class="hc-step-panel" hidden>
+      <div class="hc-panel">
+        <div class="hc-panel-head"><div><h3>Tree Version / Import History</h3><p>ACTIVE 仅一个；历史版本只读。Rename / Move 不改变 node_id。</p></div><button id="hc-refresh-history" class="btn">刷新</button></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Version</th><th>状态</th><th>来源任务</th><th>树类型</th><th>来源文件</th><th>结果</th><th>操作者</th><th>时间</th></tr></thead>
+            <tbody id="hc-version-history"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block page_scripts %}
+<script src="/p0/static/hardware_tree_import_p07.js?v=hc-tree-m3b-001"></script>
+{% endblock %}
