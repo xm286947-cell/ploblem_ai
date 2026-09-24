@@ -1,7 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
+
+from quality_knowledge.repeat_risk import (
+    RepeatHistoricalCaseSearchService,
+    RepeatITRService,
+    RepeatQueryTraceRepository,
+    RepeatResultService,
+)
+from services.historical_case_contract import (
+    HistoricalCaseConsumerService,
+    HistoricalCaseContractError,
+)
 
 
 _MISSED_TEST_KEYS = {
@@ -236,3 +248,146 @@ class P0ITRSubjectSource:
             ),
             "version": issue.get("issue_version_id") or issue.get("version_no"),
         }
+
+
+
+class RepeatWebFacade:
+    """Application-facing facade for REPEAT-WEB-001.
+
+    The Web layer consumes this facade only.  Cross-domain reads remain behind
+    ITRSubjectSource and HistoricalCaseConsumerService.
+    """
+
+    def __init__(
+        self,
+        *,
+        issue_repository: Any,
+        repeat_repository: RepeatQueryTraceRepository,
+        case_service: HistoricalCaseConsumerService,
+    ) -> None:
+        self.issue_repository = issue_repository
+        self.source = P0ITRSubjectSource(issue_repository)
+        self.repeat_repository = repeat_repository
+        self.itr = RepeatITRService(self.source, repeat_repository)
+        self.search = RepeatHistoricalCaseSearchService(
+            repeat_repository,
+            case_service,
+        )
+        self.results = RepeatResultService(repeat_repository)
+        self.cases = case_service
+
+    @classmethod
+    def from_project(
+        cls,
+        *,
+        issue_repository: Any,
+        repeat_db_path: str | Path,
+        project_root: str | Path,
+    ) -> "RepeatWebFacade":
+        repeat_repository = RepeatQueryTraceRepository(repeat_db_path)
+        try:
+            case_service = HistoricalCaseConsumerService.from_project_root(project_root)
+        except HistoricalCaseContractError:
+            case_service = HistoricalCaseConsumerService(
+                __import__("repositories").JsonArtifactRepository(project_root)
+            )
+        return cls(
+            issue_repository=issue_repository,
+            repeat_repository=repeat_repository,
+            case_service=case_service,
+        )
+
+    def _itr_ref_for_issue(self, knowledge_id: str) -> str:
+        issue = self.source._issue_by_ref(knowledge_id)
+        if not issue:
+            raise KeyError("ISSUE_NOT_FOUND")
+        return str(issue.get("business_issue_id") or knowledge_id)
+
+    def inspect_issue(self, knowledge_id: str) -> dict[str, Any]:
+        itr_ref = self._itr_ref_for_issue(knowledge_id)
+        payload = self.itr.inspect_subject(itr_ref)
+        latest = self.repeat_repository.latest_for_subject(itr_ref)
+        result = None
+        if latest:
+            result = self.repeat_repository.get_result(latest["query_id"])
+        return {
+            **payload,
+            "latest_query": latest,
+            "latest_result": result,
+        }
+
+    def run_query(
+        self,
+        knowledge_id: str,
+        *,
+        include_missed_test: bool = False,
+        top_k: int = 5,
+    ) -> dict[str, Any]:
+        itr_ref = self._itr_ref_for_issue(knowledge_id)
+        query = self.itr.create_query(
+            itr_ref,
+            include_missed_test=include_missed_test,
+        )
+        search_result = self.search.search(query["query_id"], top_k=top_k)
+        result = self.results.build(search_result)
+        return {
+            "query": query,
+            "search": search_result,
+            "result": result,
+        }
+
+    def restore_result(self, knowledge_id: str) -> dict[str, Any] | None:
+        itr_ref = self._itr_ref_for_issue(knowledge_id)
+        latest = self.repeat_repository.latest_for_subject(itr_ref)
+        if not latest:
+            return None
+        result = self.repeat_repository.get_result(latest["query_id"])
+        return {
+            "query": latest,
+            "result": result,
+        }
+
+    def decide(
+        self,
+        query_id: str,
+        decision: str,
+        *,
+        decided_by: str,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        return self.results.decide(
+            query_id,
+            decision,
+            decided_by=decided_by,
+            reason=reason,
+        )
+
+    def list_cases(
+        self,
+        *,
+        q: str = "",
+        product: str = "",
+        status: str = "PUBLISHED",
+    ) -> dict[str, Any]:
+        return self.cases.list_published_cases(q=q, product=product, status=status)
+
+    def case_detail(self, case_id: str) -> dict[str, Any]:
+        detail = self.cases.get_case(case_id)
+        return {
+            **detail,
+            "itr": self._publication_metadata(case_id).get("business_id"),
+            "published_at": self._publication_metadata(case_id).get("published_at"),
+            "case_version": self._publication_metadata(case_id).get("knowledge_revision"),
+            "publication_status": self._publication_metadata(case_id).get("publication_status"),
+        }
+
+    def _publication_metadata(self, case_id: str) -> dict[str, Any]:
+        try:
+            paths = self.cases.repository.list("knowledge/publication_metadata/major_event")
+        except Exception:
+            return {}
+        for path in paths:
+            payload = self.cases.repository.load(path)
+            if isinstance(payload, dict) and payload.get("case_id") == case_id:
+                return payload
+        return {}
