@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web import create_p0_app
 
 
@@ -29,14 +28,6 @@ def build_app(
 ):
     db = Path(db_path)
     db.parent.mkdir(parents=True, exist_ok=True)
-    initializer = P0Initializer(
-        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
-        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
-    )
-    if db.exists():
-        initializer.verify_ready(db)
-    else:
-        initializer.initialize(db)
 
     hardware_db = Path(hardware_case_db_path)
     hardware_db.parent.mkdir(parents=True, exist_ok=True)
@@ -50,6 +41,7 @@ def build_app(
         hardware_case_db_path=hardware_db,
         hardware_tree_upload_dir=upload_dir,
         hardware_case_source_root=hardware_case_source_root,
+        enabled_domains={"HARDWARE_CASE"},
     )
 
 
@@ -109,6 +101,7 @@ def main() -> int:
         print("RESULT=PASS")
         print("STARTUP_IMPORT=PASS")
         print("APP_FACTORY=create_p0_app")
+        print("ENABLED_DOMAINS=HARDWARE_CASE")
         print("WEB_ENTRY=" + p01_path)
         print("BASE_DATA_ENTRY=" + p07_path)
         print("TREE_IMPORT_ENTRY=" + import_path)
