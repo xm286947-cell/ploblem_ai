@@ -13,6 +13,8 @@ if str(ROOT) not in sys.path:
 from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 from scripts.hardware_case_mvp_smoke import main as backend_smoke
+from scripts.hardware_case_precheck import check_python, check_web
+from services.hardware_case_runtime_adapter import build_hardware_case_structurer
 
 
 def frontend_smoke() -> None:
@@ -42,13 +44,33 @@ def frontend_smoke() -> None:
         assert client.get("/p0/static/hardware_tree_import.css").status_code == 200
 
 
+def runtime_package_smoke() -> None:
+    required = (
+        ROOT / "config/runtime/model.local.hardware_case.example.yaml",
+        ROOT / "config/runtime/agents/hardware_case.structure.yaml",
+        ROOT / "prompts/runtime/hardware_case/structure_v1.md",
+        ROOT / "services/hardware_case_runtime_adapter.py",
+        ROOT / "INIT_LOCAL_CONFIG.bat",
+        ROOT / "CHECK_ENV.bat",
+        ROOT / "START_HARDWARE_CASE.bat",
+        ROOT / "RUN_REAL_AI_VALIDATION.bat",
+    )
+    assert all(path.is_file() for path in required)
+    assert build_hardware_case_structurer.__hardware_case_structurer_factory__ is True
+    assert check_python() == []
+    assert check_web() == []
+
+
 def main() -> int:
     code = backend_smoke()
     if code != 0:
         return code
     frontend_smoke()
+    runtime_package_smoke()
     print("PRODUCT_TEST_PACKAGE=PASS")
     print("P07_FRONTEND=PASS")
+    print("RUNTIME_PACKAGE_ASSETS=PASS")
+    print("STARTUP_PRECHECK=PASS")
     print("PACKAGE_STATUS=READY_FOR_INTERNAL_TEST")
     print("RELEASE_CLAIM=NO")
     return 0
