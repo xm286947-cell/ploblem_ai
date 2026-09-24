@@ -1,6 +1,6 @@
 # QUALITY_SCENARIO_MVP_RC1 E2E Report
 
-Status: CI_PENDING
+Status: ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING
 
 ## Golden Dataset
 
@@ -41,6 +41,36 @@ None. The Golden Path uses repositories, services and formal HTTP APIs only.
 Not executed by repository CI. Internal problem material must remain inside the company environment.
 The same Golden Path should be executed there and only a sanitized result summary should be returned.
 
-## Final result
+## Authoritative engineering gate
 
-Filled by QS-MVP-07 Product Gate after authoritative CI completes.
+- PR workflow run: 35947679409
+- Implementation head: f9331848c685710aabaded7a2e8163b75254ad07
+- Result: SUCCESS
+- Total: 147 passed / 0 failed
+- Python compile: PASS
+- P01 / P02 / P03 JavaScript syntax: PASS
+- Unified Runtime dependency boundary: PASS
+- Golden E2E: 2 passed
+- Evidence traceability: 7 passed
+- P03: 6 passed
+- P02: 7 passed
+- P01: 6 passed
+- Review / Confirm / Publish: 13 passed
+- Candidate V1: 8 passed
+- QualityScenario V1 contract: 15 passed
+- V1 Repository: 5 passed
+- Reverse Quality: 12 passed
+- Reverse Quality Store: 8 passed
+- Reverse Runtime integration: 4 passed
+- P0 UED shell: 6 passed
+- P0 workbench UED: 5 passed
+- Legacy Scenario Generation: 26 passed
+- Legacy Scenario Library: 17 passed
+
+## Engineering result
+
+ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING
+
+No manual database mutation was used.
+Reverse Quality and QualityScenario V1 used independent stores and handed off through ReverseQualityResult V0.1, preserving the frozen domain boundary.
+The only remaining release gate is the company-environment real internal Golden run.
