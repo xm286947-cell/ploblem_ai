@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import shutil
@@ -9,12 +10,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASELINE = "6ad93f1396585163fffd1e4a70a677aee917a6ff"
-ENGINEERING_HEAD = "66df062b28527a286033ad7632a7ac79247efe82"
+ENGINEERING_HEAD = PRODUCT_BASELINE
 RUNTIME_BASELINE = "0959da43008307398a9cac0f9abfc7fec26dcb8a"
-PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924"
+PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_DEFECT_126_FIX_CANDIDATE_20260925_R1"
 EXCLUDED_DIRS = {".git", ".github", ".pytest_cache", "__pycache__", ".deps", "knowledge", "input", "output", "baseline_release", "releases", "deliverables"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".log", ".zip", ".xlsx", ".xls", ".xlsm", ".pdf", ".doc", ".docx"}
-REQUIRED_PROJECT_DIRS = ("quality_knowledge", "prompts/runtime", "config/runtime/agents")
+REQUIRED_PROJECT_DIRS = ("quality_knowledge", "models", "prompts/runtime", "config/runtime/agents")
 RC1_DOCS = (
     "docs/QUALITY_SCENARIO_MVP_RC1_RELEASE_NOTE.md",
     "docs/QUALITY_SCENARIO_MVP_RC1_E2E_REPORT.md",
@@ -34,6 +35,73 @@ def copy_tree(src: Path, dst: Path) -> None:
         target = dst / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+
+
+INTERNAL_DEPENDENCY_EXCLUDED_TOPS = {
+    ".git", ".github", ".pytest_cache", "__pycache__", ".deps",
+    "tests", "knowledge", "input", "output", "outputs", "docs", "scripts",
+    "baseline_release", "releases", "deliverables",
+}
+
+
+def _internal_python_roots() -> dict[str, Path]:
+    roots: dict[str, Path] = {}
+    for child in ROOT.iterdir():
+        if child.name in INTERNAL_DEPENDENCY_EXCLUDED_TOPS:
+            continue
+        if child.is_file() and child.suffix == ".py":
+            roots[child.stem] = child
+        elif child.is_dir() and any(child.rglob("*.py")):
+            roots[child.name] = child
+    return roots
+
+
+def _imported_top_levels(pkg: Path) -> set[str]:
+    imported: set[str] = set()
+    for path in pkg.rglob("*.py"):
+        if "vendor/unified_agent_runtime" in path.as_posix():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imported.add(node.module.split(".")[0])
+    return imported
+
+
+def copy_internal_import_closure(pkg: Path) -> list[str]:
+    """Copy repository-internal top-level Python dependencies transitively.
+
+    The RC1 package owns quality_knowledge as its primary product package, but
+    some frozen modules legitimately import shared repository packages such as
+    models/ and builder/.  Resolve those dependencies from imports instead of
+    maintaining a fragile manual allowlist.
+    """
+    roots = _internal_python_roots()
+    copied: list[str] = []
+    while True:
+        imported = _imported_top_levels(pkg)
+        missing = sorted(
+            name for name in imported
+            if name in roots
+            and name != "quality_knowledge"
+            and not (pkg / name).exists()
+            and not (pkg / f"{name}.py").exists()
+        )
+        if not missing:
+            break
+        for name in missing:
+            source = roots[name]
+            if source.is_dir():
+                copy_tree(source, pkg / name)
+            else:
+                shutil.copy2(source, pkg / source.name)
+            copied.append(name)
+    return copied
 
 
 def write_launchers(pkg: Path) -> None:
@@ -151,18 +219,43 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "vendor/unified_agent_runtime"))
+from models.common import VersionedDTO
+from quality_knowledge.models.issue import QualityIssueDTO
 from quality_knowledge.quality_scenario_v1 import ScenarioStatus
+from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
+from quality_knowledge.quality_scenario_v1_workflow_service import QualityScenarioV1WorkflowService
+from quality_knowledge.quality_scenario_traceability_service import QualityScenarioTraceabilityService
+from quality_knowledge.web.app import create_app
+from quality_knowledge.web.p0_app import create_p0_app
 from runtime import AgentRequest
 
 m = json.loads((ROOT / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
 assert m["product_baseline"] == "6ad93f1396585163fffd1e4a70a677aee917a6ff"
 assert m["runtime_baseline"] == "0959da43008307398a9cac0f9abfc7fec26dcb8a"
 assert ScenarioStatus.PUBLISHED.value == "PUBLISHED"
+assert VersionedDTO is not None
+assert QualityIssueDTO is not None
+assert CandidateV1Service is not None
+assert QualityScenarioV1WorkflowService is not None
+assert QualityScenarioTraceabilityService is not None
+assert create_app is not None
+assert create_p0_app is not None
 assert AgentRequest is not None
 for rel in (
     "quality_knowledge/web/templates/p0_quality_scenario_workbench.html",
     "quality_knowledge/web/templates/p0_quality_scenario_library.html",
     "quality_knowledge/web/templates/p0_quality_scenario_detail.html",
+    "quality_knowledge/web/static/p0_scenario_workbench.js",
+    "quality_knowledge/web/static/p0_scenario_library.js",
+    "quality_knowledge/web/static/p0_scenario_detail.js",
+    "quality_knowledge/p0/schema.sql",
+    "quality_knowledge/config/p0_seed_manifest.json",
+    "quality_knowledge/config/plc_fields.yaml",
+    "quality_knowledge/models/issue.py",
+    "models/common.py",
+    "config/runtime/agents/reverse_quality.single_issue.analyze.yaml",
+    "config/runtime/model.yaml",
+    "prompts/runtime/reverse_quality/single_issue_v01.md",
     "vendor/unified_agent_runtime/runtime/__init__.py",
 ):
     assert (ROOT / rel).is_file(), rel
@@ -275,7 +368,7 @@ def write_readme(pkg: Path) -> None:
 
 ## 基线
 Product baseline: 6ad93f1396585163fffd1e4a70a677aee917a6ff
-Engineering head: 66df062b28527a286033ad7632a7ac79247efe82
+Engineering head: 6ad93f1396585163fffd1e4a70a677aee917a6ff
 Unified Runtime baseline: 0959da43008307398a9cac0f9abfc7fec26dcb8a
 Engineering Gate: 147 passed / 0 failed
 
@@ -306,7 +399,7 @@ prepare_internal_golden.bat --source-db "D:\\path\\internal_quality_issue.db" --
 """, encoding="utf-8")
 
 
-def make_manifest(pkg: Path, source_commit: str) -> dict:
+def make_manifest(pkg: Path, source_commit: str, internal_roots: list[str]) -> dict:
     files = []
     for path in sorted(pkg.rglob("*")):
         if not path.is_file() or path.name == "PACKAGE_MANIFEST.json":
@@ -318,11 +411,16 @@ def make_manifest(pkg: Path, source_commit: str) -> dict:
         })
     return {
         "package_name": PACKAGE_NAME,
-        "status": "ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING",
+        "defect_id": "#126",
+        "build_type": "PACKAGE_DEFECT_FIX_CANDIDATE_R1",
+        "product_code_changed": False,
+        "status": "FIX_CANDIDATE_READY_FOR_RETEST",
         "product_baseline": PRODUCT_BASELINE,
         "engineering_head": ENGINEERING_HEAD,
         "runtime_baseline": RUNTIME_BASELINE,
         "package_source_commit": source_commit,
+        "required_project_dirs": list(REQUIRED_PROJECT_DIRS),
+        "internal_import_closure_roots": internal_roots,
         "file_count": len(files),
         "files": files,
     }
@@ -346,6 +444,9 @@ def main() -> int:
         if not src.exists():
             raise SystemExit("REQUIRED_PATH_MISSING:" + rel)
         copy_tree(src, pkg / rel)
+
+    internal_roots = copy_internal_import_closure(pkg)
+    print("internal_import_closure_roots=" + ",".join(internal_roots))
 
     shutil.copy2(ROOT / "requirements.txt", pkg / "requirements.txt")
     for rel in RC1_DOCS:
@@ -376,7 +477,7 @@ def main() -> int:
     write_readme(pkg)
 
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    manifest = make_manifest(pkg, commit)
+    manifest = make_manifest(pkg, commit, internal_roots)
     (pkg / "PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(pkg)
     print("files=" + str(manifest["file_count"]))
