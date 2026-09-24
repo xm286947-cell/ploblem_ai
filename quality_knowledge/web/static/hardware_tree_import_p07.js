@@ -466,6 +466,48 @@
       '<div class="hc-formal-summary">' + formal + '</div>';
   }
 
+  async function showAppliedTree() {
+    const resultHost = $("hc-apply-result");
+    let tree = null;
+    try {
+      tree = await request(caseApi + "/trees/" + encodeURIComponent(state.treeType));
+    } catch (error) {
+      return alertBox("新树加载失败：" + error.message);
+    }
+    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+    let panel = document.getElementById("hc-applied-tree");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "hc-applied-tree";
+      panel.className = "hc-applied-tree";
+      resultHost.appendChild(panel);
+    }
+    panel.innerHTML =
+      '<div class="hc-panel-head"><div><h3>当前 ACTIVE Tree</h3><p>来自现有 Hardware Case tree consumer API。</p></div><span class="badge badge-neutral">' +
+      nodes.length + ' nodes</span></div><div class="hc-tree-preview">' +
+      (nodes.length ? nodes.slice(0, 160).map(node =>
+        '<div class="hc-node-row"><span>' + escapeHtml(pathText(node)) + '</span><small>' +
+        escapeHtml(node.node_id || "") + '</small></div>'
+      ).join("") : '<div class="hc-empty">当前树暂无节点</div>') +
+      '</div>';
+  }
+
+  function bindApplyResultActions() {
+    const treeButton = document.getElementById("hc-view-applied-tree");
+    const historyButton = document.getElementById("hc-view-import-history");
+    const backButton = document.getElementById("hc-failed-back-diff");
+    if (treeButton) treeButton.addEventListener("click", showAppliedTree);
+    if (historyButton) historyButton.addEventListener("click", async () => {
+      try {
+        await renderHistory(state.treeType);
+        setStep(6);
+      } catch (error) {
+        alertBox("历史加载失败：" + error.message);
+      }
+    });
+    if (backButton) backButton.addEventListener("click", () => setStep(4));
+  }
+
   async function applyJob() {
     $("hc-confirm-apply").disabled = true;
     clearAlert();
@@ -479,21 +521,25 @@
       const changes = state.analysis?.changes || [];
       const excluded = changes.filter(item => item.decision === "EXCLUDED").length;
       const changed = changes.filter(item => item.change_type !== "NO_CHANGE" && item.decision !== "EXCLUDED").length;
+      const resultActions =
+        '<div class="hc-result-actions"><button id="hc-view-applied-tree" class="btn">查看新树</button>' +
+        '<button id="hc-view-import-history" class="btn btn-primary">查看导入记录</button></div>';
       if (result.job.status === "APPLIED_WITH_EXCLUSIONS") {
         $("hc-apply-result").innerHTML =
           '<article class="hc-result hc-result-exclusion"><h3>已生效，存在排除项</h3>' +
           '<p>用户在 Apply 前已明确排除部分 Candidate，其余 Change Set 已 Atomic Apply 成功。</p>' +
           '<div><b>生效：' + changed + '</b><b>排除：' + excluded + '</b><b>失败：0</b></div>' +
-          '<p>新 ACTIVE Version：<strong>' + escapeHtml(result.active_version?.version_id || result.job.applied_version_id) + '</strong></p></article>';
+          '<p>新 ACTIVE Version：<strong>' + escapeHtml(result.active_version?.version_id || result.job.applied_version_id) + '</strong></p>' +
+          resultActions + '</article>';
       } else {
         $("hc-apply-result").innerHTML =
           '<article class="hc-result hc-result-success"><h3>导入成功</h3>' +
           '<p>Change Set 已全部生效。</p><div><b>生效：' + changed + '</b><b>排除：0</b><b>失败：0</b></div>' +
-          '<p>新 ACTIVE Version：<strong>' + escapeHtml(result.active_version?.version_id || result.job.applied_version_id) + '</strong></p></article>';
+          '<p>新 ACTIVE Version：<strong>' + escapeHtml(result.active_version?.version_id || result.job.applied_version_id) + '</strong></p>' +
+          resultActions + '</article>';
       }
+      bindApplyResultActions();
       alertBox("Atomic Apply 完成。", "success");
-      await renderHistory(state.treeType);
-      setTimeout(() => setStep(6), 50);
     } catch (error) {
       let detail = null, afterActive = null;
       try { detail = await request(api + "/" + state.jobId, {headers: MAINTAINER_HEADERS()}); } catch (_) {}
@@ -504,7 +550,10 @@
         '<article class="hc-result hc-result-failed"><h3>APPLY_FAILED</h3>' +
         '<p>Atomic Apply 失败，未生成新的 ACTIVE Version。上一 ACTIVE Version 保持不变。</p>' +
         '<div><b>失败：1</b><b>错误：' + escapeHtml(detail?.job?.error_code || error.message) + '</b></div>' +
-        '<p>Apply 前：<strong>' + escapeHtml(beforeId) + '</strong> · 当前：<strong>' + escapeHtml(afterId) + '</strong></p></article>';
+        '<p>Apply 前：<strong>' + escapeHtml(beforeId) + '</strong> · 当前：<strong>' + escapeHtml(afterId) + '</strong></p>' +
+        '<div class="hc-result-actions"><button class="btn" disabled title="M3A 当前未开放 APPLY_FAILED Retry API">重试（待 API）</button>' +
+        '<button id="hc-failed-back-diff" class="btn btn-primary">返回冲突处理</button></div></article>';
+      bindApplyResultActions();
       alertBox("Apply 失败：" + error.message);
     } finally {
       $("hc-confirm-apply").disabled = false;
