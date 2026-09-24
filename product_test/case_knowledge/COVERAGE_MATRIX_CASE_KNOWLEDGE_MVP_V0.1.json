@@ -1,0 +1,151 @@
+{
+  "baseline": "feature/knowledge-production-mvp-001@65798a01bb220334a4e561de94814ddb3a5c0d75",
+  "test_baseline": "CASE_KNOWLEDGE_TEST_V0.1",
+  "scenarios": [
+    {
+      "scenario_id": "PM-KP-GOLDEN-A-NVME",
+      "requirement": "Golden Case 1: NVMe Health",
+      "test_ids": [
+        "CK-SYS-EXT-NVME-001"
+      ],
+      "fixture": "nvme_health_golden.json",
+      "levels": [
+        "INTEGRATION",
+        "SYSTEM",
+        "AUTOMATION"
+      ],
+      "gate": "GOLDEN_PDF_CASE"
+    },
+    {
+      "scenario_id": "PM-KP-GOLDEN-A-UBI",
+      "requirement": "Golden Case 2: Linux UBI",
+      "test_ids": [
+        "CK-SYS-EXT-UBI-001"
+      ],
+      "fixture": "linux_ubi_golden.json",
+      "levels": [
+        "INTEGRATION",
+        "SYSTEM",
+        "AUTOMATION"
+      ],
+      "gate": "GOLDEN_PDF_CASE"
+    },
+    {
+      "scenario_id": "PM-KP-GOLDEN-B-HCASE",
+      "requirement": "Golden Case 3: Historical Case -> reusable knowledge",
+      "test_ids": [
+        "tests/test_kp_d06_storage_golden.py::test_kp_d06_golden_b_historical_case_full_production_to_storage",
+        "tests/test_kp_d06_storage_golden.py::test_kp_d06_historical_case_adapter_does_not_copy_case_database"
+      ],
+      "levels": [
+        "INTEGRATION",
+        "SYSTEM",
+        "AUTOMATION"
+      ],
+      "gate": "GOLDEN_HISTORICAL_CASE"
+    },
+    {
+      "scenario_id": "PM-KP-NO-AUTO-PUBLISH",
+      "requirement": "AI output remains Candidate; human review required",
+      "test_ids": [
+        "CK-FAIL-AI-AUTH-001",
+        "CK-SYS-EXT-NVME-001"
+      ],
+      "fixture": "ai_privilege_escalation.json",
+      "levels": [
+        "INTERFACE",
+        "INTEGRATION"
+      ],
+      "gate": "NO_AUTO_PUBLISH"
+    },
+    {
+      "scenario_id": "PM-KP-EVIDENCE-FAIL-CLOSED",
+      "requirement": "No evidence => no publish",
+      "test_ids": [
+        "CK-FAIL-EVIDENCE-001"
+      ],
+      "fixture": "missing_evidence.json",
+      "levels": [
+        "INTEGRATION"
+      ],
+      "gate": "EVIDENCE_EVALUATION"
+    },
+    {
+      "scenario_id": "PM-KP-PROVIDER-FAIL-CLOSED",
+      "requirement": "Provider error cannot create knowledge",
+      "test_ids": [
+        "CK-FAIL-PROVIDER-429-001",
+        "CK-FAIL-PROVIDER-JSON-001"
+      ],
+      "fixtures": [
+        "provider_429.json",
+        "provider_invalid_json.json"
+      ],
+      "levels": [
+        "INTEGRATION",
+        "AUTOMATION"
+      ],
+      "gate": "KNOWLEDGE_EXTRACTION"
+    },
+    {
+      "scenario_id": "PM-KP-REVIEW-PUBLISH-VERSION",
+      "requirement": "CONFIRM/EDIT/REJECT, fail-closed publish, immutable versions",
+      "test_ids": [
+        "tests/test_kp_d03_review_publish.py"
+      ],
+      "levels": [
+        "INTERFACE",
+        "INTEGRATION"
+      ],
+      "gate": "KNOWLEDGE_PUBLISH"
+    },
+    {
+      "scenario_id": "PM-KP-QUERY-RELEASE",
+      "requirement": "Published knowledge + evidence + source refs, pinned release",
+      "test_ids": [
+        "tests/test_kp_d04_release_query.py",
+        "tests/test_kp_d06_storage_golden.py"
+      ],
+      "levels": [
+        "INTERFACE",
+        "INTEGRATION"
+      ],
+      "gate": "KNOWLEDGE_QUERY"
+    },
+    {
+      "scenario_id": "PM-KP-PROCESSING-UI",
+      "requirement": "Sources/Candidates/Review/Published views; UI uses application layer",
+      "test_ids": [
+        "tests/test_kp_d05_processing_ui.py"
+      ],
+      "levels": [
+        "SYSTEM"
+      ],
+      "gate": "KNOWLEDGE_PROCESSING_UI"
+    },
+    {
+      "scenario_id": "PM-KP-DUAL-ENTRY",
+      "requirement": "External and Business candidates share pipeline, stable provenance",
+      "test_ids": [
+        "tests/test_kp_d01_business_candidate_intake.py"
+      ],
+      "levels": [
+        "INTERFACE",
+        "INTEGRATION"
+      ],
+      "gate": "CANDIDATE_INTAKE"
+    },
+    {
+      "scenario_id": "PM-KP-EVAL-DEDUP-CONFLICT",
+      "requirement": "Evidence evaluation, duplicate and conflict detection",
+      "test_ids": [
+        "tests/test_kp_d02_evaluation.py"
+      ],
+      "levels": [
+        "INTERFACE",
+        "INTEGRATION"
+      ],
+      "gate": "CONFLICT_DETECTION"
+    }
+  ]
+}
