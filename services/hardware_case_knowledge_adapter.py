@@ -166,8 +166,10 @@ class HardwareCaseKnowledgeAdapter:
         ).strip()
         source_ref = str(evidence.get("source_ref") or "").strip()
         evidence_id = str(evidence.get("evidence_id") or "").strip()
+        mime_type = str(source_metadata.get("mime_type") or "").lower()
         source_type = str(
-            evidence.get("evidence_type") or source_metadata.get("mime_type") or "WORD"
+            source_metadata.get("source_type")
+            or ("WORD" if "wordprocessingml" in mime_type else "DOCUMENT")
         ).strip()
         locator = evidence.get("locator")
         if (
@@ -210,6 +212,7 @@ class HardwareCaseKnowledgeAdapter:
             "metadata": {
                 "hardware_case_id": case_id,
                 "hardware_evidence_id": evidence_id,
+                "hardware_evidence_type": evidence.get("evidence_type"),
                 "hardware_locator": dict(locator),
                 "hardware_source_sha256": source_metadata.get("sha256"),
                 "knowledge_capability_version": (
