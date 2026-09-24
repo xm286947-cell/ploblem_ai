@@ -65,6 +65,7 @@
       "properties": {
         "node_id": {"type": "string", "minLength": 1},
         "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
+        "business_key": {"type": ["string", "null"]},
         "name": {"type": "string", "minLength": 1},
         "parent_id": {"type": ["string", "null"]},
         "path": {
@@ -94,6 +95,8 @@
         "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
         "node_id": {"type": "string", "minLength": 1},
         "node_path": {"type": "string"},
+        "tree_version": {"type": ["string", "null"]},
+        "path_snapshot": {"type": ["string", "null"]},
         "relation_role": {"enum": ["PRIMARY", "SECONDARY"]},
         "mapping_status": {"enum": ["SUGGESTED", "CONFIRMED"]},
         "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},

@@ -129,7 +129,13 @@ class HardwareCaseBackendService:
         if node["tree_type"] != mapping.get("tree_type"):
             raise HardwareCaseContractError("TREE_TYPE_MISMATCH")
         normalized = deepcopy(mapping)
-        normalized.setdefault("node_path", "/".join(node["path"]))
+        current_path = "/".join(node["path"])
+        normalized.setdefault("node_path", current_path)
+        normalized.setdefault("path_snapshot", current_path)
+        normalized.setdefault(
+            "tree_version",
+            self.repository.get_active_tree_version_id(str(mapping.get("tree_type"))),
+        )
         return self.repository.save_mapping(normalized)
 
     def save_evidence(self, evidence: dict[str, Any]) -> dict[str, Any]:
