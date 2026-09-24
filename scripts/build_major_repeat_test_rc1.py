@@ -98,6 +98,7 @@ def stage_app(stage: Path) -> None:
         "    temperature: 0\n    max_tokens: 8192\n",
         encoding="utf-8",
     )
+    (stage / "config").mkdir(parents=True, exist_ok=True)
     (stage / "config/model.local.example.yaml").write_text(
         "active_model: target_model\nmodels:\n  target_model:\n"
         "    provider: openai_compatible\n"
