@@ -1,0 +1,74 @@
+name: Hardware Case M3 Frontend
+
+on:
+  pull_request:
+    paths:
+      - "quality_knowledge/web/p0_pages.py"
+      - "quality_knowledge/web/templates/_hardware_case_nav.html"
+      - "quality_knowledge/web/templates/hardware_case_*.html"
+      - "quality_knowledge/web/templates/p0_base.html"
+      - "quality_knowledge/web/templates/hardware_tree_import.html"
+      - "quality_knowledge/web/static/hardware_case.css"
+      - "quality_knowledge/web/static/hardware_case.js"
+      - "START_HARDWARE_CASE.bat"
+      - "START_HARDWARE_CASE.sh"
+      - "scripts/hardware_case_web_start.py"
+      - "scripts/hardware_case_precheck.py"
+      - "tests/test_hardware_case_m3_frontend.py"
+      - ".github/workflows/hardware-case-m3-frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "quality_knowledge/web/p0_pages.py"
+      - "quality_knowledge/web/templates/_hardware_case_nav.html"
+      - "quality_knowledge/web/templates/hardware_case_*.html"
+      - "quality_knowledge/web/templates/p0_base.html"
+      - "quality_knowledge/web/templates/hardware_tree_import.html"
+      - "quality_knowledge/web/static/hardware_case.css"
+      - "quality_knowledge/web/static/hardware_case.js"
+      - "START_HARDWARE_CASE.bat"
+      - "START_HARDWARE_CASE.sh"
+      - "scripts/hardware_case_web_start.py"
+      - "scripts/hardware_case_precheck.py"
+      - "tests/test_hardware_case_m3_frontend.py"
+      - ".github/workflows/hardware-case-m3-frontend.yml"
+  workflow_dispatch:
+
+jobs:
+  frontend-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: JavaScript syntax
+        run: |
+          node --check quality_knowledge/web/static/hardware_case.js
+          node --check quality_knowledge/web/static/hardware_tree_import.js
+
+      - name: Compile frontend routes and startup
+        run: >
+          python -m py_compile
+          quality_knowledge/web/p0_pages.py
+          scripts/hardware_case_web_start.py
+          scripts/hardware_case_precheck.py
+
+      - name: P01-P07 frontend Gate
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_case_m3_frontend.py
+          tests/test_hardware_tree_import_m3b_frontend.py
+          tests/test_hardware_case_web_api.py
+          tests/test_hardware_case_evidence_source.py
+          tests/test_hardware_case_product_api_e2e.py
+
+      - name: Startup defaults to P01
+        run: |
+          python scripts/hardware_case_web_start.py --check             --db /tmp/hc_m3_quality.db             --hardware-db /tmp/hc_m3_hardware.db             --tree-upload-dir /tmp/hc_m3_tree_uploads             --source-root /tmp/hc_m3_sources | tee /tmp/hc_start.txt
+          grep -q "WEB_ENTRY=/p0/hardware-cases" /tmp/hc_start.txt
+          grep -q "BASE_DATA_ENTRY=/p0/hardware-cases/base-data" /tmp/hc_start.txt
