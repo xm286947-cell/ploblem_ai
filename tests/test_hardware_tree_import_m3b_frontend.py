@@ -41,6 +41,11 @@ def test_m3b_p07_is_mounted_on_existing_p0_shell(tmp_path: Path):
     assert "Change Diff" in html
     assert "确认生效" in html
     assert "APPLIED_WITH_EXCLUSIONS" in html
+    assert "查看版本" in html
+    assert "Tree Version" in html
+    assert "重试" in html
+    assert "返回冲突处理" in html
+    assert "查看新树" in html
     assert "EXCLUDE" in html
     assert "DEPRECATE" in html
     assert "DELETE" not in html
