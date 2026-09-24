@@ -98,7 +98,14 @@ def stage_app(stage: Path) -> None:
         "    temperature: 0\n    max_tokens: 8192\n",
         encoding="utf-8",
     )
-    copy(ROOT / "config/runtime/model.local.example.yaml", stage / "config/model.local.example.yaml")
+    (stage / "config/model.local.example.yaml").write_text(
+        "active_model: target_model\nmodels:\n  target_model:\n"
+        "    provider: openai_compatible\n"
+        "    base_url_env: QUALITY_AI_BASE_URL\n"
+        "    api_key_env: QUALITY_AI_API_KEY\n"
+        "    model: __SET_IN_TARGET_ENV__\n",
+        encoding="utf-8",
+    )
     (stage / "config/README.md").write_text(
         "Provider 配置仅用于目标环境需要 AI 分析时。请在目标环境通过环境变量 "
         "QUALITY_AI_BASE_URL / QUALITY_AI_API_KEY 配置，勿写入本包。合成演示的 Repeat "
