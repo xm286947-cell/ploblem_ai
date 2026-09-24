@@ -33,7 +33,7 @@ jobs:
 
       - name: Re-run RC1 Golden E2E before packaging
         env:
-          PYTHONPATH: \${{ github.workspace }}:\${{ github.workspace }}/.deps/unified-agent-runtime
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.deps/unified-agent-runtime
         run: python -m pytest tests/test_quality_scenario_rc1_golden_e2e.py -q
 
       - name: Build test package
@@ -42,7 +42,7 @@ jobs:
       - name: Verify packaged runtime boundary
         working-directory: dist/QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924
         env:
-          PYTHONPATH: \${{ github.workspace }}/dist/QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924:\${{ github.workspace }}/dist/QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924/vendor/unified_agent_runtime
+          PYTHONPATH: ${{ github.workspace }}/dist/QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924:${{ github.workspace }}/dist/QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924/vendor/unified_agent_runtime
         run: |
           python -m compileall -q quality_knowledge vendor/unified_agent_runtime/runtime tools
           python tools/verify_quality_scenario_rc1_package.py
