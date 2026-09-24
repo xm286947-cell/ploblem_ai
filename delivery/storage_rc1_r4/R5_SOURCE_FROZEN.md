@@ -31,3 +31,10 @@ Second preflight note:
 - The next selfcheck scenario exposed a launcher lifecycle bug: cleanup killed owned background PIDs but did not wait for process termination, so port 8765 could still be listening when the next scenario started.
 - R5 now owns shutdown as well as startup: every launcher-owned PID is killed and waited before launcher exit.
 - This revision supersedes all earlier R5 preflight source markers for final package construction.
+
+macOS native preflight note:
+- Internal R5 SHA afe58eed6edd2707f23f931853209f4afaa2a069c61e1a4421c0d012f40b5eae was NOT released.
+- Linux package/port/selfcheck gate passed, but macOS native timed out waiting for the OpenAI Mock listener.
+- Evidence showed python -m tools.openai_mock.server emitted a runpy warning because tools.openai_mock.__init__ imports server before module execution; the spawned process remained alive but never emitted its listening line in the gate window.
+- R5 now invokes the same Mock server through a single import and direct server.main() call. Runtime/Knowledge semantics and Mock API behavior are unchanged.
+- This revision supersedes all earlier R5 preflight source markers for final package construction.
