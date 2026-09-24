@@ -44,6 +44,7 @@ def build_app(
 
     return create_p0_app(
         db,
+        stage_runner=object(),
         project_root=ROOT,
         hardware_case_db_path=hardware_db,
         hardware_tree_upload_dir=upload_dir,
@@ -93,6 +94,10 @@ def main() -> int:
     if missing:
         print("RESULT=BLOCKED")
         print("MISSING_ROUTES=" + ",".join(missing))
+        status = getattr(app.state, "initialization_status", None)
+        if status is not None:
+            import json
+            print("INITIALIZATION_STATUS=" + json.dumps(status, ensure_ascii=False, default=str))
         return 3
 
     if args.check:
