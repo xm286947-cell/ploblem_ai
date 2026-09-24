@@ -65,7 +65,11 @@ def stage_app(stage: Path) -> None:
         if not raw:
             continue
         path = Path(raw)
-        if path.parts[0] not in CODE_DIRS or path.suffix.lower() not in CODE_SUFFIXES:
+        if path.parts[0] not in CODE_DIRS:
+            continue
+        if path.suffix.lower() not in CODE_SUFFIXES and not (
+            path.parts[:2] == ("quality_knowledge", "prompts_v2") and path.suffix.lower() == ".md"
+        ):
             continue
         if any(part in {"__pycache__", "data", "output", "outputs"} for part in path.parts):
             continue
