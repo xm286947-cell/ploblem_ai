@@ -85,6 +85,7 @@ def create_hardware_tree_import_router(
         staged = None
         try:
             staged = file_store.save(job_id, filename, payload)
+            workbook = analyzer.inspect(staged)
             job = repository.create_job(
                 job_id=job_id,
                 tree_type=tree_type,
@@ -92,7 +93,6 @@ def create_hardware_tree_import_router(
                 source_sha256=sha256(payload).hexdigest(),
                 operator=operator,
             )
-            workbook = analyzer.inspect(staged)
             return {"job": job, "workbook": workbook}
         except HardwareTreeImportContractError as error:
             if staged is not None:
