@@ -37,6 +37,12 @@
   </section>
 
   {% if hardware_role == 'MAINTAINER' %}
+  <section class="hc-card hc-import-entry">
+    <div class="hc-card-head"><div><h2>知识导入</h2><p>先导入两棵基础树，再上传历史案例 Word，查看 Candidate 与 Evidence，进入人工确认。</p></div></div>
+    <p data-tree-prerequisite hidden>请先导入基础树：两棵树均需 Apply 为 ACTIVE Version。</p>
+    <a class="hc-button secondary" href="/p0/hardware-cases/base-data">基础数据管理</a>
+    <a class="hc-button primary" href="/p0/hardware-cases/intake">导入案例知识</a>
+  </section>
   <section class="hc-maintenance-strip" data-maintenance-strip>
     <div><span>待确认</span><strong data-pending-review>—</strong></div>
     <div><span>待挂接</span><strong data-pending-mapping>—</strong></div>

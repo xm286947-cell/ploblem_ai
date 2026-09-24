@@ -1,0 +1,32 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-import-v1">{% endblock %}
+{% block breadcrumb %}知识导入{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-intake data-api="{{ hardware_api_prefix }}">
+  <section class="hc-hero"><div><span class="hc-kicker">HARDWARE CASE · KNOWLEDGE IMPORT</span><h1>知识导入</h1><p>上传 Word，形成 Case Candidate、原文 Evidence 与双树建议挂接，再由人工确认和发布。</p></div></section>
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>1 · 基础树</h2><p>电路 / 特性树和物料 / 器件树各自导入并 Apply 后，才可处理 Word。</p></div><a class="hc-button secondary" href="/p0/hardware-cases/base-data">基础数据管理</a></div>
+    <p data-intake-tree-status>正在检查 ACTIVE Version…</p>
+  </section>
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>2 · 上传历史案例 Word</h2><p>仅支持 .docx；上传后点击“开始处理”。失败重试复用同一份 Source。</p></div></div>
+    <form data-intake-upload><input type="file" accept=".docx" multiple required data-intake-files aria-label="选择 Word 案例"><button class="hc-button primary" type="submit">上传 Word</button></form>
+    <p role="status" data-intake-message></p>
+  </section>
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>3 · 处理任务</h2><p>Candidate 和 SUGGESTED Mapping 不会自动发布。可从结果直接进入案例确认。</p></div><button class="hc-button secondary" type="button" data-intake-refresh>刷新</button></div>
+    <div data-intake-list><div class="hc-empty">正在读取…</div></div>
+  </section>
+  <section class="hc-card" data-intake-detail hidden>
+    <div class="hc-card-head"><div><h2 data-intake-title>Candidate</h2><p data-intake-case-id></p></div><div><a class="hc-button secondary" data-intake-case-detail href="#">查看详情 / Evidence</a> <a class="hc-button primary" data-intake-review href="#">进入人工确认</a></div></div>
+    <div data-intake-facts></div>
+    <h3>原文 Evidence</h3><div data-intake-evidence></div>
+    <h3>双树 Candidate Mapping</h3><div data-intake-mappings></div>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_intake.js?v=hc-import-v1"></script>{% endblock %}

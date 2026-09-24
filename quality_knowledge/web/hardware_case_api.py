@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
+from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
 
 
 _ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
@@ -58,6 +59,7 @@ def create_hardware_case_router(
     *,
     prefix: str = "/api/v2/hardware-cases",
     source_store: HardwareCaseSourceStore | None = None,
+    intake_service: HardwareCaseIntakeService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -158,6 +160,47 @@ def create_hardware_case_router(
                 if code in {"SOURCE_TOO_LARGE", "SOURCE_FILENAME_INVALID", "SOURCE_REF_REQUIRED"}:
                     raise HTTPException(status_code=400, detail=code) from error
                 raise HTTPException(status_code=404, detail=code) from error
+
+    if intake_service is not None:
+        def _intake_error(error: Exception) -> HTTPException:
+            code = getattr(error, "code", "INTAKE_FAILED")
+            status = 404 if code == "INTAKE_NOT_FOUND" else 409 if code in {
+                "INTAKE_ALREADY_PROCESSED", "INTAKE_PROCESSING", "ACTIVE_TREES_REQUIRED", "CASE_ALREADY_EXISTS", "SOURCE_REF_CONFLICT",
+            } else 400
+            return HTTPException(status_code=status, detail=code)
+
+        @router.post("/intakes", status_code=201)
+        async def upload_intake(
+            file: UploadFile = File(...),
+            x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"),
+        ) -> dict[str, Any]:
+            _require_maintainer(x_hardware_case_role)
+            try:
+                return intake_service.upload(str(file.filename or ""), await file.read())
+            except (HardwareCaseIntakeError, HardwareCaseSourceError) as error:
+                raise _intake_error(error) from error
+
+        @router.get("/intakes")
+        def list_intakes(x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
+            _require_maintainer(x_hardware_case_role)
+            items = intake_service.list()
+            return {"items": items, "total": len(items)}
+
+        @router.get("/intakes/{intake_id}")
+        def get_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
+            _require_maintainer(x_hardware_case_role)
+            try:
+                return intake_service.detail(intake_id)
+            except HardwareCaseIntakeError as error:
+                raise _intake_error(error) from error
+
+        @router.post("/intakes/{intake_id}/process")
+        def process_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
+            _require_maintainer(x_hardware_case_role)
+            try:
+                return intake_service.process(intake_id)
+            except HardwareCaseIntakeError as error:
+                raise _intake_error(error) from error
 
     @router.post("", status_code=201)
     def create_case(

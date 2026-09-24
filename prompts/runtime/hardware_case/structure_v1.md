@@ -16,9 +16,9 @@ business approval decisions.
    than guessing.
 5. Do not return confirmed_value, reviewer, publish status, or other human
    confirmation fields.
-6. Tree links are optional. Only return a circuit_feature_links or material_links
-   item when the input itself contains a trustworthy node_id supplied by the
-   caller. Do not invent node IDs from names or paths.
+6. Tree links are optional. Use only node_id values supplied in the input
+   tree_candidates for the matching tree. Cite its supporting Word block_id.
+   Do not invent node IDs from names or paths.
 7. Return strict JSON only. No Markdown fences or prose outside JSON.
 
 ## Output shape

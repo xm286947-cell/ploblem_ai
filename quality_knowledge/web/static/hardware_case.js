@@ -90,6 +90,9 @@
       qs('[data-case-count]',card).textContent=cases.filter(item=>mappingPaths(item,type).length).length;
     }
     if(role==='MAINTAINER'){
+      const versions=await Promise.all(['CIRCUIT_FEATURE','MATERIAL_DEVICE'].map(type=>safe('/tree-imports/active-version/'+type,{},'MAINTAINER')));
+      const prerequisite=qs('[data-tree-prerequisite]');
+      if(prerequisite)prerequisite.hidden=versions.every(item=>item&&item.active_version);
       const all=await safe('',{},'MAINTAINER');
       const maintenance=(all&&all.results)||[];
       const pending=maintenance.filter(x=>!['PUBLISHED','DEPRECATED'].includes(x.case_status));
