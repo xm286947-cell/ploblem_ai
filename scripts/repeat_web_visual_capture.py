@@ -274,7 +274,7 @@ def main() -> int:
         page.screenshot(path=str(out / "H09_case_list.png"), full_page=True)
 
         page.goto(base + "/p0/cases/HCASE-DEMO-001", wait_until="networkidle")
-        page.get_by_text("01").wait_for()
+        page.locator(".case-section-no").first.wait_for()
         page.screenshot(path=str(out / "H10_case_detail.png"), full_page=True)
         browser.close()
 
