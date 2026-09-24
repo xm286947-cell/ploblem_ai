@@ -173,6 +173,14 @@ def test_m3a_upload_analyze_review_apply_and_consume_through_unified_app(tmp_pat
     assert version.status_code == 200
     assert version.json()["active_version"]["version_id"] == "C-001"
 
+    versions = client.get(
+        "/api/v2/hardware-cases/tree-imports/versions/CIRCUIT_FEATURE",
+        headers=MAINTAINER,
+    )
+    assert versions.status_code == 200
+    assert versions.json()["items"][0]["version_id"] == "C-001"
+    assert versions.json()["items"][0]["status"] == "ACTIVE"
+
     history = client.get(
         "/api/v2/hardware-cases/tree-imports?tree_type=CIRCUIT_FEATURE",
         headers=MAINTAINER,
