@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import subprocess
 import sys
 
 from fastapi.testclient import TestClient
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_hardware_case_only_composition_does_not_load_other_business_domains(tmp_path):
@@ -26,16 +32,10 @@ def test_hardware_case_only_composition_does_not_load_other_business_domains(tmp
     assert app.state.repeat_risk_service is None
     assert not p0_db.exists()
 
-    # The product-only composition must not even import these business modules.
-    assert "quality_knowledge.web.repeat_risk_integration" not in sys.modules
-    assert "quality_knowledge.web.api_v2" not in sys.modules
-    assert "quality_knowledge.web.p1_pages" not in sys.modules
-    assert "quality_knowledge.p0.repository" not in sys.modules
-    assert "services.historical_case_contract" not in sys.modules
-    assert "services.knowledge_service" not in sys.modules
-
     client = TestClient(app)
-    assert client.get("/").history
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code in {302, 307}
+    assert response.headers["location"] == "/p0/hardware-cases"
     assert client.get("/p0/hardware-cases").status_code == 200
     assert client.get("/p0/hardware-cases/base-data").status_code == 200
     assert client.get("/api/v2/hardware-cases").status_code == 200
@@ -44,6 +44,42 @@ def test_hardware_case_only_composition_does_not_load_other_business_domains(tmp
     assert client.get("/api/v2/products").status_code == 404
     assert client.get("/p0/issues").status_code == 404
     assert client.get("/p0/cases").status_code == 404
+
+    # Module-boundary evidence must be collected in a clean interpreter so the
+    # result cannot depend on pytest collection/import order.
+    probe = r"""
+import json
+import sys
+from pathlib import Path
+from quality_knowledge.web.p0_app import create_p0_app
+
+root = Path(sys.argv[1])
+app = create_p0_app(
+    root / "quality.db",
+    hardware_case_db_path=root / "hardware.db",
+    hardware_tree_upload_dir=root / "tree",
+    hardware_case_source_root=root / "sources",
+    enabled_domains={"HARDWARE_CASE"},
+)
+targets = [
+    "quality_knowledge.web.repeat_risk_integration",
+    "quality_knowledge.web.api_v2",
+    "quality_knowledge.web.p1_pages",
+    "quality_knowledge.p0.repository",
+    "services.historical_case_contract",
+    "services.knowledge_service",
+]
+print(json.dumps({name: name in sys.modules for name in targets}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(tmp_path / "probe")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    loaded = json.loads(result.stdout.strip())
+    assert loaded == {name: False for name in loaded}
 
 
 def test_default_composition_contract_remains_full():
