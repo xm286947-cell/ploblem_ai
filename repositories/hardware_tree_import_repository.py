@@ -277,6 +277,40 @@ class HardwareTreeImportRepository:
             )
         return self.get_job(job_id)
 
+    def set_counts(self, job_id: str, counts: dict[str, Any]) -> dict[str, Any]:
+        self.get_job(job_id)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE hardware_tree_import_job
+                SET counts_json=?,updated_at=CURRENT_TIMESTAMP
+                WHERE job_id=?
+                """,
+                (_json(counts), job_id),
+            )
+        return self.get_job(job_id)
+
+    def clear_analysis(self, job_id: str) -> None:
+        """Clear generated issues/changes before a same-job re-analysis."""
+        self.get_job(job_id)
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM hardware_tree_import_change WHERE job_id=?",
+                (job_id,),
+            )
+            connection.execute(
+                "DELETE FROM hardware_tree_import_issue WHERE job_id=?",
+                (job_id,),
+            )
+            connection.execute(
+                """
+                UPDATE hardware_tree_import_job
+                SET counts_json='{}',error_code=NULL,updated_at=CURRENT_TIMESTAMP
+                WHERE job_id=?
+                """,
+                (job_id,),
+            )
+
     def set_mapping_profile(
         self, job_id: str, profile: dict[str, Any]
     ) -> dict[str, Any]:
@@ -348,6 +382,18 @@ class HardwareTreeImportRepository:
             "suggested_action": row["suggested_action"],
             "resolved": bool(row["resolved"]),
         }
+
+    def list_issues(self, job_id: str) -> list[dict[str, Any]]:
+        self.get_job(job_id)
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT issue_id FROM hardware_tree_import_issue
+                WHERE job_id=? ORDER BY row_number,issue_id
+                """,
+                (job_id,),
+            ).fetchall()
+        return [self.get_issue(str(row["issue_id"])) for row in rows]
 
     def resolve_issue(self, issue_id: str) -> dict[str, Any]:
         self.get_issue(issue_id)

@@ -1,0 +1,34 @@
+name: Hardware Tree Import M2
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_tree_excel.py"
+      - "repositories/hardware_tree_import_repository.py"
+      - "tests/test_hardware_tree_import_m2.py"
+      - ".github/workflows/hardware-tree-import-m2.yml"
+  workflow_dispatch:
+
+jobs:
+  excel-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: HC-TREE M1 + M2 tests
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_tree_import_m1.py
+          tests/test_hardware_tree_import_m2.py
+      - name: Hardware Case regression
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_case_contract.py
+          tests/test_hardware_case_backend.py
+          tests/test_hardware_case_ai_adapter.py
+          tests/test_hardware_case_web_api.py
+          tests/test_hardware_case_product_api_e2e.py
