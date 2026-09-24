@@ -74,7 +74,7 @@ INTEGRITYPY
   STORAGE_TEST_NO_WAIT=1 STORAGE_MOCK_FAULT=persistent_503 STORAGE_PYTHON_BIN="$PYTHON_BIN" bash ./run_product_test.sh mock "$RUNTIME_ROOT" || exit $?
 
   printf '\n[5/6] Storage regression\n'
-  "$PYTHON_BIN" -m pytest -q || exit $?
+  "$PYTHON_BIN" -m pytest -q -rs || exit $?
 
   printf '\nPRODUCT PRETEST SELF-CHECK PASS\n'
 } 2>&1 | tee "$LOG"
