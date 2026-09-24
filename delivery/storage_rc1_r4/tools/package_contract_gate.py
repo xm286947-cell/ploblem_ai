@@ -177,6 +177,8 @@ def validate_extracted(
         raise SystemExit("PACKAGE_GATE=FAIL reason=port_conflict_e2e_contract")
     if "terminated and waited" not in str(ownership.get("shutdown_rule") or ""):
         raise SystemExit("PACKAGE_GATE=FAIL reason=shutdown_ownership_contract")
+    if "single module import" not in str(ownership.get("mock_start_rule") or ""):
+        raise SystemExit("PACKAGE_GATE=FAIL reason=mock_start_contract")
 
     automation = fix.get("port_automation") or {}
     for case in (
@@ -218,6 +220,10 @@ def validate_extracted(
                 "PACKAGE_GATE=FAIL reason=port_ownership_launcher_contract "
                 f"missing={token}"
             )
+    if "from tools.openai_mock.server import main; main()" not in launcher:
+        raise SystemExit("PACKAGE_GATE=FAIL reason=mock_single_import_launcher_missing")
+    if "-m tools.openai_mock.server" in launcher:
+        raise SystemExit("PACKAGE_GATE=FAIL reason=mock_runpy_double_load_forbidden")
 
     guard = (root / "scripts/port_guard.py").read_text(encoding="utf-8")
     guard_required_tokens = (
