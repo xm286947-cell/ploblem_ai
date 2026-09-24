@@ -1,0 +1,27 @@
+{
+  "mock_id": "M12",
+  "purpose": "SCHEMA_MISSING_REQUIRED",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "GB",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M12"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "result": "SCHEMA_VALIDATION_ERROR",
+    "db_write_allowed": false
+  }
+}
