@@ -47,3 +47,11 @@ Third platform preflight note:
 - Package Contract now requires this cross-platform listener-detection rule.
 - This revision supersedes all prior R5 preflight source markers for final package construction.
 
+
+macOS port-conflict preflight note:
+- Internal R5 SHA 5a06638621e599ce36cd11e2d9cf2d7ece38c9cbfd04614fa49f2da82f9233f8 was NOT released.
+- On macOS, normal free-port launcher and Product E2E passed.
+- The first occupied-port regression timed out because the test listener was bound to 127.0.0.1 while the product target host was 0.0.0.0; a bind-only precheck did not reliably classify that listener as a conflict on this platform/socket combination.
+- R5 pre-start governance now performs an existing-listener connection probe (127.0.0.1/::1 for wildcard targets) plus the bind probe. Either signal yields PORT_CONFLICT before service spawn and before Product E2E.
+- The 30-second fail-fast regression timeout remains unchanged.
+- This revision supersedes all earlier R5 preflight source markers for final package construction.
