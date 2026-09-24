@@ -368,7 +368,8 @@ def test_cg02_evidence_resolves_to_original_word_reference(tmp_path):
     assert resolved["source"]["source_id"] == _source_metadata()["source_id"]
     assert resolved["source"]["uri"] == "word:synthetic-hardware-case.docx"
     assert resolved["excerpt"] == SOURCE_TEXT
-    assert resolved["locator"]["value"]["block_id"] == "B0008"
+    assert resolved["source"]["source_type"] == "WORD"
+    assert resolved["source"]["metadata"]["hardware_locator"]["block_id"] == "B0008"
     assert publish["object"]["evidence_refs"] == [evidence["evidence_id"]]
 
 
