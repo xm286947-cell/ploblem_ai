@@ -669,9 +669,11 @@ class HardwareTreeImportAnalyzer:
             candidate_nodes=parsed["nodes"],
             current_nodes=current,
         )
-        all_issues = [*parsed["issues"], *diff["issues"]]
+        # Structural validation issues belong to Step 3. Diff conflicts belong
+        # to Step 4 and are governed by Change decisions, so they must not also
+        # remain as unresolved validation blockers.
         unique_issues: dict[str, dict[str, Any]] = {
-            str(item["issue_id"]): item for item in all_issues
+            str(item["issue_id"]): item for item in parsed["issues"]
         }
         for issue in unique_issues.values():
             self.repository.add_issue(job_id, issue)
