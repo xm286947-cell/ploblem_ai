@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
@@ -26,6 +28,10 @@ from quality_knowledge.standard_fields.service import StandardFieldService
 
 
 def _http_error(error: Exception) -> HTTPException:
+    if isinstance(error, ValidationError):
+        return HTTPException(400, "SCENARIO_VALIDATION_ERROR")
+    if isinstance(error, sqlite3.Error):
+        return HTTPException(500, "SCENARIO_PERSISTENCE_ERROR")
     code = str(error)
     if code in {
         "ISSUE_NOT_FOUND", "V2_ANALYSIS_NOT_AVAILABLE", "ANALYSIS_SET_NOT_FOUND", "ANALYSIS_JOB_NOT_FOUND",

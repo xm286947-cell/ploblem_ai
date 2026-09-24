@@ -242,6 +242,14 @@ class QualityScenarioV1WorkflowService:
             technical_confirmed_at=technical_confirmed_at or (utc_now() if technical_actor else ""),
             confirmation_note=confirmation_note,
         )
+        # Validate the domain contract against the proposed confirmation while
+        # the persisted Candidate remains untouched.  This keeps domain error
+        # codes stable instead of allowing Pydantic to wrap them in a raw
+        # ValidationError while constructing the CONFIRMED model.
+        current_with_confirmation = current.model_copy(
+            update={"confirmation": confirmation}
+        )
+        current_with_confirmation.assert_formal_ready()
         confirmed=self._validated(
             current,
             {

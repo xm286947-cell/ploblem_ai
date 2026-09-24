@@ -10,9 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASELINE = "6ad93f1396585163fffd1e4a70a677aee917a6ff"
-ENGINEERING_HEAD = PRODUCT_BASELINE
 RUNTIME_BASELINE = "0959da43008307398a9cac0f9abfc7fec26dcb8a"
-PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_DEFECT_126_FIX_CANDIDATE_20260925_R1"
+PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_DEFECT_127_FIX_CANDIDATE_20260925_R2"
 EXCLUDED_DIRS = {".git", ".github", ".pytest_cache", "__pycache__", ".deps", "knowledge", "input", "output", "baseline_release", "releases", "deliverables"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".log", ".zip", ".xlsx", ".xls", ".xlsm", ".pdf", ".doc", ".docx"}
 REQUIRED_PROJECT_DIRS = ("quality_knowledge", "models", "prompts/runtime", "config/runtime/agents")
@@ -364,13 +363,14 @@ models:
 def write_readme(pkg: Path) -> None:
     (pkg / "README_TEST_PACKAGE.md").write_text("""# 质量场景库 MVP RC1 提测包
 
-状态：ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING
+状态：DEFECT_127_FIX_CANDIDATE_READY / INTERNAL_GOLDEN_PENDING
 
 ## 基线
 Product baseline: 6ad93f1396585163fffd1e4a70a677aee917a6ff
-Engineering head: 6ad93f1396585163fffd1e4a70a677aee917a6ff
+Defect: #127（API error contract / domain error mapping）
+Product code changed: YES
 Unified Runtime baseline: 0959da43008307398a9cac0f9abfc7fec26dcb8a
-Engineering Gate: 147 passed / 0 failed
+Engineering Gate: targeted error-contract and RC1 golden regression PASS
 
 ## Windows 安装与启动
 1. 解压到全新目录，不覆盖生产目录。
@@ -395,7 +395,7 @@ prepare_internal_golden.bat --source-db "D:\\path\\internal_quality_issue.db" --
 
 ## 安全
 不复制真实Excel/PDF/Word/SQLite到外传包；不记录真实API Key/Authorization；不手工改库绕过Gate。
-真实Golden通过前，状态只能是 ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING。
+正式回归通过前，状态只能是 DEFECT_127_FIX_CANDIDATE_READY / INTERNAL_GOLDEN_PENDING。
 """, encoding="utf-8")
 
 
@@ -411,12 +411,12 @@ def make_manifest(pkg: Path, source_commit: str, internal_roots: list[str]) -> d
         })
     return {
         "package_name": PACKAGE_NAME,
-        "defect_id": "#126",
-        "build_type": "PACKAGE_DEFECT_FIX_CANDIDATE_R1",
-        "product_code_changed": False,
-        "status": "FIX_CANDIDATE_READY_FOR_RETEST",
+        "defect_id": "#127",
+        "build_type": "ERROR_CONTRACT_FIX_CANDIDATE_R2",
+        "product_code_changed": True,
+        "status": "READY_FOR_FORMAL_RETEST",
         "product_baseline": PRODUCT_BASELINE,
-        "engineering_head": ENGINEERING_HEAD,
+        "engineering_head": source_commit,
         "runtime_baseline": RUNTIME_BASELINE,
         "package_source_commit": source_commit,
         "required_project_dirs": list(REQUIRED_PROJECT_DIRS),
