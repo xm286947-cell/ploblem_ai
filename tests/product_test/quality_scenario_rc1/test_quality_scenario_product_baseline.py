@@ -502,3 +502,56 @@ def test_qs_pt_009_p02_p03_query_detail_history_and_404(tmp_path):
 def test_qs_pt_010_429_is_provider_failure_not_product_state(tmp_path):
     with pytest.raises(Exception):
         _analyse_with_mock(tmp_path, "rate_limit")
+
+
+def test_qs_pt_011_three_product_pages_follow_single_rc1_flow(tmp_path):
+    client = _p0_client(tmp_path)
+    published = _review_confirm_publish(client, _create_candidate(client))
+
+    p01 = client.get("/p0/quality-scenarios/workbench")
+    p02 = client.get("/p0/quality-scenarios")
+    p03 = client.get(f"/p0/quality-scenarios/{published['scenario_id']}")
+
+    assert p01.status_code == 200
+    assert "场景工作台" in p01.text
+    assert p02.status_code == 200
+    assert "质量场景库" in p02.text
+    assert 'value="PUBLISHED" selected' in p02.text
+    assert p03.status_code == 200
+    assert "场景详情" in p03.text
+    assert "Evidence完整性" in p03.text
+
+    combined = p01.text + p02.text + p03.text
+    assert "WAIT_APPROVAL" not in combined
+    assert "WAIT_RND_APPROVAL" not in combined
+    assert "WAIT_QUALITY_APPROVAL" not in combined
+
+
+def test_qs_pt_012_reject_is_terminal_for_current_candidate(tmp_path):
+    client = _p0_client(tmp_path)
+    candidate = _create_candidate(client)
+
+    rejected = client.post(
+        f"/api/v2/quality-scenarios/{candidate['scenario_id']}/reject",
+        json={
+            "expected_scenario_version": candidate["scenario_version"],
+            "reviewer": "QUALITY_OWNER_TEST",
+            "comment": "不具备标准场景沉淀价值",
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
+    rejected_scenario = rejected.json()["scenario"]
+    assert rejected_scenario["status"] == "REJECTED"
+
+    publish = client.post(
+        f"/api/v2/quality-scenarios/{candidate['scenario_id']}/publish",
+        json={
+            "expected_scenario_version": rejected_scenario["scenario_version"],
+            "published_by": "QUALITY_OWNER_TEST",
+        },
+    )
+    assert publish.status_code == 400
+    assert publish.json()["detail"] == "SCENARIO_PUBLISH_REQUIRES_CONFIRMED"
+
+    saved = client.get(f"/api/v2/quality-scenarios/{candidate['scenario_id']}").json()
+    assert saved["status"] == "REJECTED"
