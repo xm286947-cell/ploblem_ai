@@ -323,3 +323,31 @@ def test_ct15_maintainer_can_query_unpublished_consumer_cannot() -> None:
         "", role="MAINTAINER", statuses=["PENDING_REVIEW"]
     )
     assert maintainer["results"][0]["case_id"] == "HC-001"
+
+
+def test_ct16_consumer_projection_includes_confirmed_mapping_paths() -> None:
+    case = _case(status="PUBLISHED")
+    case["published_at"] = "2026-09-24T10:00:00"
+    service = _service(
+        cases=[case],
+        mappings=[
+            _mapping(),
+            _mapping(
+                mapping_id="MAP-SUGGESTED",
+                node_id="CF-SUGGESTED",
+                node_path="电源/候选",
+                status="SUGGESTED",
+                role="SECONDARY",
+            ),
+        ],
+        evidence=[_evidence()],
+    )
+    detail = service.get_case("HC-001")
+    assert detail["published_at"] == "2026-09-24T10:00:00"
+    assert detail["mapping_paths"]["CIRCUIT_FEATURE"] == ["电源/DC-DC"]
+    assert [item["mapping_id"] for item in detail["mappings"]] == ["MAP-1"]
+    assert service.get_mappings("HC-001")["mappings"][0]["mapping_id"] == "MAP-1"
+    maintainer = service.get_mappings("HC-001", role="MAINTAINER")
+    assert {item["mapping_id"] for item in maintainer["mappings"]} == {
+        "MAP-1", "MAP-SUGGESTED"
+    }
