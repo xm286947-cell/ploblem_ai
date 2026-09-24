@@ -181,6 +181,12 @@ class HardwareCaseContractService:
         evidence = [
             deepcopy(item) for item in self.evidence if item.get("case_id") == cid
         ]
+        confirmed_mappings = [
+            deepcopy(item)
+            for item in self.mappings
+            if item.get("case_id") == cid
+            and item.get("mapping_status") == "CONFIRMED"
+        ]
         evidence_health = "AVAILABLE"
         if not evidence:
             evidence_health = "EVIDENCE_MISSING"
@@ -194,6 +200,16 @@ class HardwareCaseContractService:
             "processing_status": case.get("processing_status", "READY"),
             "product_context": deepcopy(case.get("product_context") or {}),
             "facts": {name: effective_fact(field) for name, field in facts.items()},
+            "mappings": confirmed_mappings,
+            "mapping_paths": {
+                tree_type: [
+                    _text(item.get("node_path") or item.get("path_snapshot"))
+                    for item in confirmed_mappings
+                    if item.get("tree_type") == tree_type
+                    and _text(item.get("node_path") or item.get("path_snapshot"))
+                ]
+                for tree_type in TREE_TYPES
+            },
             "circuit_mapping_state": mapping_state(
                 self.mappings, cid, "CIRCUIT_FEATURE"
             ),
@@ -204,6 +220,9 @@ class HardwareCaseContractService:
             "evidence_warning": (
                 "SOURCE_UNAVAILABLE" if evidence_health == "SOURCE_UNAVAILABLE" else None
             ),
+            "created_at": case.get("created_at"),
+            "updated_at": case.get("updated_at"),
+            "published_at": case.get("published_at"),
         }
 
     def get_case(
@@ -215,6 +234,22 @@ class HardwareCaseContractService:
         if role not in {"CONSUMER", "MAINTAINER"}:
             raise HardwareCaseContractError("ROLE_INVALID")
         return self._projection(case) if role == "CONSUMER" else deepcopy(case)
+
+    def get_mappings(
+        self, case_id: str, *, role: str = "CONSUMER", historical: bool = False
+    ) -> dict[str, Any]:
+        self.get_case(case_id, role=role, historical=historical)
+        items = [
+            deepcopy(item)
+            for item in self.mappings
+            if item.get("case_id") == case_id
+            and (role == "MAINTAINER" or item.get("mapping_status") == "CONFIRMED")
+        ]
+        return {
+            "contract_version": CONTRACT_VERSION,
+            "case_id": case_id,
+            "mappings": items,
+        }
 
     def get_evidence(
         self, case_id: str, *, role: str = "CONSUMER", historical: bool = False

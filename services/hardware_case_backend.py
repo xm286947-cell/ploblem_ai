@@ -79,6 +79,13 @@ class HardwareCaseBackendService:
             node_id, role=role, historical=historical
         )
 
+    def get_mappings(
+        self, case_id: str, *, role: str = "CONSUMER", historical: bool = False
+    ) -> dict[str, Any]:
+        return self._contract().get_mappings(
+            case_id, role=role, historical=historical
+        )
+
     def get_evidence(
         self, case_id: str, *, role: str = "CONSUMER", historical: bool = False
     ) -> dict[str, Any]:
