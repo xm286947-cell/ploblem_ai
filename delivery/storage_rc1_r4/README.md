@@ -27,6 +27,8 @@ After each background service is spawned, readiness requires all three:
 
 Health-only readiness is forbidden. A dead spawned PID cannot borrow another process's health endpoint.
 
+Launcher lifecycle ownership also applies at shutdown: every background PID started by the launcher is terminated and waited before the launcher returns, so a successful scenario cannot leave its own listener behind for the next scenario.
+
 ## Automated port cases
 
 - `TEST-PORT-01`: 8765 occupied -> fail-fast -> Product E2E not run.
