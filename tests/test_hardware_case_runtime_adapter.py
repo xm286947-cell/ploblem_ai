@@ -167,6 +167,7 @@ models:
   hardware_case_test:
     provider: openai_compatible
     base_url: http://{host}:{port}/v1
+    api_key: HC_RUNTIME_IDEMPOTENT_SECRET
     model: qwen-hardware-case-test
     temperature: 0
     max_tokens: 8192
