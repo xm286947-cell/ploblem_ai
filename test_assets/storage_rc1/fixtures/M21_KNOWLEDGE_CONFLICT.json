@@ -1,0 +1,45 @@
+{
+  "mock_id": "M21",
+  "purpose": "KNOWLEDGE_CONFLICT",
+  "request_match": {
+    "stage": "knowledge_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "knowledge_candidates": [
+      {
+        "candidate_id": "KC-A",
+        "object_type": "FACT",
+        "title": "Synthetic endurance",
+        "content": "3000 cycles",
+        "device_type": "NAND",
+        "scope": [
+          "pe_cycle"
+        ],
+        "evidence_refs": [
+          "E-M21-A"
+        ]
+      },
+      {
+        "candidate_id": "KC-B",
+        "object_type": "FACT",
+        "title": "Synthetic endurance",
+        "content": "10000 cycles",
+        "device_type": "NAND",
+        "scope": [
+          "pe_cycle"
+        ],
+        "evidence_refs": [
+          "E-M21-B"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "evaluation": "CONFLICT",
+    "auto_overwrite_forbidden": true,
+    "human_review_required": true
+  }
+}
