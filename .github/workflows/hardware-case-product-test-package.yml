@@ -66,7 +66,9 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
 
       - name: JavaScript syntax
-        run: node --check quality_knowledge/web/static/hardware_tree_import.js
+        run: |
+          node --check quality_knowledge/web/static/hardware_case.js
+          node --check quality_knowledge/web/static/hardware_tree_import.js
 
       - name: Build product test package
         run: python scripts/build_hardware_case_product_test_package.py
