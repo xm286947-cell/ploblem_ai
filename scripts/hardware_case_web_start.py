@@ -25,6 +25,7 @@ def build_app(
     db_path: str | Path,
     hardware_case_db_path: str | Path,
     hardware_tree_upload_dir: str | Path,
+    hardware_case_source_root: str | Path,
 ):
     db = Path(db_path)
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,7 @@ def build_app(
         project_root=ROOT,
         hardware_case_db_path=hardware_db,
         hardware_tree_upload_dir=upload_dir,
+        hardware_case_source_root=hardware_case_source_root,
     )
 
 
@@ -67,6 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--tree-upload-dir",
         default=str(ROOT / "data/hardware_case_tree_uploads"),
     )
+    parser.add_argument(
+        "--source-root",
+        default=str(ROOT / "data/hardware_case_sources"),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
@@ -83,6 +89,7 @@ def main() -> int:
         db_path=args.db,
         hardware_case_db_path=args.hardware_db,
         hardware_tree_upload_dir=args.tree_upload_dir,
+        hardware_case_source_root=args.source_root,
     )
 
     try:
