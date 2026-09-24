@@ -16,8 +16,9 @@ This directory remains the repository-backed delivery source of truth. The faile
 R5 must never accept a health response from a process it did not start.
 
 Before any product/mock service is spawned:
-- Storage Web target port must be bind-free.
-- In mock mode, 18000 and 18001 must also be bind-free.
+- Storage Web target port must pass both an existing-listener probe and a bind probe.
+- For wildcard Web binds such as 0.0.0.0, loopback listener probes cover 127.0.0.1 and ::1 before the bind probe.
+- In mock mode, 18000 and 18001 must pass the same fail-closed port-free check.
 - Conflict is fail-fast with `PORT_CONFLICT`, `PORT=<n>`, `SERVICE=<name>`, and `PRODUCT_E2E=NOT_RUN`.
 
 After each background service is spawned, readiness requires all three:
