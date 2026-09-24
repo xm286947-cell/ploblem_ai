@@ -68,6 +68,10 @@ def test_m3b_p07_freezes_change_type_and_result_semantics(tmp_path: Path):
     assert "已生效，存在排除项" in script
     assert "Change Set 已全部生效" in script
     assert "上一 ACTIVE Version 保持不变" in script
+    assert "查看新树" in script
+    assert "查看导入记录" in script
+    assert "重试（待 API）" in script
+    assert "返回冲突处理" in script
 
 
 def test_m3b_p07_keeps_backend_authority_for_analysis_and_apply(tmp_path: Path):
