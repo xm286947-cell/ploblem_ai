@@ -1,0 +1,68 @@
+{
+  "baseline_version": "quality-scenario-rc1-expected-v0.1",
+  "cases": [
+    {
+      "case_id": "QS-PT-001",
+      "scenario": "Golden Provider -> Reverse Quality",
+      "expected_status": "PASS",
+      "expected_provider_calls": 1,
+      "expected_runtime_result": "reverse-quality-v0.1",
+      "expected_side_effect": "ReverseQualityResult persisted; no product Candidate until formal handoff"
+    },
+    {
+      "case_id": "QS-PT-002",
+      "scenario": "HIGH_PERCEPTION and RND_VALUE",
+      "expected_status": "CANDIDATE",
+      "expected_error_code": "",
+      "expected_side_effect": "same product state machine; no WAIT_APPROVAL-like state"
+    },
+    {
+      "case_id": "QS-PT-003",
+      "scenario": "Pending missing_information",
+      "expected_status": "CANDIDATE",
+      "expected_error_code": "SCENARIO_MISSING_INFORMATION_PENDING",
+      "expected_publish_gate": "BLOCKED",
+      "expected_side_effect": "must not become CONFIRMED/PUBLISHED"
+    },
+    {
+      "case_id": "QS-PT-004",
+      "scenario": "Evidence reference mismatch",
+      "expected_status": "FAIL_CLOSED",
+      "expected_error_code": "evidence validation failure",
+      "expected_side_effect": "no ScenarioCandidateV1 produced"
+    },
+    {
+      "case_id": "QS-PT-005",
+      "scenario": "Malformed/empty/unauthorized AI output",
+      "expected_status": "FAIL_CLOSED",
+      "expected_side_effect": "no AI-controlled CONFIRMED/PUBLISHED state"
+    },
+    {
+      "case_id": "QS-PT-006",
+      "scenario": "Optimistic concurrency",
+      "expected_status": "CONFLICT",
+      "expected_error_code": "SCENARIO_VERSION_CONFLICT",
+      "expected_side_effect": "newer scenario version remains unchanged"
+    },
+    {
+      "case_id": "QS-PT-007",
+      "scenario": "Publish + repeat publish",
+      "expected_status": "PUBLISHED",
+      "expected_publish_gate": "PASS",
+      "expected_side_effect": "first publish changes version; repeat publish is idempotent"
+    },
+    {
+      "case_id": "QS-PT-008",
+      "scenario": "Evidence traceability + source reverse lookup",
+      "expected_status": "PASS",
+      "expected_evidence": "integrity PASS; source_resolved=true; supports_valid=true",
+      "expected_query_result": "source_ref returns same QualityScenario V1"
+    },
+    {
+      "case_id": "QS-PT-009",
+      "scenario": "P02/P03 product consumption",
+      "expected_status": "PASS",
+      "expected_query_result": "PUBLISHED scenario is searchable; detail/history readable; missing id -> 404"
+    }
+  ]
+}
