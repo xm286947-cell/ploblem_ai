@@ -118,6 +118,28 @@
     }).join('');
   }
 
+  async function showVersions(treeType){
+    const panel=qs('[data-version-panel]');const body=qs('[data-version-body]');
+    panel.hidden=false;qs('[data-version-title]').textContent=treeLabel(treeType)+' · Tree Version';
+    body.innerHTML='<tr><td colspan="5" class="hti-empty-cell">正在读取版本…</td></tr>';
+    try{
+      const data=await request(importApi+'/versions/'+encodeURIComponent(treeType),{headers:roleHeaders});
+      const items=data.items||[];
+      body.innerHTML=items.length?items.map(version=>
+        '<tr>'+
+          '<td><strong>'+esc(version.version_id)+'</strong></td>'+
+          '<td><span class="hti-status '+(version.status==='ACTIVE'?'ok':'')+'">'+esc(version.status)+'</span></td>'+
+          '<td>'+esc(formatTime(version.created_at))+'</td>'+
+          '<td>'+esc(formatTime(version.activated_at))+'</td>'+
+          '<td><code>'+esc(version.source_job_id)+'</code></td>'+
+        '</tr>'
+      ).join(''):'<tr><td colspan="5" class="hti-empty-cell">该树尚未生成正式版本。</td></tr>';
+      panel.scrollIntoView({behavior:'smooth',block:'start'});
+    }catch(error){
+      body.innerHTML='<tr><td colspan="5" class="hti-empty-cell">版本读取失败：'+esc(errorLabel(error.message))+'</td></tr>';
+    }
+  }
+
   function resetWizard(treeType){
     state.step=1;state.treeType=treeType||'CIRCUIT_FEATURE';state.job=null;state.workbook=null;state.raw=null;state.analysis=null;state.applying=false;state.excludedSnapshot=[];
     qs('[data-tree-type]').value=state.treeType;
@@ -444,6 +466,17 @@
     qs('[data-result-applied]').textContent=data.applied||0;qs('[data-result-excluded]').textContent=data.excluded||0;qs('[data-result-failed]').textContent=data.failed||0;
     qs('[data-result-version]').textContent=data.version||'—';
     qs('[data-view-exclusions]').hidden=status!=='APPLIED_WITH_EXCLUSIONS';
+    qs('[data-retry-apply]').hidden=status!=='APPLY_FAILED';
+    qs('[data-return-conflict]').hidden=status!=='APPLY_FAILED';
+    qs('[data-view-tree]').hidden=status==='APPLY_FAILED';
+  }
+
+  function resetAfterFailure(targetStep){
+    qs('[data-result]').hidden=true;
+    qs('[data-confirm-state]').hidden=false;
+    qs('[data-atomic-confirm]').checked=false;
+    qs('[data-apply]').disabled=true;
+    showStep(targetStep);
   }
 
   function showExclusions(){
@@ -476,6 +509,8 @@
     if(button.matches('[data-refresh-home]'))return loadHome();
     if(button.matches('[data-open-import]'))return openWizard('CIRCUIT_FEATURE');
     if(button.matches('[data-import-tree]'))return openWizard(button.dataset.importTree);
+    if(button.matches('[data-show-versions]'))return showVersions(button.dataset.showVersions);
+    if(button.matches('[data-close-versions]')){qs('[data-version-panel]').hidden=true;return}
     if(button.matches('[data-show-history]')){qs('[data-history-tree]').value=button.dataset.showHistory;renderHistory();qs('[data-history-body]').scrollIntoView({behavior:'smooth',block:'center'});return}
     if(button.matches('[data-close-wizard],[data-cancel-import]'))return closeWizard();
     if(button.matches('[data-upload]'))return upload();
@@ -491,6 +526,9 @@
     if(button.matches('[data-back-diff]'))return showStep(4);
     if(button.matches('[data-apply]'))return apply();
     if(button.matches('[data-view-exclusions]'))return showExclusions();
+    if(button.matches('[data-retry-apply]')){resetAfterFailure(5);toast('请再次确认 Atomic Apply 后重试。');return}
+    if(button.matches('[data-return-conflict]')){resetAfterFailure(4);return}
+    if(button.matches('[data-view-tree]')){qs('[data-wizard]').hidden=true;const card=qs('[data-tree-card="'+state.treeType+'"]');if(card)card.scrollIntoView({behavior:'smooth',block:'center'});toast('新 ACTIVE Version 已刷新；正式案例消费仍通过 P02 双树导航。');return}
     if(button.matches('[data-view-history]')){qs('[data-wizard]').hidden=true;qs('[data-history-tree]').value=state.treeType;renderHistory();return}
     if(button.matches('[data-finish]')){qs('[data-wizard]').hidden=true;return}
     if(button.matches('[data-change-action]')){
