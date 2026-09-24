@@ -89,6 +89,9 @@ jobs:
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
+          assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
+          assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
+          assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is False
           assert manifest["entrypoints"]["start_product_windows"] == "START_HARDWARE_CASE.bat"
           assert manifest["entrypoints"]["web_launcher"] == "scripts/hardware_case_web_start.py"
           assert manifest["entrypoints"]["real_ai_validation_windows"] == "RUN_REAL_AI_VALIDATION.bat"
@@ -125,6 +128,12 @@ jobs:
           assert "scripts/hardware_case_web_start.py" in paths
           assert "main.py" not in paths
           assert "config/runtime/model.local.yaml" not in paths
+          assert "quality_knowledge/web/repeat_risk_integration.py" not in paths
+          assert "quality_knowledge/web/api_v2.py" not in paths
+          assert "quality_knowledge/web/p1_pages.py" not in paths
+          assert "services/historical_case_contract.py" not in paths
+          assert "services/knowledge_service.py" not in paths
+          assert not any(path.startswith("quality_knowledge/p0/") for path in paths)
           print("MANIFEST=PASS")
           PY
 
@@ -144,6 +153,7 @@ jobs:
       - name: Run Hardware Case and Tree Import regression
         run: >
           python -m pytest -q --noconftest
+          tests/test_hardware_case_domain_boundary.py
           tests/test_hardware_case_m3_frontend.py
           tests/test_hardware_case_contract.py
           tests/test_hardware_case_backend.py
