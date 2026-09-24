@@ -119,7 +119,7 @@ wait_owned(){
 }
 
 if [ "$MODE" = "mock" ]; then
-  "$PYTHON_BIN" -m tools.openai_mock.server --host 127.0.0.1 --port "$OPENAI_MOCK_PORT" >release/openai_mock.log 2>&1 &
+  "$PYTHON_BIN" -c 'from tools.openai_mock.server import main; main()' --host 127.0.0.1 --port "$OPENAI_MOCK_PORT" >release/openai_mock.log 2>&1 &
   OPENAI_MOCK_PID=$!
   PIDS="$PIDS $OPENAI_MOCK_PID"
   wait_owned "http://127.0.0.1:${OPENAI_MOCK_PORT}/__mock__/health" "OpenAI-Mock" "$OPENAI_MOCK_PORT" "$OPENAI_MOCK_PID" "release/openai_mock.log"
