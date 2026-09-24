@@ -139,6 +139,73 @@ class HistoricalCaseConsumerService:
             candidate["matched_fields"] = [str(field) for field in matched_fields if _text(field)]
         return candidate
 
+    def list_published_cases(
+        self,
+        *,
+        q: str = "",
+        product: str = "",
+        status: str = "PUBLISHED",
+    ) -> dict[str, Any]:
+        """List published Historical Cases without exposing repository layout."""
+        wanted_status = (_text(status) or "PUBLISHED").upper()
+        query = (_text(q) or "").lower()
+        wanted_product = (_text(product) or "").lower()
+        items: list[dict[str, Any]] = []
+
+        try:
+            paths = self.repository.list("knowledge/publication_metadata/major_event")
+        except Exception as exc:
+            raise HistoricalCaseContractError("CASE_SERVICE_UNAVAILABLE") from exc
+
+        for path in paths:
+            metadata = self.repository.load(path)
+            if not isinstance(metadata, dict):
+                continue
+            publication_status = (_text(metadata.get("publication_status")) or "").upper()
+            if wanted_status and publication_status != wanted_status:
+                continue
+            case_id = _text(metadata.get("case_id"))
+            if not case_id:
+                continue
+            try:
+                detail = self.get_case(case_id)
+            except HistoricalCaseContractError:
+                continue
+            item_product = _text(detail.get("product"))
+            itr = _text(metadata.get("business_id"))
+            title = _text(detail.get("title"))
+            haystack = " ".join(x for x in (case_id, itr, title, item_product) if x).lower()
+            if query and query not in haystack:
+                continue
+            if wanted_product and (item_product or "").lower() != wanted_product:
+                continue
+            items.append(
+                {
+                    "case_id": case_id,
+                    "itr": itr,
+                    "title": title,
+                    "product": item_product,
+                    "version": _text(detail.get("version")),
+                    "status": publication_status,
+                    "published_at": _text(metadata.get("published_at")),
+                    "case_version": _text(metadata.get("knowledge_revision")),
+                }
+            )
+
+        items.sort(
+            key=lambda item: (
+                item.get("published_at") or "",
+                item.get("case_id") or "",
+            ),
+            reverse=True,
+        )
+        return {
+            "contract_version": CONTRACT_VERSION,
+            "items": items,
+            "total": len(items),
+            "status_filter": wanted_status,
+        }
+
     def get_case(self, case_id: str) -> dict[str, Any]:
         """Load one historical case by stable business ID only."""
         stable_case_id = _text(case_id)
