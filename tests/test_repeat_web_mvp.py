@@ -130,6 +130,7 @@ def _seed_case_artifacts(repo: JsonArtifactRepository) -> None:
 
 
 def _client(tmp_path: Path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "p0.db"
     _init(db)
     p0 = P0Repository(db)
