@@ -1,0 +1,99 @@
+{
+  "mock_id": "M20",
+  "purpose": "KNOWLEDGE_GOLDEN",
+  "request_match": {
+    "stage": "knowledge_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "knowledge_candidates": [
+      {
+        "object_type": "FACT",
+        "title": "eMMC life-time field",
+        "content": "Life Time Estimation A is reported through EXT_CSD.",
+        "device_type": "eMMC",
+        "scope": [
+          "health"
+        ],
+        "conditions": [
+          "EXT_CSD available"
+        ],
+        "limitations": [],
+        "tags": [
+          "life_time_a"
+        ],
+        "evidence_refs": [
+          "E-M20-F"
+        ]
+      },
+      {
+        "object_type": "CONCEPT",
+        "title": "Life consumption indicator",
+        "content": "The field represents a vendor-defined life consumption range.",
+        "device_type": "eMMC",
+        "scope": [
+          "health"
+        ],
+        "conditions": [],
+        "limitations": [
+          "not a precise remaining-life percentage"
+        ],
+        "tags": [
+          "lifetime"
+        ],
+        "evidence_refs": [
+          "E-M20-C"
+        ]
+      },
+      {
+        "object_type": "SOLUTION",
+        "title": "Collect health periodically",
+        "content": "Collect health indicators periodically and preserve timestamps.",
+        "device_type": "eMMC",
+        "scope": [
+          "monitoring"
+        ],
+        "conditions": [
+          "device accessible"
+        ],
+        "limitations": [],
+        "tags": [
+          "monitoring"
+        ],
+        "evidence_refs": [
+          "E-M20-S"
+        ]
+      },
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Read eMMC health",
+        "content": "Read EXT_CSD health fields from the device interface.",
+        "device_type": "eMMC",
+        "scope": [
+          "diagnostic"
+        ],
+        "conditions": [
+          "runtime access"
+        ],
+        "limitations": [],
+        "tags": [
+          "read_method"
+        ],
+        "evidence_refs": [
+          "E-M20-D"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "candidate_types": [
+      "FACT",
+      "CONCEPT",
+      "SOLUTION",
+      "DIAGNOSTIC"
+    ],
+    "auto_publish": false
+  }
+}
