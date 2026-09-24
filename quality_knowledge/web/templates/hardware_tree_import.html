@@ -1,0 +1,258 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_tree_import.css?v=hc-tree-m3b-v1">{% endblock %}
+{% block breadcrumb %}硬件案例库 / 基础数据管理{% endblock %}
+{% block body %}
+<main class="hti-page"
+      data-hardware-tree-import
+      data-import-api="{{ import_api_prefix }}"
+      data-tree-api="{{ tree_api_prefix }}"
+      data-operator="web-maintainer">
+  <header class="hti-head">
+    <div>
+      <span class="hti-kicker">HARDWARE CASE · P07</span>
+      <h1>基础数据管理</h1>
+      <p>维护电路/特性树与物料/器件树。上传、预览与 Diff 不会改变当前 ACTIVE Tree，只有确认 Apply 后才生成新版本。</p>
+    </div>
+    <div class="hti-head-actions">
+      <button type="button" class="hti-button secondary" data-refresh-home>刷新</button>
+      <button type="button" class="hti-button primary" data-open-import>导入 / 更新 Excel</button>
+    </div>
+  </header>
+
+  <section class="hti-notice">
+    <strong>安全规则</strong>
+    <span>ACTIVE 正式节点不物理删除；退出使用只能 DEPRECATE。EXCLUDE 只表示本次 Change Set 排除，不是 Tree Change Type。</span>
+  </section>
+
+  <section class="hti-tree-grid" data-tree-overview>
+    <article class="hti-tree-card" data-tree-card="CIRCUIT_FEATURE">
+      <div class="hti-tree-card-top">
+        <div>
+          <span class="hti-tree-type">CIRCUIT / FEATURE</span>
+          <h2>电路 / 特性树</h2>
+        </div>
+        <span class="hti-version" data-active-version>—</span>
+      </div>
+      <dl class="hti-metrics">
+        <div><dt>ACTIVE Version</dt><dd data-version-value>—</dd></div>
+        <div><dt>有效节点</dt><dd data-node-count>—</dd></div>
+        <div><dt>最近导入</dt><dd data-latest-import>—</dd></div>
+        <div><dt>异常</dt><dd data-anomaly-count>—</dd></div>
+      </dl>
+      <div class="hti-tree-actions">
+        <button type="button" class="hti-button primary" data-import-tree="CIRCUIT_FEATURE">导入 / 更新</button>
+        <button type="button" class="hti-button secondary" data-show-history="CIRCUIT_FEATURE">导入历史</button>
+      </div>
+    </article>
+
+    <article class="hti-tree-card" data-tree-card="MATERIAL_DEVICE">
+      <div class="hti-tree-card-top">
+        <div>
+          <span class="hti-tree-type">MATERIAL / DEVICE</span>
+          <h2>物料 / 器件树</h2>
+        </div>
+        <span class="hti-version" data-active-version>—</span>
+      </div>
+      <dl class="hti-metrics">
+        <div><dt>ACTIVE Version</dt><dd data-version-value>—</dd></div>
+        <div><dt>有效节点</dt><dd data-node-count>—</dd></div>
+        <div><dt>最近导入</dt><dd data-latest-import>—</dd></div>
+        <div><dt>异常</dt><dd data-anomaly-count>—</dd></div>
+      </dl>
+      <div class="hti-tree-actions">
+        <button type="button" class="hti-button primary" data-import-tree="MATERIAL_DEVICE">导入 / 更新</button>
+        <button type="button" class="hti-button secondary" data-show-history="MATERIAL_DEVICE">导入历史</button>
+      </div>
+    </article>
+  </section>
+
+  <section class="hti-card">
+    <div class="hti-card-head">
+      <div><h2>最近导入任务</h2><p>只展示基础树治理任务；正式 Case Evidence 不在这里管理。</p></div>
+      <div class="hti-history-filter">
+        <select data-history-tree>
+          <option value="">全部树</option>
+          <option value="CIRCUIT_FEATURE">电路 / 特性树</option>
+          <option value="MATERIAL_DEVICE">物料 / 器件树</option>
+        </select>
+        <select data-history-result>
+          <option value="">全部结果</option>
+          <option value="SUCCESS">SUCCESS</option>
+          <option value="APPLIED_WITH_EXCLUSIONS">APPLIED_WITH_EXCLUSIONS</option>
+          <option value="FAILED">FAILED</option>
+          <option value="IN_PROGRESS">IN_PROGRESS</option>
+        </select>
+      </div>
+    </div>
+    <div class="hti-table-wrap">
+      <table class="hti-table">
+        <thead><tr><th>任务 ID</th><th>树类型</th><th>文件</th><th>开始时间</th><th>结果</th><th>新版本</th><th>异常数</th><th>操作者</th></tr></thead>
+        <tbody data-history-body><tr><td colspan="8" class="hti-empty-cell">正在读取导入历史…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="hti-wizard-card" data-wizard hidden>
+    <div class="hti-wizard-head">
+      <div>
+        <span class="hti-kicker">IMPORT WIZARD</span>
+        <h2 data-wizard-title>导入基础树</h2>
+        <p data-wizard-subtitle>上传完成 ≠ 生效。Apply 前当前 ACTIVE Tree 不会改变。</p>
+      </div>
+      <button type="button" class="hti-icon-button" data-close-wizard aria-label="关闭">×</button>
+    </div>
+
+    <ol class="hti-steps" aria-label="导入步骤">
+      <li class="active" data-step-indicator="1"><span>1</span><b>选择文件</b></li>
+      <li data-step-indicator="2"><span>2</span><b>结构映射</b></li>
+      <li data-step-indicator="3"><span>3</span><b>预览 / Validation</b></li>
+      <li data-step-indicator="4"><span>4</span><b>Change Diff</b></li>
+      <li data-step-indicator="5"><span>5</span><b>确认生效</b></li>
+    </ol>
+
+    <div class="hti-step-panel" data-step-panel="1">
+      <div class="hti-form-grid">
+        <label>树类型
+          <select data-tree-type>
+            <option value="CIRCUIT_FEATURE">电路 / 特性树</option>
+            <option value="MATERIAL_DEVICE">物料 / 器件树</option>
+          </select>
+        </label>
+        <label class="span-2">Excel 文件
+          <input type="file" accept=".xlsx,.xlsm" data-excel-file>
+          <small>仅支持公司环境本地 .xlsx / .xlsm；真实数据不会进入 GitHub。</small>
+        </label>
+      </div>
+      <div class="hti-upload-summary" data-upload-summary hidden>
+        <div><span>文件</span><strong data-upload-file>—</strong></div>
+        <div><span>Import Type</span><strong data-upload-type>—</strong></div>
+        <div><span>状态</span><strong data-upload-status>—</strong></div>
+        <div><span>Job ID</span><strong data-upload-job>—</strong></div>
+      </div>
+      <div class="hti-inline-alert info">上传只创建 Import Job 和 Workbook 检查结果，不会写入 ACTIVE Tree。</div>
+      <div class="hti-actions">
+        <button type="button" class="hti-button secondary" data-cancel-import>取消</button>
+        <button type="button" class="hti-button primary" data-upload>上传并检查工作簿</button>
+      </div>
+    </div>
+
+    <div class="hti-step-panel" data-step-panel="2" hidden>
+      <div class="hti-form-grid mapping-top">
+        <label>Sheet
+          <select data-sheet-select></select>
+        </label>
+        <label>表头行
+          <input type="number" min="1" value="1" data-header-row>
+        </label>
+        <div class="hti-field-action"><button type="button" class="hti-button secondary" data-load-columns>读取表头与样例</button></div>
+      </div>
+      <div class="hti-inline-alert info">层级列数量不固定。为每个原始列选择角色；LEVEL 通过顺序号确定树层级。</div>
+      <div class="hti-table-wrap">
+        <table class="hti-table mapping-table">
+          <thead><tr><th>原始列</th><th>列位置</th><th>角色</th><th>层级顺序</th><th>样例值</th></tr></thead>
+          <tbody data-mapping-body><tr><td colspan="5" class="hti-empty-cell">选择 Sheet 和表头行后读取列。</td></tr></tbody>
+        </table>
+      </div>
+      <div class="hti-inline-alert bad" data-mapping-error hidden></div>
+      <div class="hti-actions">
+        <button type="button" class="hti-button secondary" data-prev-step>上一步</button>
+        <button type="button" class="hti-button primary" data-run-analysis disabled>生成 Preview / Validation</button>
+      </div>
+    </div>
+
+    <div class="hti-step-panel" data-step-panel="3" hidden>
+      <div class="hti-summary-grid" data-parse-summary></div>
+      <div class="hti-preview-grid">
+        <article class="hti-subcard">
+          <div class="hti-subcard-head"><h3>树预览</h3><span data-preview-node-count></span></div>
+          <div class="hti-tree-preview" data-tree-preview></div>
+        </article>
+        <article class="hti-subcard raw-preview">
+          <div class="hti-subcard-head"><h3>原始数据预览</h3><span data-raw-sheet></span></div>
+          <div class="hti-table-wrap raw-table-wrap"><table class="hti-table"><thead data-raw-head></thead><tbody data-raw-body></tbody></table></div>
+        </article>
+        <article class="hti-subcard validation-panel">
+          <div class="hti-subcard-head"><h3>Validation</h3><span data-validation-count></span></div>
+          <div data-validation-list></div>
+        </article>
+      </div>
+      <div class="hti-inline-alert bad" data-validation-blocker hidden>
+        存在阻断 Validation。请修改 Excel 后重新上传；当前任务不会进入 Apply。
+      </div>
+      <div class="hti-actions">
+        <button type="button" class="hti-button secondary" data-restart-import>重新上传</button>
+        <button type="button" class="hti-button primary" data-to-diff>进入 Change Diff</button>
+      </div>
+    </div>
+
+    <div class="hti-step-panel" data-step-panel="4" hidden>
+      <div class="hti-change-summary" data-change-summary></div>
+      <div class="hti-diff-toolbar">
+        <select data-change-filter>
+          <option value="">全部 Change Type</option>
+          <option>ADD</option><option>UPDATE</option><option>RENAME</option><option>MOVE</option>
+          <option>DEPRECATE</option><option>NO_CHANGE</option><option>CONFLICT</option>
+        </select>
+        <button type="button" class="hti-button secondary" data-accept-all>接受全部非冲突变更</button>
+        <span data-conflict-status></span>
+      </div>
+      <div class="hti-table-wrap">
+        <table class="hti-table diff-table">
+          <thead><tr><th>Change Type</th><th>Node / Path</th><th>Before</th><th>After</th><th>处理状态</th><th>操作</th></tr></thead>
+          <tbody data-diff-body></tbody>
+        </table>
+      </div>
+      <div class="hti-inline-alert info">EXCLUDE 只排除本次 Candidate / Change，不改变正式树节点状态，也不属于 Tree Change Type。</div>
+      <div class="hti-actions">
+        <button type="button" class="hti-button secondary" data-back-preview>返回 Preview</button>
+        <button type="button" class="hti-button primary" data-to-confirm disabled>确认变更范围</button>
+      </div>
+    </div>
+
+    <div class="hti-step-panel" data-step-panel="5" hidden>
+      <div data-confirm-state>
+        <section class="hti-confirm-grid">
+          <div><span>目标树</span><strong data-confirm-tree>—</strong></div>
+          <div><span>当前 ACTIVE</span><strong data-confirm-current>—</strong></div>
+          <div><span>预期新版本</span><strong data-confirm-next>由后端 Apply 生成</strong></div>
+          <div><span>未处理冲突</span><strong data-confirm-conflicts>—</strong></div>
+        </section>
+        <div class="hti-change-summary" data-confirm-summary></div>
+        <div class="hti-inline-alert warning">确认生效将创建新的 Tree Version。Atomic Apply 任一正式变更失败时，整体失败且当前 ACTIVE Version 保持不变。</div>
+        <label class="hti-confirm-check"><input type="checkbox" data-atomic-confirm> 我已确认本次 Change Set 与排除项，理解 Apply 为原子操作。</label>
+        <div class="hti-actions">
+          <button type="button" class="hti-button secondary" data-back-diff>返回 Change Diff</button>
+          <button type="button" class="hti-button primary" data-apply disabled>确认生效</button>
+        </div>
+      </div>
+
+      <div class="hti-result" data-result hidden>
+        <div class="hti-result-icon" data-result-icon>✓</div>
+        <h2 data-result-title>导入成功</h2>
+        <p data-result-message></p>
+        <div class="hti-result-stats">
+          <div><span>生效</span><strong data-result-applied>0</strong></div>
+          <div><span>排除</span><strong data-result-excluded>0</strong></div>
+          <div><span>失败</span><strong data-result-failed>0</strong></div>
+        </div>
+        <div class="hti-result-version">Tree Version：<strong data-result-version>—</strong></div>
+        <div class="hti-actions centered">
+          <button type="button" class="hti-button secondary" data-view-exclusions hidden>查看排除项</button>
+          <button type="button" class="hti-button secondary" data-view-history>查看导入记录</button>
+          <button type="button" class="hti-button primary" data-finish>完成</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="hti-toast" data-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}
+<script>
+window.HC_TREE_IMPORT_API={{ import_api_prefix|tojson }};
+window.HC_TREE_API={{ tree_api_prefix|tojson }};
+</script>
+<script src="/p0/static/hardware_tree_import.js?v=hc-tree-m3b-v1" defer></script>
+{% endblock %}
