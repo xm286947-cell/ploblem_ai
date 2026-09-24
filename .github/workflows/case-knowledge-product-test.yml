@@ -6,8 +6,12 @@ on:
       - "product_test/case_knowledge/**"
       - "tests/product_test/test_case_knowledge_product_scenarios.py"
       - "knowledge_production/**"
+      - "runtime/**"
+      - "repositories/**"
+      - "parser/**"
+      - "services/**"
       - "tools/openai_mock/**"
-      - "config/runtime/agents/knowledge.production.extract.yaml"
+      - "config/runtime/**"
       - "prompts/runtime/knowledge_production/**"
       - "run_case_knowledge_product_test.*"
       - ".github/workflows/case-knowledge-product-test.yml"
@@ -28,13 +32,18 @@ jobs:
           python -m pip install pytest
       - name: Run frozen case-knowledge product test
         run: bash run_case_knowledge_product_test.sh
-      - name: Build Work test package
+      - name: Build standalone Work test package
         if: always()
         run: |
           PKG="outputs/case_knowledge_product_test/work_package"
           rm -rf "$PKG"
           mkdir -p "$PKG"
           cp --parents -r \
+            knowledge_production \
+            runtime \
+            repositories \
+            parser \
+            services \
             product_test/case_knowledge \
             tests/product_test/test_case_knowledge_product_scenarios.py \
             tests/test_kp_m01_source_document.py \
@@ -47,15 +56,17 @@ jobs:
             tests/test_kp_d05_processing_ui.py \
             tests/test_kp_d06_storage_golden.py \
             tools/openai_mock \
-            config/runtime/agents/knowledge.production.extract.yaml \
-            prompts/runtime/knowledge_production/knowledge_extract.md \
+            config/runtime \
+            prompts/runtime/knowledge_production \
             run_case_knowledge_product_test.sh \
             run_case_knowledge_product_test.bat \
             requirements.txt \
             requirements-openai-mock-test.txt \
             "$PKG/"
+          find "$PKG" -type d -name __pycache__ -prune -exec rm -rf {} +
           printf '%s\n' \
             'CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1' \
+            'Standalone deterministic product-test package.' \
             'Source branch: test/case-knowledge-baseline-001' \
             'Execution: bash run_case_knowledge_product_test.sh OR run_case_knowledge_product_test.bat' \
             'Rule: Work executes only. Do not modify Fixture, Expected, tests, or product code.' \
@@ -65,6 +76,11 @@ jobs:
             cd "$PKG"
             find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           )
+      - name: Verify standalone Work package
+        if: always()
+        run: |
+          cd outputs/case_knowledge_product_test/work_package
+          bash run_case_knowledge_product_test.sh
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
