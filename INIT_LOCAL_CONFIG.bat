@@ -16,7 +16,7 @@ if not exist "config\hardware_case_real_validation.local.json" (
   echo [KEEP] config\hardware_case_real_validation.local.json
 )
 
-for %%D in ("data" "data\input" "data\input\word" "data\tree" "data\output" "data\runtime") do (
+for %%D in ("data" "data\input" "data\input\word" "data\tree" "data\output" "data\runtime" "data\evidence_sources" "data\hardware_case_sources") do (
   if not exist %%D mkdir %%D
 )
 
