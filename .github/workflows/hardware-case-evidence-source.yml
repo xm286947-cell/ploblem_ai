@@ -1,0 +1,69 @@
+name: Hardware Case Evidence Source
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_case_source_store.py"
+      - "services/hardware_case_ai_adapter.py"
+      - "quality_knowledge/web/hardware_case_api.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "tools/hardware_case_real_validation.py"
+      - "scripts/hardware_case_web_start.py"
+      - "scripts/hardware_case_precheck.py"
+      - "config/hardware_case_real_validation.local.example.json"
+      - "tests/test_hardware_case_evidence_source.py"
+      - ".github/workflows/hardware-case-evidence-source.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/hardware_case_source_store.py"
+      - "services/hardware_case_ai_adapter.py"
+      - "quality_knowledge/web/hardware_case_api.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "tools/hardware_case_real_validation.py"
+      - "scripts/hardware_case_web_start.py"
+      - "scripts/hardware_case_precheck.py"
+      - "config/hardware_case_real_validation.local.example.json"
+      - "tests/test_hardware_case_evidence_source.py"
+      - ".github/workflows/hardware-case-evidence-source.yml"
+  workflow_dispatch:
+
+jobs:
+  evidence-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Compile
+        run: >
+          python -m py_compile
+          services/hardware_case_source_store.py
+          services/hardware_case_ai_adapter.py
+          quality_knowledge/web/hardware_case_api.py
+          quality_knowledge/web/p0_app.py
+          tools/hardware_case_real_validation.py
+          scripts/hardware_case_web_start.py
+
+      - name: Evidence Source Gate
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_case_evidence_source.py
+          tests/test_hardware_case_ai_adapter.py
+          tests/test_hardware_case_web_api.py
+          tests/test_hardware_case_contract.py
+
+      - name: Packaged startup check
+        run: |
+          python scripts/build_hardware_case_product_test_package.py
+          cd dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+          python scripts/hardware_case_web_start.py --check \
+            --db data/ci_source_quality.db \
+            --hardware-db data/ci_source_hardware.db \
+            --tree-upload-dir data/ci_source_tree_uploads \
+            --source-root data/ci_source_store
