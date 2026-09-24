@@ -8,6 +8,7 @@ on:
       - "knowledge_production/**"
       - "tools/openai_mock/**"
       - "config/runtime/agents/knowledge.production.extract.yaml"
+      - "prompts/runtime/knowledge_production/**"
       - "run_case_knowledge_product_test.*"
       - ".github/workflows/case-knowledge-product-test.yml"
   workflow_dispatch:
@@ -27,9 +28,23 @@ jobs:
           python -m pip install pytest
       - name: Run frozen case-knowledge product test
         run: bash run_case_knowledge_product_test.sh
+      - name: Build Work test package
+        if: always()
+        run: |
+          mkdir -p outputs/case_knowledge_product_test/package
+          zip -r outputs/case_knowledge_product_test/package/CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1.zip             product_test/case_knowledge             tests/product_test/test_case_knowledge_product_scenarios.py             tests/test_kp_m01_source_document.py             tests/test_kp_m02_candidate_evidence.py             tests/test_kp_m03_ai_extraction.py             tests/test_kp_d01_business_candidate_intake.py             tests/test_kp_d02_evaluation.py             tests/test_kp_d03_review_publish.py             tests/test_kp_d04_release_query.py             tests/test_kp_d05_processing_ui.py             tests/test_kp_d06_storage_golden.py             tools/openai_mock             config/runtime/agents/knowledge.production.extract.yaml             prompts/runtime/knowledge_production/knowledge_extract.md             run_case_knowledge_product_test.sh             run_case_knowledge_product_test.bat             requirements.txt             requirements-openai-mock-test.txt
+          sha256sum outputs/case_knowledge_product_test/package/CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1.zip             > outputs/case_knowledge_product_test/package/CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1.sha256
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: case-knowledge-product-test-evidence
-          path: outputs/case_knowledge_product_test/
+          path: |
+            outputs/case_knowledge_product_test/junit.xml
+            outputs/case_knowledge_product_test/summary.txt
+      - name: Upload Work test package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-knowledge-product-test-package-v0.1
+          path: outputs/case_knowledge_product_test/package/
