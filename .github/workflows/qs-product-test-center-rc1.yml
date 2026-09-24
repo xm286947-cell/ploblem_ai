@@ -1,0 +1,62 @@
+name: QS Product Test Center RC1 Baseline
+
+on:
+  push:
+    branches:
+      - test/quality-scenario-rc1-baseline-v01
+  pull_request:
+    branches:
+      - feature/reverse-quality-v01
+    paths:
+      - 'tests/product_test/quality_scenario_rc1/**'
+      - '.github/workflows/qs-product-test-center-rc1.yml'
+  workflow_dispatch:
+
+jobs:
+  product-test-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout validated Runtime dependency
+        uses: actions/checkout@v4
+        with:
+          repository: xm286947-cell/ploblem_ai
+          ref: 0959da43008307398a9cac0f9abfc7fec26dcb8a
+          path: .deps/unified-agent-runtime
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install product dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install Runtime dependencies
+        run: python -m pip install -r .deps/unified-agent-runtime/requirements-runtime-p0-test.txt
+
+      - name: Isolate Runtime package only
+        run: |
+          mkdir -p .runtime-dep
+          cp -R .deps/unified-agent-runtime/runtime .runtime-dep/runtime
+
+      - name: Compile frozen product-test assets
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: python -m compileall -q tests/product_test/quality_scenario_rc1
+
+      - name: Run Product Test Center RC1 baseline
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: python -m pytest -q tests/product_test/quality_scenario_rc1/test_quality_scenario_product_baseline.py
+
+      - name: Run authoritative compatibility regressions
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: |
+          python -m pytest -q tests/test_quality_scenario_candidate_v1_service.py
+          python -m pytest -q tests/test_quality_scenario_v1_workflow_service.py
+          python -m pytest -q tests/test_quality_scenario_traceability.py
+          python -m pytest -q tests/test_quality_scenario_rc1_golden_e2e.py
