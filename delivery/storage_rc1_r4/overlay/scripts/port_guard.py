@@ -27,6 +27,9 @@ def _print_kv(kind: str, **values: object) -> None:
 def _bind_probe(host: str, port: int) -> None:
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     sock = socket.socket(family, socket.SOCK_STREAM)
+    # Match normal server bind semantics: TIME_WAIT must not be treated as a
+    # live port owner, while an actual LISTEN socket still rejects this bind.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind((host, port))
     finally:
