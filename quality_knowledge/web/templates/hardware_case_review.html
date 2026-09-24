@@ -1,0 +1,34 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block breadcrumb %}硬件案例库 / 案例确认{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-page="review" data-api="{{ hardware_api_prefix }}" data-role="MAINTAINER" data-case-id="{{ case_id }}">
+  <header class="hc-page-head">
+    <div><span class="hc-kicker">HARDWARE CASE · P05</span><h1>案例确认工作台</h1><p>左侧确认知识与双树挂接，右侧确认 Evidence。AI Candidate 永远不等于人工确认。</p></div>
+  </header>
+  <section class="hc-review-layout">
+    <aside class="hc-review-queue">
+      <div class="hc-card-head"><div><h2>待处理案例</h2><p>维护侧未发布 Case。</p></div></div>
+      <div data-review-queue><div class="hc-empty">正在读取…</div></div>
+    </aside>
+    <section class="hc-review-main">
+      <div class="hc-review-empty" data-review-empty>选择一个待确认案例开始。</div>
+      <div data-review-workspace hidden>
+        <div class="hc-review-header"><div><h2 data-review-title>—</h2><div class="hc-detail-meta"><code data-review-id>—</code><span data-review-status>—</span><span data-review-processing>—</span></div></div><a class="hc-button secondary" data-open-detail href="#">查看详情</a></div>
+        <div class="hc-review-grid">
+          <section class="hc-review-facts"><div data-review-facts></div><div class="hc-card hc-mapping-review"><h3>双树挂接</h3><div data-review-mappings></div></div></section>
+          <aside class="hc-review-evidence"><h3>Evidence</h3><div data-review-evidence></div><div class="hc-evidence-preview" data-review-preview><div class="hc-empty">选择 Evidence 查看原始来源。</div></div></aside>
+        </div>
+        <div class="hc-publish-bar">
+          <div class="hc-publish-gate"><strong>Publish Gate</strong><div data-publish-checklist></div></div>
+          <div class="hc-publish-actions"><button type="button" class="hc-button secondary" data-save-draft>保存草稿</button><button type="button" class="hc-button primary" data-publish disabled>确认发布</button></div>
+        </div>
+      </div>
+    </section>
+  </section>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}
