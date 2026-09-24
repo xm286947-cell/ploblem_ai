@@ -27,6 +27,7 @@ INCLUDE_DIRS = [
 ]
 
 INCLUDE_FILES = [
+    "00_README_FIRST.txt",
     "main.py",
     "requirements.txt",
     "requirements-runtime-p0-test.txt",
