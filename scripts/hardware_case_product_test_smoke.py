@@ -54,6 +54,7 @@ def runtime_package_smoke() -> None:
         ROOT / "CHECK_ENV.bat",
         ROOT / "START_HARDWARE_CASE.bat",
         ROOT / "RUN_REAL_AI_VALIDATION.bat",
+        ROOT / "scripts/hardware_case_web_start.py",
     )
     assert all(path.is_file() for path in required)
     assert build_hardware_case_structurer.__hardware_case_structurer_factory__ is True

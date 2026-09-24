@@ -1,4 +1,4 @@
-HARDWARE CASE PRODUCT TEST V0.1.1
+HARDWARE CASE PRODUCT TEST V0.1.2
 ==================================
 
 这是内部提测包，不是 Release 包。
@@ -75,4 +75,23 @@ Hardware Case 不自建第二套模型调用链。
 
 
 完整说明：
-  docs\product\HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md
+  docs\product\HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md
+
+
+【V0.1.2 启动修复说明】
+
+如果旧 V0.1.1 包出现：
+  ModuleNotFoundError: No module named 'parser'
+
+不要执行：
+  pip install parser
+
+parser 是主仓内部旧模块，不是需要安装的第三方依赖。
+
+V0.1.2 已改为：
+  START_HARDWARE_CASE.bat
+    -> scripts\hardware_case_web_start.py
+    -> create_p0_app
+
+仍然是同一个统一 Web / 同一个 8080 / 同一个 Hardware Case API，
+只是启动时不再加载与本产品无关的 Repeat Case builder 依赖。

@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
-PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_V0.1.1"
+PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_V0.1.2"
 STAGE = DIST / PACKAGE_NAME
 
 INCLUDE_DIRS = [
@@ -28,7 +28,6 @@ INCLUDE_DIRS = [
 
 INCLUDE_FILES = [
     "00_README_FIRST.txt",
-    "main.py",
     "requirements.txt",
     "requirements-runtime-p0-test.txt",
     "config/runtime/model.local.hardware_case.example.yaml",
@@ -39,6 +38,7 @@ INCLUDE_FILES = [
     "scripts/hardware_case_mvp_smoke.py",
     "scripts/hardware_case_product_test_smoke.py",
     "scripts/hardware_case_precheck.py",
+    "scripts/hardware_case_web_start.py",
     "INIT_LOCAL_CONFIG.bat",
     "CHECK_ENV.bat",
     "START_HARDWARE_CASE.bat",
@@ -50,7 +50,7 @@ INCLUDE_FILES = [
     "run_hardware_case_product_test.sh",
     "run_hardware_case_mvp_smoke.bat",
     "run_hardware_case_mvp_smoke.sh",
-    "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md",
+    "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md",
 ]
 
 EXCLUDED_NAMES = {
@@ -162,7 +162,7 @@ def main() -> int:
         "package": PACKAGE_NAME,
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
-        "package_revision": "V0.1.1_RUNTIME_READY",
+        "package_revision": "V0.1.2_STARTUP_CLOSURE",
         "package_status": "READY_FOR_INTERNAL_TEST",
         "release_status": "TEST_PACKAGE_NOT_RELEASE",
         "source_commit": source_commit,
@@ -174,6 +174,7 @@ def main() -> int:
             "init_local_config_windows": "INIT_LOCAL_CONFIG.bat",
             "precheck_windows": "CHECK_ENV.bat",
             "start_product_windows": "START_HARDWARE_CASE.bat",
+            "web_launcher": "scripts/hardware_case_web_start.py",
             "real_ai_validation_windows": "RUN_REAL_AI_VALIDATION.bat",
             "start_product_shell": "START_HARDWARE_CASE.sh",
             "real_ai_validation_shell": "RUN_REAL_AI_VALIDATION.sh",
@@ -196,7 +197,9 @@ def main() -> int:
             "DOCX parser + AI Adapter boundary",
             "Hardware Case Agent Config + Unified Runtime Adapter",
             "Local model configuration template and environment precheck",
-            "One-click Web start + company-local Real AI validation entry",
+            "One-click Web start through the same create_p0_app without repository-wide main.py imports",
+            "Packaged startup import check from the built artifact",
+            "Company-local Real AI validation entry",
             "Company-only Real Validation Harness",
             "Synthetic package smoke",
         ],
@@ -214,7 +217,8 @@ def main() -> int:
         "known_gaps": [
             "P01-P06 Hardware Case dedicated formal frontend is not part of this package",
             "Real company Word/Excel data is not bundled",
-            "Real Provider acceptance has not yet been passed; the package now contains the runnable Runtime/Agent entry for company validation",
+            "Real Provider acceptance has not yet been passed; the package contains the runnable Runtime/Agent entry for company validation",
+            "The repository-wide main.py CLI is intentionally not packaged; Hardware Case uses the dedicated launcher to avoid unrelated legacy builder dependencies",
         ],
         "explicitly_not_claimed": [
             "MVP_INTEGRATION_GATE_PASS",

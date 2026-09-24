@@ -18,7 +18,7 @@ on:
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
-      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
@@ -30,6 +30,7 @@ on:
       - "scripts/build_hardware_case_product_test_package.py"
       - "scripts/hardware_case_product_test_smoke.py"
       - "scripts/hardware_case_precheck.py"
+      - "scripts/hardware_case_web_start.py"
       - "run_hardware_case_product_test.bat"
       - "run_hardware_case_product_test.sh"
       - "INIT_LOCAL_CONFIG.bat"
@@ -44,7 +45,7 @@ on:
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
-      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
@@ -76,16 +77,17 @@ jobs:
           import json
           from pathlib import Path
 
-          stage = Path("dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.1")
+          stage = Path("dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2")
           manifest = json.loads((stage / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
 
           assert manifest["package_status"] == "READY_FOR_INTERNAL_TEST"
           assert manifest["release_status"] == "TEST_PACKAGE_NOT_RELEASE"
           assert manifest["web_entry"] == "/p0/hardware-cases/base-data"
-          assert manifest["package_revision"] == "V0.1.1_RUNTIME_READY"
+          assert manifest["package_revision"] == "V0.1.2_STARTUP_CLOSURE"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
           assert manifest["entrypoints"]["start_product_windows"] == "START_HARDWARE_CASE.bat"
+          assert manifest["entrypoints"]["web_launcher"] == "scripts/hardware_case_web_start.py"
           assert manifest["entrypoints"]["real_ai_validation_windows"] == "RUN_REAL_AI_VALIDATION.bat"
           assert manifest["frozen_tree_change_types"] == [
               "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT"
@@ -110,13 +112,24 @@ jobs:
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "RUN_REAL_AI_VALIDATION.bat" in paths
+          assert "scripts/hardware_case_web_start.py" in paths
+          assert "main.py" not in paths
           assert "config/runtime/model.local.yaml" not in paths
           print("MANIFEST=PASS")
           PY
 
       - name: Run product test package smoke
-        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.1
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
         run: python scripts/hardware_case_product_test_smoke.py
+
+      - name: Run packaged startup import Gate
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+        run: >
+          python scripts/hardware_case_web_start.py
+          --check
+          --db data/ci_startup_quality.db
+          --hardware-db data/ci_startup_hardware.db
+          --tree-upload-dir data/ci_startup_tree_uploads
 
       - name: Run Hardware Case and Tree Import regression
         run: >
@@ -135,15 +148,15 @@ jobs:
       - name: Stage delivery files
         run: |
           mkdir -p dist/product-test-delivery
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.1_*.zip dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.1_*.zip.sha256 dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
-          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2_*.zip dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2_*.zip.sha256 dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2/PACKAGE_MANIFEST.json dist/product-test-delivery/
+          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md dist/product-test-delivery/
 
       - name: Upload product test package
         uses: actions/upload-artifact@v4
         with:
-          name: HARDWARE_CASE_PRODUCT_TEST_V0.1.1
+          name: HARDWARE_CASE_PRODUCT_TEST_V0.1.2
           path: dist/product-test-delivery/*
           if-no-files-found: error
           retention-days: 14
