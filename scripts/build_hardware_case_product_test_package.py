@@ -151,6 +151,8 @@ def main() -> int:
         "data/tree",
         "data/output",
         "data/runtime",
+        "data/evidence_sources",
+        "data/hardware_case_sources",
     ):
         (STAGE / relative).mkdir(parents=True, exist_ok=True)
 
