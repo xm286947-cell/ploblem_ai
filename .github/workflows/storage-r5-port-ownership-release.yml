@@ -16,7 +16,7 @@ env:
   SOURCE_COMMIT: d6de1321734b1d1193d9ac5a870de8d965057c43
   BUILD_SCRIPT_VERSION: storage-rc1-r5-builder-v1.0
   R4A_EXPECTED_SHA256: 4de6586bc23a1105e4004faf949897a595a9c38b5382cb3e99d75c15111ddb60
-  R4A_URL: 'https://sdmntprdenmarkeast.oaiusercontent.com/files/00000000-f248-8210-b64c-a1d2bc6c4d17/raw?se=2026-09-24T16%3A52%3A47Z&sp=r&sv=2026-02-06&sr=b&scid=01bd0f7b-1ab7-5818-8e3c-71f3ab68bd79&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T16%3A00%3A45Z&ske=2026-09-25T16%3A00%3A45Z&sks=b&skv=2026-02-06&sig=urqkXiv9/ov5XmpUcRB0qaXc/3pzs%2BJiPVda0OlyVG4%3D'
+  R4A_URL: 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-12f0-81f4-9977-6880e7b62e1a/raw?se=2026-09-24T16%3A53%3A17Z&sp=r&sv=2026-02-06&sr=b&scid=e40beeff-fae1-5fe4-816c-b6d776242ec8&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T16%3A25%3A11Z&ske=2026-09-25T16%3A25%3A11Z&sks=b&skv=2026-02-06&sig=D2HK9m7E3Tyh8br5bw3JsMFszPcTr8MNdTMtWKNz8/E%3D'
   R5_PACKAGE: STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip
 
 jobs:
