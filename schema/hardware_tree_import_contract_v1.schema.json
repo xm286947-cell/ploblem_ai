@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/hardware-tree-import/v1",
+  "title": "Hardware Tree Import MVP V0.1 Contract",
+  "type": "object",
+  "$defs": {
+    "MappingProfile": {
+      "type": "object",
+      "required": ["sheet_name", "header_row", "path_columns"],
+      "properties": {
+        "sheet_name": {"type": "string", "minLength": 1},
+        "header_row": {"type": "integer", "minimum": 1},
+        "path_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "metadata_columns": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "business_key_column": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "ImportJob": {
+      "type": "object",
+      "required": [
+        "job_id",
+        "contract_version",
+        "tree_type",
+        "import_type",
+        "status",
+        "source_filename",
+        "source_sha256",
+        "operator"
+      ],
+      "properties": {
+        "job_id": {"type": "string", "minLength": 1},
+        "contract_version": {"const": "hardware-tree-import/v1"},
+        "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
+        "import_type": {"enum": ["INITIAL_IMPORT", "UPDATE_IMPORT"]},
+        "status": {
+          "enum": [
+            "UPLOADED",
+            "PARSED",
+            "MAPPING_REQUIRED",
+            "VALIDATING",
+            "REVIEW_REQUIRED",
+            "READY_TO_APPLY",
+            "APPLYING",
+            "APPLIED",
+            "APPLIED_WITH_EXCLUSIONS",
+            "PARSE_FAILED",
+            "VALIDATION_FAILED",
+            "APPLY_FAILED"
+          ]
+        },
+        "source_filename": {"type": "string", "minLength": 1},
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operator": {"type": "string", "minLength": 1},
+        "current_version_id": {"type": ["string", "null"]},
+        "applied_version_id": {"type": ["string", "null"]},
+        "mapping_profile": {"$ref": "#/$defs/MappingProfile"},
+        "counts": {"type": "object"},
+        "error_code": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "Change": {
+      "type": "object",
+      "required": ["change_id", "change_type", "decision"],
+      "properties": {
+        "change_id": {"type": "string", "minLength": 1},
+        "change_type": {
+          "enum": ["ADD", "UPDATE", "RENAME", "MOVE", "NO_CHANGE", "CONFLICT", "DEPRECATE"]
+        },
+        "node_id": {"type": ["string", "null"]},
+        "business_key": {"type": ["string", "null"]},
+        "before": {"type": ["object", "null"]},
+        "after": {"type": ["object", "null"]},
+        "decision": {"enum": ["PENDING", "CONFIRMED", "EXCLUDED", "RESOLVED"]},
+        "issue_code": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "TreeVersion": {
+      "type": "object",
+      "required": ["version_id", "tree_type", "version_seq", "status", "source_job_id"],
+      "properties": {
+        "version_id": {"type": "string", "pattern": "^[CM]-[0-9]{3,}$"},
+        "tree_type": {"enum": ["CIRCUIT_FEATURE", "MATERIAL_DEVICE"]},
+        "version_seq": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["ACTIVE", "SUPERSEDED"]},
+        "source_job_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": ["contract_version", "entity_type", "payload"],
+  "properties": {
+    "contract_version": {"const": "hardware-tree-import/v1"},
+    "entity_type": {"enum": ["IMPORT_JOB", "MAPPING_PROFILE", "CHANGE", "TREE_VERSION"]},
+    "payload": {
+      "oneOf": [
+        {"$ref": "#/$defs/ImportJob"},
+        {"$ref": "#/$defs/MappingProfile"},
+        {"$ref": "#/$defs/Change"},
+        {"$ref": "#/$defs/TreeVersion"}
+      ]
+    }
+  },
+  "additionalProperties": false
+}
