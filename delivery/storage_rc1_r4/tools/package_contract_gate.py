@@ -228,6 +228,8 @@ def validate_extracted(
     guard = (root / "scripts/port_guard.py").read_text(encoding="utf-8")
     guard_required_tokens = (
         "PORT_CONFLICT",
+        "LISTENER_CONNECT",
+        "_listener_probe",
         "SPAWNED_PROCESS_EXITED",
         "HEALTH_OWNERSHIP_MISMATCH",
         "PID_PORT_OWNERSHIP",
