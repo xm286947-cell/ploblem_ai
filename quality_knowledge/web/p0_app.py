@@ -20,6 +20,7 @@ from quality_knowledge.web.api_v2 import create_v2_router
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
+from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
 from repositories.hardware_case_repository import HardwareCaseRepository
 from services.hardware_case_backend import HardwareCaseBackendService
 
@@ -110,6 +111,14 @@ def create_p0_app(
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
 
+    repeat_db = Path(db_path).with_name(Path(db_path).name + ".repeat-risk.db")
+    repeat_web = RepeatWebFacade.from_project(
+        issue_repository=repository,
+        repeat_db_path=repeat_db,
+        project_root=root,
+    )
+    app.state.repeat_risk_service = repeat_web
+
     hardware_db = (
         Path(hardware_case_db_path)
         if hardware_case_db_path is not None
@@ -125,6 +134,7 @@ def create_p0_app(
         stage_runner=stage_runner,
         initialization_status=status,
         analysis_runtime_status=analysis_runtime_status,
+        repeat_web=repeat_web,
     ))
     app.include_router(create_hardware_case_router(hardware_case_service))
     app.include_router(create_p0_insights_router())
