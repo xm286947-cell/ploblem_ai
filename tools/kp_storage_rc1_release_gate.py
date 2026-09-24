@@ -3,9 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from knowledge_production import (
     EvidenceLocation,
@@ -25,7 +29,6 @@ from repositories import JsonArtifactRepository
 
 
 RELEASE_VERSION = "KP-STORAGE-RC1-VALIDATION-001"
-ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist" / "kp-storage-rc1"
 
 
