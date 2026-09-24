@@ -1,0 +1,22 @@
+# Hardware Case internal-test local model configuration.
+# Copy this file to model.local.yaml and edit only the endpoint/model values.
+# Keep the API key in an environment variable; do not write a real key here.
+
+active_model: hardware_case_real
+
+models:
+  hardware_case_real:
+    provider: openai_compatible
+    base_url: https://REPLACE_WITH_COMPANY_APPROVED_ENDPOINT/v1
+    api_key_env: HARDWARE_CASE_API_KEY
+    model: REPLACE_WITH_MODEL_NAME
+    temperature: 0
+    max_tokens: 8192
+
+  # Optional local OpenAI-compatible model example:
+  # hardware_case_local:
+  #   provider: openai_compatible
+  #   base_url: http://127.0.0.1:11434/v1
+  #   model: REPLACE_WITH_LOCAL_MODEL
+  #   temperature: 0
+  #   max_tokens: 8192
