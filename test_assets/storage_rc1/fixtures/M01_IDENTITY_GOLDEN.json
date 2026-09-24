@@ -1,0 +1,32 @@
+{
+  "mock_id": "M01",
+  "purpose": "IDENTITY_GOLDEN",
+  "request_match": {
+    "stage": "device_identity"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "device_identity": {
+      "manufacturer": "SyntheticSemi",
+      "product_family": "EMMC-PRO",
+      "device_type": "eMMC",
+      "models": [
+        "SS64G-A1"
+      ],
+      "document_title": "Synthetic eMMC Datasheet",
+      "document_number": "SS-EMMC-001",
+      "revision": "1.2",
+      "publication_date": "2026-01-15",
+      "evidence_refs": [
+        "E-M01-P1"
+      ]
+    }
+  },
+  "expected": {
+    "candidate_status": "UNREVIEWED",
+    "auto_confirm": false,
+    "evidence_required": true
+  }
+}

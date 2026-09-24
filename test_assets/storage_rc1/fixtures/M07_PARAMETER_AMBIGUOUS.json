@@ -1,0 +1,33 @@
+{
+  "mock_id": "M07",
+  "purpose": "PARAMETER_AMBIGUOUS",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "operating_temperature",
+        "category": "KEY_SPEC",
+        "value": [
+          "-25..85",
+          "-40..85"
+        ],
+        "unit": "degC",
+        "condition": "different ordering-code tables",
+        "coverage": "AMBIGUOUS",
+        "evidence_refs": [
+          "E-M07-A",
+          "E-M07-B"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "coverage": "AMBIGUOUS",
+    "auto_select_forbidden": true
+  }
+}

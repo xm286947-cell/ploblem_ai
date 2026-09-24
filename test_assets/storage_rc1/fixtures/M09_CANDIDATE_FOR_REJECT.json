@@ -1,0 +1,29 @@
+{
+  "mock_id": "M09",
+  "purpose": "CANDIDATE_FOR_REJECT",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "endurance_usage_model",
+        "category": "KEY_SPEC",
+        "value": "unsupported marketing claim",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M09"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "human_action": "REJECT",
+    "formal_consumer_allowed": false
+  }
+}

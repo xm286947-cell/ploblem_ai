@@ -1,0 +1,29 @@
+{
+  "mock_id": "M05",
+  "purpose": "PARAMETER_NOT_APPLICABLE",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "bkops_status",
+        "category": "KEY_DIAGNOSTIC",
+        "value": null,
+        "unit": null,
+        "condition": "device explicitly has no BKOPS",
+        "coverage": "NOT_APPLICABLE",
+        "evidence_refs": [
+          "E-M05-NA"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "coverage": "NOT_APPLICABLE",
+    "counts_as_failure": false
+  }
+}

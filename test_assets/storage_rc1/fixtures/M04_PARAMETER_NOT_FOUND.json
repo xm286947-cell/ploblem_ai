@@ -1,0 +1,29 @@
+{
+  "mock_id": "M04",
+  "purpose": "PARAMETER_NOT_FOUND",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "device_life_time_estimation_a",
+        "category": "KEY_DIAGNOSTIC",
+        "value": null,
+        "unit": null,
+        "condition": null,
+        "coverage": "NOT_FOUND",
+        "evidence_refs": [
+          "E-M04-CHECKED"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "coverage": "NOT_FOUND",
+    "must_not_map_to": "NOT_CHECKED"
+  }
+}

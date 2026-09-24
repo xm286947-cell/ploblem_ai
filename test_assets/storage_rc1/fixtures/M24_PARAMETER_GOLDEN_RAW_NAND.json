@@ -1,0 +1,76 @@
+{
+  "mock_id": "M24",
+  "purpose": "PARAMETER_GOLDEN_RAW_NAND",
+  "request_match": {
+    "stage": "parameter_extract",
+    "device_type": "NAND Flash"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "nand_type",
+        "category": "KEY_SPEC",
+        "value": "TLC",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M24-01"
+        ]
+      },
+      {
+        "parameter_id": "pe_cycles",
+        "category": "KEY_SPEC",
+        "value": 3000,
+        "unit": "cycles",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M24-02"
+        ]
+      },
+      {
+        "parameter_id": "ecc_observability",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "controller/driver statistics",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M24-03"
+        ]
+      },
+      {
+        "parameter_id": "bad_block_observability",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "MTD/UBI statistics",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M24-04"
+        ]
+      },
+      {
+        "parameter_id": "interface_timing",
+        "category": "COMPREHENSIVE",
+        "value": "datasheet controlled fact",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M24-05"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "device_family": "Raw NAND",
+    "schema_categories": [
+      "KEY_SPEC",
+      "KEY_DIAGNOSTIC",
+      "COMPREHENSIVE"
+    ],
+    "required_slots_must_remain_visible": true,
+    "runtime_values_must_not_be_fabricated": true,
+    "auto_confirm": false
+  }
+}

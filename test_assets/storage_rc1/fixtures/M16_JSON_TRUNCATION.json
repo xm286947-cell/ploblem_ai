@@ -1,0 +1,30 @@
+{
+  "mock_id": "M16",
+  "purpose": "JSON_TRUNCATION",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200,
+    "truncate_at": 96
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "GB",
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M16"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "runtime": "STRICT_JSON_FAILURE_OR_RECOVERY",
+    "loose_parse_forbidden": true
+  }
+}

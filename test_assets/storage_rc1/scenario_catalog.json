@@ -1,0 +1,270 @@
+{
+  "baseline": "PRODUCT_REQUIREMENT_BASELINE_STORAGE_MVP_RC1_V1.0",
+  "requirements": [
+    {
+      "id": "REQ-STG-001",
+      "title": "规格书导入",
+      "system_cases": [
+        "SYS-001",
+        "SYS-002"
+      ],
+      "mock_ids": [
+        "M01",
+        "M02"
+      ]
+    },
+    {
+      "id": "REQ-STG-002",
+      "title": "基础信息自动识别与人工确认",
+      "system_cases": [
+        "SYS-001",
+        "SYS-003"
+      ],
+      "mock_ids": [
+        "M01",
+        "M02"
+      ]
+    },
+    {
+      "id": "REQ-STG-003",
+      "title": "参数识别",
+      "system_cases": [
+        "SYS-001",
+        "SYS-004"
+      ],
+      "mock_ids": [
+        "M03",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "id": "REQ-STG-004",
+      "title": "参数三类组织",
+      "system_cases": [
+        "SYS-004"
+      ],
+      "mock_ids": [
+        "M03",
+        "M23",
+        "M24",
+        "M25"
+      ]
+    },
+    {
+      "id": "REQ-STG-005",
+      "title": "Coverage",
+      "system_cases": [
+        "SYS-004"
+      ],
+      "mock_ids": [
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "M07"
+      ]
+    },
+    {
+      "id": "REQ-STG-006",
+      "title": "人工确认闭环",
+      "system_cases": [
+        "SYS-001",
+        "SYS-005"
+      ],
+      "mock_ids": [
+        "M08",
+        "M09",
+        "M18"
+      ]
+    },
+    {
+      "id": "REQ-STG-007",
+      "title": "器件库",
+      "system_cases": [
+        "SYS-001",
+        "SYS-006"
+      ],
+      "mock_ids": [
+        "M01",
+        "M03",
+        "M08",
+        "M09"
+      ]
+    },
+    {
+      "id": "REQ-STG-008",
+      "title": "器件详情与Evidence",
+      "system_cases": [
+        "SYS-006",
+        "SYS-015"
+      ],
+      "mock_ids": [
+        "M10",
+        "M11"
+      ]
+    },
+    {
+      "id": "REQ-STG-009",
+      "title": "知识形成",
+      "system_cases": [
+        "SYS-007"
+      ],
+      "mock_ids": [
+        "M19",
+        "M20",
+        "M21"
+      ]
+    },
+    {
+      "id": "REQ-STG-010",
+      "title": "知识查询与消费",
+      "system_cases": [
+        "SYS-007",
+        "SYS-013"
+      ],
+      "mock_ids": [
+        "M20",
+        "M21"
+      ]
+    },
+    {
+      "id": "REQ-STG-011",
+      "title": "器件对比",
+      "system_cases": [
+        "SYS-008",
+        "SYS-013"
+      ],
+      "mock_ids": [
+        "M03",
+        "M04",
+        "M07"
+      ]
+    },
+    {
+      "id": "REQ-STG-012",
+      "title": "寿命诊断与测试",
+      "system_cases": [
+        "SYS-009",
+        "SYS-013"
+      ],
+      "mock_ids": [
+        "M20",
+        "M22"
+      ]
+    },
+    {
+      "id": "REQ-STG-013",
+      "title": "器件变更影响",
+      "system_cases": [
+        "SYS-010",
+        "SYS-013"
+      ],
+      "mock_ids": [
+        "M07",
+        "M20",
+        "M21",
+        "M22"
+      ]
+    },
+    {
+      "id": "REQ-STG-014",
+      "title": "维护中心",
+      "system_cases": [
+        "SYS-001",
+        "SYS-011"
+      ],
+      "mock_ids": [
+        "M01",
+        "M03",
+        "M08",
+        "M09",
+        "M20"
+      ]
+    },
+    {
+      "id": "REQ-STG-015",
+      "title": "页面语言与参数命名",
+      "system_cases": [
+        "SYS-012"
+      ],
+      "mock_ids": []
+    }
+  ],
+  "golden_paths": [
+    {
+      "id": "GOLDEN-A",
+      "name": "Datasheet to Confirmed Device Fact",
+      "system_cases": [
+        "SYS-001",
+        "SYS-003",
+        "SYS-004",
+        "SYS-005",
+        "SYS-006"
+      ],
+      "mock_ids": [
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "M07",
+        "M08",
+        "M09",
+        "M10",
+        "M11",
+        "M12",
+        "M13",
+        "M14",
+        "M15",
+        "M16",
+        "M17",
+        "M18",
+        "M23",
+        "M24",
+        "M25"
+      ]
+    },
+    {
+      "id": "GOLDEN-B",
+      "name": "Knowledge Production to Storage Consumer",
+      "system_cases": [
+        "SYS-007"
+      ],
+      "mock_ids": [
+        "M19",
+        "M20",
+        "M21"
+      ]
+    },
+    {
+      "id": "GOLDEN-C",
+      "name": "Compare Diagnose Impact Evidence",
+      "system_cases": [
+        "SYS-008",
+        "SYS-009",
+        "SYS-010",
+        "SYS-013"
+      ],
+      "mock_ids": [
+        "M03",
+        "M07",
+        "M20",
+        "M21",
+        "M22"
+      ]
+    }
+  ],
+  "existing_repo_tests": [
+    "tests/test_openai_mock_storage_m01_m08.py",
+    "tests/test_kp_d03_review_publish.py",
+    "tests/test_kp_d06_storage_golden.py",
+    "tests/test_runtime_provider_adapter.py",
+    "tests/test_agent_runtime_p0_storage_e2e_json_truncation.py"
+  ],
+  "required_sut_package_tests": [
+    "tests/test_storage_product_mvp_rc1.py",
+    "tests/test_storage_rc1_review_blocker_001.py"
+  ]
+}

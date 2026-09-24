@@ -1,0 +1,30 @@
+{
+  "mock_id": "M08",
+  "purpose": "PARAMETER_WRONG_VALUE_FOR_EDIT_CONFIRM",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 32,
+        "unit": "GB",
+        "condition": "synthetic wrong AI value",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M08"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "human_action": "EDIT_CONFIRM",
+    "confirmed_value": 64,
+    "preserve_ai_value": true
+  }
+}

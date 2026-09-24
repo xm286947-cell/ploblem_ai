@@ -1,0 +1,93 @@
+{
+  "manifest_version": "RC1_V0.3",
+  "status": "FROZEN_FOR_WORK_EXECUTION",
+  "sut": {
+    "package": "STORAGE_PRODUCT_MVP_RC1_JOINT_PACKAGE_20260924.zip",
+    "sha256": "b6f48ad5447ad82dd74ccbe31ff650c4f0eb6b64791e65812c0e19dc1c529017"
+  },
+  "test_package": {
+    "package": "STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3.zip",
+    "sha256_source": "STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3.zip.sha256"
+  },
+  "rules": {
+    "results": [
+      "PASS",
+      "FAIL",
+      "BLOCKED",
+      "NOT_TESTED"
+    ],
+    "work_may_modify_test_assets": false,
+    "work_may_modify_sut": false,
+    "mock_boundary": "Provider/AI Response only",
+    "p0_non_pass_blocks_final_pass": true
+  },
+  "phases": [
+    {
+      "id": "P0",
+      "name": "PACKAGE_INTEGRITY",
+      "command": "verify SUT and test package SHA256; verify PACKAGE_MANIFEST.json"
+    },
+    {
+      "id": "P1",
+      "name": "TEST_ASSET_GATE",
+      "command": "python test_assets/storage_rc1/run_full_gate.py --mock-only"
+    },
+    {
+      "id": "P2",
+      "name": "MOCK_RUNTIME",
+      "command": "python -m pytest -q tests/test_openai_mock_storage_m01_m08.py tests/test_runtime_provider_adapter.py"
+    },
+    {
+      "id": "P3",
+      "name": "PROVIDER_429",
+      "fixture": "M14"
+    },
+    {
+      "id": "P4",
+      "name": "PROVIDER_TIMEOUT",
+      "fixture": "M15"
+    },
+    {
+      "id": "P5",
+      "name": "JSON_TRUNCATION",
+      "fixture": "M16"
+    },
+    {
+      "id": "P6",
+      "name": "SEMANTIC_REPAIR",
+      "fixture": "M17"
+    },
+    {
+      "id": "P7",
+      "name": "BROWSER_GOLDEN_A",
+      "checklist": "BROWSER_SYSTEM_CHECKLIST.md#SYS-001 / GOLDEN-A"
+    },
+    {
+      "id": "P8",
+      "name": "BROWSER_GOLDEN_B",
+      "checklist": "BROWSER_SYSTEM_CHECKLIST.md#SYS-007 / GOLDEN-B"
+    },
+    {
+      "id": "P9",
+      "name": "BROWSER_GOLDEN_C",
+      "checklist": "BROWSER_SYSTEM_CHECKLIST.md#SYS-013 / GOLDEN-C"
+    },
+    {
+      "id": "P10",
+      "name": "REQ_STG_015",
+      "checklist": "BROWSER_SYSTEM_CHECKLIST.md#SYS-012 REQ-STG-015"
+    }
+  ],
+  "required_evidence": [
+    "environment",
+    "commands",
+    "pytest output",
+    "runtime execution",
+    "provider call",
+    "mock counter",
+    "DB/API state",
+    "browser screenshots",
+    "failed test evidence",
+    "acceptance base url"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "mock_id": "M11",
+  "purpose": "EVIDENCE_INVALID_REF",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "GB",
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-NOT-EXIST"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "result": "FAIL_CLOSED",
+    "error_code": "EVIDENCE_INVALID"
+  }
+}

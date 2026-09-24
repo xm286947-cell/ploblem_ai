@@ -1,0 +1,75 @@
+{
+  "mock_id": "M25",
+  "purpose": "PARAMETER_GOLDEN_NOR",
+  "request_match": {
+    "stage": "parameter_extract",
+    "device_type": "NOR Flash"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "Mbit",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M25-01"
+        ]
+      },
+      {
+        "parameter_id": "pe_cycles",
+        "category": "KEY_SPEC",
+        "value": 100000,
+        "unit": "cycles",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M25-02"
+        ]
+      },
+      {
+        "parameter_id": "status_register",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "read status register",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M25-03"
+        ]
+      },
+      {
+        "parameter_id": "erase_write_count_observability",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "not directly observable",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M25-04"
+        ]
+      },
+      {
+        "parameter_id": "command_set",
+        "category": "COMPREHENSIVE",
+        "value": "datasheet controlled fact",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M25-05"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "device_family": "NOR Flash",
+    "schema_categories": [
+      "KEY_SPEC",
+      "KEY_DIAGNOSTIC",
+      "COMPREHENSIVE"
+    ],
+    "required_slots_must_remain_visible": true,
+    "auto_confirm": false
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "mock_id": "M15",
+  "purpose": "PROVIDER_TIMEOUT",
+  "request_match": {
+    "stage": "any"
+  },
+  "behavior": {
+    "status": 200,
+    "delay_ms": 2500
+  },
+  "payload": {
+    "ok": true
+  },
+  "expected": {
+    "runtime": "TIMEOUT",
+    "diagnosable": true,
+    "fabricate_fact": false
+  }
+}
