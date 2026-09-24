@@ -2,7 +2,7 @@
 
 Baseline: `main@654b7102ecfbb9e0a89cff354574c2a77551c713`
 
-Status: REMEDIATION_IMPLEMENTED / CI_PENDING
+Status: DOMAIN_BOUNDARY_AUDIT_PASS / PR_READY
 
 ## Audit rule
 
@@ -40,9 +40,26 @@ P01-P07, `hardware-case/v1`, `hardware-tree-import/v1`, Publish Gate, dual-tree 
 5. Hardware Case package no longer relies on whole-business-directory copying.
 6. Boundary tests assert that Quality Issue, Repeat Risk and Historical Case modules are not imported by Hardware Case-only startup.
 
-## Gate
+## Gate evidence
 
-Required before closure:
+Validated on PR #107 head `cf3b72d84a37a3f827c9ad18319785d622d96610`:
+
+- Hardware Case Product Test Package: PASS; regression suite `82 passed, 1 warning`.
+- Explicit package allowlist build: PASS.
+- Package manifest boundary assertions: PASS.
+- Packaged Hardware Case-only startup: PASS.
+- Hardware Case Web API Integration: PASS.
+- Hardware Case Product API E2E: PASS.
+- Hardware Case M3 P01-P07 Frontend: PASS.
+- Evidence Source: PASS.
+- Hardware Tree Import M3A + M3B: PASS.
+- Hardware Case Release Prep: PASS.
+- Major Issue Runtime Config + Major Case Publish regression: PASS.
+- Repeat Risk functional H01-H10/E2E, ITR, domain, Historical Case and Case Publish regression steps: PASS.
+- Product test artifact: `HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_abe7b64c4966.zip`.
+- Product ZIP SHA256: `626d7422982f4dbe5939ca17e96cd53b98ca33f4f567b55d14e58a8ffa404371`.
+
+Closure gates:
 
 - DOMAIN_BOUNDARY_STATIC_GATE
 - HARDWARE_CASE_ONLY_STARTUP_GATE
@@ -51,4 +68,6 @@ Required before closure:
 - GOLDEN_PATH_REGRESSION_PASS
 - DEFAULT_FULL_COMPOSITION_REGRESSION_PASS
 
-Final target: `DOMAIN_BOUNDARY_AUDIT_PASS`.
+Final result: `DOMAIN_BOUNDARY_AUDIT_PASS`.
+
+PR #107 is ready for review/merge; no further architecture redesign is required by this audit.
