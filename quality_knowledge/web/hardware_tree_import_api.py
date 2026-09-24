@@ -113,6 +113,20 @@ def create_hardware_tree_import_router(
         except HardwareTreeImportContractError as error:
             raise _http_error(error) from error
 
+    @router.get("/versions/{tree_type}")
+    def list_versions(
+        tree_type: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            items = repository.list_versions(tree_type)
+            return {"tree_type": tree_type.upper(), "items": items, "total": len(items)}
+        except HardwareTreeImportContractError as error:
+            raise _http_error(error) from error
+
     @router.get("/active-version/{tree_type}")
     def active_version(
         tree_type: str,
