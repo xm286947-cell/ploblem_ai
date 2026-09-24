@@ -513,7 +513,7 @@ class HardwareTreeImportRepository:
 
     def mark_ready_to_apply(self, job_id: str) -> dict[str, Any]:
         job = self.get_job(job_id)
-        if job["status"] != "REVIEW_REQUIRED":
+        if job["status"] not in {"REVIEW_REQUIRED", "APPLY_FAILED"}:
             raise HardwareTreeImportContractError("IMPORT_NOT_IN_REVIEW")
         with self.connect() as connection:
             unresolved_issue = connection.execute(
