@@ -29,8 +29,21 @@ on:
     paths:
       - "scripts/build_hardware_case_product_test_package.py"
       - "scripts/hardware_case_product_test_smoke.py"
+      - "scripts/hardware_case_precheck.py"
       - "run_hardware_case_product_test.bat"
       - "run_hardware_case_product_test.sh"
+      - "INIT_LOCAL_CONFIG.bat"
+      - "CHECK_ENV.bat"
+      - "START_HARDWARE_CASE.bat"
+      - "RUN_REAL_AI_VALIDATION.bat"
+      - "INIT_LOCAL_CONFIG.sh"
+      - "START_HARDWARE_CASE.sh"
+      - "RUN_REAL_AI_VALIDATION.sh"
+      - "00_README_FIRST.txt"
+      - "config/runtime/agents/hardware_case.structure.yaml"
+      - "config/runtime/model.local.hardware_case.example.yaml"
+      - "config/hardware_case_real_validation.local.example.json"
+      - "prompts/runtime/hardware_case/structure_v1.md"
       - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
@@ -94,6 +107,7 @@ jobs:
           assert "config/runtime/model.local.hardware_case.example.yaml" in paths
           assert "prompts/runtime/hardware_case/structure_v1.md" in paths
           assert "services/hardware_case_runtime_adapter.py" in paths
+          assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "RUN_REAL_AI_VALIDATION.bat" in paths
           assert "config/runtime/model.local.yaml" not in paths
