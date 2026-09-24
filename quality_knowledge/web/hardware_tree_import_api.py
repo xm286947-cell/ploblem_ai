@@ -127,6 +127,29 @@ def create_hardware_tree_import_router(
         except HardwareTreeImportContractError as error:
             raise _http_error(error) from error
 
+    @router.post("/{job_id}/workbook-preview")
+    def workbook_preview(
+        job_id: str,
+        payload: dict[str, Any],
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            job = repository.get_job(job_id)
+            staged = file_store.get(job_id, job["source_filename"])
+            return analyzer.preview_rows(
+                staged,
+                sheet_name=str(payload.get("sheet_name") or ""),
+                header_row=int(payload.get("header_row") or 0),
+                max_rows=int(payload.get("max_rows") or 20),
+            )
+        except (TypeError, ValueError) as error:
+            raise HTTPException(status_code=400, detail="HEADER_ROW_INVALID") from error
+        except HardwareTreeImportContractError as error:
+            raise _http_error(error) from error
+
     @router.get("/{job_id}")
     def get_import(
         job_id: str,
