@@ -1,0 +1,45 @@
+{
+  "manifest_version": "quality-scenario-rc1-test-execution-v0.1",
+  "status": "FROZEN_FOR_EXECUTION",
+  "product": "QUALITY_SCENARIO_MVP_RC1",
+  "product_baseline": "REQUIREMENT_BASELINE_质量场景库_MVP_V0.2",
+  "code_baseline": "6ad93f1396585163fffd1e4a70a677aee917a6ff",
+  "test_branch": "test/quality-scenario-rc1-baseline-v01",
+  "test_asset_root": "tests/product_test/quality_scenario_rc1",
+  "input_product_package": {
+    "name": "QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924.zip",
+    "sha256": "f84fb73c15f58db397f2a648970274aa4d666fb298011e1bb93167cf221945ac"
+  },
+  "fixtures": "tests/product_test/quality_scenario_rc1/mock_ai_fixtures.json",
+  "expected": "tests/product_test/quality_scenario_rc1/expected_results.json",
+  "coverage": "tests/product_test/quality_scenario_rc1/COVERAGE_MATRIX.json",
+  "runbook": "tests/product_test/quality_scenario_rc1/RUNBOOK.md",
+  "commands": [
+    "python -m pytest -q tests/product_test/quality_scenario_rc1/test_quality_scenario_product_baseline.py",
+    "python -m pytest -q tests/test_quality_scenario_candidate_v1_service.py tests/test_quality_scenario_v1_workflow_service.py tests/test_quality_scenario_traceability.py tests/test_quality_scenario_rc1_golden_e2e.py"
+  ],
+  "mock": {
+    "provider": "OpenAI-compatible local HTTP mock",
+    "listen": "127.0.0.1:ephemeral",
+    "endpoint": "/v1/chat/completions",
+    "real_external_provider_required": false,
+    "mock_boundary": "Provider/AI response only"
+  },
+  "execution_order": [
+    "verify code baseline",
+    "verify fixture/expected files unchanged",
+    "run product-test baseline",
+    "run compatibility set",
+    "collect evidence",
+    "return RESULT without modifying product or test assets"
+  ],
+  "evidence_output": "80_TEST_RESULT_EVIDENCE / execution-specific record",
+  "allowed_results": ["PASS","FAIL","BLOCKED","NOT_TESTED"],
+  "forbidden_actions": [
+    "modify product code during execution",
+    "modify fixture or Expected",
+    "directly write final DB state to bypass workflow",
+    "replace Repository/Publish/Query/Evidence with mocks",
+    "upload real internal problem data to GitHub or external public services"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "version": "quality-scenario-rc1-coverage-v0.1",
+  "status": "TEST_BASELINE_READY",
+  "product_baseline": "REQUIREMENT_BASELINE_质量场景库_MVP_V0.2",
+  "code_baseline": "6ad93f1396585163fffd1e4a70a677aee917a6ff",
+  "coverage": [
+    {"requirement":"REQ-TRIGGER-01","intent":"HIGH_PERCEPTION and RND_VALUE are source metadata, not two workflows","tests":["QS-PT-002","QS-PT-011"],"fixture":"golden/direct synthetic","expected":"CANDIDATE on same state machine; no WAIT_* approval state"},
+    {"requirement":"REQ-CONFIRM-01","intent":"quality + R&D confirmation is a business principle, not approval workflow","tests":["QS-PT-007","QS-PT-009","QS-PT-011"],"fixture":"golden","expected":"dual confirmation facts persisted; single state machine"},
+    {"requirement":"REQ-CONFIRM-02","intent":"confirmation trace","tests":["QS-PT-009"],"fixture":"golden","expected":"quality_confirmed_by and technical_confirmed_by visible in detail/history"},
+    {"requirement":"REQ-CONFIRM-03","intent":"CANDIDATE -> CONFIRMED -> PUBLISHED; CANDIDATE -> REJECTED","tests":["QS-PT-003","QS-PT-007","QS-PT-012"],"fixture":"golden/missing_information","expected":"only frozen states; blockers prevent illegal transition"},
+    {"requirement":"REQ-FLOW-01","intent":"single RC1 Golden Path","tests":["QS-PT-001","QS-PT-007","QS-PT-008","QS-PT-009","QS-PT-011"],"fixture":"golden","expected":"problem-to-evidence chain succeeds without manual DB mutation"},
+    {"requirement":"REQ-UI-01","intent":"P01/P02/P03 only","tests":["QS-PT-011"],"fixture":"published synthetic scenario","expected":"all three routes render; no alternate approval flow"},
+    {"requirement":"REQ-UI-02","intent":"Evidence/source remain in business context","tests":["QS-PT-008","QS-PT-011"],"fixture":"controlled content_ref","expected":"traceability PASS and Evidence integrity visible on P03"},
+    {"requirement":"REQ-P01-01","intent":"P01 state/buttons/evidence follow formal state machine","tests":["QS-PT-003","QS-PT-006","QS-PT-011","QS-PT-012"],"fixture":"candidate/blocker/rejected","expected":"no UI-defined extra state; illegal transitions fail"},
+    {"requirement":"Evidence-1/2/3/4","intent":"source/evidence traceability; AI inference not source fact; Runtime logs not product evidence","tests":["QS-PT-004","QS-PT-008"],"fixture":"evidence_mismatch/golden","expected":"bad evidence fails closed; valid evidence traceable"},
+    {"requirement":"NFR-AI-RUNTIME","intent":"AI calls Unified Runtime and failure is diagnosable","tests":["QS-PT-001","QS-PT-004","QS-PT-010"],"fixture":"golden/type_error/invalid_json/429","expected":"provider contract observed; malformed/provider faults fail closed"},
+    {"requirement":"NFR-DETERMINISTIC-STATE","intent":"product state and publish are deterministic","tests":["QS-PT-006","QS-PT-007","QS-PT-012"],"fixture":"synthetic candidate","expected":"optimistic concurrency, idempotent publish, rejected stays rejected"},
+    {"requirement":"AI-NO-SECOND-CALL","intent":"Candidate/Review/Confirm/Publish do not invoke AI again","tests":["QS-PT-007"],"fixture":"golden","expected":"provider.calls remains 1"}
+  ],
+  "p0_coverage_holes": []
+}
