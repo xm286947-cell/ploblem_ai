@@ -35,6 +35,7 @@ def create_p0_app(
     project_root: str | Path = PROJECT_ROOT,
     runtime_model_config: str | Path | None = None,
     hardware_case_db_path: str | Path | None = None,
+    repeat_web: Any | None = None,
 ) -> FastAPI:
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
@@ -111,12 +112,13 @@ def create_p0_app(
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
 
-    repeat_db = Path(db_path).with_name(Path(db_path).name + ".repeat-risk.db")
-    repeat_web = RepeatWebFacade.from_project(
-        issue_repository=repository,
-        repeat_db_path=repeat_db,
-        project_root=root,
-    )
+    if repeat_web is None:
+        repeat_db = Path(db_path).with_name(Path(db_path).name + ".repeat-risk.db")
+        repeat_web = RepeatWebFacade.from_project(
+            issue_repository=repository,
+            repeat_db_path=repeat_db,
+            project_root=root,
+        )
     app.state.repeat_risk_service = repeat_web
 
     hardware_db = (
