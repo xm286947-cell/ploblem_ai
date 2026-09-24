@@ -34,7 +34,7 @@
     $('[data-intake-title]').textContent=candidate?candidate.title:item.filename;
     $('[data-intake-case-id]').textContent=(item.case_id||'—')+' · '+item.status;
     $('[data-intake-facts]').innerHTML=candidate?['symptom','root_cause','actions'].map(key=>'<p><strong>'+escape(key)+'</strong>：'+escape(candidate.facts[key]||'待人工补充')+'</p>').join(''):'<p>尚未形成 Candidate。</p>';
-    $('[data-intake-evidence]').innerHTML=candidate&&candidate.evidence.length?candidate.evidence.map(e=>'<p>'+escape(e.evidence_id)+' · '+escape(e.evidence_type)+' · '+escape(e.locator&&e.locator.block_id)+'</p>').join(''):'<p>暂无 Evidence。</p>';
+    $('[data-intake-evidence]').innerHTML=candidate&&candidate.evidence.length?'<p>Evidence '+candidate.evidence.length+' 条；点击“查看详情 / Evidence”可回溯原始 Word。</p>'+candidate.evidence.map(e=>'<p>'+escape(e.evidence_id)+' · '+escape(e.evidence_type)+' · '+escape(e.locator&&e.locator.block_id)+' · '+escape(e.excerpt_or_caption||'')+'</p>').join(''):'<p>暂无 Evidence。</p>';
     $('[data-intake-mappings]').innerHTML=candidate&&candidate.mappings.length?candidate.mappings.map(m=>'<p>'+escape(m.tree_type)+' · '+escape(m.node_path||m.node_id)+' · '+escape(m.mapping_status)+'</p>').join(''):'<p>暂无建议挂接，可在案例确认中人工选择节点。</p>';
     for(const [selector,suffix] of [['[data-intake-review]','/review'],['[data-intake-case-detail]','?role=maintainer']]){
       const link=$(selector);link.hidden=!candidate;link.href=candidate?'/p0/hardware-cases/'+encodeURIComponent(item.case_id)+suffix:'#';
