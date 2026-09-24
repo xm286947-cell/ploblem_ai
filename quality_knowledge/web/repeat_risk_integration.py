@@ -10,6 +10,7 @@ from quality_knowledge.repeat_risk import (
     RepeatQueryTraceRepository,
     RepeatResultService,
 )
+from repositories import JsonArtifactRepository
 from services.historical_case_contract import (
     HistoricalCaseConsumerService,
     HistoricalCaseContractError,
@@ -289,7 +290,7 @@ class RepeatWebFacade:
             case_service = HistoricalCaseConsumerService.from_project_root(project_root)
         except HistoricalCaseContractError:
             case_service = HistoricalCaseConsumerService(
-                __import__("repositories").JsonArtifactRepository(project_root)
+                JsonArtifactRepository(project_root)
             )
         return cls(
             issue_repository=issue_repository,
