@@ -1,0 +1,27 @@
+{
+  "mock_id": "M06",
+  "purpose": "PARAMETER_NOT_CHECKED",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "nand_technology",
+        "category": "KEY_SPEC",
+        "value": null,
+        "unit": null,
+        "condition": null,
+        "coverage": "NOT_CHECKED",
+        "evidence_refs": []
+      }
+    ]
+  },
+  "expected": {
+    "coverage": "NOT_CHECKED",
+    "must_not_map_to": "NOT_FOUND"
+  }
+}
