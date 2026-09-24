@@ -834,6 +834,19 @@ class HardwareTreeImportRepository:
             "active_version": self.get_active_version(job["tree_type"]),
         }
 
+    def list_versions(self, tree_type: str) -> list[dict[str, Any]]:
+        tree_type = validate_tree_type(tree_type)
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM hardware_tree_version
+                WHERE tree_type=?
+                ORDER BY version_seq DESC
+                """,
+                (tree_type,),
+            ).fetchall()
+        return [self._version(row) for row in rows]
+
     def list_version_nodes(self, version_id: str) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
