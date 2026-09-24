@@ -12,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 
 
@@ -50,21 +49,19 @@ def main() -> int:
         p0_db = root / "quality_capability_p0.db"
         hardware_db = root / "hardware_case_mvp.db"
 
-        initializer = P0Initializer(
-            manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
-            plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
-        )
-        initializer.initialize(p0_db)
-
         app = create_p0_app(
             p0_db,
-            stage_runner=object(),
             hardware_case_db_path=hardware_db,
+            enabled_domains={"HARDWARE_CASE"},
         )
         client = TestClient(app)
 
-        assert client.get("/api/v2/initialization/status").status_code == 200
-        assert client.get("/api/v2/products").status_code == 200
+        assert app.state.p0_repository is None
+        assert app.state.repeat_risk_service is None
+        assert not p0_db.exists()
+        assert client.get("/api/v2/initialization/status").status_code == 404
+        assert client.get("/api/v2/products").status_code == 404
+        assert client.get("/api/v2/hardware-cases").status_code == 200
 
         case = {
             "case_id": "HC-PACKAGE-SMOKE-001",
