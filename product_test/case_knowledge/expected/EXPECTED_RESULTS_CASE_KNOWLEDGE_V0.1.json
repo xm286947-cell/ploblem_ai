@@ -1,0 +1,88 @@
+{
+  "baseline_version": "CASE_KNOWLEDGE_TEST_V0.1",
+  "scenarios": [
+    {
+      "test_id": "CK-SYS-EXT-NVME-001",
+      "fixture": "nvme_health_golden.json",
+      "expected": {
+        "extraction_status": "COMPLETED",
+        "candidate_count": 5,
+        "candidate_status": "CANDIDATE",
+        "auto_publish": false,
+        "evidence_status": "BOUND",
+        "human_review_required": true,
+        "publish_after_confirm": true,
+        "release_query_object_count": 5,
+        "knowledge_release_pinned": true
+      }
+    },
+    {
+      "test_id": "CK-SYS-EXT-UBI-001",
+      "fixture": "linux_ubi_golden.json",
+      "expected": {
+        "extraction_status": "COMPLETED",
+        "candidate_count": 4,
+        "candidate_status": "CANDIDATE",
+        "auto_publish": false,
+        "evidence_status": "BOUND",
+        "types": [
+          "CONCEPT",
+          "SOLUTION",
+          "DIAGNOSTIC"
+        ]
+      }
+    },
+    {
+      "test_id": "CK-FAIL-EVIDENCE-001",
+      "fixture": "missing_evidence.json",
+      "expected": {
+        "result": "FAIL_CLOSED",
+        "error_code": "EVIDENCE_MISSING",
+        "candidate_persisted": false,
+        "published_object_created": false
+      }
+    },
+    {
+      "test_id": "CK-FAIL-AI-AUTH-001",
+      "fixture": "ai_privilege_escalation.json",
+      "expected": {
+        "result": "FAIL_CLOSED",
+        "schema_accepts_ai_status": false,
+        "published_object_created": false,
+        "rule": "AI cannot set CONFIRMED/PUBLISHED business state"
+      }
+    },
+    {
+      "test_id": "CK-FAIL-PROVIDER-429-001",
+      "fixture": "provider_429.json",
+      "expected": {
+        "result": "FAIL_CLOSED",
+        "error_code": "KNOWLEDGE_EXTRACTION_FAILED",
+        "max_provider_calls": 2,
+        "published_object_created": false
+      }
+    },
+    {
+      "test_id": "CK-FAIL-PROVIDER-JSON-001",
+      "fixture": "provider_invalid_json.json",
+      "expected": {
+        "result": "FAIL_CLOSED",
+        "error_code": "KNOWLEDGE_EXTRACTION_FAILED",
+        "published_object_created": false
+      }
+    },
+    {
+      "test_id": "CK-SYS-BIZ-HCASE-001",
+      "fixture": "existing D06 HistoricalCase fixture",
+      "expected": {
+        "candidate_source_type": "BUSINESS",
+        "business_source_type": "HISTORICAL_CASE",
+        "copy_case_database": false,
+        "human_review_required": true,
+        "published_after_confirm": true,
+        "consumer_query_success": true,
+        "trace_to_case_evidence": true
+      }
+    }
+  ]
+}

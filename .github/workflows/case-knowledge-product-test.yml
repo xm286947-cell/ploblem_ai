@@ -1,0 +1,112 @@
+name: Case Knowledge Product Test
+
+on:
+  pull_request:
+    paths:
+      - "product_test/case_knowledge/**"
+      - "tests/product_test/test_case_knowledge_product_scenarios.py"
+      - "knowledge_production/**"
+      - "runtime/**"
+      - "repositories/**"
+      - "parser/**"
+      - "services/**"
+      - "tools/openai_mock/**"
+      - "config/runtime/**"
+      - "prompts/runtime/knowledge_production/**"
+      - "run_case_knowledge_product_test.*"
+      - ".github/workflows/case-knowledge-product-test.yml"
+  workflow_dispatch:
+
+jobs:
+  deterministic-product-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+      - name: Run frozen case-knowledge product test
+        run: bash run_case_knowledge_product_test.sh
+      - name: Build standalone Work test package
+        if: always()
+        run: |
+          PKG="outputs/case_knowledge_product_test/work_package"
+          rm -rf "$PKG"
+          mkdir -p "$PKG"
+          cp --parents -r \
+            knowledge_production \
+            runtime \
+            repositories \
+            parser \
+            services \
+            retriever \
+            builder \
+            product_test/case_knowledge \
+            tests/product_test/test_case_knowledge_product_scenarios.py \
+            tests/test_kp_m01_source_document.py \
+            tests/test_kp_m02_candidate_evidence.py \
+            tests/test_kp_m03_ai_extraction.py \
+            tests/test_kp_d01_business_candidate_intake.py \
+            tests/test_kp_d02_evaluation.py \
+            tests/test_kp_d03_review_publish.py \
+            tests/test_kp_d04_release_query.py \
+            tests/test_kp_d05_processing_ui.py \
+            tests/test_kp_d06_storage_golden.py \
+            tools/openai_mock \
+            config/runtime \
+            prompts/runtime/knowledge_production \
+            run_case_knowledge_product_test.sh \
+            run_case_knowledge_product_test.bat \
+            requirements.txt \
+            requirements-openai-mock-test.txt \
+            "$PKG/"
+          find "$PKG" -type d -name __pycache__ -prune -exec rm -rf {} +
+          printf '%s\n' \
+            'CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1' \
+            'Standalone deterministic product-test package.' \
+            'Source branch: test/case-knowledge-baseline-001' \
+            'Execution: bash run_case_knowledge_product_test.sh OR run_case_knowledge_product_test.bat' \
+            'Rule: Work executes only. Do not modify Fixture, Expected, tests, or product code.' \
+            'Outputs: outputs/case_knowledge_product_test/junit.xml and summary.txt' \
+            > "$PKG/WORK_PACKAGE_README.txt"
+          (
+            cd "$PKG"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+      - name: Verify standalone Work package
+        if: always()
+        run: |
+          cd outputs/case_knowledge_product_test/work_package
+          bash run_case_knowledge_product_test.sh
+      - name: Finalize verified Work package
+        if: always()
+        run: |
+          PKG="outputs/case_knowledge_product_test/work_package"
+          find "$PKG" -type d -name __pycache__ -prune -exec rm -rf {} +
+          find "$PKG" -type d -name .pytest_cache -prune -exec rm -rf {} +
+          find "$PKG" -type f -name '*.pyc' -delete
+          rm -rf "$PKG/outputs"
+          rm -f "$PKG/SHA256SUMS.txt"
+          (
+            cd "$PKG"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: case-knowledge-product-test-evidence
+          path: |
+            outputs/case_knowledge_product_test/junit.xml
+            outputs/case_knowledge_product_test/summary.txt
+      - name: Upload Work test package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CASE_KNOWLEDGE_PRODUCT_TEST_PACKAGE_V0.1
+          path: outputs/case_knowledge_product_test/work_package/

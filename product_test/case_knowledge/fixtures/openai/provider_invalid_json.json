@@ -1,0 +1,8 @@
+{
+  "scenario_key": "default",
+  "payload": "unused",
+  "behavior": {
+    "status": 200,
+    "raw_response_body": "{\"id\":\"chatcmpl-broken\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{broken-json\"}}]"
+  }
+}
