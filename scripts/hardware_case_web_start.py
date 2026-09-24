@@ -115,7 +115,7 @@ def main() -> int:
     import uvicorn
 
     print("Hardware Case Product Test")
-    print("P07: http://127.0.0.1:%s/p0/hardware-cases/base-data" % args.port)
+    print("P01: http://127.0.0.1:%s/p0/hardware-cases" % args.port)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
