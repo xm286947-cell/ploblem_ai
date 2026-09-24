@@ -1,0 +1,214 @@
+name: MAJOR-REPEAT-MVP-TEST-RC2-PLATFORM
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packaging/major_repeat_test_rc2/**"
+      - "scripts/build_major_repeat_test_rc2.py"
+      - "scripts/posix_major_repeat_test_rc2.py"
+      - "scripts/windows_major_repeat_test_rc1.py"
+      - "docs/product/major_repeat_test_rc2/**"
+      - ".github/workflows/major-repeat-test-rc2-platform.yml"
+  push:
+    branches:
+      - "feature/major-repeat-mvp-test-rc2-platform"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Reuse frozen H01-H10 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: repeat-web-001-h01-h10-9af9aa37785c34da18b71402b62d5fdcaa44c32e
+          repository: xm286947-cell/ploblem_ai
+          run-id: 35937969420
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: screenshot-evidence
+
+      - name: Frozen product regression
+        run: >
+          python -m pytest -q
+          tests/test_golden_e2e_001.py
+          tests/test_repeat_web_mvp.py
+          tests/test_quality_capability_p0_workbench_ued.py
+          tests/test_repeat_itr_subject.py
+          tests/test_repeat_search_contract.py
+          tests/test_repeat_result_contract.py
+          tests/test_historical_case_consumer_contract.py
+          tests/test_case_publish_adapter.py
+          tests/test_case_publish_service.py
+
+      - name: Runtime regression
+        run: >
+          python -m pytest -q
+          tests/test_runtime_long_content_recovery.py
+          tests/test_agent_runtime_p0_d4.py
+          tests/test_agent_runtime_p0_storage_e2e_json_truncation.py
+          tests/test_runtime_provider_adapter.py
+          tests/test_agent_runtime_p0_d3.py
+          tests/test_agent_runtime_p0_d11_acceptance_gaps.py
+          tests/test_rcfg02_major_runtime_config.py
+          tests/test_quality_capability_production_runner_p0.py
+          tests/test_quality_capability_v2_analysis_p0.py
+
+      - name: Build deterministic RC2
+        run: python scripts/build_major_repeat_test_rc2.py --out-dir dist --screenshots-dir screenshot-evidence
+
+      - name: Verify ZIP entry permission
+        run: |
+          python - <<'PY'
+          import zipfile
+          path = "dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip"
+          expected = {"run_linux.sh", "run_macos.sh", "run_posix.sh"}
+          with zipfile.ZipFile(path) as z:
+              for name in expected:
+                  info = z.getinfo("MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2/" + name)
+                  mode = (info.external_attr >> 16) & 0o777
+                  assert mode == 0o755, (name, oct(mode))
+          print("ZIP_ENTRY_PERMISSION=PASS")
+          PY
+
+      - name: Verify deterministic rebuild
+        run: |
+          cp dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip /tmp/first.zip
+          python scripts/build_major_repeat_test_rc2.py --out-dir dist2 --screenshots-dir screenshot-evidence
+          cmp /tmp/first.zip dist2/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip
+          echo "DETERMINISTIC_PACKAGE=PASS"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-${{ github.sha }}
+          path: |
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-native:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-${{ github.sha }}
+          path: dist
+
+      - name: Fresh extract with native unzip
+        run: |
+          rm -rf extracted
+          mkdir extracted
+          unzip -q dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip -d extracted
+          test -x extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2/run_linux.sh
+          test -x extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2/run_macos.sh
+          echo "FRESH_EXTRACT_PERMISSION=PASS"
+
+      - name: Linux no-chmod direct-start gate
+        run: >
+          python scripts/posix_major_repeat_test_rc2.py
+          --package extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2
+          --port 8769
+
+      - name: Upload Linux evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-linux-${{ github.sha }}
+          path: extracted/linux_startup.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  macos-native:
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-${{ github.sha }}
+          path: dist
+
+      - name: Fresh extract with native unzip
+        run: |
+          rm -rf extracted
+          mkdir extracted
+          unzip -q dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip -d extracted
+          test -x extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2/run_macos.sh
+          test -x extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2/run_linux.sh
+          echo "FRESH_EXTRACT_PERMISSION=PASS"
+
+      - name: macOS no-chmod direct-start gate
+        run: >
+          python scripts/posix_major_repeat_test_rc2.py
+          --package extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2
+          --port 8770
+
+      - name: Upload macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-macos-${{ github.sha }}
+          path: extracted/darwin_startup.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-regression:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-${{ github.sha }}
+          path: dist
+
+      - name: Fresh extract
+        shell: pwsh
+        run: Expand-Archive -Path dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2.zip -DestinationPath extracted
+
+      - name: Windows launcher regression
+        run: >
+          python scripts/windows_major_repeat_test_rc1.py
+          --package extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC2
+          --port 8771
+
+      - name: Upload Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc2-windows-${{ github.sha }}
+          path: extracted/windows_startup.log
+          if-no-files-found: warn
+          retention-days: 30
