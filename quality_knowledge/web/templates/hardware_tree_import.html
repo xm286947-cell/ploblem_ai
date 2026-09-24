@@ -42,6 +42,7 @@
       </dl>
       <div class="hti-tree-actions">
         <button type="button" class="hti-button primary" data-import-tree="CIRCUIT_FEATURE">导入 / 更新</button>
+        <button type="button" class="hti-button secondary" data-show-versions="CIRCUIT_FEATURE">查看版本</button>
         <button type="button" class="hti-button secondary" data-show-history="CIRCUIT_FEATURE">导入历史</button>
       </div>
     </article>
@@ -62,9 +63,23 @@
       </dl>
       <div class="hti-tree-actions">
         <button type="button" class="hti-button primary" data-import-tree="MATERIAL_DEVICE">导入 / 更新</button>
+        <button type="button" class="hti-button secondary" data-show-versions="MATERIAL_DEVICE">查看版本</button>
         <button type="button" class="hti-button secondary" data-show-history="MATERIAL_DEVICE">导入历史</button>
       </div>
     </article>
+  </section>
+
+  <section class="hti-card" data-version-panel hidden>
+    <div class="hti-card-head">
+      <div><h2 data-version-title>Tree Version</h2><p>ACTIVE 仅一个；历史版本只读。Rename / Move 不改变 node_id。</p></div>
+      <button type="button" class="hti-button secondary" data-close-versions>关闭</button>
+    </div>
+    <div class="hti-table-wrap">
+      <table class="hti-table">
+        <thead><tr><th>Version</th><th>状态</th><th>创建时间</th><th>生效时间</th><th>来源任务</th></tr></thead>
+        <tbody data-version-body><tr><td colspan="5" class="hti-empty-cell">选择一棵树查看版本。</td></tr></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="hti-card">
@@ -239,6 +254,9 @@
         <div class="hti-result-version">Tree Version：<strong data-result-version>—</strong></div>
         <div class="hti-actions centered">
           <button type="button" class="hti-button secondary" data-view-exclusions hidden>查看排除项</button>
+          <button type="button" class="hti-button secondary" data-retry-apply hidden>重试</button>
+          <button type="button" class="hti-button secondary" data-return-conflict hidden>返回冲突处理</button>
+          <button type="button" class="hti-button secondary" data-view-tree hidden>查看新树</button>
           <button type="button" class="hti-button secondary" data-view-history>查看导入记录</button>
           <button type="button" class="hti-button primary" data-finish>完成</button>
         </div>
