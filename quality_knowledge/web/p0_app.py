@@ -19,6 +19,7 @@ from runtime.config import AgentConfigError
 from quality_knowledge.web.api_v2 import create_v2_router
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
+from quality_knowledge.web.hardware_tree_import_pages import create_hardware_tree_import_pages_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
 from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
@@ -158,6 +159,7 @@ def create_p0_app(
         )
     )
     app.include_router(create_hardware_case_router(hardware_case_service))
+    app.include_router(create_hardware_tree_import_pages_router())
     app.include_router(create_p0_insights_router())
     app.include_router(create_p1_router())
 
