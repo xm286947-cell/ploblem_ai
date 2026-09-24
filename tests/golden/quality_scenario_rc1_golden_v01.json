@@ -1,0 +1,98 @@
+{
+  "dataset_version": "quality-scenario-rc1-golden-v0.1",
+  "classification": "SANITIZED_SYNTHETIC",
+  "contains_internal_real_data": false,
+  "purpose": "RC1 engineering Golden Path validation; real internal issue validation must run only in company environment.",
+  "case_id": "QS-RC1-GOLDEN-POWERLOSS-001",
+  "business_type": "PLC",
+  "trigger_source": "HIGH_PERCEPTION",
+  "trigger_reason": "客户现场运行中异常掉电导致关键计数丢失，作为高感知问题进入质量场景沉淀。",
+  "problem": {
+    "business_key": "ITR20260924001CS",
+    "source_file": "sanitized_golden.xlsx",
+    "sheet_name": "Sheet1",
+    "row_number": 2,
+    "raw": {
+      "问题信息_问题描述": "PLC 正常运行时异常掉电，重新上电后关键计数丢失",
+      "问题信息_问题原因定位": "保持变量写入未完成",
+      "问题信息_问题发生阶段": "终端正常使用",
+      "问题信息_产品型号": "PLC AM600",
+      "问题信息_问题领域": "软件",
+      "问题处理结果_问题解决方案": "重新上电恢复运行"
+    }
+  },
+  "runtime_response": {
+    "fields": {
+      "customer_experience": {
+        "value": "重新上电后关键计数丢失",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.95
+      },
+      "expected_quality_state": {
+        "value": "异常掉电后重新上电，关键计数应保持一致",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.86
+      },
+      "business_impact": {
+        "value": "关键计数丢失",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.9
+      },
+      "failure_mode": {
+        "value": "重新上电后关键计数丢失",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.95
+      },
+      "root_cause": {
+        "value": "保持变量写入未完成",
+        "evidence_ids": ["cs.root_cause"],
+        "confidence": 1.0
+      },
+      "failure_mechanism": {
+        "value": "保持变量写入未完成",
+        "evidence_ids": ["cs.root_cause"],
+        "confidence": 0.9
+      },
+      "trigger_condition": {
+        "value": "正常运行时异常掉电",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.95
+      },
+      "preconditions": {
+        "value": "PLC 正常运行时",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.95
+      },
+      "quality_risk": {
+        "value": "数据完整性风险",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.8
+      },
+      "quality_requirement_candidate": {
+        "value": "异常掉电后关键运行数据能够正确恢复",
+        "evidence_ids": ["cs.description", "cs.root_cause"],
+        "confidence": 0.8
+      },
+      "lifecycle_stage": {
+        "value": "运行执行",
+        "evidence_ids": ["cs.description", "cs.phase"],
+        "confidence": 0.9
+      },
+      "business_activity_scene": {
+        "value": "掉电数据保持与上电恢复",
+        "evidence_ids": ["cs.description"],
+        "confidence": 0.9
+      }
+    },
+    "lifecycle_code": "RUNTIME_EXECUTION",
+    "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+    "match_reason": "问题事实明确涉及运行期异常掉电与重新上电恢复。",
+    "missing_condition": "",
+    "questions": []
+  },
+  "human_review": {
+    "quality_reviewer": "QUALITY_OWNER_GOLDEN",
+    "technical_reviewer": "RND_OWNER_GOLDEN",
+    "confirmation_note": "RC1脱敏Golden：质量确认场景事实，研发确认技术判断。"
+  }
+}
