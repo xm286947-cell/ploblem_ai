@@ -1,0 +1,75 @@
+{
+  "mock_id": "M23",
+  "purpose": "PARAMETER_GOLDEN_SSD_NVME",
+  "request_match": {
+    "stage": "parameter_extract",
+    "device_type": "SSD"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 1024,
+        "unit": "GB",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M23-01"
+        ]
+      },
+      {
+        "parameter_id": "tbw",
+        "category": "KEY_SPEC",
+        "value": 600,
+        "unit": "TB",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M23-02"
+        ]
+      },
+      {
+        "parameter_id": "percentage_used",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "SMART/NVMe Health",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M23-03"
+        ]
+      },
+      {
+        "parameter_id": "available_spare",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "NVMe SMART",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M23-04"
+        ]
+      },
+      {
+        "parameter_id": "power_management",
+        "category": "COMPREHENSIVE",
+        "value": "supported",
+        "unit": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M23-05"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "device_family": "SSD/NVMe SSD",
+    "schema_categories": [
+      "KEY_SPEC",
+      "KEY_DIAGNOSTIC",
+      "COMPREHENSIVE"
+    ],
+    "required_slots_must_remain_visible": true,
+    "auto_confirm": false
+  }
+}
