@@ -201,8 +201,7 @@ def validate_extracted(
             )
 
     launcher = (root / "run_product_test.sh").read_text(encoding="utf-8")
-    required_tokens = (
-        "PORT_CONFLICT",
+    launcher_required_tokens = (
         "PRODUCT_E2E=NOT_RUN",
         "scripts/port_guard.py check-free",
         "scripts/port_guard.py wait-owned",
@@ -210,10 +209,26 @@ def validate_extracted(
         "18000",
         "18001",
     )
-    for token in required_tokens:
+    for token in launcher_required_tokens:
         if token not in launcher:
             raise SystemExit(
                 "PACKAGE_GATE=FAIL reason=port_ownership_launcher_contract "
+                f"missing={token}"
+            )
+
+    guard = (root / "scripts/port_guard.py").read_text(encoding="utf-8")
+    guard_required_tokens = (
+        "PORT_CONFLICT",
+        "SPAWNED_PROCESS_EXITED",
+        "HEALTH_OWNERSHIP_MISMATCH",
+        "PID_PORT_OWNERSHIP",
+        "check-free",
+        "wait-owned",
+    )
+    for token in guard_required_tokens:
+        if token not in guard:
+            raise SystemExit(
+                "PACKAGE_GATE=FAIL reason=port_guard_contract "
                 f"missing={token}"
             )
     return count, manifest
