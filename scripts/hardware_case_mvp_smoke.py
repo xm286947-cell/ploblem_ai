@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import tempfile
+from io import BytesIO
 from pathlib import Path
 import sys
 
+import openpyxl
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +17,22 @@ from quality_knowledge.web.p0_app import create_p0_app
 
 
 MAINTAINER = {"X-Hardware-Case-Role": "MAINTAINER"}
+TREE_MAINTAINER = {
+    "X-Hardware-Case-Role": "MAINTAINER",
+    "X-Hardware-Case-Operator": "package-smoke",
+}
+
+
+def tree_workbook_bytes() -> bytes:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "分类"
+    sheet.append(["编码", "一级", "二级", "备注"])
+    sheet.append(["C-IN-PROTECT", "电源", "输入保护", "Synthetic"])
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
 
 
 def field(value: str) -> dict:
@@ -73,19 +91,69 @@ def main() -> int:
             "/api/v2/hardware-cases?q=浪涌"
         ).json()["results"] == []
 
-        node = {
-            "node_id": "CF-PACKAGE-POWER",
-            "tree_type": "CIRCUIT_FEATURE",
-            "name": "输入保护",
-            "path": ["电源", "输入保护"],
-            "source_ref": "synthetic:package-tree.xlsx",
-            "active": True,
-        }
-        assert client.post(
-            "/api/v2/hardware-cases/trees/nodes",
-            json=node,
-            headers=MAINTAINER,
-        ).status_code == 201
+        # Productized tree intake: upload -> mapping -> preview/diff -> confirm -> apply.
+        upload = client.post(
+            "/api/v2/hardware-cases/tree-imports",
+            data={"tree_type": "CIRCUIT_FEATURE"},
+            files={
+                "file": (
+                    "synthetic-package-tree.xlsx",
+                    tree_workbook_bytes(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+            headers=TREE_MAINTAINER,
+        )
+        assert upload.status_code == 201, upload.text
+        job_id = upload.json()["job"]["job_id"]
+
+        analyzed = client.post(
+            f"/api/v2/hardware-cases/tree-imports/{job_id}/analyze",
+            json={
+                "sheet_name": "分类",
+                "header_row": 1,
+                "path_columns": ["一级", "二级"],
+                "metadata_columns": ["备注"],
+                "business_key_column": "编码",
+            },
+            headers=TREE_MAINTAINER,
+        )
+        assert analyzed.status_code == 200, analyzed.text
+        analysis = analyzed.json()
+        assert analysis["job"]["status"] == "REVIEW_REQUIRED"
+        assert analysis["change_summary"]["ADD"] == 2
+
+        for change in analysis["changes"]:
+            if change["change_type"] == "ADD":
+                decision = client.post(
+                    f"/api/v2/hardware-cases/tree-imports/{job_id}"
+                    f"/changes/{change['change_id']}/decision",
+                    json={"decision": "CONFIRMED"},
+                    headers=TREE_MAINTAINER,
+                )
+                assert decision.status_code == 200, decision.text
+
+        ready = client.post(
+            f"/api/v2/hardware-cases/tree-imports/{job_id}/ready",
+            headers=TREE_MAINTAINER,
+        )
+        assert ready.status_code == 200, ready.text
+
+        applied = client.post(
+            f"/api/v2/hardware-cases/tree-imports/{job_id}/apply",
+            headers=TREE_MAINTAINER,
+        )
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["active_version"]["version_id"] == "C-001"
+
+        tree = client.get("/api/v2/hardware-cases/trees/CIRCUIT_FEATURE")
+        assert tree.status_code == 200
+        imported_node = next(
+            node
+            for node in tree.json()["nodes"]
+            if node["path"] == ["电源", "输入保护"]
+        )
+        imported_node_id = imported_node["node_id"]
 
         for name, value in (
             ("symptom", "上电后复位"),
@@ -120,7 +188,7 @@ def main() -> int:
         mapping = {
             "mapping_id": "MAP-PACKAGE-001",
             "tree_type": "CIRCUIT_FEATURE",
-            "node_id": "CF-PACKAGE-POWER",
+            "node_id": imported_node_id,
             "relation_role": "PRIMARY",
             "mapping_status": "CONFIRMED",
             "confidence": 1.0,
@@ -164,9 +232,11 @@ def main() -> int:
         print("RESULT=PASS")
         print("PACKAGE_STAGE=RC0_PREP")
         print(
-            "GOLDEN_PATH=Case -> Human Confirm -> Evidence -> Mapping -> "
-            "Publish -> Search -> Detail -> Evidence"
+            "GOLDEN_PATH=Excel Upload -> Mapping -> Preview/Diff -> Apply -> "
+            "Case -> Human Confirm -> Evidence -> Tree Mapping -> Publish -> "
+            "Search -> Detail -> Evidence"
         )
+        print("TREE_IMPORT_VERSION=C-001")
         print("MVP_RELEASE_CLAIM=NO")
         return 0
 
