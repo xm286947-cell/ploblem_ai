@@ -1,6 +1,6 @@
 # QUALITY_SCENARIO_MVP_RC1 Release Note
 
-Status: ENGINEERING_RC1_CANDIDATE / INTERNAL_GOLDEN_PENDING
+Status: ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING
 
 ## Scope
 
@@ -35,8 +35,19 @@ Problem Fact
 
 ## Engineering release evidence
 
-The QS-MVP-07 gate uses a sanitized synthetic Golden Dataset that is safe to store in the repository.
-It validates the real product code path and the Unified Runtime boundary without uploading internal problem data.
+QS-MVP-07 engineering gate: PASS.
+
+Authoritative PR workflow:
+- run: 35947679409
+- implementation head: f9331848c685710aabaded7a2e8163b75254ad07
+- result: 147 passed / 0 failed
+- Python compile: PASS
+- P01 / P02 / P03 JavaScript syntax: PASS
+- validated Runtime dependency: 0959da43008307398a9cac0f9abfc7fec26dcb8a
+
+The gate uses a sanitized synthetic Golden Dataset that is safe to store in the repository.
+The automated Golden path runs the real product code boundary from problem fact through Unified Runtime, Reverse Quality, V1 Candidate, human confirmation, Publish, P02/P03 and Evidence traceability.
+Candidate / Review / Publish do not trigger a second model call, and the test provider secret is not persisted in Runtime evidence.
 
 Final internal-data acceptance is intentionally separate and must be executed only in the company environment.
 
