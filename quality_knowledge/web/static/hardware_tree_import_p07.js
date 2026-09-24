@@ -370,12 +370,20 @@
       if (change.change_type === "NO_CHANGE") {
         actions = '<span class="muted">无需处理</span>';
       } else if (change.change_type === "CONFLICT") {
+        const resolveLabel = decision === "RESOLVED" ? "更新修正" : (decision === "EXCLUDED" ? "恢复并解决" : "接受 / 修正");
+        const excludeAction = decision === "EXCLUDED" ? "" :
+          '<button class="btn hc-exclude-change" data-change="' + escapeHtml(change.change_id) + '">排除</button>';
         actions = '<div class="hc-conflict-editor">' +
           '<textarea class="hc-conflict-json" data-change="' + escapeHtml(change.change_id) + '">' +
             escapeHtml(JSON.stringify(after || before || {}, null, 2)) + '</textarea>' +
-          '<div><button class="btn btn-primary hc-resolve-conflict" data-change="' + escapeHtml(change.change_id) + '">接受 / 修正</button>' +
-          '<button class="btn hc-exclude-change" data-change="' + escapeHtml(change.change_id) + '">排除</button></div>' +
-        '</div>';
+          '<div><button class="btn btn-primary hc-resolve-conflict" data-change="' + escapeHtml(change.change_id) + '">' +
+          resolveLabel + '</button>' + excludeAction + '</div></div>';
+      } else if (decision === "CONFIRMED") {
+        actions = '<div class="hc-inline-actions"><span class="muted">已确认</span><button class="btn hc-exclude-change" data-change="' +
+          escapeHtml(change.change_id) + '">改为排除</button></div>';
+      } else if (decision === "EXCLUDED") {
+        actions = '<div class="hc-inline-actions"><span class="muted">已排除</span><button class="btn btn-primary hc-confirm-change" data-change="' +
+          escapeHtml(change.change_id) + '">恢复并确认</button></div>';
       } else {
         actions = '<div class="hc-inline-actions"><button class="btn btn-primary hc-confirm-change" data-change="' +
           escapeHtml(change.change_id) + '">确认</button><button class="btn hc-exclude-change" data-change="' +
