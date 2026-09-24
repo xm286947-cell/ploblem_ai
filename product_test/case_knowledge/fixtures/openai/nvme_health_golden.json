@@ -1,0 +1,144 @@
+{
+  "scenario_key": "default",
+  "payload": {
+    "candidates": [
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Percentage Used",
+        "content": "Percentage Used contains an estimate of NVM subsystem life consumed.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health",
+          "endurance"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "percentage_used",
+          "device_health",
+          "nvme"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 100,
+            "section": "SMART / Health",
+            "source_anchor": "page:100"
+          }
+        ],
+        "confidence": 0.99
+      },
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Available Spare",
+        "content": "Available Spare reports the normalized percentage of remaining spare capacity.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "available_spare",
+          "device_health",
+          "nvme"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 101,
+            "section": "SMART / Health",
+            "source_anchor": "page:101"
+          }
+        ],
+        "confidence": 0.98
+      },
+      {
+        "object_type": "FACT",
+        "title": "Data Units Written",
+        "content": "Data Units Written reports the amount of data written by the host.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health",
+          "write_endurance"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "data_units_written",
+          "host_write",
+          "nvme"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 102,
+            "section": "SMART / Health",
+            "source_anchor": "page:102"
+          }
+        ],
+        "confidence": 0.98
+      },
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Critical Warning",
+        "content": "Critical Warning indicates critical NVM subsystem conditions requiring attention.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "critical_warning",
+          "device_health",
+          "nvme"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 103,
+            "section": "SMART / Health",
+            "source_anchor": "page:103"
+          }
+        ],
+        "confidence": 0.98
+      },
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Media Errors",
+        "content": "Media and Data Integrity Errors reports unrecovered data integrity errors detected by the controller.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health",
+          "reliability"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "media_errors",
+          "data_integrity",
+          "nvme"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 104,
+            "section": "SMART / Health",
+            "source_anchor": "page:104"
+          }
+        ],
+        "confidence": 0.98
+      }
+    ],
+    "unknowns_or_gaps": []
+  },
+  "behavior": {
+    "status": 200
+  }
+}
