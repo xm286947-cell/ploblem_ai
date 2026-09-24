@@ -1,0 +1,56 @@
+{
+  "evidence": {
+    "contract_version": "knowledge-evidence/v1",
+    "evidence_id": "EVD-HW-WORD-001",
+    "source_document_id": "HW-WORD-001",
+    "domain": "HARDWARE_CASE",
+    "source_type": "WORD",
+    "source_ref": "controlled://hardware-case/HW-WORD-001",
+    "source_revision": "V1",
+    "page": 2,
+    "section": "Failure Analysis",
+    "paragraph": "P3",
+    "source_text": "Connector contact resistance increased after repeated vibration.",
+    "content_hash": "TO_BE_REPLACED_BY_TEST_FIXTURE",
+    "revision": 1
+  },
+  "candidate": {
+    "contract_version": "knowledge-candidate/v1",
+    "candidate_id": "HC-CAND-001",
+    "source_document_id": "HW-WORD-001",
+    "domain": "HARDWARE_CASE",
+    "object_type": "HARDWARE_CASE",
+    "structured_content": {
+      "phenomenon": "Intermittent communication loss",
+      "failure_mechanism": "Connector contact degradation",
+      "solution": "Improve connector retention and contact design"
+    },
+    "evidence_refs": ["EVD-HW-WORD-001"],
+    "status": "PENDING_REVIEW",
+    "created_at": "2026-09-24T12:00:00Z",
+    "revision": 1
+  },
+  "review": {
+    "contract_version": "knowledge-review/v1",
+    "candidate_id": "HC-CAND-001",
+    "action": "CONFIRM",
+    "reviewer": "hardware-reviewer",
+    "review_time": "2026-09-24T12:05:00Z",
+    "review_comment": "Evidence verified",
+    "revision": 1
+  },
+  "publish": {
+    "contract_version": "knowledge-publish/v1",
+    "candidate_id": "HC-CAND-001",
+    "idempotency_key": "HC-CAND-001-R1",
+    "publisher": "hardware-publisher",
+    "published_at": "2026-09-24T12:10:00Z",
+    "revision": 1
+  },
+  "query": {
+    "contract_version": "knowledge-query/v1",
+    "knowledge_release_version": "KNOWLEDGE_CAPABILITY_RELEASE_V0.3-HW-GOLDEN",
+    "domain": "HARDWARE_CASE",
+    "object_type": "HARDWARE_CASE"
+  }
+}

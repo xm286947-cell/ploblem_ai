@@ -92,6 +92,7 @@ class KnowledgePublishService:
             producer=candidate.producer,
             published_by=actor,
             published_at=published_at,
+            metadata=candidate.metadata,
         )
         self._commit_version(obj)
         return obj
@@ -218,6 +219,7 @@ class KnowledgePublishService:
             "evidence_refs": current.evidence_refs,
             "source_refs": current.source_refs,
             "producer": current.producer,
+            "metadata": current.metadata,
         }
         candidate_material = {
             "candidate_id": candidate.candidate_id,
@@ -241,5 +243,6 @@ class KnowledgePublishService:
             "evidence_refs": candidate.evidence_refs,
             "source_refs": candidate.source_refs,
             "producer": candidate.producer,
+            "metadata": candidate.metadata,
         }
         return current_material == candidate_material

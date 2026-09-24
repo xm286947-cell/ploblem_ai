@@ -304,6 +304,7 @@ class KnowledgeObject(StrictModel):
     producer: str = Field(min_length=1)
     published_by: str = Field(min_length=1)
     published_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 KNOWLEDGE_QUERY_CONTRACT_VERSION = "knowledge-query/v1"
