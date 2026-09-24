@@ -9,18 +9,24 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-BUILD_SCRIPT_VERSION = "storage-rc1-r4-builder-v1.1"
-EXPECTED_BASE_SHA256 = "a535a7cf741058ef687a6d65db83e18a32414e111c023517ae83c1a5fbac1b01"
+BUILD_SCRIPT_VERSION = "storage-rc1-r5-builder-v1.0"
+EXPECTED_BASE_SHA256 = "4de6586bc23a1105e4004faf949897a595a9c38b5382cb3e99d75c15111ddb60"
 PACKAGE_ROOT = "STORAGE_PRODUCT_MVP_RC1"
-PACKAGE_ID = "STORAGE-RC1-PACKAGE-DEFECT-115-FIX-CANDIDATE-20260924-R4A"
-PACKAGE_NAME = "STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260924_R4A.zip"
-FIXED_TIME = (2026, 9, 24, 0, 0, 0)
+PACKAGE_ID = "STORAGE-RC1-PACKAGE-DEFECT-115-FIX-CANDIDATE-20260925-R5"
+PACKAGE_NAME = "STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip"
+FIXED_TIME = (2026, 9, 25, 0, 0, 0)
 OVERLAY_FILES = (
     "start_test.sh",
     "run_server_test.sh",
     "run_product_test.sh",
     "selfcheck.sh",
     "run_windows.bat",
+    "scripts/port_guard.py",
+    "scripts/port_regression.py",
+)
+NEW_MANIFEST_PATHS = (
+    "scripts/port_guard.py",
+    "scripts/port_regression.py",
 )
 
 
@@ -41,7 +47,9 @@ def safe_name(name: str) -> None:
 def extract_verified(base_zip: Path, out: Path) -> Path:
     actual = sha256(base_zip)
     if actual != EXPECTED_BASE_SHA256:
-        raise SystemExit(f"base package SHA mismatch: expected={EXPECTED_BASE_SHA256} actual={actual}")
+        raise SystemExit(
+            f"base package SHA mismatch: expected={EXPECTED_BASE_SHA256} actual={actual}"
+        )
     with zipfile.ZipFile(base_zip) as zf:
         names = [i.filename for i in zf.infolist()]
         if len(names) != len(set(names)):
@@ -72,21 +80,29 @@ def parse_manifest_paths(root: Path) -> list[str]:
         safe_name(rel)
         paths.append(rel)
     if len(paths) != 254:
-        raise SystemExit(f"manifest path count drift: expected=254 actual={len(paths)}")
+        raise SystemExit(f"base manifest path count drift: expected=254 actual={len(paths)}")
     if len(paths) != len(set(paths)):
         raise SystemExit("manifest contains duplicate paths")
+    for rel in NEW_MANIFEST_PATHS:
+        if rel not in paths:
+            paths.append(rel)
+    if len(paths) != 256:
+        raise SystemExit(f"R5 manifest path count drift: expected=256 actual={len(paths)}")
     return paths
 
 
-def update_release_manifest(root: Path, source_branch: str, source_commit: str, base_name: str) -> None:
+def update_release_manifest(
+    root: Path, source_branch: str, source_commit: str, base_name: str
+) -> None:
     if not source_branch.strip() or source_branch == "N/A_PACKAGE_DERIVED_SOURCE":
         raise SystemExit("SOURCE_BRANCH must be traceable")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", source_commit):
         raise SystemExit("SOURCE_COMMIT must be a full 40-hex Git commit")
+
     p = root / "RELEASE_MANIFEST.json"
     data = json.loads(p.read_text(encoding="utf-8"))
     data["package_id"] = PACKAGE_ID
-    data["status"] = "R4A_BUILT_PENDING_CROSS_PLATFORM_RELEASE_GATE"
+    data["status"] = "R5_BUILT_PENDING_PLATFORM_RETEST"
     data["source_branch"] = source_branch
     data["source_commit"] = source_commit.lower()
     data["build_script_version"] = BUILD_SCRIPT_VERSION
@@ -96,38 +112,50 @@ def update_release_manifest(root: Path, source_branch: str, source_commit: str, 
         "build_script_version": BUILD_SCRIPT_VERSION,
         "base_package": base_name,
         "base_package_sha256": EXPECTED_BASE_SHA256,
-        "base_package_role": "FROZEN_INPUT_NOT_SOURCE_OF_TRUTH",
-        "r3_status": "FAILED_RETIRED",
+        "base_package_role": "FAILED_RETIRED_FROZEN_INPUT_NOT_SOURCE_OF_TRUTH",
+        "r4a_status": "FAILED_RETIRED",
     }
+
     fix = data.setdefault("defect_115_fix", {})
-    fix["r3_status"] = "FAILED_RETIRED"
-    fix["r3_package_sha256"] = EXPECTED_BASE_SHA256
+    fix["r4a_status"] = "FAILED_RETIRED"
+    fix["r4a_package_sha256"] = EXPECTED_BASE_SHA256
     fix["release_ceiling"] = "READY_FOR_PLATFORM_RETEST"
-    fix["dc_002"] = {
-        "status": "FIXED_IN_R4A_PENDING_CROSS_PLATFORM_RETEST",
-        "root_cause": "R3 launcher semantics depended on the extractor restoring ZIP Unix executable bits. The same immutable R3 ZIP/SHA produced 0755 in one fresh-extract path and 0644 in another, while launchers invoked shell helpers as ./helper.sh.",
-        "fix": "Linux/macOS official launch is bash start_test.sh mock|real and every shell-to-shell helper call is explicit bash. ZIP .sh entries remain Unix regular 0755 metadata, but executable-bit restoration is no longer a runtime dependency.",
-        "manual_chmod_allowed": False,
+    fix["launcher_port_ownership"] = {
+        "defect_id": "DEFECT-STG-LAUNCHER-PORT-OWNERSHIP-001",
+        "status": "FIXED_IN_R5_PENDING_PLATFORM_RETEST",
+        "governed_ports": {
+            "storage_web": "STORAGE_WEB_PORT default 8765",
+            "openai_mock": 18000,
+            "mock_router": 18001,
+        },
+        "pre_start_rule": "all required ports must be bind-free before any product/mock service is spawned",
+        "post_start_rule": "spawned PID alive + spawned PID owns listening port + expected health endpoint succeeds",
+        "port_conflict_behavior": "FAIL_FAST_BEFORE_PRODUCT_E2E",
+        "product_e2e_on_port_conflict": "NOT_RUN",
+        "health_only_success_forbidden": True,
+        "storage_web_port_configurable": True,
     }
-    fix["r4_launcher_contract"] = {
-        "linux_macos_official": ["bash start_test.sh mock", "bash start_test.sh real"],
-        "windows_official": "run_windows.bat",
-        "shell_executable_bit_runtime_dependency": False,
-        "shell_zip_metadata_required": "0755 contract only",
-        "manual_chmod_allowed": False,
+    fix["port_automation"] = {
+        "TEST-PORT-01": "8765 occupied -> PORT_CONFLICT -> Product E2E NOT_RUN",
+        "TEST-PORT-02": "18000 occupied -> PORT_CONFLICT -> Product E2E NOT_RUN",
+        "TEST-PORT-03": "18001 occupied -> PORT_CONFLICT -> Product E2E NOT_RUN",
+        "TEST-PORT-04": "all ports free -> normal mock E2E PASS",
+        "TEST-PORT-05": "spawned PID dead while other health is reachable -> Launcher FAIL",
     }
+
     gates = data.setdefault("gates", {})
-    gates["P0_PACKAGE_INTEGRITY"] = "PENDING_R4A_EXTERNAL_GATE"
-    gates["LINUX_LAUNCHER_PACKAGE_SMOKE"] = "PENDING_R4A_EXTERNAL_GATE"
-    gates["MACOS_CLEAN_MACHINE"] = "NOT_RUN"
-    gates["WINDOWS_CLEAN_MACHINE"] = "NOT_RUN"
-    gates["R4_PACKAGE_CONTRACT_GATE"] = "PENDING_EXTERNAL_EXECUTION"
-    gates["R4_CROSS_PLATFORM_GATE"] = "PENDING_EXTERNAL_EXECUTION"
+    gates["P0_PACKAGE_INTEGRITY"] = "PENDING_R5_PLATFORM_RETEST"
+    gates["LINUX_LAUNCHER_PACKAGE_SMOKE"] = "PENDING_R5_PLATFORM_RETEST"
+    gates["MACOS_CLEAN_MACHINE"] = "PENDING_R5_PLATFORM_RETEST"
+    gates["WINDOWS_CLEAN_MACHINE"] = "BLOCKED_NO_WINDOWS_ENVIRONMENT"
+    gates["R5_PORT_OWNERSHIP_GATE"] = "PENDING_EXTERNAL_EXECUTION"
     gates["RC1_PACKAGE_READY"] = "NO"
     data["test_gate"] = "NOT_CLAIMED"
     data["product_gate"] = "NOT_CLAIMED"
     data["final_rc1"] = "NOT_CLAIMED"
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    p.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def rewrite_sha_manifest(root: Path, paths: list[str]) -> None:
@@ -137,13 +165,20 @@ def rewrite_sha_manifest(root: Path, paths: list[str]) -> None:
         if not target.is_file():
             raise SystemExit(f"manifest path missing before build: {rel}")
         rows.append(f"{sha256(target)}  {rel}")
-    (root / "FILE_SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (root / "FILE_SHA256SUMS.txt").write_text(
+        "\n".join(rows) + "\n", encoding="utf-8"
+    )
 
 
 def write_zip(root: Path, target: Path) -> None:
-    files = sorted((p for p in root.rglob("*") if p.is_file()), key=lambda p: p.relative_to(root).as_posix())
+    files = sorted(
+        (p for p in root.rglob("*") if p.is_file()),
+        key=lambda p: p.relative_to(root).as_posix(),
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+    with zipfile.ZipFile(
+        target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as zf:
         for path in files:
             rel = path.relative_to(root).as_posix()
             arc = f"{PACKAGE_ROOT}/{rel}"
@@ -164,19 +199,25 @@ def main() -> None:
     ap.add_argument("--source-branch", required=True)
     ap.add_argument("--source-commit", required=True)
     args = ap.parse_args()
-    with tempfile.TemporaryDirectory(prefix="storage-r4-build-") as td:
+
+    with tempfile.TemporaryDirectory(prefix="storage-r5-build-") as td:
         root = extract_verified(args.base_zip.resolve(), Path(td))
         paths = parse_manifest_paths(root)
         for rel in OVERLAY_FILES:
             src = args.overlay_dir / rel
             if not src.is_file():
                 raise SystemExit(f"overlay missing: {rel}")
-            shutil.copy2(src, root / rel)
-        update_release_manifest(root, args.source_branch, args.source_commit, args.base_zip.name)
+            dst = root / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        update_release_manifest(
+            root, args.source_branch, args.source_commit, args.base_zip.name
+        )
         rewrite_sha_manifest(root, paths)
         target = args.out_dir / PACKAGE_NAME
         write_zip(root, target)
-    print("TASK=STORAGE-DELIVERY-QUALITY-HARDENING-001")
+
+    print("TASK=STORAGE-RC1-R5-LAUNCHER-PORT-OWNERSHIP-FIX-001")
     print(f"PACKAGE_ID={PACKAGE_ID}")
     print(f"PACKAGE={target}")
     print(f"SHA256={sha256(target)}")
