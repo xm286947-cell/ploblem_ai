@@ -63,6 +63,26 @@
       "scenario": "P02/P03 product consumption",
       "expected_status": "PASS",
       "expected_query_result": "PUBLISHED scenario is searchable; detail/history readable; missing id -> 404"
+    },
+    {
+      "case_id": "QS-PT-010",
+      "scenario": "429 provider fault",
+      "expected_status": "FAIL_CLOSED",
+      "expected_side_effect": "provider failure does not create product state"
+    },
+    {
+      "case_id": "QS-PT-011",
+      "scenario": "P01/P02/P03 product routes",
+      "expected_status": "PASS",
+      "expected_query_result": "three RC1 pages render and no WAIT_* approval-state expansion is exposed"
+    },
+    {
+      "case_id": "QS-PT-012",
+      "scenario": "Reject terminal path",
+      "expected_status": "REJECTED",
+      "expected_error_code": "SCENARIO_PUBLISH_REQUIRES_CONFIRMED",
+      "expected_publish_gate": "BLOCKED",
+      "expected_side_effect": "rejected candidate remains REJECTED"
     }
   ]
 }
