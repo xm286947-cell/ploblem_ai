@@ -149,6 +149,11 @@
       <div class="hc-panel">
         <div class="hc-panel-head"><div><h3>Step 5 · Confirm Apply</h3><p>Apply 将创建新的 Tree Version；若失败，当前 ACTIVE Version 保持不变。</p></div></div>
         <div id="hc-apply-summary" class="hc-apply-summary"></div>
+        <div class="hc-outcome-legend" aria-label="Apply 完成态">
+          <div><b>SUCCESS</b><span>全部生效 · 排除 0 · 失败 0</span></div>
+          <div><b>APPLIED_WITH_EXCLUSIONS</b><span>Apply 前已有明确排除，其余 Change Set Atomic Apply 成功</span></div>
+          <div><b>APPLY_FAILED</b><span>任一正式变更失败即整体失败；不生成新 ACTIVE Version</span></div>
+        </div>
         <div class="hc-danger-note">Atomic Apply：任一正式变更失败即整体失败，不生成新 ACTIVE Version，绝不显示“部分成功”。</div>
         <div class="hc-actions"><button id="hc-confirm-apply" class="btn btn-primary">确认生效</button><button id="hc-back-diff" class="btn">返回 Change Diff</button></div>
       </div>
