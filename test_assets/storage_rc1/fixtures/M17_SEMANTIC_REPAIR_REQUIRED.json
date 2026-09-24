@@ -1,0 +1,15 @@
+{
+  "mock_id": "M17",
+  "purpose": "SEMANTIC_REPAIR_REQUIRED",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": "Capacity might be 64GB, but the response cannot be safely mapped to the required schema.",
+  "expected": {
+    "runtime": "SEMANTIC_REPAIR_REQUIRED",
+    "business_guess_forbidden": true
+  }
+}
