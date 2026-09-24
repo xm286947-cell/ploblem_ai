@@ -1,0 +1,68 @@
+name: Storage R5 macOS Deterministic Platform Retest
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r5-macos-platform-retest-v2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  R4A_EXPECTED_SHA256: 4de6586bc23a1105e4004faf949897a595a9c38b5382cb3e99d75c15111ddb60
+  R5_EXPECTED_SHA256: 26b80ff06680e3f03c8107336f65515cdc5d29988fea13a3e97a9458dbddf691
+  SOURCE_BRANCH: fix/storage-rc1-r5-launcher-port-ownership
+  SOURCE_COMMIT: 6d9ea0913132e1dce059a0f9ee160877ad0c5e8a
+  R4A_URL: 'https://sdmntpraustraliaeast.oaiusercontent.com/files/00000000-e438-81fa-9e48-b7fbaa3ad236/raw?se=2026-09-24T16%3A57%3A48Z&sp=r&sv=2026-02-06&sr=b&scid=a43337ca-39d4-50bb-a282-a06b7d35a6b2&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T16%3A28%3A47Z&ske=2026-09-25T16%3A28%3A47Z&sks=b&skv=2026-02-06&sig=YxNHb/mWX8VXcKeLewuZvKVFP23Y/NOYsc71dBBkLl4%3D'
+
+jobs:
+  macos-native-r5:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frozen R4A and verify input SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/R4A.zip"
+          curl -fL --retry 3 --retry-delay 2 "$R4A_URL" -o "$BASE"
+          ACTUAL="$(shasum -a 256 "$BASE" | awk '{print $1}')"
+          echo "R4A_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$R4A_EXPECTED_SHA256"
+
+      - name: Deterministically build exact R5 bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/R4A.zip"
+          OUT="$RUNNER_TEMP/r5build"
+          mkdir -p "$OUT"
+          python3 delivery/storage_rc1_r4/tools/build_r4_package.py             --base-zip "$BASE"             --overlay-dir delivery/storage_rc1_r4/overlay             --out-dir "$OUT"             --source-branch "$SOURCE_BRANCH"             --source-commit "$SOURCE_COMMIT"
+          ZIP="$OUT/STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip"
+          ACTUAL="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          echo "MACOS_R5_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$R5_EXPECTED_SHA256"
+
+      - name: Run official R5 macOS platform gate on exact bytes
+        shell: bash
+        run: |
+          set -o pipefail
+          ZIP="$RUNNER_TEMP/r5build/STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip"
+          set +e
+          bash delivery/storage_rc1_r4/tools/platform_gate_macos.sh "$ZIP" "$R5_EXPECTED_SHA256" 2>&1 | tee "$RUNNER_TEMP/r5_macos_platform_gate_v2.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "MACOS_PLATFORM_GATE_EXIT=$RC"
+          test "$RC" -eq 0
+
+      - name: Upload R5 macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-macos-platform-evidence-v2
+          path: |
+            ${{ runner.temp }}/r5_macos_platform_gate_v2.log
