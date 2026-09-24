@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from io import BytesIO
@@ -12,11 +13,13 @@ import openpyxl
 import uvicorn
 from playwright.sync_api import sync_playwright
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def _fixture_xlsx(path: Path) -> None:
