@@ -44,6 +44,8 @@ jobs:
             repositories \
             parser \
             services \
+            retriever \
+            builder \
             product_test/case_knowledge \
             tests/product_test/test_case_knowledge_product_scenarios.py \
             tests/test_kp_m01_source_document.py \
