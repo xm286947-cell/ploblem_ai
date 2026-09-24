@@ -1,0 +1,54 @@
+name: REPEAT-WEB-001 Gate
+
+on:
+  push:
+    branches:
+      - "feature/repeat-web-001-v1"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "quality_knowledge/web/**"
+      - "quality_knowledge/repeat_risk/**"
+      - "services/historical_case_contract.py"
+      - "tests/test_repeat_web_mvp.py"
+      - ".github/workflows/repeat-web-001.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeat-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile
+        run: |
+          python -m compileall -q             quality_knowledge/web             quality_knowledge/repeat_risk             services/historical_case_contract.py
+
+      - name: REPEAT-WEB-001 H01-H10 and E2E
+        run: python -m pytest -q tests/test_repeat_web_mvp.py
+
+      - name: Existing ITR workbench regression
+        run: python -m pytest -q tests/test_quality_capability_p0_workbench_ued.py
+
+      - name: Repeat domain regression
+        run: |
+          python -m pytest -q             tests/test_repeat_itr_subject.py             tests/test_repeat_search_contract.py             tests/test_repeat_result_contract.py
+
+      - name: Historical Case and Case Publish regression
+        run: |
+          python -m pytest -q             tests/test_historical_case_consumer_contract.py             tests/test_case_publish_adapter.py             tests/test_case_publish_service.py
