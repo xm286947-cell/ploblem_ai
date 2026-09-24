@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS hardware_case_fact (
 CREATE TABLE IF NOT EXISTS hardware_tree_node (
     node_id TEXT PRIMARY KEY,
     tree_type TEXT NOT NULL,
+    business_key TEXT,
     name TEXT NOT NULL,
     parent_id TEXT,
     path_json TEXT NOT NULL,
@@ -58,6 +59,8 @@ CREATE TABLE IF NOT EXISTS hardware_case_mapping (
     tree_type TEXT NOT NULL,
     node_id TEXT NOT NULL,
     node_path TEXT,
+    tree_version TEXT,
+    path_snapshot TEXT,
     relation_role TEXT NOT NULL,
     mapping_status TEXT NOT NULL,
     confidence REAL,
@@ -119,6 +122,25 @@ class HardwareCaseRepository:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            self._ensure_column(connection, "hardware_tree_node", "business_key", "TEXT")
+            self._ensure_column(connection, "hardware_case_mapping", "tree_version", "TEXT")
+            self._ensure_column(connection, "hardware_case_mapping", "path_snapshot", "TEXT")
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection,
+        table: str,
+        column: str,
+        declaration: str,
+    ) -> None:
+        existing = {
+            str(row["name"])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+            )
 
     def save_case(self, case: dict[str, Any]) -> dict[str, Any]:
         case_id = str(case.get("case_id") or "").strip()
@@ -311,11 +333,12 @@ class HardwareCaseRepository:
             connection.execute(
                 """
                 INSERT INTO hardware_tree_node(
-                    node_id,tree_type,name,parent_id,path_json,description,
+                    node_id,tree_type,business_key,name,parent_id,path_json,description,
                     source_ref,active,source_metadata_json
-                ) VALUES(?,?,?,?,?,?,?,?,?)
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     tree_type=excluded.tree_type,
+                    business_key=excluded.business_key,
                     name=excluded.name,
                     parent_id=excluded.parent_id,
                     path_json=excluded.path_json,
@@ -327,6 +350,7 @@ class HardwareCaseRepository:
                 (
                     node_id,
                     node["tree_type"],
+                    node.get("business_key"),
                     node["name"],
                     node.get("parent_id"),
                     _json(node.get("path") or []),
@@ -348,6 +372,7 @@ class HardwareCaseRepository:
         return {
             "node_id": row["node_id"],
             "tree_type": row["tree_type"],
+            "business_key": row["business_key"],
             "name": row["name"],
             "parent_id": row["parent_id"],
             "path": _load(row["path_json"], []),
@@ -377,6 +402,23 @@ class HardwareCaseRepository:
             if (node := self.get_tree_node(str(row["node_id"]))) is not None
         ]
 
+    def get_active_tree_version_id(self, tree_type: str) -> str | None:
+        """Return the active HC-TREE version when the import subsystem exists."""
+        with self.connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hardware_tree_version'"
+            ).fetchone()
+            if not exists:
+                return None
+            row = connection.execute(
+                """
+                SELECT version_id FROM hardware_tree_version
+                WHERE tree_type=? AND status='ACTIVE'
+                """,
+                (tree_type,),
+            ).fetchone()
+        return str(row["version_id"]) if row else None
+
     def save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
         with self.connect() as connection:
             if mapping.get("relation_role") == "PRIMARY":
@@ -391,14 +433,16 @@ class HardwareCaseRepository:
             connection.execute(
                 """
                 INSERT INTO hardware_case_mapping(
-                    mapping_id,case_id,tree_type,node_id,node_path,relation_role,
-                    mapping_status,confidence,basis_refs_json
-                ) VALUES(?,?,?,?,?,?,?,?,?)
+                    mapping_id,case_id,tree_type,node_id,node_path,tree_version,
+                    path_snapshot,relation_role,mapping_status,confidence,basis_refs_json
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(mapping_id) DO UPDATE SET
                     case_id=excluded.case_id,
                     tree_type=excluded.tree_type,
                     node_id=excluded.node_id,
                     node_path=excluded.node_path,
+                    tree_version=excluded.tree_version,
+                    path_snapshot=excluded.path_snapshot,
                     relation_role=excluded.relation_role,
                     mapping_status=excluded.mapping_status,
                     confidence=excluded.confidence,
@@ -410,6 +454,8 @@ class HardwareCaseRepository:
                     mapping["tree_type"],
                     mapping["node_id"],
                     mapping.get("node_path"),
+                    mapping.get("tree_version"),
+                    mapping.get("path_snapshot") or mapping.get("node_path"),
                     mapping["relation_role"],
                     mapping["mapping_status"],
                     mapping.get("confidence"),
@@ -434,6 +480,8 @@ class HardwareCaseRepository:
             "tree_type": row["tree_type"],
             "node_id": row["node_id"],
             "node_path": row["node_path"],
+            "tree_version": row["tree_version"],
+            "path_snapshot": row["path_snapshot"] or row["node_path"],
             "relation_role": row["relation_role"],
             "mapping_status": row["mapping_status"],
             "confidence": row["confidence"],
