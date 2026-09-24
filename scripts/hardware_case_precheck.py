@@ -48,6 +48,8 @@ def ensure_local_templates() -> None:
         "data/tree",
         "data/output",
         "data/runtime",
+        "data/evidence_sources",
+        "data/hardware_case_sources",
     ):
         (ROOT / relative).mkdir(parents=True, exist_ok=True)
 
@@ -115,6 +117,8 @@ def check_web() -> list[str]:
                 str(temp_root / "hardware_case_mvp.db"),
                 "--tree-upload-dir",
                 str(temp_root / "tree_uploads"),
+                "--source-root",
+                str(temp_root / "sources"),
             ]
             result = subprocess.run(
                 command,

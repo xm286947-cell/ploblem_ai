@@ -13,6 +13,7 @@ import re
 from typing import Any, Callable, Protocol
 
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_case_word import HardwareWordParseError, ParsedWord, parse_docx
 
 
@@ -68,9 +69,12 @@ class HardwareCaseAIAdapter:
         self,
         backend: HardwareCaseBackendService,
         structurer: RuntimeStructurer | Callable[[dict[str, Any]], dict[str, Any]],
+        *,
+        source_store: HardwareCaseSourceStore | None = None,
     ):
         self.backend = backend
         self.structurer = structurer
+        self.source_store = source_store
 
     def ingest_docx(self, path: str | Path) -> dict[str, Any]:
         try:
@@ -80,6 +84,12 @@ class HardwareCaseAIAdapter:
 
         case_id, title = derive_identity(parsed)
         source_ref = parsed.source_ref
+        if self.source_store is not None:
+            try:
+                self.source_store.register_file(source_ref, path)
+            except Exception as exc:
+                code = getattr(exc, "code", "SOURCE_REGISTRATION_FAILED")
+                raise HardwareCaseAIAdapterError(str(code)) from exc
         block_index = {block["block_id"]: block for block in parsed.blocks}
 
         try:

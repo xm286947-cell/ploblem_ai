@@ -144,6 +144,7 @@ jobs:
           tests/test_hardware_tree_import_m3a_api.py
           tests/test_hardware_tree_import_m3b_frontend.py
           tests/test_hardware_case_runtime_adapter.py
+          tests/test_hardware_case_evidence_source.py
 
       - name: Stage delivery files
         run: |

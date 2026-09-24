@@ -25,6 +25,7 @@ from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
@@ -39,6 +40,7 @@ def create_p0_app(
     runtime_model_config: str | Path | None = None,
     hardware_case_db_path: str | Path | None = None,
     hardware_tree_upload_dir: str | Path | None = None,
+    hardware_case_source_root: str | Path | None = None,
     repeat_web: Any | None = None,
 ) -> FastAPI:
     root = Path(project_root)
@@ -135,6 +137,14 @@ def create_p0_app(
     app.state.hardware_case_repository = hardware_case_repository
     app.state.hardware_case_service = hardware_case_service
 
+    hardware_case_source_store = HardwareCaseSourceStore(
+        hardware_db,
+        Path(hardware_case_source_root)
+        if hardware_case_source_root is not None
+        else hardware_db.with_name(hardware_db.stem + "_sources"),
+    )
+    app.state.hardware_case_source_store = hardware_case_source_store
+
     hardware_tree_import_repository = HardwareTreeImportRepository(hardware_db)
     hardware_tree_file_store = HardwareTreeImportFileStore(
         Path(hardware_tree_upload_dir)
@@ -157,7 +167,12 @@ def create_p0_app(
             hardware_tree_file_store,
         )
     )
-    app.include_router(create_hardware_case_router(hardware_case_service))
+    app.include_router(
+        create_hardware_case_router(
+            hardware_case_service,
+            source_store=hardware_case_source_store,
+        )
+    )
     app.include_router(create_p0_insights_router())
     app.include_router(create_p1_router())
 

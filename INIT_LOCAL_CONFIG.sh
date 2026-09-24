@@ -9,5 +9,5 @@ if [ ! -f config/hardware_case_real_validation.local.json ]; then
   cp config/hardware_case_real_validation.local.example.json config/hardware_case_real_validation.local.json
   echo "[CREATED] config/hardware_case_real_validation.local.json"
 fi
-mkdir -p data/input/word data/tree data/output data/runtime
+mkdir -p data/input/word data/tree data/output data/runtime data/evidence_sources data/hardware_case_sources
 echo "Local configuration initialized."

@@ -25,6 +25,7 @@ from typing import Any, Callable
 from repositories.hardware_case_repository import HardwareCaseRepository
 from services.hardware_case_ai_adapter import FACT_FIELDS, HardwareCaseAIAdapter
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_source_store import HardwareCaseSourceStore
 
 
 CORE_FACTS = ("symptom", "root_cause", "actions")
@@ -273,13 +274,22 @@ def run_validation(
     )
     output_db.parent.mkdir(parents=True, exist_ok=True)
     backend = HardwareCaseBackendService(HardwareCaseRepository(output_db))
+    source_root = _resolve_local_path(
+        config,
+        str(config.get("source_root") or "../data/evidence_sources"),
+    )
+    source_store = HardwareCaseSourceStore(output_db, source_root)
 
     tree_counts = load_trees_from_config(backend, config)
     if structurer is None:
         structurer = resolve_structurer(str(config.get("structurer") or ""))
 
     files = discover_word_files(config)
-    adapter = HardwareCaseAIAdapter(backend, structurer)
+    adapter = HardwareCaseAIAdapter(
+        backend,
+        structurer,
+        source_store=source_store,
+    )
 
     status_counts: Counter[str] = Counter()
     failure_categories: Counter[str] = Counter()
