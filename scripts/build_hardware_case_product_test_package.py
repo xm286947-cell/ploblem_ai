@@ -213,7 +213,7 @@ def main() -> int:
         "package": PACKAGE_NAME,
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
-        "package_revision": "FULL_V0.1_P01_P07_DOMAIN_BOUNDARY",
+        "package_revision": "FULL_V0.1_P01_P07",
         "package_status": "READY_FOR_INTERNAL_TEST",
         "release_status": "TEST_PACKAGE_NOT_RELEASE",
         "source_commit": source_commit,
