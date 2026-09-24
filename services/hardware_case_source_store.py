@@ -46,7 +46,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_name(name: str) -> str:
-    value = Path(str(name or "")).name.replace("\x00", "").strip()
+    value = Path(str(name or "").replace("\\", "/")).name.replace("\x00", "").strip()
     if not value or value in {".", ".."}:
         raise HardwareCaseSourceError("SOURCE_FILENAME_INVALID")
     return value
