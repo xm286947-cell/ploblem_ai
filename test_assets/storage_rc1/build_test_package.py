@@ -17,7 +17,6 @@ INCLUDE = [
     "tests/test_storage_rc1_scenario_catalog.py",
     "tests/test_openai_mock_storage_m01_m08.py",
     "tests/test_runtime_provider_adapter.py",
-    "tests/test_runtime_strict_json_recovery_storage_integration.py",
     "tests/test_kp_d03_review_publish.py",
     "tests/test_kp_d06_storage_golden.py",
     "tools/openai_mock",
