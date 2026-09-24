@@ -1,0 +1,38 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block breadcrumb %}硬件案例库 / 双树导航{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-page="tree" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
+  <header class="hc-page-head">
+    <div><span class="hc-kicker">HARDWARE CASE · P02</span><h1>双树工程导航</h1><p>两棵树相互独立；切换树只替换数据源，不改变页面结构。</p></div>
+    <div class="hc-segmented" data-tree-toggle>
+      <button type="button" data-tree-type="CIRCUIT_FEATURE">电路 / 特性树</button>
+      <button type="button" data-tree-type="MATERIAL_DEVICE">物料 / 器件树</button>
+    </div>
+  </header>
+  <section class="hc-tree-layout">
+    <aside class="hc-tree-panel">
+      <input type="search" placeholder="搜索节点" data-node-search>
+      <div class="hc-tree-list" data-tree-list><div class="hc-empty">正在读取树…</div></div>
+    </aside>
+    <section class="hc-node-panel">
+      <div class="hc-breadcrumb-mini" data-node-breadcrumb>请选择树节点</div>
+      <h2 data-node-name>未选择节点</h2>
+      <p data-node-description>从左侧树选择一个节点查看工程上下文。</p>
+      <dl class="hc-node-meta">
+        <div><dt>完整路径</dt><dd data-node-path>—</dd></div>
+        <div><dt>已发布案例</dt><dd data-node-case-count>—</dd></div>
+      </dl>
+      <a class="hc-button secondary" href="/p0/hardware-cases/search" data-search-all>搜索全库</a>
+    </section>
+    <section class="hc-tree-cases">
+      <div class="hc-card-head"><div><h2>相关历史案例</h2><p>只展示已确认挂接且当前可消费的案例。</p></div></div>
+      <div class="hc-case-list" data-tree-cases><div class="hc-empty">请选择节点。</div></div>
+    </section>
+  </section>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}
