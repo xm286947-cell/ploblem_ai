@@ -79,6 +79,27 @@ from .storage_compat import (
     StorageKnowledgeCompatibilityError,
     StorageKnowledgeCompatibilityService,
 )
+from .public_contracts import (
+    KNOWLEDGE_EVIDENCE_CONTRACT_VERSION,
+    KNOWLEDGE_PUBLISH_CONTRACT_VERSION,
+    KNOWLEDGE_REVIEW_CONTRACT_VERSION,
+    KnowledgeCandidateIntakeRequest,
+    KnowledgeCandidateIntakeResponse,
+    KnowledgeEvidenceInput,
+    KnowledgeEvidenceResponse,
+    KnowledgePublishRequest,
+    KnowledgePublishResponse,
+    KnowledgeReviewRequest,
+    KnowledgeReviewResponse,
+    PublicKnowledgeQuery,
+    PublicKnowledgeQueryResult,
+    PublishedKnowledgeObject,
+)
+from .evidence import (
+    BusinessEvidenceIntakeService,
+    KnowledgeEvidenceIntakeError,
+)
+from .public_service import PublicKnowledgeError, PublicKnowledgeService
 from .api import create_knowledge_api_app
 from .web import create_processing_app
 
@@ -141,6 +162,24 @@ __all__ = [
     "SourceDocumentService",
     "StorageKnowledgeCompatibilityError",
     "StorageKnowledgeCompatibilityService",
+    "KNOWLEDGE_EVIDENCE_CONTRACT_VERSION",
+    "KNOWLEDGE_PUBLISH_CONTRACT_VERSION",
+    "KNOWLEDGE_REVIEW_CONTRACT_VERSION",
+    "KnowledgeCandidateIntakeRequest",
+    "KnowledgeCandidateIntakeResponse",
+    "KnowledgeEvidenceInput",
+    "KnowledgeEvidenceResponse",
+    "KnowledgePublishRequest",
+    "KnowledgePublishResponse",
+    "KnowledgeReviewRequest",
+    "KnowledgeReviewResponse",
+    "PublicKnowledgeQuery",
+    "PublicKnowledgeQueryResult",
+    "PublishedKnowledgeObject",
+    "BusinessEvidenceIntakeService",
+    "KnowledgeEvidenceIntakeError",
+    "PublicKnowledgeError",
+    "PublicKnowledgeService",
     "create_knowledge_api_app",
     "create_processing_app",
 ]
