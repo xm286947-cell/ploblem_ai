@@ -151,18 +151,43 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "vendor/unified_agent_runtime"))
+from models.common import VersionedDTO
+from quality_knowledge.models.issue import QualityIssueDTO
 from quality_knowledge.quality_scenario_v1 import ScenarioStatus
+from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
+from quality_knowledge.quality_scenario_v1_workflow_service import QualityScenarioV1WorkflowService
+from quality_knowledge.quality_scenario_traceability_service import QualityScenarioTraceabilityService
+from quality_knowledge.web.app import create_app
+from quality_knowledge.web.p0_app import create_p0_app
 from runtime import AgentRequest
 
 m = json.loads((ROOT / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
 assert m["product_baseline"] == "6ad93f1396585163fffd1e4a70a677aee917a6ff"
 assert m["runtime_baseline"] == "0959da43008307398a9cac0f9abfc7fec26dcb8a"
 assert ScenarioStatus.PUBLISHED.value == "PUBLISHED"
+assert VersionedDTO is not None
+assert QualityIssueDTO is not None
+assert CandidateV1Service is not None
+assert QualityScenarioV1WorkflowService is not None
+assert QualityScenarioTraceabilityService is not None
+assert create_app is not None
+assert create_p0_app is not None
 assert AgentRequest is not None
 for rel in (
     "quality_knowledge/web/templates/p0_quality_scenario_workbench.html",
     "quality_knowledge/web/templates/p0_quality_scenario_library.html",
     "quality_knowledge/web/templates/p0_quality_scenario_detail.html",
+    "quality_knowledge/web/static/p0_scenario_workbench.js",
+    "quality_knowledge/web/static/p0_scenario_library.js",
+    "quality_knowledge/web/static/p0_scenario_detail.js",
+    "quality_knowledge/p0/schema.sql",
+    "quality_knowledge/config/p0_seed_manifest.json",
+    "quality_knowledge/config/plc_fields.yaml",
+    "quality_knowledge/models/issue.py",
+    "models/common.py",
+    "config/runtime/agents/reverse_quality.single_issue.analyze.yaml",
+    "config/runtime/model.yaml",
+    "prompts/runtime/reverse_quality/single_issue_v01.md",
     "vendor/unified_agent_runtime/runtime/__init__.py",
 ):
     assert (ROOT / rel).is_file(), rel
@@ -318,11 +343,15 @@ def make_manifest(pkg: Path, source_commit: str) -> dict:
         })
     return {
         "package_name": PACKAGE_NAME,
-        "status": "ENGINEERING_RC1_PASS / INTERNAL_GOLDEN_PENDING",
+        "defect_id": "#126",
+        "build_type": "PACKAGE_DEFECT_FIX_CANDIDATE_R1",
+        "product_code_changed": False,
+        "status": "FIX_CANDIDATE_READY_FOR_RETEST",
         "product_baseline": PRODUCT_BASELINE,
         "engineering_head": ENGINEERING_HEAD,
         "runtime_baseline": RUNTIME_BASELINE,
         "package_source_commit": source_commit,
+        "required_project_dirs": list(REQUIRED_PROJECT_DIRS),
         "file_count": len(files),
         "files": files,
     }
