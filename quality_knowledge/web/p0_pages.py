@@ -68,6 +68,26 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/p0/cases", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_cases(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_cases.html",
+            {"api_prefix": api_prefix.rstrip("/"), "page_title": "重大问题案例库"},
+        )
+
+    @router.get("/p0/cases/{case_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_case_detail(request: Request, case_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_case_detail.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "case_id": case_id,
+                "page_title": "重大问题案例详情",
+            },
+        )
+
     @router.get("/p0/settings", response_class=HTMLResponse, include_in_schema=False)
     async def p0_settings(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(

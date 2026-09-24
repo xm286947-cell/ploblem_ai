@@ -4,15 +4,36 @@
 {% block breadcrumb %}问题分析{% endblock %}
 {% block body %}<main class="p0-detail" data-p0-issue-detail data-knowledge-id="{{knowledge_id}}" data-api-prefix="{{api_prefix}}">
   <header class="p0-page-head"><div><a class="p0-back" data-back href="/p0/issues">← 返回问题工作台</a><h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
-  <nav class="p0-detail-tabs" aria-label="问题详情导航"><a href="#overview">概览</a><a href="#analysis">原因与防控</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">原始与入库数据</a></nav>
+  <nav class="p0-detail-tabs" aria-label="问题详情导航"><a href="#overview">概览</a><a href="#analysis">原因与防控</a><a href="#repeat-risk">Repeat Risk</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">原始与入库数据</a></nav>
   <section class="p0-card p0-scope-bar" data-scope-status>正在读取问题与分析状态…</section>
   <section class="p0-card p0-facts" id="overview" data-facts><div class="p0-loading">正在加载问题事实…</div></section>
   <section class="p0-card p0-analysis-diagnostic" id="analysis" data-analysis-diagnostic hidden></section>
   <section class="p0-columns" data-analysis-grid hidden><article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">OCCURRENCE / ESCAPE</span><h2>发生与流出 MRC</h2></div></div><div class="p0-analysis-block" data-mrc></div></article><article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">RECURRENCE</span><h2>再发、防控与客户影响</h2></div></div><div class="p0-analysis-block" data-recurrence></div></article></section>
+  <section class="p0-card p0-repeat" id="repeat-risk" data-repeat-risk>
+    <div class="p0-card-head">
+      <div><span class="p0-kicker">REPEAT RISK</span><h2>历史类似问题</h2><p>查询主体固定为当前 ITR。系统提供历史经验与 Evidence，最终 Repeat 判断由人工完成。</p></div>
+      <a class="p0-ghost p0-case-link" href="/p0/cases">打开重大问题案例库</a>
+    </div>
+    <div class="p0-repeat-body">
+      <div class="p0-repeat-subject" data-repeat-subject><div class="p0-loading">正在读取当前 ITR…</div></div>
+      <div class="p0-repeat-optional" data-repeat-optional hidden></div>
+      <div class="p0-repeat-actions" data-repeat-actions><button class="p0-primary" type="button" data-repeat-query>查询历史类似问题</button><span data-repeat-context-summary></span></div>
+      <div class="p0-repeat-state" data-repeat-state="idle"><p>尚未执行 Repeat Risk 查询。</p></div>
+      <div class="p0-repeat-state" data-repeat-state="running" hidden><strong>正在检索历史案例…</strong><p data-repeat-running-context></p></div>
+      <div class="p0-repeat-state" data-repeat-state="result" hidden><div data-repeat-result></div></div>
+      <div class="p0-repeat-state p0-repeat-empty" data-repeat-state="empty" hidden><strong>未检索到历史案例</strong><p>本次查询未检索到符合当前条件的历史案例。该结果不等价于“不是重复问题”。</p></div>
+      <div class="p0-repeat-state p0-repeat-error" data-repeat-state="unavailable" hidden><strong>历史案例检索当前不可用</strong><p>请稍后重试。本次失败不会产生 Repeat / Not Repeat 结论。</p><button class="p0-primary" type="button" data-repeat-retry>重试</button></div>
+      <div class="p0-repeat-state p0-repeat-warning" data-repeat-state="incomplete" hidden><strong>查询结果不完整</strong><p>查询已完成，但部分结果或 Evidence 不完整。已有完整 Candidate 仍会显示。</p><div data-repeat-incomplete-result></div></div>
+    </div>
+  </section>
+  <aside class="p0-evidence-drawer" data-repeat-evidence-drawer hidden aria-label="Repeat Risk Evidence">
+    <div class="p0-drawer-head"><div><span class="p0-kicker">EVIDENCE</span><h2>原始 Evidence</h2></div><button type="button" data-evidence-close aria-label="关闭">×</button></div>
+    <div class="p0-drawer-body" data-evidence-body></div>
+  </aside>
   <section class="p0-card" id="gaps" data-gaps hidden><div class="p0-card-head"><div><span class="p0-kicker">CAPABILITY</span><h2>工程与管理能力缺口</h2></div></div><div class="p0-gap-grid" data-gap-list></div></section>
   <section class="p0-card" data-evidence hidden><div class="p0-card-head"><div><span class="p0-kicker">EVIDENCE</span><h2>证据与来源</h2></div></div><div class="p0-evidence-list" data-evidence-list></div></section>
   <section class="p0-card" id="human-analysis" data-confirmations hidden><div class="p0-card-head"><div><span class="p0-kicker">HUMAN ANALYSIS</span><h2>人工分析与确认</h2><p>可补充 AI 未识别的原因、MRC、客户影响和防控判断；人工结果独立保存，不覆盖 AI 原值。</p></div><span data-save-status></span></div><form data-confirm-form><div data-question-list></div><div class="p0-form-actions"><button class="p0-primary" type="submit">保存人工分析</button></div></form></section>
   <section class="p0-card p0-state" data-state="empty" hidden><h2>当前尚无分析结果</h2><p>可以发起分析，完成后再查看 MRC、能力缺口和证据。</p><button type="button" class="p0-primary" data-analyze>发起分析</button></section><section class="p0-card p0-state" data-state="running" hidden><h2>分析进行中</h2><p>分析完成后刷新本页查看结果。</p></section><section class="p0-card p0-state p0-error" data-state="error" hidden><h2>分析或读取失败</h2><p data-error-message>请稍后重试。</p><button type="button" class="p0-primary" data-analyze>重新分析</button></section><section class="p0-card p0-state" data-state="stale" hidden><h2>数据范围已变化</h2><p>当前问题或分析版本已更新，请刷新后继续。</p><button type="button" class="p0-primary" data-reload>刷新页面</button></section>
   <details class="p0-card p0-raw" id="trace" open><summary>技术追溯：原始数据与标准化入库数据</summary><div class="p0-raw-columns"><section><h3>原始问题数据</h3><div data-raw></div></section><section><h3>标准化入库数据</h3><div data-normalized></div></section></div></details>
 </main>{% endblock %}
-{% block page_scripts %}<script>window.P0_ISSUES_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_issue_detail.js?v=p0-detail-parity01" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.P0_ISSUES_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_issue_detail.js?v=p0-detail-parity01-repeat-v1" defer></script>{% endblock %}

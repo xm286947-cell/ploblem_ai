@@ -288,8 +288,268 @@
     }
   }
 
+
+  let repeatInspection = null;
+  let repeatResult = null;
+
+  async function post(path, payload) {
+    const response = await fetch(url(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const error = new Error(detail.detail || 'HTTP_' + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  function showRepeatState(name) {
+    root.querySelectorAll('[data-repeat-state]').forEach(element => {
+      element.hidden = element.dataset.repeatState !== name;
+    });
+  }
+
+  function repeatContextLabel() {
+    const optional = repeatInspection && obj(repeatInspection.optional_context);
+    const toggle = root.querySelector('[data-missed-toggle]');
+    const useMissed = Boolean(toggle && toggle.checked && optional.missed_test_available);
+    return useMissed
+      ? '当前 ITR + 关联漏测问题 ' + (optional.missed_test_ref || '')
+      : '仅当前 ITR';
+  }
+
+  function renderRepeatSubject(payload) {
+    repeatInspection = payload;
+    const subject = obj(payload.subject);
+    const snapshot = obj(subject.itr_snapshot);
+    root.querySelector('[data-repeat-subject]').innerHTML =
+      '<div class="p0-repeat-subject-grid">' +
+      '<div><label>查询主体</label><strong>当前 ITR · ' + esc(snapshot.itr_id || subject.itr_ref || '-') + '</strong></div>' +
+      '<div><label>问题</label><span>' + esc(snapshot.problem_description || '未提供') + '</span></div>' +
+      '<div><label>产品 / 版本</label><span>' + esc([snapshot.product, snapshot.version].filter(Boolean).join(' / ') || '未提供') + '</span></div>' +
+      '<div><label>场景</label><span>' + esc(snapshot.scene || '未提供') + '</span></div>' +
+      '</div>';
+
+    const optional = obj(payload.optional_context);
+    const mount = root.querySelector('[data-repeat-optional]');
+    mount.hidden = false;
+    if (optional.missed_test_available) {
+      mount.innerHTML =
+        '<label class="p0-repeat-check"><input type="checkbox" data-missed-toggle> ' +
+        '<span><strong>带入关联漏测问题</strong><small>' + esc(optional.missed_test_ref || '') +
+        ' · 仅作为 Optional Context，不改变当前 ITR 主 Subject</small></span></label>';
+      mount.querySelector('[data-missed-toggle]').addEventListener('change', () => {
+        root.querySelector('[data-repeat-context-summary]').textContent = '本次查询：' + repeatContextLabel();
+      });
+    } else {
+      mount.innerHTML = '<p class="p0-repeat-note">当前 ITR 无关联漏测问题，本次查询仅使用当前 ITR。</p>';
+    }
+    root.querySelector('[data-repeat-context-summary]').textContent = '本次查询：' + repeatContextLabel();
+  }
+
+  function evidenceHtml(item, index) {
+    const evidenceId = item.evidence_id || item.id || '';
+    const source = [item.source_type, item.source_id].filter(Boolean).join(' / ') || '未提供';
+    const location = [
+      item.file_name,
+      item.page != null ? 'Page ' + item.page : '',
+      item.section ? 'Section ' + item.section : ''
+    ].filter(Boolean).join(' · ') || '未提供';
+    const raw = item.raw_text || item.excerpt || item.content || '';
+    const support = item.target_path || item.supports || item.field_path || '';
+    const sourceLink = item.url
+      ? '<a href="' + esc(item.url) + '" target="_blank" rel="noopener">查看来源</a>'
+      : '<span>无可用来源链接</span>';
+    return '<article class="p0-drawer-evidence">' +
+      '<div class="p0-evidence-index">Evidence ' + esc(index + 1) + '</div>' +
+      '<dl><dt>Evidence ID</dt><dd>' + esc(evidenceId || '未提供') + '</dd>' +
+      '<dt>来源</dt><dd>' + esc(source) + '</dd>' +
+      '<dt>文档 / 位置</dt><dd>' + esc(location) + '</dd>' +
+      '<dt>支撑字段 / 结论</dt><dd>' + esc(support || '未确认 / 无已确认内容') + '</dd></dl>' +
+      '<blockquote>' + esc(raw || '当前知识存在，但没有可用原始 Evidence。') + '</blockquote>' +
+      '<div class="p0-source-link">' + sourceLink + '</div></article>';
+  }
+
+  function openEvidence(candidate) {
+    const drawer = root.querySelector('[data-repeat-evidence-drawer]');
+    const body = root.querySelector('[data-evidence-body]');
+    const evidence = arr(candidate.evidence);
+    drawer.hidden = false;
+    document.body.classList.add('p0-drawer-open');
+    body.innerHTML =
+      '<div class="p0-drawer-context"><strong>' + esc(candidate.title || candidate.case_id || '历史案例') + '</strong>' +
+      '<span>' + esc(candidate.case_id || '') + '</span></div>' +
+      (evidence.length
+        ? evidence.map(evidenceHtml).join('')
+        : '<div class="p0-evidence-missing"><strong>当前知识存在，但没有可用原始 Evidence。</strong><p>系统不会补造 Evidence。</p></div>');
+  }
+
+  function closeEvidence() {
+    root.querySelector('[data-repeat-evidence-drawer]').hidden = true;
+    document.body.classList.remove('p0-drawer-open');
+  }
+
+  function candidateHtml(candidate, index) {
+    const rationale = arr(candidate.why_relevant);
+    const rootCauses = arr(candidate.root_causes);
+    const measures = arr(candidate.measures);
+    const score = typeof candidate.retrieval_score === 'number'
+      ? Math.round(candidate.retrieval_score * 100) + '%'
+      : '-';
+    const evidenceCount = arr(candidate.evidence).length;
+    return '<article class="p0-repeat-candidate">' +
+      '<header><div><span class="p0-kicker">HISTORICAL CASE · #' + esc(candidate.rank || index + 1) + '</span>' +
+      '<h3>' + esc(candidate.title || candidate.case_id || '历史案例') + '</h3>' +
+      '<small>Case ' + esc(candidate.case_id || '-') + ' · 历史来源 ' + esc(candidate.source_ref || '-') + '</small></div></header>' +
+      '<section class="p0-rationale"><label>为什么值得关注</label>' +
+      (rationale.length
+        ? '<ul>' + rationale.map(item => '<li>' + esc(text(item)) + '</li>').join('') + '</ul>'
+        : '<p>' + esc(candidate.explanation_message || '当前检索结果未返回足够的可解释关联依据。') + '</p>') +
+      '</section>' +
+      '<div class="p0-repeat-case-grid">' +
+      '<section><label>历史问题现象</label><p>' + esc(candidate.historical_phenomenon || '未确认 / 无已确认内容') + '</p></section>' +
+      '<section><label>历史根因</label><p>' + esc(rootCauses.join('；') || '未确认 / 无已确认内容') + '</p></section>' +
+      '<section><label>历史措施</label><p>' + esc(measures.join('；') || '未确认 / 无已确认内容') + '</p></section>' +
+      '</div>' +
+      '<div class="p0-repeat-secondary"><span><b>Verification</b> ' + esc(candidate.verification || '未确认 / 无已确认内容') + '</span>' +
+      '<span><b>Similarity</b> ' + esc(score) + '</span>' +
+      '<span><b>Evidence</b> ' + esc(evidenceCount) + '</span></div>' +
+      '<footer><a class="p0-ghost" href="/p0/cases/' + encodeURIComponent(candidate.case_id || '') + '">查看完整案例</a>' +
+      '<button class="p0-ghost" type="button" data-repeat-evidence="' + esc(index) + '">查看 Evidence</button></footer>' +
+      '</article>';
+  }
+
+  function decisionHtml(result) {
+    const decision = obj(result.human_decision);
+    if (decision.decision && decision.decision !== 'PENDING') {
+      return '<section class="p0-repeat-decision p0-repeat-decision-saved"><div><span class="p0-kicker">HUMAN DECISION</span>' +
+        '<h3>人工结论：' + esc(decision.decision) + '</h3></div>' +
+        '<dl><dt>确认人</dt><dd>' + esc(decision.decided_by || '-') + '</dd>' +
+        '<dt>确认时间</dt><dd>' + esc(decision.decided_at || '-') + '</dd>' +
+        '<dt>判断说明</dt><dd>' + esc(decision.reason || '未填写') + '</dd></dl></section>';
+    }
+    return '<section class="p0-repeat-decision"><div><span class="p0-kicker">HUMAN DECISION</span>' +
+      '<h3>人工判断</h3><p>人工结论针对整次 Repeat Risk Run，不针对单个 Candidate。</p></div>' +
+      '<label>结论<select data-repeat-decision><option value="">请选择</option>' +
+      '<option value="REPEAT">REPEAT</option><option value="SIMILAR">SIMILAR</option>' +
+      '<option value="NOT_REPEAT">NOT_REPEAT</option><option value="INSUFFICIENT_EVIDENCE">INSUFFICIENT_EVIDENCE</option></select></label>' +
+      '<label>判断说明<textarea data-repeat-decision-reason rows="3" placeholder="请记录判断依据"></textarea></label>' +
+      '<button class="p0-primary" type="button" data-repeat-decision-save>保存人工判断</button>' +
+      '<span data-repeat-decision-status></span></section>';
+  }
+
+  function attachRepeatResultEvents(result) {
+    root.querySelectorAll('[data-repeat-evidence]').forEach(button => {
+      button.addEventListener('click', () => {
+        const candidate = arr(result.candidates)[Number(button.dataset.repeatEvidence)];
+        if (candidate) openEvidence(candidate);
+      });
+    });
+    const save = root.querySelector('[data-repeat-decision-save]');
+    if (save) save.addEventListener('click', saveRepeatDecision);
+  }
+
+  function resultBody(result) {
+    const candidates = arr(result.candidates);
+    const context = obj(result.query_snapshot);
+    const contextText = context.include_missed_test
+      ? '当前 ITR + 漏测问题 ' + (context.missed_test_ref || '')
+      : '仅当前 ITR';
+    return '<div class="p0-repeat-result-head"><div><span class="p0-kicker">QUERY CONTEXT</span><strong>' +
+      esc(contextText) + '</strong></div><span>Query ' + esc(result.query_id || '-') + '</span></div>' +
+      '<div class="p0-repeat-result-title">找到 <b>' + esc(result.candidate_count || 0) + '</b> 个值得关注的历史案例</div>' +
+      candidates.map(candidateHtml).join('') +
+      decisionHtml(result);
+  }
+
+  function renderRepeatResult(result) {
+    repeatResult = result;
+    const status = result && result.result_status;
+    if (status === 'NO_CANDIDATES') {
+      showRepeatState('empty');
+      return;
+    }
+    if (status === 'SEARCH_UNAVAILABLE') {
+      showRepeatState('unavailable');
+      return;
+    }
+    if (status === 'INCOMPLETE') {
+      showRepeatState('incomplete');
+      const mount = root.querySelector('[data-repeat-incomplete-result]');
+      mount.innerHTML = resultBody(result);
+      attachRepeatResultEvents(result);
+      return;
+    }
+    showRepeatState('result');
+    const mount = root.querySelector('[data-repeat-result]');
+    mount.innerHTML = resultBody(result);
+    attachRepeatResultEvents(result);
+  }
+
+  async function loadRepeat() {
+    try {
+      const state = await get('/issues/' + encodeURIComponent(knowledgeId) + '/repeat-risk');
+      renderRepeatSubject(state);
+      if (state.latest_result) renderRepeatResult(state.latest_result);
+      else showRepeatState('idle');
+    } catch (error) {
+      showRepeatState('unavailable');
+    }
+  }
+
+  async function runRepeatQuery() {
+    if (!repeatInspection) return;
+    const button = root.querySelector('[data-repeat-query]');
+    const toggle = root.querySelector('[data-missed-toggle]');
+    const includeMissed = Boolean(toggle && toggle.checked);
+    button.disabled = true;
+    showRepeatState('running');
+    root.querySelector('[data-repeat-running-context]').textContent =
+      '查询主体：当前 ITR；本次 Context：' + repeatContextLabel();
+    try {
+      const payload = await post(
+        '/issues/' + encodeURIComponent(knowledgeId) + '/repeat-risk/queries',
+        { include_missed_test: includeMissed, top_k: 5 }
+      );
+      renderRepeatResult(obj(payload.result));
+    } catch (error) {
+      showRepeatState('unavailable');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function saveRepeatDecision() {
+    if (!repeatResult || !repeatResult.query_id) return;
+    const decision = root.querySelector('[data-repeat-decision]')?.value || '';
+    const reason = root.querySelector('[data-repeat-decision-reason]')?.value.trim() || '';
+    const status = root.querySelector('[data-repeat-decision-status]');
+    if (!decision) {
+      if (status) status.textContent = '请选择人工结论。';
+      return;
+    }
+    if (status) status.textContent = '保存中…';
+    try {
+      const result = await post(
+        '/repeat-risk/queries/' + encodeURIComponent(repeatResult.query_id) + '/decision',
+        { decision, reason, decided_by: 'web' }
+      );
+      renderRepeatResult(result);
+    } catch (error) {
+      if (status) status.textContent = '保存失败：' + error.message;
+    }
+  }
+
   root.querySelectorAll('[data-analyze]').forEach(button => button.addEventListener('click', analyze));
   root.querySelector('[data-reload]').addEventListener('click', () => location.reload());
   root.querySelector('[data-confirm-form]').addEventListener('submit', confirm);
+  root.querySelector('[data-repeat-query]').addEventListener('click', runRepeatQuery);
+  root.querySelector('[data-repeat-retry]').addEventListener('click', runRepeatQuery);
+  root.querySelector('[data-evidence-close]').addEventListener('click', closeEvidence);
   load();
+  loadRepeat();
 })();

@@ -1,0 +1,22 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_cases.css?v=case-mvp-v1">{% endblock %}
+{% block breadcrumb %}重大问题案例详情{% endblock %}
+{% block body %}
+<main class="case-page" data-case-detail data-api-prefix="{{api_prefix}}" data-case-id="{{case_id}}">
+  <header class="case-head">
+    <div><a class="case-back" href="/p0/cases">← 返回案例库</a><span class="case-kicker">CASE REPORT</span><h1 data-case-title>正在加载案例…</h1><div class="case-badges" data-case-badges></div></div>
+  </header>
+  <section class="case-card case-summary" data-case-summary><div class="case-empty">正在加载…</div></section>
+  <div data-case-sections></div>
+  <section class="case-card" id="case-evidence">
+    <div class="case-card-head"><div><span class="case-section-no">08</span><h2>Evidence</h2></div><span data-case-evidence-count>0 条</span></div>
+    <div class="case-evidence-list" data-case-evidence><div class="case-empty">正在读取 Evidence…</div></div>
+  </section>
+  <section class="case-card" id="case-source-version">
+    <div class="case-card-head"><div><span class="case-section-no">09</span><h2>来源与版本</h2></div></div>
+    <div class="case-kv-grid" data-case-source></div>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.P0_CASES_API={{api_prefix|tojson}};window.P0_CASE_ID={{case_id|tojson}};</script><script src="/p0/static/p0_case_detail.js?v=case-mvp-v1" defer></script>{% endblock %}

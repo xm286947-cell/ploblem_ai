@@ -15,6 +15,7 @@
     <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
     <nav class="main-nav">
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/cases') %}active{% endif %}" href="/p0/cases">重大问题案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/batch-analysis') %}active{% endif %}" href="/p0/batch-analysis">批量 AI 分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/product-reports') %}active{% endif %}" href="/p1/product-reports">产品综合报告</a>
