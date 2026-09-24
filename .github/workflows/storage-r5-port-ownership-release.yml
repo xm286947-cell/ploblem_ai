@@ -13,10 +13,10 @@ permissions:
 
 env:
   SOURCE_BRANCH: fix/storage-rc1-r5-launcher-port-ownership
-  SOURCE_COMMIT: 5c8e8059babd68255c0f4a9dc8dddab4bad05df0
+  SOURCE_COMMIT: d39e5db9452a1006a62e10abdbe868a80e4a42d2
   BUILD_SCRIPT_VERSION: storage-rc1-r5-builder-v1.0
   R4A_EXPECTED_SHA256: 4de6586bc23a1105e4004faf949897a595a9c38b5382cb3e99d75c15111ddb60
-  R4A_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-49e8-8211-a6d0-8840a5660fc4/raw?se=2026-09-24T16%3A43%3A48Z&sp=r&sv=2026-02-06&sr=b&scid=e8420170-c411-51c7-83ba-234b38c9b38b&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T14%3A50%3A21Z&ske=2026-09-25T14%3A50%3A21Z&sks=b&skv=2026-02-06&sig=cTZ00dN7th/vIkd8HUzdXL/c6TQ%2BamrdWcr88nVDiHo%3D'
+  R4A_URL: 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-a44c-81f4-b4fc-5fc17f787feb/raw?se=2026-09-24T16%3A45%3A33Z&sp=r&sv=2026-02-06&sr=b&scid=2d87125e-5c77-5e00-a3ca-b9bc0afcd094&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T14%3A31%3A35Z&ske=2026-09-25T14%3A31%3A35Z&sks=b&skv=2026-02-06&sig=zWZ9ZpivLLxqBclH/Ak8QQpOuf9bwlASfx/Ri1Ulepg%3D'
   R5_PACKAGE: STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip
 
 jobs:
