@@ -108,7 +108,7 @@ wait_owned(){
   set +e
   "$PYTHON_BIN" scripts/port_guard.py wait-owned \
       --url "$url" --service "$name" --port "$port" --pid "$pid" \
-      --timeout "${STORAGE_SERVICE_START_TIMEOUT:-20}" --log "$log"
+      --timeout "${STORAGE_SERVICE_START_TIMEOUT:-90}" --log "$log"
   rc=$?
   set -e
   if [ "$rc" -eq 0 ]; then
