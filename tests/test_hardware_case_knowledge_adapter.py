@@ -33,7 +33,7 @@ CASE_ID = "HC-KNOWLEDGE-001"
 SOURCE_TEXT = "输入浪涌触发保护并导致控制器反复复位。"
 
 
-class TestClientTransport:
+class ClientTransport:
     def __init__(self, client: TestClient):
         self.client = client
         self.calls: list[dict[str, Any]] = []
@@ -78,7 +78,7 @@ def _knowledge(tmp_path: Path):
         service_id="hardware_case_knowledge_contract_gate",
     )
     client = TestClient(app)
-    transport = TestClientTransport(client)
+    transport = ClientTransport(client)
     adapter = HardwareCaseKnowledgeAdapter(
         transport,
         knowledge_release_version=RELEASE,
