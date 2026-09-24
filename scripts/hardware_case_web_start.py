@@ -1,0 +1,112 @@
+"""Standalone Hardware Case internal-test Web launcher.
+
+This is not a second Web application. It initializes the same Quality Capability
+P0/P1 database and starts the same create_p0_app() FastAPI application, but it
+avoids importing the repository-wide legacy CLI entrypoint (main.py), whose
+top-level imports include unrelated Repeat Case builder modules.
+"""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from quality_knowledge.p0.initializer import P0Initializer
+from quality_knowledge.web import create_p0_app
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def build_app(
+    *,
+    db_path: str | Path,
+    hardware_case_db_path: str | Path,
+    hardware_tree_upload_dir: str | Path,
+):
+    db = Path(db_path)
+    db.parent.mkdir(parents=True, exist_ok=True)
+    initializer = P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    )
+    if db.exists():
+        initializer.verify_ready(db)
+    else:
+        initializer.initialize(db)
+
+    hardware_db = Path(hardware_case_db_path)
+    hardware_db.parent.mkdir(parents=True, exist_ok=True)
+    upload_dir = Path(hardware_tree_upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    return create_p0_app(
+        db,
+        project_root=ROOT,
+        hardware_case_db_path=hardware_db,
+        hardware_tree_upload_dir=upload_dir,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Start the Hardware Case internal-test Web on the unified P0 app."
+    )
+    parser.add_argument(
+        "--db",
+        default=str(ROOT / "data/quality_capability_p1.db"),
+    )
+    parser.add_argument(
+        "--hardware-db",
+        default=str(ROOT / "data/hardware_case_mvp.db"),
+    )
+    parser.add_argument(
+        "--tree-upload-dir",
+        default=str(ROOT / "data/hardware_case_tree_uploads"),
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Initialize and build the app without opening a listening socket.",
+    )
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    app = build_app(
+        db_path=args.db,
+        hardware_case_db_path=args.hardware_db,
+        hardware_tree_upload_dir=args.tree_upload_dir,
+    )
+
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    required_routes = {
+        "/p0/hardware-cases/base-data",
+        "/api/v2/hardware-cases/tree-imports",
+    }
+    missing = sorted(path for path in required_routes if path not in route_paths)
+    if missing:
+        print("RESULT=BLOCKED")
+        print("MISSING_ROUTES=" + ",".join(missing))
+        return 3
+
+    if args.check:
+        print("RESULT=PASS")
+        print("STARTUP_IMPORT=PASS")
+        print("APP_FACTORY=create_p0_app")
+        print("WEB_ENTRY=/p0/hardware-cases/base-data")
+        print(f"ROUTE_COUNT={len(route_paths)}")
+        return 0
+
+    import uvicorn
+
+    print("Hardware Case Product Test")
+    print("P07: http://127.0.0.1:%s/p0/hardware-cases/base-data" % args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
