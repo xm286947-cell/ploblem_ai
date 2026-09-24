@@ -1,0 +1,209 @@
+name: Storage R4 Native Platform Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r4-native-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_SHA256: 27a8807ed8161968cd447c6a855e0d1caffa50093c8a5b516a6f43ec659633f6
+  R4_URL: 'https://sdmntprnznorth.oaiusercontent.com/files/00000000-a71c-820b-81c1-675feb2399b6/raw?se=2026-09-24T15%3A12%3A43Z&sp=r&sv=2026-02-06&sr=b&scid=98ea1517-39a9-5dc7-a0d6-2bf61a7c2f16&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T12%3A00%3A00Z&ske=2026-09-25T12%3A00%3A00Z&sks=b&skv=2026-02-06&sig=BQrRkv7TfblzUL5kjApkNdc4WTrxMjUxve1sZqbV4JA%3D'
+
+jobs:
+  macos-native:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download exact R4 and verify SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/R4.zip"
+          curl -fL --retry 3 --retry-delay 2 "$R4_URL" -o "$ZIP"
+          ACTUAL="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          echo "MACOS_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED_SHA256"
+
+      - name: Fresh extract with native macOS ditto and record shell modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/R4.zip"
+          DEST="$RUNNER_TEMP/R4 Fresh Extract"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          /usr/bin/ditto -x -k "$ZIP" "$DEST"
+          PKG="$DEST/STORAGE_PRODUCT_MVP_RC1"
+          test -d "$PKG"
+          echo "MACOS_FRESH_EXTRACT=$DEST"
+          find "$PKG" -type f -name '*.sh' -print0 | while IFS= read -r -d '' f; do
+            stat -f 'MACOS_SHELL_MODE=%N mode=%Lp' "$f"
+          done
+          PKG_ROOT="$PKG" python3 - <<'PY'
+          from pathlib import Path
+          import os
+          root=Path(os.environ["PKG_ROOT"])
+          bad=[]
+          for p in root.rglob("*.sh"):
+              for n,line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(),1):
+                  s=line.strip()
+                  if s.startswith("./") and ".sh" in s.split()[0]:
+                      bad.append(f"{p.relative_to(root)}:{n}:{s}")
+          print("MACOS_HELPER_DIRECT_EXEC_COUNT="+str(len(bad)))
+          for x in bad: print(x)
+          raise SystemExit(1 if bad else 0)
+          PY
+
+      - name: Start same Launcher without chmod
+        shell: bash
+        run: |
+          set -o pipefail
+          PKG="$RUNNER_TEMP/R4 Fresh Extract/STORAGE_PRODUCT_MVP_RC1"
+          cd "$PKG"
+          set +e
+          STORAGE_TEST_NO_WAIT=1 bash start_test.sh mock 2>&1 | tee "$RUNNER_TEMP/macos_launcher.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "MACOS_LAUNCHER_EXIT=$RC"
+          test "$RC" -eq 0
+
+      - name: Run package selfcheck without chmod
+        shell: bash
+        run: |
+          set -o pipefail
+          PKG="$RUNNER_TEMP/R4 Fresh Extract/STORAGE_PRODUCT_MVP_RC1"
+          cd "$PKG"
+          set +e
+          bash selfcheck.sh 2>&1 | tee "$RUNNER_TEMP/macos_selfcheck.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "MACOS_SELFCHECK_EXIT=$RC"
+          test "$RC" -eq 0
+
+      - name: Upload macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r4-macos-native-evidence
+          path: |
+            ${{ runner.temp }}/macos_launcher.log
+            ${{ runner.temp }}/macos_selfcheck.log
+            ${{ runner.temp }}/R4 Fresh Extract/STORAGE_PRODUCT_MVP_RC1/logs/**
+            ${{ runner.temp }}/R4 Fresh Extract/STORAGE_PRODUCT_MVP_RC1/release/**
+
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download exact R4 and verify SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'R4.zip'
+          Invoke-WebRequest -Uri $env:R4_URL -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          Write-Host "WINDOWS_SHA256=$actual"
+          if ($actual -ne $env:EXPECTED_SHA256) { throw "SHA256 mismatch" }
+
+      - name: Fresh extract into path with spaces
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'R4.zip'
+          $dest = Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces'
+          if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest
+          $pkg = Join-Path $dest 'STORAGE_PRODUCT_MVP_RC1'
+          if (-not (Test-Path (Join-Path $pkg 'run_windows.bat'))) { throw 'run_windows.bat missing' }
+          Write-Host "WINDOWS_FRESH_EXTRACT=$dest"
+          Write-Host "WINDOWS_PATH_WITH_SPACES=$($pkg -match ' ')"
+
+      - name: Native Windows Launcher from changed CWD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces'
+          $pkg = Join-Path $dest 'STORAGE_PRODUCT_MVP_RC1'
+          $outside = Join-Path $env:RUNNER_TEMP 'Outside Current Working Directory'
+          New-Item -ItemType Directory -Force -Path $outside | Out-Null
+          Set-Location $outside
+          Write-Host "WINDOWS_CHANGED_CWD=$(Get-Location)"
+          py -3 --version
+          Write-Host "WINDOWS_PYTHON_BOOTSTRAP=py -3"
+          $config = Join-Path $pkg 'config\model.local.yaml'
+          if (-not (Test-Path $config)) { throw "config missing: $config" }
+          $env:STORAGE_MODEL_CONFIG = $config
+          $env:STORAGE_WEB_PORT = '18765'
+          $stdout = Join-Path $env:RUNNER_TEMP 'windows_launcher_stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'windows_launcher_stderr.log'
+          $cmdLine = 'call "' + (Join-Path $pkg 'run_windows.bat') + '" < NUL'
+          $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$cmdLine -WorkingDirectory $outside -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $ok = $false
+          for ($i=0; $i -lt 180; $i++) {
+            if ($proc.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/api/health' -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { $ok=$true; break }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) {
+            if (Test-Path $stdout) { Get-Content $stdout -Tail 200 }
+            if (Test-Path $stderr) { Get-Content $stderr -Tail 200 }
+            if (Test-Path (Join-Path $pkg 'RUN_LOG.txt')) { Get-Content (Join-Path $pkg 'RUN_LOG.txt') -Tail 200 }
+            throw 'Native Windows Launcher did not become healthy'
+          }
+          Write-Host 'WINDOWS_LAUNCHER_HEALTH=PASS'
+          $runlog = Get-Content (Join-Path $pkg 'RUN_LOG.txt') -Raw
+          $launcherlog = Get-Content (Join-Path $pkg 'logs\launcher_latest.log') -Raw
+          if ($runlog -notmatch [regex]::Escape($pkg)) { throw 'PACKAGE_ROOT evidence missing' }
+          if ($launcherlog -notmatch [regex]::Escape($config)) { throw 'model config evidence missing' }
+          if ($launcherlog -notmatch '\\.venv\\Scripts') { throw 'package Python venv evidence missing' }
+          Write-Host "WINDOWS_CONFIG=$config"
+          Write-Host 'WINDOWS_PYTHON=PACKAGE_LOCAL_VENV'
+          taskkill /PID $proc.Id /T /F | Out-Host
+          Start-Sleep -Seconds 2
+
+      - name: Native Windows Mock Product Test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Join-Path (Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces') 'STORAGE_PRODUCT_MVP_RC1'
+          $python = Join-Path $pkg '.venv\Scripts\python.exe'
+          if (-not (Test-Path $python)) { throw "package Python missing: $python" }
+          $env:STORAGE_WEB_PORT='18766'
+          $env:STORAGE_TEST_NO_WAIT='1'
+          $env:STORAGE_STRICT_PACKAGE_PROVENANCE='1'
+          $env:STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME='1'
+          $env:UNIFIED_AGENT_RUNTIME_ROOT=(Join-Path $pkg 'vendor\unified_agent_runtime')
+          $env:VIRTUAL_ENV=(Join-Path $pkg '.venv')
+          $env:PYTHONHOME=''
+          $env:PYTHONPATH="$pkg;$($env:UNIFIED_AGENT_RUNTIME_ROOT)"
+          $env:PATH="$(Join-Path $pkg '.venv\Scripts');$env:PATH"
+          Push-Location $pkg
+          try {
+            & $python (Join-Path $pkg 'scripts\windows_e2e.py') --mode mock 2>&1 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'windows_product_test.log')
+            $rc = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+          Write-Host "WINDOWS_PRODUCT_TEST_EXIT=$rc"
+          if ($rc -ne 0) { throw "Windows mock Product Test failed rc=$rc" }
+
+      - name: Upload Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r4-windows-native-evidence
+          path: |
+            ${{ runner.temp }}\windows_launcher_stdout.log
+            ${{ runner.temp }}\windows_launcher_stderr.log
+            ${{ runner.temp }}\windows_product_test.log
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\RUN_LOG.txt
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\logs\**
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\release\**
