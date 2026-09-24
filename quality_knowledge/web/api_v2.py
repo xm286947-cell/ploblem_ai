@@ -14,6 +14,12 @@ from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
 from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
 from quality_knowledge.product_report import ProductQualityReportService, ProductReportError
+from quality_knowledge.repeat_risk import (
+    RepeatITRContractError,
+    RepeatResultContractError,
+    RepeatSearchContractError,
+)
+from services.historical_case_contract import HistoricalCaseContractError
 from quality_knowledge.services.v2_analysis_service import V2AnalysisError, V2AnalysisService
 from quality_knowledge.services.v2_batch_analysis_service import V2BatchAnalysisError, V2BatchAnalysisService
 from quality_knowledge.services.v2_batch_job_service import V2BatchAnalysisJobManager
@@ -51,6 +57,7 @@ def create_v2_router(
     stage_runner: Any | None = None,
     initialization_status: dict[str, Any] | None = None,
     analysis_runtime_status: dict[str, Any] | None = None,
+    repeat_web: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2")
     fields = StandardFieldRepository(repository.db_path)
@@ -579,6 +586,77 @@ def create_v2_router(
             )
         except ForwardRiskError as error:
             raise _http_error(error) from error
+
+    def _repeat_http_error(error: Exception) -> HTTPException:
+        code = getattr(error, "code", None) or str(error)
+        if code in {"ISSUE_NOT_FOUND", "ITR_NOT_FOUND", "REPEAT_QUERY_NOT_FOUND", "REPEAT_RESULT_NOT_FOUND", "CASE_NOT_FOUND"}:
+            return HTTPException(404, code)
+        if code in {"CASE_SERVICE_UNAVAILABLE", "SEARCH_UNAVAILABLE", "REPEAT_RISK_NOT_CONFIGURED"}:
+            return HTTPException(503, code)
+        if code in {"CASE_CONTRACT_INVALID", "CANDIDATE_DETAIL_INCOMPLETE"}:
+            return HTTPException(502, code)
+        return HTTPException(400, code)
+
+    def _repeat_service() -> Any:
+        if repeat_web is None:
+            raise HTTPException(503, "REPEAT_RISK_NOT_CONFIGURED")
+        return repeat_web
+
+    @router.get("/issues/{knowledge_id}/repeat-risk")
+    def repeat_risk_state(knowledge_id: str) -> dict[str, Any]:
+        try:
+            return _repeat_service().inspect_issue(knowledge_id)
+        except (RepeatITRContractError, RepeatSearchContractError, RepeatResultContractError, HistoricalCaseContractError, KeyError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.post("/issues/{knowledge_id}/repeat-risk/queries", status_code=201)
+    def repeat_risk_query(knowledge_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return _repeat_service().run_query(
+                knowledge_id,
+                include_missed_test=bool(payload.get("include_missed_test")),
+                top_k=max(1, min(int(payload.get("top_k") or 5), 20)),
+            )
+        except (RepeatITRContractError, RepeatSearchContractError, RepeatResultContractError, HistoricalCaseContractError, KeyError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.get("/issues/{knowledge_id}/repeat-risk/result")
+    def repeat_risk_restore(knowledge_id: str) -> dict[str, Any]:
+        try:
+            restored = _repeat_service().restore_result(knowledge_id)
+            return restored or {"state": "NOT_RUN", "result": None}
+        except (RepeatITRContractError, RepeatSearchContractError, RepeatResultContractError, HistoricalCaseContractError, KeyError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.post("/repeat-risk/queries/{query_id}/decision")
+    def repeat_risk_decision(query_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return _repeat_service().decide(
+                query_id,
+                str(payload.get("decision") or ""),
+                decided_by=str(payload.get("decided_by") or ""),
+                reason=str(payload.get("reason") or ""),
+            )
+        except (RepeatResultContractError, KeyError, ValueError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.get("/historical-cases")
+    def historical_cases(
+        q: str = "",
+        product: str = "",
+        status: str = "PUBLISHED",
+    ) -> dict[str, Any]:
+        try:
+            return _repeat_service().list_cases(q=q, product=product, status=status or "PUBLISHED")
+        except HistoricalCaseContractError as error:
+            raise _repeat_http_error(error) from error
+
+    @router.get("/historical-cases/{case_id}")
+    def historical_case_detail(case_id: str) -> dict[str, Any]:
+        try:
+            return _repeat_service().case_detail(case_id)
+        except HistoricalCaseContractError as error:
+            raise _repeat_http_error(error) from error
 
     def insight_filters(business_type: str, month: str, issue_domain: str, lifecycle_phase: str) -> dict[str, str]:
         return {key: value for key, value in {
