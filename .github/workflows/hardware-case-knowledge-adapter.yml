@@ -1,0 +1,86 @@
+name: Hardware Case Knowledge Adapter Gate
+
+on:
+  push:
+    branches:
+      - feature/hardware-case-knowledge-adapter-001
+    paths:
+      - "services/hardware_case_knowledge_adapter.py"
+      - "tests/test_hardware_case_knowledge_adapter.py"
+      - "docs/product/HARDWARE_CASE_KNOWLEDGE_ADAPTER_001.md"
+      - ".github/workflows/hardware-case-knowledge-adapter.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "services/hardware_case_knowledge_adapter.py"
+      - "tests/test_hardware_case_knowledge_adapter.py"
+      - "docs/product/HARDWARE_CASE_KNOWLEDGE_ADAPTER_001.md"
+      - ".github/workflows/hardware-case-knowledge-adapter.yml"
+  workflow_dispatch:
+
+jobs:
+  adapter-contract-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Run Knowledge Adapter contract gate
+        run: |
+          python -m pytest -q tests/test_hardware_case_knowledge_adapter.py
+
+      - name: Run Hardware Case baseline regression
+        run: |
+          python -m pytest -q \
+            tests/test_hardware_case_contract.py \
+            tests/test_hardware_case_backend.py \
+            tests/test_hardware_case_ai_adapter.py \
+            tests/test_hardware_case_runtime_adapter.py \
+            tests/test_hardware_case_evidence_source.py \
+            tests/test_hardware_case_scenario_poc.py \
+            tests/test_hardware_case_knowledge_import.py \
+            tests/test_hardware_tree_import_m1.py \
+            tests/test_hardware_tree_import_m2.py \
+            tests/test_hardware_tree_import_m3a_api.py \
+            tests/test_hardware_tree_import_m3b_frontend.py \
+            tests/test_hardware_case_web_api.py \
+            tests/test_hardware_case_product_api_e2e.py \
+            tests/test_hardware_case_m3_frontend.py \
+            tests/test_hardware_case_domain_boundary.py
+
+      - name: Static boundary proof
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path = Path("services/hardware_case_knowledge_adapter.py")
+          tree = ast.parse(path.read_text(encoding="utf-8"))
+          imports = []
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imports.extend(alias.name for alias in node.names)
+              elif isinstance(node, ast.ImportFrom):
+                  imports.append(node.module or "")
+
+          forbidden = ("knowledge_production", "repositories", "runtime")
+          bad = [
+              name for name in imports
+              if any(name == prefix or name.startswith(prefix + ".") for prefix in forbidden)
+          ]
+          if bad:
+              raise SystemExit("DIRECT_KNOWLEDGE_INTERNAL_DEPENDENCY:" + ",".join(bad))
+          print("DIRECT_KNOWLEDGE_INTERNAL_DEPENDENCY=NO")
+          print("RUNTIME_MODIFIED=NO")
+          print("SECOND_WEB=NO")
+          PY
