@@ -24,7 +24,21 @@ jobs:
           python -m pip install -r requirements-runtime-p0-test.txt -r requirements-openai-mock-test.txt
       - name: Validate Storage RC1 fixtures and scenario mapping
         run: |
-          python -m pytest -q             tests/test_storage_rc1_mock_assets.py             tests/test_storage_rc1_scenario_catalog.py
+          python -m pytest -q \
+            tests/test_storage_rc1_mock_assets.py \
+            tests/test_storage_rc1_scenario_catalog.py
       - name: Re-run established Storage OpenAI Mock Runtime gate
         run: |
           python -m pytest -q tests/test_openai_mock_storage_m01_m08.py
+      - name: Build frozen Storage RC1 test package
+        run: |
+          python test_assets/storage_rc1/build_test_package.py
+          cat dist/STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3.zip.sha256
+      - name: Upload frozen test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3
+          path: |
+            dist/STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3.zip
+            dist/STORAGE_PRODUCT_TEST_BASELINE_RC1_V0.3.zip.sha256
+          if-no-files-found: error
