@@ -2,7 +2,7 @@
 
 Baseline: `main@654b7102ecfbb9e0a89cff354574c2a77551c713`
 
-Status: DOMAIN_BOUNDARY_AUDIT_PASS / PR_READY
+Status: DOMAIN_BOUNDARY_AUDIT_PASS / POST_MERGE_GATE_PASS / CLOSED
 
 ## Audit rule
 
@@ -71,3 +71,14 @@ Closure gates:
 Final result: `DOMAIN_BOUNDARY_AUDIT_PASS`.
 
 PR #107 is ready for review/merge; no further architecture redesign is required by this audit.
+
+
+## Post-merge closure
+
+- PR #107 merged to `main@1c51bf3e030090804e743df6c205b572e3b61f05`.
+- Main push Gate: Hardware Case Product Test Package PASS.
+- Main push Gate: Hardware Case M3 Frontend PASS.
+- Main push Gate: Hardware Case Evidence Source PASS.
+- Main package: `HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_1c51bf3e0300.zip`.
+- Main package SHA256: `328984b6ce84755563a2c6fb681915c5eb23c37ef61fda3ce8d3ec286789a66b`.
+- Architecture audit task is CLOSED. Any future coupling regression must be caught by the package/domain-boundary CI gate rather than reopened as redesign work.
