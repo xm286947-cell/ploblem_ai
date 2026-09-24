@@ -56,16 +56,26 @@ INTEGRITYPY
   PYTHON_BIN="$(bash ./scripts/select_python.sh)"
   export PYTHONPATH="$RUNTIME_ROOT:${PYTHONPATH:-}"
   "$PYTHON_BIN" scripts/preflight.py --runtime-root "$RUNTIME_ROOT" --mode mock
+
+  printf '\n[PORT] Launcher port ownership regression\n'
+  "$PYTHON_BIN" scripts/port_regression.py --package-root . || exit $?
+
   printf '\n[1/6] Mock normal\n'
   STORAGE_TEST_NO_WAIT=1 STORAGE_MOCK_FAULT=normal STORAGE_PYTHON_BIN="$PYTHON_BIN" bash ./run_product_test.sh mock "$RUNTIME_ROOT" || exit $?
+  printf 'TEST-PORT-04=PASS FREE_PORT_NORMAL_MOCK_E2E=PASS\n'
+
   printf '\n[2/6] Mock JSON truncation\n'
   STORAGE_TEST_NO_WAIT=1 STORAGE_MOCK_FAULT=truncate_once STORAGE_PYTHON_BIN="$PYTHON_BIN" bash ./run_product_test.sh mock "$RUNTIME_ROOT" || exit $?
+
   printf '\n[3/6] Mock 429 recovery\n'
   STORAGE_TEST_NO_WAIT=1 STORAGE_MOCK_FAULT=429_once STORAGE_PYTHON_BIN="$PYTHON_BIN" bash ./run_product_test.sh mock "$RUNTIME_ROOT" || exit $?
+
   printf '\n[4/6] Mock persistent 503 hard budget\n'
   STORAGE_TEST_NO_WAIT=1 STORAGE_MOCK_FAULT=persistent_503 STORAGE_PYTHON_BIN="$PYTHON_BIN" bash ./run_product_test.sh mock "$RUNTIME_ROOT" || exit $?
+
   printf '\n[5/6] Storage regression\n'
   "$PYTHON_BIN" -m pytest -q || exit $?
+
   printf '\nPRODUCT PRETEST SELF-CHECK PASS\n'
 } 2>&1 | tee "$LOG"
 status=${PIPESTATUS[0]}
