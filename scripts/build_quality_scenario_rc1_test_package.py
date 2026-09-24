@@ -9,12 +9,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASELINE = "6ad93f1396585163fffd1e4a70a677aee917a6ff"
-ENGINEERING_HEAD = "66df062b28527a286033ad7632a7ac79247efe82"
+ENGINEERING_HEAD = PRODUCT_BASELINE
 RUNTIME_BASELINE = "0959da43008307398a9cac0f9abfc7fec26dcb8a"
-PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_TEST_PACKAGE_20260924"
+PACKAGE_NAME = "QUALITY_SCENARIO_MVP_RC1_DEFECT_126_FIX_CANDIDATE_20260925_R1"
 EXCLUDED_DIRS = {".git", ".github", ".pytest_cache", "__pycache__", ".deps", "knowledge", "input", "output", "baseline_release", "releases", "deliverables"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".log", ".zip", ".xlsx", ".xls", ".xlsm", ".pdf", ".doc", ".docx"}
-REQUIRED_PROJECT_DIRS = ("quality_knowledge", "prompts/runtime", "config/runtime/agents")
+REQUIRED_PROJECT_DIRS = ("quality_knowledge", "models", "prompts/runtime", "config/runtime/agents")
 RC1_DOCS = (
     "docs/QUALITY_SCENARIO_MVP_RC1_RELEASE_NOTE.md",
     "docs/QUALITY_SCENARIO_MVP_RC1_E2E_REPORT.md",
@@ -275,7 +275,7 @@ def write_readme(pkg: Path) -> None:
 
 ## 基线
 Product baseline: 6ad93f1396585163fffd1e4a70a677aee917a6ff
-Engineering head: 66df062b28527a286033ad7632a7ac79247efe82
+Engineering head: 6ad93f1396585163fffd1e4a70a677aee917a6ff
 Unified Runtime baseline: 0959da43008307398a9cac0f9abfc7fec26dcb8a
 Engineering Gate: 147 passed / 0 failed
 
