@@ -1,0 +1,111 @@
+name: Hardware Case Product Test Package
+
+on:
+  pull_request:
+    paths:
+      - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_product_test_smoke.py"
+      - "run_hardware_case_product_test.bat"
+      - "run_hardware_case_product_test.sh"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.md"
+      - ".github/workflows/hardware-case-product-test-package.yml"
+      - "quality_knowledge/**"
+      - "repositories/hardware_*"
+      - "services/hardware_*"
+      - "schema/hardware_*"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_product_test_smoke.py"
+      - "run_hardware_case_product_test.bat"
+      - "run_hardware_case_product_test.sh"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.md"
+      - ".github/workflows/hardware-case-product-test-package.yml"
+      - "quality_knowledge/**"
+      - "repositories/hardware_*"
+      - "services/hardware_*"
+      - "schema/hardware_*"
+  workflow_dispatch:
+
+jobs:
+  product-test-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: JavaScript syntax
+        run: node --check quality_knowledge/web/static/hardware_tree_import.js
+
+      - name: Build product test package
+        run: python scripts/build_hardware_case_product_test_package.py
+
+      - name: Verify package manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          stage = Path("dist/HARDWARE_CASE_PRODUCT_TEST_V0.1")
+          manifest = json.loads((stage / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
+
+          assert manifest["package_status"] == "READY_FOR_INTERNAL_TEST"
+          assert manifest["release_status"] == "TEST_PACKAGE_NOT_RELEASE"
+          assert manifest["web_entry"] == "/p0/hardware-cases/base-data"
+          assert manifest["frozen_tree_change_types"] == [
+              "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT"
+          ]
+          assert "DELETE" in manifest["explicitly_not_tree_change_type"]
+          assert "EXCLUDE" in manifest["explicitly_not_tree_change_type"]
+          assert "REAL_TREE_IMPORT_VALIDATION" in manifest["open_test_gates"]
+          assert "HC_TREE_IMPORT_PRODUCT_GATE" in manifest["open_test_gates"]
+          assert any("P01-P06" in item for item in manifest["known_gaps"])
+
+          paths = [item["path"] for item in manifest["files"]]
+          forbidden_suffixes = {".db", ".sqlite", ".sqlite3", ".log"}
+          assert not any(Path(path).suffix.lower() in forbidden_suffixes for path in paths)
+          assert not any(Path(path).name.lower() in {".env", ".env.local"} for path in paths)
+          assert "quality_knowledge/web/templates/hardware_tree_import.html" in paths
+          assert "quality_knowledge/web/static/hardware_tree_import.js" in paths
+          assert "quality_knowledge/web/static/hardware_tree_import.css" in paths
+          print("MANIFEST=PASS")
+          PY
+
+      - name: Run product test package smoke
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1
+        run: python scripts/hardware_case_product_test_smoke.py
+
+      - name: Run Hardware Case and Tree Import regression
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_case_contract.py
+          tests/test_hardware_case_backend.py
+          tests/test_hardware_case_ai_adapter.py
+          tests/test_hardware_case_web_api.py
+          tests/test_hardware_case_product_api_e2e.py
+          tests/test_hardware_tree_import_m1.py
+          tests/test_hardware_tree_import_m2.py
+          tests/test_hardware_tree_import_m3a_api.py
+          tests/test_hardware_tree_import_m3b_frontend.py
+
+      - name: Stage delivery files
+        run: |
+          mkdir -p dist/product-test-delivery
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1_*.zip dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1_*.zip.sha256 dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
+          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.md dist/product-test-delivery/
+
+      - name: Upload product test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_CASE_PRODUCT_TEST_V0.1
+          path: dist/product-test-delivery/*
+          if-no-files-found: error
+          retention-days: 14
