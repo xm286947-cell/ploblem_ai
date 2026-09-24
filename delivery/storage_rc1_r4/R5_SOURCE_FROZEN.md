@@ -55,3 +55,8 @@ macOS port-conflict preflight note:
 - R5 pre-start governance now performs an existing-listener connection probe (127.0.0.1/::1 for wildcard targets) plus the bind probe. Either signal yields PORT_CONFLICT before service spawn and before Product E2E.
 - The 30-second fail-fast regression timeout remains unchanged.
 - This revision supersedes all earlier R5 preflight source markers for final package construction.
+
+Gate alignment note:
+- The listener-probe implementation is _listener_probe() using socket connect_ex() plus the bind probe.
+- Package Contract Gate was aligned to the actual implementation identifiers; this changes validation only, not Launcher behavior.
+- This revision is the source-of-truth for the next R5 build.
