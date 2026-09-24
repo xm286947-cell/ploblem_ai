@@ -36,12 +36,54 @@ def _bind_probe(host: str, port: int) -> None:
         sock.close()
 
 
+def _listener_probe(host: str, port: int) -> str | None:
+    # A bind-only probe is not portable enough for wildcard addresses:
+    # macOS can allow a SO_REUSEADDR bind to 0.0.0.0 while an existing
+    # loopback listener still owns 127.0.0.1:<port>. Probe for an actual
+    # listener first, then retain the bind probe for non-accepting conflicts.
+    if host in {"0.0.0.0", ""}:
+        targets = ("127.0.0.1",)
+    elif host == "::":
+        targets = ("::1",)
+    else:
+        targets = (host,)
+
+    for target in targets:
+        family = socket.AF_INET6 if ":" in target else socket.AF_INET
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(0.25)
+        try:
+            if sock.connect_ex((target, port)) == 0:
+                return target
+        finally:
+            sock.close()
+    return None
+
+
 def check_free(host: str, port: int, service: str) -> int:
+    listener_host = _listener_probe(host, port)
+    if listener_host is not None:
+        _print_kv(
+            "PORT_CONFLICT",
+            PORT=port,
+            SERVICE=service,
+            HOST=host,
+            DETECTED_BY="LISTENER_CONNECT",
+            PROBE_HOST=listener_host,
+        )
+        return EXIT_PORT_CONFLICT
+
     try:
         _bind_probe(host, port)
     except OSError as exc:
         if exc.errno in {errno.EADDRINUSE, 48, 98, 10048}:
-            _print_kv("PORT_CONFLICT", PORT=port, SERVICE=service, HOST=host)
+            _print_kv(
+                "PORT_CONFLICT",
+                PORT=port,
+                SERVICE=service,
+                HOST=host,
+                DETECTED_BY="BIND",
+            )
             return EXIT_PORT_CONFLICT
         _print_kv(
             "PORT_CHECK_FAILED",
