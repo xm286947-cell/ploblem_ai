@@ -1,0 +1,56 @@
+{
+  "manifest_version": "V0.1",
+  "status": "TEST_BASELINE_READY_CANDIDATE",
+  "product": "CASE_KNOWLEDGE / Unified Knowledge Production",
+  "code_baseline": {
+    "repository": "xm286947-cell/ploblem_ai",
+    "base_branch": "feature/knowledge-production-mvp-001",
+    "base_sha": "65798a01bb220334a4e561de94814ddb3a5c0d75",
+    "test_branch": "test/case-knowledge-baseline-001"
+  },
+  "test_package": {
+    "root": "product_test/case_knowledge",
+    "runner_linux": "./run_case_knowledge_product_test.sh",
+    "runner_windows": "run_case_knowledge_product_test.bat"
+  },
+  "environment": {
+    "python": "3.11+",
+    "dependencies": [
+      "requirements.txt",
+      "pytest"
+    ],
+    "real_provider_required": false,
+    "production_data_allowed": false
+  },
+  "execution_order": [
+    "product test deterministic OpenAI Mock scenarios",
+    "M01/M02/M03 source/evidence/extraction regression",
+    "D01 business candidate intake",
+    "D02 evaluation/dedup/conflict",
+    "D03 review/publish/version",
+    "D04 release/query",
+    "D05 processing UI",
+    "D06 Storage/Golden B consumer integration"
+  ],
+  "commands": {
+    "deterministic": "python -m pytest -q tests/product_test/test_case_knowledge_product_scenarios.py",
+    "full": "python -m pytest -q tests/product_test/test_case_knowledge_product_scenarios.py tests/test_kp_m01_source_document.py tests/test_kp_m02_candidate_evidence.py tests/test_kp_m03_ai_extraction.py tests/test_kp_d01_business_candidate_intake.py tests/test_kp_d02_evaluation.py tests/test_kp_d03_review_publish.py tests/test_kp_d04_release_query.py tests/test_kp_d05_processing_ui.py tests/test_kp_d06_storage_golden.py",
+    "real_ai_supplemental": "python -m pytest -q tests/test_kp_d00_seed_real_provider.py"
+  },
+  "evidence": {
+    "pytest_junit": "outputs/case_knowledge_product_test/junit.xml",
+    "summary": "outputs/case_knowledge_product_test/summary.txt"
+  },
+  "rules": [
+    "Do not modify fixture or expected during execution",
+    "Do not modify business code during Work execution",
+    "Real AI is supplemental and does not replace deterministic Mock gate",
+    "Any failure preserves evidence and returns to Test Owner"
+  ],
+  "gate": {
+    "pass": "all required deterministic tests pass and no P0 scenario is skipped",
+    "fail": "any executed required test fails",
+    "blocked": "environment/dependency prevents execution",
+    "not_tested": "not executed is never PASS"
+  }
+}
