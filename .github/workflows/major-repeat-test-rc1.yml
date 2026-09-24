@@ -1,0 +1,106 @@
+name: MAJOR-REPEAT-MVP-TEST-RC1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/build_major_repeat_test_rc1.py"
+      - "scripts/major_repeat_test_rc1.py"
+      - "scripts/windows_major_repeat_test_rc1.py"
+      - "packaging/major_repeat_test_rc1/**"
+      - "docs/product/major_repeat_test_rc1/**"
+      - ".github/workflows/major-repeat-test-rc1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Reuse REPEAT-WEB-001 H01-H10 screenshots
+        uses: actions/download-artifact@v4
+        with:
+          name: repeat-web-001-h01-h10-9af9aa37785c34da18b71402b62d5fdcaa44c32e
+          repository: xm286947-cell/ploblem_ai
+          run-id: 35937969420
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: screenshot-evidence
+      - name: Engineering Golden and regression
+        run: >
+          python -m pytest -q
+          tests/test_golden_e2e_001.py
+          tests/test_repeat_web_mvp.py
+          tests/test_quality_capability_p0_workbench_ued.py
+          tests/test_repeat_itr_subject.py
+          tests/test_repeat_search_contract.py
+          tests/test_repeat_result_contract.py
+          tests/test_historical_case_consumer_contract.py
+          tests/test_case_publish_adapter.py
+          tests/test_case_publish_service.py
+      - name: Runtime regression
+        run: >
+          python -m pytest -q
+          tests/test_runtime_long_content_recovery.py
+          tests/test_agent_runtime_p0_d4.py
+          tests/test_agent_runtime_p0_storage_e2e_json_truncation.py
+          tests/test_runtime_provider_adapter.py
+          tests/test_agent_runtime_p0_d3.py
+          tests/test_agent_runtime_p0_d11_acceptance_gaps.py
+          tests/test_rcfg02_major_runtime_config.py
+          tests/test_quality_capability_production_runner_p0.py
+          tests/test_quality_capability_v2_analysis_p0.py
+      - name: Build RC1 test ZIP
+        run: python scripts/build_major_repeat_test_rc1.py --out-dir dist --screenshots-dir screenshot-evidence
+      - name: Verify extracted package smoke
+        run: |
+          python -m zipfile -e dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1.zip extracted
+          cd extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1/app
+          python scripts/major_repeat_test_rc1.py smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc1-${{ github.sha }}
+          path: |
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1.zip
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-startup:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc1-${{ github.sha }}
+          path: dist
+      - name: Extract package
+        shell: pwsh
+        run: Expand-Archive -Path dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1.zip -DestinationPath extracted
+      - name: Run Windows batch entrypoint and close cleanly
+        run: python scripts/windows_major_repeat_test_rc1.py --package extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC1
+      - name: Upload Windows log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc1-windows-${{ github.sha }}
+          path: extracted/windows_startup.log
+          if-no-files-found: warn
+          retention-days: 30
