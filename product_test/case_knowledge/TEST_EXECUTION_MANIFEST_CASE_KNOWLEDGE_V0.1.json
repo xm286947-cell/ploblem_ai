@@ -1,6 +1,6 @@
 {
   "manifest_version": "V0.1",
-  "status": "TEST_BASELINE_READY_CANDIDATE",
+  "status": "TEST_BASELINE_READY",
   "product": "CASE_KNOWLEDGE / Unified Knowledge Production",
   "code_baseline": {
     "repository": "xm286947-cell/ploblem_ai",
@@ -52,5 +52,17 @@
     "fail": "any executed required test fails",
     "blocked": "environment/dependency prevents execution",
     "not_tested": "not executed is never PASS"
+  },
+  "validation": {
+    "ci_run_id": 35996894335,
+    "ci_run_url": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/35996894335",
+    "result": "PASS",
+    "total": 91,
+    "passed": 91,
+    "failed": 0,
+    "warnings": 1,
+    "execution_time_seconds": 2.87,
+    "head_sha": "836b44224026e8adfbb12c5addd8669705244618",
+    "note": "Baseline self-validation only. Formal Work execution and Product Test Gate remain separate."
   }
 }
