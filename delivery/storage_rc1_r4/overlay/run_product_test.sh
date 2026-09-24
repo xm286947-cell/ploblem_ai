@@ -36,10 +36,13 @@ fi
 
 guard_free(){
   host="$1"; port="$2"; service="$3"
-  if "$PORT_GUARD_PYTHON" scripts/port_guard.py check-free --host "$host" --port "$port" --service "$service"; then
+  set +e
+  "$PORT_GUARD_PYTHON" scripts/port_guard.py check-free --host "$host" --port "$port" --service "$service"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
     return 0
   fi
-  rc=$?
   echo "PRODUCT_E2E=NOT_RUN" >&2
   exit "$rc"
 }
@@ -94,12 +97,15 @@ trap cleanup EXIT INT TERM
 
 wait_owned(){
   url="$1"; name="$2"; port="$3"; pid="$4"; log="$5"
-  if "$PYTHON_BIN" scripts/port_guard.py wait-owned \
+  set +e
+  "$PYTHON_BIN" scripts/port_guard.py wait-owned \
       --url "$url" --service "$name" --port "$port" --pid "$pid" \
-      --timeout "${STORAGE_SERVICE_START_TIMEOUT:-20}" --log "$log"; then
+      --timeout "${STORAGE_SERVICE_START_TIMEOUT:-20}" --log "$log"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
     return 0
   fi
-  rc=$?
   echo "PRODUCT_E2E=NOT_RUN" >&2
   exit "$rc"
 }
