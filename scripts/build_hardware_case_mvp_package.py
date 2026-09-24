@@ -13,6 +13,7 @@ PACKAGE_NAME = "HARDWARE_CASE_MVP_RC0_PREP"
 STAGE = DIST / PACKAGE_NAME
 
 INCLUDE_DIRS = [
+    "builder",
     "common",
     "compatibility",
     "contracts",
