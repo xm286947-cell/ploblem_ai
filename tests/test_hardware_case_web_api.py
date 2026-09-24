@@ -206,3 +206,32 @@ def test_source_unavailable_anomaly_is_maintainer_only(tmp_path):
     assert allowed.json()["items"] == [
         {"case_id": "HC-WEB-001", "code": "SOURCE_UNAVAILABLE"}
     ]
+
+
+def test_mapping_read_api_respects_consumer_visibility(tmp_path):
+    client, backend = _client(tmp_path)
+    _prepare_publishable(client)
+
+    blocked = client.get("/api/v2/hardware-cases/HC-WEB-001/mappings")
+    assert blocked.status_code == 404
+
+    maintainer_before_publish = client.get(
+        "/api/v2/hardware-cases/HC-WEB-001/mappings",
+        headers=MAINTAINER,
+    )
+    assert maintainer_before_publish.status_code == 200
+    assert maintainer_before_publish.json()["mappings"][0]["node_path"] == "电源/输入保护"
+
+    assert client.post(
+        "/api/v2/hardware-cases/HC-WEB-001/publish",
+        headers=MAINTAINER,
+    ).status_code == 200
+
+    consumer = client.get("/api/v2/hardware-cases/HC-WEB-001/mappings")
+    assert consumer.status_code == 200
+    assert consumer.json()["mappings"][0]["mapping_status"] == "CONFIRMED"
+
+    detail = client.get("/api/v2/hardware-cases/HC-WEB-001")
+    assert detail.status_code == 200
+    assert detail.json()["mapping_paths"]["CIRCUIT_FEATURE"] == ["电源/输入保护"]
+    assert detail.json()["published_at"] is not None
