@@ -157,6 +157,24 @@ def create_hardware_case_router(
         except HardwareCaseContractError as error:
             raise _http_error(error) from error
 
+    @router.get("/{case_id}/mappings")
+    def get_case_mappings(
+        case_id: str,
+        historical: bool = False,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        role = _role(x_hardware_case_role)
+        try:
+            return service.get_mappings(
+                case_id,
+                role=role,
+                historical=historical,
+            )
+        except HardwareCaseContractError as error:
+            raise _http_error(error) from error
+
     @router.get("/{case_id}/evidence")
     def get_evidence(
         case_id: str,
