@@ -16,15 +16,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout validated Runtime dependency
+        uses: actions/checkout@v4
+        with:
+          repository: xm286947-cell/ploblem_ai
+          ref: 0959da43008307398a9cac0f9abfc7fec26dcb8a
+          path: .deps/unified-agent-runtime
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install product dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Install Runtime dependencies
+        run: python -m pip install -r .deps/unified-agent-runtime/requirements-runtime-p0-test.txt
+
+      - name: Isolate Runtime package only
+        run: |
+          mkdir -p .runtime-dep
+          cp -R .deps/unified-agent-runtime/runtime .runtime-dep/runtime
+
+      - name: Verify Runtime dependency boundary
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
+        run: |
+          python - <<'PY'
+          import quality_knowledge
+          import runtime
+          from pathlib import Path
+          root=Path.cwd().resolve()
+          q=Path(quality_knowledge.__file__).resolve()
+          r=Path(runtime.__file__).resolve()
+          assert str(q).startswith(str(root)), q
+          assert ".runtime-dep" in str(r), r
+          print("quality_knowledge:", q)
+          print("runtime:", r)
+          PY
+
       - name: Compile Python
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m compileall -q quality_knowledge
 
       - name: Check product JavaScript syntax
@@ -34,43 +68,65 @@ jobs:
           node --check quality_knowledge/web/static/p0_scenario_detail.js
 
       - name: QS-MVP-07 Golden Path E2E
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_rc1_golden_e2e.py -q
 
       - name: QS-MVP-06 Evidence traceability regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_traceability.py -q
 
       - name: QS-MVP-05C P03 regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_p03_detail.py -q
 
       - name: QS-MVP-05B P02 regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_p02_library.py -q
 
       - name: QS-MVP-05A P01 regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_p01_workbench.py -q
 
       - name: QS-MVP-04 workflow regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_v1_workflow_service.py -q
 
       - name: QS-MVP-03 Candidate V1 regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: python -m pytest tests/test_quality_scenario_candidate_v1_service.py -q
 
       - name: Quality Scenario V1 contract and repository
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: |
           python -m pytest tests/test_quality_scenario_v1.py -q
           python -m pytest tests/test_quality_scenario_v1_repository.py -q
 
       - name: Reverse Quality and Runtime regressions
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: |
           python -m pytest tests/test_reverse_quality.py -q
           python -m pytest tests/test_reverse_quality_store.py -q
           python -m pytest tests/test_reverse_quality_runtime_integration.py -q
 
       - name: Existing P0 UED shell regression
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: |
           python -m pytest tests/test_quality_capability_p0_ued.py -q
           python -m pytest tests/test_quality_capability_p0_workbench_ued.py -q
 
       - name: Legacy Scenario regressions
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/.runtime-dep
         run: |
           python -m pytest tests/test_quality_scenario_generation.py -q
           python -m pytest tests/test_quality_scenario_library.py -q
