@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import shutil
@@ -34,6 +35,73 @@ def copy_tree(src: Path, dst: Path) -> None:
         target = dst / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+
+
+INTERNAL_DEPENDENCY_EXCLUDED_TOPS = {
+    ".git", ".github", ".pytest_cache", "__pycache__", ".deps",
+    "tests", "knowledge", "input", "output", "outputs", "docs", "scripts",
+    "baseline_release", "releases", "deliverables",
+}
+
+
+def _internal_python_roots() -> dict[str, Path]:
+    roots: dict[str, Path] = {}
+    for child in ROOT.iterdir():
+        if child.name in INTERNAL_DEPENDENCY_EXCLUDED_TOPS:
+            continue
+        if child.is_file() and child.suffix == ".py":
+            roots[child.stem] = child
+        elif child.is_dir() and any(child.rglob("*.py")):
+            roots[child.name] = child
+    return roots
+
+
+def _imported_top_levels(pkg: Path) -> set[str]:
+    imported: set[str] = set()
+    for path in pkg.rglob("*.py"):
+        if "vendor/unified_agent_runtime" in path.as_posix():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imported.add(node.module.split(".")[0])
+    return imported
+
+
+def copy_internal_import_closure(pkg: Path) -> list[str]:
+    """Copy repository-internal top-level Python dependencies transitively.
+
+    The RC1 package owns quality_knowledge as its primary product package, but
+    some frozen modules legitimately import shared repository packages such as
+    models/ and builder/.  Resolve those dependencies from imports instead of
+    maintaining a fragile manual allowlist.
+    """
+    roots = _internal_python_roots()
+    copied: list[str] = []
+    while True:
+        imported = _imported_top_levels(pkg)
+        missing = sorted(
+            name for name in imported
+            if name in roots
+            and name != "quality_knowledge"
+            and not (pkg / name).exists()
+            and not (pkg / f"{name}.py").exists()
+        )
+        if not missing:
+            break
+        for name in missing:
+            source = roots[name]
+            if source.is_dir():
+                copy_tree(source, pkg / name)
+            else:
+                shutil.copy2(source, pkg / source.name)
+            copied.append(name)
+    return copied
 
 
 def write_launchers(pkg: Path) -> None:
@@ -331,7 +399,7 @@ prepare_internal_golden.bat --source-db "D:\\path\\internal_quality_issue.db" --
 """, encoding="utf-8")
 
 
-def make_manifest(pkg: Path, source_commit: str) -> dict:
+def make_manifest(pkg: Path, source_commit: str, internal_roots: list[str]) -> dict:
     files = []
     for path in sorted(pkg.rglob("*")):
         if not path.is_file() or path.name == "PACKAGE_MANIFEST.json":
@@ -352,6 +420,7 @@ def make_manifest(pkg: Path, source_commit: str) -> dict:
         "runtime_baseline": RUNTIME_BASELINE,
         "package_source_commit": source_commit,
         "required_project_dirs": list(REQUIRED_PROJECT_DIRS),
+        "internal_import_closure_roots": internal_roots,
         "file_count": len(files),
         "files": files,
     }
@@ -375,6 +444,9 @@ def main() -> int:
         if not src.exists():
             raise SystemExit("REQUIRED_PATH_MISSING:" + rel)
         copy_tree(src, pkg / rel)
+
+    internal_roots = copy_internal_import_closure(pkg)
+    print("internal_import_closure_roots=" + ",".join(internal_roots))
 
     shutil.copy2(ROOT / "requirements.txt", pkg / "requirements.txt")
     for rel in RC1_DOCS:
@@ -405,7 +477,7 @@ def main() -> int:
     write_readme(pkg)
 
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    manifest = make_manifest(pkg, commit)
+    manifest = make_manifest(pkg, commit, internal_roots)
     (pkg / "PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(pkg)
     print("files=" + str(manifest["file_count"]))
