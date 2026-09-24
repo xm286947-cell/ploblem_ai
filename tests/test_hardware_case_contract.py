@@ -249,6 +249,17 @@ def test_ct10_multiple_mappings_keep_single_case_identity() -> None:
     assert service.get_case("HC-001")["case_id"] == "HC-001"
 
 
+def test_ct10a_mapping_semantic_key_is_idempotent_but_other_nodes_are_allowed() -> None:
+    service = _service(cases=[_case(status="PUBLISHED")])
+    first = service.set_mapping(_mapping(mapping_id="M1", node_id="CF-1"))
+    retry = service.set_mapping(_mapping(mapping_id="M2", node_id="CF-1"))
+    other = service.set_mapping(_mapping(mapping_id="M3", node_id="CF-2"))
+
+    assert first["mapping_id"] == retry["mapping_id"] == "M1"
+    assert other["mapping_id"] == "M3"
+    assert len(service.get_mappings("HC-001", role="MAINTAINER")["mappings"]) == 2
+
+
 def test_ct11_tree_depth_is_variable_not_fixed() -> None:
     service = _service(
         trees=[

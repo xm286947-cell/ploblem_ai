@@ -143,6 +143,13 @@ class HardwareCaseBackendService:
             "tree_version",
             self.repository.get_active_tree_version_id(str(mapping.get("tree_type"))),
         )
+        existing = self.repository.get_mapping_by_semantic_key(
+            case_id,
+            str(mapping.get("tree_type")),
+            str(mapping.get("node_id") or ""),
+        )
+        if existing is not None and existing.get("mapping_id") != normalized.get("mapping_id"):
+            return existing
         return self.repository.save_mapping(normalized)
 
     def save_evidence(self, evidence: dict[str, Any]) -> dict[str, Any]:

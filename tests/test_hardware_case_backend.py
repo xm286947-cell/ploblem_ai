@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,149 @@ def test_m2_multiple_mappings_keep_one_case_and_one_primary_per_tree(tmp_path: P
     assert len(service.repository.list_cases()) == 1
     assert sum(item["relation_role"] == "PRIMARY" for item in mappings) == 1
     assert {item["node_id"] for item in mappings} == {"CF-A", "CF-B"}
+
+
+def test_mapping_same_semantic_key_is_idempotent_at_service_and_repository(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    service.create_case(_case(status="PUBLISHED"))
+    service.save_tree_node(_node(node_id="CF-A", path=["电源", "A"], name="A"))
+    first = service.set_mapping(_mapping(mapping_id="M-A", node_id="CF-A"))
+    second = service.set_mapping(_mapping(mapping_id="M-A-RETRY", node_id="CF-A"))
+
+    assert second["mapping_id"] == first["mapping_id"] == "M-A"
+    assert len(service.repository.list_mappings(case_id="HC-M2-001")) == 1
+
+
+def test_mapping_semantic_key_allows_other_nodes_and_tree_types(tmp_path: Path):
+    service = _backend(tmp_path)
+    service.create_case(_case(status="PUBLISHED"))
+    service.save_tree_node(_node(node_id="CF-A", path=["电源", "A"], name="A"))
+    service.save_tree_node(
+        _node(
+            node_id="CF-B",
+            tree_type="CIRCUIT_FEATURE",
+            path=["电源", "B"],
+            name="B",
+        )
+    )
+    service.save_tree_node(
+        _node(
+            node_id="MD-A",
+            tree_type="MATERIAL_DEVICE",
+            path=["器件", "A"],
+            name="A",
+        )
+    )
+
+    service.set_mapping(_mapping(mapping_id="M-A", node_id="CF-A"))
+    service.set_mapping(_mapping(mapping_id="M-B", node_id="CF-B"))
+    service.set_mapping(
+        _mapping(
+            mapping_id="M-M",
+            node_id="MD-A",
+            tree_type="MATERIAL_DEVICE",
+        )
+    )
+
+    mappings = service.repository.list_mappings(case_id="HC-M2-001")
+    assert len(mappings) == 3
+    assert {(item["tree_type"], item["node_id"]) for item in mappings} == {
+        ("CIRCUIT_FEATURE", "CF-A"),
+        ("CIRCUIT_FEATURE", "CF-B"),
+        ("MATERIAL_DEVICE", "MD-A"),
+    }
+
+
+def test_mapping_semantic_key_is_persistence_safe_for_concurrent_retries(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "hardware_case.sqlite3"
+    seed = HardwareCaseBackendService(HardwareCaseRepository(db_path))
+    seed.create_case(_case(status="PUBLISHED"))
+    seed.save_tree_node(_node(node_id="CF-A", path=["电源", "A"], name="A"))
+
+    def submit(retry: int):
+        service = HardwareCaseBackendService(HardwareCaseRepository(db_path))
+        return service.set_mapping(
+            _mapping(mapping_id=f"M-CONCURRENT-{retry}", node_id="CF-A")
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(submit, range(2)))
+
+    assert len({item["mapping_id"] for item in results}) == 1
+    assert len(seed.repository.list_mappings(case_id="HC-M2-001")) == 1
+
+
+def test_publish_gate_fails_closed_when_fact_evidence_content_mismatches(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    case = _case(status="PENDING_REVIEW")
+    for field_name in ("symptom", "root_cause", "actions"):
+        case["facts"][field_name]["evidence_refs"] = ["EV-1"]
+    service.create_case(case)
+    _review_core(service)
+    service.save_tree_node(_node())
+    service.set_mapping(_mapping())
+    service.save_evidence(_evidence())
+
+    gate = service.check_publish_gate("HC-M2-001")
+
+    assert gate["passed"] is False
+    assert gate["gate_status"] == "REVIEW_REQUIRED"
+    assert gate["publish_blocked"] is True
+    assert gate["evidence_validation_status"] == "INVALID"
+    assert "EVIDENCE_CONTENT_MISMATCH" in gate["blockers"]
+    assert any(
+        item["candidate_fact_ref"] == "HC-M2-001:symptom"
+        and item["validation"] == "INVALID"
+        for item in gate["evidence_validation"]
+    )
+    assert gate["evidence_traceability"][0]["evidence_ref"] == "EV-1"
+    assert gate["evidence_traceability"][0]["source_ref"] == "word:A1001.docx"
+
+
+def test_publish_gate_accepts_fact_evidence_that_contains_all_confirmed_facts(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    case = _case(status="PENDING_REVIEW")
+    for field_name in ("symptom", "root_cause", "actions"):
+        case["facts"][field_name]["evidence_refs"] = ["EV-1"]
+    service.create_case(case)
+    _review_core(service)
+    service.save_tree_node(_node())
+    service.set_mapping(_mapping())
+    evidence = _evidence()
+    evidence["excerpt_or_caption"] = "上电失败；浪涌触发保护；增加输入保护"
+    service.save_evidence(evidence)
+
+    gate = service.publish_case("HC-M2-001")
+
+    assert gate["passed"] is True
+    assert gate["evidence_validation_status"] == "VALID"
+
+
+def test_publish_gate_fails_closed_when_fact_evidence_cannot_be_resolved(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    case = _case(status="PENDING_REVIEW")
+    for field_name in ("symptom", "root_cause", "actions"):
+        case["facts"][field_name]["evidence_refs"] = ["EV-MISSING"]
+    service.create_case(case)
+    _review_core(service)
+    service.save_tree_node(_node())
+    service.set_mapping(_mapping())
+
+    gate = service.check_publish_gate("HC-M2-001")
+
+    assert gate["passed"] is False
+    assert "EVIDENCE_NOT_FOUND" in gate["blockers"]
+    assert gate["evidence_validation_status"] == "INVALID"
 
 
 def test_m2_tree_supports_variable_depth_and_node_query_only_counts_published(tmp_path: Path):
