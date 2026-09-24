@@ -1,0 +1,31 @@
+{
+  "mock_id": "M18",
+  "purpose": "AI_TRIES_TO_CONFIRM",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "status": "CONFIRMED",
+    "reviewer": "ai-model",
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "GB",
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M18"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "effective_review_status": "UNREVIEWED",
+    "ignore_ai_review_authority": true
+  }
+}
