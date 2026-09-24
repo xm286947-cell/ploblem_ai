@@ -1,0 +1,87 @@
+name: Storage R5 Full 198 Regression Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r5-full-regression-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  R5_RUN_ID: "36030816299"
+  R5_ARTIFACT: storage-r5-linux-package-and-evidence
+  R5_PACKAGE: STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip
+  R5_EXPECTED_SHA256: c7a71b12ca5e29484c21a3a1d2d73c7d41d8b71312a3a1b851fa946f2ba5de88
+
+jobs:
+  linux-full-198-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Download exact final R5 artifact from frozen platform run
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.R5_ARTIFACT }}
+          path: _r5_artifact
+          repository: ${{ github.repository }}
+          run-id: ${{ env.R5_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify exact R5 SHA
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          R5="$(find _r5_artifact -type f -name "$R5_PACKAGE" -print -quit)"
+          test -n "$R5"
+          ACTUAL="$(sha256sum "$R5" | awk '{print $1}')"
+          echo "R5_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$R5_EXPECTED_SHA256"
+          echo "package=$R5" >> "$GITHUB_OUTPUT"
+
+      - name: Install existing OCR test prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr poppler-utils
+          tesseract --version | head -1
+          pdftoppm -v 2>&1 | head -1
+
+      - name: Fresh extract exact R5
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _r5_fresh
+          mkdir _r5_fresh
+          unzip -q "${{ steps.locate.outputs.package }}" -d _r5_fresh
+          test -f _r5_fresh/STORAGE_PRODUCT_MVP_RC1/selfcheck.sh
+
+      - name: Full R5 selfcheck with OCR prerequisites
+        shell: bash
+        run: |
+          set -o pipefail
+          cd _r5_fresh/STORAGE_PRODUCT_MVP_RC1
+          STORAGE_TEST_NO_WAIT=1 STORAGE_TEST_RESET_DATA=1 bash selfcheck.sh 2>&1 | tee ../../r5_full_198_selfcheck.log
+
+      - name: Assert 198 regression passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -E '(^|[^0-9])198 passed([^0-9]|$)' r5_full_198_selfcheck.log
+          if grep -q ' skipped' r5_full_198_selfcheck.log; then
+            echo "FULL_REGRESSION=FAIL reason=unexpected_skip" >&2
+            exit 1
+          fi
+          echo "FULL_REGRESSION=PASS count=198"
+
+      - name: Publish exact-package full regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-full-198-regression-evidence
+          path: r5_full_198_selfcheck.log
