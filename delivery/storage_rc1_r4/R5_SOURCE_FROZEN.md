@@ -38,3 +38,12 @@ macOS native preflight note:
 - Evidence showed python -m tools.openai_mock.server emitted a runpy warning because tools.openai_mock.__init__ imports server before module execution; the spawned process remained alive but never emitted its listening line in the gate window.
 - R5 now invokes the same Mock server through a single import and direct server.main() call. Runtime/Knowledge semantics and Mock API behavior are unchanged.
 - This revision supersedes all earlier R5 preflight source markers for final package construction.
+
+Third platform preflight note:
+- Linux R5 gate passed with package contract, dual fresh-extract, no-chmod launcher, TEST-PORT-01..05, selfcheck, and regression.
+- macOS normal free-port launcher also passed end-to-end with PID ownership verified for OpenAI Mock, Mock Router, and Storage Web.
+- macOS then exposed an OS-specific conflict-detection gap in TEST-PORT-01: an existing listener bound to 127.0.0.1:8765 could coexist with a SO_REUSEADDR bind probe against 0.0.0.0:8765, so bind-only preflight was not portable enough.
+- R5 port preflight now detects an already-listening endpoint first, then performs the bind probe. Any listener or bind conflict returns PORT_CONFLICT before Product E2E.
+- Package Contract now requires this cross-platform listener-detection rule.
+- This revision supersedes all prior R5 preflight source markers for final package construction.
+
