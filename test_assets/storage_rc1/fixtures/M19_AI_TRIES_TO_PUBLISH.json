@@ -1,0 +1,29 @@
+{
+  "mock_id": "M19",
+  "purpose": "AI_TRIES_TO_PUBLISH",
+  "request_match": {
+    "stage": "knowledge_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "status": "PUBLISHED",
+    "release": "FAKE-AI-RELEASE",
+    "knowledge_candidates": [
+      {
+        "object_type": "FACT",
+        "title": "Capacity",
+        "content": "64GB",
+        "device_type": "eMMC",
+        "evidence_refs": [
+          "E-M19"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "effective_publish_status": "CANDIDATE",
+    "human_publish_required": true
+  }
+}
