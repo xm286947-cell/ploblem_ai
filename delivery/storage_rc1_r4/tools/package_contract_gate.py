@@ -13,6 +13,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 PACKAGE_ROOT = "STORAGE_PRODUCT_MVP_RC1"
+EXPECTED_PACKAGE_ID = "STORAGE-RC1-PACKAGE-DEFECT-115-FIX-CANDIDATE-20260924-R4A"
+EXPECTED_BUILD_VERSION = "storage-rc1-r4-builder-v1.1"
+EXPECTED_R3_SHA256 = "a535a7cf741058ef687a6d65db83e18a32414e111c023517ae83c1a5fbac1b01"
 REQUIRED = {
     "start_test.sh", "run_server_test.sh", "run_product_test.sh", "selfcheck.sh",
     "run_windows.bat", "RELEASE_MANIFEST.json", "FILE_SHA256SUMS.txt",
@@ -76,6 +79,18 @@ def validate_extracted(root: Path, expected_branch: str|None, expected_commit: s
     if not re.fullmatch(r'[0-9a-f]{40}', str(manifest.get('source_commit') or '')): raise SystemExit("PACKAGE_GATE=FAIL reason=source_commit_format")
     if expected_branch and manifest.get('source_branch')!=expected_branch: raise SystemExit("PACKAGE_GATE=FAIL reason=source_branch_mismatch")
     if expected_commit and manifest.get('source_commit')!=expected_commit.lower(): raise SystemExit("PACKAGE_GATE=FAIL reason=source_commit_mismatch")
+    if manifest.get('package_id') != EXPECTED_PACKAGE_ID: raise SystemExit("PACKAGE_GATE=FAIL reason=package_id_mismatch")
+    if manifest.get('build_script_version') != EXPECTED_BUILD_VERSION: raise SystemExit("PACKAGE_GATE=FAIL reason=build_version_mismatch")
+    provenance=manifest.get('build_provenance') or {}
+    if provenance.get('base_package_sha256') != EXPECTED_R3_SHA256: raise SystemExit("PACKAGE_GATE=FAIL reason=base_sha_mismatch")
+    if provenance.get('base_package_role') != 'FROZEN_INPUT_NOT_SOURCE_OF_TRUTH': raise SystemExit("PACKAGE_GATE=FAIL reason=base_role_mismatch")
+    fix=manifest.get('defect_115_fix') or {}
+    if fix.get('release_ceiling') != 'READY_FOR_PLATFORM_RETEST': raise SystemExit("PACKAGE_GATE=FAIL reason=release_ceiling_mismatch")
+    dc2=fix.get('dc_002') or {}
+    if 'extractor restoring ZIP Unix executable bits' not in str(dc2.get('root_cause') or ''): raise SystemExit("PACKAGE_GATE=FAIL reason=dc002_root_cause_stale")
+    contract=fix.get('r4_launcher_contract') or {}
+    if contract.get('shell_executable_bit_runtime_dependency') is not False: raise SystemExit("PACKAGE_GATE=FAIL reason=executable_bit_dependency")
+    if contract.get('manual_chmod_allowed') is not False: raise SystemExit("PACKAGE_GATE=FAIL reason=manual_chmod_allowed")
     for rel in SHELLS:
         text=(root/rel).read_text(encoding='utf-8')
         if re.search(r'(?m)(^|[;&|]\s*)\./[^\s]+\.sh(?:\s|$)', text):
