@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
-PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_V0.1.2"
+PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
 STAGE = DIST / PACKAGE_NAME
 
 INCLUDE_DIRS = [
@@ -50,7 +50,7 @@ INCLUDE_FILES = [
     "run_hardware_case_product_test.sh",
     "run_hardware_case_mvp_smoke.bat",
     "run_hardware_case_mvp_smoke.sh",
-    "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md",
+    "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md",
 ]
 
 EXCLUDED_NAMES = {
@@ -164,13 +164,13 @@ def main() -> int:
         "package": PACKAGE_NAME,
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
-        "package_revision": "V0.1.2_STARTUP_CLOSURE",
+        "package_revision": "FULL_V0.1_P01_P07",
         "package_status": "READY_FOR_INTERNAL_TEST",
         "release_status": "TEST_PACKAGE_NOT_RELEASE",
         "source_commit": source_commit,
         "contract_version": "hardware-case/v1",
         "tree_import_contract_version": "hardware-tree-import/v1",
-        "web_entry": "/p0/hardware-cases/base-data",
+        "web_entry": "/p0/hardware-cases",
         "api_prefix": "/api/v2/hardware-cases",
         "entrypoints": {
             "init_local_config_windows": "INIT_LOCAL_CONFIG.bat",
@@ -191,6 +191,12 @@ def main() -> int:
             "secret_policy": "ENV_REFERENCE_RECOMMENDED",
         },
         "test_scope": [
+            "P01 Hardware Case homepage",
+            "P02 Circuit/Feature and Material/Device dual-tree navigation",
+            "P03 published-case search",
+            "P04 engineering case detail",
+            "P05 maintainer review + Publish Gate",
+            "P06 Evidence Viewer + company-local Source Resolver",
             "P07 base-data management frontend",
             "Circuit/Feature and Material/Device tree import workflow",
             "Excel upload / Sheet+Header / dynamic Mapping / Preview / Validation",
@@ -217,12 +223,13 @@ def main() -> int:
             "HC_TREE_IMPORT_PRODUCT_GATE",
         ],
         "known_gaps": [
-            "P01-P06 Hardware Case dedicated formal frontend is not part of this package",
             "Real company Word/Excel data is not bundled",
-            "Real Provider acceptance has not yet been passed; the package contains the runnable Runtime/Agent entry for company validation",
+            "Real Provider acceptance still requires company-environment validation with approved endpoint/model",
             "The repository-wide main.py CLI is intentionally not packaged; Hardware Case uses the dedicated launcher to avoid unrelated legacy builder dependencies",
         ],
+        "frontend_gate": "P01_P07_FRONTEND_GATE_PASS",
         "explicitly_not_claimed": [
+            "REAL_DATA_VALIDATED",
             "MVP_INTEGRATION_GATE_PASS",
             "MVP_DEMO_GATE_PASS",
             "RELEASE_GATE_PASS",
