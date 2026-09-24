@@ -96,6 +96,22 @@ def test_m3a_upload_analyze_review_apply_and_consume_through_unified_app(tmp_pat
     assert upload_body["workbook"]["sheets"][0]["sheet_name"] == "分类"
     assert str(tmp_path) not in json.dumps(upload_body, ensure_ascii=False)
 
+    preview = client.post(
+        f"/api/v2/hardware-cases/tree-imports/{job_id}/workbook-preview",
+        json={"sheet_name": "分类", "header_row": 2, "max_rows": 10},
+        headers=MAINTAINER,
+    )
+    assert preview.status_code == 200, preview.text
+    preview_body = preview.json()
+    assert [item["column_name"] for item in preview_body["columns"]] == [
+        "编码", "一级", "二级", "三级", "备注"
+    ]
+    assert preview_body["rows"][0]["row_number"] == 3
+    assert preview_body["rows"][0]["values"][:4] == [
+        "K-USB", "连接器", "特殊连接器", "USB"
+    ]
+    assert str(tmp_path) not in json.dumps(preview_body, ensure_ascii=False)
+
     analyze = client.post(
         f"/api/v2/hardware-cases/tree-imports/{job_id}/analyze",
         json={
@@ -156,6 +172,14 @@ def test_m3a_upload_analyze_review_apply_and_consume_through_unified_app(tmp_pat
     )
     assert version.status_code == 200
     assert version.json()["active_version"]["version_id"] == "C-001"
+
+    versions = client.get(
+        "/api/v2/hardware-cases/tree-imports/versions/CIRCUIT_FEATURE",
+        headers=MAINTAINER,
+    )
+    assert versions.status_code == 200
+    assert versions.json()["items"][0]["version_id"] == "C-001"
+    assert versions.json()["items"][0]["status"] == "ACTIVE"
 
     history = client.get(
         "/api/v2/hardware-cases/tree-imports?tree_type=CIRCUIT_FEATURE",

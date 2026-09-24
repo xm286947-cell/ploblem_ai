@@ -22,6 +22,7 @@
       <a class="nav-item {% if request.url.path.startswith('/p0/data-intake') %}active{% endif %}" href="/p0/data-intake">数据接入</a>
       <div class="nav-divider"></div>
       <div class="nav-label">管理</div>
+      <a class="nav-item {% if request.url.path.startswith('/p0/hardware-cases/base-data') %}active{% endif %}" href="/p0/hardware-cases/base-data">基础数据管理</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
     </nav>

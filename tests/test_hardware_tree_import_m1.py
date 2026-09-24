@@ -296,6 +296,11 @@ def test_m1_apply_failure_is_atomic_and_keeps_previous_active_version(tmp_path: 
     assert "C-WOULD-BE-PARTIAL" not in current_ids
     assert current_ids == {"C-ROOT", "C-SURGE"}
 
+    # Explicit retry is allowed only after the failed atomic Apply has been
+    # surfaced; the next Apply will re-run the same all-or-nothing checks.
+    retried = service.ready_to_apply("JOB-BAD")
+    assert retried["status"] == "READY_TO_APPLY"
+
 
 def test_m1_case_mapping_keeps_tree_version_and_path_snapshot_after_tree_move(tmp_path: Path):
     service = _service(tmp_path)

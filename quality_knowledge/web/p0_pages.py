@@ -88,6 +88,18 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/p0/hardware-cases/base-data", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_base_data(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_tree_import.html",
+            {
+                "import_api_prefix": "/api/v2/hardware-cases/tree-imports",
+                "tree_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "基础数据管理 · 硬件案例库",
+            },
+        )
+
     @router.get("/p0/settings", response_class=HTMLResponse, include_in_schema=False)
     async def p0_settings(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(

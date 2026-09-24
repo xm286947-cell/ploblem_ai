@@ -236,6 +236,21 @@ def test_m2_path_change_without_business_key_is_conflict_not_silent_move(tmp_pat
     assert len(conflicts) == 1
     assert conflicts[0]["issue_code"] == "PATH_CHANGED_WITHOUT_BUSINESS_KEY"
     assert result["change_summary"]["CONFLICT"] == 1
+    # Diff conflicts belong to Step 4 and must not also remain as Step 3
+    # validation blockers after the user resolves/excludes the Change.
+    assert all(
+        issue["issue_type"] != "PATH_CHANGED_WITHOUT_BUSINESS_KEY"
+        for issue in result["issues"]
+    )
+    for change in result["changes"]:
+        if change["change_type"] in {"ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE"}:
+            repo.set_change_decision(change["change_id"], "CONFIRMED")
+    repo.set_change_decision(
+        conflicts[0]["change_id"],
+        "RESOLVED",
+        resolved_after=conflicts[0]["after"],
+    )
+    assert repo.mark_ready_to_apply("JOB-NK-U")["status"] == "READY_TO_APPLY"
 
 
 def test_m2_same_business_key_multiple_paths_is_never_auto_applied(tmp_path: Path):
