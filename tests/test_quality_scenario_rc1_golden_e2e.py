@@ -130,13 +130,13 @@ def test_rc1_golden_path_problem_to_runtime_reverse_candidate_publish_library_de
     assert golden["classification"] == "SANITIZED_SYNTHETIC"
     assert golden["contains_internal_real_data"] is False
 
-    db_path = tmp_path / "quality_scenario_rc1.db"
-    _initializer().initialize(db_path)
+    reverse_db_path = tmp_path / "reverse_quality_source.db"
+    p0_db_path = tmp_path / "quality_scenario_rc1.db"
 
     with _running_provider(golden["runtime_response"]) as (server, provider):
         host, port = server.server_address
 
-        legacy_app = create_app(db_path)
+        legacy_app = create_app(reverse_db_path)
         reverse_service = legacy_app.state.reverse_quality_service
         reverse_service.ai_client = None
         reverse_service._runtime_executor = _executor(
@@ -170,7 +170,11 @@ def test_rc1_golden_path_problem_to_runtime_reverse_candidate_publish_library_de
         )
         assert taxonomy is not None
 
-        client = TestClient(create_p0_app(db_path, stage_runner=None))
+        # The Reverse Quality source domain and the V1 product domain keep their
+        # independent stores. Handoff happens through ReverseQualityResult V0.1,
+        # not through shared database tables.
+        _initializer().initialize(p0_db_path)
+        client = TestClient(create_p0_app(p0_db_path, stage_runner=None))
         created = client.post(
             "/api/v2/quality-scenarios/candidates/from-reverse",
             json={
