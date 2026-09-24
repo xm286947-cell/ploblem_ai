@@ -92,7 +92,15 @@ fi
 mkdir -p "$STORAGE_LIFE_DATA_DIR"
 
 PIDS=""
-cleanup(){ for p in $PIDS; do kill "$p" 2>/dev/null || true; done; }
+cleanup(){
+  trap - EXIT INT TERM
+  for p in $PIDS; do
+    kill "$p" 2>/dev/null || true
+  done
+  for p in $PIDS; do
+    wait "$p" 2>/dev/null || true
+  done
+}
 trap cleanup EXIT INT TERM
 
 wait_owned(){
