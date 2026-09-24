@@ -1,0 +1,10 @@
+{
+  "scenario_key": "default",
+  "payload": {
+    "error_case": "rate_limit"
+  },
+  "behavior": {
+    "status": 429,
+    "retry_after": "0"
+  }
+}
