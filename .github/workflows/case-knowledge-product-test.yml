@@ -83,6 +83,19 @@ jobs:
         run: |
           cd outputs/case_knowledge_product_test/work_package
           bash run_case_knowledge_product_test.sh
+      - name: Finalize verified Work package
+        if: always()
+        run: |
+          PKG="outputs/case_knowledge_product_test/work_package"
+          find "$PKG" -type d -name __pycache__ -prune -exec rm -rf {} +
+          find "$PKG" -type d -name .pytest_cache -prune -exec rm -rf {} +
+          find "$PKG" -type f -name '*.pyc' -delete
+          rm -rf "$PKG/outputs"
+          rm -f "$PKG/SHA256SUMS.txt"
+          (
+            cd "$PKG"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
