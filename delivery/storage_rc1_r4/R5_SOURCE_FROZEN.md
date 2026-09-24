@@ -18,3 +18,9 @@ Release ceiling: READY_FOR_PLATFORM_RETEST
 Windows platform status for this execution: BLOCKED_NO_WINDOWS_ENVIRONMENT
 
 This commit is the immutable repository source reference embedded into the R5 release manifest.
+
+Preflight note:
+- The first internal R5 preflight package SHA d911e81318b4c87591b5c71083c7b8b3829c984362190da040762fb94ecf456a was NOT released.
+- Its Launcher code was not the failure; package_contract_gate.py incorrectly required the PORT_CONFLICT literal in run_product_test.sh instead of validating that diagnostic in scripts/port_guard.py.
+- The gate assertion has been corrected without changing Runtime/Knowledge semantics.
+- This revision supersedes the earlier source-freeze marker for the final R5 build.
