@@ -476,8 +476,9 @@
     try {
       const result = await request(api + "/" + state.jobId + "/apply", {method: "POST", headers: MAINTAINER_HEADERS()});
       state.job = result.job;
-      const excluded = Number(result.job.counts?.excluded_count || 0);
-      const changed = Math.max(0, Number(result.job.counts?.change_count || 0) - excluded);
+      const changes = state.analysis?.changes || [];
+      const excluded = changes.filter(item => item.decision === "EXCLUDED").length;
+      const changed = changes.filter(item => item.change_type !== "NO_CHANGE" && item.decision !== "EXCLUDED").length;
       if (result.job.status === "APPLIED_WITH_EXCLUSIONS") {
         $("hc-apply-result").innerHTML =
           '<article class="hc-result hc-result-exclusion"><h3>已生效，存在排除项</h3>' +
