@@ -131,6 +131,7 @@ def update_release_manifest(
         "pre_start_rule": "all required ports must be bind-free before any product/mock service is spawned",
         "post_start_rule": "spawned PID alive + spawned PID owns listening port + expected health endpoint succeeds",
         "shutdown_rule": "all launcher-owned background PIDs are terminated and waited before launcher exit",
+        "mock_start_rule": "OpenAI Mock uses a single module import and direct server.main invocation; python -m double-loading is forbidden",
         "port_conflict_behavior": "FAIL_FAST_BEFORE_PRODUCT_E2E",
         "product_e2e_on_port_conflict": "NOT_RUN",
         "health_only_success_forbidden": True,
