@@ -1,0 +1,52 @@
+name: Storage R5 macOS Platform Retest
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r5-macos-platform-retest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_SHA256: 9b5d03e28f99844f400f402a24433fbda36641f9c135a037d8aed56494eeb67f
+  R5_URL: 'https://sdmntprwestus2.oaiusercontent.com/files/00000000-ddbc-81f8-b111-c7d663329ef3/raw?se=2026-09-24T16%3A48%3A00Z&sp=r&sv=2026-02-06&sr=b&scid=cb5c2521-9f16-501b-a8b9-b77d60252c5a&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T09%3A36%3A31Z&ske=2026-09-25T09%3A36%3A31Z&sks=b&skv=2026-02-06&sig=sVutrTRYxMKpzBz%2BgNvnky%2BFdoJhLAHdJwdxxGS/Yb4%3D'
+
+jobs:
+  macos-native-r5:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact R5 and verify SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$RUNNER_TEMP/STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip"
+          curl -fL --retry 3 --retry-delay 2 "$R5_URL" -o "$ZIP"
+          ACTUAL="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          echo "MACOS_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED_SHA256"
+
+      - name: Run official R5 macOS platform gate
+        shell: bash
+        run: |
+          set -o pipefail
+          ZIP="$RUNNER_TEMP/STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip"
+          set +e
+          bash delivery/storage_rc1_r4/tools/platform_gate_macos.sh "$ZIP" "$EXPECTED_SHA256" 2>&1 | tee "$RUNNER_TEMP/r5_macos_platform_gate.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "MACOS_PLATFORM_GATE_EXIT=$RC"
+          test "$RC" -eq 0
+
+      - name: Upload R5 macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-macos-platform-evidence
+          path: |
+            ${{ runner.temp }}/r5_macos_platform_gate.log
