@@ -1,0 +1,28 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_cases.css?v=case-mvp-v1">{% endblock %}
+{% block breadcrumb %}重大问题案例库{% endblock %}
+{% block body %}
+<main class="case-page" data-case-list data-api-prefix="{{api_prefix}}">
+  <header class="case-head">
+    <div><span class="case-kicker">HISTORICAL CASE</span><h1>重大问题案例库</h1><p>只展示正式发布的 Historical Case，用于组织历史经验检索、复用与 Evidence 追溯。</p></div>
+    <a class="case-button secondary" href="/p0/issues">返回问题工作台</a>
+  </header>
+  <section class="case-card case-filters">
+    <label>ITR / 关键词<input type="search" data-case-q placeholder="输入 ITR、标题或关键词"></label>
+    <label>产品<input data-case-product placeholder="全部产品"></label>
+    <label>状态<select data-case-status><option value="PUBLISHED" selected>PUBLISHED</option></select></label>
+    <button class="case-button primary" type="button" data-case-search>查询</button>
+  </section>
+  <section class="case-card">
+    <div class="case-card-head"><div><h2>正式案例</h2><p>默认只消费 PUBLISHED 案例。</p></div><span data-case-count>0 条</span></div>
+    <div class="case-table-wrap">
+      <table class="case-table">
+        <thead><tr><th>ITR</th><th>标题</th><th>产品</th><th>版本</th><th>状态</th><th>发布时间</th><th>Case Version</th><th></th></tr></thead>
+        <tbody data-case-body><tr><td colspan="8" class="case-empty">正在加载…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.P0_CASES_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_cases.js?v=case-mvp-v1" defer></script>{% endblock %}
