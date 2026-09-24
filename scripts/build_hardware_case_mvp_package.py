@@ -20,6 +20,7 @@ INCLUDE_DIRS = [
     "models",
     "quality_knowledge",
     "repositories",
+    "retriever",
     "runtime",
     "services",
     "schema",
