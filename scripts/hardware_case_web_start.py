@@ -85,15 +85,12 @@ def main() -> int:
         hardware_tree_upload_dir=args.tree_upload_dir,
     )
 
-    route_paths = {getattr(route, "path", None) for route in app.routes}
-    required_routes = {
-        "/p0/hardware-cases/base-data",
-        "/api/v2/hardware-cases/tree-imports",
-    }
-    missing = sorted(path for path in required_routes if path not in route_paths)
-    if missing:
+    try:
+        p07_path = str(app.url_path_for("hardware_case_base_data"))
+        import_path = str(app.url_path_for("list_imports"))
+    except Exception as exc:
         print("RESULT=BLOCKED")
-        print("MISSING_ROUTES=" + ",".join(missing))
+        print("ROUTE_RESOLUTION_FAILED=" + type(exc).__name__)
         status = getattr(app.state, "initialization_status", None)
         if status is not None:
             import json
@@ -104,8 +101,8 @@ def main() -> int:
         print("RESULT=PASS")
         print("STARTUP_IMPORT=PASS")
         print("APP_FACTORY=create_p0_app")
-        print("WEB_ENTRY=/p0/hardware-cases/base-data")
-        print(f"ROUTE_COUNT={len(route_paths)}")
+        print("WEB_ENTRY=" + p07_path)
+        print("TREE_IMPORT_ENTRY=" + import_path)
         return 0
 
     import uvicorn
