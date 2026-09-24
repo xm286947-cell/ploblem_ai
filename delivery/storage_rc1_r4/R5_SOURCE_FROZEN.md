@@ -60,3 +60,11 @@ Gate alignment note:
 - The listener-probe implementation is _listener_probe() using socket connect_ex() plus the bind probe.
 - Package Contract Gate was aligned to the actual implementation identifiers; this changes validation only, not Launcher behavior.
 - This revision is the source-of-truth for the next R5 build.
+
+
+Fourth preflight note:
+- Internal R5 SHA ac2819a1ef65511a76b2fd8de9281b620577690b05b38e7e9400bcf3f700244d was NOT released.
+- Its failure was a stale Package Contract assertion in the frozen source commit: the gate still required the superseded symbol _existing_listener.
+- Current guard behavior is implemented by _listener_probe + socket.connect_ex with DETECTED_BY=LISTENER_CONNECT, followed by bind-probe fallback.
+- Current Package Contract now validates the real implementation contract instead of the superseded function name.
+- This revision supersedes all earlier R5 source markers for final package construction.
