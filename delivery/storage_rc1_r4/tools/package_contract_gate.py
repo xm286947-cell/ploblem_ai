@@ -175,6 +175,8 @@ def validate_extracted(
         raise SystemExit("PACKAGE_GATE=FAIL reason=web_port_not_configurable")
     if ownership.get("product_e2e_on_port_conflict") != "NOT_RUN":
         raise SystemExit("PACKAGE_GATE=FAIL reason=port_conflict_e2e_contract")
+    if "terminated and waited" not in str(ownership.get("shutdown_rule") or ""):
+        raise SystemExit("PACKAGE_GATE=FAIL reason=shutdown_ownership_contract")
 
     automation = fix.get("port_automation") or {}
     for case in (
@@ -202,6 +204,7 @@ def validate_extracted(
 
     launcher = (root / "run_product_test.sh").read_text(encoding="utf-8")
     launcher_required_tokens = (
+        'wait "$p"',
         "PRODUCT_E2E=NOT_RUN",
         "scripts/port_guard.py check-free",
         "scripts/port_guard.py wait-owned",
