@@ -1,0 +1,272 @@
+{
+  "A9001": {
+    "title": "LDO 输出振荡",
+    "background": "LDO 样机验证。",
+    "symptom": "LDO 输出振荡。",
+    "analysis_process": "测量电容 ESR。",
+    "root_cause": "电容 ESR 偏低。",
+    "actions": "更换电容。",
+    "conclusion": "LDO 恢复稳定。",
+    "circuit_feature_links": [
+      "CF-LDO"
+    ],
+    "material_links": [
+      "MD-CAP"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9002": {
+    "title": "GPIO 控制异常",
+    "background": "GPIO 输入测试。",
+    "symptom": "GPIO 控制异常。",
+    "analysis_process": "检查输入电平。",
+    "root_cause": "IC 输入悬空。",
+    "actions": "增加上拉。",
+    "conclusion": "GPIO 恢复。",
+    "circuit_feature_links": [
+      "CF-GPIO"
+    ],
+    "material_links": [
+      "MD-IC"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9003": {
+    "title": "CAN 通信中断",
+    "background": "CAN 通信测试。",
+    "symptom": "CAN 通信中断。",
+    "analysis_process": "测量收发器供电。",
+    "root_cause": "通信 IC 供电跌落。",
+    "actions": "调整通信 IC 供电。",
+    "conclusion": "CAN 通信恢复。",
+    "circuit_feature_links": [
+      "CF-CAN"
+    ],
+    "material_links": [
+      "MD-COMM"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9004": {
+    "title": "功率驱动过热",
+    "background": "功率驱动测试。",
+    "symptom": "功率驱动过热。",
+    "analysis_process": "测量 MOS 温升。",
+    "root_cause": "MOS 导通损耗过高。",
+    "actions": "更换 MOS。",
+    "conclusion": "温升达标。",
+    "circuit_feature_links": [
+      "CF-DRIVE"
+    ],
+    "material_links": [
+      "MD-MOS"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9005": {
+    "title": "接口信号丢失",
+    "background": "接口振动测试。",
+    "symptom": "接口信号间歇丢失。",
+    "analysis_process": "检查连接器。",
+    "root_cause": "连接器接触不良。",
+    "actions": "更换连接器。",
+    "conclusion": "接口信号稳定。",
+    "circuit_feature_links": [
+      "CF-PORT"
+    ],
+    "material_links": [
+      "MD-CONN"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9006": {
+    "title": "多器件复位",
+    "background": "电源测试。",
+    "symptom": "电源复位。",
+    "analysis_process": "检查电容及 MOS。",
+    "root_cause": "电容与 MOS 参数不匹配。",
+    "actions": "更换电容和 MOS。",
+    "conclusion": "电源复位消失。",
+    "circuit_feature_links": [
+      "CF-POWER"
+    ],
+    "material_links": [
+      "MD-CAP",
+      "MD-MOS"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9007": {
+    "title": "多电路异常",
+    "background": "GPIO 与 CAN 联测。",
+    "symptom": "GPIO 与 CAN 同时异常。",
+    "analysis_process": "检查 GPIO 和 CAN 供电。",
+    "root_cause": "通信 IC 供电不足。",
+    "actions": "调整通信 IC 供电。",
+    "conclusion": "GPIO 和 CAN 均恢复。",
+    "circuit_feature_links": [
+      "CF-GPIO",
+      "CF-CAN"
+    ],
+    "material_links": [
+      "MD-COMM"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9008": {
+    "title": "LDO 输出偏低",
+    "background": "LDO 负载测试。",
+    "symptom": "LDO 输出偏低。",
+    "analysis_process": "检查 LDO 负载。",
+    "root_cause": null,
+    "actions": "减小负载。",
+    "conclusion": "LDO 输出恢复。",
+    "circuit_feature_links": [
+      "CF-LDO"
+    ],
+    "material_links": [],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9009": {
+    "title": "接口接触异常",
+    "background": "接口测试。",
+    "symptom": "接口接触异常。",
+    "analysis_process": "检查连接器触点。",
+    "root_cause": "连接器触点氧化。",
+    "actions": null,
+    "conclusion": "待措施验证。",
+    "circuit_feature_links": [
+      "CF-PORT"
+    ],
+    "material_links": [
+      "MD-CONN"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "conclusion"
+    ]
+  },
+  "A9010": {
+    "title": "电源纹波",
+    "background": "电源测试。",
+    "symptom": "电源纹波超标。",
+    "analysis_process": "观察电源波形。",
+    "root_cause": "电容老化。",
+    "actions": "更换电容。",
+    "conclusion": "电源纹波恢复。",
+    "circuit_feature_links": [
+      "CF-POWER"
+    ],
+    "material_links": [
+      "MD-CAP"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9011": {
+    "title": "非标准章节",
+    "background": "功率驱动测试。",
+    "symptom": "功率驱动启动失败。",
+    "analysis_process": "测量 MOS 栅压。",
+    "root_cause": "MOS 栅压不足。",
+    "actions": "调整栅极电阻。",
+    "conclusion": "功率驱动启动正常。",
+    "circuit_feature_links": [
+      "CF-DRIVE"
+    ],
+    "material_links": [
+      "MD-MOS"
+    ],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  },
+  "A9012": {
+    "title": "未分类现象",
+    "background": "通用试验台。",
+    "symptom": "偶发指示灯闪烁。",
+    "analysis_process": "记录环境温度。",
+    "root_cause": "环境温度突变。",
+    "actions": "增加温控。",
+    "conclusion": "闪烁消失。",
+    "circuit_feature_links": [],
+    "material_links": [],
+    "expected_evidence_fields": [
+      "background",
+      "symptom",
+      "analysis_process",
+      "root_cause",
+      "actions",
+      "conclusion"
+    ]
+  }
+}

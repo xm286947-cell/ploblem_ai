@@ -181,12 +181,24 @@ class HardwareCaseAIAdapter:
                 for block_id in block_ids
                 if block_id in evidence_by_block
             ]
+            # A locator alone is insufficient: an unrelated block cannot ground
+            # a claimed fact. Mock/real semantic outputs remain review candidates.
+            if value not in (None, "") and field_name in {"symptom", "root_cause", "actions"}:
+                supported = any(
+                    str(value).strip() in str(block_index[block_id].get("text") or "")
+                    for block_id in block_ids
+                    if block_id in block_index
+                )
+                if not supported:
+                    refs = []
+                    warnings.append(f"KEY_FACT_UNSUPPORTED:{field_name}")
             if value not in (None, "") and not refs and field_name in {
                 "symptom",
                 "root_cause",
                 "actions",
             }:
                 warnings.append(f"KEY_FACT_EVIDENCE_MISSING:{field_name}")
+                value = None
             facts[field_name] = _candidate_field(value, refs)
 
         case = {
