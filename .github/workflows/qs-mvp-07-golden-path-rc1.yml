@@ -1,0 +1,76 @@
+name: QS-MVP-07 Golden Path RC1
+
+on:
+  push:
+    branches:
+      - feature/qs-mvp-07-golden-path-rc1
+  pull_request:
+    branches:
+      - feature/reverse-quality-v01
+  workflow_dispatch:
+
+jobs:
+  golden-path-rc1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python
+        run: python -m compileall -q quality_knowledge
+
+      - name: Check product JavaScript syntax
+        run: |
+          node --check quality_knowledge/web/static/p0_scenario_workbench.js
+          node --check quality_knowledge/web/static/p0_scenario_library.js
+          node --check quality_knowledge/web/static/p0_scenario_detail.js
+
+      - name: QS-MVP-07 Golden Path E2E
+        run: python -m pytest tests/test_quality_scenario_rc1_golden_e2e.py -q
+
+      - name: QS-MVP-06 Evidence traceability regression
+        run: python -m pytest tests/test_quality_scenario_traceability.py -q
+
+      - name: QS-MVP-05C P03 regression
+        run: python -m pytest tests/test_quality_scenario_p03_detail.py -q
+
+      - name: QS-MVP-05B P02 regression
+        run: python -m pytest tests/test_quality_scenario_p02_library.py -q
+
+      - name: QS-MVP-05A P01 regression
+        run: python -m pytest tests/test_quality_scenario_p01_workbench.py -q
+
+      - name: QS-MVP-04 workflow regression
+        run: python -m pytest tests/test_quality_scenario_v1_workflow_service.py -q
+
+      - name: QS-MVP-03 Candidate V1 regression
+        run: python -m pytest tests/test_quality_scenario_candidate_v1_service.py -q
+
+      - name: Quality Scenario V1 contract and repository
+        run: |
+          python -m pytest tests/test_quality_scenario_v1.py -q
+          python -m pytest tests/test_quality_scenario_v1_repository.py -q
+
+      - name: Reverse Quality and Runtime regressions
+        run: |
+          python -m pytest tests/test_reverse_quality.py -q
+          python -m pytest tests/test_reverse_quality_store.py -q
+          python -m pytest tests/test_reverse_quality_runtime_integration.py -q
+
+      - name: Existing P0 UED shell regression
+        run: |
+          python -m pytest tests/test_quality_capability_p0_ued.py -q
+          python -m pytest tests/test_quality_capability_p0_workbench_ued.py -q
+
+      - name: Legacy Scenario regressions
+        run: |
+          python -m pytest tests/test_quality_scenario_generation.py -q
+          python -m pytest tests/test_quality_scenario_library.py -q
