@@ -29,6 +29,8 @@ Health-only readiness is forbidden. A dead spawned PID cannot borrow another pro
 
 Launcher lifecycle ownership also applies at shutdown: every background PID started by the launcher is terminated and waited before the launcher returns, so a successful scenario cannot leave its own listener behind for the next scenario.
 
+For cross-platform Mock startup, R5 invokes the existing OpenAI Mock server through one import and a direct server.main() call. The older python -m tools.openai_mock.server path is forbidden because the package __init__ imports server first, creating a runpy double-load path that was observed to stall before listening on macOS.
+
 ## Automated port cases
 
 - `TEST-PORT-01`: 8765 occupied -> fail-fast -> Product E2E not run.
