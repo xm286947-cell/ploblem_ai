@@ -10,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 from scripts.hardware_case_mvp_smoke import main as backend_smoke
 from scripts.hardware_case_precheck import check_python, check_web
@@ -22,18 +21,15 @@ def frontend_smoke() -> None:
         root = Path(temp)
         p0_db = root / "quality_capability_p1.db"
         hardware_db = root / "hardware_case_mvp.db"
-        P0Initializer(
-            manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
-            plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
-        ).initialize(p0_db)
-        client = TestClient(
-            create_p0_app(
-                p0_db,
-                stage_runner=object(),
-                hardware_case_db_path=hardware_db,
-                hardware_tree_upload_dir=root / "tree_uploads",
-            )
+        app = create_p0_app(
+            p0_db,
+            hardware_case_db_path=hardware_db,
+            hardware_tree_upload_dir=root / "tree_uploads",
+            enabled_domains={"HARDWARE_CASE"},
         )
+        assert app.state.p0_repository is None
+        assert app.state.repeat_risk_service is None
+        client = TestClient(app)
         page = client.get("/p0/hardware-cases")
         assert page.status_code == 200, page.text
         assert "HARDWARE CASE · P01" in page.text

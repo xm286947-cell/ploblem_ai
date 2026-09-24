@@ -231,6 +231,31 @@ def create_p0_insights_router(
     return router
 
 
+def create_hardware_case_pages_router(
+    *,
+    template_dir: str | Path | None = None,
+    static_dir: str | Path | None = None,
+) -> APIRouter:
+    """Return only Hardware Case P01-P07 pages plus their shared static route.
+
+    The implementation reuses the frozen page definitions above.  Filtering at
+    composition time avoids duplicating P01-P07 behavior while allowing a
+    Hardware Case-only host to omit unrelated product pages and APIs.
+    """
+    full = create_p0_insights_router(
+        template_dir=template_dir,
+        static_dir=static_dir,
+    )
+    router = APIRouter()
+    router.routes.extend(
+        route
+        for route in full.routes
+        if str(getattr(route, "path", "")).startswith("/p0/hardware-cases")
+        or str(getattr(route, "path", "")) == "/p0/static/{asset_name}"
+    )
+    return router
+
+
 # Convenience for hosts that prefer a module-level router while still keeping
 # inclusion explicit in their main.py.
 p0_insights_router = create_p0_insights_router()

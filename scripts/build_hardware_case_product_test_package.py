@@ -13,23 +13,42 @@ PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
 STAGE = DIST / PACKAGE_NAME
 
 INCLUDE_DIRS = [
-    "builder",
-    "common",
-    "compatibility",
-    "contracts",
-    "models",
-    "quality_knowledge",
-    "repositories",
-    "retriever",
+    # Unified Runtime is the only executable shared platform subtree required
+    # by Hardware Case. Business-domain trees are never copied wholesale.
     "runtime",
-    "services",
-    "schema",
+]
+
+INCLUDE_GLOBS = [
+    "services/hardware_case*.py",
+    "services/hardware_tree*.py",
+    "repositories/hardware_case*.py",
+    "repositories/hardware_tree*.py",
+    "schema/hardware_case*.json",
+    "schema/hardware_tree*.json",
+    "quality_knowledge/web/templates/hardware_case*.html",
+    "quality_knowledge/web/static/hardware_case*.css",
+    "quality_knowledge/web/static/hardware_case*.js",
 ]
 
 INCLUDE_FILES = [
     "00_README_FIRST.txt",
     "requirements.txt",
     "requirements-runtime-p0-test.txt",
+    "quality_knowledge/__init__.py",
+    "quality_knowledge/web/__init__.py",
+    "quality_knowledge/web/p0_app.py",
+    "quality_knowledge/web/p0_pages.py",
+    "quality_knowledge/web/hardware_case_api.py",
+    "quality_knowledge/web/hardware_tree_import_api.py",
+    "quality_knowledge/web/templates/p0_base.html",
+    "quality_knowledge/web/templates/_hardware_case_nav.html",
+    "quality_knowledge/web/templates/hardware_tree_import.html",
+    "quality_knowledge/web/static/app.css",
+    "quality_knowledge/web/static/p0_ued_bridge.css",
+    "quality_knowledge/web/static/hardware_tree_import.css",
+    "quality_knowledge/web/static/hardware_tree_import.js",
+    "repositories/__init__.py",
+    "services/__init__.py",
     "config/runtime/model.local.hardware_case.example.yaml",
     "config/runtime/agents/hardware_case.structure.yaml",
     "config/hardware_case_real_validation.local.example.json",
@@ -92,6 +111,26 @@ def copy_tree(src: Path, dst: Path) -> None:
         shutil.copy2(item, target)
 
 
+def copy_relative(relative: str) -> None:
+    source = ROOT / relative
+    if not source.is_file():
+        raise SystemExit(f"MISSING_REQUIRED_FILE={relative}")
+    target = STAGE / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def copy_glob(pattern: str) -> None:
+    matches = [path for path in ROOT.glob(pattern) if path.is_file() and allowed(path)]
+    if not matches:
+        raise SystemExit(f"MISSING_REQUIRED_GLOB={pattern}")
+    for source in matches:
+        relative = source.relative_to(ROOT)
+        target = STAGE / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -114,13 +153,25 @@ def inventory() -> list[dict[str, object]]:
 
 def security_assertions(files: list[dict[str, object]]) -> None:
     forbidden: list[str] = []
+    cross_domain_forbidden = {
+        "quality_knowledge/web/repeat_risk_integration.py",
+        "quality_knowledge/web/api_v2.py",
+        "quality_knowledge/web/p1_pages.py",
+        "services/historical_case_contract.py",
+        "services/knowledge_service.py",
+        "repositories/json_repository.py",
+        "main.py",
+    }
     for entry in files:
         path = Path(str(entry["path"]))
+        path_text = path.as_posix()
         if not allowed(path):
-            forbidden.append(path.as_posix())
+            forbidden.append(path_text)
         lower = path.name.lower()
         if lower in SENSITIVE_EXACT_NAMES or any(lower.endswith(p) for p in SENSITIVE_PATTERNS):
-            forbidden.append(path.as_posix())
+            forbidden.append(path_text)
+        if path_text in cross_domain_forbidden or path_text.startswith("quality_knowledge/p0/"):
+            forbidden.append(path_text)
     if forbidden:
         raise SystemExit("FORBIDDEN_PACKAGE_FILES=" + ",".join(sorted(set(forbidden))))
 
@@ -136,13 +187,11 @@ def main() -> int:
             raise SystemExit(f"MISSING_REQUIRED_DIR={relative}")
         copy_tree(source, STAGE / relative)
 
+    for pattern in INCLUDE_GLOBS:
+        copy_glob(pattern)
+
     for relative in INCLUDE_FILES:
-        source = ROOT / relative
-        if not source.is_file():
-            raise SystemExit(f"MISSING_REQUIRED_FILE={relative}")
-        target = STAGE / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        copy_relative(relative)
 
     # Empty company-local working folders are intentionally created in the
     # package. Real data is supplied only after extraction inside the company.
@@ -205,7 +254,7 @@ def main() -> int:
             "DOCX parser + AI Adapter boundary",
             "Hardware Case Agent Config + Unified Runtime Adapter",
             "Local model configuration template and environment precheck",
-            "One-click Web start through the same create_p0_app without repository-wide main.py imports",
+            "One-click Web start through the same create_p0_app with HARDWARE_CASE-only domain composition",
             "Packaged startup import check from the built artifact",
             "Company-local Real AI validation entry",
             "Company-only Real Validation Harness",
@@ -222,6 +271,12 @@ def main() -> int:
             "20_TO_30_REAL_CASE_MVP_INTEGRATION_GATE_PASS",
             "HC_TREE_IMPORT_PRODUCT_GATE",
         ],
+        "domain_boundary": {
+            "composition_profile": ["HARDWARE_CASE"],
+            "platform_shared": ["runtime"],
+            "package_policy": "EXPLICIT_HARDWARE_ALLOWLIST",
+            "cross_domain_business_code_bundled": False,
+        },
         "known_gaps": [
             "Real company Word/Excel data is not bundled",
             "Real Provider acceptance still requires company-environment validation with approved endpoint/model",
