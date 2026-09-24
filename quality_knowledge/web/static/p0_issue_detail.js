@@ -404,8 +404,7 @@
     return '<article class="p0-repeat-candidate">' +
       '<header><div><span class="p0-kicker">HISTORICAL CASE · #' + esc(candidate.rank || index + 1) + '</span>' +
       '<h3>' + esc(candidate.title || candidate.case_id || '历史案例') + '</h3>' +
-      '<small>Case ' + esc(candidate.case_id || '-') + ' · 历史来源 ' + esc(candidate.source_ref || '-') + '</small></div>' +
-      '<div class="p0-repeat-meta">Similarity <b>' + esc(score) + '</b></div></header>' +
+      '<small>Case ' + esc(candidate.case_id || '-') + ' · 历史来源 ' + esc(candidate.source_ref || '-') + '</small></div></header>' +
       '<section class="p0-rationale"><label>为什么值得关注</label>' +
       (rationale.length
         ? '<ul>' + rationale.map(item => '<li>' + esc(text(item)) + '</li>').join('') + '</ul>'
