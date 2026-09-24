@@ -18,11 +18,14 @@ from quality_knowledge.p0.stage_runner import (
 from runtime.config import AgentConfigError
 from quality_knowledge.web.api_v2 import create_v2_router
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
+from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
 from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
 from repositories.hardware_case_repository import HardwareCaseRepository
+from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +38,7 @@ def create_p0_app(
     project_root: str | Path = PROJECT_ROOT,
     runtime_model_config: str | Path | None = None,
     hardware_case_db_path: str | Path | None = None,
+    hardware_tree_upload_dir: str | Path | None = None,
     repeat_web: Any | None = None,
 ) -> FastAPI:
     root = Path(project_root)
@@ -131,6 +135,15 @@ def create_p0_app(
     app.state.hardware_case_repository = hardware_case_repository
     app.state.hardware_case_service = hardware_case_service
 
+    hardware_tree_import_repository = HardwareTreeImportRepository(hardware_db)
+    hardware_tree_file_store = HardwareTreeImportFileStore(
+        Path(hardware_tree_upload_dir)
+        if hardware_tree_upload_dir is not None
+        else hardware_db.with_name(hardware_db.stem + "_tree_uploads")
+    )
+    app.state.hardware_tree_import_repository = hardware_tree_import_repository
+    app.state.hardware_tree_file_store = hardware_tree_file_store
+
     app.include_router(create_v2_router(
         repository,
         stage_runner=stage_runner,
@@ -138,6 +151,12 @@ def create_p0_app(
         analysis_runtime_status=analysis_runtime_status,
         repeat_web=repeat_web,
     ))
+    app.include_router(
+        create_hardware_tree_import_router(
+            hardware_tree_import_repository,
+            hardware_tree_file_store,
+        )
+    )
     app.include_router(create_hardware_case_router(hardware_case_service))
     app.include_router(create_p0_insights_router())
     app.include_router(create_p1_router())
