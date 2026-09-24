@@ -14,7 +14,7 @@ from test_assets.storage_rc1.mock_harness import (
 )
 
 
-EXPECTED_IDS = [f"M{index:02d}" for index in range(1, 23)]
+EXPECTED_IDS = [f"M{index:02d}" for index in range(1, 26)]
 COVERAGE = {"FOUND", "NOT_FOUND", "NOT_APPLICABLE", "NOT_CHECKED", "AMBIGUOUS"}
 
 
@@ -22,7 +22,7 @@ def test_rc1_fixture_set_is_complete_and_unique() -> None:
     fixtures = load_all_fixtures()
     ids = [item["mock_id"] for item in fixtures]
     assert sorted(ids) == EXPECTED_IDS
-    assert len(ids) == len(set(ids)) == 22
+    assert len(ids) == len(set(ids)) == 25
     for fixture in fixtures:
         assert fixture["purpose"]
         assert isinstance(fixture["request_match"], dict)
@@ -71,6 +71,23 @@ def test_golden_parameter_fixture_has_three_product_categories() -> None:
     assert must_exist.issubset(ids)
 
 
+def test_parameter_baseline_covers_all_four_rc1_device_families() -> None:
+    expected = {
+        "M03": "eMMC",
+        "M23": "SSD/NVMe SSD",
+        "M24": "Raw NAND",
+        "M25": "NOR Flash",
+    }
+    for mock_id, family in expected.items():
+        fixture = load_fixture(mock_id)
+        categories = {item["category"] for item in fixture["payload"]["parameters"]}
+        assert categories == {"KEY_SPEC", "KEY_DIAGNOSTIC", "COMPREHENSIVE"}
+        if mock_id != "M03":
+            assert fixture["expected"]["device_family"] == family
+            assert fixture["expected"]["required_slots_must_remain_visible"] is True
+        assert fixture["expected"]["auto_confirm"] is False
+
+
 def test_ai_has_no_confirm_or_publish_authority() -> None:
     confirm = load_fixture("M18")
     publish = load_fixture("M19")
@@ -92,7 +109,7 @@ def test_diagnostic_fixture_never_fabricates_runtime_observation() -> None:
     assert fixture["expected"]["fabricate_runtime_value"] is False
 
 
-@pytest.mark.parametrize("mock_id", ["M01", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11", "M12", "M13", "M18", "M19", "M20", "M21", "M22"])
+@pytest.mark.parametrize("mock_id", ["M01", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11", "M12", "M13", "M18", "M19", "M20", "M21", "M22", "M23", "M24", "M25"])
 def test_fixture_is_served_by_shared_openai_mock(mock_id: str) -> None:
     fixture = load_fixture(mock_id)
     with running_server() as (host, port):
