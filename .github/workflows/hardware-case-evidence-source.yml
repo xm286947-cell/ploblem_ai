@@ -61,7 +61,7 @@ jobs:
       - name: Packaged startup check
         run: |
           python scripts/build_hardware_case_product_test_package.py
-          cd dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+          cd dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
           python scripts/hardware_case_web_start.py --check \
             --db data/ci_source_quality.db \
             --hardware-db data/ci_source_hardware.db \

@@ -1,0 +1,58 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block breadcrumb %}案例首页{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-page="home" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
+  <section class="hc-hero">
+    <div>
+      <span class="hc-kicker">HARDWARE CASE · P01</span>
+      <h1>硬件案例库</h1>
+      <p>从电路 / 特性或物料 / 器件出发，快速复用历史硬件问题、根因、措施与 Evidence。</p>
+    </div>
+    <form class="hc-search-hero" data-home-search>
+      <input type="search" placeholder="搜索问题现象 / 器件 / 型号 / 电路 / 特性 / 案例标题" data-home-query>
+      <button type="submit" class="hc-button primary">搜索案例</button>
+    </form>
+  </section>
+
+  <section class="hc-tree-entry-grid">
+    <a class="hc-tree-entry" href="/p0/hardware-cases/tree?type=CIRCUIT_FEATURE{% if hardware_role == 'MAINTAINER' %}&role=maintainer{% endif %}" data-home-tree="CIRCUIT_FEATURE">
+      <span class="hc-tree-type">CIRCUIT / FEATURE</span>
+      <h2>电路 / 特性树</h2>
+      <p>从工程功能和电路结构查历史问题。</p>
+      <dl><div><dt>有效节点</dt><dd data-node-count>—</dd></div><div><dt>案例</dt><dd data-case-count>—</dd></div></dl>
+      <span class="hc-inline-link">进入树 →</span>
+    </a>
+    <a class="hc-tree-entry" href="/p0/hardware-cases/tree?type=MATERIAL_DEVICE{% if hardware_role == 'MAINTAINER' %}&role=maintainer{% endif %}" data-home-tree="MATERIAL_DEVICE">
+      <span class="hc-tree-type">MATERIAL / DEVICE</span>
+      <h2>物料 / 器件树</h2>
+      <p>从器件分类和物料族查历史问题。</p>
+      <dl><div><dt>有效节点</dt><dd data-node-count>—</dd></div><div><dt>案例</dt><dd data-case-count>—</dd></div></dl>
+      <span class="hc-inline-link">进入树 →</span>
+    </a>
+  </section>
+
+  {% if hardware_role == 'MAINTAINER' %}
+  <section class="hc-maintenance-strip" data-maintenance-strip>
+    <div><span>待确认</span><strong data-pending-review>—</strong></div>
+    <div><span>待挂接</span><strong data-pending-mapping>—</strong></div>
+    <div><span>Evidence 异常</span><strong data-evidence-anomaly>—</strong></div>
+    <a href="/p0/hardware-cases/review">进入案例确认 →</a>
+  </section>
+  {% endif %}
+
+  <section class="hc-card">
+    <div class="hc-card-head">
+      <div><h2>最近发布案例</h2><p>只展示当前有效 PUBLISHED 知识。</p></div>
+      <a class="hc-button secondary" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">查看全部</a>
+    </div>
+    <div class="hc-case-list" data-recent-cases><div class="hc-empty">正在读取案例…</div></div>
+  </section>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}

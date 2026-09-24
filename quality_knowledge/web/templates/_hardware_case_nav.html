@@ -1,0 +1,16 @@
+<div class="hc-product-bar" data-hc-product-bar>
+  <div class="hc-product-id">
+    <span class="hc-product-kicker">HARDWARE CASE LIBRARY</span>
+    <strong>硬件案例库</strong>
+  </div>
+  <nav class="hc-local-nav" aria-label="硬件案例库导航">
+    <a class="{% if hardware_active == 'home' %}active{% endif %}" href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例首页</a>
+    <a class="{% if hardware_active == 'tree' %}active{% endif %}" href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">双树导航</a>
+    <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例搜索</a>
+    {% if hardware_role == 'MAINTAINER' %}
+    <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review">案例确认</a>
+    <a class="{% if hardware_active == 'base-data' %}active{% endif %}" href="/p0/hardware-cases/base-data">基础数据管理</a>
+    {% endif %}
+  </nav>
+  <div class="hc-role-pill">{{ "维护视图" if hardware_role == "MAINTAINER" else "研发视图" }}</div>
+</div>

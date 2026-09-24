@@ -88,6 +88,76 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/p0/hardware-cases", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_home(request: Request) -> HTMLResponse:
+        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_home.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "硬件案例库",
+                "hardware_role": role,
+                "hardware_active": "home",
+            },
+        )
+
+    @router.get("/p0/hardware-cases/tree", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_tree(request: Request) -> HTMLResponse:
+        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_tree.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "双树导航 · 硬件案例库",
+                "hardware_role": role,
+                "hardware_active": "tree",
+            },
+        )
+
+    @router.get("/p0/hardware-cases/search", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_search(request: Request) -> HTMLResponse:
+        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_search.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "案例搜索 · 硬件案例库",
+                "hardware_role": role,
+                "hardware_active": "search",
+            },
+        )
+
+    @router.get("/p0/hardware-cases/review", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_review_queue(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_review.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "案例确认 · 硬件案例库",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "review",
+                "case_id": "",
+            },
+        )
+
+    @router.get("/p0/hardware-cases/{case_id}/review", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_review(request: Request, case_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_review.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "案例确认 · 硬件案例库",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "review",
+                "case_id": case_id,
+            },
+        )
+
     @router.get("/p0/hardware-cases/base-data", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_base_data(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -97,6 +167,23 @@ def create_p0_insights_router(
                 "import_api_prefix": "/api/v2/hardware-cases/tree-imports",
                 "tree_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "基础数据管理 · 硬件案例库",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "base-data",
+            },
+        )
+
+    @router.get("/p0/hardware-cases/{case_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_detail(request: Request, case_id: str) -> HTMLResponse:
+        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_detail.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "案例详情 · 硬件案例库",
+                "hardware_role": role,
+                "hardware_active": "",
+                "case_id": case_id,
             },
         )
 

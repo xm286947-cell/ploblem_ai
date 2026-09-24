@@ -18,7 +18,7 @@ on:
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
-      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
@@ -45,7 +45,7 @@ on:
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
-      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md"
+      - "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
@@ -66,7 +66,9 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
 
       - name: JavaScript syntax
-        run: node --check quality_knowledge/web/static/hardware_tree_import.js
+        run: |
+          node --check quality_knowledge/web/static/hardware_case.js
+          node --check quality_knowledge/web/static/hardware_tree_import.js
 
       - name: Build product test package
         run: python scripts/build_hardware_case_product_test_package.py
@@ -77,13 +79,14 @@ jobs:
           import json
           from pathlib import Path
 
-          stage = Path("dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2")
+          stage = Path("dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1")
           manifest = json.loads((stage / "PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
 
           assert manifest["package_status"] == "READY_FOR_INTERNAL_TEST"
           assert manifest["release_status"] == "TEST_PACKAGE_NOT_RELEASE"
-          assert manifest["web_entry"] == "/p0/hardware-cases/base-data"
-          assert manifest["package_revision"] == "V0.1.2_STARTUP_CLOSURE"
+          assert manifest["web_entry"] == "/p0/hardware-cases"
+          assert manifest["package_revision"] == "FULL_V0.1_P01_P07"
+          assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
           assert manifest["entrypoints"]["start_product_windows"] == "START_HARDWARE_CASE.bat"
@@ -96,12 +99,19 @@ jobs:
           assert "EXCLUDE" in manifest["explicitly_not_tree_change_type"]
           assert "REAL_TREE_IMPORT_VALIDATION" in manifest["open_test_gates"]
           assert "HC_TREE_IMPORT_PRODUCT_GATE" in manifest["open_test_gates"]
-          assert any("P01-P06" in item for item in manifest["known_gaps"])
+          assert not any("P01-P06" in item for item in manifest["known_gaps"])
 
           paths = [item["path"] for item in manifest["files"]]
           forbidden_suffixes = {".db", ".sqlite", ".sqlite3", ".log"}
           assert not any(Path(path).suffix.lower() in forbidden_suffixes for path in paths)
           assert not any(Path(path).name.lower() in {".env", ".env.local"} for path in paths)
+          assert "quality_knowledge/web/templates/hardware_case_home.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_tree.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_search.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_detail.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_review.html" in paths
+          assert "quality_knowledge/web/static/hardware_case.js" in paths
+          assert "quality_knowledge/web/static/hardware_case.css" in paths
           assert "quality_knowledge/web/templates/hardware_tree_import.html" in paths
           assert "quality_knowledge/web/static/hardware_tree_import.js" in paths
           assert "quality_knowledge/web/static/hardware_tree_import.css" in paths
@@ -119,11 +129,11 @@ jobs:
           PY
 
       - name: Run product test package smoke
-        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
         run: python scripts/hardware_case_product_test_smoke.py
 
       - name: Run packaged startup import Gate
-        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
         run: >
           python scripts/hardware_case_web_start.py
           --check
@@ -134,6 +144,7 @@ jobs:
       - name: Run Hardware Case and Tree Import regression
         run: >
           python -m pytest -q --noconftest
+          tests/test_hardware_case_m3_frontend.py
           tests/test_hardware_case_contract.py
           tests/test_hardware_case_backend.py
           tests/test_hardware_case_ai_adapter.py
@@ -149,15 +160,15 @@ jobs:
       - name: Stage delivery files
         run: |
           mkdir -p dist/product-test-delivery
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2_*.zip dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2_*.zip.sha256 dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_V0.1.2/PACKAGE_MANIFEST.json dist/product-test-delivery/
-          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip.sha256 dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
+          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md dist/product-test-delivery/
 
       - name: Upload product test package
         uses: actions/upload-artifact@v4
         with:
-          name: HARDWARE_CASE_PRODUCT_TEST_V0.1.2
+          name: HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
           path: dist/product-test-delivery/*
           if-no-files-found: error
           retention-days: 14

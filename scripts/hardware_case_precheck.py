@@ -75,6 +75,13 @@ def check_web() -> list[str]:
     errors: list[str] = []
     required = (
         "scripts/hardware_case_web_start.py",
+        "quality_knowledge/web/templates/hardware_case_home.html",
+        "quality_knowledge/web/templates/hardware_case_tree.html",
+        "quality_knowledge/web/templates/hardware_case_search.html",
+        "quality_knowledge/web/templates/hardware_case_detail.html",
+        "quality_knowledge/web/templates/hardware_case_review.html",
+        "quality_knowledge/web/static/hardware_case.css",
+        "quality_knowledge/web/static/hardware_case.js",
         "quality_knowledge/web/templates/hardware_tree_import.html",
         "quality_knowledge/web/static/hardware_tree_import.js",
         "quality_knowledge/web/static/hardware_tree_import.css",

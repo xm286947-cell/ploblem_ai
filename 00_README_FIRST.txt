@@ -1,4 +1,4 @@
-HARDWARE CASE PRODUCT TEST V0.1.2
+HARDWARE CASE PRODUCT TEST FULL V0.1
 ==================================
 
 这是内部提测包，不是 Release 包。
@@ -26,8 +26,20 @@ HARDWARE CASE PRODUCT TEST V0.1.2
 4. 启动产品：
    START_HARDWARE_CASE.bat
 
-   P07 地址：
-   http://127.0.0.1:8080/p0/hardware-cases/base-data
+   产品首页：
+   http://127.0.0.1:8080/p0/hardware-cases
+
+页面：
+   P01 案例首页
+   P02 双树导航
+   P03 案例搜索
+   P04 案例详情
+   P05 案例确认（维护视图）
+   P06 Evidence Viewer
+   P07 基础数据管理
+
+维护视图：
+   http://127.0.0.1:8080/p0/hardware-cases?role=maintainer
 
 
 【真实 AI 验证】
@@ -75,10 +87,10 @@ Hardware Case 不自建第二套模型调用链。
 
 
 完整说明：
-  docs\product\HARDWARE_CASE_PRODUCT_TEST_V0.1.2.md
+  docs\product\HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md
 
 
-【V0.1.2 启动修复说明】
+【FULL V0.1 启动修复说明】
 
 如果旧 V0.1.1 包出现：
   ModuleNotFoundError: No module named 'parser'
@@ -88,7 +100,7 @@ Hardware Case 不自建第二套模型调用链。
 
 parser 是主仓内部旧模块，不是需要安装的第三方依赖。
 
-V0.1.2 已改为：
+FULL V0.1 已改为：
   START_HARDWARE_CASE.bat
     -> scripts\hardware_case_web_start.py
     -> create_p0_app

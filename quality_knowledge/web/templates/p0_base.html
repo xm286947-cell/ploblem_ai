@@ -12,17 +12,17 @@
 <body class="p0-page">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
-    <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
+    <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
     <nav class="main-nav">
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/cases') %}active{% endif %}" href="/p0/cases">重大问题案例库</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/hardware-cases') %}active{% endif %}" href="/p0/hardware-cases">硬件案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/batch-analysis') %}active{% endif %}" href="/p0/batch-analysis">批量 AI 分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/product-reports') %}active{% endif %}" href="/p1/product-reports">产品综合报告</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/data-intake') %}active{% endif %}" href="/p0/data-intake">数据接入</a>
       <div class="nav-divider"></div>
       <div class="nav-label">管理</div>
-      <a class="nav-item {% if request.url.path.startswith('/p0/hardware-cases/base-data') %}active{% endif %}" href="/p0/hardware-cases/base-data">基础数据管理</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
     </nav>
@@ -30,7 +30,7 @@
   </aside>
   <div class="app-main">
     <header class="top-bar">
-      <div class="breadcrumb">质量问题分析 <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div>
+      <div class="breadcrumb">{% block shell_product %}质量问题分析{% endblock %} <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div>
       <div class="top-actions"><a href="/p0/data-intake">导入数据</a><a href="/p0/settings">系统配置</a></div>
     </header>
     <main class="content">{% block body %}{% endblock %}</main>

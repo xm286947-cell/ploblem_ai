@@ -34,12 +34,30 @@ def frontend_smoke() -> None:
                 hardware_tree_upload_dir=root / "tree_uploads",
             )
         )
-        page = client.get("/p0/hardware-cases/base-data")
+        page = client.get("/p0/hardware-cases")
         assert page.status_code == 200, page.text
-        assert "基础数据管理" in page.text
-        assert "Change Diff" in page.text
-        assert "APPLIED_WITH_EXCLUSIONS" in page.text
-        assert "DELETE" not in page.text
+        assert "HARDWARE CASE · P01" in page.text
+        assert "硬件案例库" in page.text
+        assert "双树导航" in page.text
+        assert "案例搜索" in page.text
+
+        tree = client.get("/p0/hardware-cases/tree")
+        search = client.get("/p0/hardware-cases/search")
+        detail = client.get("/p0/hardware-cases/HC-SMOKE")
+        review = client.get("/p0/hardware-cases/review")
+        base_data = client.get("/p0/hardware-cases/base-data")
+        assert tree.status_code == 200 and "HARDWARE CASE · P02" in tree.text
+        assert search.status_code == 200 and "HARDWARE CASE · P03" in search.text
+        assert detail.status_code == 200 and "HARDWARE CASE · P04" in detail.text
+        assert "EVIDENCE · P06" in detail.text
+        assert review.status_code == 200 and "HARDWARE CASE · P05" in review.text
+        assert base_data.status_code == 200 and "HARDWARE CASE · P07" in base_data.text
+        assert "Change Diff" in base_data.text
+        assert "APPLIED_WITH_EXCLUSIONS" in base_data.text
+        assert "DELETE" not in base_data.text
+
+        assert client.get("/p0/static/hardware_case.js").status_code == 200
+        assert client.get("/p0/static/hardware_case.css").status_code == 200
         assert client.get("/p0/static/hardware_tree_import.js").status_code == 200
         assert client.get("/p0/static/hardware_tree_import.css").status_code == 200
 
@@ -69,7 +87,7 @@ def main() -> int:
     frontend_smoke()
     runtime_package_smoke()
     print("PRODUCT_TEST_PACKAGE=PASS")
-    print("P07_FRONTEND=PASS")
+    print("P01_P07_FRONTEND=PASS")
     print("RUNTIME_PACKAGE_ASSETS=PASS")
     print("STARTUP_PRECHECK=PASS")
     print("PACKAGE_STATUS=READY_FOR_INTERNAL_TEST")

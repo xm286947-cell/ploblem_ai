@@ -1,0 +1,32 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block breadcrumb %}案例搜索{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-page="search" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
+  <header class="hc-page-head">
+    <div><span class="hc-kicker">HARDWARE CASE · P03</span><h1>案例搜索</h1><p>不知道树位置时，通过现象、器件、型号、电路、特性或标题搜索全库。</p></div>
+  </header>
+  <section class="hc-card hc-search-panel">
+    <form class="hc-search-row" data-search-form>
+      <input type="search" placeholder="输入关键词" data-search-query>
+      <button type="submit" class="hc-button primary">搜索</button>
+    </form>
+    <div class="hc-filter-row">
+      <input type="text" placeholder="产品" data-filter-product>
+      <input type="text" placeholder="电路 / 特性路径" data-filter-circuit>
+      <input type="text" placeholder="物料 / 器件路径" data-filter-material>
+      <button type="button" class="hc-button secondary" data-clear-filters>清空筛选</button>
+    </div>
+  </section>
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>搜索结果</h2><p data-search-summary>正在读取案例…</p></div></div>
+    <div class="hc-case-list dense" data-search-results><div class="hc-empty">正在读取案例…</div></div>
+  </section>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}
