@@ -128,7 +128,7 @@ def update_release_manifest(
             "openai_mock": 18000,
             "mock_router": 18001,
         },
-        "pre_start_rule": "all required ports must be bind-free before any product/mock service is spawned",
+        "pre_start_rule": "all required ports must pass existing-listener probe plus bind probe before any product/mock service is spawned",
         "post_start_rule": "spawned PID alive + spawned PID owns listening port + expected health endpoint succeeds",
         "shutdown_rule": "all launcher-owned background PIDs are terminated and waited before launcher exit",
         "mock_start_rule": "OpenAI Mock uses a single module import and direct server.main invocation; python -m double-loading is forbidden",
