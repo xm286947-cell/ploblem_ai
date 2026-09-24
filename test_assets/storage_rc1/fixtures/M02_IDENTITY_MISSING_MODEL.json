@@ -1,0 +1,31 @@
+{
+  "mock_id": "M02",
+  "purpose": "IDENTITY_MISSING_MODEL",
+  "request_match": {
+    "stage": "device_identity"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "device_identity": {
+      "manufacturer": "SyntheticSemi",
+      "product_family": "EMMC-PRO",
+      "device_type": "eMMC",
+      "models": null,
+      "document_title": "Synthetic eMMC Datasheet",
+      "document_number": "SS-EMMC-001",
+      "revision": "1.2",
+      "evidence_refs": [
+        "E-M02-P1"
+      ]
+    }
+  },
+  "expected": {
+    "candidate_status": "UNREVIEWED",
+    "missing_fields": [
+      "models"
+    ],
+    "must_not_guess": true
+  }
+}
