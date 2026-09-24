@@ -98,6 +98,14 @@ cleanup(){
     kill "$p" 2>/dev/null || true
   done
   for p in $PIDS; do
+    i=0
+    while kill -0 "$p" 2>/dev/null && [ "$i" -lt 30 ]; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    if kill -0 "$p" 2>/dev/null; then
+      kill -9 "$p" 2>/dev/null || true
+    fi
     wait "$p" 2>/dev/null || true
   done
 }
