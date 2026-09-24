@@ -1,0 +1,116 @@
+{
+  "scenario_key": "default",
+  "payload": {
+    "candidates": [
+      {
+        "object_type": "CONCEPT",
+        "title": "Physical Eraseblock (PEB)",
+        "content": "A PEB is a physical eraseblock managed by the UBI layer.",
+        "device_type": "RAW_NAND",
+        "scope": [
+          "ubi",
+          "wear_leveling"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "peb",
+          "ubi"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "LINUX-UBI",
+            "source_version": "V1",
+            "page": 10,
+            "section": "UBI terminology",
+            "source_anchor": "page:10"
+          }
+        ],
+        "confidence": 0.97
+      },
+      {
+        "object_type": "CONCEPT",
+        "title": "Logical Eraseblock (LEB)",
+        "content": "A LEB is a logical eraseblock mapped by UBI onto a physical eraseblock.",
+        "device_type": "RAW_NAND",
+        "scope": [
+          "ubi"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "leb",
+          "ubi"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "LINUX-UBI",
+            "source_version": "V1",
+            "page": 11,
+            "section": "UBI terminology",
+            "source_anchor": "page:11"
+          }
+        ],
+        "confidence": 0.97
+      },
+      {
+        "object_type": "SOLUTION",
+        "title": "UBI Wear Leveling",
+        "content": "UBI performs wear leveling by managing eraseblock mappings and erase counters.",
+        "device_type": "RAW_NAND",
+        "scope": [
+          "ubi",
+          "wear_leveling"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "wear_leveling",
+          "erase_counter",
+          "ubi"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "LINUX-UBI",
+            "source_version": "V1",
+            "page": 12,
+            "section": "Wear leveling",
+            "source_anchor": "page:12"
+          }
+        ],
+        "confidence": 0.96
+      },
+      {
+        "object_type": "DIAGNOSTIC",
+        "title": "Erase Counter",
+        "content": "Erase counters can be used to observe erase history across physical eraseblocks.",
+        "device_type": "RAW_NAND",
+        "scope": [
+          "ubi",
+          "diagnostic"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "erase_counter",
+          "diagnostic",
+          "ubi"
+        ],
+        "evidence_locations": [
+          {
+            "source_id": "LINUX-UBI",
+            "source_version": "V1",
+            "page": 13,
+            "section": "Erase counters",
+            "source_anchor": "page:13"
+          }
+        ],
+        "confidence": 0.95
+      }
+    ],
+    "unknowns_or_gaps": []
+  },
+  "behavior": {
+    "status": 200
+  }
+}
