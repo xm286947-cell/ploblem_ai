@@ -24,3 +24,10 @@ Preflight note:
 - Its Launcher code was not the failure; package_contract_gate.py incorrectly required the PORT_CONFLICT literal in run_product_test.sh instead of validating that diagnostic in scripts/port_guard.py.
 - The gate assertion has been corrected without changing Runtime/Knowledge semantics.
 - This revision supersedes the earlier source-freeze marker for the final R5 build.
+
+Second preflight note:
+- Internal preflight SHA 8181a8360b72ef4f2fb1ba1a26f6648870d6583871e429555e2acdcbabcdaa5f was NOT released.
+- TEST-PORT-01/02/03/05 passed and normal TEST-PORT-04 passed.
+- The next selfcheck scenario exposed a launcher lifecycle bug: cleanup killed owned background PIDs but did not wait for process termination, so port 8765 could still be listening when the next scenario started.
+- R5 now owns shutdown as well as startup: every launcher-owned PID is killed and waited before launcher exit.
+- This revision supersedes all earlier R5 preflight source markers for final package construction.
