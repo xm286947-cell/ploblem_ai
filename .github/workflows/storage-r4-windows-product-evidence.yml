@@ -1,0 +1,124 @@
+name: Storage R4 Windows Native Product Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r4-windows-product-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_SHA256: 27a8807ed8161968cd447c6a855e0d1caffa50093c8a5b516a6f43ec659633f6
+  R4_URL: 'https://sdmntprwestcentralus.oaiusercontent.com/files/00000000-97fc-81fb-90fc-6ec6169cad2b/raw?se=2026-09-24T15%3A17%3A09Z&sp=r&sv=2026-02-06&sr=b&scid=a0215a2b-d945-56fb-8e6c-82b09cf538f5&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T12%3A50%3A25Z&ske=2026-09-25T12%3A50%3A25Z&sks=b&skv=2026-02-06&sig=JPKLMPwjcDoK9LE/94S3HQ%2BdoEqQWOmOkB22VzfXyiU%3D'
+
+jobs:
+  windows-native-product:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download exact frozen R4 and verify SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'R4.zip'
+          Invoke-WebRequest -Uri $env:R4_URL -OutFile $zip
+          $actual=(Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          Write-Host "WINDOWS_SHA256=$actual"
+          if($actual -ne $env:EXPECTED_SHA256){ throw 'SHA256 mismatch' }
+
+      - name: Fresh extract with spaces
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'R4.zip'
+          $dest=Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces'
+          if(Test-Path $dest){ Remove-Item -Recurse -Force $dest }
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest
+          $pkg=Join-Path $dest 'STORAGE_PRODUCT_MVP_RC1'
+          if(-not (Test-Path (Join-Path $pkg 'run_windows.bat'))){ throw 'run_windows.bat missing' }
+          Write-Host "WINDOWS_FRESH_EXTRACT=$dest"
+          Write-Host "WINDOWS_PATH_WITH_SPACES=$($pkg -match ' ')"
+
+      - name: Official Windows Launcher from changed CWD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg=Join-Path (Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces') 'STORAGE_PRODUCT_MVP_RC1'
+          $outside=Join-Path $env:RUNNER_TEMP 'Outside Current Working Directory'
+          New-Item -ItemType Directory -Force -Path $outside | Out-Null
+          Set-Location $outside
+          Write-Host "WINDOWS_CHANGED_CWD=$(Get-Location)"
+          py -3 --version
+          $config=Join-Path $pkg 'config\model.local.yaml'
+          if(-not (Test-Path $config)){ throw "config missing $config" }
+          $env:STORAGE_MODEL_CONFIG=$config
+          $env:STORAGE_WEB_PORT='18765'
+          $stdout=Join-Path $env:RUNNER_TEMP 'windows_launcher_stdout.log'
+          $stderr=Join-Path $env:RUNNER_TEMP 'windows_launcher_stderr.log'
+          $cmdLine='call "'+(Join-Path $pkg 'run_windows.bat')+'" < NUL'
+          $proc=Start-Process -FilePath 'cmd.exe' -ArgumentList '/d','/c',$cmdLine -WorkingDirectory $outside -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $healthy=$false
+          for($i=0;$i -lt 180;$i++){
+            if($proc.HasExited){ break }
+            try{
+              $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/api/health' -TimeoutSec 2
+              if($r.StatusCode -eq 200){ $healthy=$true; break }
+            }catch{}
+            Start-Sleep -Seconds 2
+          }
+          if(-not $healthy){
+            if(Test-Path $stdout){Get-Content $stdout -Tail 200}
+            if(Test-Path $stderr){Get-Content $stderr -Tail 200}
+            throw 'official Windows Launcher did not become healthy'
+          }
+          Write-Host 'WINDOWS_LAUNCHER_HEALTH=PASS'
+          $venvPython=Join-Path $pkg '.venv\Scripts\python.exe'
+          if(-not (Test-Path $venvPython)){ throw 'package local Python missing' }
+          Write-Host "WINDOWS_PYTHON=$venvPython"
+          Write-Host "WINDOWS_CONFIG=$config"
+          Get-Content (Join-Path $pkg 'logs\launcher_latest.log') | Select-Object -Last 40
+          Get-Content (Join-Path $pkg 'RUN_LOG.txt') | Select-Object -Last 120
+          cmd /d /c "taskkill /PID $($proc.Id) /T /F >NUL 2>&1 & exit /b 0"
+          Start-Sleep -Seconds 3
+
+      - name: Native Windows Mock Product Test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg=Join-Path (Join-Path $env:RUNNER_TEMP 'R4 Fresh Extract With Spaces') 'STORAGE_PRODUCT_MVP_RC1'
+          $python=Join-Path $pkg '.venv\Scripts\python.exe'
+          $runtime=Join-Path $pkg 'vendor\unified_agent_runtime'
+          $env:STORAGE_WEB_PORT='18766'
+          $env:STORAGE_TEST_NO_WAIT='1'
+          $env:STORAGE_STRICT_PACKAGE_PROVENANCE='1'
+          $env:STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME='1'
+          $env:UNIFIED_AGENT_RUNTIME_ROOT=$runtime
+          $env:VIRTUAL_ENV=(Join-Path $pkg '.venv')
+          Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+          $env:PYTHONPATH="$pkg;$runtime"
+          $env:PATH="$(Join-Path $pkg '.venv\Scripts');$env:PATH"
+          Push-Location $pkg
+          try{
+            & $python (Join-Path $pkg 'scripts\windows_e2e.py') --mode mock 2>&1 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'windows_product_test.log')
+            $rc=$LASTEXITCODE
+          }finally{
+            Pop-Location
+          }
+          Write-Host "WINDOWS_PRODUCT_TEST_EXIT=$rc"
+          if($rc -ne 0){ throw "Windows Mock Product Test failed rc=$rc" }
+
+      - name: Upload Windows native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r4-windows-native-product-evidence
+          path: |
+            ${{ runner.temp }}\windows_launcher_stdout.log
+            ${{ runner.temp }}\windows_launcher_stderr.log
+            ${{ runner.temp }}\windows_product_test.log
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\RUN_LOG.txt
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\logs\**
+            ${{ runner.temp }}\R4 Fresh Extract With Spaces\STORAGE_PRODUCT_MVP_RC1\release\**
