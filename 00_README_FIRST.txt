@@ -38,6 +38,9 @@ HARDWARE CASE PRODUCT TEST FULL V0.1
    P06 Evidence Viewer
    P07 基础数据管理
 
+维护视图：
+   http://127.0.0.1:8080/p0/hardware-cases?role=maintainer
+
 
 【真实 AI 验证】
 
@@ -84,7 +87,7 @@ Hardware Case 不自建第二套模型调用链。
 
 
 完整说明：
-  docs\product\HARDWARE_CASE_PRODUCT_TEST_FULL V0.1.md
+  docs\product\HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md
 
 
 【FULL V0.1 启动修复说明】
