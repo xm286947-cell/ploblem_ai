@@ -1,0 +1,57 @@
+name: KP Storage RC1 Release Gate
+
+on:
+  push:
+    branches:
+      - delivery/kp-storage-rc1-blocker-001
+    paths:
+      - "tools/kp_storage_rc1_release_gate.py"
+      - ".github/workflows/kp-storage-rc1-release-gate.yml"
+      - "knowledge_production/**"
+      - "tests/test_kp_d03_review_publish.py"
+      - "tests/test_kp_d04_release_query.py"
+      - "tests/test_kp_d06_storage_golden.py"
+  workflow_dispatch:
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Run existing review publish release and Storage consumer gates
+        run: |
+          python -m pytest -q             tests/test_kp_d03_review_publish.py             tests/test_kp_d04_release_query.py             tests/test_kp_d06_storage_golden.py
+
+      - name: Build independent Knowledge Release delivery
+        run: |
+          python tools/kp_storage_rc1_release_gate.py
+
+      - name: Verify delivery files
+        run: |
+          test -f dist/kp-storage-rc1/release_manifest.json
+          test -f dist/kp-storage-rc1/knowledge_objects.json
+          test -f dist/kp-storage-rc1/evidences.json
+          test -f dist/kp-storage-rc1/source_references.json
+          test -f dist/kp-storage-rc1/storage_consumer_request.json
+          test -f dist/kp-storage-rc1/storage_consumer_response.json
+          test -f dist/kp-storage-rc1/gate_result.json
+          test -f dist/kp-storage-rc1/knowledge-release-KP-STORAGE-RC1-VALIDATION-001.zip
+          cat dist/kp-storage-rc1/gate_result.json
+
+      - name: Upload RC1 Knowledge Release delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: KP-STORAGE-RC1-RELEASE-DELIVERY
+          path: dist/kp-storage-rc1/
+          if-no-files-found: error
