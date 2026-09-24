@@ -6,16 +6,21 @@ if not exist "app\requirements.txt" (
   exit /b 1
 )
 if not exist ".venv\Scripts\python.exe" (
-  where py >nul 2>nul
+  py -3.11 --version >nul 2>nul
   if not errorlevel 1 (
-    py -3 -m venv ".venv"
+    py -3.11 -m venv ".venv"
   ) else (
-    where python >nul 2>nul
-    if errorlevel 1 (
-      echo Python 3 is required.
-      exit /b 1
+    where py >nul 2>nul
+    if not errorlevel 1 (
+      py -3 -m venv ".venv"
+    ) else (
+      where python >nul 2>nul
+      if errorlevel 1 (
+        echo Python 3 is required.
+        exit /b 1
+      )
+      python -m venv ".venv"
     )
-    python -m venv ".venv"
   )
   if errorlevel 1 exit /b 1
   ".venv\Scripts\python.exe" -m pip install -r "app\requirements.txt"

@@ -19,13 +19,23 @@ class P0RepositoryError(RuntimeError):
     """Raised when a caller uses an unready database or breaks P0 invariants."""
 
 
+class _ClosingSQLiteConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class P0Repository:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self._assert_ready()
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30.0)
+        connection = sqlite3.connect(
+            self.db_path, timeout=30.0, factory=_ClosingSQLiteConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 30000")

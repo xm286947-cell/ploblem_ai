@@ -7,8 +7,10 @@ consumer contract with a deterministic retrieval adapter over published docs.
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
+import pytest
 
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from quality_knowledge.p0.initializer import P0Initializer
@@ -196,3 +198,16 @@ def test_repeat_domain_boundary_has_no_major_or_knowledge_repository_imports():
     web = (ROOT / "quality_knowledge/web/repeat_risk_integration.py").read_text(encoding="utf-8")
     assert "major_cases.repository" not in web
     assert "knowledge.sqlite" not in web
+
+
+def test_p0_repository_context_releases_sqlite_handle(tmp_path):
+    db = tmp_path / "p0.sqlite3"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(db)
+    repository = P0Repository(db)
+    with repository.connect() as connection:
+        assert connection.execute("SELECT 1").fetchone()[0] == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("SELECT 1")
