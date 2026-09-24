@@ -4,7 +4,9 @@ import argparse
 import importlib
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -70,7 +72,7 @@ def check_python() -> list[str]:
 def check_web() -> list[str]:
     errors: list[str] = []
     required = (
-        "main.py",
+        "scripts/hardware_case_web_start.py",
         "quality_knowledge/web/templates/hardware_tree_import.html",
         "quality_knowledge/web/static/hardware_tree_import.js",
         "quality_knowledge/web/static/hardware_tree_import.css",
@@ -93,6 +95,48 @@ def check_web() -> list[str]:
         except OSError:
             errors.append(f"DIRECTORY_NOT_WRITABLE:{relative}")
             emit(f"writable:{relative}", "FAIL")
+
+    if errors:
+        return errors
+
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="hc-web-precheck-",
+            dir=ROOT / "data",
+        ) as temp:
+            temp_root = Path(temp)
+            command = [
+                sys.executable,
+                str(ROOT / "scripts/hardware_case_web_start.py"),
+                "--check",
+                "--db",
+                str(temp_root / "quality_capability_p1.db"),
+                "--hardware-db",
+                str(temp_root / "hardware_case_mvp.db"),
+                "--tree-upload-dir",
+                str(temp_root / "tree_uploads"),
+            ]
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            if result.returncode != 0:
+                detail = (
+                    (result.stderr or result.stdout or "startup check failed")
+                    .strip()
+                    .replace("\n", " ")
+                )[-500:]
+                errors.append("WEB_STARTUP_IMPORT_FAILED")
+                emit("startup import", "FAIL", detail)
+            else:
+                emit("startup import", "PASS", "create_p0_app")
+    except Exception as exc:
+        errors.append("WEB_STARTUP_IMPORT_FAILED")
+        emit("startup import", "FAIL", type(exc).__name__)
     return errors
 
 
