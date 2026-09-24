@@ -1,0 +1,30 @@
+{
+  "mock_id": "M13",
+  "purpose": "SCHEMA_WRONG_TYPE",
+  "request_match": {
+    "stage": "parameter_extract"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": {
+          "bad": "type"
+        },
+        "unit": [
+          "GB"
+        ],
+        "coverage": 123,
+        "evidence_refs": "E-M13"
+      }
+    ]
+  },
+  "expected": {
+    "result": "SCHEMA_VALIDATION_ERROR",
+    "db_write_allowed": false
+  }
+}
