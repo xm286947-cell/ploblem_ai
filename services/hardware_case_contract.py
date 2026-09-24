@@ -6,6 +6,7 @@ this module until later implementation gates.
 """
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any, Iterable
 
@@ -36,6 +37,9 @@ CORE_FACTS = ("symptom", "root_cause", "actions")
 BLOCK_CORE_FACTS = "CORE_FACTS_NOT_REVIEWED"
 BLOCK_EVIDENCE = "NO_VALID_EVIDENCE"
 BLOCK_MAPPING = "NO_CONFIRMED_MAPPING"
+EVIDENCE_NOT_FOUND = "EVIDENCE_NOT_FOUND"
+EVIDENCE_CONTENT_MISMATCH = "EVIDENCE_CONTENT_MISMATCH"
+EVIDENCE_UNSUPPORTED_FACT = "EVIDENCE_UNSUPPORTED_FACT"
 
 
 class HardwareCaseContractError(RuntimeError):
@@ -97,31 +101,200 @@ def mapping_state(
     return "UNMAPPED"
 
 
+def _normalized_fact_parts(value: Any) -> list[str]:
+    """Return comparable text leaves without inventing semantic matches."""
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for item in value.values():
+            parts.extend(_normalized_fact_parts(item))
+        return parts
+    if isinstance(value, (list, tuple, set)):
+        parts = []
+        for item in value:
+            parts.extend(_normalized_fact_parts(item))
+        return parts
+    text = re.sub(r"\s+", " ", _text(value)).casefold()
+    return [text] if text else []
+
+
+def _evidence_text(item: dict[str, Any]) -> str:
+    return re.sub(r"\s+", " ", _text(item.get("excerpt_or_caption"))).casefold()
+
+
+def _supports_fact_part(part: str, content: str) -> bool:
+    if part in content:
+        return True
+    # Hardware facts are often composed from two or more Chinese terms while
+    # the source uses a grammatical variant.  Require two distinct CJK
+    # bigrams so a single generic character/word cannot create a false pass.
+    if len(part) < 6 or not re.search(r"[\u3400-\u9fff]", part):
+        return False
+    part_ngrams = {part[index : index + 2] for index in range(len(part) - 1)}
+    content_ngrams = {
+        content[index : index + 2] for index in range(len(content) - 1)
+    }
+    return len(part_ngrams & content_ngrams) >= 2
+
+
+def _evidence_trace(item: dict[str, Any]) -> dict[str, Any]:
+    locator = item.get("locator") if isinstance(item.get("locator"), dict) else {}
+    block_id = (
+        locator.get("block_id")
+        or locator.get("source_anchor")
+        or locator.get("paragraph")
+        or locator.get("table")
+        or locator.get("image")
+    )
+    return {
+        "evidence_ref": item.get("evidence_id"),
+        "source_ref": item.get("source_ref"),
+        "block_id": block_id,
+        "locator": deepcopy(locator),
+    }
+
+
+def validate_fact_evidence(
+    case: dict[str, Any], evidence: Iterable[dict[str, Any]]
+) -> dict[str, Any]:
+    """Validate explicitly linked candidate facts without semantic guessing.
+
+    Older M2 cases did not persist fact-level references.  They retain the
+    existing case-level availability gate until an explicit fact/evidence link
+    is present.  Once links are present, every linked reference must resolve
+    and its excerpt must contain the fact or multiple distinctive fact terms.
+    """
+    cid = _case_id(case)
+    evidence_by_id = {
+        _text(item.get("evidence_id")): item
+        for item in evidence
+        if _text(item.get("evidence_id"))
+    }
+    facts = case.get("facts") if isinstance(case.get("facts"), dict) else {}
+    confirmed = [
+        (name, field)
+        for name, field in facts.items()
+        if isinstance(field, dict)
+        and field.get("review_disposition") == "CONFIRMED"
+    ]
+    linked = (
+        confirmed
+        if any(field.get("evidence_refs") for _, field in confirmed)
+        else []
+    )
+    available = [
+        item
+        for item in evidence_by_id.values()
+        if item.get("case_id") == cid
+        and item.get("evidence_status") == "AVAILABLE"
+        and _evidence_text(item)
+    ]
+
+    if not linked:
+        return {
+            "status": "VALID" if available else "INVALID",
+            "blockers": [] if available else [BLOCK_EVIDENCE],
+            "facts": [],
+            "traceability": [_evidence_trace(item) for item in available],
+        }
+
+    results: list[dict[str, Any]] = []
+    blockers: list[str] = []
+    for field_name, field in linked:
+        value = (
+            field.get("confirmed_value")
+            if field.get("review_disposition") == "CONFIRMED"
+            else None
+        )
+        refs = [str(ref).strip() for ref in field.get("evidence_refs") or []]
+        traces: list[dict[str, Any]] = []
+        reason: str | None = None
+        supports = False
+        if not _normalized_fact_parts(value):
+            reason = EVIDENCE_UNSUPPORTED_FACT
+        else:
+            parts = _normalized_fact_parts(value)
+            for ref in refs:
+                item = evidence_by_id.get(ref)
+                if (
+                    item is None
+                    or item.get("case_id") != cid
+                    or item.get("evidence_status") != "AVAILABLE"
+                ):
+                    reason = EVIDENCE_NOT_FOUND
+                    continue
+                traces.append(_evidence_trace(item))
+                content = _evidence_text(item)
+                if not content or not all(
+                    _supports_fact_part(part, content) for part in parts
+                ):
+                    reason = EVIDENCE_CONTENT_MISMATCH
+                else:
+                    supports = True
+            if not supports and reason is None:
+                reason = EVIDENCE_UNSUPPORTED_FACT
+
+        status = "VALID" if reason is None and supports else "INVALID"
+        if status != "VALID":
+            blockers.extend([BLOCK_EVIDENCE, reason or EVIDENCE_UNSUPPORTED_FACT])
+        results.append(
+            {
+                "candidate_fact_ref": f"{cid}:{field_name}",
+                "field_name": field_name,
+                "validation": status,
+                "code": reason,
+                "evidence_refs": refs,
+                "traceability": traces,
+            }
+        )
+
+    blockers = list(dict.fromkeys(blockers))
+    return {
+        "status": "VALID" if not blockers else "INVALID",
+        "blockers": blockers,
+        "facts": results,
+        "traceability": [
+            trace
+            for result in results
+            for trace in result["traceability"]
+        ],
+    }
+
+
 def publish_gate(
     case: dict[str, Any],
     mappings: Iterable[dict[str, Any]],
     evidence: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
     cid = _case_id(case)
+    evidence = list(evidence)
     blockers: list[str] = []
     if not core_fact_review_complete(case):
         blockers.append(BLOCK_CORE_FACTS)
-    if not any(
+    evidence_available = any(
         item.get("case_id") == cid and item.get("evidence_status") == "AVAILABLE"
         for item in evidence
-    ):
+    )
+    evidence_validation = validate_fact_evidence(case, evidence)
+    if not evidence_available or evidence_validation["status"] != "VALID":
         blockers.append(BLOCK_EVIDENCE)
+        blockers.extend(evidence_validation["blockers"])
     circuit = mapping_state(mappings, cid, "CIRCUIT_FEATURE")
     material = mapping_state(mappings, cid, "MATERIAL_DEVICE")
     if circuit != "CONFIRMED" and material != "CONFIRMED":
         blockers.append(BLOCK_MAPPING)
+    blockers = list(dict.fromkeys(blockers))
     return {
         "contract_version": CONTRACT_VERSION,
         "case_id": cid,
         "passed": not blockers,
+        "gate_status": "VALID" if not blockers else "REVIEW_REQUIRED",
+        "publish_blocked": bool(blockers),
         "blockers": blockers,
         "core_fact_review_complete": BLOCK_CORE_FACTS not in blockers,
         "valid_evidence_available": BLOCK_EVIDENCE not in blockers,
+        "evidence_validation_status": evidence_validation["status"],
+        "evidence_validation": evidence_validation["facts"],
+        "evidence_traceability": evidence_validation["traceability"],
         "confirmed_mapping_available": BLOCK_MAPPING not in blockers,
         "circuit_mapping_state": circuit,
         "material_mapping_state": material,
@@ -369,6 +542,21 @@ class HardwareCaseContractService:
             raise HardwareCaseContractError("RELATION_ROLE_INVALID")
         cid = _text(mapping.get("case_id"))
         self._case(cid)
+        existing = next(
+            (
+                item
+                for item in self.mappings
+                if item.get("case_id") == cid
+                and item.get("tree_type") == mapping.get("tree_type")
+                and item.get("node_id") == mapping.get("node_id")
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing.get("mapping_id") != mapping.get("mapping_id"):
+                return deepcopy(existing)
+            existing.update(deepcopy(mapping))
+            return deepcopy(existing)
         if mapping.get("relation_role") == "PRIMARY":
             for item in self.mappings:
                 if (

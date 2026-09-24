@@ -77,6 +77,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_hardware_primary_mapping
 ON hardware_case_mapping(case_id, tree_type)
 WHERE relation_role='PRIMARY';
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hardware_mapping_semantic
+ON hardware_case_mapping(case_id, tree_type, node_id);
+
 CREATE TABLE IF NOT EXISTS hardware_case_evidence (
     evidence_id TEXT PRIMARY KEY,
     case_id TEXT NOT NULL REFERENCES hardware_case(case_id) ON DELETE CASCADE,
@@ -421,6 +424,17 @@ class HardwareCaseRepository:
 
     def save_mapping(self, mapping: dict[str, Any]) -> dict[str, Any]:
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT * FROM hardware_case_mapping
+                WHERE case_id=? AND tree_type=? AND node_id=?
+                LIMIT 1
+                """,
+                (mapping["case_id"], mapping["tree_type"], mapping["node_id"]),
+            ).fetchone()
+            if existing is not None and existing["mapping_id"] != mapping["mapping_id"]:
+                return self._mapping(existing)
             if mapping.get("relation_role") == "PRIMARY":
                 connection.execute(
                     """
@@ -463,6 +477,20 @@ class HardwareCaseRepository:
                 ),
             )
         return self.get_mapping(mapping["mapping_id"]) or {}
+
+    def get_mapping_by_semantic_key(
+        self, case_id: str, tree_type: str, node_id: str
+    ) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM hardware_case_mapping
+                WHERE case_id=? AND tree_type=? AND node_id=?
+                LIMIT 1
+                """,
+                (case_id, tree_type, node_id),
+            ).fetchone()
+        return self._mapping(row) if row else None
 
     def get_mapping(self, mapping_id: str) -> dict[str, Any] | None:
         with self.connect() as connection:
