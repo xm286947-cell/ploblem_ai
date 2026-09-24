@@ -93,6 +93,7 @@ def main() -> int:
     )
 
     try:
+        p01_path = str(app.url_path_for("hardware_case_home"))
         p07_path = str(app.url_path_for("hardware_case_base_data"))
         import_path = str(app.url_path_for("list_imports"))
     except Exception as exc:
@@ -108,7 +109,8 @@ def main() -> int:
         print("RESULT=PASS")
         print("STARTUP_IMPORT=PASS")
         print("APP_FACTORY=create_p0_app")
-        print("WEB_ENTRY=" + p07_path)
+        print("WEB_ENTRY=" + p01_path)
+        print("BASE_DATA_ENTRY=" + p07_path)
         print("TREE_IMPORT_ENTRY=" + import_path)
         return 0
 
