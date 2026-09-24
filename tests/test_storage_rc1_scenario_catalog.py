@@ -48,13 +48,13 @@ def test_all_catalog_mock_references_resolve_to_frozen_fixtures() -> None:
     for golden in catalog["golden_paths"]:
         referenced.update(golden["mock_ids"])
     assert referenced <= actual
-    assert actual == {f"M{index:02d}" for index in range(1, 23)}
+    assert actual == {f"M{index:02d}" for index in range(1, 26)}
 
 
 def test_coverage_five_states_are_forced_into_req_stg_005() -> None:
     catalog = _catalog()
     req = next(item for item in catalog["requirements"] if item["id"] == "REQ-STG-005")
-    assert {"M03", "M04", "M05", "M06", "M07"} <= set(req["mock_ids"])
+    assert {"M03", "M23", "M24", "M25"} <= set(req["mock_ids"])
 
 
 def test_human_governance_and_knowledge_governance_are_explicit() -> None:
