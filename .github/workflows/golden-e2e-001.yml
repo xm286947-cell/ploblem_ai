@@ -1,0 +1,54 @@
+name: GOLDEN-E2E-001 Engineering Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tests/test_golden_e2e_001.py"
+      - "tests/test_repeat_web_mvp.py"
+      - "tests/test_case_publish_*.py"
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/repeat_risk/**"
+      - "quality_knowledge/web/**"
+      - "services/historical_case_contract.py"
+      - "services/major_case_*.py"
+      - ".github/workflows/golden-e2e-001.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Golden E2E and domain regression
+        run: |
+          mkdir -p artifacts/golden-e2e-001
+          python -m pytest -q \
+            tests/test_golden_e2e_001.py \
+            tests/test_repeat_web_mvp.py \
+            tests/test_quality_capability_p0_workbench_ued.py \
+            tests/test_repeat_itr_subject.py \
+            tests/test_repeat_search_contract.py \
+            tests/test_repeat_result_contract.py \
+            tests/test_historical_case_consumer_contract.py \
+            tests/test_case_publish_adapter.py \
+            tests/test_case_publish_service.py \
+            --junitxml=artifacts/golden-e2e-001/pytest.xml
+      - name: Upload engineering test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-e2e-001-engineering-${{ github.sha }}
+          path: artifacts/golden-e2e-001/pytest.xml
+          if-no-files-found: warn
+          retention-days: 90

@@ -24,6 +24,7 @@ releases/
 
 # Generated baseline delivery artifacts
 baseline_release/
+artifacts/golden-e2e-001/
 
 # Runtime evidence and generated outputs are local state, not source baseline
 knowledge/raw_evidence/*.json
