@@ -67,7 +67,7 @@ def main() -> None:
         "test_asset_head": os.environ.get("GITHUB_SHA", "LOCAL_BUILD"),
         "sut_package": "STORAGE_PRODUCT_MVP_RC1_JOINT_PACKAGE_20260924.zip",
         "sut_sha256": "b6f48ad5447ad82dd74ccbe31ff650c4f0eb6b64791e65812c0e19dc1c529017",
-        "mock_ids": [f"M{i:02d}" for i in range(1, 23)],
+        "mock_ids": [f"M{i:02d}" for i in range(1, 26)],
         "system_cases": [f"SYS-{i:03d}" for i in range(1, 16)],
         "interface_cases": [f"ITF-{i:03d}" for i in range(1, 33)],
         "integration_cases": [f"INT-{i:02d}" for i in range(1, 13)],
