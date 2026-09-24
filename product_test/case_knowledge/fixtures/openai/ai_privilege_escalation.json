@@ -1,0 +1,36 @@
+{
+  "scenario_key": "default",
+  "payload": {
+    "candidates": [
+      {
+        "object_type": "FACT",
+        "title": "AI tries to publish",
+        "content": "This response attempts to set a business-owned status.",
+        "device_type": "SSD",
+        "scope": [
+          "nvme_health"
+        ],
+        "conditions": [],
+        "limitations": [],
+        "tags": [
+          "negative"
+        ],
+        "status": "PUBLISHED",
+        "evidence_locations": [
+          {
+            "source_id": "NVME-HEALTH",
+            "source_version": "2.0d",
+            "page": 100,
+            "section": "SMART / Health",
+            "source_anchor": "page:100"
+          }
+        ],
+        "confidence": 0.8
+      }
+    ],
+    "unknowns_or_gaps": []
+  },
+  "behavior": {
+    "status": 200
+  }
+}
