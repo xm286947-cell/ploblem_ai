@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout package fix
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Checkout frozen product baseline
         uses: actions/checkout@v4
