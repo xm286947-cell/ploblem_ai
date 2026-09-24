@@ -1,0 +1,166 @@
+{
+  "mock_id": "M03",
+  "purpose": "PARAMETER_GOLDEN_EMMC",
+  "request_match": {
+    "stage": "parameter_extract",
+    "device_type": "eMMC"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "parameters": [
+      {
+        "parameter_id": "capacity",
+        "category": "KEY_SPEC",
+        "value": 64,
+        "unit": "GB",
+        "condition": "nominal",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-01"
+        ]
+      },
+      {
+        "parameter_id": "emmc_spec_version",
+        "category": "KEY_SPEC",
+        "value": "5.1",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-02"
+        ]
+      },
+      {
+        "parameter_id": "operating_temperature",
+        "category": "KEY_SPEC",
+        "value": "-25..85",
+        "unit": "degC",
+        "condition": "operating",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-03"
+        ]
+      },
+      {
+        "parameter_id": "endurance_usage_model",
+        "category": "KEY_SPEC",
+        "value": "JEDEC client workload",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-04"
+        ]
+      },
+      {
+        "parameter_id": "enhanced_user_data_area",
+        "category": "KEY_SPEC",
+        "value": "supported",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-05"
+        ]
+      },
+      {
+        "parameter_id": "reliable_write",
+        "category": "KEY_SPEC",
+        "value": "supported",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-06"
+        ]
+      },
+      {
+        "parameter_id": "cache",
+        "category": "KEY_SPEC",
+        "value": "supported",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-07"
+        ]
+      },
+      {
+        "parameter_id": "bkops",
+        "category": "KEY_SPEC",
+        "value": "supported",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-08"
+        ]
+      },
+      {
+        "parameter_id": "device_life_time_estimation_a",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "EXT_CSD[268]",
+        "unit": null,
+        "condition": "read via EXT_CSD",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-09"
+        ]
+      },
+      {
+        "parameter_id": "device_life_time_estimation_b",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "EXT_CSD[269]",
+        "unit": null,
+        "condition": "read via EXT_CSD",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-10"
+        ]
+      },
+      {
+        "parameter_id": "pre_eol_information",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "EXT_CSD[267]",
+        "unit": null,
+        "condition": "read via EXT_CSD",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-11"
+        ]
+      },
+      {
+        "parameter_id": "health_read_method",
+        "category": "KEY_DIAGNOSTIC",
+        "value": "read EXT_CSD health fields",
+        "unit": null,
+        "condition": null,
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-12"
+        ]
+      },
+      {
+        "parameter_id": "supply_voltage",
+        "category": "COMPREHENSIVE",
+        "value": "2.7..3.6",
+        "unit": "V",
+        "condition": "VCC",
+        "coverage": "FOUND",
+        "evidence_refs": [
+          "E-M03-13"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "schema_categories": [
+      "KEY_SPEC",
+      "KEY_DIAGNOSTIC",
+      "COMPREHENSIVE"
+    ],
+    "auto_confirm": false
+  }
+}
