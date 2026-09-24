@@ -1,0 +1,32 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block breadcrumb %}硬件案例库 / 案例详情{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-page="detail" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}" data-case-id="{{ case_id }}">
+  <div data-case-warning class="hc-source-warning" hidden></div>
+  <header class="hc-detail-head">
+    <div>
+      <span class="hc-kicker">HARDWARE CASE · P04</span>
+      <h1 data-case-title>正在读取案例…</h1>
+      <div class="hc-detail-meta"><code data-case-id-text>{{ case_id }}</code><span data-case-status></span><span data-case-product></span><span data-case-time></span></div>
+    </div>
+    {% if hardware_role == 'MAINTAINER' %}<a class="hc-button secondary" href="/p0/hardware-cases/{{ case_id }}/review">进入确认工作台</a>{% endif %}
+  </header>
+  <section class="hc-detail-layout">
+    <article class="hc-card hc-facts" data-facts></article>
+    <aside class="hc-detail-side">
+      <section class="hc-card"><div class="hc-card-head"><div><h2>工程索引</h2><p>双树关联与发布时路径快照。</p></div></div><div data-case-mappings></div></section>
+      <section class="hc-card"><div class="hc-card-head"><div><h2>Evidence</h2><p>点击证据下钻到原始来源。</p></div></div><div data-case-evidence></div></section>
+    </aside>
+  </section>
+  <div class="hc-drawer-backdrop" data-evidence-backdrop hidden></div>
+  <aside class="hc-evidence-drawer" data-evidence-drawer hidden>
+    <header><div><span class="hc-kicker">EVIDENCE · P06</span><h2 data-evidence-title>Evidence</h2></div><button type="button" class="hc-icon-button" data-close-evidence>×</button></header>
+    <div class="hc-evidence-body" data-evidence-body></div>
+  </aside>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}
