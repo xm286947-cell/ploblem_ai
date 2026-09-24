@@ -1,0 +1,115 @@
+{
+  "dataset_version": "quality-scenario-product-test-fixtures-v0.1",
+  "classification": "SANITIZED_SYNTHETIC",
+  "contains_internal_real_data": false,
+  "cases": {
+    "golden": {
+      "http_status": 200,
+      "content": {
+        "fields": {
+          "customer_experience": {"value": "重新上电后关键计数丢失", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "expected_quality_state": {"value": "异常掉电后重新上电，关键计数应保持一致", "evidence_ids": ["cs.description"], "confidence": 0.86},
+          "business_impact": {"value": "关键计数丢失", "evidence_ids": ["cs.description"], "confidence": 0.90},
+          "failure_mode": {"value": "重新上电后关键计数丢失", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "root_cause": {"value": "保持变量写入未完成", "evidence_ids": ["cs.root_cause"], "confidence": 1.0},
+          "failure_mechanism": {"value": "保持变量写入未完成", "evidence_ids": ["cs.root_cause"], "confidence": 0.90},
+          "trigger_condition": {"value": "正常运行时异常掉电", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "preconditions": {"value": "PLC 正常运行时", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "quality_risk": {"value": "数据完整性风险", "evidence_ids": ["cs.description"], "confidence": 0.80},
+          "quality_requirement_candidate": {"value": "异常掉电后关键运行数据能够正确恢复", "evidence_ids": ["cs.description", "cs.root_cause"], "confidence": 0.80},
+          "lifecycle_stage": {"value": "运行执行", "evidence_ids": ["cs.description", "cs.phase"], "confidence": 0.90},
+          "business_activity_scene": {"value": "掉电数据保持与上电恢复", "evidence_ids": ["cs.description"], "confidence": 0.90}
+        },
+        "lifecycle_code": "RUNTIME_EXECUTION",
+        "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+        "match_reason": "问题事实明确涉及运行期异常掉电与重新上电恢复。",
+        "missing_condition": "",
+        "questions": []
+      }
+    },
+    "missing_information": {
+      "http_status": 200,
+      "content": {
+        "fields": {
+          "customer_experience": {"value": "重新上电后关键计数丢失", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "expected_quality_state": {"value": "异常掉电后重新上电，关键计数应保持一致", "evidence_ids": ["cs.description"], "confidence": 0.80},
+          "trigger_condition": {"value": "正常运行时异常掉电", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "lifecycle_stage": {"value": "运行执行", "evidence_ids": ["cs.phase"], "confidence": 0.90},
+          "business_activity_scene": {"value": "掉电数据保持与上电恢复", "evidence_ids": ["cs.description"], "confidence": 0.90}
+        },
+        "lifecycle_code": "RUNTIME_EXECUTION",
+        "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+        "match_reason": "业务链路可识别，但现场设备规模缺失。",
+        "missing_condition": "现场设备规模未知",
+        "questions": [
+          {
+            "field_name": "scale_or_load",
+            "reason": "原问题没有设备规模信息",
+            "question": "现场设备规模是多少？",
+            "evidence_needed": ["现场拓扑或设备清单"]
+          }
+        ]
+      }
+    },
+    "evidence_mismatch": {
+      "http_status": 200,
+      "content": {
+        "fields": {
+          "customer_experience": {"value": "重新上电后关键计数丢失", "evidence_ids": ["NOT_EXIST"], "confidence": 0.95},
+          "lifecycle_stage": {"value": "运行执行", "evidence_ids": ["cs.phase"], "confidence": 0.90},
+          "business_activity_scene": {"value": "掉电数据保持与上电恢复", "evidence_ids": ["cs.description"], "confidence": 0.90}
+        },
+        "lifecycle_code": "RUNTIME_EXECUTION",
+        "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+        "match_reason": "非法Evidence引用用例",
+        "missing_condition": "",
+        "questions": []
+      }
+    },
+    "type_error": {
+      "http_status": 200,
+      "content": {
+        "fields": "THIS_MUST_BE_AN_OBJECT",
+        "lifecycle_code": "RUNTIME_EXECUTION",
+        "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+        "match_reason": "字段类型错误",
+        "missing_condition": "",
+        "questions": []
+      }
+    },
+    "ai_unauthorized_state": {
+      "http_status": 200,
+      "content": {
+        "fields": {
+          "customer_experience": {"value": "重新上电后关键计数丢失", "evidence_ids": ["cs.description"], "confidence": 0.95},
+          "lifecycle_stage": {"value": "运行执行", "evidence_ids": ["cs.phase"], "confidence": 0.90},
+          "business_activity_scene": {"value": "掉电数据保持与上电恢复", "evidence_ids": ["cs.description"], "confidence": 0.90}
+        },
+        "lifecycle_code": "RUNTIME_EXECUTION",
+        "activity_code": "POWER_LOSS_RETENTION_RECOVERY",
+        "match_reason": "模型试图越权设置状态",
+        "missing_condition": "",
+        "questions": [],
+        "status": "PUBLISHED"
+      }
+    },
+    "empty_content": {
+      "http_status": 200,
+      "content_text": ""
+    },
+    "invalid_json": {
+      "http_status": 200,
+      "content_text": "{not-valid-json"
+    },
+    "rate_limit": {
+      "http_status": 429,
+      "raw_body": {
+        "error": {
+          "message": "synthetic rate limit",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        }
+      }
+    }
+  }
+}
