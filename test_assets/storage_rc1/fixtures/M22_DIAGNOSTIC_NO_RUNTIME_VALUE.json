@@ -1,0 +1,27 @@
+{
+  "mock_id": "M22",
+  "purpose": "DIAGNOSTIC_NO_RUNTIME_VALUE",
+  "request_match": {
+    "stage": "diagnostic"
+  },
+  "behavior": {
+    "status": 200
+  },
+  "payload": {
+    "diagnostic": {
+      "metric": "Percentage Used",
+      "engineering_meaning": "life consumed indicator",
+      "data_source": "NVMe SMART / Health log",
+      "read_method": "read SMART / Health log",
+      "judgement": "interpret per specification and device context",
+      "runtime_observation": null,
+      "evidence_refs": [
+        "E-M22"
+      ]
+    }
+  },
+  "expected": {
+    "runtime_value_state": "NOT_COLLECTED",
+    "fabricate_runtime_value": false
+  }
+}
