@@ -294,8 +294,9 @@
   function reviewFactCard(key,label,field){
     const obj=field&&typeof field==='object'?field:{candidate_value:field,confirmed_value:null,review_disposition:'UNREVIEWED',evidence_refs:[]};
     const candidate=text(obj.candidate_value);const confirmed=obj.confirmed_value??'';
+    const initialValue=confirmed!==''?confirmed:(candidate==='—'?'':candidate);
     return '<article class="hc-review-fact" data-review-field="'+esc(key)+'"><div class="hc-review-fact-head"><h3>'+esc(label)+'</h3><span class="hc-status '+statusClass(obj.review_disposition)+'">'+esc(obj.review_disposition||'UNREVIEWED')+'</span></div>'+
-      '<div class="hc-review-columns"><div class="hc-review-column"><label>AI 候选</label><p>'+esc(candidate)+'</p></div><div class="hc-review-column"><label>人工确认值</label><textarea class="hc-review-textarea" data-confirmed-value>'+esc(confirmed||candidate==='—'?'':candidate)+'</textarea></div></div>'+
+      '<div class="hc-review-columns"><div class="hc-review-column"><label>AI 候选</label><p>'+esc(candidate)+'</p></div><div class="hc-review-column"><label>人工确认值</label><textarea class="hc-review-textarea" data-confirmed-value>'+esc(initialValue)+'</textarea></div></div>'+
       '<div class="hc-review-actions"><button type="button" class="hc-button secondary" data-review-action="DEFERRED">暂缓</button><button type="button" class="hc-button secondary" data-review-action="CONFIRMED_UNKNOWN">确认未知</button><button type="button" class="hc-button primary" data-review-action="CONFIRMED">确认</button></div></article>';
   }
   function treeOptions(type){
