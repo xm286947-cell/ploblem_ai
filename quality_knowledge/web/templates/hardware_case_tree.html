@@ -1,7 +1,9 @@
 {% extends "p0_base.html" %}
 {% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
-{% block breadcrumb %}硬件案例库 / 双树导航{% endblock %}
+{% block breadcrumb %}双树导航{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page" data-hc-page="tree" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
