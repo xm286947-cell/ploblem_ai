@@ -4,7 +4,9 @@ on:
     branches:
       - fix/storage-rc1-r6-issue-132
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - fix/storage-rc1-r6-source-provenance
     paths:
       - "products/storage_rc1/**"
 permissions:
