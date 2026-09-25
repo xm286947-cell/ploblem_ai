@@ -14,7 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
-PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"\nRUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
+RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
 
 
 def sha256(path: Path) -> str:
