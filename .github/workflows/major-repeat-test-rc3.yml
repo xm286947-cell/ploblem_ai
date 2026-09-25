@@ -1,0 +1,180 @@
+name: MAJOR-REPEAT-MVP-TEST-RC3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "quality_knowledge/web/**"
+      - "quality_knowledge/major_cases/**"
+      - "services/major_case_production.py"
+      - "services/major_case_retrieval.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "parser/pdf_extractor.py"
+      - "scripts/build_major_repeat_test_rc3.py"
+      - "scripts/major_repeat_test_rc3.py"
+      - "packaging/major_repeat_test_rc3/**"
+      - "tests/test_major_repeat_gp01_browser_production.py"
+      - ".github/workflows/major-repeat-test-rc3.yml"
+  push:
+    branches:
+      - "fix/major-repeat-gp01-browser-production-flow-v1.1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: GP01 and Major Repeat regression
+        run: >
+          python -m pytest -q
+          tests/test_major_repeat_gp01_browser_production.py
+          tests/test_case_publish_service.py
+          tests/test_golden_e2e_001.py
+          tests/test_repeat_web_mvp.py
+          tests/test_historical_case_consumer_contract.py
+          tests/test_repeat_itr_subject.py
+          tests/test_repeat_search_contract.py
+          tests/test_repeat_result_contract.py
+      - name: Build RC3
+        run: python scripts/build_major_repeat_test_rc3.py --out-dir dist
+      - name: Verify package integrity
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, zipfile
+          z = pathlib.Path("dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3.zip")
+          d = hashlib.sha256(z.read_bytes()).hexdigest()
+          expected = pathlib.Path(str(z) + ".sha256").read_text().split()[0]
+          assert d == expected, (d, expected)
+          with zipfile.ZipFile(z) as bundle:
+              manifest = json.loads(bundle.read("MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3/manifest.json"))
+              assert manifest["package"] == "MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3"
+              assert manifest["clean_state_browser_flow"] == "GP01"
+              assert manifest["preseeded_published_history"] is False
+              assert manifest["mvp_ready"] is False
+          print("PACKAGE_INTEGRITY=PASS")
+          print("SHA256=" + d)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc3-${{ github.sha }}
+          path: |
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3.zip
+            dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-native:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc3-${{ github.sha }}
+          path: dist
+      - name: Fresh extract and direct launch
+        run: |
+          rm -rf extracted
+          mkdir extracted
+          unzip -q dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3.zip -d extracted
+          cd extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3
+          test -x run_linux.sh
+          echo "FRESH_EXTRACT_PERMISSION=PASS"
+          ./run_linux.sh --port 8781 > ../linux_startup.log 2>&1 &
+          pid=$!
+          trap 'kill -INT $pid 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import time, urllib.request
+          url="http://127.0.0.1:8781/p0/major-production"
+          for _ in range(120):
+              try:
+                  with urllib.request.urlopen(url, timeout=3) as r:
+                      assert r.status == 200
+                      print("LINUX_NATIVE=PASS")
+                      print("CLEAN_STATE_BROWSER_ENTRY=PASS")
+                      break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit("LINUX_STARTUP_TIMEOUT")
+          PY
+          kill -INT $pid
+          wait $pid || true
+          trap - EXIT
+          ! grep -q "Permission denied" ../linux_startup.log
+          ! grep -q "Traceback (most recent call last)" ../linux_startup.log
+          echo "NO_CHMOD_DIRECT_START=PASS"
+          echo "SHUTDOWN_CLEANUP=PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: major-repeat-mvp-test-rc3-linux-${{ github.sha }}
+          path: extracted/linux_startup.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  macos-native:
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: major-repeat-mvp-test-rc3-${{ github.sha }}
+          path: dist
+      - name: Fresh extract and direct launch
+        run: |
+          rm -rf extracted
+          mkdir extracted
+          unzip -q dist/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3.zip -d extracted
+          cd extracted/MAJOR_REPEAT_PRODUCT_MVP_TEST_RC3
+          test -x run_macos.sh
+          echo "FRESH_EXTRACT_PERMISSION=PASS"
+          ./run_macos.sh --port 8782 > ../macos_startup.log 2>&1 &
+          pid=$!
+          trap 'kill -INT $pid 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import time, urllib.request
+          url="http://127.0.0.1:8782/p0/major-production"
+          for _ in range(120):
+              try:
+                  with urllib.request.urlopen(url, timeout=3) as r:
+                      assert r.status == 200
+                      print("MACOS_NATIVE=PASS")
+                      print("CLEAN_STATE_BROWSER_ENTRY=PASS")
+                      break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit("MACOS_STARTUP_TIMEOUT")
+          PY
+          kill -INT $pid
+          wait $pid || true
+          trap - EXIT
+          ! grep -q "Permission denied" ../macos_startup.log
+          ! grep -q "Traceback (most recent call last)" ../macos_startup.log
+          echo "NO_CHMOD_DIRECT_START=PASS"
+          echo "SHUTDOWN_CLEANUP=PASS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: major-repeat-mvp-test-rc3-macos-${{ github.sha }}
+          path: extracted/macos_startup.log
+          if-no-files-found: warn
+          retention-days: 30
