@@ -173,7 +173,9 @@ def create_p0_app(
     app.state.analysis_runtime_status = analysis_runtime_status
 
     # Major production owns its SQLite store; downstream domains receive only
-    # historical-case/v1 over the published artifact repository.
+    # historical-case/v1 over the published artifact repository. Source-parser
+    # dependencies stay lazy so composing this shared host does not couple
+    # unrelated domains to PDF tooling until Major Source intake is used.
     major_case_service: Any | None = None
     historical_case_service: Any | None = None
     if "QUALITY_ISSUE" in domains:
