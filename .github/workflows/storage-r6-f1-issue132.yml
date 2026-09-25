@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - fix/storage-rc1-r6-issue-132
+    paths:
+      - "products/storage_rc1/**"
+      - ".github/workflows/storage-r6-f1-issue132.yml"
   pull_request:
     branches:
       - main
