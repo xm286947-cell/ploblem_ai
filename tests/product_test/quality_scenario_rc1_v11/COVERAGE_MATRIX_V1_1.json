@@ -15,14 +15,108 @@
     "component_pass_not_equal_product_e2e_pass": true
   },
   "scenario_coverage": [
-    {"scenario_id":"QS-MAND-001","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-GP-01","fixture":"golden","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-001","QS-PT-007","QS-PT-008","QS-PT-009","QS-PT-011"],"blocking_gap":"QS-AUD-P0-002"},
-    {"scenario_id":"QS-MAND-002","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-GP-02","fixture":"golden + trigger_source=RND_VALUE","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-002"],"blocking_gap":"QS-AUD-P0-002"},
-    {"scenario_id":"QS-MAND-003","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-GP-03","fixture":"missing_information","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-003","#127 regression"],"blocking_gap":"QS-AUD-P0-002"},
-    {"scenario_id":"QS-MAND-004","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-GP-04","fixture":"golden","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-012"],"blocking_gap":"QS-AUD-P0-002"},
-    {"scenario_id":"QS-MAND-005","design":"COVERED","execution":"PARTIAL_CROSS_EVIDENCE_ONLY","browser_flow":"BROWSER-NEG-01","fixture":"evidence_mismatch","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-004"]},
-    {"scenario_id":"QS-MAND-006","design":"COVERED","execution":"PARTIAL_CROSS_EVIDENCE_ONLY","browser_flow":"BROWSER-NEG-02","fixture":"rate_limit/invalid_json/empty_content","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-004","QS-PT-010"]},
-    {"scenario_id":"QS-MAND-007","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-CONSUME-01","fixture":"published scenario produced by BROWSER-GP-01/02/03","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-009"],"blocking_gap":"QS-AUD-P0-002"},
-    {"scenario_id":"QS-MAND-008","design":"COVERED","execution":"BLOCKED","browser_flow":"BROWSER-CONSUME-02","fixture":"published scenario produced by BROWSER-GP-01/02/03","expected":"expected_results_v1_1.json","cross_evidence":["QS-PT-008","QS-PT-009","QS-PT-011"],"blocking_gap":"QS-AUD-P0-002"}
+    {
+      "scenario_id": "QS-MAND-001",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-GP-01",
+      "fixture": "golden",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-001",
+        "QS-PT-007",
+        "QS-PT-008",
+        "QS-PT-009",
+        "QS-PT-011"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    },
+    {
+      "scenario_id": "QS-MAND-002",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-GP-02",
+      "fixture": "golden + trigger_source=RND_VALUE",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-002"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    },
+    {
+      "scenario_id": "QS-MAND-003",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-GP-03",
+      "fixture": "missing_information",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-003",
+        "#127 regression"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    },
+    {
+      "scenario_id": "QS-MAND-004",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-GP-04",
+      "fixture": "golden",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-012"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    },
+    {
+      "scenario_id": "QS-MAND-005",
+      "design": "COVERED",
+      "execution": "PARTIAL_CROSS_EVIDENCE_ONLY",
+      "browser_flow": "BROWSER-NEG-01",
+      "fixture": "evidence_mismatch",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-004"
+      ]
+    },
+    {
+      "scenario_id": "QS-MAND-006",
+      "design": "COVERED",
+      "execution": "PARTIAL_CROSS_EVIDENCE_ONLY",
+      "browser_flow": "BROWSER-NEG-02",
+      "fixture": "rate_limit/invalid_json/empty_content",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-004",
+        "QS-PT-010"
+      ]
+    },
+    {
+      "scenario_id": "QS-MAND-007",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-CONSUME-01",
+      "fixture": "published scenario produced by BROWSER-GP-01/02/03",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-009"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    },
+    {
+      "scenario_id": "QS-MAND-008",
+      "design": "COVERED",
+      "execution": "BLOCKED",
+      "browser_flow": "BROWSER-CONSUME-02",
+      "fixture": "published scenario produced by BROWSER-GP-01/02/03",
+      "expected": "expected_results_v1_1.json",
+      "cross_evidence": [
+        "QS-PT-008",
+        "QS-PT-009",
+        "QS-PT-011"
+      ],
+      "blocking_gap": "QS-AUD-P0-002"
+    }
   ],
   "metrics": {
     "mandatory_scenario_total": 8,
@@ -33,5 +127,11 @@
     "golden_e2e_pass": 0,
     "golden_e2e_blocked": 4
   },
-  "p0_coverage_holes": ["QS-AUD-P0-002","QS-AUD-P0-003","QS-AUD-P0-004","QS-AUD-P0-005"]
+  "p0_coverage_holes": [
+    "QS-AUD-P0-002",
+    "QS-AUD-P0-003",
+    "QS-AUD-P0-004",
+    "QS-AUD-P0-005"
+  ],
+  "test_asset_release_ref": "test/quality-scenario-v11-audit-release-001"
 }
