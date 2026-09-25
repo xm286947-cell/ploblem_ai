@@ -56,6 +56,29 @@ def copy_file(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
+def runtime_vendor_closure_gate(runtime_root: Path) -> None:
+    required = [
+        "RUNTIME_COMMIT",
+        "requirements-runtime-p0-test.txt",
+        "config/runtime/model.yaml",
+        "tools/openai_mock/server.py",
+        "runtime/__init__.py",
+        "runtime/providers/openai_compatible.py",
+    ]
+    missing = [rel for rel in required if not (runtime_root / rel).is_file()]
+    if missing:
+        raise SystemExit("RUNTIME_VENDOR_CLOSURE_FAILED:MISSING:" + ",".join(missing))
+    actual = (runtime_root / "RUNTIME_COMMIT").read_text(encoding="utf-8").strip()
+    if actual != RUNTIME_EXPECTED_COMMIT:
+        raise SystemExit(
+            f"RUNTIME_VENDOR_CLOSURE_FAILED:COMMIT:"
+            f"expected={RUNTIME_EXPECTED_COMMIT},actual={actual}"
+        )
+    print("RUNTIME_VENDOR_CLOSURE=PASS")
+    print(f"RUNTIME_EXPECTED_COMMIT={RUNTIME_EXPECTED_COMMIT}")
+    print(f"RUNTIME_SNAPSHOT_COMMIT={actual}")
+
+
 def verify_release(package_root: Path) -> dict:
     release = package_root / "knowledge_release" / "current"
     manifest_path = release / "release_manifest.json"
@@ -167,7 +190,11 @@ def build() -> tuple[Path, Path, Path]:
         ROOT / "prompts" / "runtime" / "knowledge_production",
         runtime_root / "prompts" / "runtime" / "knowledge_production",
     )
-    (runtime_root / "RUNTIME_COMMIT").write_text(commit + "\n", encoding="utf-8")
+    # The marker describes the bundled Runtime snapshot, never the Storage assembly HEAD.
+    (runtime_root / "RUNTIME_COMMIT").write_text(
+        RUNTIME_EXPECTED_COMMIT + "\n", encoding="utf-8"
+    )
+    runtime_vendor_closure_gate(runtime_root)
 
     release = verify_release(package_root)
     scan_secrets(package_root)
@@ -181,6 +208,10 @@ def build() -> tuple[Path, Path, Path]:
         "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
         "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
+        "runtime_provenance_source": "RUNTIME_COMMIT",
+        "runtime_vendor_closure": "PASS",
+        "supersedes": "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925",
+        "supersede_reason": "RUNTIME_VENDOR_CLOSURE_AND_PROVENANCE_DEFECT",
         "knowledge_release_version": release.get("knowledge_release_version"),
         "knowledge_snapshot_hash": release.get("snapshot_hash"),
         "knowledge_product_packaged": True,
