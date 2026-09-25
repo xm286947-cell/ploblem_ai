@@ -67,6 +67,7 @@ def test_gp01_clean_state_browser_source_to_publish_and_repeat_contract(tmp_path
     case_id = created["case"]["case_id"]
     event_id = created["event"]["event_id"]
     assert created["document"]["version_id"]
+    assert created["document"]["original_filename"] == source.name
     assert created["source_link"]["standard_itr"] == "ITR-GP01-001"
 
     # GP01-05/06: no AI candidate can be published before real analysis/review.
