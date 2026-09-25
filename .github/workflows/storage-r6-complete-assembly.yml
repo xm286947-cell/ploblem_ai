@@ -52,13 +52,14 @@ jobs:
             tests/test_kp_d06_storage_golden.py
       - name: Fresh extract assembly smoke
         run: |
-          rm -rf /tmp/storage-r6-fresh
+          rm -rf dist /tmp/storage-r6-fresh
+          python tools/build_storage_r6_complete.py
           mkdir -p /tmp/storage-r6-fresh
-          cp -a products/storage_rc1 /tmp/storage-r6-fresh/product
-          cp -a knowledge_production runtime repositories parser config prompts /tmp/storage-r6-fresh/
-          cd /tmp/storage-r6-fresh
-          export PYTHONPATH="$PWD:$PWD/product"
-          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PWD/product/knowledge_release/current"
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip -d /tmp/storage-r6-fresh
+          PKG=/tmp/storage-r6-fresh/STORAGE_PRODUCT_MVP_RC1
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
           python - <<'PY'
           from storage_life.app import app
           from storage_life.knowledge_release import KnowledgeReleaseConsumer
@@ -81,7 +82,7 @@ jobs:
           print("KNOWLEDGE_RELEASE_VERSION=" + status["knowledge_release_version"])
           print("KNOWLEDGE_SNAPSHOT_HASH=" + status["snapshot_hash"])
           PY
-          python product/scripts/package_gate.py
+          python scripts/package_gate.py
       - name: Result
         run: |
           echo "ASSEMBLY_GATE=PASS"
