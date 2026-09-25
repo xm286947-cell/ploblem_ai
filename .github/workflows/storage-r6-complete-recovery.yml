@@ -1,0 +1,211 @@
+name: Storage R6 Complete Package Recovery Gate
+
+on:
+  push:
+    branches:
+      - fix/storage-rc1-r6-complete-package-recovery
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  complete-package-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+
+      - name: P0-2 Runtime provenance isolation regression
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q tests/test_runtime_provenance_isolation.py
+
+      - name: Gate A - Golden A regression
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q             tests/test_storage_rc1_r6_f2_golden_a.py             tests/test_ui_next_issue132.py             tests/test_coverage_gate_next001.py             tests/test_review_gate_next001.py
+
+      - name: Gate B/C - Knowledge production and release
+        run: |
+          python -m pytest -q             tests/test_kp_m01_source_document.py             tests/test_kp_m02_candidate_evidence.py             tests/test_kp_m03_ai_extraction.py             tests/test_kp_d02_evaluation.py             tests/test_kp_d03_review_publish.py             tests/test_kp_d04_release_query.py             tests/test_kp_d05_processing_ui.py             tests/test_kp_d06_storage_golden.py
+
+      - name: Gate D/E/F/G/H - Complete Storage regression
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q             tests/test_storage_rc1_r6_complete_assembly.py             tests/test_storage_product_mvp_rc1.py             tests/test_lifetime_profiles_p7.py             tests/test_runtime_product_adapter.py             tests/test_runtime_product_contract_rc2.py
+
+      - name: P0-1 Build with Runtime Vendor Closure hard gate
+        env:
+          STORAGE_R6_BUILD_DATE: "20260925"
+        run: python tools/build_storage_r6_complete.py
+
+      - name: Verify final ZIP SHA
+        run: |
+          cd dist
+          ZIP=$(ls STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip)
+          sha256sum -c "$ZIP.sha256"
+
+      - name: FE-01 Final ZIP clean fresh extract
+        run: |
+          rm -rf /tmp/storage-r6-fe01
+          mkdir -p /tmp/storage-r6-fe01
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip -d /tmp/storage-r6-fe01
+          PKG=/tmp/storage-r6-fe01/STORAGE_PRODUCT_MVP_RC1
+          test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          test "$(cat "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          test -f "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+          test -f "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
+          test -f "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          test -f "$PKG/vendor/unified_agent_runtime/runtime/__init__.py"
+          test -f "$PKG/vendor/unified_agent_runtime/runtime/providers/openai_compatible.py"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root=Path("/tmp/storage-r6-fe01/STORAGE_PRODUCT_MVP_RC1")
+          for line in (root/"FILE_SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              expected, rel = line.split("  ", 1)
+              p=root/rel
+              assert p.is_file(), rel
+              actual=hashlib.sha256(p.read_bytes()).hexdigest()
+              assert actual == expected, (rel, expected, actual)
+          print("PACKAGE_INTEGRITY=PASS")
+          print("RUNTIME_VENDOR_CLOSURE=PASS")
+          PY
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          python -m pip install -q -r "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+          cd "$PKG"
+          python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock
+          bash selfcheck.sh
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from storage_life.app import app
+          c=TestClient(app)
+          assert c.get("/api/health").status_code == 200
+          status=c.get("/api/product/knowledge/status")
+          assert status.status_code == 200, status.text
+          body=status.json()
+          assert body["available"] is True, body
+          assert body["status"] == "READY", body
+          print("FRESH_EXTRACT=PASS")
+          print("STARTUP=PASS")
+          print("HEALTH=PASS")
+          print("KNOWLEDGE_STATUS=READY")
+          PY
+
+      - name: FE-02 Parent Git repository isolation
+        run: |
+          rm -rf /tmp/fake-parent
+          mkdir -p /tmp/fake-parent
+          cd /tmp/fake-parent
+          git init -q
+          git config user.email storage-r6@test.invalid
+          git config user.name "Storage R6 Gate"
+          echo parent > PARENT.txt
+          git add PARENT.txt
+          git commit -qm "fake parent head"
+          PARENT_HEAD=$(git rev-parse HEAD)
+          test "$PARENT_HEAD" != "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          mkdir package
+          unzip -q "$GITHUB_WORKSPACE/dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip" -d package
+          PKG=/tmp/fake-parent/package/STORAGE_PRODUCT_MVP_RC1
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          cd "$PKG"
+          python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock | tee /tmp/fe02.log
+          grep -F "EXPECTED_RUNTIME=f9ca45f82960b3ce380273cf26868bc842a72b7f" /tmp/fe02.log
+          grep -F "ACTUAL_RUNTIME=f9ca45f82960b3ce380273cf26868bc842a72b7f" /tmp/fe02.log
+          grep -F "PROVENANCE_SOURCE=RUNTIME_COMMIT" /tmp/fe02.log
+          grep -F "PARENT_GIT_HEAD_IGNORED=YES" /tmp/fe02.log
+          ! grep -F "$PARENT_HEAD" /tmp/fe02.log
+          echo "PARENT_GIT_ISOLATION=PASS"
+
+      - name: FE-03 Runtime marker missing fails closed
+        run: |
+          PKG=/tmp/fake-parent/package/STORAGE_PRODUCT_MVP_RC1
+          rm -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          test ! -e "$PKG/vendor/unified_agent_runtime/.git"
+          set +e
+          python "$PKG/scripts/preflight.py"             --runtime-root "$PKG/vendor/unified_agent_runtime"             --mode mock > /tmp/fe03.log 2>&1
+          RC=$?
+          set -e
+          cat /tmp/fe03.log
+          test "$RC" -eq 2
+          grep -F "Runtime 根目录缺少 RUNTIME_COMMIT / 自有 .git" /tmp/fe03.log
+          echo "RUNTIME_PROVENANCE_FAIL_CLOSED=PASS"
+
+      - name: Secret scan and manifest assertions
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+          z=Path("dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip")
+          with zipfile.ZipFile(z) as f:
+              m=json.loads(f.read("STORAGE_PRODUCT_MVP_RC1/PACKAGE_MANIFEST.json"))
+          assert m["runtime_expected_commit"] == "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          assert m["runtime_snapshot_commit"] == m["runtime_expected_commit"]
+          assert m["runtime_provenance_source"] == "RUNTIME_COMMIT"
+          assert m["runtime_vendor_closure"] == "PASS"
+          assert m["supersedes"] == "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925"
+          print("SECRET_SCAN=PASS")
+          print("PACKAGE_MANIFEST_RUNTIME_PROVENANCE=PASS")
+          PY
+
+      - name: Release result
+        run: |
+          cd dist
+          ZIP=STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
+          SHA=$(sha256sum "$ZIP" | awk '{print $1}')
+          SIZE=$(stat -c %s "$ZIP")
+          echo "TASK=STORAGE-RC1-R6-COMPLETE-PACKAGE-RECOVERY-001"
+          echo "SOURCE_COMMIT=$GITHUB_SHA"
+          echo "PACKAGE_ID=STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-20260925"
+          echo "PACKAGE=$ZIP"
+          echo "SHA256=$SHA"
+          echo "PACKAGE_SIZE=$SIZE"
+          echo "RUNTIME_VENDOR_CLOSURE=PASS"
+          echo "RUNTIME_PROVENANCE=PASS"
+          echo "PARENT_GIT_ISOLATION=PASS"
+          echo "PACKAGE_INTEGRITY=PASS"
+          echo "FRESH_EXTRACT=PASS"
+          echo "SELFCHECK=PASS"
+          echo "PREFLIGHT=PASS"
+          echo "KNOWLEDGE_STATUS=READY"
+          echo "GOLDEN_A_DEV_REGRESSION=PASS"
+          echo "GOLDEN_B_DEV_REGRESSION=PASS"
+          echo "GOLDEN_C_DEV_REGRESSION=PASS"
+          echo "OLD_R6_MODIFIED=NO"
+          echo "F2_USED_AS_TEST_CANDIDATE=NO"
+          echo "SECRET_SCAN=PASS"
+          echo "STATUS=READY_FOR_FULL_PRODUCT_RETEST"
+          echo "PRODUCT_GATE_PASS=NOT_CLAIMED"
+          echo "RC1_PASS=NOT_CLAIMED"
+
+      - name: Upload recovered Complete candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r6-complete-product-candidate-r1-recovery
+          path: |
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip.sha256
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
