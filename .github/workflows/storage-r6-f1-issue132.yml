@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/storage-rc1-r6-issue-132
+      - integration/storage-rc1-r6-f1-clean
   pull_request:
     branches:
       - main
