@@ -1,5 +1,5 @@
 name: Storage R6 Complete Product Candidate
-# R6 R1 authoritative rebuild after parent-git provenance fix
+# R6 R1 authoritative rebuild after builder syntax fix
 
 on:
   push:
