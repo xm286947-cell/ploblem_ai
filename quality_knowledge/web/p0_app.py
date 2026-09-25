@@ -54,6 +54,10 @@ def create_p0_app(
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
     repeat_web: Any | None = None,
+    major_case_db_path: str | Path | None = None,
+    major_attachment_root: str | Path | None = None,
+    major_artifact_root: str | Path | None = None,
+    major_provider: Any | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
@@ -168,6 +172,47 @@ def create_p0_app(
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
 
+    # Major production owns its SQLite store; downstream domains receive only
+    # historical-case/v1 over the published artifact repository.
+    major_case_service: Any | None = None
+    historical_case_service: Any | None = None
+    if "QUALITY_ISSUE" in domains:
+        from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
+        from quality_knowledge.web.major_production_api import create_major_production_router
+        from repositories import JsonArtifactRepository
+        from services.historical_case_contract import HistoricalCaseConsumerService
+        from services.major_case_production import MajorCaseProductionService
+        from services.major_case_retrieval import MajorPublishedCaseSearchAdapter
+
+        major_db = (
+            Path(major_case_db_path)
+            if major_case_db_path is not None
+            else Path(db_path).with_name(Path(db_path).name + ".major-case.db")
+        )
+        attachment_root = (
+            Path(major_attachment_root)
+            if major_attachment_root is not None
+            else major_db.with_name(major_db.stem + "_attachments")
+        )
+        artifact_root = Path(major_artifact_root) if major_artifact_root is not None else root
+        artifacts = JsonArtifactRepository(artifact_root)
+        major_repository = MajorKnowledgeRepository(major_db, attachment_root)
+        major_case_service = MajorCaseProductionService(
+            major_repository,
+            artifacts,
+            major_db.with_name(major_db.name + ".runtime.db"),
+            provider=major_provider,
+        )
+        search = MajorPublishedCaseSearchAdapter(artifacts)
+        historical_case_service = HistoricalCaseConsumerService(
+            artifacts,
+            repeat_search=search.search,
+        )
+        app.state.major_case_repository = major_repository
+        app.state.major_case_production_service = major_case_service
+        app.state.historical_case_service = historical_case_service
+        app.include_router(create_major_production_router(major_case_service))
+
     if "REPEAT_RISK" in domains:
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
 
@@ -177,6 +222,7 @@ def create_p0_app(
                 issue_repository=repository,
                 repeat_db_path=repeat_db,
                 project_root=root,
+                case_service=historical_case_service,
             )
         app.state.repeat_risk_service = repeat_web
     else:

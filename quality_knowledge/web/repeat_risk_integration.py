@@ -284,14 +284,16 @@ class RepeatWebFacade:
         issue_repository: Any,
         repeat_db_path: str | Path,
         project_root: str | Path,
+        case_service: HistoricalCaseConsumerService | None = None,
     ) -> "RepeatWebFacade":
         repeat_repository = RepeatQueryTraceRepository(repeat_db_path)
-        try:
-            case_service = HistoricalCaseConsumerService.from_project_root(project_root)
-        except HistoricalCaseContractError:
-            case_service = HistoricalCaseConsumerService(
-                JsonArtifactRepository(project_root)
-            )
+        if case_service is None:
+            try:
+                case_service = HistoricalCaseConsumerService.from_project_root(project_root)
+            except HistoricalCaseContractError:
+                case_service = HistoricalCaseConsumerService(
+                    JsonArtifactRepository(project_root)
+                )
         return cls(
             issue_repository=issue_repository,
             repeat_repository=repeat_repository,
