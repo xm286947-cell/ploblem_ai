@@ -117,3 +117,11 @@ Current:
 BLOCKER=QS-AUD-P0-002
 
 NEXT=Product Manager/Development provides formal Browser handoff and new RC; Test Team executes frozen V1.1 Browser Golden and closes remaining P0 gaps.
+
+
+## 9. Frozen test release control
+
+TEST_RELEASE_REF=test/quality-scenario-v11-audit-release-001
+PRODUCT_BLOCKER_ISSUE=#134
+
+Execution must resolve test assets from the immutable test release ref above, never from a moving latest branch.
