@@ -9,10 +9,29 @@ TEXT = HTML.read_text(encoding="utf-8")
 def _function_body(name: str) -> str:
     marker = f"function {name}("
     start = TEXT.index(marker)
-    end = TEXT.find("\nfunction ", start + len(marker))
-    if end < 0:
-        end = TEXT.find("\nasync function ", start + len(marker))
-    return TEXT[start:] if end < 0 else TEXT[start:end]
+    brace = TEXT.index("{", start)
+    depth = 0
+    quote = None
+    escaped = False
+    for i in range(brace, len(TEXT)):
+        ch = TEXT[i]
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return TEXT[start:i + 1]
+    raise AssertionError(f"unterminated function: {name}")
 
 
 def test_ui_next_01_no_pdf_is_explicit_and_post_not_run():
