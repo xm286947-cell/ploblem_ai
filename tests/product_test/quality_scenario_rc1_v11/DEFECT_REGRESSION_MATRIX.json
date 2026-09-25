@@ -1,0 +1,30 @@
+{
+  "version": "quality-scenario-defect-regression-matrix-v1.1",
+  "defects": [
+    {
+      "defect_id": "#126",
+      "type": "PACKAGE_DEPENDENCY",
+      "original_failure": "quality_knowledge/models/issue.py imports models.common but original package omitted models/common.py; startup and pytest collection failed.",
+      "fix_candidate": "QUALITY_SCENARIO_MVP_RC1_DEFECT_126_FIX_CANDIDATE_20260925_R1.zip",
+      "fix_candidate_sha256": "fd387f7e123543b02d358f1e1e318b37926a4a443c992b56ae4daa8c0a908b28",
+      "build_commit": "1b7ffb329dc3db1420fef916c35c806ddb2fe051",
+      "original_frozen_test": "Package Gate + Import Smoke + pytest Collection",
+      "regression_result": "PASS",
+      "closure": "VERIFIED_CLOSED_BY_TEST_CENTER",
+      "evidence_summary": ["PACKAGE_INTEGRITY PASS","MISSING_RUNTIME_FILE_COUNT=0","IMPORT_SMOKE PASS","PYTEST_COLLECTION PASS","COLLECTION_ERROR_COUNT=0"]
+    },
+    {
+      "defect_id": "#127",
+      "type": "API_ERROR_CONTRACT",
+      "original_failure": "Pending missing_information correctly blocked Confirm with HTTP 400 but leaked Pydantic ValidationError instead of SCENARIO_MISSING_INFORMATION_PENDING.",
+      "fix_candidate": "QUALITY_SCENARIO_MVP_RC1_DEFECT_127_FIX_CANDIDATE_20260925_R2.zip",
+      "fix_candidate_sha256": "2f679b013c81a219632d38ef024942f6450838ab0e5da46e41b0efa0074344f5",
+      "source_commit": "53688fe9817e51cba9e8c99ef41bac0b3d293a0f",
+      "build_commit": "53688fe9817e51cba9e8c99ef41bac0b3d293a0f",
+      "original_frozen_test": "QS-PT-003",
+      "regression_result": "PASS",
+      "closure": "VERIFIED_CLOSED_BY_TEST_CENTER",
+      "evidence_summary": ["HTTP 400","detail=SCENARIO_MISSING_INFORMATION_PENDING","state remains CANDIDATE","raw ValidationError leak=NO","12/12 system scenarios PASS","failure delta=0"]
+    }
+  ]
+}

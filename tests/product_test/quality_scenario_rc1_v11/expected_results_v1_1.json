@@ -1,0 +1,55 @@
+{
+  "baseline_version": "quality-scenario-rc1-expected-v1.1",
+  "authority": "Product Test Center / Quality Scenario Test Team",
+  "expected_independent": true,
+  "change_classification": "TEST_CORRECTION",
+  "change_reason": "V1.1 audit separates product Mandatory scenarios from technical/API cases and adds Browser Golden expectations without relaxing existing product contracts.",
+  "mandatory_expected": [
+    {
+      "scenario_id": "QS-MAND-001",
+      "terminal": "PUBLISHED",
+      "must_observe": ["HIGH_PERCEPTION","P01 human edit/review","quality confirmation","technical confirmation","P02 searchable","P03 detail/history","Evidence integrity PASS","Source reverse trace"],
+      "forbidden": ["API/DB Candidate pre-seed used as Golden proof","second AI call during Candidate/Review/Confirm/Publish","WAIT_* approval state"]
+    },
+    {
+      "scenario_id": "QS-MAND-002",
+      "terminal": "PUBLISHED",
+      "must_observe": ["RND_VALUE","trigger_reason visible","same P01 state machine","P02/P03/Evidence complete"],
+      "forbidden": ["separate RND approval workflow","API/DB Candidate pre-seed used as Golden proof"]
+    },
+    {
+      "scenario_id": "QS-MAND-003",
+      "terminal": "PUBLISHED",
+      "must_observe": ["missing_information visible","Confirm blocked while PENDING","SCENARIO_MISSING_INFORMATION_PENDING or equivalent UI blocking message","human answer saved","refresh persistence","PENDING cleared/confirmed","later Confirm and Publish succeed"],
+      "forbidden": ["silent auto-fill","state advance while PENDING","raw ValidationError leakage"]
+    },
+    {
+      "scenario_id": "QS-MAND-004",
+      "terminal": "REJECTED",
+      "must_observe": ["Reject reason required","refresh remains REJECTED","Publish unavailable or returns SCENARIO_PUBLISH_REQUIRES_CONFIRMED","default PUBLISHED library excludes rejected scenario"],
+      "forbidden": ["REJECTED -> PUBLISHED"]
+    },
+    {
+      "scenario_id": "QS-MAND-005",
+      "terminal": "FAIL_CLOSED",
+      "must_observe": ["Evidence mismatch/insufficiency visible or analysis fails","no publishable state created"],
+      "forbidden": ["invented source fact","invalid Evidence accepted"]
+    },
+    {
+      "scenario_id": "QS-MAND-006",
+      "terminal": "FAIL_CLOSED",
+      "must_observe": ["diagnosable provider/AI failure","no fake Candidate/PUBLISHED state","retry remains possible"],
+      "forbidden": ["silent success","fabricated business value"]
+    },
+    {
+      "scenario_id": "QS-MAND-007",
+      "terminal": "MATCHED_PUBLISHED_SCENARIO",
+      "must_observe": ["default PUBLISHED","product filter","lifecycle filter","business activity filter","quality concern filter","keyword filter","status filter","browser navigation to detail"]
+    },
+    {
+      "scenario_id": "QS-MAND-008",
+      "terminal": "TRACEABLE_PUBLISHED_SCENARIO",
+      "must_observe": ["scenario definition","lifecycle","business activity","business goal","trigger","quality concern","expected result","applicability","source problem","Evidence","version/history","quality confirmer","technical confirmer","Evidence integrity PASS"]
+    }
+  ]
+}

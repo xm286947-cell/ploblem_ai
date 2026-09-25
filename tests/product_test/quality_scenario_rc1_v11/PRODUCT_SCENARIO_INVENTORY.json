@@ -1,0 +1,183 @@
+{
+  "version": "quality-scenario-product-scenario-inventory-v1.1",
+  "status": "FROZEN_FOR_AUDIT_REMEDIATION",
+  "authority": [
+    "REQUIREMENT_BASELINE_质量场景库_MVP_V0.2",
+    "BUSINESS_FLOW_质量场景库_MVP_V0.1",
+    "TEST_AUDIT_QUALITY_SCENARIO_V1.1_001"
+  ],
+  "scope_note": "产品基线冻结业务语义与流程，但未枚举全部生命周期×业务活动×质量关注点的具体组合；本清单只从已冻结需求反推RC1 Mandatory行为场景，不虚构未定义业务组合。",
+  "mandatory_scenarios": [
+    {
+      "scenario_id": "QS-MAND-001",
+      "name": "HIGH_PERCEPTION完整发布Golden",
+      "requirement_refs": ["REQ-TRIGGER-01","REQ-CONFIRM-01","REQ-CONFIRM-02","REQ-CONFIRM-03","REQ-FLOW-01","REQ-UI-01","REQ-UI-02","REQ-P01-01"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "Source Problem/ITR",
+        "Browser触发Reverse Quality AI",
+        "ReverseQualityResult",
+        "Browser正式交接Candidate",
+        "P01查看Source/Evidence",
+        "Human Edit/Review",
+        "专业质量+研发确认",
+        "Publish",
+        "P02按正式维度检索",
+        "P03 Detail/History",
+        "Evidence",
+        "Source Problem Reverse Trace"
+      ],
+      "trigger_source": "HIGH_PERCEPTION",
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "PUBLISHED"
+    },
+    {
+      "scenario_id": "QS-MAND-002",
+      "name": "RND_VALUE完整发布Golden",
+      "requirement_refs": ["REQ-TRIGGER-01","REQ-CONFIRM-01","REQ-CONFIRM-02","REQ-CONFIRM-03","REQ-FLOW-01","REQ-UI-01","REQ-UI-02"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "Source Problem/ITR",
+        "Browser触发Reverse Quality AI",
+        "ReverseQualityResult",
+        "Browser正式交接Candidate",
+        "P01查看trigger_source/trigger_reason",
+        "Human Edit/Review",
+        "专业质量+研发确认",
+        "Publish",
+        "P02 Query",
+        "P03 Detail/History",
+        "Evidence",
+        "Source Reverse Trace"
+      ],
+      "trigger_source": "RND_VALUE",
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "PUBLISHED"
+    },
+    {
+      "scenario_id": "QS-MAND-003",
+      "name": "Missing Information人工补充恢复后发布",
+      "requirement_refs": ["REQ-FLOW-01","REQ-P01-01","REQ-CONFIRM-03","Evidence-1","Evidence-2","Evidence-3"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "AI返回missing_information",
+        "UI显示PENDING与Evidence缺口",
+        "Confirm被阻断且状态保持CANDIDATE/分析记录不被错误推进",
+        "用户补充/确认事实",
+        "刷新后补充事实仍存在",
+        "重新校验",
+        "P01 Review/Confirm",
+        "Publish",
+        "P02/P03",
+        "Evidence/Source Trace"
+      ],
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "PUBLISHED"
+    },
+    {
+      "scenario_id": "QS-MAND-004",
+      "name": "Reject终态",
+      "requirement_refs": ["REQ-CONFIRM-03","REQ-FLOW-01","REQ-P01-01"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "AI Candidate",
+        "P01查看Evidence",
+        "填写处理人和Reject原因",
+        "Reject",
+        "刷新保持REJECTED",
+        "Publish不可用/被拒绝",
+        "PUBLISHED默认库不出现该Candidate"
+      ],
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "REJECTED"
+    },
+    {
+      "scenario_id": "QS-MAND-005",
+      "name": "Evidence不足或引用错误Fail-Closed",
+      "requirement_refs": ["Evidence-1","Evidence-2","Evidence-3","Evidence-4","REQ-P01-01"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "AI返回Evidence mismatch/不足",
+        "Reverse Quality校验",
+        "不得把推断伪装为事实",
+        "不得产生可发布正式场景",
+        "UI显示缺口/失败",
+        "状态不得静默推进"
+      ],
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "FAIL_CLOSED"
+    },
+    {
+      "scenario_id": "QS-MAND-006",
+      "name": "Provider/AI失败可诊断且不造业务状态",
+      "requirement_refs": ["NFR-AI-RUNTIME","REQ-P01-01"],
+      "clean_state": true,
+      "user_entry": "历史问题/ITR Web入口",
+      "flow": [
+        "Browser触发AI",
+        "Provider返回429/非法JSON/空内容",
+        "UI显示可诊断失败",
+        "不得生成假Candidate/PUBLISHED",
+        "保留可重试入口"
+      ],
+      "browser_required": true,
+      "mock_policy": "Provider/AI Response only",
+      "expected_terminal": "FAIL_CLOSED"
+    },
+    {
+      "scenario_id": "QS-MAND-007",
+      "name": "P02正式场景库查询与复用",
+      "requirement_refs": ["REQ-UI-01","REQ-FLOW-01"],
+      "clean_state": false,
+      "precondition": "由同一条连续Golden产生PUBLISHED Scenario，禁止API/DB单独预置作为Golden证据",
+      "flow": [
+        "P02默认PUBLISHED",
+        "按产品筛选",
+        "按生命周期筛选",
+        "按业务活动筛选",
+        "按质量关注筛选",
+        "按关键词筛选",
+        "按状态筛选",
+        "进入目标场景详情"
+      ],
+      "browser_required": true,
+      "expected_terminal": "MATCHED_PUBLISHED_SCENARIO"
+    },
+    {
+      "scenario_id": "QS-MAND-008",
+      "name": "P03详情/History/Evidence/Source追溯",
+      "requirement_refs": ["REQ-UI-01","REQ-UI-02","REQ-CONFIRM-02","Evidence-1","Evidence-2","Evidence-3"],
+      "clean_state": false,
+      "precondition": "由同一条连续Golden产生PUBLISHED Scenario",
+      "flow": [
+        "P03展示标准场景定义",
+        "展示生命周期/业务活动/业务目标",
+        "展示触发条件/质量关注/期望结果/适用范围",
+        "展示双角色确认事实",
+        "展示版本与Review History",
+        "Evidence完整性PASS",
+        "展开Source/Evidence",
+        "可反向定位来源问题"
+      ],
+      "browser_required": true,
+      "expected_terminal": "TRACEABLE_PUBLISHED_SCENARIO"
+    }
+  ],
+  "golden_paths": [
+    "QS-MAND-001",
+    "QS-MAND-002",
+    "QS-MAND-003",
+    "QS-MAND-004"
+  ],
+  "mandatory_scenario_total": 8
+}

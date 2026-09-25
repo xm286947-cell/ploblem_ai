@@ -1,0 +1,86 @@
+{
+  "manifest_version": "quality-scenario-rc1-test-execution-v1.1",
+  "status": "FROZEN_DESIGN_BLOCKED_BY_PRODUCT_GAP",
+  "audit_task": "TEST-AUDIT-QUALITY-SCENARIO-V1.1-001",
+  "product": "QUALITY_SCENARIO_MVP_RC1",
+  "product_baseline": "REQUIREMENT_BASELINE_质量场景库_MVP_V0.2",
+  "business_flow": "BUSINESS_FLOW_质量场景库_MVP_V0.1",
+  "current_verified_package": {
+    "name": "QUALITY_SCENARIO_MVP_RC1_DEFECT_127_FIX_CANDIDATE_20260925_R2.zip",
+    "sha256": "2f679b013c81a219632d38ef024942f6450838ab0e5da46e41b0efa0074344f5",
+    "size_bytes": 787274,
+    "source_commit": "53688fe9817e51cba9e8c99ef41bac0b3d293a0f",
+    "runtime_baseline": "0959da43008307398a9cac0f9abfc7fec26dcb8a",
+    "audit_disposition": "PRE_V1_1_BASELINE_PASS_BUT_CANNOT_SATISFY_BROWSER_GOLDEN_HANDOFF"
+  },
+  "next_product_package": {
+    "required": true,
+    "reason": "QS-AUD-P0-002 requires product Browser handoff capability",
+    "name": "TBD_AFTER_PRODUCT_FIX",
+    "sha256": "TBD_AFTER_PRODUCT_FIX"
+  },
+  "test_branch": "test/quality-scenario-v11-audit-remediation",
+  "test_asset_commit": "RESOLVE_FROM_IMMUTABLE_TEST_RELEASE_REF",
+  "asset_root": "tests/product_test/quality_scenario_rc1_v11",
+  "scenario_inventory": "PRODUCT_SCENARIO_INVENTORY.json",
+  "expected": "expected_results_v1_1.json",
+  "coverage": "COVERAGE_MATRIX_V1_1.json",
+  "browser_flow": "BROWSER_EXECUTION_FLOW.md",
+  "gap_register": "TEST_GAP_REGISTER.json",
+  "defect_regression": "DEFECT_REGRESSION_MATRIX.json",
+  "legacy_fixture": "../quality_scenario_rc1/mock_ai_fixtures.json",
+  "legacy_cross_evidence_tests": "../quality_scenario_rc1/test_quality_scenario_product_baseline.py",
+  "execution_order_after_product_fix": [
+    "verify new product package name/SHA",
+    "fresh extract",
+    "package dependency regression #126",
+    "startup/import/pytest collection",
+    "missing information contract regression #127",
+    "verify V1.1 test assets unchanged",
+    "BROWSER-GP-01",
+    "BROWSER-GP-02",
+    "BROWSER-GP-03",
+    "BROWSER-GP-04",
+    "BROWSER-NEG-01",
+    "BROWSER-NEG-02",
+    "BROWSER-CONSUME-01",
+    "BROWSER-CONSUME-02",
+    "run legacy API/integration automation as cross-evidence",
+    "assemble mandatory-scenario evidence index",
+    "return results to test team; do not self-judge TEST_AUDIT_GATE"
+  ],
+  "mock": {
+    "boundary": "Provider/AI Response only",
+    "forbidden_mocks": [
+      "Adapter",
+      "Schema",
+      "Service",
+      "Repository",
+      "DB",
+      "Evidence",
+      "Review",
+      "Confirm",
+      "Reject",
+      "Publish",
+      "Query",
+      "Detail",
+      "UI"
+    ]
+  },
+  "stop_rule": "Any mandatory step failure stops that continuous chain; downstream steps are NOT_TESTED. No repair-in-place.",
+  "forbidden_actions": [
+    "API/DB create Candidate as Browser Golden proof",
+    "modify product during execution",
+    "modify Expected/Fixture/Scenario Inventory",
+    "use old RC evidence as current RC evidence",
+    "skip failed mandatory step and continue to claim E2E",
+    "self-declare TEST_AUDIT_GATE=PASS"
+  ],
+  "allowed_results": [
+    "PASS",
+    "FAIL",
+    "BLOCKED",
+    "NOT_TESTED"
+  ],
+  "test_release_ref": "test/quality-scenario-v11-audit-release-001"
+}
