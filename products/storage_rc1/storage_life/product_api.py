@@ -403,9 +403,10 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
 def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
     dtype = templates.normalize_device_type(device_type) if device_type else ""
     evidence_by_field = {}
+    lifecycle = None
     if device_id:
-        _require_formal_device(device_id)
         detail = device_slots(device_id)
+        lifecycle = detail["lifecycle"]
         dtype = templates.normalize_device_type(detail["device"]["device_type"])
         evidence_by_field = {x["canonical_name"]: x for x in detail["slots"]}
     if not dtype:
@@ -444,7 +445,14 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "formal_knowledge": knowledge,
             "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
         })
-    return {"device_type": dtype, "device_id": device_id or None, "items": rows, "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"]}
+    return {
+        "device_type": dtype,
+        "device_id": device_id or None,
+        "items": rows,
+        "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
+        "lifecycle_gate": lifecycle,
+        "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
+    }
 
 
 def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
