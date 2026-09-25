@@ -98,5 +98,7 @@ function legacyPendingModels(){return currentModels.filter(m=>m.verify_status===
 // 料号确认只在“料号差异”中处理，不进入关键规格展示。 一键确认待确认料号；status:'confirmed'；已驳回项保持不变。
 // 未识别：Agent 未找到有证据的候选值，可人工查看 PDF 后补充。
 
+const renderDetailBase=renderDetail;
+renderDetail=function(){renderDetailBase();let lc=CURRENT.lifecycle||{},co=CURRENT.conclusion||{},el=$('#detailConclusion');if(!el)return;let cls=co.is_formal?'fact':'warning';let risks=(co.risks||[]).join('；')||'—';let missing=(co.missing_critical_fields||[]).join('；')||'无';el.innerHTML='<div class="card"><b>Device Lifecycle</b> '+badge(lc.status||'DRAFT')+' · '+esc(lc.reason||'')+'</div><div class="card"><div class="group-title">寿命 / 风险结论</div><div class="'+cls+' card"><b>'+(co.is_formal?'Formal Device Conclusion':'Draft / Review Required')+'</b> · '+esc(co.conclusion_status||'UNKNOWN')+'<p><b>寿命：</b>'+esc(co.lifetime_summary||'暂无正式寿命结论')+'</p><p><b>诊断：</b>'+esc(co.diagnostic_summary||'—')+'</p><p><b>软件建议：</b>'+esc(co.software_recommendation||'—')+'</p><p><b>风险：</b>'+esc(risks)+'</p><p><b>缺失关键项：</b>'+esc(missing)+'</p></div></div>'};
 init();
 </script></body></html>
