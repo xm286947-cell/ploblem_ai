@@ -1,0 +1,52 @@
+# LEGACY LOCAL-DIRECT CONFIG ONLY.
+# Unified Runtime managed execution MUST NOT read this file.
+# Runtime-managed model/provider/secret settings come from Runtime model.yaml -> context.runtime.provider_config.
+# This file is retained only for RC3 compatibility fallback until formal migration completes.
+# Storage Life Agent configuration
+# 1) Set enabled: true
+# 2) Select one active_profile
+# 3) Put secrets in environment variables when possible.
+#    You may use api_key directly for a local/private deployment, but do not commit real keys.
+
+agent:
+  enabled: false
+  active_profile: qwen
+
+  # Defaults inherited by profiles unless overridden.
+  max_output_tokens: 8192
+  json_mode: auto
+
+  profiles:
+    deepseek:
+      provider: deepseek
+      protocol: openai_compatible_chat
+      base_url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      api_key_env: DEEPSEEK_API_KEY
+      # api_key: ""
+      max_output_tokens: 8192
+      json_mode: auto
+      disable_thinking: false
+
+    qwen:
+      provider: qwen
+      protocol: openai_compatible_chat
+      base_url: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+      model: qwen3.8-max
+      api_key_env: DASHSCOPE_API_KEY
+      # api_key: ""
+      max_output_tokens: 8192
+      json_mode: auto
+      disable_thinking: true
+
+    gemma:
+      provider: generic
+      protocol: openai_compatible_chat
+      base_url: http://127.0.0.1:8000/v1
+      model: gemma-e4b
+      # For a gateway that requires auth, set an environment variable name here.
+      api_key_env: STORAGE_LIFE_AGENT_API_KEY
+      # api_key: ""
+      max_output_tokens: 8192
+      json_mode: off
+      disable_thinking: false

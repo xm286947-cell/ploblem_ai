@@ -1,0 +1,13 @@
+{
+  "source": "GigaDevice DS-00484-GD25Q64E-Rev1.6, April 2024",
+  "source_url": "https://download.gigadevice.com/Datasheet/DS-00484-GD25Q64E-Rev1.6.pdf",
+  "pages": [
+    [1, "GD25Q64E-Rev1.6 1 April 2024\nGD25Q64E\nDATASHEET", "pdf_text"],
+    [3, "9 ORDERING INFORMATION 51\n9.1 VALID PART NUMBERS 52\n11 REVISION HISTORY 65", "pdf_text"],
+    [4, "1 FEATURES\n64M-bit Serial Flash\nEndurance and Data Retention\nMinimum 100,000 Program/Erase Cycles\n20-year data retention typical", "pdf_text"],
+    [51, "9 ORDERING INFORMATION\nProduct Family\n25: SPI NOR Flash\nQ: 3V, 4KB Uniform Sector\n64: 64M bit\nE: E Version", "pdf_text"],
+    [52, "9.1 Valid Part Numbers\nPlease contact GigaDevice regional sales for the latest product selection and available form factors.\nGD25Q64EXEIG\nGD25Q64ENIG\nGD25Q64EQIG\nGD25Q64ETIG\nGD25Q64EWIG\nGD25Q64ESIG\nGD25Q64EYIG\nGD25Q64EBIG\nGD25Q64EZIG\nGD25Q64EFIG", "pdf_text"],
+    [65, "11 REVISION HISTORY\nVersion No Description Page Date\n1.6 Add VPWD and tPWD P39 2024-4-28", "pdf_text"],
+    [66, "Important Notice\nThis document is the property of GigaDevice Semiconductor Inc. and its subsidiaries", "pdf_text"]
+  ]
+}

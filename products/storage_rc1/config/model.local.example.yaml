@@ -1,0 +1,11 @@
+active_model: qwen_prod
+
+models:
+  qwen_prod:
+    provider: openai_compatible
+    # Internal Agent example: http://127.0.0.1:8000/v1
+    # DashScope example: https://<workspace>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    base_url: http://127.0.0.1:80/v1
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192

@@ -1,0 +1,48 @@
+version: 1
+device_types:
+  NOR Flash:
+    operation_model: "寿命主要由 Program/Erase 循环消耗；普通读取通常不是 P/E 寿命消耗项。"
+    parameters:
+      pe_cycles: {role: endurance, operation: [program, erase], note: "定义存储单元可承受的编程/擦除循环边界，是 NOR 写入寿命评估的核心参数。"}
+      retention: {role: retention, operation: [read], note: "表示数据在规定条件下的保持能力，并会受介质老化与温度等条件影响。"}
+      erase_granularity: {role: influencing_factor, operation: [erase], note: "决定一次擦除影响的数据范围；小量频繁改写可能转化为更大的实际擦除负荷。"}
+      page_size: {role: influencing_factor, operation: [program], note: "决定编程组织粒度，会影响写入合并和实际写入策略，但本身不是寿命指标。"}
+      status_register: {role: diagnostic, operation: [read], note: "用于读取器件运行状态；是否包含寿命信息取决于具体器件定义。"}
+      program_fail: {role: diagnostic, operation: [program], note: "反映编程操作失败状态，可作为介质或操作异常的诊断信息。"}
+      erase_fail: {role: diagnostic, operation: [erase], note: "反映擦除操作失败状态，可作为介质或操作异常的诊断信息。"}
+      ecc_status: {role: diagnostic, operation: [read], note: "反映错误纠正状态；用于观察数据可靠性，不应直接等同于剩余寿命。"}
+      lifetime_counter: {role: diagnostic, operation: [read], note: "若器件提供，可用于读取寿命消耗信息；具体含义以厂商定义为准。"}
+  NAND Flash:
+    operation_model: "Program/Erase 是主要耐久消耗；大量读取还需关注 Read Disturb，老化后 ECC 与坏块状态更重要。"
+    parameters:
+      pe_cycles: {role: endurance, operation: [program, erase], note: "定义 NAND 单元的擦写耐久边界，是介质寿命的核心参数。"}
+      retention: {role: retention, operation: [read], note: "表示数据保持能力，需结合 P/E 老化程度和温度条件理解。"}
+      ecc_capability: {role: degradation, operation: [read], note: "用于纠正介质错误并维持数据可靠性；ECC 余量变化可反映退化风险。"}
+      internal_ecc: {role: degradation, operation: [read], note: "器件内部 ECC 帮助维持数据可靠性，但不能简单解释为增加 P/E 规格。"}
+      read_retry: {role: diagnostic, operation: [read], note: "读取困难时的恢复机制；频繁触发可能提示读取裕量下降。"}
+      factory_bad_block: {role: general, operation: [read], note: "描述出厂坏块特性，是 NAND 管理约束，不代表运行期寿命消耗。"}
+      runtime_bad_block: {role: diagnostic, operation: [program, erase, read], note: "运行期新增坏块可反映介质退化，应结合写入量和 ECC 状态观察。"}
+      program_fail: {role: diagnostic, operation: [program], note: "编程失败是运行期介质/操作异常的重要诊断信号。"}
+      erase_fail: {role: diagnostic, operation: [erase], note: "擦除失败是运行期介质/操作异常的重要诊断信号。"}
+  eMMC:
+    operation_model: "Host 写入由控制器映射到内部 NAND；寿命评估应优先使用设备级寿命/健康字段，而非把 Host 写入直接等同于 NAND P/E。"
+    parameters:
+      life_time_a: {role: diagnostic, operation: [read], note: "报告对应存储区域的寿命消耗等级，用于运行期判断耐久度消耗。"}
+      life_time_b: {role: diagnostic, operation: [read], note: "报告另一类存储区域的寿命消耗等级，需与器件区域定义结合解释。"}
+      pre_eol: {role: diagnostic, operation: [read], note: "反映预留块消耗/EOL 风险状态，是运行期寿命预警信息。"}
+      pe_cycles: {role: endurance, operation: [program, erase], note: "若厂商明确提供，可描述底层介质耐久边界；通常不是 eMMC 运行期首选健康指标。"}
+      enhanced_user_data_area: {role: influencing_factor, operation: [program, erase], note: "增强区域可能采用不同耐久配置，会改变可用容量与耐久能力的权衡。"}
+      write_reliability: {role: general, operation: [program], note: "提升特定写入场景的数据可靠性，属于可靠性机制，不等同于寿命指标。"}
+      ext_csd_health_report: {role: diagnostic, operation: [read], note: "通过 EXT_CSD 暴露设备寿命/健康信息，是 eMMC 运行期诊断的重要入口。"}
+      bkops: {role: influencing_factor, operation: [program, erase], note: "后台维护影响内部介质管理与性能，应结合厂商定义评估其对长期运行的意义。"}
+  SSD:
+    operation_model: "Host 写入经控制器、FTL、GC 等形成内部 NAND 写入；产品层优先使用 TBW/DWPD 与 SMART/NVMe Health 评估耐久和健康。"
+    parameters:
+      tbw: {role: endurance, operation: [program, erase], note: "表示规定条件下可承受的累计写入量，是 SSD 耐久度的直接产品级指标。"}
+      dwpd: {role: endurance, operation: [program, erase], note: "表示规定周期内每天允许写满整盘的次数，用于描述持续写入耐久能力。"}
+      percentage_used: {role: diagnostic, operation: [read], note: "表示设备报告的耐久度消耗比例，是运行期寿命诊断的重要指标。"}
+      data_units_written: {role: diagnostic, operation: [read], note: "记录主机累计写入量，可用于结合耐久规格判断寿命消耗。"}
+      smart_health: {role: diagnostic, operation: [read], note: "提供健康、错误和寿命相关遥测；具体可用字段取决于 SATA/NVMe 与厂商实现。"}
+      over_provisioning: {role: influencing_factor, operation: [program, erase], note: "预留空间有助于垃圾回收和磨损均衡，通常会影响实际耐久表现。"}
+      wear_level_remaining: {role: diagnostic, operation: [read], note: "反映磨损或剩余寿命状态，是运行期健康判断的重要信息。"}
+      media_errors: {role: diagnostic, operation: [read], note: "介质错误用于观察运行可靠性和退化风险，不应单独作为寿命剩余量。"}

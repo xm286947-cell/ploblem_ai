@@ -1,0 +1,35 @@
+agent_id: storage.ai.json_call
+version: v1
+label: Storage Generic Structured AI Call
+model_ref: qwen_prod
+
+prompt:
+  ref: prompts/runtime/storage/generic_json_call.md
+  version: v1
+
+output_schema:
+  ref: StorageDynamicJson
+  version: v1
+
+execution:
+  timeout_seconds: 300
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+    backoff_seconds: 0
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    max_tokens: 8192
+    temperature: 0
+
+long_content:
+  enabled: false
+
+metadata:
+  provider_response_shape: json_object
+  business_domain: STORAGE
+  adapter_owner: STORAGE
+  runtime_owner: UNIFIED_AGENT_RUNTIME
+  provider_retry_owner: RUNTIME
