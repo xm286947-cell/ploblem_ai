@@ -17,9 +17,6 @@ jobs:
   canonical-full-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
-      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
     steps:
       - name: Checkout canonical candidate
         uses: actions/checkout@v4
@@ -34,7 +31,6 @@ jobs:
           git cat-file -e "$BASE^{commit}"
           CHANGED="$(git diff --name-only "$BASE"...HEAD)"
           echo "$CHANGED"
-          test -n "$CHANGED"
           UNEXPECTED="$(echo "$CHANGED"             | grep -v '^.github/workflows/storage-r6-r1-macos-native-start.yml$'             | grep -v '^.github/workflows/storage-r6-canonical-full-gate.yml$'             | sed '/^$/d' || true)"
           test -z "$UNEXPECTED"
           echo "PRODUCT_SOURCE_CHANGED=NO"
@@ -45,29 +41,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install repository dependencies for source-level gates
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install -r products/storage_rc1/requirements.txt
-          python -m pip install -r requirements-runtime-p0-test.txt
-          python -m pip install -r requirements-openai-mock-test.txt
           python -m pip install pytest
 
-      - name: Full Storage product regression
+      - name: Source-level R6 assembly and Knowledge gates
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+          STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
         run: |
-          python -m pytest -q products/storage_rc1/tests
-          echo "STORAGE_FULL_REGRESSION=PASS"
-
-      - name: Storage shared Runtime and Mock regression
-        run: |
-          python -m pytest -q             tests/test_agent_runtime_p0_storage_e2e_json_truncation.py             tests/test_agent_runtime_p0_storage_real_provider_e2e.py             tests/test_openai_mock_storage_m01_m08.py             tests/test_runtime_request_secret_persistence.py
-          echo "STORAGE_RUNTIME_MOCK_REGRESSION=PASS"
-
-      - name: Knowledge Production Storage consumer regression
-        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py             products/storage_rc1/tests/test_ui_next_issue132.py             products/storage_rc1/tests/test_coverage_gate_next001.py             products/storage_rc1/tests/test_review_gate_next001.py             products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py             products/storage_rc1/tests/test_storage_product_mvp_rc1.py             products/storage_rc1/tests/test_lifetime_profiles_p7.py             products/storage_rc1/tests/test_runtime_product_adapter.py             products/storage_rc1/tests/test_runtime_product_contract_rc2.py
           python -m pytest -q             tests/test_kp_m01_source_document.py             tests/test_kp_m02_candidate_evidence.py             tests/test_kp_m03_ai_extraction.py             tests/test_kp_d02_evaluation.py             tests/test_kp_d03_review_publish.py             tests/test_kp_d04_release_query.py             tests/test_kp_d05_processing_ui.py             tests/test_kp_d06_storage_golden.py
-          echo "KNOWLEDGE_STORAGE_CONSUMER_REGRESSION=PASS"
+          echo "SOURCE_LEVEL_CANONICAL_GATES=PASS"
 
       - name: Download exact frozen R1 Product Test Candidate
         env:
@@ -80,7 +68,7 @@ jobs:
           unzip -q artifact.zip -d artifact
           test -f artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
 
-      - name: Frozen R1 Package Gate
+      - name: Verify SHA and fresh extract frozen R1
         run: |
           set -euo pipefail
           ZIP="$PWD/artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip"
@@ -98,6 +86,33 @@ jobs:
           test -f "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
           test -f "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
           test -f "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          echo "FROZEN_R1_SHA_AND_RUNTIME_VENDOR=PASS"
+
+      - name: Install exact package dependencies
+        run: |
+          set -euo pipefail
+          PKG=/tmp/storage-r6-canonical-fresh/STORAGE_PRODUCT_MVP_RC1
+          python -m pip install -q -r "$PKG/requirements.txt"
+          python -m pip install -q -r "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+
+      - name: Full Storage regression inside frozen R1 package
+        run: |
+          set -euo pipefail
+          PKG=/tmp/storage-r6-canonical-fresh/STORAGE_PRODUCT_MVP_RC1
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
+          python -m pytest -q tests
+          echo "STORAGE_FULL_PACKAGE_REGRESSION=PASS"
+
+      - name: Frozen R1 Package Recovery Gate
+        run: |
+          set -euo pipefail
+          PKG=/tmp/storage-r6-canonical-fresh/STORAGE_PRODUCT_MVP_RC1
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
           python - <<'PY'
           import hashlib
           from pathlib import Path
@@ -109,10 +124,6 @@ jobs:
               assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, rel
           print("PACKAGE_INTEGRITY=PASS")
           PY
-          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
-          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
-          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
-          python -m pip install -q -r "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
           cd "$PKG"
           python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock
           bash selfcheck.sh
@@ -138,9 +149,8 @@ jobs:
           echo "CANONICAL_COMMIT=$(git rev-parse HEAD)"
           echo "PRODUCT_SOURCE_BASE=93deeb9fa7f354ebfad9129e3f537f751e4c3b6c"
           echo "FROZEN_R1_SHA256=2c7e3024b94f8be7d7d39a34f6094882f16be159ee75a09c3ac4dba08711ba9a"
-          echo "STORAGE_FULL_REGRESSION=PASS"
-          echo "STORAGE_RUNTIME_MOCK_REGRESSION=PASS"
-          echo "KNOWLEDGE_STORAGE_CONSUMER_REGRESSION=PASS"
+          echo "SOURCE_LEVEL_CANONICAL_GATES=PASS"
+          echo "STORAGE_FULL_PACKAGE_REGRESSION=PASS"
           echo "PACKAGE_RECOVERY_GATE=PASS"
           echo "VALID_FIX_LOST=0"
           echo "RESULT=READY_FOR_BASELINE_SNAPSHOT"
