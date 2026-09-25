@@ -21,5 +21,7 @@ for base in ('config','storage_life','scripts'):
 checks['SECRET_SCAN']=not hits
 out={'checks':checks,'secret_hits':hits,'package_gate':'PASS' if all(v for k,v in checks.items() if k!='FORMAL_RELEASE_AVAILABLE') else 'FAIL','product_gate':'PENDING' if not checks['FORMAL_RELEASE_AVAILABLE'] else 'READY_FOR_REAL_GOLDEN'}
 print(json.dumps(out,ensure_ascii=False,indent=2))
-(ROOT/'evidence/build/package_gate.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
+evidence_path=ROOT/'evidence/build/package_gate.json'
+evidence_path.parent.mkdir(parents=True,exist_ok=True)
+evidence_path.write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
 sys.exit(0 if out['package_gate']=='PASS' else 2)
