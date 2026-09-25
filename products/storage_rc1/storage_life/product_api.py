@@ -364,8 +364,6 @@ def dashboard() -> dict[str, Any]:
 def compare_devices(device_ids: list[str]) -> dict[str, Any]:
     if len(set(device_ids)) < 2:
         raise ValueError("至少选择两个不同器件")
-    for device_id in device_ids:
-        _require_formal_device(device_id)
     details = [device_slots(x) for x in device_ids]
     field_order = []
     by_device = {}
