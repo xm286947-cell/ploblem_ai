@@ -192,7 +192,11 @@ class MajorKnowledgeRepository:
             connection.execute(
                 "INSERT INTO kb_case_document(case_id,version_id,document_role) VALUES(?,?,?)", (case_id, version_id, role)
             )
-        return {"action": "NEW" if version_no == 1 else "UPDATED", "version_id": version_id, "document_id": document_id, "version_no": version_no, "content_hash": digest, "attachment_path": relative}
+        action = "NEW" if version_no == 1 else "UPDATED"
+        saved = self.version(version_id)
+        if not saved:
+            raise RuntimeError("DOCUMENT_VERSION_NOT_FOUND_AFTER_INGEST")
+        return {"action": action, **saved}
 
     def version(self, version_id: str) -> dict | None:
         with self.connect() as connection:
