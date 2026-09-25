@@ -1,0 +1,1 @@
+{"evidences":[{"evidence_id":"EVD-SAMPLE-NVME-001","excerpt":"Percentage Used estimates life consumed.","source":{"source_id":"NVME","source_type":"PDF","revision":"SAMPLE","metadata":{"title":"Sample NVMe Specification"}},"locator":{"type":"PAGE","value":{"page":1,"section":"Health"}},"metadata":{"evidence_status":"BOUND"}}]}

@@ -1,0 +1,38 @@
+agent_id: storage.emmc.parameter_extract
+version: v1
+label: Storage eMMC Parameter Extract
+model_ref: qwen_prod
+
+prompt:
+  ref: prompts/runtime/storage/emmc_parameter_extract.md
+  version: v1
+
+output_schema:
+  ref: StorageParameterExtractResultV1
+  version: v1
+
+execution:
+  timeout_seconds: 300
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+    backoff_seconds: 0
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    max_tokens: 8192
+    temperature: 0
+
+long_content:
+  enabled: true
+  strategy_ref: storage_emmc_field_groups@1
+
+metadata:
+  provider_response_shape: json_object
+  business_domain: STORAGE
+  adapter_owner: STORAGE
+  runtime_owner: UNIFIED_AGENT_RUNTIME
+  provider_retry_owner: RUNTIME
+  business_contract: StorageParameterExtractResultV1
+  field_count: 37

@@ -1,0 +1,47 @@
+name: Storage R6 F2 Golden A Assembly Gate
+
+on:
+  push:
+    branches:
+      - feature/storage-rc1-r6-f2-golden-a-assembly
+  pull_request:
+    branches:
+      - integration/storage-rc1-r6-base
+
+permissions:
+  contents: read
+
+jobs:
+  golden-a-assembly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: products/storage_rc1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -q -r requirements.txt
+      - name: F2 Golden A API assembly
+        run: python -m pytest -q tests/test_storage_rc1_r6_f2_golden_a.py
+      - name: F1 UI-NEXT regression
+        run: python -m pytest -q tests/test_ui_next_issue132.py
+      - name: P08 import coverage regression
+        run: |
+          python -m pytest -q \
+            tests/test_storage_rc1_p0_gap_fix.py \
+            tests/test_storage_product_mvp_rc1.py -k "p01_p08_product_api_and_coverage_semantics" \
+            tests/test_coverage_gate_next001.py \
+            tests/test_coverage_ui_next001.py
+      - name: Import smoke
+        run: python -c "import storage_life; import storage_life.app; print('STORAGE_LIFE_IMPORT_SMOKE=PASS')"
+      - name: Result
+        run: |
+          echo "TASK=STORAGE-RC1-R6-F2-GOLDEN-A-ASSEMBLY-001"
+          echo "GOLDEN_A_ASSEMBLY=PASS"
+          echo "F1_UI_NEXT_REGRESSION=PASS"
+          echo "P08_IMPORT_COVERAGE_REGRESSION=PASS"
+          echo "RESULT=READY_FOR_GOLDEN_A_RETEST"

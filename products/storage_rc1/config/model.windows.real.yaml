@@ -1,0 +1,12 @@
+# Windows Real Provider validation profile.
+# Default assumes the OpenAI-compatible Agent is on this Windows machine.
+# If your Agent endpoint differs, edit base_url only. Do not put secrets in this file.
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: http://127.0.0.1:8000/v1
+    api_key_env: STORAGE_AGENT_API_KEY
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192

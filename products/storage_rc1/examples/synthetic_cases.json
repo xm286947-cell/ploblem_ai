@@ -1,0 +1,5 @@
+[
+  {"case_id":"SYN-CASE-001","synthetic":true,"summary":"SSD write budget monitoring was omitted","root_cause":"Synthetic: no alert threshold for observed writes","solution":"Synthetic: add monitored threshold and review with workload evidence"},
+  {"case_id":"SYN-CASE-002","synthetic":true,"summary":"eMMC lifetime register was not sampled","root_cause":"Synthetic: telemetry path lacked health field collection","solution":"Synthetic: collect life estimation and pre-EOL fields"},
+  {"case_id":"SYN-CASE-003","synthetic":true,"summary":"NAND Flash ECC margin became insufficient","root_cause":"Synthetic: assumed correction capability did not match device requirement","solution":"Synthetic: verify ECC configuration against confirmed specification"}
+]

@@ -1,0 +1,90 @@
+name: Storage R6 Complete Assembly
+
+on:
+  push:
+    branches:
+      - feature/storage-rc1-r6-complete-product-assembly
+    paths:
+      - "products/storage_rc1/**"
+      - "knowledge_production/**"
+      - "runtime/**"
+      - "repositories/**"
+      - "parser/**"
+      - "tests/test_kp_*.py"
+      - ".github/workflows/storage-r6-complete-assembly.yml"
+  workflow_dispatch:
+
+jobs:
+  complete-assembly-gate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+      - name: Storage assembly tests
+        run: |
+          python -m pytest -q \
+            products/storage_rc1/tests/test_ui_next_issue132.py \
+            products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py \
+            products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py \
+            products/storage_rc1/tests/test_storage_product_mvp_rc1.py
+      - name: Unified Knowledge core gates
+        run: |
+          python -m pytest -q \
+            tests/test_kp_m01_source_document.py \
+            tests/test_kp_m02_candidate_evidence.py \
+            tests/test_kp_m03_ai_extraction.py \
+            tests/test_kp_d01_business_candidate_intake.py \
+            tests/test_kp_d02_evaluation.py \
+            tests/test_kp_d03_review_publish.py \
+            tests/test_kp_d04_release_query.py \
+            tests/test_kp_d05_processing_ui.py \
+            tests/test_kp_d06_storage_golden.py
+      - name: Fresh extract assembly smoke
+        run: |
+          rm -rf dist /tmp/storage-r6-fresh
+          python tools/build_storage_r6_complete.py
+          mkdir -p /tmp/storage-r6-fresh
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip -d /tmp/storage-r6-fresh
+          PKG=/tmp/storage-r6-fresh/STORAGE_PRODUCT_MVP_RC1
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
+          python - <<'PY'
+          from storage_life.app import app
+          from storage_life.knowledge_release import KnowledgeReleaseConsumer
+          paths = {getattr(route, "path", "") for route in app.router.routes}
+          required = {
+              "/api/health",
+              "/api/documents/jobs",
+              "/api/product/knowledge/status",
+              "/api/product/knowledge-production/sources",
+              "/knowledge-production/candidates",
+              "/api/product/diagnostics",
+              "/api/product/change-impact",
+          }
+          missing = sorted(required - paths)
+          assert not missing, missing
+          status = KnowledgeReleaseConsumer.current().status()
+          assert status["available"] is True, status
+          assert status["status"] == "READY", status
+          print("FRESH_EXTRACT_STARTUP=PASS")
+          print("KNOWLEDGE_RELEASE_VERSION=" + status["knowledge_release_version"])
+          print("KNOWLEDGE_SNAPSHOT_HASH=" + status["snapshot_hash"])
+          PY
+          python scripts/package_gate.py
+      - name: Result
+        run: |
+          echo "ASSEMBLY_GATE=PASS"
+          echo "PACKAGE_BUILD_OWNER=Storage R6 Complete Product Candidate workflow"
+          echo "DUPLICATE_PACKAGE_BUILD=NO"

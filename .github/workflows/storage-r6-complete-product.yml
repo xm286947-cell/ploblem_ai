@@ -1,0 +1,97 @@
+name: Storage R6 Complete Product Candidate
+# R6 R1 authoritative rebuild after builder syntax fix
+
+on:
+  push:
+    branches:
+      - feature/storage-rc1-r6-complete-product-assembly
+    paths:
+      - "products/storage_rc1/**"
+      - "knowledge_production/**"
+      - "repositories/**"
+      - "parser/**"
+      - "runtime/**"
+      - "config/runtime/agents/knowledge.production.extract.yaml"
+      - "prompts/runtime/knowledge_production/**"
+      - "tools/build_storage_r6_complete.py"
+      - ".github/workflows/storage-r6-complete-product.yml"
+  workflow_dispatch:
+
+jobs:
+  complete-product-gate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+      - name: Gate A - Golden A regression
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q tests/test_storage_rc1_r6_f2_golden_a.py tests/test_ui_next_issue132.py tests/test_coverage_gate_next001.py tests/test_review_gate_next001.py
+      - name: Gate B/C - Unified Knowledge production publish release and Storage contract
+        run: |
+          python -m pytest -q tests/test_kp_m01_source_document.py tests/test_kp_m02_candidate_evidence.py tests/test_kp_m03_ai_extraction.py tests/test_kp_d02_evaluation.py tests/test_kp_d03_review_publish.py tests/test_kp_d04_release_query.py tests/test_kp_d05_processing_ui.py tests/test_kp_d06_storage_golden.py
+      - name: Gate D/E/F/G/H - Complete Storage product assembly
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q tests/test_storage_rc1_r6_complete_assembly.py tests/test_storage_product_mvp_rc1.py tests/test_lifetime_profiles_p7.py tests/test_runtime_product_adapter.py tests/test_runtime_product_contract_rc2.py
+      - name: Build one complete R6 candidate
+        run: python tools/build_storage_r6_complete.py
+      - name: Gate I - Fresh extract startup and Knowledge READY
+        run: |
+          rm -rf /tmp/storage-r6-fresh
+          mkdir -p /tmp/storage-r6-fresh
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip -d /tmp/storage-r6-fresh
+          PKG=/tmp/storage-r6-fresh/STORAGE_PRODUCT_MVP_RC1
+          test -d "$PKG/knowledge_production"
+          test -d "$PKG/repositories"
+          test -d "$PKG/parser"
+          test -f "$PKG/config/runtime/agents/knowledge.production.extract.yaml"
+          test -f "$PKG/knowledge_release/current/release_manifest.json"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from storage_life.app import app
+          c = TestClient(app)
+          assert c.get("/api/health").status_code == 200
+          status = c.get("/api/product/knowledge/status")
+          assert status.status_code == 200, status.text
+          body = status.json()
+          assert body["available"] is True, body
+          assert body["status"] == "READY", body
+          ui = c.get("/knowledge-production/sources")
+          assert ui.status_code == 200, ui.text
+          assert "Knowledge Production" in ui.text
+          print("FRESH_EXTRACT=PASS")
+          print("KNOWLEDGE_STATUS_ON_FRESH_START=READY")
+          print("KNOWLEDGE_RELEASE_VERSION=" + body["knowledge_release_version"])
+          print("KNOWLEDGE_SNAPSHOT_HASH=" + body["snapshot_hash"])
+          PY
+      - name: Verify package SHA sidecar
+        run: |
+          cd dist
+          ZIP=$(ls STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip)
+          sha256sum -c "$ZIP.sha256"
+      - name: Upload complete candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r6-complete-product-candidate
+          path: |
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip.sha256
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.DELIVERY_MANIFEST.json
+          if-no-files-found: error

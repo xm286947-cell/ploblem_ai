@@ -1,0 +1,130 @@
+name: Storage R5 Port Ownership Release Evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/storage-r5-port-ownership-release.yml"
+      - "delivery/storage_rc1_r4/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_BRANCH: fix/storage-rc1-r5-launcher-port-ownership
+  SOURCE_COMMIT: b8b1fd364a53e23af10bf561a20a5c0c0d3a949d
+  BUILD_SCRIPT_VERSION: storage-rc1-r5-builder-v1.0
+  R4A_EXPECTED_SHA256: 4de6586bc23a1105e4004faf949897a595a9c38b5382cb3e99d75c15111ddb60
+  R4A_URL: 'https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-5100-8211-aa94-621590d7a7f2/raw?se=2026-09-24T17%3A01%3A06Z&sp=r&sv=2026-02-06&sr=b&scid=50c44702-44ee-546a-a42f-3ba14978eb73&skoid=697dc613-6c29-4a76-87a7-d1b783c6d43f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-24T14%3A26%3A04Z&ske=2026-09-25T14%3A26%3A04Z&sks=b&skv=2026-02-06&sig=RldwfnBnZHhULn3HNZJz1gLg3HXAcaHM3H0rZM0eVzM%3D'
+  R5_PACKAGE: STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip
+
+jobs:
+  linux-build-and-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      r5_sha256: ${{ steps.package.outputs.r5_sha256 }}
+    steps:
+      - name: Checkout frozen R5 source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Download exact failed-retired R4A input and verify SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _r5/input _r5/out _r5/evidence
+          curl -fL --retry 3 --retry-delay 2 "$R4A_URL" -o "_r5/input/R4A.zip"
+          ACTUAL="$(sha256sum _r5/input/R4A.zip | awk '{print $1}')"
+          echo "R4A_ACTUAL_SHA256=$ACTUAL" | tee _r5/evidence/r4a_sha.txt
+          test "$ACTUAL" = "$R4A_EXPECTED_SHA256"
+
+      - name: Build immutable R5 with repository builder
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python delivery/storage_rc1_r4/tools/build_r4_package.py             --base-zip "_r5/input/R4A.zip"             --overlay-dir "delivery/storage_rc1_r4/overlay"             --out-dir "_r5/out"             --source-branch "$SOURCE_BRANCH"             --source-commit "$SOURCE_COMMIT"             | tee _r5/evidence/build.log
+          R5="_r5/out/$R5_PACKAGE"
+          SHA="$(sha256sum "$R5" | awk '{print $1}')"
+          echo "$SHA  $R5_PACKAGE" | tee "_r5/out/$R5_PACKAGE.sha256"
+          echo "r5_sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "R5_SHA256=$SHA"
+
+      - name: Extract release manifest for handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          package=Path("_r5/out/STORAGE_PRODUCT_MVP_RC1_DEFECT_115_FIX_CANDIDATE_20260925_R5.zip")
+          with zipfile.ZipFile(package) as zf:
+              data=zf.read("STORAGE_PRODUCT_MVP_RC1/RELEASE_MANIFEST.json")
+          Path("_r5/out/STORAGE_RC1_R5_RELEASE_MANIFEST_20260925.json").write_bytes(data)
+          manifest=json.loads(data.decode("utf-8"))
+          print("PACKAGE_ID="+manifest["package_id"])
+          print("SOURCE_BRANCH="+manifest["source_branch"])
+          print("SOURCE_COMMIT="+manifest["source_commit"])
+          print("BUILD_SCRIPT_VERSION="+manifest["build_script_version"])
+          print("R4A_STATUS="+manifest["build_provenance"]["r4a_status"])
+          PY
+
+      - name: Linux package contract plus dual fresh-extract plus selfcheck
+        shell: bash
+        run: |
+          set -o pipefail
+          python delivery/storage_rc1_r4/tools/package_contract_gate.py             --package "_r5/out/$R5_PACKAGE"             --expected-sha256 "${{ steps.package.outputs.r5_sha256 }}"             --source-branch "$SOURCE_BRANCH"             --source-commit "$SOURCE_COMMIT"             --linux-matrix             --selfcheck             2>&1 | tee _r5/evidence/linux_package_gate.log
+
+      - name: Publish Linux R5 package and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-linux-package-and-evidence
+          path: |
+            _r5/out/**
+            _r5/evidence/**
+
+  macos-native-gate:
+    needs: linux-build-and-gate
+    if: needs.linux-build-and-gate.result == 'success'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout frozen R5 source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Download exact Linux-built R5 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: storage-r5-linux-package-and-evidence
+          path: _r5_artifact
+
+      - name: Locate exact R5 package and verify cross-job SHA
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          R5="$(find _r5_artifact -type f -name "$R5_PACKAGE" -print -quit)"
+          test -n "$R5"
+          ACTUAL="$(shasum -a 256 "$R5" | awk '{print $1}')"
+          echo "MACOS_R5_SHA256=$ACTUAL"
+          test "$ACTUAL" = "${{ needs.linux-build-and-gate.outputs.r5_sha256 }}"
+          echo "package=$R5" >> "$GITHUB_OUTPUT"
+
+      - name: Native macOS fresh-extract/no-chmod/port/selfcheck gate
+        shell: bash
+        run: |
+          set -o pipefail
+          bash delivery/storage_rc1_r4/tools/platform_gate_macos.sh             "${{ steps.locate.outputs.package }}"             "${{ needs.linux-build-and-gate.outputs.r5_sha256 }}"             2>&1 | tee macos_r5_platform_gate.log
+
+      - name: Publish macOS R5 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r5-macos-native-evidence
+          path: macos_r5_platform_gate.log

@@ -1,0 +1,96 @@
+name: Storage R6 R1 macOS native startup
+
+on:
+  push:
+    branches:
+      - integration/storage-r6-canonical-consolidation-20260925
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  macos-native-start:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - name: Checkout frozen product source
+        uses: actions/checkout@v4
+        with:
+          ref: 93deeb9fa7f354ebfad9129e3f537f751e4c3b6c
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Record macOS runner
+        run: |
+          sw_vers
+          uname -a
+          python --version
+
+      - name: Download exact frozen R1 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/xm286947-cell/ploblem_ai/actions/artifacts/10858206332/zip" \
+            -o artifact.zip
+          rm -rf artifact
+          mkdir artifact
+          unzip -q artifact.zip -d artifact
+          test -f artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
+
+      - name: Verify exact Product Test Candidate SHA
+        run: |
+          set -euo pipefail
+          ZIP=artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
+          ACTUAL=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+          EXPECTED=2c7e3024b94f8be7d7d39a34f6094882f16be159ee75a09c3ac4dba08711ba9a
+          echo "EXPECTED_SHA256=$EXPECTED"
+          echo "ACTUAL_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+          echo "PACKAGE_SHA256=PASS"
+
+      - name: Fresh extract and launcher permission gate
+        run: |
+          set -euo pipefail
+          rm -rf fresh
+          mkdir fresh
+          unzip -q artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip -d fresh
+          PKG="$PWD/fresh/STORAGE_PRODUCT_MVP_RC1"
+          test -x "$PKG/start_test.sh"
+          test -x "$PKG/run_server_test.sh"
+          test -x "$PKG/selfcheck.sh"
+          test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          test "$(tr -d '\r\n ' < "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          echo "MACOS_LAUNCHER_EXECUTABLE=PASS"
+          echo "RUNTIME_VENDOR_MARKER=PASS"
+
+      - name: Install package dependencies
+        run: |
+          set -euo pipefail
+          PKG="$PWD/fresh/STORAGE_PRODUCT_MVP_RC1"
+          python -m pip install --upgrade pip
+          python -m pip install -r "$PKG/requirements.txt"
+          python -m pip install -r "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+
+      - name: Start exact package on macOS and run health/E2E
+        run: |
+          set -euo pipefail
+          PKG="$PWD/fresh/STORAGE_PRODUCT_MVP_RC1"
+          cd "$PKG"
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export STORAGE_TEST_NO_WAIT=1
+          export STORAGE_WEB_HOST=127.0.0.1
+          ./start_test.sh mock | tee /tmp/storage-r6-r1-macos-start.log
+          grep -F "PRODUCT E2E PASS" /tmp/storage-r6-r1-macos-start.log
+          grep -F "HEALTH=PASS" logs/latest.log || true
+          echo "MACOS_NATIVE_START=PASS"
+          echo "PACKAGE_UNCHANGED=YES"

@@ -1,0 +1,666 @@
+version: 1
+device_types:
+  NOR Flash:
+    aliases:
+    - NOR Flash
+    - SPI NOR
+    - Serial NOR
+    - NOR
+    fields:
+      capacity: 容量（Capacity）
+      interface: 接口（Interface）
+      voltage: 工作电压（Operating Voltage）
+      operating_temperature: 工作温度（Operating Temperature）
+      clock_frequency: 时钟频率（Clock Frequency）
+      page_size: 页大小（Page Size）
+      erase_granularity: 擦除粒度（Erase Granularity）
+      pe_cycles: 擦写次数（P/E Cycle）
+      retention: 数据保持（Data Retention）
+      program_time: 编程时间（Program Time）
+      erase_time: 擦除时间（Erase Time）
+      protection: 保护能力（Protection Capability）
+      status_register: 状态寄存器（Status Register）
+      program_fail: 编程失败诊断（Program Fail）
+      erase_fail: 擦除失败诊断（Erase Fail）
+      error_flag: 错误标志（Error Flag）
+      ecc_status: ECC状态（ECC Status）
+      lifetime_counter: 寿命计数（Lifetime Counter）
+    analysis_fields:
+    - pe_cycles
+    - retention
+    - page_size
+    - erase_granularity
+    - program_time
+    - erase_time
+    - operating_temperature
+    - status_register
+    - program_fail
+    - erase_fail
+    - error_flag
+    - ecc_status
+    - lifetime_counter
+  NAND Flash:
+    aliases:
+    - NAND Flash
+    - Raw NAND
+    - SPI NAND
+    - Serial NAND
+    - Parallel NAND
+    - NAND
+    fields:
+      capacity: 容量（Capacity）
+      nand_type: 单元类型（Cell Type）
+      interface: 接口（Interface）
+      voltage: 工作电压（Operating Voltage）
+      operating_temperature: 工作温度（Operating Temperature）
+      page_size: 页大小（Page Size）
+      pages_per_block: 每块页数（Pages Per Block）
+      block_size: 块大小（Block Size）
+      block_count: 块数量（Block Count）
+      pe_cycles: 擦写次数（P/E Cycle）
+      retention: 数据保持（Data Retention）
+      ecc_requirement: ECC能力（ECC Capability）
+      bad_block_requirement: 坏块管理（Bad Block Management）
+      program_time: 编程时间（Program Time）
+      erase_time: 擦除时间（Erase Time）
+      cell_type: 单元类型（Cell Type）
+      ecc_capability: ECC能力（ECC Capability）
+      internal_ecc: 内部ECC（Internal ECC）
+      ecc_status: ECC状态（ECC Status）
+      factory_bad_block: 初始坏块（Factory Bad Block）
+      runtime_bad_block: 运行坏块（Runtime Bad Block）
+      minimum_valid_blocks: 最少有效块（Minimum Valid Blocks）
+      bad_block_mark: 坏块标记（Bad Block Mark）
+      bad_block_mark_location: 坏块标记位置（Bad Block Mark Location）
+      program_fail: 编程失败诊断（Program Fail）
+      erase_fail: 擦除失败诊断（Erase Fail）
+      status_register: 状态寄存器（Status Register）
+      read_retry: 读重试（Read Retry）
+    analysis_fields:
+    - cell_type
+    - capacity
+    - pe_cycles
+    - retention
+    - page_size
+    - pages_per_block
+    - block_size
+    - block_count
+    - ecc_capability
+    - internal_ecc
+    - ecc_status
+    - factory_bad_block
+    - runtime_bad_block
+    - minimum_valid_blocks
+    - bad_block_mark
+    - bad_block_mark_location
+    - program_fail
+    - erase_fail
+    - status_register
+    - read_retry
+    - program_time
+    - erase_time
+    - operating_temperature
+  eMMC:
+    aliases:
+    - eMMC
+    - Embedded MultiMediaCard
+    fields:
+      capacity: 容量（Capacity）
+      nand_type: 单元类型（Cell Type）
+      interface: 接口 / eMMC 版本（Interface / eMMC Version）
+      voltage: 工作电压（Operating Voltage）
+      operating_temperature: 工作温度（Operating Temperature）
+      speed_mode: 速度模式（Speed Mode）
+      life_time_a: 设备寿命估算A（Device Life Time Estimation A）
+      life_time_b: 设备寿命估算B（Device Life Time Estimation B）
+      pre_eol: 寿命预警（PRE_EOL_INFO）
+      enhanced_user_data_area: 增强用户数据区（Enhanced User Data Area）
+      write_reliability: 写可靠性（Write Reliability）
+      health_report: 健康报告能力（Health Report Capability）
+      pe_cycles: 擦写次数（P/E Cycle）
+      plp: 掉电保护（Power Loss Protection）
+      cell_type: 单元类型（Cell Type）
+      default_user_area_type: 默认用户区类型（Default User Area Type）
+      enhanced_area_cell_type: 增强区单元类型（Enhanced Area Cell Type）
+      ext_csd_health_report: EXT_CSD健康报告（EXT_CSD Health Report）
+      bkops: 后台操作状态（BKOPS）
+      error_reporting: 错误报告（Error Reporting）
+      vendor_health_report: 厂商健康报告（Vendor Health Report）
+    analysis_fields:
+    - cell_type
+    - capacity
+    - default_user_area_type
+    - enhanced_user_data_area
+    - enhanced_area_cell_type
+    - pe_cycles
+    - write_reliability
+    - ext_csd_health_report
+    - life_time_a
+    - life_time_b
+    - pre_eol
+    - bkops
+    - error_reporting
+    - vendor_health_report
+    - plp
+  SSD:
+    aliases:
+    - SSD
+    - Solid State Drive
+    fields:
+      capacity: 容量（Capacity）
+      nand_type: 单元类型（Cell Type）
+      interface: 接口（Interface）
+      protocol: 协议（Protocol）
+      operating_temperature: 工作温度（Operating Temperature）
+      sequential_read: 顺序读取（Sequential Read）
+      sequential_write: 顺序写入（Sequential Write）
+      tbw: 总写入字节数（TBW）
+      dwpd: 每日整盘写入次数（DWPD）
+      smart_health: 健康监测（SMART / NVMe Health）
+      percentage_used: 已用寿命比例（Percentage Used）
+      data_units_written: 已写入数据量（Data Units Written）
+      over_provisioning: 预留空间（Over Provisioning）
+      endurance_class: 耐久等级（Endurance Class）
+      mtbf: 平均无故障时间（MTBF）
+      uber: 不可恢复位错误率（UBER）
+      plp: 掉电保护（Power Loss Protection）
+      cell_type: 单元类型（Cell Type）
+      available_spare: 可用备用空间（Available Spare）
+      spare_threshold: 备用空间阈值（Spare Threshold）
+      media_errors: 介质错误（Media Errors）
+      critical_warning: 关键告警（Critical Warning）
+      temperature: 温度诊断（Temperature）
+      unsafe_shutdowns: 非安全关机（Unsafe Shutdowns）
+      error_log: 错误日志（Error Log）
+      wear_level_remaining: 磨损/剩余寿命（Wear Level / Remaining Life）
+      warranty_write_limit: 质保写入上限（Warranty Write Limit）
+    analysis_fields:
+    - cell_type
+    - capacity
+    - tbw
+    - dwpd
+    - endurance_class
+    - over_provisioning
+    - warranty_write_limit
+    - plp
+    - smart_health
+    - percentage_used
+    - data_units_written
+    - available_spare
+    - spare_threshold
+    - media_errors
+    - critical_warning
+    - temperature
+    - unsafe_shutdowns
+    - error_log
+    - wear_level_remaining
+generic_section_groups:
+  NOR Flash:
+  - name: overview
+    headings:
+    - FEATURE
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - DESCRIPTION
+    - PRODUCT FEATURES
+    fields:
+    - capacity
+    - interface
+    - voltage
+    - operating_temperature
+    - clock_frequency
+    - pe_cycles
+    - retention
+  - name: organization
+    headings:
+    - MEMORY ORGANIZATION
+    - MEMORY ARRAY
+    - MEMORY MAPPING
+    - ARCHITECTURE
+    fields:
+    - capacity
+    - page_size
+    - erase_granularity
+  - name: timing
+    headings:
+    - AC CHARACTERISTICS
+    - PERFORMANCE
+    - TIMING
+    - PROGRAM
+    - ERASE
+    fields:
+    - program_time
+    - erase_time
+    - clock_frequency
+  - name: ordering
+    headings:
+    - ORDERING INFORMATION
+    - PART NUMBER
+    - VALID PART NUMBERS
+    - PRODUCT OPTIONS
+    fields:
+    - capacity
+    - voltage
+    - operating_temperature
+  NAND Flash:
+  - name: overview
+    headings:
+    - FEATURE
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - DESCRIPTION
+    fields:
+    - capacity
+    - cell_type
+    - pe_cycles
+    - retention
+    - ecc_capability
+    - internal_ecc
+  - name: part_numbers
+    headings:
+    - VALID PART NUMBERS
+    - ORDERING INFORMATION
+    - PART NUMBER
+    - PRODUCT OPTIONS
+    fields:
+    - capacity
+    - voltage
+    - operating_temperature
+  - name: organization
+    headings:
+    - ARRAY ORGANIZATION
+    - MEMORY ORGANIZATION
+    - MEMORY MAPPING
+    - PARAMETER PAGE
+    fields:
+    - capacity
+    - page_size
+    - pages_per_block
+    - block_size
+    - block_count
+    - ecc_capability
+  - name: reliability
+    headings:
+    - BAD BLOCK
+    - BAD BLOCK MANAGEMENT
+    - INTERNAL ECC
+    - ECC
+    - RELIABILITY
+    fields:
+    - pe_cycles
+    - retention
+    - ecc_capability
+    - internal_ecc
+    - ecc_status
+    - factory_bad_block
+    - runtime_bad_block
+    - minimum_valid_blocks
+    - bad_block_mark
+    - bad_block_mark_location
+    - program_fail
+    - erase_fail
+    - status_register
+    - read_retry
+  - name: timing
+    headings:
+    - PERFORMANCE AND TIMING
+    - AC CHARACTERISTICS
+    - PROGRAM OPERATIONS
+    - ERASE OPERATIONS
+    fields:
+    - program_time
+    - erase_time
+  eMMC:
+  - name: overview
+    headings:
+    - FEATURE
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - PRODUCT SPECIFICATION
+    - PRODUCT OVERVIEW
+    fields:
+    - capacity
+    - cell_type
+    - default_user_area_type
+    - enhanced_user_data_area
+    - enhanced_area_cell_type
+    - pe_cycles
+    - write_reliability
+    - plp
+  - name: health
+    headings:
+    - EXT_CSD
+    - EXTENDED CSD
+    - DEVICE LIFE TIME
+    - PRE_EOL
+    - HEALTH
+    - HEALTH REPORT
+    fields:
+    - life_time_a
+    - life_time_b
+    - pre_eol
+    - ext_csd_health_report
+    - enhanced_user_data_area
+    - enhanced_area_cell_type
+    - write_reliability
+    - bkops
+    - error_reporting
+    - vendor_health_report
+  - name: ordering
+    headings:
+    - ORDERING INFORMATION
+    - PRODUCT LINE
+    - PART NUMBER
+    - PRODUCT OPTIONS
+    fields:
+    - capacity
+    - nand_type
+    - voltage
+    - operating_temperature
+    - speed_mode
+  SSD:
+  - name: overview
+    headings:
+    - KEY FEATURES
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - PRODUCT OVERVIEW
+    - SPECIFICATION
+    fields:
+    - capacity
+    - cell_type
+    - plp
+    - warranty_write_limit
+  - name: performance
+    headings:
+    - PERFORMANCE
+    - PERFORMANCE SPECIFICATION
+    - PRODUCT SPECIFICATION
+    fields:
+    - tbw
+    - dwpd
+    - endurance_class
+  - name: health
+    headings:
+    - SMART
+    - NVME HEALTH
+    - HEALTH
+    - ENDURANCE
+    - RELIABILITY
+    fields:
+    - smart_health
+    - percentage_used
+    - data_units_written
+    - available_spare
+    - spare_threshold
+    - media_errors
+    - critical_warning
+    - temperature
+    - unsafe_shutdowns
+    - error_log
+    - wear_level_remaining
+    - tbw
+    - dwpd
+    - over_provisioning
+  - name: ordering
+    headings:
+    - PRODUCT LINE-UP
+    - ORDERING INFORMATION
+    - PART NUMBER
+    - PRODUCT OPTIONS
+    fields:
+    - capacity
+    - nand_type
+    - interface
+    - protocol
+    - operating_temperature
+vendors:
+  gigadevice:
+    canonical_name: GigaDevice
+    aliases:
+    - GigaDevice
+    - Giga Device
+    - GD
+    supported_types:
+    - NOR Flash
+    - NAND Flash
+    identity_headings:
+    - FEATURE
+    - GENERAL DESCRIPTION
+    - VALID PART NUMBERS
+    - ORDERING INFORMATION
+    - PARAMETER PAGE
+    overrides:
+      NAND Flash:
+      - name: parameter_page
+        headings:
+        - READ PARAMETER PAGE
+        - PARAMETER PAGE
+        following_pages: 4
+        fields:
+        - capacity
+        - page_size
+        - pages_per_block
+        - block_count
+        - ecc_capability
+        - factory_bad_block
+        - minimum_valid_blocks
+        - bad_block_mark
+        - bad_block_mark_location
+      - name: reliability
+        headings:
+        - ASSISTANT BAD BLOCK MANAGEMENT
+        - INTERNAL ECC
+        - RELIABILITY
+        fields:
+        - ecc_capability
+        - pe_cycles
+        - retention
+        - factory_bad_block
+        - minimum_valid_blocks
+        - bad_block_mark
+        - bad_block_mark_location
+      - name: timing
+        headings:
+        - PERFORMANCE AND TIMING
+        - PROGRAM OPERATIONS
+        - ERASE OPERATIONS
+        fields:
+        - program_time
+        - erase_time
+  macronix:
+    canonical_name: Macronix
+    aliases:
+    - Macronix
+    - MXIC
+    - Macronix International
+    supported_types:
+    - NOR Flash
+    - NAND Flash
+    identity_headings:
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - PRODUCT INFORMATION
+    - PART NAME
+    - ORDERING INFORMATION
+    overrides:
+      NAND Flash:
+      - name: organization
+        headings:
+        - MEMORY ORGANIZATION
+        - ARRAY ORGANIZATION
+        fields:
+        - capacity
+        - page_size
+        - pages_per_block
+        - block_size
+        - block_count
+      - name: reliability
+        headings:
+        - BAD BLOCK MANAGEMENT
+        - ECC REQUIREMENT
+        - RELIABILITY
+        fields:
+        - ecc_capability
+        - pe_cycles
+        - retention
+        - factory_bad_block
+        - minimum_valid_blocks
+        - bad_block_mark
+        - bad_block_mark_location
+      NOR Flash:
+      - name: organization
+        headings:
+        - MEMORY ORGANIZATION
+        - MEMORY ARRAY
+        - ERASE ARCHITECTURE
+        fields:
+        - capacity
+        - page_size
+        - erase_granularity
+  atmel:
+    canonical_name: ATMEL
+    aliases:
+    - Atmel
+    - ATMEL
+    - Microchip Atmel
+    - Renesas Atmel
+    supported_types:
+    - NOR Flash
+    identity_headings:
+    - FEATURES
+    - DESCRIPTION
+    - DEVICE OVERVIEW
+    - ORDERING INFORMATION
+    overrides:
+      NOR Flash:
+      - name: erase_program
+        headings:
+        - BLOCK ERASE
+        - CHIP ERASE
+        - PROGRAM
+        - PROGRAM AND ERASE COMMANDS
+        fields:
+        - erase_granularity
+        - program_time
+        - erase_time
+        - pe_cycles
+  issi:
+    canonical_name: ISSI
+    aliases:
+    - ISSI
+    - Integrated Silicon Solution
+    - Integrated Silicon Solution, Inc.
+    supported_types:
+    - NOR Flash
+    - NAND Flash
+    identity_headings:
+    - GENERAL DESCRIPTION
+    - FEATURES
+    - ORDERING INFORMATION
+    - PART NUMBER
+    overrides:
+      NAND Flash:
+      - name: organization
+        headings:
+        - MEMORY ORGANIZATION
+        - BLOCK DIAGRAM
+        - ARRAY ORGANIZATION
+        fields:
+        - capacity
+        - page_size
+        - pages_per_block
+        - block_size
+        - block_count
+      - name: reliability
+        headings:
+        - BAD BLOCK MANAGEMENT
+        - INTERNAL ECC
+        - ECC
+        - RELIABILITY
+        fields:
+        - ecc_capability
+        - pe_cycles
+        - retention
+        - factory_bad_block
+        - minimum_valid_blocks
+        - bad_block_mark
+        - bad_block_mark_location
+  skyhigh:
+    canonical_name: SkyHigh Memory
+    aliases:
+    - SkyHigh Memory
+    - SkyHigh
+    - SkyHigh Memory Limited
+    supported_types:
+    - eMMC
+    identity_headings:
+    - FEATURES
+    - GENERAL DESCRIPTION
+    - PRODUCT OFFERING
+    - ORDERING INFORMATION
+    overrides:
+      eMMC:
+      - name: ext_csd
+        headings:
+        - EXT_CSD
+        - EXTENDED CSD
+        - DEVICE_LIFE_TIME_EST_TYP_A
+        - PRE_EOL_INFO
+        fields:
+        - life_time_a
+        - life_time_b
+        - pre_eol
+        - enhanced_user_data_area
+        - write_reliability
+        - ext_csd_health_report
+  timar:
+    canonical_name: TIMAR
+    aliases:
+    - TIMAR
+    - Shanghai Timar
+    - 上海岱码
+    - 岱码
+    supported_types:
+    - eMMC
+    - SSD
+    identity_headings:
+    - KEY FEATURES
+    - FEATURES
+    - PRODUCT SPECIFICATION
+    - PRODUCT LINE-UP
+    - GENERAL DESCRIPTION
+    overrides:
+      eMMC:
+      - name: product_spec
+        headings:
+        - PRODUCT SPECIFICATION
+        - TECHNOLOGY APPLICATION
+        - KEY FEATURES
+        fields:
+        - capacity
+        - cell_type
+        - interface
+        - speed_mode
+        - operating_temperature
+        - pe_cycles
+        - plp
+      SSD:
+      - name: product_spec
+        headings:
+        - KEY FEATURES
+        - PRODUCT LINE-UP
+        - PRODUCT SPECIFICATION
+        - PERFORMANCE
+        fields:
+        - capacity
+        - cell_type
+        - interface
+        - protocol
+        - sequential_read
+        - sequential_write
+        - tbw
+        - mtbf
+        - uber
+        - plp
+        - operating_temperature
