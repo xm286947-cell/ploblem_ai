@@ -18,6 +18,12 @@ jobs:
   issue132-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # R6 complete assembly reuses the repository-level unified Knowledge
+      # capability while the legacy F1 gate runs from products/storage_rc1.
+      # Keep the repository root importable so this historical regression gate
+      # validates product behavior instead of failing on CI path setup.
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
     defaults:
       run:
         working-directory: products/storage_rc1
