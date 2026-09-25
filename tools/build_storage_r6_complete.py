@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
-PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
+PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"\nRUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
 
 
 def sha256(path: Path) -> str:
@@ -107,8 +107,8 @@ def write_hash_manifest(package_root: Path) -> None:
 def build() -> tuple[Path, Path, Path]:
     commit = source_commit()
     date = os.environ.get("STORAGE_R6_BUILD_DATE", "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d")
-    package_id = f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-{date}"
-    zip_name = f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_{date}.zip"
+    package_id = f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-{date}"
+    zip_name = f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_{date}.zip"
 
     work = DIST / "_storage_r6_complete"
     if work.exists():
@@ -122,9 +122,34 @@ def build() -> tuple[Path, Path, Path]:
     copy_tree(ROOT / "repositories", package_root / "repositories")
     copy_tree(ROOT / "parser", package_root / "parser")
 
-    # Preserve the existing launcher contract: unified Runtime remains under vendor.
+    # Preserve the existing launcher contract and provenance: the bundled Runtime
+    # must be the exact pinned public Runtime snapshot, not the current assembly HEAD.
     runtime_root = package_root / "vendor" / "unified_agent_runtime"
-    copy_tree(ROOT / "runtime", runtime_root / "runtime")
+    runtime_source = DIST / "_runtime_pinned_snapshot"
+    if runtime_source.exists():
+        shutil.rmtree(runtime_source)
+    subprocess.run(
+        [
+            "git", "archive", "--format=tar",
+            f"--prefix={runtime_source.name}/",
+            RUNTIME_EXPECTED_COMMIT,
+            "runtime",
+            "config/runtime/model.yaml",
+            "tools/openai_mock/server.py",
+            "requirements-runtime-p0-test.txt",
+        ],
+        cwd=ROOT,
+        check=True,
+        stdout=(DIST / "_runtime_pinned_snapshot.tar").open("wb"),
+    )
+    subprocess.run(
+        ["tar", "-xf", str(DIST / "_runtime_pinned_snapshot.tar"), "-C", str(DIST)],
+        check=True,
+    )
+    copy_tree(runtime_source / "runtime", runtime_root / "runtime")
+    copy_file(runtime_source / "config/runtime/model.yaml", runtime_root / "config/runtime/model.yaml")
+    copy_file(runtime_source / "tools/openai_mock/server.py", runtime_root / "tools/openai_mock/server.py")
+    copy_file(runtime_source / "requirements-runtime-p0-test.txt", runtime_root / "requirements-runtime-p0-test.txt")
     copy_file(
         ROOT / "config" / "runtime" / "agents" / "knowledge.production.extract.yaml",
         package_root / "config" / "runtime" / "agents" / "knowledge.production.extract.yaml",
@@ -153,6 +178,8 @@ def build() -> tuple[Path, Path, Path]:
         "assembly": "Golden A + Golden B + Golden C",
         "source_commit": commit,
         "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
+        "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
+        "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
         "knowledge_release_version": release.get("knowledge_release_version"),
         "knowledge_snapshot_hash": release.get("snapshot_hash"),
         "knowledge_product_packaged": True,
