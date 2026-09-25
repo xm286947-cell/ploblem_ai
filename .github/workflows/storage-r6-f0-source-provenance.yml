@@ -1,6 +1,9 @@
 name: Storage R6 F0 Source Provenance Closure
 
 on:
+  push:
+    branches:
+      - fix/storage-rc1-r6-source-provenance
   pull_request:
     branches: [main]
     paths:
@@ -18,7 +21,7 @@ env:
 
 jobs:
   f0-close:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
