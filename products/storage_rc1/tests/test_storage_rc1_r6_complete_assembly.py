@@ -4,9 +4,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from products.storage_rc1.storage_life import product_api
-from products.storage_rc1.storage_life.app import app
-from products.storage_rc1.storage_life.knowledge_release import KnowledgeReleaseConsumer
+from storage_life import product_api
+from storage_life.app import app
+from storage_life.knowledge_release import KnowledgeReleaseConsumer
 
 
 ROOT = Path(__file__).resolve().parents[1]
