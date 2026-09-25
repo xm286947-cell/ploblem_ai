@@ -1,5 +1,5 @@
 name: Storage R6 Complete Product Candidate
-# final authoritative rebuild after fresh-extract dependency closure
+# R6 R1 rebuild after exact Runtime provenance closure
 
 on:
   push:
