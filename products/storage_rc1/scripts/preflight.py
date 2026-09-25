@@ -65,19 +65,25 @@ def main() -> None:
     if root is None or not (root / "runtime" / "__init__.py").exists():
         errors.append("UNIFIED_AGENT_RUNTIME_ROOT 未指向有效 Runtime 仓库")
     else:
+        # Packaged Runtime provenance is owned by its local RUNTIME_COMMIT marker.
+        # Never ask Git for HEAD unless the Runtime root itself owns a .git directory:
+        # otherwise git -C walks to a parent product worktree and reports the wrong
+        # Storage assembly commit as the Runtime provenance.
+        marker = root / "RUNTIME_COMMIT"
         head = None
-        try:
-            head = subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "HEAD"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except Exception:
-            marker = root / "RUNTIME_COMMIT"
-            if marker.is_file():
-                head = marker.read_text(encoding="utf-8").strip()
+        if marker.is_file():
+            head = marker.read_text(encoding="utf-8").strip()
+        elif (root / ".git").exists():
+            try:
+                head = subprocess.check_output(
+                    ["git", "-C", str(root), "rev-parse", "HEAD"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            except Exception:
+                head = None
         if not head:
-            errors.append("无法校验 Runtime 版本：缺少 git HEAD / RUNTIME_COMMIT")
+            errors.append("无法校验 Runtime 版本：Runtime 根目录缺少 RUNTIME_COMMIT / 自有 .git")
         elif head != EXPECTED:
             errors.append(f"Runtime 基线不匹配: expected={EXPECTED}, actual={head}")
         else:
