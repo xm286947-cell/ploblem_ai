@@ -29,7 +29,9 @@
       "target_asset": "产品Web入口/正式Handoff能力 + 回归Evidence",
       "regression_required": true,
       "gate_impact": "PRODUCT_TEST_GATE_V1_1 / GOLDEN_E2E",
-      "status": "OPEN"
+      "status": "OPEN",
+      "github_issue": "#134",
+      "issue_url": "https://github.com/xm286947-cell/ploblem_ai/issues/134"
     },
     {
       "gap_id": "QS-AUD-P0-003",
