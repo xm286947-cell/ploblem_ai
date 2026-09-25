@@ -1,5 +1,5 @@
 name: Storage R6 Complete Product Candidate
-# rerun after diagnostics compatibility fix
+# final rebuild after legacy F1 gate environment compatibility fix
 
 on:
   push:
