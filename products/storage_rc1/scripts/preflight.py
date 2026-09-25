@@ -71,8 +71,10 @@ def main() -> None:
         # Storage assembly commit as the Runtime provenance.
         marker = root / "RUNTIME_COMMIT"
         head = None
+        provenance_source = None
         if marker.is_file():
             head = marker.read_text(encoding="utf-8").strip()
+            provenance_source = "RUNTIME_COMMIT"
         elif (root / ".git").exists():
             try:
                 head = subprocess.check_output(
@@ -80,6 +82,7 @@ def main() -> None:
                     text=True,
                     stderr=subprocess.DEVNULL,
                 ).strip()
+                provenance_source = "RUNTIME_OWN_GIT"
             except Exception:
                 head = None
         if not head:
@@ -88,6 +91,12 @@ def main() -> None:
             errors.append(f"Runtime 基线不匹配: expected={EXPECTED}, actual={head}")
         else:
             notes.append("Runtime baseline PASS")
+            notes.append(f"Runtime provenance source={provenance_source}")
+            print(f"EXPECTED_RUNTIME={EXPECTED}")
+            print(f"ACTUAL_RUNTIME={head}")
+            print(f"PROVENANCE_SOURCE={provenance_source}")
+            if provenance_source == "RUNTIME_COMMIT":
+                print("PARENT_GIT_HEAD_IGNORED=YES")
         for rel in [
             "config/runtime/model.yaml",
             "tools/openai_mock/server.py",
