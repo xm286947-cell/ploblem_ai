@@ -55,7 +55,7 @@ jobs:
           rm -rf dist /tmp/storage-r6-fresh
           python tools/build_storage_r6_complete.py
           mkdir -p /tmp/storage-r6-fresh
-          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip -d /tmp/storage-r6-fresh
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip -d /tmp/storage-r6-fresh
           PKG=/tmp/storage-r6-fresh/STORAGE_PRODUCT_MVP_RC1
           export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
           export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
