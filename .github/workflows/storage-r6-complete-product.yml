@@ -51,7 +51,7 @@ jobs:
         run: |
           rm -rf /tmp/storage-r6-fresh
           mkdir -p /tmp/storage-r6-fresh
-          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip -d /tmp/storage-r6-fresh
+          unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip -d /tmp/storage-r6-fresh
           PKG=/tmp/storage-r6-fresh/STORAGE_PRODUCT_MVP_RC1
           test -d "$PKG/knowledge_production"
           test -d "$PKG/repositories"
@@ -82,14 +82,14 @@ jobs:
       - name: Verify package SHA sidecar
         run: |
           cd dist
-          ZIP=$(ls STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip)
+          ZIP=$(ls STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip)
           sha256sum -c "$ZIP.sha256"
       - name: Upload complete candidate
         uses: actions/upload-artifact@v4
         with:
           name: storage-r6-complete-product-candidate
           path: |
-            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip
-            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.zip.sha256
-            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_*.DELIVERY_MANIFEST.json
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.zip.sha256
+            dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_*.DELIVERY_MANIFEST.json
           if-no-files-found: error
