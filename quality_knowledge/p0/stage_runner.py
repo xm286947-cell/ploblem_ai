@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from typing import Any
 from builder.ai_client import OpenAICompatibleClient
 from quality_knowledge.models.analysis_v2 import OccurrenceAnalysisV2DTO
 from quality_knowledge.response_normalizer_v2 import normalize_stage_v2
+from quality_knowledge.runtime_model_config import resolve_major_runtime_model_config
 from runtime import (
     AgentConfigLoader,
     AgentRequest,
@@ -191,41 +191,10 @@ class RuntimeConfiguredV2StageRunner:
         root: str | Path,
         model_config_path: str | Path | None = None,
     ) -> Path:
-        """Resolve Runtime model config using the Storage-proven precedence.
-
-        1. explicit caller path;
-        2. MAJOR_MODEL_CONFIG selection;
-        3. non-committed config/model.local.yaml when present;
-        4. shared config/runtime/model.yaml fallback.
-
-        Provider credentials remain a Runtime concern. The selected profile may
-        use direct values or *_env references according to Runtime rules.
-        """
-        project_root = Path(root).resolve()
-        selected: str | Path | None = model_config_path
-        if selected is None:
-            configured = os.environ.get("MAJOR_MODEL_CONFIG", "").strip()
-            if configured:
-                selected = configured
-
-        if selected is not None:
-            path = Path(selected).expanduser()
-            if not path.is_absolute():
-                path = project_root / path
-            path = path.resolve()
-            if not path.is_file():
-                raise ValueError(
-                    f"MAJOR_MODEL_CONFIG_NOT_FOUND:{path}"
-                )
-            return path
-
-        local_path = project_root / "config/model.local.yaml"
-        if local_path.is_file():
-            return local_path.resolve()
-
-        return (
-            project_root / "config/runtime/model.yaml"
-        ).resolve()
+        return resolve_major_runtime_model_config(
+            root,
+            model_config_path,
+        )
 
     @classmethod
     def from_project(
