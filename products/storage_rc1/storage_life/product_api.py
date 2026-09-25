@@ -94,6 +94,79 @@ def _enrich_evidence(device: dict[str, Any], evidence: list[dict[str, Any]]) -> 
         enriched.append(item)
     return enriched
 
+def _device_lifecycle(device_id: str) -> dict[str, Any]:
+    workflow = core.specification_workflow_status(device_id)
+    return {
+        "status": "FORMAL_READY" if workflow.get("formal_ready") else "DRAFT",
+        "formal_ready": bool(workflow.get("formal_ready")),
+        "workflow_status": workflow.get("status"),
+        "reason": (
+            "HUMAN_CONFIRMED_DEVICE_FACT_READY"
+            if workflow.get("formal_ready")
+            else "REVIEW_REQUIRED"
+        ),
+    }
+
+
+def _require_formal_device(device_id: str) -> dict[str, Any]:
+    lifecycle = _device_lifecycle(device_id)
+    if not lifecycle["formal_ready"]:
+        raise ValueError("DEVICE_NOT_FORMAL_READY")
+    return lifecycle
+
+
+def _formal_knowledge(
+    canonical_name: str,
+    parameter_name: str,
+    device_type: str,
+    *,
+    context: str = "",
+    top_k: int = 3,
+) -> dict[str, Any]:
+    consumer = KnowledgeReleaseConsumer.current()
+    status = consumer.status()
+    if not status.get("available"):
+        return {
+            "status": "UNKNOWN",
+            "code": status.get("code") or "KNOWLEDGE_RELEASE_NOT_READY",
+            "knowledge_release_version": None,
+            "results": [],
+            "evidence_refs": [],
+        }
+    query = " ".join(
+        item
+        for item in (canonical_name, parameter_name, context)
+        if str(item or "").strip()
+    )
+    try:
+        result = consumer.query(
+            query,
+            device_type=device_type,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        return {
+            "status": "UNKNOWN",
+            "code": str(exc),
+            "knowledge_release_version": status.get("knowledge_release_version"),
+            "results": [],
+            "evidence_refs": [],
+        }
+    rows = result.get("results") or []
+    evidence_refs = []
+    for row in rows:
+        for evidence in row.get("evidence") or []:
+            evidence_id = evidence.get("evidence_id")
+            if evidence_id and evidence_id not in evidence_refs:
+                evidence_refs.append(evidence_id)
+    return {
+        "status": "MATCHED" if rows else "NO_MATCH",
+        "code": None if rows else "NO_MATCHING_PUBLISHED_KNOWLEDGE",
+        "knowledge_release_version": result.get("knowledge_release_version"),
+        "results": rows,
+        "evidence_refs": evidence_refs,
+    }
+
 
 def device_slots(device_id: str) -> dict[str, Any]:
     devices = {x["id"]: x for x in core.list_devices()}
@@ -154,6 +227,22 @@ def device_slots(device_id: str) -> dict[str, Any]:
             "role": field.get("role") or "",
             "evidence": evidence,
             "candidate_id": (primary or {}).get("id"),
+            "formal_knowledge": (
+                _formal_knowledge(
+                    key,
+                    field.get("parameter_name") or key,
+                    device["device_type"],
+                    context="engineering meaning diagnostic lifetime",
+                )
+                if review_status == "CONFIRMED"
+                else {
+                    "status": "NOT_APPLICABLE",
+                    "code": "DEVICE_FACT_NOT_CONFIRMED",
+                    "knowledge_release_version": None,
+                    "results": [],
+                    "evidence_refs": [],
+                }
+            ),
         })
     states = ("CONFIRMED", "UNREVIEWED", "REJECTED", "NOT_FOUND", "NOT_CHECKED", "AMBIGUOUS", "NOT_APPLICABLE")
     counts = {state: sum(1 for x in slots if x["status"] == state) for state in states}
@@ -169,6 +258,7 @@ def device_slots(device_id: str) -> dict[str, Any]:
         "counts": counts,
         "coverage_ratio": round(coverage_known / len(slots), 4) if slots else 0,
         "workflow": core.specification_workflow_status(device_id),
+        "lifecycle": _device_lifecycle(device_id),
         "conclusion": core.get_device_conclusion(device_id),
     }
 
@@ -246,12 +336,24 @@ def dashboard() -> dict[str, Any]:
     for d in devices:
         detail = device_slots(d["id"])
         attention = detail["counts"]["NOT_CHECKED"] + detail["counts"]["AMBIGUOUS"] + detail["counts"]["UNREVIEWED"]
-        summaries.append({"id": d["id"], "vendor": d["vendor"], "model": d["model"], "device_type": d["device_type"], "coverage_ratio": detail["coverage_ratio"], "attention": attention, "counts": detail["counts"]})
+        summaries.append({
+            "id": d["id"],
+            "vendor": d["vendor"],
+            "model": d["model"],
+            "device_type": d["device_type"],
+            "coverage_ratio": detail["coverage_ratio"],
+            "attention": attention,
+            "counts": detail["counts"],
+            "lifecycle": detail["lifecycle"],
+        })
     by_type = {}
     for d in devices:
         by_type[d["device_type"]] = by_type.get(d["device_type"], 0) + 1
+    formal = [x for x in summaries if x["lifecycle"]["formal_ready"]]
     return {
         "device_count": len(devices),
+        "formal_device_count": len(formal),
+        "draft_device_count": len(devices) - len(formal),
         "confirmed_fact_count": sum(int(d.get("confirmed_candidate_count") or 0) for d in devices),
         "by_type": by_type,
         "attention_count": sum(x["attention"] for x in summaries),
@@ -259,10 +361,11 @@ def dashboard() -> dict[str, Any]:
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
     }
 
-
 def compare_devices(device_ids: list[str]) -> dict[str, Any]:
     if len(set(device_ids)) < 2:
         raise ValueError("至少选择两个不同器件")
+    for device_id in device_ids:
+        _require_formal_device(device_id)
     details = [device_slots(x) for x in device_ids]
     field_order = []
     by_device = {}
@@ -288,7 +391,14 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
         values = {(str(c.get("value") or ""), str(c.get("unit") or ""), c.get("status")) for c in cells.values()}
         missing = any(c.get("review_status") != "CONFIRMED" for c in cells.values())
         exemplar = next((x for x in details[0]["slots"] if x.get("canonical_name") == key), {})
-        rows.append({"canonical_name": key, "parameter_name": next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key), "group": exemplar.get("group") or parameter_baseline.COMPREHENSIVE, "group_label": exemplar.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE], "cells": cells, "is_difference": len(values) > 1, "has_missing": missing})
+        parameter_name = next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key)
+        knowledge = _formal_knowledge(
+            key,
+            parameter_name,
+            details[0]["device"]["device_type"],
+            context="comparison difference engineering meaning",
+        )
+        rows.append({"canonical_name": key, "parameter_name": parameter_name, "group": exemplar.get("group") or parameter_baseline.COMPREHENSIVE, "group_label": exemplar.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE], "cells": cells, "is_difference": len(values) > 1, "has_missing": missing, "formal_knowledge": knowledge})
     return {"devices": [x["device"] for x in details], "rows": rows}
 
 
@@ -296,6 +406,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
     dtype = templates.normalize_device_type(device_type) if device_type else ""
     evidence_by_field = {}
     if device_id:
+        _require_formal_device(device_id)
         detail = device_slots(device_id)
         dtype = templates.normalize_device_type(detail["device"]["device_type"])
         evidence_by_field = {x["canonical_name"]: x for x in detail["slots"]}
@@ -309,6 +420,12 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         data_source, method, interpretation = DIAGNOSTIC_METHODS.get(key, ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"))
         slot = evidence_by_field.get(key) or {}
         formal = slot.get("review_status") == "CONFIRMED"
+        knowledge = _formal_knowledge(
+            key,
+            field.get("parameter_name") or key,
+            dtype,
+            context="diagnostic read method interpretation lifetime health",
+        )
         rows.append({
             "canonical_name": key,
             "indicator": field.get("parameter_name") or key,
@@ -319,7 +436,15 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "fact_status": slot.get("status", "NOT_CHECKED") if device_id else "REFERENCE",
             "review_status": slot.get("review_status", "NOT_REVIEWED") if device_id else "REFERENCE",
             "evidence": slot.get("evidence", []) if formal else [],
-            "runtime_observation": None,
+            "runtime_observation": {
+                "status": "UNKNOWN",
+                "code": "RUNTIME_OBSERVATION_UNAVAILABLE",
+                "observed_at": None,
+                "value": None,
+                "source": None,
+            },
+            "formal_knowledge": knowledge,
+            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
         })
     return {"device_type": dtype, "device_id": device_id or None, "items": rows, "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"]}
 
@@ -340,6 +465,15 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         else:
             confidence = "EVIDENCED"
         meaning, sw, test, monitor = IMPACT_RULES.get(row["canonical_name"], ("参数能力发生变化或存在事实缺口", "复核相关软件配置、异常处理和持久化策略", "补充该参数相关边界与回归测试", "复核对应运行监控/告警"))
+        knowledge = _formal_knowledge(
+            row["canonical_name"],
+            row["parameter_name"],
+            comparison["devices"][0]["device_type"],
+            context="change impact software test monitoring lifetime risk",
+        )
+        if knowledge["status"] == "MATCHED":
+            first = knowledge["results"][0]
+            meaning = str(first.get("summary") or first.get("content") or meaning)
         rows.append({
             "canonical_name": row["canonical_name"],
             "parameter_name": row["parameter_name"],
@@ -351,6 +485,8 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
             "test_impact": test,
             "monitoring_impact": monitor,
             "validation_item": "确认事实差异、适用条件和 Evidence 后由工程人员完成最终判定",
+            "formal_knowledge": knowledge,
+            "knowledge_analysis_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
         })
     return {"old_id": old_id, "new_id": new_id, "status": "DRAFT_FOR_ENGINEERING_REVIEW", "final_replacement_decision": None, "items": rows, "unknowns": list(dict.fromkeys(unknowns))}
 
