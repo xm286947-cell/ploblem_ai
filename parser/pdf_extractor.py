@@ -5,8 +5,6 @@ from pathlib import Path
 from typing import Any, List
 import re
 
-from pypdf import PdfReader
-
 
 @dataclass
 class PageText:
@@ -40,6 +38,11 @@ class PdfExtractor:
         return text.strip()
 
     def extract(self, pdf_path: str | Path) -> PdfExtractionResult:
+        # Keep PDF support lazy so the shared Web host can start in domains
+        # that do not consume PDF sources without importing optional PDF
+        # dependencies at application composition time.
+        from pypdf import PdfReader
+
         path = Path(pdf_path)
         if not path.exists():
             raise FileNotFoundError(f"PDF文件不存在: {path}")
