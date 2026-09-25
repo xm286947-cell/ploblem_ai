@@ -40,6 +40,30 @@ def create_p0_insights_router(
             {"api_prefix": api_prefix.rstrip("/"), "page_title": "质量洞察 · 质量能力"},
         )
 
+    @router.get("/p0/quality-scenario-insights", response_class=HTMLResponse, include_in_schema=False)
+    async def p04_quality_scenario_insights(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p04_insights.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "page_title": "质量画像与洞察 · QualityScenario",
+            },
+        )
+
+    @router.get("/p0/insights/p04", response_class=HTMLResponse, include_in_schema=False)
+    async def p04_quality_scenario_insights_alias(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p04_insights.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "page_title": "质量画像与洞察 · QualityScenario",
+            },
+        )
+
     @router.get("/p0/issues", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issues(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(

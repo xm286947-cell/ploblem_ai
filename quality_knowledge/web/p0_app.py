@@ -14,6 +14,9 @@ from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
     create_p0_insights_router,
 )
+from quality_knowledge.p04.adapter import P04Provider, UnavailableP04Provider
+from quality_knowledge.p04.api import create_p04_router
+from quality_knowledge.p04.service import P04InsightService
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -54,6 +57,7 @@ def create_p0_app(
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
     repeat_web: Any | None = None,
+    p04_provider: P04Provider | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
@@ -167,6 +171,10 @@ def create_p0_app(
     app.state.p0_repository = repository
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
+    # P04 is intentionally provider-injected.  The default is explicit
+    # DATA_UNAVAILABLE until the approved public JSON providers are wired.
+    app.state.p04_provider = p04_provider or UnavailableP04Provider()
+    app.state.p04_service = P04InsightService(app.state.p04_provider)
 
     if "REPEAT_RISK" in domains:
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
@@ -252,6 +260,7 @@ def create_p0_app(
                 repeat_web=repeat_web,
             )
         )
+        app.include_router(create_p04_router(app.state.p04_service))
         app.include_router(create_p0_insights_router())
         app.include_router(create_p1_router())
         root_target = "/p0/insights"
