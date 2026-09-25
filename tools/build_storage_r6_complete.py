@@ -27,7 +27,10 @@ def sha256(path: Path) -> str:
 
 
 def source_commit() -> str:
-    value = os.environ.get("GITHUB_SHA", "").strip()
+    # Package provenance must describe the exact checked-out source tree.
+    # Do not use GITHUB_SHA on pull_request runs because that is a synthetic
+    # merge commit rather than the immutable repair branch commit.
+    value = os.environ.get("STORAGE_SOURCE_COMMIT", "").strip()
     if value:
         return value
     return subprocess.check_output(
