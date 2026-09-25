@@ -171,6 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
     kw.add_argument("--host", default="127.0.0.1")
     kw.add_argument("--port", type=int, default=8080)
     kw.add_argument("--debug", action="store_true")
+    kw.add_argument(
+        "--scenario-db",
+        default=None,
+        help="可选：READY 的 Quality Capability P0/P1 场景库；提供后同源挂载 /api/v2 与 /p0、/p1 页面",
+    )
 
     p0_init = subparsers.add_parser("knowledge-p0-init", help="初始化干净的 Quality Capability P0 数据库")
     p0_init.add_argument("--db", default=str(ROOT / "knowledge/quality_capability_p0.db"))
@@ -428,7 +433,29 @@ def main() -> int:
         if args.command == "knowledge-web":
             import uvicorn
             from quality_knowledge.web import create_app
-            uvicorn.run(create_app(args.db),host=args.host,port=args.port)
+
+            scenario_db = args.scenario_db
+            if scenario_db:
+                from quality_knowledge.p0.initializer import P0InitializationError, P0Initializer
+
+                initializer = P0Initializer(
+                    manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+                    plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+                )
+                scenario_path = Path(scenario_db)
+                try:
+                    if scenario_path.exists():
+                        initializer.verify_ready(scenario_path)
+                    else:
+                        initializer.initialize(scenario_path)
+                except P0InitializationError as error:
+                    print(json.dumps({
+                        "outcome": "INITIALIZATION_BLOCKED",
+                        "error": error.code,
+                        "diagnostic": error.diagnostic.as_dict(),
+                    }, ensure_ascii=False, indent=2), file=sys.stderr)
+                    return 4
+            uvicorn.run(create_app(args.db, scenario_db=scenario_db),host=args.host,port=args.port)
             return 0
         if args.command == "knowledge-query":
             from quality_knowledge.repositories import IssueKnowledgeRepository

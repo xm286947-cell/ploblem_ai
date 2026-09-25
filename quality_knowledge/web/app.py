@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import logging
+import sqlite3
 import tempfile
 import threading
 import uuid
@@ -182,7 +183,96 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_
     }
 
 
-def create_app(db_path):
+SCENARIO_TRIGGER_SOURCES=[('HIGH_PERCEPTION','客户高感知问题'),('RND_VALUE','研发认定价值')]
+SCENARIO_HANDOFF_UNAVAILABLE='同源质量场景库未启用；启动时未提供 --scenario-db，本次不会生成候选场景。'
+SCENARIO_HANDOFF_BLOCKED='同源质量场景库未就绪，本次未生成候选场景；请先恢复该场景库的初始化状态。'
+SCENARIO_HANDOFF_NO_ANALYSIS='尚未生成逆向分析结果；请先完成 AI 分析并人工核对后再交接为候选场景。'
+SCENARIO_HANDOFF_FALLBACK='质量场景候选生成失败，本页逆向分析记录未被修改；请核对分析结果与场景词典后重试。'
+SCENARIO_HANDOFF_MESSAGES={
+ 'REVERSE_QUALITY_RESULT_VERSION_UNSUPPORTED':'逆向分析结果版本不受支持，请重新分析后再交接。',
+ 'REVERSE_QUALITY_RESULT_INVALID':'逆向分析结果不完整，无法交接为候选场景。',
+ 'SCENARIO_SOURCE_REF_DUPLICATED':'候选来源问题重复，已阻止本次交接。',
+ 'SCENARIO_EVIDENCE_ID_DUPLICATED':'候选证据编号重复，已阻止本次交接。',
+ 'SCENARIO_EVIDENCE_SOURCE_REF_NOT_FOUND':'候选证据未指向本次来源问题，已阻止本次交接。',
+ 'SCENARIO_EVIDENCE_SOURCE_TEXT_OR_CONTENT_REF_REQUIRED':'候选证据缺少来源文本或受控引用，已阻止本次交接。',
+ 'SCENARIO_PERSISTENCE_ERROR':'质量场景候选保存失败，本页逆向分析记录未被修改；请稍后重试。',
+ 'SCENARIO_SAVE_FAILED':'质量场景候选保存失败，本页逆向分析记录未被修改；请稍后重试。',
+}
+
+
+def _scenario_handoff_message(exc):
+    """Stable product copy for a handoff failure; never leaks the raw exception."""
+    raw=str(exc or '').strip()
+    return SCENARIO_HANDOFF_MESSAGES.get(raw.splitlines()[0].strip() if raw else '',SCENARIO_HANDOFF_FALLBACK)
+
+
+def _scenario_library_notice(library):
+    if library.get('ready'):
+        return ''
+    return SCENARIO_HANDOFF_UNAVAILABLE if library.get('error')=='SCENARIO_LIBRARY_NOT_CONFIGURED' else SCENARIO_HANDOFF_BLOCKED
+
+
+def _prepare_scenario_library(scenario_db):
+    """Attach the frozen P0/P1 scenario library; absent scenario_db keeps legacy behaviour."""
+    library={'ready':False,'db_path':str(scenario_db or ''),'error':'','initialization_status':None,
+             'repository':None,'candidates':None,'traceability':None}
+    if not scenario_db:
+        library['error']='SCENARIO_LIBRARY_NOT_CONFIGURED'
+        return library
+    from quality_knowledge.p0.initializer import P0InitializationError,P0Initializer
+    from quality_knowledge.p0.repository import P0Repository,P0RepositoryError
+    from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1Service
+    from quality_knowledge.quality_scenario_traceability_service import QualityScenarioTraceabilityService
+    from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
+    root=BASE.parent.parent
+    initializer=P0Initializer(manifest_path=root/'quality_knowledge/config/p0_seed_manifest.json',
+                              plc_seed_path=root/'quality_knowledge/config/plc_fields.yaml')
+    try:
+        library['initialization_status']=initializer.verify_ready(scenario_db)
+        library['repository']=P0Repository(scenario_db)
+    except (P0InitializationError,P0RepositoryError,sqlite3.Error,OSError) as exc:
+        library['error']=getattr(exc,'code','') or 'SCENARIO_LIBRARY_NOT_READY'
+        library['repository']=None
+        logging.getLogger('quality_knowledge.web').warning('scenario library unavailable: %s',library['error'])
+        return library
+    candidates=CandidateV1Service(SQLiteQualityScenarioV1Repository(scenario_db))
+    library.update({'ready':True,'candidates':candidates,
+                    'traceability':QualityScenarioTraceabilityService(candidates.repository)})
+    return library
+
+
+def _scenario_handoff_view(library,analysis,facts):
+    """Read-only Source/Evidence and candidate status shown next to the handoff action."""
+    review=(analysis or {}).get('review') or {}
+    evidence=sorted({str(item) for field in review.values()
+                     if isinstance(field,dict) and field.get('review_status')!='REJECTED'
+                     for item in (field.get('evidence_ids') or []) if str(item).strip()})
+    canonical=str((analysis or {}).get('canonical_itr') or (facts or {}).get('canonical_itr') or '')
+    view={'available':False,'notice':'','trigger_sources':SCENARIO_TRIGGER_SOURCES,'candidates':[],
+          'source_ref':('ITR:'+canonical) if canonical else '','product_code':(analysis or {}).get('product_code') or '',
+          'taxonomy_version_id':(analysis or {}).get('taxonomy_version_id') or '','analysis_status':(analysis or {}).get('status') or '',
+          'analysis_id':(analysis or {}).get('analysis_id') or '','run_id':(analysis or {}).get('run_id') or '',
+          'evidence_ids':evidence}
+    if not analysis:
+        view['notice']=SCENARIO_HANDOFF_NO_ANALYSIS
+        return view
+    if not library.get('ready'):
+        view['notice']=_scenario_library_notice(library)
+        return view
+    view['available']=True
+    if view['source_ref']:
+        try:
+            found=library['traceability'].scenarios_for_source(view['source_ref'])
+            view['candidates']=[{'scenario_id':item.get('scenario_id'),'status':item.get('status'),
+                                 'scenario_name':item.get('scenario_name') or '',
+                                 'scenario_version':item.get('scenario_version')}
+                                for item in found.get('items') or []]
+        except (ValueError,sqlite3.Error):
+            view['candidates']=[]
+    return view
+
+
+def create_app(db_path, scenario_db=None):
     app = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
     svc = KnowledgeIssueService(IssueKnowledgeRepository(db_path))
     capability_extension = QualityCapabilityExtension(db_path)
@@ -231,6 +321,18 @@ def create_app(db_path):
     tpl.env.globals['zh_value'] = zh_value
     from .scenario_asset_pages import create_asset_router
     app.include_router(create_asset_router(scenario_repo,tpl,scenario_generation_svc))
+    scenario_library=_prepare_scenario_library(scenario_db)
+    app.state.quality_scenario_library=scenario_library
+    if scenario_library['ready']:
+        from .api_v2 import create_v2_router
+        from .p0_pages import create_p0_insights_router
+        from .p1_pages import create_p1_router
+        app.state.p0_repository=scenario_library['repository']
+        app.state.initialization_status=scenario_library['initialization_status']
+        app.include_router(create_v2_router(scenario_library['repository'],
+                                            initialization_status=scenario_library['initialization_status']))
+        app.include_router(create_p0_insights_router())
+        app.include_router(create_p1_router())
 
     @app.get('/api/reverse-quality/{canonical_itr}')
     def api_reverse_quality_result(canonical_itr: str):
@@ -260,6 +362,7 @@ def create_app(db_path):
         return tpl.TemplateResponse(request,'reverse_quality_issue.html',{'facts':facts,'analysis':analysis,
             'sections':REVERSE_SECTIONS,'labels':REVERSE_LABELS,'products':product_repo.list(),
             'product_code':selected,'taxonomy':taxonomy,'error':error,
+            'handoff':_scenario_handoff_view(scenario_library,analysis,facts),
             'available_scenarios':scenario_repo.scenarios(product_code=selected) if selected else []})
 
     @app.post('/reverse-quality/{material_id}/analyse', include_in_schema=False)
@@ -297,6 +400,44 @@ def create_app(db_path):
         except (ValueError,KeyError) as exc:
             return RedirectResponse('/reverse-quality/'+material_id+'?'+urlencode({'error':str(exc)})+'#scene-match',303)
         return RedirectResponse('/reverse-quality/'+material_id+'#scene-match',303)
+
+    @app.post('/reverse-quality/{material_id}/handoff', include_in_schema=False)
+    def reverse_quality_handoff(material_id: str, trigger_source: str = Form(''), trigger_reason: str = Form(''), reviewer: str = Form('')):
+        """Hand an accepted reverse-quality record to the same-origin scenario library as CANDIDATE."""
+        page='/reverse-quality/'+material_id
+        def blocked(message):
+            return RedirectResponse(page+'?'+urlencode({'error':message})+'#scenario-handoff',303)
+        if not scenario_library['ready']:
+            return blocked(_scenario_library_notice(scenario_library))
+        source=str(trigger_source or '').strip().upper()
+        if source not in {code for code,_ in SCENARIO_TRIGGER_SOURCES}:
+            return blocked('请选择业务触发来源：客户高感知问题或研发认定价值。')
+        reason=str(trigger_reason or '').strip()
+        if not reason:
+            return blocked('请填写业务触发原因；候选场景需要保留人工填写的触发依据。')
+        try:facts=reverse_quality_svc.facts(material_id)
+        except KeyError:raise HTTPException(404,'原始问题不存在')
+        except ValueError:return blocked('同一标准 ITR 存在多个原始数据组，请先在原始问题页人工确认来源后再交接。')
+        analysis=reverse_quality_svc.get(facts['canonical_itr'])
+        if not analysis or not isinstance(analysis.get('result'),dict):
+            return blocked(SCENARIO_HANDOFF_NO_ANALYSIS)
+        product_code=analysis.get('product_code') or ''
+        version_id=str(analysis.get('taxonomy_version_id') or '')
+        taxonomy=scenario_repo.taxonomy(version_id,product_code) if (version_id and product_code) else None
+        if not taxonomy and product_code:taxonomy=scenario_repo.taxonomy_active(product_code)
+        if not taxonomy:
+            return blocked('该产品没有已启用的场景词典，无法生成质量场景候选。')
+        try:
+            scenario_library['candidates'].create_from_reverse(
+                analysis['result'],taxonomy,trigger_source=source,trigger_reason=reason,
+                created_by=str(reviewer or '').strip())
+        except (ValueError,RuntimeError) as exc:
+            return blocked(_scenario_handoff_message(exc))
+        except sqlite3.Error:
+            return blocked(SCENARIO_HANDOFF_MESSAGES['SCENARIO_PERSISTENCE_ERROR'])
+        # create_from_reverse never confirms or publishes; the scenario stays CANDIDATE
+        # (an idempotent replay returns the already-persisted CANDIDATE unchanged).
+        return RedirectResponse('/p0/quality-scenarios/workbench',303)
 
     def filters(req):
         return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}
