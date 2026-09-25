@@ -1,6 +1,6 @@
 {
   "manifest_version": "quality-scenario-rc1-test-execution-v1.1",
-  "status": "FROZEN_DESIGN_PENDING_PRODUCT_BLOCKER_FIX",
+  "status": "FROZEN_DESIGN_BLOCKED_BY_PRODUCT_GAP",
   "audit_task": "TEST-AUDIT-QUALITY-SCENARIO-V1.1-001",
   "product": "QUALITY_SCENARIO_MVP_RC1",
   "product_baseline": "REQUIREMENT_BASELINE_质量场景库_MVP_V0.2",
@@ -20,7 +20,7 @@
     "sha256": "TBD_AFTER_PRODUCT_FIX"
   },
   "test_branch": "test/quality-scenario-v11-audit-remediation",
-  "test_asset_commit": "TO_BE_FROZEN_AFTER_ASSET_CREATION",
+  "test_asset_commit": "RESOLVE_FROM_IMMUTABLE_TEST_RELEASE_REF",
   "asset_root": "tests/product_test/quality_scenario_rc1_v11",
   "scenario_inventory": "PRODUCT_SCENARIO_INVENTORY.json",
   "expected": "expected_results_v1_1.json",
@@ -51,7 +51,21 @@
   ],
   "mock": {
     "boundary": "Provider/AI Response only",
-    "forbidden_mocks": ["Adapter","Schema","Service","Repository","DB","Evidence","Review","Confirm","Reject","Publish","Query","Detail","UI"]
+    "forbidden_mocks": [
+      "Adapter",
+      "Schema",
+      "Service",
+      "Repository",
+      "DB",
+      "Evidence",
+      "Review",
+      "Confirm",
+      "Reject",
+      "Publish",
+      "Query",
+      "Detail",
+      "UI"
+    ]
   },
   "stop_rule": "Any mandatory step failure stops that continuous chain; downstream steps are NOT_TESTED. No repair-in-place.",
   "forbidden_actions": [
@@ -62,5 +76,11 @@
     "skip failed mandatory step and continue to claim E2E",
     "self-declare TEST_AUDIT_GATE=PASS"
   ],
-  "allowed_results": ["PASS","FAIL","BLOCKED","NOT_TESTED"]
+  "allowed_results": [
+    "PASS",
+    "FAIL",
+    "BLOCKED",
+    "NOT_TESTED"
+  ],
+  "test_release_ref": "test/quality-scenario-v11-audit-release-001"
 }
