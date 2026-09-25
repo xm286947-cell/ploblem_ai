@@ -196,6 +196,14 @@ def build() -> tuple[Path, Path, Path]:
     )
     runtime_vendor_closure_gate(runtime_root)
 
+    # Keep the root run-log contract valid on a clean extraction before any
+    # platform launcher overwrites it with the concrete session log.
+    (package_root / "RUN_LOG.txt").write_text(
+        "STORAGE_PRODUCT_TEST_FULL_V1.12\n"
+        "R6_COMPLETE_PACKAGE_FRESH_EXTRACT\n",
+        encoding="utf-8",
+    )
+
     release = verify_release(package_root)
     scan_secrets(package_root)
 
