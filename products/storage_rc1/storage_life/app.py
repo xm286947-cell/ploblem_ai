@@ -19,6 +19,7 @@ from . import ai
 from . import templates
 from . import document_pipeline
 from . import product_api
+from . import knowledge_product
 from .knowledge_release import KnowledgeReleaseConsumer, KnowledgeReleaseError
 
 app = FastAPI(title="存储器件寿命知识库 MVP", version="0.8.0-rc3-runtime-rc2.1")
@@ -82,6 +83,11 @@ class AnalysisRequest(BaseModel):
 
 class ProductCompareRequest(BaseModel):
     device_ids: list[str]
+
+
+class KnowledgeReleaseBuildRequest(BaseModel):
+    release_version: str
+
 
 
 @app.get("/api/product/dashboard", tags=["Storage Product MVP"])
@@ -161,6 +167,61 @@ def product_knowledge_evidence(evidence_id: str):
         return KnowledgeReleaseConsumer.current().evidence(evidence_id)
     except KnowledgeReleaseError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/product/knowledge-production/sources", tags=["Storage Product MVP"])
+async def knowledge_production_source(
+    file: UploadFile = File(...),
+    source_id: str = Form(...),
+    publisher: str = Form(...),
+    title: str = Form(...),
+    version: str = Form(""),
+    revision: str = Form(""),
+    official_url: str = Form(""),
+):
+    data = await file.read()
+    if len(data) > 30 * 1024 * 1024:
+        raise HTTPException(413, "知识资料文件上限 30 MB")
+    try:
+        return await run_in_threadpool(
+            knowledge_product.ingest_source,
+            data,
+            filename=file.filename or "source.pdf",
+            source_id=source_id,
+            publisher=publisher,
+            title=title,
+            version=version,
+            revision=revision,
+            official_url=official_url,
+        )
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/knowledge-production/sources/{source_id}/{source_version}/extract", tags=["Storage Product MVP"])
+async def knowledge_production_extract(source_id: str, source_version: str, requested_topics: str = Form("")):
+    topics = [item.strip() for item in requested_topics.split(",") if item.strip()]
+    try:
+        return await run_in_threadpool(
+            knowledge_product.extract_source,
+            source_id,
+            source_version,
+            requested_topics=topics,
+        )
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/product/knowledge-production/releases", tags=["Storage Product MVP"])
+async def knowledge_production_release(body: KnowledgeReleaseBuildRequest):
+    try:
+        result = await run_in_threadpool(
+            knowledge_product.build_and_activate_release,
+            body.release_version,
+        )
+        return {**result, "consumer_status": KnowledgeReleaseConsumer.current().status()}
+    except Exception as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/health")
@@ -869,3 +930,12 @@ def knowledge_passage(passage_id: int):
     if not result:
         raise HTTPException(404, "原文片段不存在")
     return result
+
+
+# Unified Knowledge Production UI is exposed on the same Storage product port.
+# Only the shared Knowledge Production routes are attached; Storage does not
+# implement or copy its review/publish state machine.
+_KNOWLEDGE_PROCESSING_APP = knowledge_product.processing_app()
+for _route in _KNOWLEDGE_PROCESSING_APP.router.routes:
+    if str(getattr(_route, "path", "")).startswith("/knowledge-production"):
+        app.router.routes.append(_route)
