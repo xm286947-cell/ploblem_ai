@@ -27,7 +27,76 @@ jobs:
           git cat-file -e f420769ff83ca9d49deb4121d7c9170991a0130a^{commit}
           CHANGED="$(git diff --name-only f420769ff83ca9d49deb4121d7c9170991a0130a...HEAD)"
           echo "$CHANGED"
-          test "$(echo "$CHANGED" | grep -v '^products/storage_rc1/storage_life/index.html$' | grep -v '^products/storage_rc1/tests/test_ui_next_issue132.py$' | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
+          test "$(echo "$CHANGED" | grep -v '^products/storage_rc1/storage_life/index.html      - name: Install declared dependencies
+        shell: bash
+        run: |
+          python -m venv /tmp/storage-r6-f1
+          /tmp/storage-r6-f1/bin/python -m pip install --disable-pip-version-check -q -r products/storage_rc1/requirements.txt
+      - name: UI-NEXT-01..06 and P08 contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/storage-r6-f1/bin/python -m pytest -q products/storage_rc1/tests/test_ui_next_issue132.py
+      - name: Import and coverage regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd products/storage_rc1
+          /tmp/storage-r6-f1/bin/python -m pytest -q tests/test_product_mvp.py tests/test_coverage.py tests/test_product_api.py
+      - name: Result
+        shell: bash
+        run: |
+          echo "TASK=STORAGE-RC1-R6-F1-ISSUE-132-FIX-001"
+          echo "UI-NEXT-01..06=PASS"
+          echo "P08_IMPORT_COVERAGE_REGRESSION=PASS"
+          echo "RESULT=READY_FOR_PRODUCT_RETEST"
+ | grep -v '^products/storage_rc1/tests/test_ui_next_issue132.py      - name: Install declared dependencies
+        shell: bash
+        run: |
+          python -m venv /tmp/storage-r6-f1
+          /tmp/storage-r6-f1/bin/python -m pip install --disable-pip-version-check -q -r products/storage_rc1/requirements.txt
+      - name: UI-NEXT-01..06 and P08 contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/storage-r6-f1/bin/python -m pytest -q products/storage_rc1/tests/test_ui_next_issue132.py
+      - name: Import and coverage regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd products/storage_rc1
+          /tmp/storage-r6-f1/bin/python -m pytest -q tests/test_product_mvp.py tests/test_coverage.py tests/test_product_api.py
+      - name: Result
+        shell: bash
+        run: |
+          echo "TASK=STORAGE-RC1-R6-F1-ISSUE-132-FIX-001"
+          echo "UI-NEXT-01..06=PASS"
+          echo "P08_IMPORT_COVERAGE_REGRESSION=PASS"
+          echo "RESULT=READY_FOR_PRODUCT_RETEST"
+ | grep -v '^.github/workflows/storage-r6-f1-issue132.yml      - name: Install declared dependencies
+        shell: bash
+        run: |
+          python -m venv /tmp/storage-r6-f1
+          /tmp/storage-r6-f1/bin/python -m pip install --disable-pip-version-check -q -r products/storage_rc1/requirements.txt
+      - name: UI-NEXT-01..06 and P08 contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/storage-r6-f1/bin/python -m pytest -q products/storage_rc1/tests/test_ui_next_issue132.py
+      - name: Import and coverage regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd products/storage_rc1
+          /tmp/storage-r6-f1/bin/python -m pytest -q tests/test_product_mvp.py tests/test_coverage.py tests/test_product_api.py
+      - name: Result
+        shell: bash
+        run: |
+          echo "TASK=STORAGE-RC1-R6-F1-ISSUE-132-FIX-001"
+          echo "UI-NEXT-01..06=PASS"
+          echo "P08_IMPORT_COVERAGE_REGRESSION=PASS"
+          echo "RESULT=READY_FOR_PRODUCT_RETEST"
+ | sed '/^$/d' | wc -l | tr -d ' ')" = "0"
       - name: Install declared dependencies
         shell: bash
         run: |
