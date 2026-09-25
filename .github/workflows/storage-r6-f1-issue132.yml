@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - integration/storage-rc1-r6-base
+      - ci/storage-r6-f1-gate-base
 
 permissions:
   contents: read
