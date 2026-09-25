@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/storage-rc1-r6-complete-package-recovery
+  pull_request:
+    branches:
+      - feature/storage-rc1-r6-complete-product-assembly
   workflow_dispatch:
 
 permissions:
