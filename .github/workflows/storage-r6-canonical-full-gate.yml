@@ -1,0 +1,146 @@
+name: Storage R6 Canonical Full Gate
+
+on:
+  push:
+    branches:
+      - integration/storage-r6-canonical-consolidation-20260925
+    paths:
+      - ".github/workflows/storage-r6-canonical-full-gate.yml"
+      - ".github/workflows/storage-r6-r1-macos-native-start.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  canonical-full-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - name: Checkout canonical candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify governance-only delta from recovered product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=93deeb9fa7f354ebfad9129e3f537f751e4c3b6c
+          git cat-file -e "$BASE^{commit}"
+          CHANGED="$(git diff --name-only "$BASE"...HEAD)"
+          echo "$CHANGED"
+          test -n "$CHANGED"
+          UNEXPECTED="$(echo "$CHANGED"             | grep -v '^.github/workflows/storage-r6-r1-macos-native-start.yml$'             | grep -v '^.github/workflows/storage-r6-canonical-full-gate.yml$'             | sed '/^$/d' || true)"
+          test -z "$UNEXPECTED"
+          echo "PRODUCT_SOURCE_CHANGED=NO"
+          echo "GOVERNANCE_ONLY_DELTA=PASS"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install -r requirements-runtime-p0-test.txt
+          python -m pip install -r requirements-openai-mock-test.txt
+          python -m pip install pytest
+
+      - name: Full Storage product regression
+        run: |
+          python -m pytest -q products/storage_rc1/tests
+          echo "STORAGE_FULL_REGRESSION=PASS"
+
+      - name: Storage shared Runtime and Mock regression
+        run: |
+          python -m pytest -q             tests/test_agent_runtime_p0_storage_e2e_json_truncation.py             tests/test_agent_runtime_p0_storage_real_provider_e2e.py             tests/test_openai_mock_storage_m01_m08.py             tests/test_runtime_request_secret_persistence.py
+          echo "STORAGE_RUNTIME_MOCK_REGRESSION=PASS"
+
+      - name: Knowledge Production Storage consumer regression
+        run: |
+          python -m pytest -q             tests/test_kp_m01_source_document.py             tests/test_kp_m02_candidate_evidence.py             tests/test_kp_m03_ai_extraction.py             tests/test_kp_d02_evaluation.py             tests/test_kp_d03_review_publish.py             tests/test_kp_d04_release_query.py             tests/test_kp_d05_processing_ui.py             tests/test_kp_d06_storage_golden.py
+          echo "KNOWLEDGE_STORAGE_CONSUMER_REGRESSION=PASS"
+
+      - name: Download exact frozen R1 Product Test Candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/xm286947-cell/ploblem_ai/actions/artifacts/10858206332/zip"             -o artifact.zip
+          rm -rf artifact
+          mkdir artifact
+          unzip -q artifact.zip -d artifact
+          test -f artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip
+
+      - name: Frozen R1 Package Gate
+        run: |
+          set -euo pipefail
+          ZIP="$PWD/artifact/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip"
+          EXPECTED=2c7e3024b94f8be7d7d39a34f6094882f16be159ee75a09c3ac4dba08711ba9a
+          ACTUAL="$(sha256sum "$ZIP" | awk '{print $1}')"
+          echo "EXPECTED_SHA256=$EXPECTED"
+          echo "ACTUAL_SHA256=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+          rm -rf /tmp/storage-r6-canonical-fresh
+          mkdir -p /tmp/storage-r6-canonical-fresh
+          unzip -q "$ZIP" -d /tmp/storage-r6-canonical-fresh
+          PKG=/tmp/storage-r6-canonical-fresh/STORAGE_PRODUCT_MVP_RC1
+          test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          test "$(tr -d '\r\n ' < "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          test -f "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+          test -f "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
+          test -f "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root=Path("/tmp/storage-r6-canonical-fresh/STORAGE_PRODUCT_MVP_RC1")
+          for line in (root/"FILE_SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              expected, rel = line.split("  ", 1)
+              path = root / rel
+              assert path.is_file(), rel
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, rel
+          print("PACKAGE_INTEGRITY=PASS")
+          PY
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          python -m pip install -q -r "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
+          cd "$PKG"
+          python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock
+          bash selfcheck.sh
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from storage_life.app import app
+          c=TestClient(app)
+          assert c.get("/api/health").status_code == 200
+          r=c.get("/api/product/knowledge/status")
+          assert r.status_code == 200, r.text
+          body=r.json()
+          assert body["available"] is True, body
+          assert body["status"] == "READY", body
+          print("FRESH_EXTRACT=PASS")
+          print("SELFCHECK=PASS")
+          print("PREFLIGHT=PASS")
+          print("KNOWLEDGE_STATUS=READY")
+          PY
+
+      - name: Canonical Gate Result
+        run: |
+          echo "TASK=STORAGE-RC1-R6-CANONICAL-FULL-GATE-001"
+          echo "CANONICAL_COMMIT=$(git rev-parse HEAD)"
+          echo "PRODUCT_SOURCE_BASE=93deeb9fa7f354ebfad9129e3f537f751e4c3b6c"
+          echo "FROZEN_R1_SHA256=2c7e3024b94f8be7d7d39a34f6094882f16be159ee75a09c3ac4dba08711ba9a"
+          echo "STORAGE_FULL_REGRESSION=PASS"
+          echo "STORAGE_RUNTIME_MOCK_REGRESSION=PASS"
+          echo "KNOWLEDGE_STORAGE_CONSUMER_REGRESSION=PASS"
+          echo "PACKAGE_RECOVERY_GATE=PASS"
+          echo "VALID_FIX_LOST=0"
+          echo "RESULT=READY_FOR_BASELINE_SNAPSHOT"
