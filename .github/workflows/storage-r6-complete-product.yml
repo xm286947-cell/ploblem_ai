@@ -1,4 +1,5 @@
 name: Storage R6 Complete Product Candidate
+# rerun after diagnostics compatibility fix
 
 on:
   push:
