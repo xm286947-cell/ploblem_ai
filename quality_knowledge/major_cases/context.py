@@ -34,11 +34,9 @@ class RepositoryMajorProblemContextProvider:
             return None
 
         contexts: list[dict[str, Any]] = []
-        source_refs: list[str] = []
         for link in case.get("source_links", []):
             if link.get("match_status") != "LINKED":
                 continue
-            source_refs.append(str(link.get("source_link_id") or ""))
             try:
                 payload = json.loads(link.get("snapshot_json") or "{}")
             except (TypeError, json.JSONDecodeError):
@@ -64,7 +62,7 @@ class RepositoryMajorProblemContextProvider:
                 "spdt": self._public_object(spdt, "code", "name"),
             },
             "relation_status": "OBSERVED_IN_PROBLEM_EVIDENCE",
-            "source_refs": [item for item in source_refs if item],
+            "source_refs": [problem_id],
         }
 
     @staticmethod
@@ -80,4 +78,4 @@ class RepositoryMajorProblemContextProvider:
 
     @staticmethod
     def _public_object(value: dict[str, Any], *allowed: str) -> dict[str, Any]:
-        return {key: value.get(key) for key in allowed if key in value}
+        return {key: value.get(key) for key in allowed}

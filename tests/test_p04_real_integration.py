@@ -162,3 +162,16 @@ def test_invalid_relation_status_fails_closed():
     snapshot = integrated.snapshot()
     assert snapshot.state == P04State.ERROR
     assert "CONTRACT_PAYLOAD_INVALID" in snapshot.warnings
+
+
+def test_missing_required_contract_shape_fails_closed():
+    bad = _context("PROBLEM-001")
+    del bad["customer"]["customer_name"]
+    major = _major_api({"PROBLEM-001": bad})
+    client = CallableMajorProblemContextClient(
+        lambda problem_id: major.get(f"/api/v2/major-problems/{problem_id}/context")
+    )
+    integrated = IntegratedP04Provider(LiveQualityScenarioProvider(_rows()[:1]), client)
+    snapshot = integrated.snapshot()
+    assert snapshot.state == P04State.ERROR
+    assert "CONTRACT_PAYLOAD_INVALID" in snapshot.warnings

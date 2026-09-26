@@ -75,6 +75,8 @@ class QualityScenarioMajorProblemContextAdapter:
                 )
             if not payload or payload.get("contract_version") != CONTRACT_VERSION:
                 return ContextEnrichment(record, P04State.ERROR, ("CONTRACT_VERSION_MISMATCH",))
+            if not self._valid_contract_payload(payload):
+                return ContextEnrichment(record, P04State.ERROR, ("CONTRACT_PAYLOAD_INVALID",))
             if payload.get("relation_status") != "OBSERVED_IN_PROBLEM_EVIDENCE":
                 return ContextEnrichment(record, P04State.ERROR, ("CONTRACT_PAYLOAD_INVALID",))
             contexts.append(payload)
@@ -87,6 +89,29 @@ class QualityScenarioMajorProblemContextAdapter:
             return ContextEnrichment(record, state, tuple(sorted(set(warnings))))
         record["relation_status"] = "NO_RELATION_MAPPING"
         return ContextEnrichment(record, P04State.NO_RELATION_MAPPING, tuple(sorted(set(warnings))))
+
+    @staticmethod
+    def _valid_contract_payload(payload: dict[str, Any]) -> bool:
+        if not isinstance(payload.get("problem_id"), str):
+            return False
+        if not isinstance(payload.get("source_refs"), list):
+            return False
+        for key, nested in {
+            "product": ("product_code", "product_name"),
+            "customer": ("customer_id", "customer_name"),
+            "industry": ("industry_code", "industry_name"),
+        }.items():
+            value = payload.get(key)
+            if not isinstance(value, dict) or any(field not in value for field in nested):
+                return False
+        organization = payload.get("organization")
+        if not isinstance(organization, dict):
+            return False
+        for key in ("ipmt", "spdt"):
+            value = organization.get(key)
+            if not isinstance(value, dict) or any(field not in value for field in ("code", "name")):
+                return False
+        return True
 
     @staticmethod
     def _problem_ids(record: dict[str, Any]) -> list[str]:

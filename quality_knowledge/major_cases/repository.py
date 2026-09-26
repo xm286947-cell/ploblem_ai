@@ -108,15 +108,7 @@ class MajorKnowledgeRepository:
             ).fetchone()
             if row:
                 return dict(row)
-            row = connection.execute(
-                """SELECT c.* FROM kb_case c
-                   JOIN kb_source_link s ON s.case_id=c.case_id
-                   WHERE s.standard_itr=? OR s.record_id=?
-                   ORDER BY s.checked_at DESC,s.source_link_id DESC
-                   LIMIT 1""",
-                (value, value),
-            ).fetchone()
-            return _row(row)
+            return None
 
     def update_case_status(self, case_id: str, status: str) -> None:
         with self.connect() as connection:

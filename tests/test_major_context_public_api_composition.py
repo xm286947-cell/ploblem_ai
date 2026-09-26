@@ -56,6 +56,7 @@ def test_unified_app_composes_public_major_context_route(tmp_path):
     body = response.json()
     assert body["contract_version"] == CONTRACT_VERSION
     assert body["problem_id"] == "ITR-1"
+    assert body["source_refs"] == ["ITR-1"]
     assert body["product"]["product_code"] == "P-1"
     assert body["customer"]["customer_id"] == "C-1"
     assert body["industry"]["industry_code"] == "I-1"
@@ -118,7 +119,18 @@ def test_business_problem_can_exist_with_partial_context_and_null_ids(tmp_path):
     body = response.json()
     assert body["problem_id"] == "ITR-001"
     assert body["relation_status"] == "OBSERVED_IN_PROBLEM_EVIDENCE"
-    assert body["product"] == {}
-    assert body["customer"] == {}
-    assert body["industry"] == {}
-    assert body["organization"] == {"ipmt": {}, "spdt": {}}
+    assert body["product"] == {"product_code": None, "product_name": None}
+    assert body["customer"] == {"customer_id": None, "customer_name": None}
+    assert body["industry"] == {"industry_code": None, "industry_name": None}
+    assert body["organization"] == {
+        "ipmt": {"code": None, "name": None},
+        "spdt": {"code": None, "name": None},
+    }
+    assert body["source_refs"] == ["ITR-001"]
+
+    assert TestClient(app).get(
+        f"/api/v2/major-problems/{case['case_id']}/context"
+    ).status_code == 404
+    assert TestClient(app).get(
+        "/api/v2/major-problems/SOURCE-1/context"
+    ).status_code == 404
