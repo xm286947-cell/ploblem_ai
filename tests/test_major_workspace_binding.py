@@ -42,12 +42,12 @@ def test_major_repeat_workspace_and_case_deep_link_bind_to_existing_overall_shel
     workspace = client.get("/p0/cases")
     assert workspace.status_code == 200
     assert 'href="/p0/cases">重大问题案例库</a>' in workspace.text
-    assert 'href="/p0/issues">返回总体工作台</a>' in workspace.text
+    assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
 
     detail = client.get("/p0/cases/CASE-OFI-02-DEEP-LINK")
     assert detail.status_code == 200
     assert 'href="/p0/cases">← 返回重大问题案例库</a>' in detail.text
-    assert 'href="/p0/issues">返回总体工作台</a>' in detail.text
+    assert 'href="/p0/overall">返回总体工作台</a>' in detail.text
     assert 'id="case-evidence"' in detail.text
 
 
