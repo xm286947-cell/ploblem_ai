@@ -40,7 +40,7 @@ def test_quality_scenario_workspace_reuses_public_library_and_return_chain(tmp_p
     workspace = client.get("/p0/quality-scenario-insights")
     assert workspace.status_code == 200
     assert 'data-quality-scenario-workspace' in workspace.text
-    assert 'href="/p0/issues">返回总体工作台</a>' in workspace.text
+    assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
     assert 'href="/p0/quality-scenario-insights">Scenario Library</a>' in workspace.text
     assert 'data-scenario-library' in workspace.text
 
