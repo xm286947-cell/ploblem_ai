@@ -1,0 +1,29 @@
+agent_id: major_issue.d01.extract
+version: v1
+label: Major Issue D01 Extract
+model_ref: qwen_prod
+
+prompt:
+  ref: prompts/runtime/major_issue/d01_extract.md
+  version: v1
+
+output_schema:
+  ref: MajorD01ProviderObject
+  version: v1
+
+execution:
+  timeout_seconds: 120
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 4
+  model:
+    max_tokens: 8192
+    temperature: 0
+
+metadata:
+  business_domain: MAJOR_CASE
+  acceptance_case: MAJOR-D01-E2E-001
+  provider_response_shape: json_array
