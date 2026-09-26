@@ -34,7 +34,7 @@ class P04InsightService:
     def selectors(self, view: P04View | str) -> dict[str, Any]:
         view = self._view(view)
         snapshot = self._snapshot()
-        if snapshot.state != P04State.NORMAL:
+        if self._is_terminal_state(snapshot.state):
             return {
                 "contract_version": "quality-scenario-insight/v1",
                 "state": snapshot.state,
@@ -56,9 +56,16 @@ class P04InsightService:
                         level=level,
                         label=label,
                     )
+        selector_state = P04State.EMPTY
+        if seen:
+            selector_state = (
+                P04State.PARTIAL_DATA
+                if snapshot.state == P04State.PARTIAL_DATA
+                else P04State.NORMAL
+            )
         return {
             "contract_version": "quality-scenario-insight/v1",
-            "state": P04State.NORMAL if seen else P04State.EMPTY,
+            "state": selector_state,
             "items": list(sorted(seen.values(), key=lambda x: (x.level, x.label))),
             "warnings": list(snapshot.warnings),
             "result_revision": snapshot.result_revision,
@@ -68,7 +75,7 @@ class P04InsightService:
         view = self._view(payload.get("view", P04View.PRODUCT))
         snapshot = self._snapshot()
         context_id = self._context_id(payload, view)
-        if snapshot.state != P04State.NORMAL:
+        if self._is_terminal_state(snapshot.state):
             return self._empty_envelope(
                 view,
                 snapshot,
@@ -135,7 +142,9 @@ class P04InsightService:
         distributions = self._distributions(view, records, query)
         total = len(items)
         start = (page - 1) * page_size
-        state = relation_state if relation_state != P04State.NORMAL else P04State.NORMAL
+        state = relation_state
+        if state == P04State.NORMAL and snapshot.state == P04State.PARTIAL_DATA:
+            state = P04State.PARTIAL_DATA
         coverage = self._coverage(records, unmapped)
         return QueryEnvelope(
             state=state,
@@ -158,7 +167,7 @@ class P04InsightService:
         view = self._view(payload.get("view", P04View.PRODUCT))
         snapshot = self._snapshot()
         context_id = str(payload.get("query_context_id") or "")
-        if snapshot.state != P04State.NORMAL:
+        if self._is_terminal_state(snapshot.state):
             return DrilldownResult(
                 state=snapshot.state,
                 status="UNAVAILABLE",
@@ -206,6 +215,16 @@ class P04InsightService:
         except Exception:
             return ProviderSnapshot(state=P04State.ERROR, result_revision="error", warnings=("PROVIDER_ERROR",))
         return snapshot
+
+    @staticmethod
+    def _is_terminal_state(state: P04State) -> bool:
+        """States that prevent serving any provider-backed result."""
+
+        return state in {
+            P04State.DATA_UNAVAILABLE,
+            P04State.PERMISSION_UNAVAILABLE,
+            P04State.ERROR,
+        }
 
     @staticmethod
     def _view(value: Any) -> P04View:

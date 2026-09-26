@@ -116,6 +116,58 @@ def test_real_public_contract_maps_full_context_and_null_ids_without_guessing(tm
     assert detail_after_live_change.model_dump(mode="json") == detail.model_dump(mode="json")
 
 
+def test_real_public_contract_keeps_full_context_when_org_codes_differ_from_names():
+    contexts = {"PROBLEM-001": _context("PROBLEM-001")}
+    major = _major_api(contexts)
+    client = CallableMajorProblemContextClient(
+        lambda problem_id: major.get(f"/api/v2/major-problems/{problem_id}/context")
+    )
+    integrated = IntegratedP04Provider(LiveQualityScenarioProvider(_rows()[:1]), client)
+    current = P04InsightService(integrated)
+
+    for view in ("PRODUCT", "CUSTOMER", "INDUSTRY"):
+        result = current.query({"view": view})
+        assert result.state == P04State.NORMAL
+        assert result.total == 1
+        assert "SPDT_IPMT_PARENT_MISMATCH" not in result.warnings
+        assert "UNMAPPED_SCENARIO_PRESENT" not in result.warnings
+
+
+def test_invalid_org_parent_code_still_fails_closed():
+    row = _rows()[:1][0].copy()
+    row["spdt_ipmt"] = "IPMT-INVALID"
+    contexts = {"PROBLEM-001": _context("PROBLEM-001")}
+    major = _major_api(contexts)
+    client = CallableMajorProblemContextClient(
+        lambda problem_id: major.get(f"/api/v2/major-problems/{problem_id}/context")
+    )
+    integrated = IntegratedP04Provider(LiveQualityScenarioProvider([row]), client)
+
+    result = P04InsightService(integrated).query({"view": "PRODUCT"})
+    assert result.state == P04State.PARTIAL_DATA
+    assert result.total == 1
+    assert "SPDT_IPMT_PARENT_MISMATCH" in result.warnings
+
+
+def test_partial_public_context_retains_usable_scenarios():
+    row = _rows()[:1][0].copy()
+    row["source_problem_ids"] = ["PROBLEM-001", "PROBLEM-MISSING"]
+    contexts = {"PROBLEM-001": _context("PROBLEM-001")}
+    major = _major_api(contexts)
+    client = CallableMajorProblemContextClient(
+        lambda problem_id: major.get(f"/api/v2/major-problems/{problem_id}/context")
+    )
+    integrated = IntegratedP04Provider(LiveQualityScenarioProvider([row]), client)
+    current = P04InsightService(integrated)
+
+    for view in ("PRODUCT", "CUSTOMER", "INDUSTRY"):
+        result = current.query({"view": view})
+        assert result.state == P04State.PARTIAL_DATA
+        assert result.total == 1
+        assert [item.scenario_id for item in result.scenario_list] == ["QS-LIVE-001"]
+        assert "SOURCE_PROBLEM_NOT_FOUND" in result.warnings
+
+
 def test_unknown_problem_is_no_relation_mapping_and_not_empty():
     major = _major_api({})
     client = CallableMajorProblemContextClient(

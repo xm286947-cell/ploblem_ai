@@ -62,6 +62,7 @@ class P04RelationAdapter:
         product = self._value(item, "product", "product_code", "product_name")
         customer = self._value(item, "customer", "customer_name", "customer_id")
         industry = self._value(item, "industry", "industry_name", "industry_code")
+        ipmt_code = self._value(item, "ipmt_code", "ipmt_id")
         ipmt = self._value(item, "ipmt", "ipmt_name")
         spdt = self._value(item, "spdt", "spdt_name")
         spdt_parent = self._value(item, "spdt_ipmt", "spdt_parent_ipmt")
@@ -81,14 +82,14 @@ class P04RelationAdapter:
         if spdt and not ipmt:
             spdt_status = P04State.PARTIAL_DATA
             spdt_warning = "SPDT_REQUIRES_IPMT_PARENT"
-        elif spdt and spdt_parent and spdt_parent != ipmt:
+        elif spdt and spdt_parent and spdt_parent not in {ipmt, ipmt_code}:
             spdt_status = P04State.PARTIAL_DATA
             spdt_warning = "SPDT_IPMT_PARENT_MISMATCH"
         spdt_result = RelationResolution(
             relation=RelationKind.PRODUCT_TO_SPDT,
             status=spdt_status,
             value=spdt or None,
-            parent_value=ipmt or None,
+            parent_value=ipmt or ipmt_code or None,
             matched=spdt_status == P04State.NORMAL,
             warning=spdt_warning,
         )
