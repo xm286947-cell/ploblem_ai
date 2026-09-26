@@ -1,0 +1,30 @@
+name: Runtime four-domain binding
+
+on:
+  push:
+    paths:
+      - "contracts/runtime_binding/**"
+      - "runtime/binding/**"
+      - "config/runtime/agents/**"
+      - "tests/compatibility/test_runtime_four_domain_binding.py"
+      - ".github/workflows/runtime-four-domain-binding.yml"
+  pull_request:
+    paths:
+      - "contracts/runtime_binding/**"
+      - "runtime/binding/**"
+      - "config/runtime/agents/**"
+      - "tests/compatibility/test_runtime_four_domain_binding.py"
+      - ".github/workflows/runtime-four-domain-binding.yml"
+
+jobs:
+  binding:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate Runtime four-domain binding
+        run: PYTHONPATH=. pytest -q tests/compatibility/test_runtime_four_domain_binding.py
