@@ -268,6 +268,17 @@ class PortraitService:
             {
                 "scenario_id": row.get("scenario_id"),
                 "source_problem_ids": list(row.get("source_problem_ids") or []),
+                "source_problem_id": row.get("source_problem_id"),
+                "source_refs": list(row.get("source_refs") or []),
+                "source_contract_version": row.get("source_contract_version"),
+                "product": row.get("product"),
+                "customer": row.get("customer"),
+                "industry": row.get("industry"),
+                "organization": {
+                    "ipmt": row.get("ipmt"),
+                    "spdt": row.get("spdt"),
+                },
+                "relation_status": row.get("relation_status"),
                 "source": "PUBLISHED_QUALITYSCENARIO",
             }
             for row in rows

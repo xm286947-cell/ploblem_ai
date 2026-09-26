@@ -121,7 +121,7 @@ class P04RelationAdapter:
 def published_records(snapshot: ProviderSnapshot) -> tuple[dict[str, Any], ...]:
     """Keep the P04 source set limited to published QualityScenario records."""
 
-    if snapshot.state != P04State.NORMAL:
+    if snapshot.state not in {P04State.NORMAL, P04State.PARTIAL_DATA, P04State.NO_RELATION_MAPPING}:
         return ()
     return tuple(
         item
