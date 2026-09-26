@@ -54,6 +54,64 @@ class ErrorCategory(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class RuntimeObservationAvailability(str, Enum):
+    """Availability of a device runtime observation.
+
+    These values intentionally distinguish an absent reading from a reading
+    that is stale, invalid, or unsupported.  Consumers must not collapse them
+    into a current value.
+    """
+
+    AVAILABLE = "AVAILABLE"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+    NOT_SUPPORTED = "NOT_SUPPORTED"
+    STALE = "STALE"
+    INVALID = "INVALID"
+
+
+class RuntimeObservationQuality(str, Enum):
+    VALID = "VALID"
+    INVALID = "INVALID"
+    UNKNOWN = "UNKNOWN"
+
+
+class RuntimeObservation(ContractModel):
+    """Canonical boundary object for device runtime telemetry.
+
+    The object is deliberately permissive enough to represent a formal empty
+    state, while ``is_formally_consumable`` enforces the fail-closed boundary
+    for downstream consumers.
+    """
+
+    observation_id: str
+    device_id: str
+    device_type: str
+    metric_name: str
+    raw_value: Any = None
+    normalized_value: Any = None
+    unit: str | None = None
+    capture_time: datetime | None = None
+    source_command_or_interface: str | None = None
+    raw_output_ref: str | None = None
+    evidence_ref: str | None = None
+    collector: str | None = None
+    environment: dict[str, Any] = Field(default_factory=dict)
+    quality_status: RuntimeObservationQuality = RuntimeObservationQuality.UNKNOWN
+    availability_status: RuntimeObservationAvailability = RuntimeObservationAvailability.NOT_AVAILABLE
+    missing_reason: str | None = None
+    schema_version: str = "1.0"
+
+    @property
+    def is_formally_consumable(self) -> bool:
+        return (
+            self.capture_time is not None
+            and bool(self.source_command_or_interface)
+            and bool(self.evidence_ref)
+            and self.quality_status is RuntimeObservationQuality.VALID
+            and self.availability_status is RuntimeObservationAvailability.AVAILABLE
+        )
+
+
 class RetryPolicy(ContractModel):
     max_attempts: int = 1
     backoff_seconds: float = 0.0
