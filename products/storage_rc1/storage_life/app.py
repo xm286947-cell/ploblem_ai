@@ -6,7 +6,7 @@ import threading
 import time
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -234,8 +234,47 @@ def health():
 
 
 @app.get("/", response_class=HTMLResponse)
-def home():
-    return (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+def home(request: Request):
+    """Serve the product UI with the active workspace binding context.
+
+    The standalone Storage app keeps its original root-relative API paths.
+    When the same app is mounted below the Overall Shell, this small browser
+    adapter prefixes those requests to the mounted host without changing any
+    T1/T2/T3 route or contract.
+    """
+
+    import json
+
+    html = (Path(__file__).parent / "index.html").read_text(encoding="utf-8")
+    workspace_prefix = str(request.scope.get("root_path") or "").rstrip("/")
+    prefix_literal = json.dumps(workspace_prefix)
+    binding_script = f"""
+<script>
+window.__STORAGE_WORKSPACE_PREFIX__ = {prefix_literal};
+window.__OVERALL_SHELL_URL__ = "/p0/overall";
+(function () {{
+  const prefix = window.__STORAGE_WORKSPACE_PREFIX__ || "";
+  if (!prefix) return;
+  const rewrite = (value) => {{
+    if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return value;
+    if (value === window.__OVERALL_SHELL_URL__ || value.startsWith(prefix + "/")) return value;
+    return prefix + value;
+  }};
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => nativeFetch(rewrite(input), init);
+  document.addEventListener("click", (event) => {{
+    const link = event.target.closest && event.target.closest("a[href]");
+    if (link) link.href = rewrite(link.getAttribute("href"));
+  }}, true);
+}})();
+</script>
+"""
+    html = html.replace(
+        "</header>",
+        '<a id="overallShellBack" class="secondary" href="/p0/overall">返回 Overall Shell</a></header>',
+        1,
+    )
+    return HTMLResponse(html.replace("</head>", binding_script + "</head>", 1))
 
 
 @app.get("/api/devices")

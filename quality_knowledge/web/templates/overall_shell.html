@@ -1,0 +1,67 @@
+{% extends "p0_base.html" %}
+{% block title %}总体工作台{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi01">{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}总体工作台{% endblock %}
+{% block body %}
+<section class="overall-head">
+  <div>
+    <div class="overall-kicker">OVERALL SHELL</div>
+    <h1>专业质量软件平台</h1>
+    <p>统一入口只负责导航、任务概览与 Evidence 返回；四个 Domain 的业务语义和数据所有权保持独立。</p>
+  </div>
+  <a class="overall-secondary" href="/p0/issues">进入问题工作台</a>
+</section>
+
+<section class="overall-card">
+  <div class="overall-card-head">
+    <div><h2>四工作空间</h2><p>通过稳定 Shell Entry 进入现有 Domain，不复制 Domain 页面。</p></div>
+    <span class="overall-chip">4 Workspaces</span>
+  </div>
+  <div class="overall-workspaces">
+    {% for workspace in workspaces %}
+    <a class="overall-workspace" data-workspace-id="{{ workspace.workspace_id }}" href="{{ workspace.shell_entry_path }}">
+      <strong>{{ workspace.title }}</strong>
+      <span>{{ workspace.summary }}</span>
+      <small>{{ workspace.shell_entry_path }} → {{ workspace.entry_path }}</small>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="overall-card" id="task-overview">
+  <div class="overall-card-head">
+    <div><h2>任务总览</h2><p>任务只能由公共 Provider 注入；Overall 不直接读任何 Domain Repository / Table。</p></div>
+    <span class="overall-state state-{{ task_overview['state']|lower }}">{{ task_overview['state'] }}</span>
+  </div>
+  {% if task_overview['items'] %}
+  <div class="overall-task-list">
+    {% for task in task_overview['items'] %}
+    <div class="overall-task">
+      <div><strong>{{ task.title }}</strong><small>{{ task.workspace_id }} · {{ task.task_id }}</small></div>
+      <span>{{ task.status }}</span>
+      <div class="overall-actions">
+        {% if task.deep_link %}<a href="{{ task.deep_link }}">进入</a>{% endif %}
+        {% if task.evidence_link %}<a href="{{ task.evidence_link }}">Evidence</a>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="overall-empty">{{ task_overview['message'] }}</div>
+  {% endif %}
+</section>
+
+<section class="overall-grid">
+  <div class="overall-card">
+    <h2>Common Evidence</h2>
+    <p>跨产品只使用 <code>{{ common_evidence_contract }}</code> 导航语义，不读取生产方内部 Evidence Store。</p>
+    <a class="overall-primary" href="/p0/overall/evidence?return_to=/p0/overall">Evidence 导航入口</a>
+  </div>
+  <div class="overall-card">
+    <h2>跨产品返回</h2>
+    <p>所有返回路径必须是同源相对路径。外部 URL、双斜杠与非法路径一律 fail-closed。</p>
+    <a class="overall-primary" href="/p0/overall/return?to=/p0/overall">验证返回 Overall</a>
+  </div>
+</section>
+{% endblock %}

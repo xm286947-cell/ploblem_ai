@@ -82,6 +82,11 @@ def create_p0_insights_router(
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+        } else ""
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
@@ -89,6 +94,7 @@ def create_p0_insights_router(
                 "api_prefix": api_prefix.rstrip("/"),
                 "knowledge_id": knowledge_id,
                 "page_title": "问题详情 · 质量能力",
+                "return_to": return_to,
             },
         )
 

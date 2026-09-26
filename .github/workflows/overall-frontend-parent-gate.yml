@@ -1,0 +1,51 @@
+name: Overall Frontend Parent Integration Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "quality_knowledge/web/**"
+      - "products/storage_rc1/storage_life/app.py"
+      - "tests/test_overall_frontend_*"
+      - "tests/test_*_workspace_binding.py"
+      - ".github/workflows/overall-frontend-parent-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parent-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile integrated Web
+        run: |
+          python -m compileall -q quality_knowledge/web products/storage_rc1/storage_life/app.py
+          node --check quality_knowledge/web/static/p04_insights.js
+          node --check quality_knowledge/web/static/p0_issue_detail.js
+      - name: Four Workspace Golden Navigation and Overall Gate
+        run: |
+          python -m pytest -q \
+            tests/test_overall_frontend_parent_integration.py \
+            tests/test_overall_frontend_shell.py \
+            tests/test_major_workspace_binding.py \
+            tests/test_quality_scenario_workspace_binding.py \
+            tests/test_hardware_workspace_binding.py \
+            tests/test_storage_workspace_binding.py
+      - name: Legacy stable workspace regression
+        run: |
+          python -m pytest -q \
+            tests/test_quality_capability_p0_workbench_ued.py \
+            tests/test_repeat_web_mvp.py \
+            tests/test_hardware_case_domain_boundary.py \
+            tests/test_storage_t123_integration.py

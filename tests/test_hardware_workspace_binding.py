@@ -37,13 +37,13 @@ def test_hardware_workspace_and_case_deep_link_bind_to_existing_overall_shell(
     assert workspace.status_code == 200
     assert 'href="/p0/issues">问题工作台</a>' in workspace.text
     assert 'href="/p0/hardware-cases">硬件案例库</a>' in workspace.text
-    assert 'href="/p0/issues">返回总体工作台</a>' in workspace.text
+    assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
 
     detail = client.get("/p0/hardware-cases/HC-OFI-04-DEEP-LINK")
     assert detail.status_code == 200
     assert "HC-OFI-04-DEEP-LINK" in detail.text
     assert 'href="/p0/hardware-cases">案例首页</a>' in detail.text
-    assert 'href="/p0/issues">返回总体工作台</a>' in detail.text
+    assert 'href="/p0/overall">返回总体工作台</a>' in detail.text
 
     # The Hardware Case workspace remains mounted on the existing app/API.
     assert client.get("/api/v2/hardware-cases").status_code == 200
@@ -62,4 +62,4 @@ def test_hardware_domain_host_keeps_existing_case_workspace_routes(
     ):
         response = client.get(path)
         assert response.status_code == 200
-        assert 'href="/p0/issues">返回总体工作台</a>' in response.text
+        assert 'href="/p0/overall">返回总体工作台</a>' in response.text

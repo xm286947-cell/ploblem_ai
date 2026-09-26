@@ -1,0 +1,26 @@
+{% extends "p0_base.html" %}
+{% block title %}Common Evidence{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi01">{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}Common Evidence{% endblock %}
+{% block body %}
+<section class="overall-head">
+  <div><div class="overall-kicker">EVIDENCE NAVIGATION</div><h1>Common Evidence</h1>
+  <p>此页只展示跨域导航上下文；Evidence 原文和 Source 仍由生产 Domain 持有。</p></div>
+  <a class="overall-secondary" href="{{ return_to }}">返回</a>
+</section>
+<section class="overall-card">
+  <div class="overall-evidence-grid">
+    <div><span>Contract</span><strong>{{ contract_version }}</strong></div>
+    <div><span>Producer Domain</span><strong>{{ producer_domain or '未提供' }}</strong></div>
+    <div><span>Evidence ID</span><strong>{{ evidence_id or '未提供' }}</strong></div>
+    <div><span>Business Object</span><strong>{{ producer_object_id or '未提供' }}</strong></div>
+    <div><span>Source Ref</span><strong>{{ source_ref or '未提供' }}</strong></div>
+    <div><span>Return To</span><strong>{{ return_to }}</strong></div>
+  </div>
+  <div class="overall-actions-row">
+    {% if object_href %}<a class="overall-primary" href="{{ object_href }}">返回原业务对象</a>{% endif %}
+    <a class="overall-secondary" href="{{ return_to }}">返回来源工作区</a>
+  </div>
+</section>
+{% endblock %}
