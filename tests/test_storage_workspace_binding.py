@@ -37,7 +37,7 @@ def test_overall_shell_binds_existing_storage_host_and_keeps_product_routes(
     workspace = client.get("/storage-workspace/")
     assert workspace.status_code == 200
     assert 'id="overallShellBack"' in workspace.text
-    assert 'href="/p0/issues"' in workspace.text
+    assert 'href="/p0/overall"' in workspace.text
     assert 'window.__STORAGE_WORKSPACE_PREFIX__ = "/storage-workspace"' in workspace.text
 
     health = client.get("/storage-workspace/api/health")
@@ -60,5 +60,5 @@ def test_storage_standalone_host_remains_compatible():
     page = TestClient(storage_app).get("/")
     assert page.status_code == 200
     assert 'window.__STORAGE_WORKSPACE_PREFIX__ = ""' in page.text
-    assert 'href="/p0/issues"' in page.text
+    assert 'href="/p0/overall"' in page.text
     assert TestClient(storage_app).get("/api/health").status_code == 200
