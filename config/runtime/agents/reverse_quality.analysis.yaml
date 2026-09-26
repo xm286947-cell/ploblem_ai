@@ -1,0 +1,30 @@
+agent_id: reverse_quality.analysis
+version: v1
+label: Reverse Quality Analysis
+model_ref: qwen_prod
+
+prompt:
+  ref: quality_knowledge/prompts_v2/occurrence_v2.md
+  version: PROMPT-RQ-OCCURRENCE-V1
+
+output_schema:
+  ref: OccurrenceAnalysisV2DTO
+  version: "2.0.0"
+
+execution:
+  timeout_seconds: 120
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 4096
+
+metadata:
+  business_domain: REVERSE_QUALITY
+  analysis_stage: occurrence
+  provider_response_shape: json_object
+  what_how_boundary: RUNTIME_EXECUTION_ONLY

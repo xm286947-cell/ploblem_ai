@@ -1,0 +1,50 @@
+{
+  "binding_contract_version": "runtime-four-domain-binding/v1.0",
+  "runtime_contract_version": "unified-agent-runtime/p0.3",
+  "agent_config_contract": "AGENT-CONFIG-001",
+  "status": "BOUND",
+  "domains": [
+    {
+      "domain_id": "STORAGE",
+      "agent_ids": ["storage.emmc.parameter_extract"],
+      "config_paths": ["config/runtime/agents/storage.emmc.parameter_extract.yaml"],
+      "adapter": "runtime.adapters.storage.StorageCompatibilityAdapter",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    },
+    {
+      "domain_id": "MAJOR_ISSUE",
+      "agent_ids": ["major_issue.v2.occurrence"],
+      "config_paths": ["config/runtime/agents/major_issue.v2.occurrence.yaml"],
+      "adapter": "runtime.adapters.major_issue.MajorIssueD01RuntimeAdapter",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    },
+    {
+      "domain_id": "REVERSE_QUALITY",
+      "agent_ids": ["reverse_quality.analysis"],
+      "config_paths": ["config/runtime/agents/reverse_quality.analysis.yaml"],
+      "adapter": "runtime.adapters.quality_issue.LegacyQualityIssueRuntimeAdapter",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    },
+    {
+      "domain_id": "KNOWLEDGE",
+      "agent_ids": ["knowledge.production.extract"],
+      "config_paths": ["config/runtime/agents/knowledge.production.extract.yaml"],
+      "adapter": "knowledge_production.extraction.KnowledgeExtractionService",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    }
+  ],
+  "boundary": {
+    "provider_execution": "RUNTIME",
+    "retry_policy": "RUNTIME",
+    "secret_resolution": "RUNTIME",
+    "execution_snapshot": "RUNTIME",
+    "domain_semantics": "DOMAIN",
+    "direct_provider_calls": false,
+    "domain_retry_loops": false,
+    "secret_persistence": false
+  }
+}
