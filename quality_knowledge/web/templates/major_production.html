@@ -1,0 +1,15 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_cases.css?v=major-production-v1"><link rel="stylesheet" href="/p0/static/major_production.css?v=major-production-v1">{% endblock %}
+{% block breadcrumb %}重大问题知识生产{% endblock %}
+{% block body %}
+<main class="case-page major-production" data-major-production data-api-prefix="{{api_prefix}}">
+  <header class="case-head"><div><span class="case-kicker">MAJOR KNOWLEDGE PRODUCTION</span><h1>从 Major Source 到正式 Historical Case</h1><p>AI 只生成待审核候选；人工确认修订后才可发布。</p></div><a class="case-button secondary" href="/p0/cases">查看案例库</a></header>
+  <section class="case-card"><div class="case-card-head"><div><h2>1. Major Source Intake 与 ITR 身份</h2><p>导入 PDF / DOCX，建立 Event、ITR 与版本化 Source。</p></div></div>
+    <form data-major-intake class="major-form"><label>案例标题<input name="title" required></label><label>Group Code<input name="group_code" value="MAJOR" required></label><label>Standard ITR<input name="standard_itr" required></label><label>领域<input name="domain" value="QUALITY"></label><label class="major-file">Major Source（PDF / DOCX）<input name="file" type="file" accept=".pdf,.docx,.doc" required></label><button class="case-button primary" type="submit">导入并建立候选上下文</button></form>
+  </section>
+  <section class="case-card" data-major-workflow hidden><div class="case-card-head"><div><h2>2. AI Analysis → Human Review → Publish</h2><p data-major-identity></p></div><span class="case-status" data-major-state>INTAKED</span></div><div class="major-actions"><button class="case-button primary" data-major-analyze>运行 AI 分析</button><button class="case-button secondary" data-major-publish disabled>正式发布</button></div><div data-major-candidates class="major-candidates"></div></section>
+  <p data-major-message class="major-message" role="status"></p>
+</main>
+{% endblock %}
+{% block page_scripts %}<script>window.P0_MAJOR_API={{api_prefix|tojson}};</script><script src="/p0/static/major_production.js?v=major-production-v1" defer></script>{% endblock %}

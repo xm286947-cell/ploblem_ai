@@ -100,6 +100,14 @@ def create_p0_insights_router(
             {"api_prefix": api_prefix.rstrip("/"), "page_title": "重大问题案例库"},
         )
 
+    @router.get("/p0/major-production", response_class=HTMLResponse, include_in_schema=False)
+    async def major_production(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "major_production.html",
+            {"api_prefix": api_prefix.rstrip("/"), "page_title": "重大问题知识生产"},
+        )
+
     @router.get("/p0/cases/{case_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_case_detail(request: Request, case_id: str) -> HTMLResponse:
         return templates.TemplateResponse(
