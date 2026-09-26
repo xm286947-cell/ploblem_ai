@@ -48,7 +48,7 @@ def test_ssd_tbw_is_deterministic_and_traceable():
     result = LifetimeEngine().assess(request, "ssd.tbw")
     assert result.status is LifetimeAssessmentStatus.CALCULATED
     assert result.result == {"consumed_ratio": 0.25, "remaining_bytes": 750_000}
-    assert result.formula_id == "ssd.tbw"
+    assert result.formula_id == "SSD_TBW_CONSUMPTION_V1"
     assert result.evidence_refs == ["fact-evidence", "runtime-evidence"]
 
 
