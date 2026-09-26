@@ -12,6 +12,7 @@ import sqlite3
 import uuid
 
 from quality_knowledge.sqlite_tuning import configure_connection
+from ..problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1, normalize_itr
 from .document_parser import PARSER_VERSION, ParseResult
 
 
@@ -94,20 +95,22 @@ class MajorKnowledgeRepository:
 
     def case_for_problem_id(self, problem_id: str) -> dict | None:
         """Resolve the public business problem id, never a knowledge case id."""
-        value = str(problem_id).strip()
-        if not value:
+        try:
+            value = SourceProblemItrRefV1.from_input(problem_id).public_ref
+        except InvalidSourceProblemItrRef:
             return None
         with self.connect() as connection:
-            row = connection.execute(
-                """SELECT c.* FROM kb_case c
+            rows = connection.execute(
+                """SELECT c.*,e.standard_itr AS _matched_standard_itr FROM kb_case c
                    JOIN kb_event e ON e.case_id=c.case_id
-                   WHERE e.standard_itr=?
-                   ORDER BY e.created_at DESC,e.event_id DESC
-                   LIMIT 1""",
-                (value,),
-            ).fetchone()
-            if row:
-                return dict(row)
+                   WHERE e.standard_itr IS NOT NULL AND e.standard_itr<>''
+                   ORDER BY e.created_at DESC,e.event_id DESC""",
+            ).fetchall()
+            for row in rows:
+                if normalize_itr(row["_matched_standard_itr"]) == value:
+                    result = dict(row)
+                    result.pop("_matched_standard_itr", None)
+                    return result
             return None
 
     def update_case_status(self, case_id: str, status: str) -> None:
@@ -266,7 +269,10 @@ class MajorKnowledgeRepository:
         case = self.get_case(case_id)
         if not case:
             raise KeyError(case_id)
-        key = internal_event_key.strip() or standard_itr.strip() or _id("INTERNAL")
+        canonical_itr = ""
+        if str(standard_itr or "").strip():
+            canonical_itr = SourceProblemItrRefV1.from_input(standard_itr).public_ref
+        key = internal_event_key.strip() or canonical_itr or _id("INTERNAL")
         with self.connect() as connection:
             existing = connection.execute(
                 "SELECT * FROM kb_event WHERE case_id=? AND internal_event_key=?", (case_id, key)
@@ -276,7 +282,7 @@ class MajorKnowledgeRepository:
             event_id = _id("KEVT")
             connection.execute(
                 "INSERT INTO kb_event(event_id,case_id,standard_itr,internal_event_key,event_title,group_code) VALUES(?,?,?,?,?,?)",
-                (event_id, case_id, standard_itr, key, title, case["group_code"]),
+                (event_id, case_id, canonical_itr, key, title, case["group_code"]),
             )
         return self.event(event_id) or {}
 
@@ -290,7 +296,10 @@ class MajorKnowledgeRepository:
 
     def add_source_link(self, case_id: str, event_id: str | None, source: dict, *, standard_itr: str, role: str, status: str) -> dict:
         link_id = _id("KSRC")
-        record_id = str(source.get("record_id") or f"UNRESOLVED:{standard_itr}")
+        canonical_itr = ""
+        if str(standard_itr or "").strip():
+            canonical_itr = SourceProblemItrRefV1.from_input(standard_itr).public_ref
+        record_id = str(source.get("record_id") or f"UNRESOLVED:{canonical_itr}")
         source_type = str(source.get("source_type") or "ITR")
         source_system = str(source.get("source_system") or "BUSINESS_DB")
         source_group = str(source.get("group_code") or self.get_case(case_id)["group_code"])
@@ -303,7 +312,7 @@ class MajorKnowledgeRepository:
                    ON CONFLICT(case_id,source_system,source_type,record_id,relation_role) DO UPDATE SET
                      event_id=excluded.event_id,source_version=excluded.source_version,standard_itr=excluded.standard_itr,
                      match_status=excluded.match_status,snapshot_json=excluded.snapshot_json,checked_at=CURRENT_TIMESTAMP""",
-                (link_id, case_id, event_id, source_system, source_type, record_id, source_group, source_version, standard_itr, role, status, _json(source)),
+                (link_id, case_id, event_id, source_system, source_type, record_id, source_group, source_version, canonical_itr, role, status, _json(source)),
             )
             row = connection.execute(
                 "SELECT * FROM kb_source_link WHERE case_id=? AND source_system=? AND source_type=? AND record_id=? AND relation_role=?",
@@ -317,10 +326,13 @@ class MajorKnowledgeRepository:
 
     def reconcile_sources(self, case_id: str, live_records: dict[str, list[dict]]) -> dict:
         updated = {"stale": 0, "unavailable": 0, "current": 0}
+        canonical_live_records = {
+            normalize_itr(key): values for key, values in live_records.items()
+        }
         with self.transaction() as connection:
             rows = connection.execute("SELECT * FROM kb_source_link WHERE case_id=? AND relation_role='CURRENT_EVENT'", (case_id,)).fetchall()
             for row in rows:
-                live = next((item for item in live_records.get(row["standard_itr"], []) if str(item.get("record_id")) == row["record_id"]), None)
+                live = next((item for item in canonical_live_records.get(row["standard_itr"], []) if str(item.get("record_id")) == row["record_id"]), None)
                 if live is None:
                     status = "SOURCE_UNAVAILABLE"
                     updated["unavailable"] += 1
