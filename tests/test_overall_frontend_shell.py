@@ -48,7 +48,7 @@ def test_overall_shell_has_four_stable_workspace_entry_points():
         "major": "/p0/cases",
         "quality-scenario": "/p0/quality-scenario-insights",
         "hardware": "/p0/hardware-cases",
-        "storage": "/p0/storage",
+        "storage": "/storage-workspace/",
     }
     for workspace_id, target in expected.items():
         response = client.get(
@@ -146,7 +146,7 @@ def test_unified_p0_host_mounts_overall_shell_without_breaking_direct_domain_ent
     # OFI-01 provides the stable Storage shell entry only.  OFI-05 owns the
     # actual /p0/storage Domain binding.
     storage = client.get("/p0/workspaces/storage", follow_redirects=False)
-    assert storage.headers["location"] == "/p0/storage"
+    assert storage.headers["location"] == "/storage-workspace/"
 
 
 def test_hardware_only_direct_entry_remains_compatible_and_no_second_web_stack(tmp_path):
