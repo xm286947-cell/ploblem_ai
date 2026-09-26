@@ -4,6 +4,7 @@
     <strong>硬件案例库</strong>
   </div>
   <nav class="hc-local-nav" aria-label="硬件案例库导航">
+    <a href="/p0/issues">返回总体工作台</a>
     <a class="{% if hardware_active == 'home' %}active{% endif %}" href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例首页</a>
     <a class="{% if hardware_active == 'tree' %}active{% endif %}" href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">双树导航</a>
     <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例搜索</a>
