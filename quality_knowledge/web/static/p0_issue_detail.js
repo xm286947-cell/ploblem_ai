@@ -216,7 +216,11 @@
       next.disabled = !navigation.next_id;
       previous.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.previous_id) + '?' + query;
       next.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.next_id) + '?' + query;
-      root.querySelector('[data-back]').href = '/p0/issues' + (query.toString() ? '?' + query : '');
+      const returnTo = query.get('return_to');
+      const allowedReturn = returnTo === '/p0/quality-scenario-insights' || returnTo === '/p0/insights/p04';
+      root.querySelector('[data-back]').href = allowedReturn
+        ? returnTo
+        : '/p0/issues' + (query.toString() ? '?' + query : '');
     } catch (error) {
       if (error.status === 409) setState('stale', true);
       else {
