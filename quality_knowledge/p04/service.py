@@ -63,6 +63,8 @@ class P04InsightService:
                 if snapshot.state == P04State.PARTIAL_DATA
                 else P04State.NORMAL
             )
+        elif snapshot.state == P04State.NO_RELATION_MAPPING:
+            selector_state = P04State.NO_RELATION_MAPPING
         return {
             "contract_version": "quality-scenario-insight/v1",
             "state": selector_state,
@@ -113,7 +115,11 @@ class P04InsightService:
         records = [r for r in published_records(snapshot) if self._matches(r, filters)]
         records, relation_state, warnings, unmapped = self._mapped_records(records, view)
         if not records:
-            state = P04State.NO_RELATION_MAPPING if unmapped else P04State.EMPTY
+            state = (
+                P04State.NO_RELATION_MAPPING
+                if unmapped or snapshot.state == P04State.NO_RELATION_MAPPING
+                else P04State.EMPTY
+            )
             return self._empty_envelope(
                 view,
                 snapshot,

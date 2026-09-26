@@ -177,6 +177,9 @@ def test_unknown_problem_is_no_relation_mapping_and_not_empty():
     snapshot = integrated.snapshot()
     assert snapshot.state == P04State.NO_RELATION_MAPPING
     assert "SOURCE_PROBLEM_NOT_FOUND" in snapshot.warnings
+    result = P04InsightService(integrated).query({"view": "PRODUCT"})
+    assert result.state == P04State.NO_RELATION_MAPPING
+    assert result.total == 0
 
 
 def test_provider_failure_is_data_unavailable():
