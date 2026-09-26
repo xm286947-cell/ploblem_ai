@@ -22,6 +22,15 @@ def test_four_domain_manifest_is_bound_to_current_tree():
     binding = load_runtime_binding(MANIFEST, repository_root=ROOT)
 
     assert tuple(item["domain_id"] for item in binding["domains"]) == EXPECTED_RUNTIME_DOMAINS
+    assert EXPECTED_RUNTIME_DOMAINS == (
+        "MAJOR_ISSUE",
+        "HARDWARE_CASE",
+        "REVERSE_QUALITY",
+        "STORAGE",
+    )
+    assert binding["runtime_contract_version"] == "P0.2_CONTRACT_FROZEN_V1.0"
+    assert binding["runtime_implementation_version"] == "P0.3"
+    assert [item["capability_id"] for item in binding["shared_capabilities"]] == ["KNOWLEDGE"]
     assert all(item["status"] == "BOUND" for item in binding["domains"])
     assert all(item["ownership"] == "RUNTIME_EXECUTION_ONLY" for item in binding["domains"])
     assert binding["boundary"]["direct_provider_calls"] is False
@@ -31,7 +40,7 @@ def test_four_domain_manifest_is_bound_to_current_tree():
 
 def test_every_bound_agent_id_matches_its_canonical_yaml():
     binding = load_runtime_binding(MANIFEST, repository_root=ROOT)
-    for domain in binding["domains"]:
+    for domain in [*binding["domains"], *binding["shared_capabilities"]]:
         for agent_id, config_path in zip(domain["agent_ids"], domain["config_paths"]):
             raw = (ROOT / config_path).read_text(encoding="utf-8")
             assert f"agent_id: {agent_id}" in raw
@@ -62,7 +71,8 @@ def test_reverse_quality_yaml_resolves_through_the_unified_loader():
     ("field", "value", "code"),
     [
         ("binding_contract_version", "runtime-four-domain-binding/v0", "RUNTIME_BINDING_VERSION_MISMATCH"),
-        ("runtime_contract_version", "runtime/p0.2", "RUNTIME_CONTRACT_VERSION_MISMATCH"),
+        ("runtime_contract_version", "runtime/p0.3", "RUNTIME_CONTRACT_VERSION_MISMATCH"),
+        ("runtime_implementation_version", "P0.4", "RUNTIME_IMPLEMENTATION_VERSION_MISMATCH"),
         ("agent_config_contract", "other", "AGENT_CONFIG_CONTRACT_MISMATCH"),
     ],
 )
@@ -84,6 +94,13 @@ def test_unknown_or_missing_domain_fails_closed():
         validate_runtime_binding(binding, repository_root=ROOT)
 
     assert caught.value.code == "RUNTIME_DOMAIN_SET_MISMATCH"
+
+
+def test_knowledge_is_not_counted_as_an_rcm_r6_business_domain():
+    binding = load_runtime_binding(MANIFEST, repository_root=ROOT)
+
+    assert "KNOWLEDGE" not in [item["domain_id"] for item in binding["domains"]]
+    assert [item["capability_id"] for item in binding["shared_capabilities"]] == ["KNOWLEDGE"]
 
 
 def test_duplicate_agent_ids_fail_closed():

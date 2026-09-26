@@ -6,14 +6,22 @@ canonical Agent YAML, and a domain adapter. The Runtime remains the only owner
 of provider calls, retry and budget policy, secret resolution, and execution
 snapshots; adapters own only domain input/output semantics.
 
-The frozen domain set is:
+The frozen RCM-R6 business-domain set is:
 
 | Domain | Agent | Canonical config |
 | --- | --- | --- |
-| `STORAGE` | `storage.emmc.parameter_extract` | `config/runtime/agents/storage.emmc.parameter_extract.yaml` |
 | `MAJOR_ISSUE` | `major_issue.v2.occurrence` | `config/runtime/agents/major_issue.v2.occurrence.yaml` |
+| `HARDWARE_CASE` | `hardware_case.structure` | `config/runtime/agents/hardware_case.structure.yaml` |
 | `REVERSE_QUALITY` | `reverse_quality.analysis` | `config/runtime/agents/reverse_quality.analysis.yaml` |
-| `KNOWLEDGE` | `knowledge.production.extract` | `config/runtime/agents/knowledge.production.extract.yaml` |
+| `STORAGE` | `storage.emmc.parameter_extract` | `config/runtime/agents/storage.emmc.parameter_extract.yaml` |
+
+`KNOWLEDGE` is a shared capability consumer, retained under the manifest's
+`shared_capabilities` extension and excluded from the four-business-domain
+count.
+
+The public Runtime contract baseline is `P0.2_CONTRACT_FROZEN_V1.0`. The
+Runtime implementation level is recorded separately as `P0.3`; the latter is
+not a public contract version.
 
 The machine-readable source is `runtime_binding.json`. Consumers must load the
 manifest through `runtime.binding.validate_runtime_binding`; a missing domain,

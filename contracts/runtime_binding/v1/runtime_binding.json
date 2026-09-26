@@ -1,22 +1,23 @@
 {
   "binding_contract_version": "runtime-four-domain-binding/v1.0",
-  "runtime_contract_version": "unified-agent-runtime/p0.3",
+  "runtime_contract_version": "P0.2_CONTRACT_FROZEN_V1.0",
+  "runtime_implementation_version": "P0.3",
   "agent_config_contract": "AGENT-CONFIG-001",
   "status": "BOUND",
   "domains": [
-    {
-      "domain_id": "STORAGE",
-      "agent_ids": ["storage.emmc.parameter_extract"],
-      "config_paths": ["config/runtime/agents/storage.emmc.parameter_extract.yaml"],
-      "adapter": "runtime.adapters.storage.StorageCompatibilityAdapter",
-      "ownership": "RUNTIME_EXECUTION_ONLY",
-      "status": "BOUND"
-    },
     {
       "domain_id": "MAJOR_ISSUE",
       "agent_ids": ["major_issue.v2.occurrence"],
       "config_paths": ["config/runtime/agents/major_issue.v2.occurrence.yaml"],
       "adapter": "runtime.adapters.major_issue.MajorIssueD01RuntimeAdapter",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    },
+    {
+      "domain_id": "HARDWARE_CASE",
+      "agent_ids": ["hardware_case.structure"],
+      "config_paths": ["config/runtime/agents/hardware_case.structure.yaml"],
+      "adapter": "services.hardware_case_runtime_adapter.HardwareCaseRuntimeStructurer",
       "ownership": "RUNTIME_EXECUTION_ONLY",
       "status": "BOUND"
     },
@@ -29,7 +30,17 @@
       "status": "BOUND"
     },
     {
-      "domain_id": "KNOWLEDGE",
+      "domain_id": "STORAGE",
+      "agent_ids": ["storage.emmc.parameter_extract"],
+      "config_paths": ["config/runtime/agents/storage.emmc.parameter_extract.yaml"],
+      "adapter": "runtime.adapters.storage.StorageCompatibilityAdapter",
+      "ownership": "RUNTIME_EXECUTION_ONLY",
+      "status": "BOUND"
+    }
+  ],
+  "shared_capabilities": [
+    {
+      "capability_id": "KNOWLEDGE",
       "agent_ids": ["knowledge.production.extract"],
       "config_paths": ["config/runtime/agents/knowledge.production.extract.yaml"],
       "adapter": "knowledge_production.extraction.KnowledgeExtractionService",

@@ -12,11 +12,13 @@ from contracts.runtime_binding.v1 import RUNTIME_FOUR_DOMAIN_BINDING_VERSION
 
 
 EXPECTED_RUNTIME_DOMAINS = (
-    "STORAGE",
     "MAJOR_ISSUE",
+    "HARDWARE_CASE",
     "REVERSE_QUALITY",
-    "KNOWLEDGE",
+    "STORAGE",
 )
+RUNTIME_CONTRACT_VERSION = "P0.2_CONTRACT_FROZEN_V1.0"
+RUNTIME_IMPLEMENTATION_VERSION = "P0.3"
 _REQUIRED_DOMAIN_FIELDS = {
     "domain_id",
     "agent_ids",
@@ -66,8 +68,10 @@ def validate_runtime_binding(
         raise RuntimeBindingError("RUNTIME_BINDING_INVALID", "manifest must be an object")
     if binding.get("binding_contract_version") != RUNTIME_FOUR_DOMAIN_BINDING_VERSION:
         raise RuntimeBindingError("RUNTIME_BINDING_VERSION_MISMATCH")
-    if binding.get("runtime_contract_version") != "unified-agent-runtime/p0.3":
+    if binding.get("runtime_contract_version") != RUNTIME_CONTRACT_VERSION:
         raise RuntimeBindingError("RUNTIME_CONTRACT_VERSION_MISMATCH")
+    if binding.get("runtime_implementation_version") != RUNTIME_IMPLEMENTATION_VERSION:
+        raise RuntimeBindingError("RUNTIME_IMPLEMENTATION_VERSION_MISMATCH")
     if binding.get("agent_config_contract") != "AGENT-CONFIG-001":
         raise RuntimeBindingError("AGENT_CONFIG_CONTRACT_MISMATCH")
     if binding.get("status") != "BOUND":
@@ -105,6 +109,45 @@ def validate_runtime_binding(
             raise RuntimeBindingError(
                 "RUNTIME_AGENT_CONFIG_CARDINALITY_MISMATCH", str(domain["domain_id"])
             )
+        overlap = seen_agents.intersection(agents)
+        if overlap:
+            raise RuntimeBindingError("RUNTIME_AGENT_ID_DUPLICATE", sorted(overlap)[0])
+        seen_agents.update(agents)
+        if root is None:
+            continue
+        for agent_id, relative_path in zip(agents, paths):
+            config_path = (root / relative_path).resolve()
+            if root not in config_path.parents:
+                raise RuntimeBindingError("RUNTIME_CONFIG_PATH_ESCAPE", relative_path)
+            if not config_path.is_file():
+                raise RuntimeBindingError("RUNTIME_AGENT_CONFIG_MISSING", relative_path)
+            try:
+                raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError) as exc:
+                raise RuntimeBindingError("RUNTIME_AGENT_CONFIG_INVALID", relative_path) from exc
+            if not isinstance(raw, Mapping) or raw.get("agent_id") != agent_id:
+                raise RuntimeBindingError("RUNTIME_AGENT_ID_MISMATCH", relative_path)
+
+    shared_capabilities = binding.get("shared_capabilities", [])
+    if not isinstance(shared_capabilities, list):
+        raise RuntimeBindingError("RUNTIME_SHARED_CAPABILITY_INVALID")
+    for capability in shared_capabilities:
+        if not isinstance(capability, Mapping):
+            raise RuntimeBindingError("RUNTIME_SHARED_CAPABILITY_INVALID")
+        required = {"capability_id", "agent_ids", "config_paths", "adapter", "ownership", "status"}
+        if not required <= set(capability):
+            raise RuntimeBindingError("RUNTIME_SHARED_CAPABILITY_INVALID")
+        if capability["status"] != "BOUND" or capability["ownership"] != "RUNTIME_EXECUTION_ONLY":
+            raise RuntimeBindingError("RUNTIME_BINDING_OWNERSHIP_VIOLATION", "shared_capability")
+        agents = _require_string_list(
+            capability["agent_ids"], "RUNTIME_SHARED_CAPABILITY_INVALID", "agent_ids"
+        )
+        paths = _require_string_list(
+            capability["config_paths"], "RUNTIME_SHARED_CAPABILITY_INVALID", "config_paths"
+        )
+        _require_text(capability["adapter"], "RUNTIME_SHARED_CAPABILITY_INVALID", "adapter")
+        if len(agents) != len(paths):
+            raise RuntimeBindingError("RUNTIME_AGENT_CONFIG_CARDINALITY_MISMATCH", "shared_capability")
         overlap = seen_agents.intersection(agents)
         if overlap:
             raise RuntimeBindingError("RUNTIME_AGENT_ID_DUPLICATE", sorted(overlap)[0])
