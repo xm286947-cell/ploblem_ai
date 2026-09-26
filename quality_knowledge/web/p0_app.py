@@ -26,6 +26,10 @@ from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
 from quality_knowledge.major_cases.context import UnavailableMajorProblemContextProvider
 from quality_knowledge.web.major_context_api import create_major_context_router
+from quality_knowledge.web.storage_workspace import (
+    DEFAULT_STORAGE_WORKSPACE_PREFIX,
+    bind_storage_workspace,
+)
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -75,6 +79,8 @@ def create_p0_app(
     major_artifact_root: str | Path | None = None,
     major_provider: Any | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
+    storage_app: Any | None = None,
+    storage_workspace_prefix: str = DEFAULT_STORAGE_WORKSPACE_PREFIX,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
 
@@ -86,6 +92,11 @@ def create_p0_app(
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
+    app.state.storage_workspace_binding = bind_storage_workspace(
+        app,
+        storage_app=storage_app,
+        prefix=storage_workspace_prefix,
+    )
 
     repository: Any | None = None
     analysis_runtime_status: dict[str, Any] = {
