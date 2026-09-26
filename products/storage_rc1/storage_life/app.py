@@ -251,7 +251,7 @@ def home(request: Request):
     binding_script = f"""
 <script>
 window.__STORAGE_WORKSPACE_PREFIX__ = {prefix_literal};
-window.__OVERALL_SHELL_URL__ = "/p0/issues";
+window.__OVERALL_SHELL_URL__ = "/p0/overall";
 (function () {{
   const prefix = window.__STORAGE_WORKSPACE_PREFIX__ || "";
   if (!prefix) return;
@@ -271,7 +271,7 @@ window.__OVERALL_SHELL_URL__ = "/p0/issues";
 """
     html = html.replace(
         "</header>",
-        '<a id="overallShellBack" class="secondary" href="/p0/issues">返回 Overall Shell</a></header>',
+        '<a id="overallShellBack" class="secondary" href="/p0/overall">返回 Overall Shell</a></header>',
         1,
     )
     return HTMLResponse(html.replace("</head>", binding_script + "</head>", 1))
