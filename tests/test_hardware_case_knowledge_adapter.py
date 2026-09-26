@@ -527,6 +527,66 @@ def test_cg07_object_to_evidence_to_original_source(tmp_path):
     assert resolved["excerpt"] == SOURCE_TEXT
 
 
+def test_public_ref_resolves_publication_and_evidence_without_object_id(tmp_path):
+    _, transport, adapter, evidence, candidate, publish = _publish_and_release(
+        tmp_path
+    )
+    public_ref = adapter.public_ref(CASE_ID, 1)
+
+    assert public_ref == candidate["candidate_id"]
+    assert publish["object"]["candidate_ref"] == public_ref
+    resolved_publication = adapter.resolve_publication(
+        public_ref,
+        expected_revision=1,
+    )
+    assert resolved_publication["candidate_ref"] == public_ref
+    assert resolved_publication["evidence_refs"] == [evidence["evidence_id"]]
+    assert "knowledge_id" not in transport.calls[-1]["json_body"]
+
+    resolved_evidence = adapter.resolve_evidence(
+        resolved_publication["evidence_refs"][0]
+    )
+    assert resolved_evidence["evidence_id"] == evidence["evidence_id"]
+    assert resolved_evidence["source"]["uri"] == "word:synthetic-hardware-case.docx"
+    assert resolved_evidence["excerpt"] == SOURCE_TEXT
+
+
+def test_missing_public_ref_fails_closed(tmp_path):
+    _, _, adapter, _, _, _ = _publish_and_release(tmp_path)
+    with pytest.raises(
+        HardwareKnowledgeAdapterError,
+        match="KNOWLEDGE_PUBLIC_REF_NOT_FOUND",
+    ):
+        adapter.resolve_publication("HC-KNOWLEDGE-MISSING-R1")
+
+
+def test_public_query_candidate_ref_filter_is_additive_and_exact(tmp_path):
+    _, transport, adapter, evidence, candidate, publish = _publish_and_release(
+        tmp_path
+    )
+    public_ref = candidate["candidate_id"]
+
+    resolved = adapter.search()
+    assert [item["candidate_ref"] for item in resolved["objects"]] == [public_ref]
+    legacy_get = adapter.get_object(publish["object"]["knowledge_id"])
+    assert legacy_get["candidate_ref"] == public_ref
+
+    response = transport.client.post(
+        "/v1/knowledge/search",
+        json={
+            "contract_version": "knowledge-query/v1",
+            "knowledge_release_version": RELEASE,
+            "candidate_refs": ["HC-KNOWLEDGE-OTHER-R1"],
+            "domain": "HARDWARE_CASE",
+            "object_type": "HARDWARE_CASE",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["objects"] == []
+    assert response.json()["evidence_refs"] == []
+    assert evidence["evidence_id"] not in response.text
+
+
 def test_cg08_knowledge_unavailable_is_explicit():
     adapter = HardwareCaseKnowledgeAdapter(
         UnavailableTransport(),

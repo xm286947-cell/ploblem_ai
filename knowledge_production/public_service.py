@@ -334,6 +334,11 @@ class PublicKnowledgeService:
         objects: list[PublishedKnowledgeObject] = []
         for obj in result.objects:
             public = self._to_public_object(obj)
+            if (
+                request.candidate_refs
+                and public.candidate_ref not in request.candidate_refs
+            ):
+                continue
             if request.domain and public.domain != request.domain:
                 continue
             if request.object_type and public.object_type != request.object_type:

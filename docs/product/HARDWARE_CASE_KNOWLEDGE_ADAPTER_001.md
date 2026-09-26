@@ -85,3 +85,17 @@ boundary errors for:
 - contract/domain/object-type mismatches
 
 There is no silent fallback to Hardware local DB when Knowledge query fails.
+
+## Public Ref binding
+
+The adapter's Public Ref is `HC-KNOWLEDGE-{case_id}-R{revision}`. It is the
+versioned public Candidate Ref (`candidate_ref`) already returned in
+`knowledge-object/v1`; it is not a Knowledge database key. The additive
+`candidate_refs` selector on `knowledge-query/v1` resolves that reference
+inside the pinned Knowledge Release. The resolved Publication's
+`evidence_refs` are followed using `GET /v1/knowledge/evidences/{evidence_id}`.
+
+The pre-existing `knowledge_ids` selector and object lookup endpoint remain
+available for older consumers. Missing or ambiguous Public Ref matches,
+missing Evidence, and Public Ref/Evidence mismatches fail closed. Historical
+Hardware Case records and their facts are not rewritten by this binding.

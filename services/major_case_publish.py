@@ -187,6 +187,10 @@ class MajorCasePublishAdapter:
             "event_id": event_id,
             "standard_itr": standard_itr,
             "knowledge_revision": knowledge_revision,
+            # Internal adapter projection consumed by the public Major ->
+            # Knowledge port.  The public contract never exposes repository
+            # rows or database identifiers beyond the declared source refs.
+            "knowledge_entries": [dict(entry) for entry in selected],
             "title": _text(case.get("title")),
             "enriched_case": enriched_case,
             "raw_evidence": raw_evidence,
