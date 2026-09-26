@@ -112,6 +112,17 @@ The public representation contains:
 - `GET /v1/knowledge/objects/{knowledge_id}?knowledge_release_version=...`
 - `GET /v1/knowledge/evidences/{evidence_id}?knowledge_release_version=...`
 
+`POST /v1/knowledge/search` also accepts the optional `candidate_refs` array.
+When supplied, it selects published objects whose public `candidate_ref`
+matches one of those values. This is an additive `knowledge-query/v1`
+extension; callers that omit it retain the existing query behavior. Business
+consumers can use their stable, versioned candidate reference to resolve a
+Publication without using the Knowledge object's internal `knowledge_id`.
+Hardware Case uses `HC-KNOWLEDGE-{case_id}-R{revision}` as this Public Ref;
+the matching published object's `candidate_ref` is the binding back to that
+Public Ref. Its `evidence_refs` are then resolved through the Evidence
+endpoint above.
+
 Consumer access is pinned to an immutable Knowledge Release. Hardware Case MUST
 NOT read the Knowledge repository or database directly.
 

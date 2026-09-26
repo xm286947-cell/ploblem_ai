@@ -159,6 +159,7 @@ class KnowledgePublishResponse(PublicContractModel):
 class PublicKnowledgeQuery(PublicContractModel):
     knowledge_release_version: str = Field(min_length=1)
     knowledge_ids: list[str] = Field(default_factory=list)
+    candidate_refs: list[str] = Field(default_factory=list)
     domain: str | None = None
     object_type: str | None = None
     text: str | None = None

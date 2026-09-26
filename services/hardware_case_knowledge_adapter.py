@@ -407,6 +407,14 @@ class HardwareCaseKnowledgeAdapter:
                 "KNOWLEDGE_RESPONSE_INVALID"
             )
         self._validate_object(obj, expected_revision=revision)
+        if obj.get("candidate_ref") != candidate_id:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_PUBLIC_REF_MISMATCH"
+            )
+        if obj.get("evidence_refs") != refs:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_EVIDENCE_REFS_MISMATCH"
+            )
         return response
 
     def search(
@@ -477,6 +485,63 @@ class HardwareCaseKnowledgeAdapter:
             expected_revision=expected_revision,
         )
         return response
+
+    def resolve_publication(
+        self,
+        public_ref: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Resolve a versioned Hardware Public Ref through the public contract."""
+        ref = str(public_ref or "").strip()
+        if not ref:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_PUBLIC_REF_NOT_FOUND"
+            )
+        result = self._request(
+            "POST",
+            "/v1/knowledge/search",
+            json_body={
+                "contract_version": CONTRACT_VERSIONS["query"],
+                "knowledge_release_version": self.knowledge_release_version,
+                "candidate_refs": [ref],
+                "domain": DOMAIN,
+                "object_type": OBJECT_TYPE,
+            },
+        )
+        self._require_contract_field(
+            result,
+            "contract_version",
+            CONTRACT_VERSIONS["query"],
+        )
+        if result.get("knowledge_release_version") != self.knowledge_release_version:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_RELEASE_MISMATCH"
+            )
+        objects = result.get("objects")
+        if not isinstance(objects, list):
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_RESPONSE_INVALID")
+        matches = [
+            obj for obj in objects
+            if isinstance(obj, dict) and obj.get("candidate_ref") == ref
+        ]
+        if not matches:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_PUBLIC_REF_NOT_FOUND"
+            )
+        if len(matches) != 1:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_PUBLIC_REF_AMBIGUOUS"
+            )
+        obj = matches[0]
+        self._validate_object(obj, expected_revision=expected_revision)
+        if not isinstance(obj.get("candidate_ref"), str):
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_PUBLIC_REF_INVALID"
+            )
+        if not obj.get("evidence_refs"):
+            raise HardwareKnowledgeAdapterError("EVIDENCE_MISSING")
+        return obj
 
     def resolve_evidence(self, evidence_id: str) -> dict[str, Any]:
         if not evidence_id:
@@ -590,6 +655,11 @@ class HardwareCaseKnowledgeAdapter:
                 "CANDIDATE_CONTRACT_INVALID"
             )
         return f"HC-KNOWLEDGE-{value}-R{int(revision)}"
+
+    @staticmethod
+    def public_ref(case_id: str, revision: int) -> str:
+        """Return the stable, revisioned public reference for a Hardware Case."""
+        return HardwareCaseKnowledgeAdapter.candidate_id(case_id, revision)
 
     @staticmethod
     def publish_idempotency_key(candidate_id: str, revision: int) -> str:
