@@ -1,0 +1,40 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block breadcrumb %}质量画像与洞察{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p04_insights.css?v=p04-v1">{% endblock %}
+{% block body %}
+<main class="p04-shell" data-p04-insights data-api-prefix="{{ p04_api_prefix }}">
+  <header class="p04-header">
+    <div><span class="p04-kicker">QUALITYSCENARIO · P04</span><h1>质量画像与洞察</h1><p>围绕已发布 QualityScenario，从产品、客户、行业三个并列视角观察结构化事实。</p></div>
+    <div class="p04-context" data-context>正在读取 P04 数据…</div>
+  </header>
+  <nav class="p04-tabs" aria-label="洞察视角">
+    <button type="button" data-view="PRODUCT" class="active">产品</button>
+    <button type="button" data-view="CUSTOMER">客户</button>
+    <button type="button" data-view="INDUSTRY">行业</button>
+  </nav>
+  <section class="p04-card p04-controls">
+    <div class="p04-control-row">
+      <label>对象<select data-selector aria-label="对象选择"><option value="">全部对象</option></select></label>
+      <label>生命周期<select data-filter="lifecycle"><option value="">全部生命周期</option></select></label>
+      <label>业务活动<select data-filter="business_activity"><option value="">全部业务活动</option></select></label>
+      <label>质量关注<select data-filter="quality_focus"><option value="">全部质量关注</option></select></label>
+      <button type="button" class="p04-primary" data-apply>应用筛选</button>
+      <button type="button" class="p04-ghost" data-reset>重置</button>
+    </div>
+    <div class="p04-status" data-status role="status"></div>
+  </section>
+  <section class="p04-state p04-state-error" data-state="ERROR" hidden><strong>洞察暂时不可用</strong><span data-state-message></span><button type="button" data-retry>重试</button></section>
+  <section class="p04-state p04-state-partial" data-state="PARTIAL_DATA" hidden><strong>数据覆盖不完整</strong><span data-state-message></span></section>
+  <section class="p04-state p04-state-mapping" data-state="NO_RELATION_MAPPING" hidden><strong>暂无关系映射</strong><span data-state-message>当前条件下没有可展示的产品/客户/行业关系，不等同于无风险。</span></section>
+  <section class="p04-state p04-state-empty" data-state="EMPTY" hidden><strong>当前条件暂无已发布场景</strong><span data-state-message>请调整筛选条件后重试。</span></section>
+  <section class="p04-cards" data-stat-cards></section>
+  <section class="p04-grid">
+    <article class="p04-card"><header><div><span class="p04-kicker">MATRIX</span><h2>聚合矩阵</h2></div><select data-matrix-mode aria-label="矩阵模式"></select></header><div class="p04-table-wrap" data-matrix></div></article>
+    <article class="p04-card"><header><div><span class="p04-kicker">DISTRIBUTION</span><h2>结构化分布</h2></div></header><div class="p04-distributions" data-distributions></div></article>
+  </section>
+  <section class="p04-card p04-scenarios"><header><div><span class="p04-kicker">PUBLISHED QUALITYSCENARIO</span><h2>Scenario List</h2></div><span data-total>0 个场景</span></header><div class="p04-table-wrap" data-scenario-list></div></section>
+</main>
+<aside class="p04-drawer" data-drawer hidden aria-label="Scenario Drawer"><header><div><span class="p04-kicker">SCENARIO DRAWER</span><h2 data-drawer-title>Scenario</h2></div><button type="button" data-close>×</button></header><div class="p04-drawer-body" data-drawer-body></div></aside><div class="p04-backdrop" data-backdrop hidden></div>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/p04_insights.js?v=p04-v1" defer></script>{% endblock %}

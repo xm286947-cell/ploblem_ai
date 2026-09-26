@@ -92,6 +92,24 @@ class MajorKnowledgeRepository:
         with self.connect() as connection:
             return _row(connection.execute("SELECT * FROM kb_case WHERE case_id=?", (case_id,)).fetchone())
 
+    def case_for_problem_id(self, problem_id: str) -> dict | None:
+        """Resolve the public business problem id, never a knowledge case id."""
+        value = str(problem_id).strip()
+        if not value:
+            return None
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT c.* FROM kb_case c
+                   JOIN kb_event e ON e.case_id=c.case_id
+                   WHERE e.standard_itr=?
+                   ORDER BY e.created_at DESC,e.event_id DESC
+                   LIMIT 1""",
+                (value,),
+            ).fetchone()
+            if row:
+                return dict(row)
+            return None
+
     def update_case_status(self, case_id: str, status: str) -> None:
         with self.connect() as connection:
             updated = connection.execute(
