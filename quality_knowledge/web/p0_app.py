@@ -24,6 +24,8 @@ from quality_knowledge.p04.portrait import (
 )
 from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
+from quality_knowledge.major_cases.context import UnavailableMajorProblemContextProvider
+from quality_knowledge.web.major_context_api import create_major_context_router
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -67,6 +69,7 @@ def create_p0_app(
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
     portrait_db_path: str | Path | None = None,
+    major_context_provider: Any | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
@@ -193,6 +196,12 @@ def create_p0_app(
         app.state.portrait_provider,
         app.state.portrait_repository,
     )
+    app.state.major_context_provider = (
+        major_context_provider or UnavailableMajorProblemContextProvider()
+    )
+    # The provider is injected at the composition boundary.  P04 can only see
+    # this HTTP JSON route and never imports the provider's repository/domain.
+    app.include_router(create_major_context_router(app.state.major_context_provider))
 
     if "REPEAT_RISK" in domains:
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
