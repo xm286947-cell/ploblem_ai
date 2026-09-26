@@ -21,14 +21,16 @@ def test_unified_app_composes_public_major_context_route(tmp_path):
         tmp_path / "major.db", tmp_path / "attachments"
     )
     case = repository.create_case("Problem", "GROUP-1")
-    event = repository.upsert_event(case["case_id"], internal_event_key="E-1")
+    event = repository.upsert_event(
+        case["case_id"], standard_itr="ITR-1", internal_event_key="E-1"
+    )
     repository.add_source_link(
         case["case_id"],
         event["event_id"],
         {
             "source_system": "problem-system",
             "source_type": "problem",
-            "record_id": case["case_id"],
+            "record_id": "SOURCE-1",
             "product": {"product_code": "P-1", "product_name": "Product"},
             "customer": {"customer_id": "C-1", "customer_name": "Customer"},
             "industry": {"industry_code": "I-1", "industry_name": "Industry"},
@@ -48,11 +50,12 @@ def test_unified_app_composes_public_major_context_route(tmp_path):
         major_context_provider=RepositoryMajorProblemContextProvider(repository),
     )
     client = TestClient(app)
-    response = client.get(f"/api/v2/major-problems/{case['case_id']}/context")
+    response = client.get("/api/v2/major-problems/ITR-1/context")
 
     assert response.status_code == 200
     body = response.json()
     assert body["contract_version"] == CONTRACT_VERSION
+    assert body["problem_id"] == "ITR-1"
     assert body["product"]["product_code"] == "P-1"
     assert body["customer"]["customer_id"] == "C-1"
     assert body["industry"]["industry_code"] == "I-1"
@@ -69,7 +72,7 @@ def test_unified_app_composes_public_major_context_route(tmp_path):
                     {
                         "scenario_id": "QS-1",
                         "status": "PUBLISHED",
-                        "source_problem_ids": [case["case_id"]],
+                        "source_problem_ids": ["ITR-1"],
                     },
                 ),
                 result_revision="live-v1",
@@ -87,3 +90,35 @@ def test_unified_app_composes_public_major_context_route(tmp_path):
     snapshot = integrated.snapshot()
     assert snapshot.state == P04State.NORMAL
     assert snapshot.scenarios[0]["product"] == "Product"
+
+
+def test_business_problem_can_exist_with_partial_context_and_null_ids(tmp_path):
+    repository = MajorKnowledgeRepository(
+        tmp_path / "major.db", tmp_path / "attachments"
+    )
+    case = repository.create_case("Problem", "GROUP-1")
+    event = repository.upsert_event(
+        case["case_id"], standard_itr="ITR-001", internal_event_key="E-1"
+    )
+    repository.add_source_link(
+        case["case_id"],
+        event["event_id"],
+        {"source_system": "problem-system", "source_type": "problem", "record_id": "SOURCE-1"},
+        standard_itr="ITR-001",
+        role="CURRENT_EVENT",
+        status="LINKED",
+    )
+    app = create_p0_app(
+        tmp_path / "host.db",
+        enabled_domains={"HARDWARE_CASE"},
+        major_context_provider=RepositoryMajorProblemContextProvider(repository),
+    )
+    response = TestClient(app).get("/api/v2/major-problems/ITR-001/context")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["problem_id"] == "ITR-001"
+    assert body["relation_status"] == "OBSERVED_IN_PROBLEM_EVIDENCE"
+    assert body["product"] == {}
+    assert body["customer"] == {}
+    assert body["industry"] == {}
+    assert body["organization"] == {"ipmt": {}, "spdt": {}}

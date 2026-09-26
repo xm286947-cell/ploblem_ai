@@ -75,6 +75,8 @@ class QualityScenarioMajorProblemContextAdapter:
                 )
             if not payload or payload.get("contract_version") != CONTRACT_VERSION:
                 return ContextEnrichment(record, P04State.ERROR, ("CONTRACT_VERSION_MISMATCH",))
+            if payload.get("relation_status") != "OBSERVED_IN_PROBLEM_EVIDENCE":
+                return ContextEnrichment(record, P04State.ERROR, ("CONTRACT_PAYLOAD_INVALID",))
             contexts.append(payload)
 
         if contexts:

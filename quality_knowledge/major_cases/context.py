@@ -26,7 +26,10 @@ class RepositoryMajorProblemContextProvider:
         self.repository = repository
 
     def get_context(self, problem_id: str) -> dict[str, Any] | None:
-        case = self.repository.case_detail(problem_id)
+        case_ref = self.repository.case_for_problem_id(problem_id)
+        if not case_ref:
+            return None
+        case = self.repository.case_detail(case_ref["case_id"])
         if not case:
             return None
 
@@ -50,8 +53,6 @@ class RepositoryMajorProblemContextProvider:
         organization = self._object(payload.get("organization"))
         ipmt = self._object(organization.get("ipmt"))
         spdt = self._object(organization.get("spdt"))
-        has_relation = any((product, customer, industry, ipmt, spdt))
-
         return {
             "contract_version": CONTRACT_VERSION,
             "problem_id": problem_id,
@@ -62,9 +63,7 @@ class RepositoryMajorProblemContextProvider:
                 "ipmt": self._public_object(ipmt, "code", "name"),
                 "spdt": self._public_object(spdt, "code", "name"),
             },
-            "relation_status": (
-                "OBSERVED_IN_PROBLEM_EVIDENCE" if has_relation else "NO_RELATION_MAPPING"
-            ),
+            "relation_status": "OBSERVED_IN_PROBLEM_EVIDENCE",
             "source_refs": [item for item in source_refs if item],
         }
 
