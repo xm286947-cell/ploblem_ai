@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common-evidence/v1.0",
+  "title": "Common Evidence Contract V1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_id", "evidence_type", "source", "locator", "producer_domain",
+    "producer_object_id", "producer_object_version", "verification_status",
+    "evidence_status", "created_at", "contract_version"
+  ],
+  "properties": {
+    "evidence_id": {"type": "string", "minLength": 1},
+    "evidence_type": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_type", "source_id", "source_version"],
+      "properties": {
+        "source_type": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string", "minLength": 1},
+        "source_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "locator": {
+      "type": "object", "additionalProperties": false,
+      "properties": {"page": {"type": ["integer", "null"], "minimum": 1}, "section": {"type": ["string", "null"]}, "anchor": {"type": ["string", "null"]}}
+    },
+    "excerpt": {"type": ["string", "null"]},
+    "source_text": {"type": ["string", "null"]},
+    "content_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "source_ref": {"type": ["string", "null"]},
+    "source_reference": {"type": ["string", "null"]},
+    "producer_domain": {"type": "string", "minLength": 1},
+    "producer_object_id": {"type": "string", "minLength": 1},
+    "producer_object_version": {"type": "string", "minLength": 1},
+    "verification_status": {"type": "string", "minLength": 1},
+    "evidence_status": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "contract_version": {"const": "common-evidence/v1.0"}
+  },
+  "anyOf": [{"required": ["source_ref"]}, {"required": ["source_reference"]}]
+}

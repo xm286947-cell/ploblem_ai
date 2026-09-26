@@ -1,0 +1,11 @@
+storage_product_version: STORAGE_PRODUCT_MVP_RC1
+knowledge_release_version: SAMPLE-CONTRACT-SMOKE-V1
+knowledge_object_contract_version: knowledge-object/v1
+knowledge_query_contract_version: knowledge-query/v1
+common_evidence_contract_version: common-evidence/v1.0
+storage_consumer_contract_version: UKCI-01/V1.0
+compatibility_status: TEST_ONLY
+release_class: CONTROLLED_CONSUMER_VALIDATION
+qualification_state: TEST_FIXTURE
+allow_latest: false
+previous_release_version: null

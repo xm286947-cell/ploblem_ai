@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from contracts.common_evidence import COMMON_EVIDENCE_CONTRACT_VERSION
+
 
 KNOWLEDGE_CANDIDATE_CONTRACT_VERSION = "knowledge-candidate/v1"
 
@@ -366,6 +368,10 @@ class KnowledgeReleaseManifest(StrictModel):
     candidate_contract_version: str = Field(
         default=KNOWLEDGE_CANDIDATE_CONTRACT_VERSION,
         pattern=r"^knowledge-candidate/v1$",
+    )
+    common_evidence_contract_version: str = Field(
+        default=COMMON_EVIDENCE_CONTRACT_VERSION,
+        pattern=r"^common-evidence/v1\.0$",
     )
     created_at: datetime
     snapshot_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

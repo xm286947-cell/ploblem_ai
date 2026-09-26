@@ -1,0 +1,14 @@
+# RCM-R5: explicit Storage RC1 -> Knowledge Release binding.
+# This file is the consumer's pinned dependency.  It must not be replaced by
+# a moving "latest" alias.
+storage_product_version: STORAGE_PRODUCT_MVP_RC1
+knowledge_release_version: KP-STORAGE-RC1-VALIDATION-001
+knowledge_object_contract_version: knowledge-object/v1
+knowledge_query_contract_version: knowledge-query/v1
+common_evidence_contract_version: common-evidence/v1.0
+storage_consumer_contract_version: UKCI-01/V1.0
+compatibility_status: COMPATIBLE
+release_class: CONTROLLED_CONSUMER_VALIDATION
+qualification_state: VALIDATION_ONLY
+allow_latest: false
+previous_release_version: null
