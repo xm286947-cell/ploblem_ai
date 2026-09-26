@@ -14,7 +14,6 @@ from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
     create_p0_insights_router,
 )
-from quality_knowledge.web.overall_shell import create_overall_shell_router
 from quality_knowledge.p04.adapter import P04Provider, UnavailableP04Provider
 from quality_knowledge.p04.api import create_p04_router
 from quality_knowledge.p04.portrait import (
@@ -328,6 +327,8 @@ def create_p0_app(
         from quality_knowledge.web.p1_pages import create_p1_router
 
         if app.state.overall_shell_enabled:
+            from quality_knowledge.web.overall_shell import create_overall_shell_router
+
             app.include_router(
                 create_overall_shell_router(task_provider=overall_task_provider)
             )
