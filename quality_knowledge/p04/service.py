@@ -45,6 +45,8 @@ class P04InsightService:
         records = published_records(snapshot)
         seen: dict[tuple[str, str], SelectorItem] = {}
         for record in records:
+            if record.get("relation_status") == P04State.NO_RELATION_MAPPING:
+                continue
             item = self.relations.resolve(record)
             candidates = self._selector_values(view, record, item)
             for level, label in candidates:
@@ -282,6 +284,9 @@ class P04InsightService:
         unmapped = 0
         warnings: list[str] = []
         for record in records:
+            if record.get("relation_status") == P04State.NO_RELATION_MAPPING:
+                unmapped += 1
+                continue
             relations = self.relations.resolve(record)
             if relations.spdt.status == P04State.PARTIAL_DATA:
                 partial = True

@@ -173,10 +173,14 @@ def test_unknown_problem_is_no_relation_mapping_and_not_empty():
     client = CallableMajorProblemContextClient(
         lambda problem_id: major.get(f"/api/v2/major-problems/{problem_id}/context")
     )
-    integrated = IntegratedP04Provider(LiveQualityScenarioProvider(_rows()[:1]), client)
+    integrated = IntegratedP04Provider(LiveQualityScenarioProvider([{
+        "scenario_id": "QS-NO-RELATION-001",
+        "status": "PUBLISHED",
+        "product": "Must not be used without a source relation",
+    }]), client)
     snapshot = integrated.snapshot()
     assert snapshot.state == P04State.NO_RELATION_MAPPING
-    assert "SOURCE_PROBLEM_NOT_FOUND" in snapshot.warnings
+    assert "SOURCE_PROBLEM_MISSING" in snapshot.warnings
     result = P04InsightService(integrated).query({"view": "PRODUCT"})
     assert result.state == P04State.NO_RELATION_MAPPING
     assert result.total == 0
