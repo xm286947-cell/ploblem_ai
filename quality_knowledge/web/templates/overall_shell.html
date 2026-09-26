@@ -32,11 +32,11 @@
 <section class="overall-card" id="task-overview">
   <div class="overall-card-head">
     <div><h2>任务总览</h2><p>任务只能由公共 Provider 注入；Overall 不直接读任何 Domain Repository / Table。</p></div>
-    <span class="overall-state state-{{ task_overview.state|lower }}">{{ task_overview.state }}</span>
+    <span class="overall-state state-{{ task_overview['state']|lower }}">{{ task_overview['state'] }}</span>
   </div>
-  {% if task_overview.items %}
+  {% if task_overview['items'] %}
   <div class="overall-task-list">
-    {% for task in task_overview.items %}
+    {% for task in task_overview['items'] %}
     <div class="overall-task">
       <div><strong>{{ task.title }}</strong><small>{{ task.workspace_id }} · {{ task.task_id }}</small></div>
       <span>{{ task.status }}</span>
@@ -48,7 +48,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="overall-empty">{{ task_overview.message }}</div>
+  <div class="overall-empty">{{ task_overview['message'] }}</div>
   {% endif %}
 </section>
 
