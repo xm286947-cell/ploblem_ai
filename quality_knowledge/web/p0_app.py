@@ -35,6 +35,7 @@ from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_STORAGE_WORKSPACE_PREFIX = "/storage-workspace"
 FULL_DOMAINS = frozenset({"QUALITY_ISSUE", "REPEAT_RISK", "HARDWARE_CASE"})
 KNOWN_DOMAINS = FULL_DOMAINS
 
@@ -74,7 +75,10 @@ def create_p0_app(
     major_attachment_root: str | Path | None = None,
     major_artifact_root: str | Path | None = None,
     major_provider: Any | None = None,
+    overall_task_provider: Any | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
+    storage_app: Any | None = None,
+    storage_workspace_prefix: str = DEFAULT_STORAGE_WORKSPACE_PREFIX,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
 
@@ -86,6 +90,16 @@ def create_p0_app(
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
+    app.state.overall_shell_enabled = domains == FULL_DOMAINS
+    app.state.storage_workspace_binding = None
+    if storage_app is not None or app.state.overall_shell_enabled:
+        from quality_knowledge.web.storage_workspace import bind_storage_workspace
+
+        app.state.storage_workspace_binding = bind_storage_workspace(
+            app,
+            storage_app=storage_app,
+            prefix=storage_workspace_prefix,
+        )
 
     repository: Any | None = None
     analysis_runtime_status: dict[str, Any] = {
@@ -323,6 +337,13 @@ def create_p0_app(
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router
         from quality_knowledge.web.p1_pages import create_p1_router
+
+        if app.state.overall_shell_enabled:
+            from quality_knowledge.web.overall_shell import create_overall_shell_router
+
+            app.include_router(
+                create_overall_shell_router(task_provider=overall_task_provider)
+            )
 
         app.include_router(
             create_v2_router(
