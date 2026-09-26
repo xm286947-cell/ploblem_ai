@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ploblem.ai/contracts/common-evidence/v1.0/schema.json",
+  "title": "Common Evidence Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "evidence_id",
+    "evidence_type",
+    "source",
+    "locator",
+    "excerpt",
+    "source_text",
+    "content_hash",
+    "source_ref",
+    "source_reference",
+    "producer_domain",
+    "producer_object_id",
+    "producer_object_version",
+    "verification_status",
+    "evidence_status",
+    "created_at"
+  ],
+  "properties": {
+    "contract_version": {"const": "common-evidence/v1.0"},
+    "evidence_id": {"type": "string", "minLength": 1},
+    "evidence_type": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_type", "source_id", "source_version"],
+      "properties": {
+        "source_type": {"type": ["string", "null"]},
+        "source_id": {"type": ["string", "null"]},
+        "source_version": {"type": ["string", "null"]}
+      }
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["page", "section", "anchor"],
+      "properties": {
+        "page": {"type": ["integer", "null"], "minimum": 1},
+        "section": {"type": ["string", "null"]},
+        "anchor": {"type": ["string", "null"]}
+      }
+    },
+    "excerpt": {"type": ["string", "null"]},
+    "source_text": {"type": ["string", "null"]},
+    "content_hash": {"type": ["string", "null"]},
+    "source_ref": {"type": ["string", "null"]},
+    "source_reference": {"type": ["string", "null"]},
+    "producer_domain": {"type": "string", "minLength": 1},
+    "producer_object_id": {"type": ["string", "null"]},
+    "producer_object_version": {"type": ["string", "integer", "null"]},
+    "verification_status": {"type": ["string", "null"]},
+    "evidence_status": {"type": ["string", "null"]},
+    "created_at": {"type": ["string", "null"], "format": "date-time"}
+  }
+}
