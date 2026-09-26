@@ -142,3 +142,43 @@ class MajorCaseService:
 
     def detail(self, case_id: str) -> dict | None:
         return self.repository.case_detail(case_id)
+
+    def problem_context_facts(self, problem_id: str) -> dict | None:
+        """Read existing event/source facts for the public context projection.
+
+        The service owns repository and source-gateway access so the public
+        projection never exposes either implementation detail.
+        """
+        canonical = normalize_itr(problem_id)
+        if not canonical:
+            return None
+        events = self.repository.events_by_standard_itr(canonical)
+        if not events:
+            return None
+        evidence: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+        for event in events:
+            for link in self.repository.source_links(event["case_id"]):
+                if link.get("event_id") != event["event_id"] or link.get("relation_role") != "CURRENT_EVENT":
+                    continue
+                identity = (
+                    str(link.get("source_type") or ""),
+                    str(link.get("record_id") or ""),
+                    str(link.get("source_group") or ""),
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                source = self.source_gateway.fetch_evidence(
+                    link["source_group"], link["source_type"], link["record_id"]
+                )
+                if source:
+                    evidence.append(source)
+                else:
+                    try:
+                        snapshot = json.loads(link.get("snapshot_json") or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        snapshot = {}
+                    if snapshot:
+                        evidence.append(snapshot)
+        return {"problem_id": canonical, "source_refs": [canonical], "evidence": evidence}

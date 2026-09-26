@@ -8,6 +8,7 @@ import json
 from quality_knowledge.major_cases.legacy_adapter import LegacyRepeatAdapter
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from quality_knowledge.major_cases.service import MajorCaseService
+from quality_knowledge.major_cases.context import MajorProblemContextProjection
 
 
 def create_major_case_router(
@@ -19,6 +20,7 @@ def create_major_case_router(
 ) -> APIRouter:
     router = APIRouter()
     repeat = LegacyRepeatAdapter(repository, project_root, run_root)
+    context_projection = MajorProblemContextProjection(service)
 
     @router.get("/knowledge/major-cases", response_class=HTMLResponse, include_in_schema=False)
     def cases_page(request: Request, group: str = "", status: str = "", tag: str = "", page: int = 1):
@@ -143,5 +145,12 @@ def create_major_case_router(
         if not case:
             raise HTTPException(404, "major case not found")
         return case
+
+    @router.get("/api/v2/major-problems/{problem_id}/context")
+    def api_major_problem_context(problem_id: str):
+        context = context_projection.project(problem_id)
+        if context is None:
+            raise HTTPException(404, "major problem not found")
+        return context
 
     return router

@@ -251,6 +251,13 @@ class MajorKnowledgeRepository:
         with self.connect() as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM kb_event WHERE case_id=? ORDER BY created_at,event_id", (case_id,))]
 
+    def events_by_standard_itr(self, standard_itr: str) -> list[dict]:
+        """Return stored event references for one canonical business problem id."""
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT * FROM kb_event WHERE standard_itr=? ORDER BY created_at,event_id", (standard_itr,)
+            )]
+
     def add_source_link(self, case_id: str, event_id: str | None, source: dict, *, standard_itr: str, role: str, status: str) -> dict:
         link_id = _id("KSRC")
         record_id = str(source.get("record_id") or f"UNRESOLVED:{standard_itr}")
