@@ -14,6 +14,7 @@ from storage_life import (
 
 
 def fact(name, value, unit=None, evidence="fact-evidence"):
+    unit = unit or ("bytes" if name.endswith("bytes") else None)
     return ConfirmedFact(
         fact_id=f"fact-{name}", metric_name=name, value=value, unit=unit,
         evidence_refs=[evidence] if evidence else [],
@@ -106,7 +107,11 @@ def test_emmc_tier_interpretation_comes_from_formal_knowledge_parameters():
             observation("device_life_time_b", "06", unit="tier"),
             observation("pre_eol_info", "01", unit="tier"),
         ],
-        formal_knowledge=[knowledge("eMMC EXT_CSD semantics", {"life_time_map": {"05": "60-70%", "06": "70-80%"}})],
+        formal_knowledge=[knowledge("eMMC EXT_CSD semantics", {
+            "life_time_a_map": {"05": "60-70%"},
+            "life_time_b_map": {"06": "70-80%"},
+            "pre_eol_map": {"01": "NORMAL"},
+        })],
     )
     result = LifetimeEngine().assess(request, "emmc.life_time")
     assert result.status is LifetimeAssessmentStatus.CALCULATED
