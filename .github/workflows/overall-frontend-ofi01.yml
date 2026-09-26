@@ -1,0 +1,41 @@
+name: Overall Frontend Integration OFI-01
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "quality_knowledge/web/overall_shell.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "quality_knowledge/web/templates/overall_*.html"
+      - "quality_knowledge/web/static/overall_shell.css"
+      - "tests/test_overall_frontend_shell.py"
+      - ".github/workflows/overall-frontend-ofi01.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ofi01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile Overall shell
+        run: python -m compileall -q quality_knowledge/web/overall_shell.py quality_knowledge/web/p0_app.py
+      - name: OFI-01 contract and navigation gate
+        run: python -m pytest -q tests/test_overall_frontend_shell.py
+      - name: Direct Domain entry compatibility regression
+        run: |
+          python -m pytest -q \
+            tests/test_hardware_case_domain_boundary.py \
+            tests/test_quality_capability_p0_console_ued.py
