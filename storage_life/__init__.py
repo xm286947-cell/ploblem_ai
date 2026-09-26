@@ -10,6 +10,7 @@ from .lifetime_engine import (
     FormulaSpec,
     LifetimeAssessmentRepository,
     create_lifetime_router,
+    ResultKind,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "FormulaSpec",
     "LifetimeAssessmentRepository",
     "create_lifetime_router",
+    "ResultKind",
 ]
