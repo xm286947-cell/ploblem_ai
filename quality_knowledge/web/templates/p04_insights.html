@@ -3,6 +3,7 @@
 {% block breadcrumb %}质量画像与洞察{% endblock %}
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/p04_insights.css?v=p04-v1">{% endblock %}
 {% block body %}
+{% include "_quality_scenario_nav.html" %}
 <main class="p04-shell" data-p04-insights data-api-prefix="{{ p04_api_prefix }}">
   <header class="p04-header">
     <div><span class="p04-kicker">QUALITYSCENARIO · P04</span><h1>质量画像与洞察</h1><p>围绕已发布 QualityScenario，从产品、客户、行业三个并列视角观察结构化事实。</p></div>
@@ -33,7 +34,7 @@
     <article class="p04-card"><header><div><span class="p04-kicker">MATRIX</span><h2>聚合矩阵</h2></div><select data-matrix-mode aria-label="矩阵模式"></select></header><div class="p04-table-wrap" data-matrix></div></article>
     <article class="p04-card"><header><div><span class="p04-kicker">DISTRIBUTION</span><h2>结构化分布</h2></div></header><div class="p04-distributions" data-distributions></div></article>
   </section>
-  <section class="p04-card p04-scenarios"><header><div><span class="p04-kicker">PUBLISHED QUALITYSCENARIO</span><h2>Scenario List</h2></div><span data-total>0 个场景</span></header><div class="p04-table-wrap" data-scenario-list></div></section>
+  <section class="p04-card p04-scenarios" data-scenario-library><header><div><span class="p04-kicker">PUBLISHED QUALITYSCENARIO</span><h2>Scenario Library</h2></div><span data-total>0 个场景</span></header><div class="p04-table-wrap" data-scenario-list></div></section>
 </main>
 <aside class="p04-drawer" data-drawer hidden aria-label="Scenario Drawer"><header><div><span class="p04-kicker">SCENARIO DRAWER</span><h2 data-drawer-title>Scenario</h2></div><button type="button" data-close>×</button></header><div class="p04-drawer-body" data-drawer-body></div></aside><div class="p04-backdrop" data-backdrop hidden></div>
 {% endblock %}
