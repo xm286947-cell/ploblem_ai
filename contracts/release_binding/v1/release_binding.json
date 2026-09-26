@@ -1,0 +1,24 @@
+{
+  "binding_contract_version": "knowledge-release-binding/v1.0",
+  "storage_product_version": "STORAGE_PRODUCT_MVP_RC1",
+  "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
+  "knowledge_object_contract_version": "knowledge-object/v1",
+  "knowledge_query_contract_version": "knowledge-query/v1",
+  "common_evidence_contract_version": "common-evidence/v1.0",
+  "storage_consumer_contract_version": "UKCI-01/V1.0",
+  "release_class": "CONTROLLED_CONSUMER_VALIDATION",
+  "qualification_state": "VALIDATION_ONLY",
+  "compatibility_status": "PASS",
+  "latest_floating_dependency": false,
+  "direct_knowledge_db_access": false,
+  "candidate_store_access": false,
+  "storage_self_publish": false,
+  "required_behavior": {
+    "pinned_release_on_startup": true,
+    "fail_closed_on_version_mismatch": true,
+    "fail_closed_on_missing_release": true,
+    "fail_closed_on_evidence_contract_mismatch": true,
+    "upgrade_requires_new_binding": true,
+    "rollback_requires_previous_binding": true
+  }
+}
