@@ -127,7 +127,7 @@ class P04InsightService:
                 snapshot,
                 context_id,
                 state=state,
-                warnings=warnings,
+                warnings=list(snapshot.warnings) + warnings,
                 error_code=None,
                 unmapped=unmapped,
             )
