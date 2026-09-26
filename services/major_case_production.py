@@ -13,6 +13,7 @@ from typing import Any
 from runtime import EvidenceLocator, EvidenceReference, LightweightExecutionEngine, SourceRef, SqliteTaskStore
 from runtime.adapters import MajorIssueD01RuntimeAdapter, MajorIssueObjectSpec
 from quality_knowledge.major_cases.document_parser import parse_document
+from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from repositories import JsonArtifactRepository
 from services.major_case_publisher import MajorCasePublisher, PublishCommitError
@@ -59,6 +60,11 @@ class MajorCaseProductionService:
     ) -> dict[str, Any]:
         if not all(value.strip() for value in (title, group_code, standard_itr, source_name)):
             raise MajorProductionError("MAJOR_SOURCE_IDENTITY_REQUIRED")
+        try:
+            public_ref = SourceProblemItrRefV1.from_input(standard_itr)
+        except InvalidSourceProblemItrRef as error:
+            raise MajorProductionError("INVALID_REF") from error
+        standard_itr = public_ref.public_ref
         if not source_bytes:
             raise MajorProductionError("MAJOR_SOURCE_EMPTY")
         suffix = Path(source_name).suffix.lower()

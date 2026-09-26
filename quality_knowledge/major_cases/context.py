@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+from ..problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
+
 
 CONTRACT_VERSION = "major-problem-context/v1"
 
@@ -26,7 +28,11 @@ class RepositoryMajorProblemContextProvider:
         self.repository = repository
 
     def get_context(self, problem_id: str) -> dict[str, Any] | None:
-        case_ref = self.repository.case_for_problem_id(problem_id)
+        try:
+            public_ref = SourceProblemItrRefV1.from_input(problem_id).public_ref
+        except InvalidSourceProblemItrRef:
+            return None
+        case_ref = self.repository.case_for_problem_id(public_ref)
         if not case_ref:
             return None
         case = self.repository.case_detail(case_ref["case_id"])
@@ -53,7 +59,7 @@ class RepositoryMajorProblemContextProvider:
         spdt = self._object(organization.get("spdt"))
         return {
             "contract_version": CONTRACT_VERSION,
-            "problem_id": problem_id,
+            "problem_id": public_ref,
             "product": self._public_object(product, "product_code", "product_name"),
             "customer": self._public_object(customer, "customer_id", "customer_name"),
             "industry": self._public_object(industry, "industry_code", "industry_name"),
@@ -62,7 +68,7 @@ class RepositoryMajorProblemContextProvider:
                 "spdt": self._public_object(spdt, "code", "name"),
             },
             "relation_status": "OBSERVED_IN_PROBLEM_EVIDENCE",
-            "source_refs": [problem_id],
+            "source_refs": [public_ref],
         }
 
     @staticmethod

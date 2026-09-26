@@ -10,6 +10,7 @@ from typing import Any, Mapping
 import json
 
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
+from quality_knowledge.problem_refs import normalize_itr
 
 
 PUBLISHABLE_ENTRY_TYPES = frozenset(
@@ -86,7 +87,7 @@ class MajorCasePublishAdapter:
         if case.get("status") != "ACTIVE":
             raise PublishValidationError("MAJOR_CASE_NOT_ACTIVE")
 
-        standard_itr = _text(event.get("standard_itr"))
+        standard_itr = normalize_itr(_text(event.get("standard_itr")) or "")
         identity = {
             "source_type": PUBLICATION_SOURCE_TYPE,
             "source_id": event_id,
