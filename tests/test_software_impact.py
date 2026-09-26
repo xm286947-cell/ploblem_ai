@@ -6,6 +6,7 @@ from storage_impact import (
     SoftwareImpactAnalysisRequest,
     SoftwareImpactAnalysisStatus,
     SoftwareImpactEngine,
+    ValidationItem,
 )
 
 
@@ -27,7 +28,12 @@ def release(status="RELEASED", evidence=True, triggers=None, content=True):
         software_impact=["Review batching and write coalescing behavior." ] if content else [],
         design_concern=["Preserve write ordering and durability semantics."],
         monitoring_impact=["Monitor host writes and media writes."],
-        validation_items=["Validate representative workload with Evidence."],
+        validation_items=[ValidationItem(
+            validation_id="VAL-001",
+            title="Representative workload",
+            description="Validate representative workload with Evidence.",
+            evidence_refs=["validation-evidence"],
+        )],
         evidence_refs=["knowledge-evidence"] if evidence else [],
     )
 
@@ -40,11 +46,11 @@ def test_formal_release_and_confirmed_fact_produce_traceable_impact():
             formal_knowledge_releases=[release()],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.CALCULATED
+    assert result.status is SoftwareImpactAnalysisStatus.EVIDENCED
     impact = result.impacts[0]
     assert impact.device_fact_refs == ["fact-write_pattern"]
     assert impact.knowledge_refs == ["K-WRITE-001"]
-    assert impact.evidence_refs == ["fact-evidence-write_pattern", "knowledge-evidence"]
+    assert impact.evidence_refs == ["fact-evidence-write_pattern", "knowledge-evidence", "validation-evidence"]
     assert result.decision_boundary == "NO_AUTO_REPLACEMENT_DECISION"
 
 
@@ -55,7 +61,7 @@ def test_candidate_knowledge_cannot_be_used_as_formal_conclusion():
             formal_knowledge_releases=[release(status="CANDIDATE")],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_DATA
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_KNOWLEDGE
     assert "FORMAL_KNOWLEDGE_RELEASE_WITH_EVIDENCE_REQUIRED" in result.missing_information
 
 
@@ -66,7 +72,7 @@ def test_missing_knowledge_evidence_fails_closed():
             formal_knowledge_releases=[release(evidence=False)],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_DATA
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_KNOWLEDGE
 
 
 def test_missing_fact_evidence_fails_closed():
@@ -76,7 +82,7 @@ def test_missing_fact_evidence_fails_closed():
             formal_knowledge_releases=[release()],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_DATA
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_FACT
     assert "FACT_EVIDENCE_REQUIRED:write_pattern" in result.missing_information
 
 
@@ -87,7 +93,7 @@ def test_missing_trigger_fact_becomes_validation_gap_not_invented_impact():
             formal_knowledge_releases=[release()],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_DATA
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_FACT
     assert result.impacts == []
     assert "K-WRITE-001:TRIGGER_FACT_REQUIRED:write_pattern" in result.missing_information
 
@@ -99,7 +105,7 @@ def test_missing_formal_impact_content_is_not_replaced_by_static_fallback():
             formal_knowledge_releases=[release(content=False)],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_DATA
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_FACT
     assert result.impacts == []
     assert "K-WRITE-001:FORMAL_IMPACT_CONTENT_REQUIRED" in result.missing_information
 
@@ -126,6 +132,6 @@ def test_multiple_releases_keep_fact_knowledge_analysis_separated():
             formal_knowledge_releases=[release(), second],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.CALCULATED
+    assert result.status is SoftwareImpactAnalysisStatus.EVIDENCED
     assert len(result.impacts) == 2
     assert all(item.source_type == "FORMAL_KNOWLEDGE_ANALYSIS" for item in result.impacts)

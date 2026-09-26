@@ -6,6 +6,12 @@ from .software_impact import (
     SoftwareImpactAnalysisResult,
     SoftwareImpactAnalysisStatus,
     SoftwareImpactEngine,
+    ValidationItem,
+    FormalKnowledgeReleaseConsumer,
+    RepositoryFormalKnowledgeReleaseConsumer,
+    InMemoryFormalKnowledgeReleaseConsumer,
+    SoftwareImpactAnalysisRepository,
+    create_software_impact_router,
 )
 
 __all__ = [
@@ -16,4 +22,10 @@ __all__ = [
     "SoftwareImpactAnalysisResult",
     "SoftwareImpactAnalysisStatus",
     "SoftwareImpactEngine",
+    "ValidationItem",
+    "FormalKnowledgeReleaseConsumer",
+    "RepositoryFormalKnowledgeReleaseConsumer",
+    "InMemoryFormalKnowledgeReleaseConsumer",
+    "SoftwareImpactAnalysisRepository",
+    "create_software_impact_router",
 ]
