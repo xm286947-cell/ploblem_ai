@@ -14,6 +14,7 @@ from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
     create_p0_insights_router,
 )
+from quality_knowledge.web.overall_shell import create_overall_shell_router
 from quality_knowledge.p04.adapter import P04Provider, UnavailableP04Provider
 from quality_knowledge.p04.api import create_p04_router
 from quality_knowledge.p04.portrait import (
@@ -74,6 +75,7 @@ def create_p0_app(
     major_attachment_root: str | Path | None = None,
     major_artifact_root: str | Path | None = None,
     major_provider: Any | None = None,
+    overall_task_provider: Any | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
@@ -86,6 +88,7 @@ def create_p0_app(
     root = Path(project_root)
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
+    app.state.overall_shell_enabled = domains == FULL_DOMAINS
 
     repository: Any | None = None
     analysis_runtime_status: dict[str, Any] = {
@@ -323,6 +326,11 @@ def create_p0_app(
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router
         from quality_knowledge.web.p1_pages import create_p1_router
+
+        if app.state.overall_shell_enabled:
+            app.include_router(
+                create_overall_shell_router(task_provider=overall_task_provider)
+            )
 
         app.include_router(
             create_v2_router(
