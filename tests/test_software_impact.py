@@ -7,6 +7,7 @@ from storage_impact import (
     SoftwareImpactAnalysisStatus,
     SoftwareImpactEngine,
     ValidationItem,
+    ValidationItemType,
 )
 
 
@@ -30,6 +31,8 @@ def release(status="RELEASED", evidence=True, triggers=None, content=True):
         monitoring_impact=["Monitor host writes and media writes."],
         validation_items=[ValidationItem(
             validation_id="VAL-001",
+            trigger_ref="fact-write_pattern",
+            type=ValidationItemType.TEST,
             title="Representative workload",
             description="Validate representative workload with Evidence.",
             evidence_refs=["validation-evidence"],
@@ -41,7 +44,7 @@ def release(status="RELEASED", evidence=True, triggers=None, content=True):
 def test_formal_release_and_confirmed_fact_produce_traceable_impact():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1",
+            request_id="req-1", device_id="dev-1",
             confirmed_facts=[fact()],
             formal_knowledge_releases=[release()],
         )
@@ -57,7 +60,7 @@ def test_formal_release_and_confirmed_fact_produce_traceable_impact():
 def test_candidate_knowledge_cannot_be_used_as_formal_conclusion():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact()],
+            request_id="req-2", device_id="dev-1", confirmed_facts=[fact()],
             formal_knowledge_releases=[release(status="CANDIDATE")],
         )
     )
@@ -68,7 +71,7 @@ def test_candidate_knowledge_cannot_be_used_as_formal_conclusion():
 def test_missing_knowledge_evidence_fails_closed():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact()],
+            request_id="req-3", device_id="dev-1", confirmed_facts=[fact()],
             formal_knowledge_releases=[release(evidence=False)],
         )
     )
@@ -78,7 +81,7 @@ def test_missing_knowledge_evidence_fails_closed():
 def test_missing_fact_evidence_fails_closed():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact(evidence=False)],
+            request_id="req-4", device_id="dev-1", confirmed_facts=[fact(evidence=False)],
             formal_knowledge_releases=[release()],
         )
     )
@@ -89,7 +92,7 @@ def test_missing_fact_evidence_fails_closed():
 def test_missing_trigger_fact_becomes_validation_gap_not_invented_impact():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact("other_fact")],
+            request_id="req-5", device_id="dev-1", confirmed_facts=[fact("other_fact")],
             formal_knowledge_releases=[release()],
         )
     )
@@ -101,11 +104,11 @@ def test_missing_trigger_fact_becomes_validation_gap_not_invented_impact():
 def test_missing_formal_impact_content_is_not_replaced_by_static_fallback():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact()],
+            request_id="req-6", device_id="dev-1", confirmed_facts=[fact()],
             formal_knowledge_releases=[release(content=False)],
         )
     )
-    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_FACT
+    assert result.status is SoftwareImpactAnalysisStatus.INSUFFICIENT_KNOWLEDGE
     assert result.impacts == []
     assert "K-WRITE-001:FORMAL_IMPACT_CONTENT_REQUIRED" in result.missing_information
 
@@ -113,7 +116,7 @@ def test_missing_formal_impact_content_is_not_replaced_by_static_fallback():
 def test_non_confirmed_fact_source_is_rejected():
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact(source="AI_INFERRED")],
+            request_id="req-7", device_id="dev-1", confirmed_facts=[fact(source="AI_INFERRED")],
             formal_knowledge_releases=[release()],
         )
     )
@@ -128,7 +131,7 @@ def test_multiple_releases_keep_fact_knowledge_analysis_separated():
     second.software_impact = ["Validate flush and journaling behavior."]
     result = SoftwareImpactEngine().analyze(
         SoftwareImpactAnalysisRequest(
-            device_id="dev-1", confirmed_facts=[fact(), fact("fsync_mode", "journaled")],
+            request_id="req-8", device_id="dev-1", confirmed_facts=[fact(), fact("fsync_mode", "journaled")],
             formal_knowledge_releases=[release(), second],
         )
     )
