@@ -8,8 +8,9 @@ from .software_impact import (
     SoftwareImpactEngine,
     ValidationItem,
     FormalKnowledgeReleaseConsumer,
-    RepositoryFormalKnowledgeReleaseConsumer,
     InMemoryFormalKnowledgeReleaseConsumer,
+    ValidationItemType,
+    ValidationItemStatus,
     SoftwareImpactAnalysisRepository,
     create_software_impact_router,
 )
@@ -24,8 +25,9 @@ __all__ = [
     "SoftwareImpactEngine",
     "ValidationItem",
     "FormalKnowledgeReleaseConsumer",
-    "RepositoryFormalKnowledgeReleaseConsumer",
     "InMemoryFormalKnowledgeReleaseConsumer",
+    "ValidationItemType",
+    "ValidationItemStatus",
     "SoftwareImpactAnalysisRepository",
     "create_software_impact_router",
 ]
