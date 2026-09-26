@@ -3,7 +3,7 @@
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_issue_detail.css">{% endblock %}
 {% block breadcrumb %}问题分析{% endblock %}
 {% block body %}<main class="p0-detail" data-p0-issue-detail data-knowledge-id="{{knowledge_id}}" data-api-prefix="{{api_prefix}}">
-  <header class="p0-page-head"><div><a class="p0-back" data-back href="/p0/issues">← 返回问题工作台</a><h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
+  <header class="p0-page-head"><div><a class="p0-back" data-back href="{{ return_to or '/p0/issues' }}">← {{ '返回质量场景工作区' if return_to else '返回问题工作台' }}</a>{% if return_to %}<a class="p0-qs-return" href="{{ return_to }}">返回质量场景工作区</a>{% endif %}<h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
   <nav class="p0-detail-tabs" aria-label="问题详情导航"><a href="#overview">概览</a><a href="#analysis">原因与防控</a><a href="#repeat-risk">Repeat Risk</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">原始与入库数据</a></nav>
   <section class="p0-card p0-scope-bar" data-scope-status>正在读取问题与分析状态…</section>
   <section class="p0-card p0-facts" id="overview" data-facts><div class="p0-loading">正在加载问题事实…</div></section>
