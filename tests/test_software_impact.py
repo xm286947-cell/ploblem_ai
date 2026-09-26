@@ -1,6 +1,6 @@
 import pytest
 
-from storage_impact import (
+from products.storage_rc1.storage_life.software_impact import (
     ConfirmedFact,
     FormalKnowledgeRelease,
     SoftwareImpactAnalysisRequest,

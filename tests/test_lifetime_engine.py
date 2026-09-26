@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from runtime.contracts import RuntimeObservation
-from storage_life import (
+from products.storage_rc1.storage_life.lifetime_engine import (
     ConfirmedFact,
     FormalKnowledgeReference,
     LifetimeAssessmentRequest,

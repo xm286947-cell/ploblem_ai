@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
 
-from storage_impact import (
+from products.storage_rc1.storage_life.software_impact import (
     ConfirmedFact, FormalKnowledgeRelease, InMemoryFormalKnowledgeReleaseConsumer,
     SoftwareImpactAnalysisRequest, SoftwareImpactAnalysisStatus, SoftwareImpactEngine,
     ValidationItem, create_software_impact_router,

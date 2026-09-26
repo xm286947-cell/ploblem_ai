@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from runtime.contracts import RuntimeObservation
-from storage_life import (
+from products.storage_rc1.storage_life.lifetime_engine import (
     ConfirmedFact, FormalKnowledgeReference, LifetimeAssessmentRequest,
     LifetimeEngine, LifetimeAssessmentStatus, FormulaRegistry, create_lifetime_router,
 )
