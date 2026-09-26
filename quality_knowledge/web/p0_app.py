@@ -15,6 +15,9 @@ from quality_knowledge.p0.stage_runner import ProductionV2StageRunner
 from quality_knowledge.web.api_v2 import create_v2_router
 from quality_knowledge.web.p0_pages import create_p0_insights_router
 from quality_knowledge.web.p1_pages import create_p1_router
+from quality_knowledge.web.runtime_observation_api import create_runtime_observation_router
+from runtime.observation import RuntimeObservationService
+from runtime.store.observation import RuntimeObservationRepository
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -77,6 +80,10 @@ def create_p0_app(
         }
     app.state.initialization_status = status
     app.state.p0_repository = repository
+    runtime_observation_repository = RuntimeObservationRepository(repository.db_path)
+    runtime_observation_service = RuntimeObservationService(runtime_observation_repository)
+    app.state.runtime_observation_service = runtime_observation_service
+    app.include_router(create_runtime_observation_router(runtime_observation_service))
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
     app.include_router(create_v2_router(

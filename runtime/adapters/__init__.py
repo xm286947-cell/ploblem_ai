@@ -26,3 +26,10 @@ from .storage import (
     StorageGoldenFieldComparator,
     StorageLinkedFieldsProjector,
 )
+
+from .observation import (
+    EmmcExtCsdAdapter,
+    MtdUbiAdapter,
+    NVMeSmartAdapter,
+    RuntimeObservationAdapter,
+)
