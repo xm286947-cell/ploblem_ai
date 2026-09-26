@@ -20,6 +20,10 @@ from .intake import (
     BusinessCandidateIntakeError,
     BusinessCandidateIntakeService,
 )
+from .major_publication import (
+    MajorPublicationIntakeAdapter,
+    MajorPublicationIntakeError,
+)
 from .models import (
     BusinessCandidateInput,
     BusinessSourceType,
@@ -107,6 +111,8 @@ __all__ = [
     "BusinessCandidateInput",
     "BusinessCandidateIntakeError",
     "BusinessCandidateIntakeService",
+    "MajorPublicationIntakeAdapter",
+    "MajorPublicationIntakeError",
     "HistoricalCaseCandidateError",
     "HistoricalCaseCandidateProducer",
     "BusinessSourceType",
