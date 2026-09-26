@@ -16,6 +16,13 @@ from quality_knowledge.web.p0_pages import (
 )
 from quality_knowledge.p04.adapter import P04Provider, UnavailableP04Provider
 from quality_knowledge.p04.api import create_p04_router
+from quality_knowledge.p04.portrait import (
+    PortraitArchiveRepository,
+    PortraitProvider,
+    PortraitService,
+    UnavailablePortraitProvider,
+)
+from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
@@ -58,6 +65,8 @@ def create_p0_app(
     hardware_case_structurer: Any | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
+    portrait_provider: PortraitProvider | None = None,
+    portrait_db_path: str | Path | None = None,
     enabled_domains: set[str] | frozenset[str] | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
@@ -175,6 +184,15 @@ def create_p0_app(
     # DATA_UNAVAILABLE until the approved public JSON providers are wired.
     app.state.p04_provider = p04_provider or UnavailableP04Provider()
     app.state.p04_service = P04InsightService(app.state.p04_provider)
+    app.state.portrait_provider = portrait_provider or UnavailablePortraitProvider()
+    app.state.portrait_repository = PortraitArchiveRepository(
+        portrait_db_path
+        or Path(db_path).with_name(Path(db_path).stem + ".p04-portrait.db")
+    )
+    app.state.portrait_service = PortraitService(
+        app.state.portrait_provider,
+        app.state.portrait_repository,
+    )
 
     if "REPEAT_RISK" in domains:
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
@@ -261,6 +279,7 @@ def create_p0_app(
             )
         )
         app.include_router(create_p04_router(app.state.p04_service))
+        app.include_router(create_portrait_router(app.state.portrait_service))
         app.include_router(create_p0_insights_router())
         app.include_router(create_p1_router())
         root_target = "/p0/insights"
