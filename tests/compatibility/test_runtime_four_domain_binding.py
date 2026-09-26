@@ -37,6 +37,27 @@ def test_every_bound_agent_id_matches_its_canonical_yaml():
             assert f"agent_id: {agent_id}" in raw
 
 
+def test_reverse_quality_yaml_resolves_through_the_unified_loader():
+    from quality_knowledge.models.analysis_v2 import OccurrenceAnalysisV2DTO
+    from runtime import AgentConfigLoader
+
+    loader = AgentConfigLoader(
+        root=ROOT,
+        model_profiles="config/runtime/model.yaml",
+        schemas={"OccurrenceAnalysisV2DTO": OccurrenceAnalysisV2DTO},
+        environ={
+            "DASHSCOPE_BASE_URL": "http://provider.invalid/v1",
+            "DASHSCOPE_API_KEY": "test-only",
+        },
+    )
+    resolved = loader.load("config/runtime/agents/reverse_quality.analysis.yaml")
+
+    assert resolved.definition.agent_id == "reverse_quality.analysis"
+    assert resolved.definition.metadata["business_domain"] == "REVERSE_QUALITY"
+    assert resolved.provider.type == "openai_compatible"
+    assert resolved.execution_policy.retry_budget.max_provider_calls_per_step == 2
+
+
 @pytest.mark.parametrize(
     ("field", "value", "code"),
     [
