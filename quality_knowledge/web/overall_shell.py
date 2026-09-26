@@ -46,7 +46,7 @@ WORKSPACES: tuple[dict[str, str], ...] = (
         "workspace_id": "storage",
         "title": "存储器件寿命智能产品",
         "summary": "Device Fact、寿命评估、诊断、Knowledge / Evidence。",
-        "entry_path": "/p0/storage",
+        "entry_path": "/storage-workspace/",
         "shell_entry_path": "/p0/workspaces/storage",
     },
 )
