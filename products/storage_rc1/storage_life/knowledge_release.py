@@ -8,6 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from contracts.common_evidence import COMMON_EVIDENCE_CONTRACT_VERSION
+
+
+STORAGE_PRODUCT_VERSION = "STORAGE_PRODUCT_MVP_RC1"
+STORAGE_CONSUMER_CONTRACT_VERSION = "UKCI-01/V1.0"
+PINNED_KNOWLEDGE_RELEASE_VERSION = "KP-STORAGE-RC1-VALIDATION-001"
+KNOWLEDGE_OBJECT_CONTRACT_VERSION = "knowledge-object/v1"
+KNOWLEDGE_QUERY_CONTRACT_VERSION = "knowledge-query/v1"
+
 
 class KnowledgeReleaseError(RuntimeError):
     pass
@@ -18,6 +29,16 @@ def _root() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return (Path(__file__).resolve().parents[1] / "knowledge_release" / "current").resolve()
+
+
+def _binding_path(root: Path) -> Path:
+    configured = os.environ.get("STORAGE_KNOWLEDGE_RELEASE_BINDING", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    local = root / "release_binding.yaml"
+    if local.is_file():
+        return local
+    return (Path(__file__).resolve().parents[1] / "config" / "knowledge_release_binding.yaml").resolve()
 
 
 def _json(path: Path) -> Any:
@@ -59,7 +80,9 @@ class KnowledgeReleaseConsumer:
                 "release_dir": str(self.root),
             }
         try:
+            binding = self._validated_binding()
             manifest = self._validated_manifest()
+            self._validate_binding_against_manifest(binding, manifest)
         except KnowledgeReleaseError as exc:
             return {"available": False, "status": "INVALID", "code": str(exc), "release_dir": str(self.root)}
         return {
@@ -71,7 +94,60 @@ class KnowledgeReleaseConsumer:
             "evidence_count": manifest.get("evidence_count", 0),
             "source_reference_count": manifest.get("source_reference_count", 0),
             "snapshot_hash": manifest.get("snapshot_hash", ""),
+            "storage_product_version": binding["storage_product_version"],
+            "storage_consumer_contract_version": binding["storage_consumer_contract_version"],
+            "common_evidence_contract_version": binding["common_evidence_contract_version"],
+            "release_class": binding["release_class"],
+            "qualification_state": binding["qualification_state"],
         }
+
+    def _validated_binding(self) -> dict[str, Any]:
+        path = _binding_path(self.root)
+        if not path.is_file():
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_BINDING_NOT_FOUND")
+        try:
+            payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_BINDING_INVALID") from exc
+        required = {
+            "storage_product_version",
+            "knowledge_release_version",
+            "knowledge_object_contract_version",
+            "knowledge_query_contract_version",
+            "common_evidence_contract_version",
+            "storage_consumer_contract_version",
+            "compatibility_status",
+            "release_class",
+            "qualification_state",
+            "allow_latest",
+        }
+        if not isinstance(payload, dict) or not required.issubset(payload):
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_BINDING_INVALID")
+        if payload.get("allow_latest") is not False:
+            raise KnowledgeReleaseError("LATEST_FLOATING_DEPENDENCY")
+        if str(payload.get("knowledge_release_version", "")).lower() == "latest":
+            raise KnowledgeReleaseError("LATEST_FLOATING_DEPENDENCY")
+        if payload.get("common_evidence_contract_version") != COMMON_EVIDENCE_CONTRACT_VERSION:
+            raise KnowledgeReleaseError("COMMON_EVIDENCE_CONTRACT_VERSION_MISMATCH")
+        return payload
+
+    @staticmethod
+    def _validate_binding_against_manifest(binding: dict[str, Any], manifest: dict[str, Any]) -> None:
+        if binding["knowledge_release_version"] != manifest.get("knowledge_release_version"):
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_VERSION_MISMATCH")
+        if binding["knowledge_object_contract_version"] != manifest.get("object_contract_version"):
+            raise KnowledgeReleaseError("KNOWLEDGE_OBJECT_CONTRACT_VERSION_MISMATCH")
+        if binding["knowledge_query_contract_version"] != manifest.get("contract_version"):
+            raise KnowledgeReleaseError("KNOWLEDGE_QUERY_CONTRACT_VERSION_MISMATCH")
+        if binding["common_evidence_contract_version"] != manifest.get("common_evidence_contract_version"):
+            raise KnowledgeReleaseError("COMMON_EVIDENCE_CONTRACT_VERSION_MISMATCH")
+        if (
+            binding["knowledge_release_version"] != PINNED_KNOWLEDGE_RELEASE_VERSION
+            and binding.get("qualification_state") != "TEST_FIXTURE"
+        ):
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_VERSION_NOT_QUALIFIED")
+        if binding["storage_consumer_contract_version"] != STORAGE_CONSUMER_CONTRACT_VERSION:
+            raise KnowledgeReleaseError("STORAGE_CONSUMER_CONTRACT_VERSION_MISMATCH")
 
     def _validated_manifest(self) -> dict[str, Any]:
         manifest = _json(self.root / "release_manifest.json")
@@ -89,7 +165,9 @@ class KnowledgeReleaseConsumer:
         return manifest
 
     def _payload(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        binding = self._validated_binding()
         manifest = self._validated_manifest()
+        self._validate_binding_against_manifest(binding, manifest)
         objects_raw = _json(self.root / "knowledge_objects.json")
         evidence_raw = _json(self.root / "evidences.json")
         source_raw = _json(self.root / "source_references.json")

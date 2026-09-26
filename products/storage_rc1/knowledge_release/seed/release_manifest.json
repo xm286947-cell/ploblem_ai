@@ -1,1 +1,1 @@
-{"knowledge_release_version":"SAMPLE-CONTRACT-SMOKE-V1","contract_version":"knowledge-query/v1","object_count":1,"evidence_count":1,"source_reference_count":1,"snapshot_hash":"sample-contract-smoke","files":[]}
+{"knowledge_release_version":"SAMPLE-CONTRACT-SMOKE-V1","contract_version":"knowledge-query/v1","object_contract_version":"knowledge-object/v1","candidate_contract_version":"knowledge-candidate/v1","common_evidence_contract_version":"common-evidence/v1.0","object_count":1,"evidence_count":1,"source_reference_count":1,"snapshot_hash":"sample-contract-smoke","files":[]}

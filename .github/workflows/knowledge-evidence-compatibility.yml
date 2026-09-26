@@ -1,0 +1,40 @@
+name: Knowledge Evidence Compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "contracts/common_evidence.py"
+      - "contracts/__init__.py"
+      - "schema/common_evidence.schema.json"
+      - "knowledge_production/**"
+      - "products/storage_rc1/config/knowledge_release_binding.yaml"
+      - "products/storage_rc1/knowledge_release/**"
+      - "products/storage_rc1/storage_life/knowledge_release.py"
+      - "tests/test_common_evidence_contract.py"
+      - "products/storage_rc1/tests/test_knowledge_release_binding.py"
+      - "docs/architecture/COMMON_EVIDENCE_*.md"
+      - "docs/architecture/KNOWLEDGE_*.md"
+      - ".github/workflows/knowledge-evidence-compatibility.yml"
+  workflow_dispatch:
+
+jobs:
+  r4-r5-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install contract test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r products/storage_rc1/requirements.txt
+      - name: R4 Common Evidence Contract gate
+        run: python -m pytest -q tests/test_common_evidence_contract.py
+      - name: R5 pinned Knowledge Release gate
+        run: python -m pytest -q products/storage_rc1/tests/test_knowledge_release_binding.py products/storage_rc1/tests/test_storage_product_mvp_rc1.py
