@@ -11,6 +11,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from compatibility.common_evidence import (
+    CommonEvidenceContractError,
+    map_common_evidence,
+    validate_common_evidence,
+)
 from runtime.observation import RuntimeObservationError, RuntimeObservationService
 from runtime.store.observation import RuntimeObservationRepository
 from runtime.contracts import RuntimeObservation
@@ -106,9 +111,36 @@ class StorageEngineeringInsightService:
         if not status.get("available"):
             return status, []
         try:
-            return status, consumer.query(query, device_type=device_type).get("results") or []
-        except KnowledgeReleaseError:
-            return status, []
+            binding_validator = getattr(consumer, "validate_storage_binding", None)
+            binding = None
+            if callable(binding_validator):
+                binding = binding_validator()
+            query_kwargs = {"device_type": device_type}
+            if binding:
+                query_kwargs["knowledge_release_version"] = binding["knowledge_release_version"]
+            rows = consumer.query(query, **query_kwargs).get("results") or []
+            normalized: list[dict[str, Any]] = []
+            for row in rows:
+                common_evidence = []
+                for evidence in row.get("evidence") or []:
+                    mapped = map_common_evidence(
+                        evidence,
+                        producer_domain="Storage Knowledge Release",
+                        producer_object_id=row.get("object_id"),
+                        producer_object_version=row.get("object_version"),
+                    )
+                    validate_common_evidence(mapped)
+                    common_evidence.append(mapped)
+                declared = {str(ref) for ref in row.get("evidence_refs") or []}
+                projected = {str(item["evidence_id"]) for item in common_evidence}
+                if declared and declared != projected:
+                    continue
+                if declared and not common_evidence:
+                    continue
+                normalized.append({**row, "_common_evidence": common_evidence})
+            return status, normalized
+        except (KnowledgeReleaseError, CommonEvidenceContractError, KeyError, TypeError):
+            return {**status, "available": False, "code": "KNOWLEDGE_RELEASE_COMPATIBILITY_FAILED"}, []
 
     def _lifetime_knowledge(self, metric: str, device_type: str = "") -> list[FormalKnowledgeReference]:
         status, objects = self._knowledge_objects(metric, device_type)
@@ -118,11 +150,12 @@ class StorageEngineeringInsightService:
             parameters = obj.get("parameters") or obj.get("structured_parameters") or {}
             if not isinstance(parameters, dict):
                 parameters = {}
+            evidence_refs = [str(item["evidence_id"]) for item in obj.get("_common_evidence") or []]
             mapped.append(FormalKnowledgeReference(
                 knowledge_id=str(obj.get("object_id") or ""), release_version=str(obj.get("knowledge_release_version") or release_version),
                 release_status="RELEASED" if str(obj.get("status") or "") == "ACTIVE" else str(obj.get("status") or ""),
                 semantic_scope=str(obj.get("title") or obj.get("summary") or metric),
-                evidence_refs=[str(x) for x in obj.get("evidence_refs") or []], parameters=parameters,
+                evidence_refs=evidence_refs, parameters=parameters,
             ))
         return mapped
 
@@ -145,7 +178,7 @@ class StorageEngineeringInsightService:
                     ))
             except (KeyError, TypeError, ValueError):
                 continue
-            evidence_refs = [str(x) for x in obj.get("evidence_refs") or []]
+            evidence_refs = [str(item["evidence_id"]) for item in obj.get("_common_evidence") or []]
             if not evidence_refs:
                 continue
             mapped.append(FormalKnowledgeRelease(

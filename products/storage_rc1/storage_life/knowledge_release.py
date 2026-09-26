@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from knowledge_production.release_binding import (
+    ReleaseBindingError,
+    validate_release_binding,
+)
+
 
 class KnowledgeReleaseError(RuntimeError):
     pass
@@ -18,6 +23,16 @@ def _root() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return (Path(__file__).resolve().parents[1] / "knowledge_release" / "current").resolve()
+
+
+def _binding_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[3]
+        / "contracts"
+        / "release_binding"
+        / "v1"
+        / "release_binding.json"
+    )
 
 
 def _json(path: Path) -> Any:
@@ -73,6 +88,23 @@ class KnowledgeReleaseConsumer:
             "snapshot_hash": manifest.get("snapshot_hash", ""),
         }
 
+    def validate_storage_binding(self) -> dict[str, Any]:
+        """Validate the pinned Storage binding before T1/T2/T3 consumption.
+
+        Legacy product query endpoints continue to expose their existing
+        status surface, while Engineering Insight uses this stricter seam.
+        That keeps the binding explicit for the new consumer without making
+        the old sample-release test path look like a production release.
+        """
+
+        manifest = self._validated_manifest()
+        binding = _json(_binding_path())
+        try:
+            validate_release_binding(binding, release_manifest=manifest)
+        except (ReleaseBindingError, TypeError) as exc:
+            raise KnowledgeReleaseError(str(exc)) from exc
+        return binding
+
     def _validated_manifest(self) -> dict[str, Any]:
         manifest = _json(self.root / "release_manifest.json")
         if not isinstance(manifest, dict) or not str(manifest.get("knowledge_release_version") or "").strip():
@@ -102,8 +134,17 @@ class KnowledgeReleaseConsumer:
         src_by_ref = {str(x.get("source_ref") or ""): x for x in sources if x.get("source_ref")}
         return manifest, objects, ev_by_id, src_by_ref
 
-    def query(self, text: str, *, device_type: str = "", top_k: int = 8) -> dict[str, Any]:
+    def query(
+        self,
+        text: str,
+        *,
+        device_type: str = "",
+        top_k: int = 8,
+        knowledge_release_version: str | None = None,
+    ) -> dict[str, Any]:
         manifest, objects, ev_by_id, src_by_ref = self._payload()
+        if knowledge_release_version is not None and knowledge_release_version != manifest.get("knowledge_release_version"):
+            raise KnowledgeReleaseError("RELEASE_VERSION_MISMATCH")
         terms = _terms(text)
         ranked = []
         for obj in objects:

@@ -27,17 +27,27 @@ class _StructuredKnowledge:
             "knowledge_release_version": "TEST-KNOWLEDGE-1",
         }
 
-    def query(self, text, *, device_type="", top_k=8):
-        objects = (
-            [self.objects[0]]
-            if "data_units" in text
-            else [self.objects[-1]]
-        )
+    def query(self, text, *, device_type="", top_k=8, knowledge_release_version=None):
+        objects = [self.objects[0]] if "data_units" in text else [self.objects[-1]]
         return {
             "knowledge_release_version": "TEST-KNOWLEDGE-1",
             "results": objects[:top_k],
         }
 
+
+def _knowledge_evidence(evidence_id: str) -> dict:
+    return {
+        "evidence_id": evidence_id,
+        "evidence_type": "SOURCE_EXCERPT",
+        "source": {
+            "source_type": "SPECIFICATION",
+            "source_id": "NVME",
+            "revision": "2.0d",
+        },
+        "locator": {"value": {"page": 1, "section": "Health"}},
+        "excerpt": "Explicit formal knowledge evidence.",
+        "metadata": {"evidence_status": "BOUND"},
+    }
 
 def _service(tmp_path, monkeypatch):
     db_path = tmp_path / "storage.sqlite3"
@@ -95,6 +105,7 @@ def test_t1_to_t2_and_t3_use_same_db_and_survive_service_recreation(tmp_path, mo
         "title": "NVMe Data Units Written",
         "knowledge_release_version": "TEST-KNOWLEDGE-1",
         "evidence_refs": ["EVIDENCE-KNOWLEDGE-1"],
+        "evidence": [_knowledge_evidence("EVIDENCE-KNOWLEDGE-1")],
         "parameters": {"bytes_per_data_unit": 512000},
     }
     impact_object = {
@@ -103,6 +114,7 @@ def test_t1_to_t2_and_t3_use_same_db_and_survive_service_recreation(tmp_path, mo
         "title": "Percentage Used impact",
         "knowledge_release_version": "TEST-KNOWLEDGE-1",
         "evidence_refs": ["EVIDENCE-KNOWLEDGE-2"],
+        "evidence": [_knowledge_evidence("EVIDENCE-KNOWLEDGE-2")],
         "trigger_fact_names": ["percentage_used"],
         "technical_meaning": "The device reports consumed endurance percentage.",
         "software_impact": ["Review endurance monitoring thresholds."],
