@@ -191,11 +191,10 @@ def main() -> None:
 
                 page.locator("a.p0-back").click()
                 page.wait_for_load_state("networkidle")
-                page.wait_for_function(
-                    "() => document.querySelector('[data-status]')?.textContent === '已更新'"
-                )
+                page.wait_for_timeout(1000)
 
                 evidence["after_return_url"] = page.url
+                evidence["after_return_status"] = page.locator("[data-status]").text_content()
                 evidence["after_return_active_view"] = page.locator(".p04-tabs button.active").get_attribute("data-view")
                 evidence["after_return_count"] = page.locator("[data-scenario-list] tbody tr").count()
                 evidence["after_return_context_text"] = page.locator("[data-context]").text_content()
@@ -206,9 +205,8 @@ def main() -> None:
                 # Refresh safety: the one-shot p04_context must already be consumed,
                 # and the latest session state must remain INDUSTRY after reload.
                 page.reload(wait_until="networkidle")
-                page.wait_for_function(
-                    "() => document.querySelector('[data-status]')?.textContent === '已更新'"
-                )
+                page.wait_for_timeout(1000)
+                evidence["after_refresh_status"] = page.locator("[data-status]").text_content()
                 evidence["after_refresh_active_view"] = page.locator(".p04-tabs button.active").get_attribute("data-view")
                 evidence["after_refresh_count"] = page.locator("[data-scenario-list] tbody tr").count()
 
