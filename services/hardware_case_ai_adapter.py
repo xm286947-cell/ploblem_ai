@@ -13,6 +13,7 @@ import re
 from typing import Any, Callable, Protocol
 
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_contract import evidence_supports_fact
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_case_word import HardwareWordParseError, ParsedWord, parse_docx
 
@@ -181,17 +182,28 @@ class HardwareCaseAIAdapter:
                 for block_id in block_ids
                 if block_id in evidence_by_block
             ]
-            # A locator alone is insufficient: an unrelated block cannot ground
-            # a claimed fact. Mock/real semantic outputs remain review candidates.
-            if value not in (None, "") and field_name in {"symptom", "root_cause", "actions"}:
-                supported = any(
-                    str(value).strip() in str(block_index[block_id].get("text") or "")
+            # A locator alone is insufficient: every cited block must support
+            # the candidate fact. Keep valid Evidence refs on mismatch so the
+            # Publish Gate can recheck the same proof after human review.
+            if value not in (None, "") and field_name in FACT_FIELDS:
+                available_blocks = [
+                    (block_id, block_index[block_id])
                     for block_id in block_ids
                     if block_id in block_index
-                )
-                if not supported:
-                    refs = []
-                    warnings.append(f"KEY_FACT_UNSUPPORTED:{field_name}")
+                ]
+                mismatched_blocks = [
+                    block_id
+                    for block_id, block in available_blocks
+                    if block.get("text")
+                    and not evidence_supports_fact(value, block.get("text"))
+                ]
+                if mismatched_blocks:
+                    if field_name in {"symptom", "root_cause", "actions"}:
+                        warnings.append(f"KEY_FACT_UNSUPPORTED:{field_name}")
+                    warnings.extend(
+                        f"EVIDENCE_CONTENT_MISMATCH:{field_name}:{block_id}"
+                        for block_id in mismatched_blocks
+                    )
             if value not in (None, "") and not refs and field_name in {
                 "symptom",
                 "root_cause",
