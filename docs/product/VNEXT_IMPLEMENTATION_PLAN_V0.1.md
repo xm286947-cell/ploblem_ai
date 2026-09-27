@@ -198,11 +198,11 @@ TEST_RESULT=104 passed
 - The original candidate remains recorded on `integration/overall-vnext` / PR #212 and is not changed by this fast-track demo.
 - Current demo work is based on the newer `main` SHA above. It does not supersede the canonical branch or represent a TSE/release decision.
 
-M10_RESULT=READY_FOR_TSE
+M10_RESULT=NOT_READY_FOR_TSE
 CANDIDATE_DATE=2026-09-27
 DEPLOYMENT=NOT_EXECUTED
 CANONICAL_PR=https://github.com/xm286947-cell/ploblem_ai/pull/212 (open; base=main)
-NEXT=TSE_CANDIDATE_ACCEPTANCE
+NEXT=CLOSE_SCOPED_BUSINESS_JOURNEYS_THEN_TSE_HANDOFF
 
 ## 2026-09-28 convergence correction (current status)
 
