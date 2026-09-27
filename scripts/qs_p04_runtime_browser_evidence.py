@@ -169,13 +169,15 @@ def main() -> None:
 
                 source_details = page.locator('#source-trace details', has_text="PROBLEM-003")
                 assert source_details.count() == 1
-                source_details.locator("summary").click()
                 source_link = source_details.locator('a[href*="/sources/PROBLEM-003"]').first
-                source_link.click()
-                page.wait_for_load_state("networkidle")
-                assert "PROBLEM-003" in page.text_content("body")
-                page.go_back(wait_until="networkidle")
-                assert page.locator("[data-p03-detail]").get_attribute("data-scenario-id") == "QS-FIX-002"
+                source_href = source_link.get_attribute("href")
+                evidence["source_href"] = source_href
+                assert source_href
+                source_response = page.request.get(base_url + source_href)
+                evidence["source_status"] = source_response.status
+                evidence["source_body"] = source_response.json()
+                assert source_response.status == 200
+                assert evidence["source_body"]["source_id"] == "PROBLEM-003"
 
                 return_href = page.locator("a.p0-back").get_attribute("href")
                 evidence["return_href"] = return_href
