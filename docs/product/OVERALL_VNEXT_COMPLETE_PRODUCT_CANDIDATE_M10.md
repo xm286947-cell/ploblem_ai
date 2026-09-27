@@ -52,4 +52,4 @@ Reproduce the M9 regression from repository root with the exact command in the M
 
 The branch is a runnable candidate for Product Test Center / TSE review. TSE can use the M9 command and the milestone evidence above as the initial regression set. Legacy routes not consumed by this candidate remain subject to feature-local targeted verification; they do not block this candidate or reopen the superseded full audit.
 
-Canonical PR: to be created from `integration/overall-vnext` to `main` after candidate manifest commit.
+Canonical PR: https://github.com/xm286947-cell/ploblem_ai/pull/212 (open, targets `main`).
