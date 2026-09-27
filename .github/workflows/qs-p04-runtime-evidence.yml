@@ -30,4 +30,4 @@ jobs:
           python -m pip install -r requirements.txt playwright
           python -m playwright install --with-deps chromium
       - name: Capture P04 real Chromium runtime evidence
-        run: python scripts/qs_p04_runtime_browser_evidence.py
+        run: PYTHONPATH=. python scripts/qs_p04_runtime_browser_evidence.py
