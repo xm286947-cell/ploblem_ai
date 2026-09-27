@@ -147,4 +147,15 @@ TEST_RESULT=31 passed
 M7_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_quality_capability_p0_console_ued.py tests/test_forward_risk_p1a_ued.py tests/test_product_quality_report_mvp.py
 TEST_RESULT=15 passed
-NEXT=M8_EXISTING_CAPABILITY_COMPATIBILITY
+
+## M8 Existing Capability Compatibility
+
+- Targeted verification covered only routes consumed by Overall navigation and the current issue, Major / Repeat Risk, Quality Scenario, Hardware Case, and Storage workspaces.
+- These existing page and API routes remain reachable with their established return links and contracts.
+- The inspected VNext consumers contain no navigation to legacy `/analysis`, `/statistics`, or `/p0/knowledge/*`; issue detail uses the existing versioned `/api/v2/issues/{id}/analysis` endpoint. No whole-repository audit or route migration was opened.
+- Other feature-local legacy bindings remain pending until a consuming feature reaches implementation, per the approved targeted-verification rule.
+
+M8_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_overall_vnext_v03_frontend_binding.py tests/test_major_workspace_binding.py tests/test_quality_scenario_workspace_binding.py tests/test_hardware_workspace_binding.py tests/test_storage_workspace_binding.py
+TEST_RESULT=12 passed
+NEXT=M9_END_TO_END_INTEGRATION
