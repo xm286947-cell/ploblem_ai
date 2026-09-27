@@ -159,3 +159,20 @@ def test_p04_script_url_uses_hash_of_served_javascript(tmp_path: Path) -> None:
         page = client.get(path)
         assert page.status_code == 200
         assert f'{script_url_prefix}{expected_hash}"' in page.text
+
+def test_p04_return_navigation_context_is_one_shot_and_refresh_safe() -> None:
+    source = (ROOT / "quality_knowledge/web/static/p04_insights.js").read_text(encoding="utf-8")
+
+    assert "function consumeNavigationParams(keys)" in source
+    assert "new URL(window.location.href)" in source
+    assert "target.searchParams.delete(k)" in source
+    assert "window.history.replaceState(window.history.state,'',next)" in source
+    assert "consumeNavigationParams(['p04_context'])" in source
+    assert "consumeNavigationParams(['p04_reset','p04_context'])" in source
+
+    # The navigation-only parameters must be consumed without dropping unrelated
+    # query parameters or the hash, so a later refresh uses the latest session
+    # state instead of replaying stale return/reset context.
+    assert "const query=target.searchParams.toString()" in source
+    assert "target.pathname+(query?'?'+query:'')+target.hash" in source
+
