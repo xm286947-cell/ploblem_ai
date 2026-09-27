@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -145,3 +146,16 @@ def test_p03_return_context_accepts_each_p04_view(tmp_path: Path) -> None:
         href = unescape(response.text.split('class="p0-back" href="', 1)[1].split('"', 1)[0])
         restored = json.loads(parse_qs(urlparse(href).query)["p04_context"][0])
         assert restored == context
+
+
+def test_p04_script_url_uses_hash_of_served_javascript(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    script_url_prefix = '/p0/static/p04_insights.js?v='
+    asset = client.get('/p0/static/p04_insights.js')
+    assert asset.status_code == 200
+    expected_hash = hashlib.sha256(asset.content).hexdigest()
+
+    for path in ("/p0/quality-scenario-insights", "/p0/insights/p04"):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert f'{script_url_prefix}{expected_hash}"' in page.text
