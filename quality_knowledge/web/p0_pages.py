@@ -6,8 +6,10 @@ main application without changing the legacy insight page.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -15,6 +17,49 @@ from fastapi.templating import Jinja2Templates
 
 
 _HERE = Path(__file__).resolve().parent
+
+
+def _p04_return_url(raw_context: str | None) -> str:
+    base = "/p0/quality-scenario-insights"
+    if raw_context is None:
+        return base + "?p04_reset=1"
+    if len(raw_context) > 4096:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    try:
+        context = json.loads(raw_context)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if not isinstance(context, dict) or context.get("contract") != "p04-query-context/v1":
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    view = context.get("view")
+    modes = {
+        "PRODUCT": {"LIFECYCLE_X_BUSINESS_ACTIVITY"},
+        "CUSTOMER": {"PRODUCT_X_BUSINESS_ACTIVITY", "PRODUCT_X_QUALITY_FOCUS"},
+        "INDUSTRY": {"CUSTOMER_X_PRODUCT_OR_FAMILY", "BUSINESS_ACTIVITY_X_QUALITY_FOCUS"},
+    }
+    selected = context.get("selected_object")
+    filters = context.get("filters")
+    page = context.get("page")
+    if view not in modes or context.get("matrix_mode") not in modes[view]:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if selected is not None and (
+        not isinstance(selected, dict)
+        or not isinstance(selected.get("selector_ref"), str)
+        or not selected["selector_ref"].strip()
+        or len(selected["selector_ref"]) > 300
+        or set(selected) != {"selector_ref"}
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    allowed_filters = {"lifecycle", "business_activity", "quality_focus"}
+    if not isinstance(filters, dict) or set(filters) - allowed_filters or any(
+        not isinstance(value, str) or len(value) > 200 for value in filters.values()
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 100000:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if set(context) != {"contract", "view", "selected_object", "filters", "matrix_mode", "page"}:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    return base + "?" + urlencode({"p04_context": json.dumps(context, ensure_ascii=False, separators=(",", ":"))})
 
 
 def create_p0_insights_router(
@@ -84,12 +129,8 @@ def create_p0_insights_router(
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
-        requested_return = request.query_params.get("return_to", "")
-        return_to = requested_return if requested_return in {
-            "/p0/quality-scenario-insights",
-            "/p0/insights/p04",
-        } else ""
         if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
+            return_to = _p04_return_url(request.query_params.get("return_context"))
             scenario = scenario_detail_service.scenario_detail(knowledge_id)
             if scenario is None:
                 raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
@@ -104,6 +145,11 @@ def create_p0_insights_router(
                     "page_title": "场景详情 · 质量能力",
                 },
             )
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+        } else ""
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
@@ -122,12 +168,8 @@ def create_p0_insights_router(
         scenario = scenario_detail_service.scenario_detail(scenario_id)
         if scenario is None:
             raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
-        requested_return = request.query_params.get("return_to", "")
-        return_to = requested_return if requested_return in {
-            "/p0/quality-scenario-insights",
-            "/p0/insights/p04",
-            "/p0/quality-scenarios",
-        } else ""
+        return_context = request.query_params.get("return_context")
+        return_to = _p04_return_url(return_context)
         return templates.TemplateResponse(
             request,
             "p0_quality_scenario_detail.html",
