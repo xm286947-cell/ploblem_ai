@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from playwright.sync_api import sync_playwright
 
 from quality_knowledge.p0.initializer import P0Initializer
@@ -25,6 +27,20 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _storage_stub() -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/", response_class=HTMLResponse)
+    def home():
+        return '<a href="/p0/overall">Overall</a>'
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok"}
+
+    return app
+
+
 def _build_app(root: Path):
     db = root / "p0.db"
     P0Initializer(
@@ -38,6 +54,7 @@ def _build_app(root: Path):
         hardware_case_db_path=root / "hardware.sqlite3",
         hardware_tree_upload_dir=root / "tree_uploads",
         hardware_case_source_root=root / "sources",
+        storage_app=_storage_stub(),
     )
 
 
