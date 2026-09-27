@@ -25,6 +25,47 @@ from quality_knowledge.web.p0_app import create_p0_app
 DEMO_LEGACY_ISSUE_ID = "ITR-VNEXT-DEMO-001"
 
 
+def demo_overall_tasks() -> dict:
+    return {
+        "items": [
+            {
+                "task_id": "DEMO-MAJOR-01",
+                "title": "查看重大问题案例与 Repeat Risk",
+                "workspace_id": "major",
+                "status": "READY",
+                "deep_link": "/p0/cases",
+                "evidence_link": "/p0/overall/evidence?producer_domain=Major",
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-QS-01",
+                "title": "查看 QS-FIX-002 场景与来源",
+                "workspace_id": "quality-scenario",
+                "status": "READY",
+                "deep_link": "/p0/quality-scenarios/QS-FIX-002?return_to=/p0/overall",
+                "evidence_link": "/p0/quality-scenario-sources/PROBLEM-003?return_to=/p0/overall",
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-HARDWARE-01",
+                "title": "进入硬件案例与双树工作区",
+                "workspace_id": "hardware",
+                "status": "READY",
+                "deep_link": "/p0/hardware-cases",
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-STORAGE-01",
+                "title": "进入存储器件寿命专题",
+                "workspace_id": "storage",
+                "status": "READY",
+                "deep_link": "/storage-workspace/",
+                "return_to": "/p0/overall",
+            },
+        ]
+    }
+
+
 def prepare_demo_legacy_database(data_dir: Path) -> Path:
     """Create an isolated Legacy store and one synthetic issue for the demo."""
     from quality_knowledge.web.app import create_legacy_quality_issue_router
@@ -89,6 +130,7 @@ def build_app(data_dir: Path):
         hardware_case_source_root=data_dir / "hardware_case_sources",
         p04_provider=FixtureP04Provider(result_revision="overall-vnext-demo-v1"),
         legacy_quality_issue_db_path=legacy_db,
+        overall_task_provider=demo_overall_tasks,
     )
     if not app.state.overall_shell_enabled:
         raise RuntimeError("OVERALL_SHELL_NOT_ENABLED")
@@ -142,6 +184,13 @@ def main() -> int:
         legacy_detail = client.get(f"/issues/{legacy_issues[0]['knowledge_id']}")
         if legacy_detail.status_code != 200 or DEMO_LEGACY_ISSUE_ID not in legacy_detail.text:
             raise RuntimeError("MVP_LEGACY_DETAIL_FAILED")
+        task_overview = client.get("/api/v2/overall/task-overview")
+        if (
+            task_overview.status_code != 200
+            or task_overview.json().get("state") != "READY"
+            or task_overview.json().get("total") != 4
+        ):
+            raise RuntimeError("MVP_OVERALL_TASK_PROVIDER_FAILED")
         root = client.get("/", follow_redirects=False)
         if root.status_code not in {302, 307} or root.headers.get("location") != "/p0/issues":
             raise RuntimeError("MVP_DEFAULT_ENTRY_FAILED")
@@ -181,6 +230,7 @@ def main() -> int:
     print("OVERALL_SHELL=READY")
     print("P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES")
     print(f"LEGACY_DEMO_DATA=SYNTHETIC_{DEMO_LEGACY_ISSUE_ID}")
+    print("OVERALL_TASKS=SYNTHETIC_4_WORKSPACE_TASKS")
     print(f"DATA_DIR={args.data_dir.resolve()}")
     print(f"WEB_URL=http://{args.host}:{args.port}/p0/overall")
     if args.check:
