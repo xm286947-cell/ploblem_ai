@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,9 @@ def create_p0_app(
     enabled_domains: set[str] | frozenset[str] | None = None,
     storage_app: Any | None = None,
     storage_workspace_prefix: str = DEFAULT_STORAGE_WORKSPACE_PREFIX,
+    testability_enabled: bool | None = None,
+    testability_token: str | None = None,
+    testability_state_root: str | Path | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
 
@@ -88,6 +92,8 @@ def create_p0_app(
     """
     domains = _normalize_domains(enabled_domains)
     root = Path(project_root)
+    primary_db = Path(db_path)
+    testability_mutable_paths: list[Path] = [primary_db]
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
@@ -206,10 +212,13 @@ def create_p0_app(
     app.state.p04_provider = p04_provider or UnavailableP04Provider()
     app.state.p04_service = P04InsightService(app.state.p04_provider)
     app.state.portrait_provider = portrait_provider or UnavailablePortraitProvider()
-    app.state.portrait_repository = PortraitArchiveRepository(
-        portrait_db_path
-        or Path(db_path).with_name(Path(db_path).stem + ".p04-portrait.db")
+    portrait_db = (
+        Path(portrait_db_path)
+        if portrait_db_path is not None
+        else primary_db.with_name(primary_db.stem + ".p04-portrait.db")
     )
+    testability_mutable_paths.append(portrait_db)
+    app.state.portrait_repository = PortraitArchiveRepository(portrait_db)
     app.state.portrait_service = PortraitService(
         app.state.portrait_provider,
         app.state.portrait_repository,
@@ -243,13 +252,15 @@ def create_p0_app(
             if major_attachment_root is not None
             else major_db.with_name(major_db.stem + "_attachments")
         )
+        major_runtime_db = major_db.with_name(major_db.name + ".runtime.db")
+        testability_mutable_paths.extend([major_db, major_runtime_db, attachment_root])
         artifact_root = Path(major_artifact_root) if major_artifact_root is not None else root
         artifacts = JsonArtifactRepository(artifact_root)
         major_repository = MajorKnowledgeRepository(major_db, attachment_root)
         major_case_service = MajorCaseProductionService(
             major_repository,
             artifacts,
-            major_db.with_name(major_db.name + ".runtime.db"),
+            major_runtime_db,
             provider=major_provider,
         )
         search = MajorPublishedCaseSearchAdapter(artifacts)
@@ -266,7 +277,8 @@ def create_p0_app(
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
 
         if repeat_web is None:
-            repeat_db = Path(db_path).with_name(Path(db_path).name + ".repeat-risk.db")
+            repeat_db = primary_db.with_name(primary_db.name + ".repeat-risk.db")
+            testability_mutable_paths.append(repeat_db)
             repeat_web = RepeatWebFacade.from_project(
                 issue_repository=repository,
                 repeat_db_path=repeat_db,
@@ -284,16 +296,21 @@ def create_p0_app(
             if hardware_case_db_path is not None
             else Path(db_path).with_name("hardware_case_mvp.db")
         )
+        testability_mutable_paths.append(hardware_db)
         hardware_case_repository = HardwareCaseRepository(hardware_db)
         hardware_case_service = HardwareCaseBackendService(hardware_case_repository)
         app.state.hardware_case_repository = hardware_case_repository
         app.state.hardware_case_service = hardware_case_service
 
-        hardware_case_source_store = HardwareCaseSourceStore(
-            hardware_db,
+        hardware_source_root = (
             Path(hardware_case_source_root)
             if hardware_case_source_root is not None
-            else hardware_db.with_name(hardware_db.stem + "_sources"),
+            else hardware_db.with_name(hardware_db.stem + "_sources")
+        )
+        testability_mutable_paths.append(hardware_source_root)
+        hardware_case_source_store = HardwareCaseSourceStore(
+            hardware_db,
+            hardware_source_root,
         )
         app.state.hardware_case_source_store = hardware_case_source_store
 
@@ -312,11 +329,13 @@ def create_p0_app(
         app.state.hardware_case_intake_service = hardware_case_intake_service
 
         hardware_tree_import_repository = HardwareTreeImportRepository(hardware_db)
-        hardware_tree_file_store = HardwareTreeImportFileStore(
+        hardware_tree_root = (
             Path(hardware_tree_upload_dir)
             if hardware_tree_upload_dir is not None
             else hardware_db.with_name(hardware_db.stem + "_tree_uploads")
         )
+        testability_mutable_paths.append(hardware_tree_root)
+        hardware_tree_file_store = HardwareTreeImportFileStore(hardware_tree_root)
         app.state.hardware_tree_import_repository = hardware_tree_import_repository
         app.state.hardware_tree_file_store = hardware_tree_file_store
 
@@ -362,6 +381,36 @@ def create_p0_app(
     else:
         app.include_router(create_hardware_case_pages_router())
         root_target = "/p0/hardware-cases"
+
+    effective_testability = testability_enabled
+    if effective_testability is None:
+        effective_testability = os.getenv("OVERALL_TESTABILITY_ENABLED", "").strip() == "1"
+    app.state.overall_testability_adapter = None
+    if effective_testability:
+        if not app.state.overall_shell_enabled:
+            raise ValueError("OVERALL_TESTABILITY_REQUIRES_FULL_PLATFORM")
+        state_root_value = testability_state_root or os.getenv(
+            "OVERALL_TESTABILITY_STATE_ROOT"
+        )
+        token_value = testability_token or os.getenv("OVERALL_TESTABILITY_TOKEN")
+        if not state_root_value:
+            raise ValueError("OVERALL_TESTABILITY_STATE_ROOT_REQUIRED")
+        if not token_value:
+            raise ValueError("OVERALL_TESTABILITY_TOKEN_REQUIRED")
+        from quality_knowledge.web.overall_testability import (
+            OverallTestabilityAdapter,
+            create_overall_testability_router,
+        )
+
+        adapter = OverallTestabilityAdapter(
+            state_root=state_root_value,
+            token=token_value,
+            mutable_paths=testability_mutable_paths,
+            p0_repository=repository,
+            hardware_case_service=getattr(app.state, "hardware_case_service", None),
+        )
+        app.state.overall_testability_adapter = adapter
+        app.include_router(create_overall_testability_router(adapter))
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
