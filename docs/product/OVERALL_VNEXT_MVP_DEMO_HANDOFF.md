@@ -47,6 +47,7 @@ python scripts/overall_vnext_demo.py --check
 - Focused Overall/workspace regression: **27 passed** (Overall Shell, product task spaces, Legacy binding presentation, knowledge route compatibility, parent integration, case/knowledge navigation, shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
 - Existing P0/P1/Knowledge Production page regression: **32 passed**.
 - Legacy binding/import/analysis/statistics plus Overall shell regression: **21 passed**.
+- Synthetic OpenAI Mock validation: **78 passed** across Runtime, Major, Repeat, Hardware, Knowledge Production, Storage, SDK, streaming, secret/resume, and Provider Contract; see `OVERALL_VNEXT_OPENAI_MOCK_VALIDATION.md`.
 - Launcher `--check`: **PASS** on a fresh directory and on repeated startup. It covers Overall task spaces and the four-item task provider, P0 Issues, Legacy Issues/detail/Analysis/Import/Statistics, P04, Hardware Case, Storage, Published Knowledge, Unified Knowledge Production, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
 - Formal S11 browser regression was not run. The smoke confirms demo route availability only; it does not claim S11 acceptance.
 - Full historical M1–M9 result of 104 tests is recorded in the original implementation plan and was not rerun on this demo branch.
