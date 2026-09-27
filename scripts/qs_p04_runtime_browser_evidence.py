@@ -201,6 +201,7 @@ def main() -> None:
                 evidence["after_return_session"] = json.loads(
                     page.evaluate("sessionStorage.getItem('p04-context')")
                 )
+                evidence["after_return_runtime"] = page.evaluate("window.__P04_RUNTIME_EVIDENCE__")
 
                 # Refresh safety: the one-shot p04_context must already be consumed,
                 # and the latest session state must remain INDUSTRY after reload.
@@ -209,6 +210,7 @@ def main() -> None:
                 evidence["after_refresh_status"] = page.locator("[data-status]").text_content()
                 evidence["after_refresh_active_view"] = page.locator(".p04-tabs button.active").get_attribute("data-view")
                 evidence["after_refresh_count"] = page.locator("[data-scenario-list] tbody tr").count()
+                evidence["after_refresh_runtime"] = page.evaluate("window.__P04_RUNTIME_EVIDENCE__")
 
                 browser.close()
         finally:
