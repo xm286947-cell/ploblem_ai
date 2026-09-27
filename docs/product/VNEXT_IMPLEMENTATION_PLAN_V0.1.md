@@ -106,4 +106,14 @@ M3_SYNC_MAIN_SHA=dffa846cd30f8dcaf92658f40e29c3cc713be5d6
 M3_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_overall_frontend_parent_integration.py tests/test_major_workspace_binding.py tests/test_hardware_workspace_binding.py tests/test_major_knowledge_publication_contract.py tests/test_historical_case_consumer_contract.py tests/test_hardware_case_knowledge_p0_contract.py
 TEST_RESULT=34 passed
-NEXT=M4_QUALITY_SCENARIO_AND_INSIGHTS
+
+## M4 Quality Scenario and Insights
+
+- Reused the existing Quality Scenario Library, P04 insight provider contract, and portrait/archive contracts.
+- Verified published scenario identity, source references, Evidence and safe return-context round trip through the existing P0 host.
+- No new route, page, or Domain repository integration was needed for this milestone.
+
+M4_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_quality_scenario_workspace_binding.py tests/test_p04_real_integration.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_quality_insights_drilldown_fix.py
+TEST_RESULT=25 passed
+NEXT=M5_SPECIALIST_WORKSPACES_AND_STORAGE
