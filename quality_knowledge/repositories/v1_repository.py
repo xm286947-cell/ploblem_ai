@@ -49,30 +49,32 @@ CREATE INDEX IF NOT EXISTS idx_open_question_issue ON analysis_open_question(kno
 def _dump(x): return json.dumps(x,ensure_ascii=False,default=str)
 
 class IssueKnowledgeRepository:
-    def __init__(self,db_path:str|Path):
-        self.db_path=Path(db_path); self.db_path.parent.mkdir(parents=True,exist_ok=True)
-        with self.connect() as c:
-            c.executescript(SCHEMA)
-            cols={r['name'] for r in c.execute('PRAGMA table_info(issue_capability_gap)').fetchall()}
-            for name in ['recommended_action','action_type','action_target','expected_prevention_effect','priority','first_action','verification_metric']:
-                if name not in cols: c.execute(f'ALTER TABLE issue_capability_gap ADD COLUMN {name} TEXT')
-            vcols={r['name'] for r in c.execute('PRAGMA table_info(quality_issue_version)').fetchall()}
-            if 'mapping_config_id' not in vcols: c.execute('ALTER TABLE quality_issue_version ADD COLUMN mapping_config_id TEXT')
-            if 'mapping_config_version' not in vcols: c.execute('ALTER TABLE quality_issue_version ADD COLUMN mapping_config_version INTEGER')
-            if 'issue_domain' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain TEXT DEFAULT 'AUTO'")
-            if 'issue_domain_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain_source TEXT DEFAULT 'AI'")
-            if 'year' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year TEXT DEFAULT ''")
-            if 'year_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year_source TEXT DEFAULT 'ISSUE_ID'")
-            if 'month_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN month_source TEXT DEFAULT 'SOURCE_DATA'")
-            rows=c.execute("SELECT v.issue_version_id,q.business_issue_id,v.year,v.month FROM quality_issue_version v JOIN quality_issue q ON q.knowledge_id=v.knowledge_id").fetchall()
-            for row in rows:
-                parsed_year,parsed_month=parse_itr_period(row['business_issue_id'])
-                if not str(row['year'] or '').strip() and parsed_year:
-                    c.execute("UPDATE quality_issue_version SET year=?,year_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_year,row['issue_version_id']))
-                if not str(row['month'] or '').strip() and parsed_month:
-                    c.execute("UPDATE quality_issue_version SET month=?,month_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_month,row['issue_version_id']))
-            acols={r['name'] for r in c.execute('PRAGMA table_info(analysis_run)').fetchall()}
-            if 'analysis_profile_json' not in acols: c.execute('ALTER TABLE analysis_run ADD COLUMN analysis_profile_json TEXT')
+    def __init__(self,db_path:str|Path, *, initialize_schema: bool = True):
+        self.db_path=Path(db_path)
+        if initialize_schema:
+            self.db_path.parent.mkdir(parents=True,exist_ok=True)
+            with self.connect() as c:
+                c.executescript(SCHEMA)
+                cols={r['name'] for r in c.execute('PRAGMA table_info(issue_capability_gap)').fetchall()}
+                for name in ['recommended_action','action_type','action_target','expected_prevention_effect','priority','first_action','verification_metric']:
+                    if name not in cols: c.execute(f'ALTER TABLE issue_capability_gap ADD COLUMN {name} TEXT')
+                vcols={r['name'] for r in c.execute('PRAGMA table_info(quality_issue_version)').fetchall()}
+                if 'mapping_config_id' not in vcols: c.execute('ALTER TABLE quality_issue_version ADD COLUMN mapping_config_id TEXT')
+                if 'mapping_config_version' not in vcols: c.execute('ALTER TABLE quality_issue_version ADD COLUMN mapping_config_version INTEGER')
+                if 'issue_domain' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain TEXT DEFAULT 'AUTO'")
+                if 'issue_domain_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN issue_domain_source TEXT DEFAULT 'AI'")
+                if 'year' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year TEXT DEFAULT ''")
+                if 'year_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN year_source TEXT DEFAULT 'ISSUE_ID'")
+                if 'month_source' not in vcols: c.execute("ALTER TABLE quality_issue_version ADD COLUMN month_source TEXT DEFAULT 'SOURCE_DATA'")
+                rows=c.execute("SELECT v.issue_version_id,q.business_issue_id,v.year,v.month FROM quality_issue_version v JOIN quality_issue q ON q.knowledge_id=v.knowledge_id").fetchall()
+                for row in rows:
+                    parsed_year,parsed_month=parse_itr_period(row['business_issue_id'])
+                    if not str(row['year'] or '').strip() and parsed_year:
+                        c.execute("UPDATE quality_issue_version SET year=?,year_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_year,row['issue_version_id']))
+                    if not str(row['month'] or '').strip() and parsed_month:
+                        c.execute("UPDATE quality_issue_version SET month=?,month_source='ISSUE_ID' WHERE issue_version_id=?",(parsed_month,row['issue_version_id']))
+                acols={r['name'] for r in c.execute('PRAGMA table_info(analysis_run)').fetchall()}
+                if 'analysis_profile_json' not in acols: c.execute('ALTER TABLE analysis_run ADD COLUMN analysis_profile_json TEXT')
     def connect(self):
         c=sqlite3.connect(self.db_path); c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');return c
     def begin_import(self,batch_id,source_file,business_type,diagnostics=None):

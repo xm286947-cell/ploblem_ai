@@ -85,10 +85,11 @@ def _confidence(raw, fallback=0.0):
 
 
 class QualityCapabilityExtension:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, initialize_schema: bool = True):
         self.db_path = Path(db_path)
-        with self.connect() as connection:
-            connection.executescript(SCHEMA)
+        if initialize_schema:
+            with self.connect() as connection:
+                connection.executescript(SCHEMA)
 
     def connect(self):
         connection = sqlite3.connect(self.db_path)
