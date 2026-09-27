@@ -101,6 +101,58 @@ def test_legacy_binding_fails_closed_without_creating_or_migrating_db(
         assert legacy_path.read_bytes() == before
 
 
+
+def test_legacy_import_preview_reports_uninitialized_mapping_without_500_or_auto_activation(
+    tmp_path,
+):
+    p0_path = _p0_db(tmp_path / "p0.db")
+    legacy_path = _legacy_db(tmp_path / "legacy.db")
+    workbook_path = tmp_path / "issues.xlsx"
+    _workbook(workbook_path)
+
+    with sqlite3.connect(legacy_path) as connection:
+        before_count = connection.execute(
+            "SELECT COUNT(*) FROM mapping_config WHERE business_type='PLC'"
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE mapping_config SET status='INACTIVE' WHERE business_type='PLC'"
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM mapping_config WHERE business_type='PLC' AND status='ACTIVE'"
+        ).fetchone()[0] == 0
+
+    client = _host(p0_path, legacy_path)
+
+    for path in ("/import/preview", "/import"):
+        with workbook_path.open("rb") as stream:
+            response = client.post(
+                path,
+                data={"business_type": "PLC"},
+                files={"file": (workbook_path.name, stream)},
+            )
+        assert response.status_code == 409
+        assert "MAPPING_NOT_INITIALIZED: PLC" in response.text
+        assert "Mapping 尚未初始化或激活" in response.text
+
+    with workbook_path.open("rb") as stream:
+        api_response = client.post(
+            "/api/import/preview",
+            data={"business_type": "PLC"},
+            files={"file": (workbook_path.name, stream)},
+        )
+    assert api_response.status_code == 409
+    assert api_response.json()["detail"].startswith("MAPPING_NOT_INITIALIZED: PLC")
+    assert "Mapping 尚未初始化或激活" in api_response.json()["detail"]
+
+    with sqlite3.connect(legacy_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM mapping_config WHERE business_type='PLC'"
+        ).fetchone()[0] == before_count
+        assert connection.execute(
+            "SELECT COUNT(*) FROM mapping_config WHERE business_type='PLC' AND status='ACTIVE'"
+        ).fetchone()[0] == 0
+
+
 def test_legacy_import_analysis_statistics_share_one_host_and_isolated_database(
     tmp_path, monkeypatch
 ):
