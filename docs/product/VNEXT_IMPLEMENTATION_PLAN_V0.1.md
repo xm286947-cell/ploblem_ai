@@ -85,4 +85,14 @@ COMPLETE_CANDIDATE_TARGET=After M9 integration and M10 release assembly; schedul
 M1_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py tests/test_overall_vnext_v03_frontend_binding.py
 TEST_RESULT=13 passed
-NEXT=M2_CURRENT_PROBLEM_WORKSPACE
+
+## M2 Current Problem Workspace
+
+- Reused the existing `/p0/issues` page and `/api/v2/issues` contract without changing issue-domain behavior or ownership.
+- Kept `/` redirecting to `/p0/issues`; added a direct return link from the existing workspace to `/p0/overall`.
+- Verified Overall entry, canonical root route, problem list API, and return navigation in the unified host.
+
+M2_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_overall_frontend_parent_integration.py
+TEST_RESULT=5 passed
+NEXT=M3_CASES_AND_KNOWLEDGE
