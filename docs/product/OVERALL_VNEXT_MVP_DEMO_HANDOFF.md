@@ -20,9 +20,10 @@ DEPLOYMENT=LOCAL_DEMO_ONLY
 - Compatibility redirects for `/p0/knowledge`, `/p0/knowledge/cases`, `/p0/knowledge/repeat-case`, `/p0/knowledge/storage-lifetime`, and `/p0/knowledge/hardware`.
 - The current `main` changes from PRs #213/#214 and #215, including the complete #207 state-restoration fix.
 - Deterministic synthetic P04 data from the repository's `FixtureP04Provider`, including `QS-FIX-002` and source `PROBLEM-003`.
-- Isolated P0, Hardware Case, uploads, sources, Storage, and shared Knowledge Production data paths. The launcher clears any inherited Legacy DB binding so the demo does not touch a production Legacy DB or the repository's default Knowledge Production data.
+- An isolated Legacy Quality Issue database with the existing PLC Mapping baseline and synthetic issue `ITR-VNEXT-DEMO-001`, enabling the original issue, analysis, import, and statistics pages on the same host.
+- Isolated P0, Legacy Quality Issue, Hardware Case, uploads, sources, Storage, and shared Knowledge Production data paths. The launcher ignores any inherited Legacy DB binding so the demo does not touch a production Legacy DB or the repository's default Knowledge Production data.
 
-The fixture is visibly identified in startup output as `P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES`; it is demo data and does not represent customer records.
+The fixtures are visibly identified in startup output as `P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES` and `LEGACY_DEMO_DATA=SYNTHETIC_ITR-VNEXT-DEMO-001`; they are demo data and do not represent customer records.
 
 ## Run
 
@@ -44,7 +45,8 @@ python scripts/overall_vnext_demo.py --check
 
 - Focused Overall/workspace regression: **27 passed** (Overall Shell, product task spaces, Legacy binding presentation, knowledge route compatibility, parent integration, case/knowledge navigation, shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
 - Existing P0/P1/Knowledge Production page regression: **32 passed**.
-- Launcher `--check`: **PASS** for Overall, Issues, P04, Hardware Case, Storage, Published Knowledge, Unified Knowledge Production, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
+- Legacy binding/import/analysis/statistics plus Overall shell regression: **21 passed**.
+- Launcher `--check`: **PASS** on a fresh directory and on repeated startup. It covers Overall task spaces, P0 Issues, Legacy Issues/detail/Analysis/Import/Statistics, P04, Hardware Case, Storage, Published Knowledge, Unified Knowledge Production, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
 - Formal S11 browser regression was not run. The smoke confirms demo route availability only; it does not claim S11 acceptance.
 - Full historical M1–M9 result of 104 tests is recorded in the original implementation plan and was not rerun on this demo branch.
 

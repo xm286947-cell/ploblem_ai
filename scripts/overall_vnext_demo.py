@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from openpyxl import Workbook
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -18,6 +20,49 @@ if str(ROOT) not in sys.path:
 from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.p04.fixtures import FixtureP04Provider
 from quality_knowledge.web.p0_app import create_p0_app
+
+
+DEMO_LEGACY_ISSUE_ID = "ITR-VNEXT-DEMO-001"
+
+
+def prepare_demo_legacy_database(data_dir: Path) -> Path:
+    """Create an isolated Legacy store and one synthetic issue for the demo."""
+    from quality_knowledge.web.app import create_legacy_quality_issue_router
+
+    legacy_db = data_dir / "legacy_quality_issue.sqlite3"
+    _, legacy_state = create_legacy_quality_issue_router(
+        legacy_db,
+        initialize_schema=True,
+    )
+    mapping_service = legacy_state.mapping_configuration_service
+    if mapping_service.get_effective_config("PLC") is None:
+        mapping_result = mapping_service.migrate_yaml(
+            ROOT / "quality_knowledge/config/plc_fields.yaml",
+            "PLC",
+            dry_run=False,
+        )
+        if mapping_result.get("status") != "ACTIVE":
+            raise RuntimeError("DEMO_LEGACY_MAPPING_NOT_ACTIVE")
+    service = legacy_state.knowledge_issue_service
+    if not service.query_issues({"business_issue_id": DEMO_LEGACY_ISSUE_ID}, limit=1):
+        workbook_path = data_dir / "legacy_demo_seed.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["ITR单号", "问题描述", "产品", "月份"])
+        sheet.append(
+            [
+                DEMO_LEGACY_ISSUE_ID,
+                "合成问题：Overall VNext Legacy 工作台与分析链演示",
+                "PLC",
+                "2026-09",
+            ]
+        )
+        workbook.save(workbook_path)
+        try:
+            service.import_file(workbook_path, "PLC")
+        finally:
+            workbook_path.unlink(missing_ok=True)
+    return legacy_db
 
 
 def build_app(data_dir: Path):
@@ -35,6 +80,7 @@ def build_app(data_dir: Path):
         initializer.verify_ready(p0_db)
     else:
         initializer.initialize(p0_db)
+    legacy_db = prepare_demo_legacy_database(data_dir)
     app = create_p0_app(
         p0_db,
         project_root=ROOT,
@@ -42,6 +88,7 @@ def build_app(data_dir: Path):
         hardware_tree_upload_dir=data_dir / "hardware_tree_uploads",
         hardware_case_source_root=data_dir / "hardware_case_sources",
         p04_provider=FixtureP04Provider(result_revision="overall-vnext-demo-v1"),
+        legacy_quality_issue_db_path=legacy_db,
     )
     if not app.state.overall_shell_enabled:
         raise RuntimeError("OVERALL_SHELL_NOT_ENABLED")
@@ -74,6 +121,10 @@ def main() -> int:
             "/p0/overall/areas/professional-topics",
             "/p0/overall/areas/management",
             "/p0/issues",
+            "/issues",
+            "/analysis",
+            "/import",
+            "/statistics",
             "/p0/quality-scenario-insights",
             "/p0/hardware-cases",
             "/storage-workspace/",
@@ -83,6 +134,14 @@ def main() -> int:
             response = client.get(path)
         if response.status_code != 200:
             raise RuntimeError(f"MVP_ROUTE_FAILED:{path}:{response.status_code}")
+        legacy_issues = app.state.legacy_quality_issue_services.knowledge_issue_service.query_issues(
+            {"business_issue_id": DEMO_LEGACY_ISSUE_ID}, limit=1
+        )
+        if not legacy_issues:
+            raise RuntimeError("MVP_LEGACY_FIXTURE_FAILED")
+        legacy_detail = client.get(f"/issues/{legacy_issues[0]['knowledge_id']}")
+        if legacy_detail.status_code != 200 or DEMO_LEGACY_ISSUE_ID not in legacy_detail.text:
+            raise RuntimeError("MVP_LEGACY_DETAIL_FAILED")
         root = client.get("/", follow_redirects=False)
         if root.status_code not in {302, 307} or root.headers.get("location") != "/p0/issues":
             raise RuntimeError("MVP_DEFAULT_ENTRY_FAILED")
@@ -121,6 +180,7 @@ def main() -> int:
     print("APP_FACTORY=create_p0_app")
     print("OVERALL_SHELL=READY")
     print("P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES")
+    print(f"LEGACY_DEMO_DATA=SYNTHETIC_{DEMO_LEGACY_ISSUE_ID}")
     print(f"DATA_DIR={args.data_dir.resolve()}")
     print(f"WEB_URL=http://{args.host}:{args.port}/p0/overall")
     if args.check:
