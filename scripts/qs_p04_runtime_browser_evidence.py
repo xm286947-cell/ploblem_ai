@@ -125,6 +125,8 @@ def main() -> None:
                 page.on("request", on_request)
                 page.on("response", on_response)
                 page.on("console", lambda msg: evidence["console_errors"].append(msg.text) if msg.type == "error" else None)
+                evidence["_page_errors"] = []
+                page.on("pageerror", lambda exc: evidence["_page_errors"].append(str(exc)))
 
                 page.goto(base_url + "/p0/quality-scenario-insights", wait_until="networkidle")
 
@@ -202,6 +204,7 @@ def main() -> None:
                     page.evaluate("sessionStorage.getItem('p04-context')")
                 )
                 evidence["after_return_runtime"] = page.evaluate("window.__P04_RUNTIME_EVIDENCE__")
+                evidence["after_return_page_errors"] = list(evidence.pop("_page_errors", []))
 
                 # Refresh safety: the one-shot p04_context must already be consumed,
                 # and the latest session state must remain INDUSTRY after reload.
