@@ -116,4 +116,14 @@ TEST_RESULT=34 passed
 M4_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_quality_scenario_workspace_binding.py tests/test_p04_real_integration.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_quality_insights_drilldown_fix.py
 TEST_RESULT=25 passed
-NEXT=M5_SPECIALIST_WORKSPACES_AND_STORAGE
+
+## M5 Specialist Workspaces / Storage
+
+- Reused the existing Storage FastAPI product through the approved single-host mount at `/storage-workspace/`.
+- Verified Overall navigation, return link, health/API paths, and the standalone Storage host compatibility; Storage retains its own internal structure and database binding.
+- No second host or port was added.
+
+M5_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_storage_workspace_binding.py products/storage_rc1/tests/test_ui_next_issue132.py tests/test_overall_frontend_parent_integration.py
+TEST_RESULT=14 passed
+NEXT=M6_EVIDENCE_SOURCE_AND_RETURN
