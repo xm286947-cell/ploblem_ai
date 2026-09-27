@@ -304,6 +304,117 @@ def test_m4_unknown_mapping_node_is_not_persisted(tmp_path: Path):
     assert any("MAPPING_NODE_NOT_FOUND" in item for item in result["warnings"])
 
 
+def test_m4_duplicate_mapping_is_preserved_once_and_requires_review(tmp_path: Path):
+    service = _backend(tmp_path)
+    _trees(service)
+
+    def duplicate_mapping(document):
+        result = _structurer(document)
+        first = result["circuit_feature_links"][0]
+        duplicate = {**first, "confidence": 0.1, "evidence_block_ids": []}
+        result["circuit_feature_links"].append(duplicate)
+        return result
+
+    result = HardwareCaseAIAdapter(service, duplicate_mapping).ingest_docx(
+        _docx(tmp_path)
+    )
+
+    mappings = [
+        item
+        for item in service.repository.list_mappings(case_id="A1234")
+        if item["tree_type"] == "CIRCUIT_FEATURE"
+        and item["node_id"] == "CF-POWER"
+    ]
+    assert len(mappings) == 1
+    assert result["status"] == "NEEDS_REVIEW"
+    assert result["circuit_suggestion_count"] == 1
+    assert any(item.startswith("DUPLICATE_MAPPING:") for item in result["warnings"])
+    assert mappings[0]["confidence"] == 0.91
+    assert service.publish_case("A1234")["passed"] is False
+
+
+def test_m4_duplicate_mapping_retry_is_idempotent_and_preserves_existing(tmp_path: Path):
+    service = _backend(tmp_path)
+    _trees(service)
+    service.create_case(
+        {
+            "case_id": "A1234",
+            "title": "电源上电复位",
+            "source_refs": [],
+            "facts": {},
+        }
+    )
+    service.set_mapping(
+        {
+            "mapping_id": "MAP-ORIGINAL",
+            "case_id": "A1234",
+            "tree_type": "CIRCUIT_FEATURE",
+            "node_id": "CF-POWER",
+            "relation_role": "PRIMARY",
+            "mapping_status": "CONFIRMED",
+            "confidence": 0.95,
+            "basis_refs": [],
+        }
+    )
+
+    result = HardwareCaseAIAdapter(
+        service, _structurer
+    ).ingest_docx(_docx(tmp_path))
+
+    mappings = service.repository.list_mappings(case_id="A1234")
+    existing = next(item for item in mappings if item["mapping_id"] == "MAP-ORIGINAL")
+    assert result["status"] == "NEEDS_REVIEW"
+    assert any(item.startswith("DUPLICATE_MAPPING:") for item in result["warnings"])
+    assert existing["mapping_status"] == "CONFIRMED"
+    assert existing["confidence"] == 0.95
+    assert len(
+        [
+            item
+            for item in mappings
+            if item["tree_type"] == "CIRCUIT_FEATURE"
+            and item["node_id"] == "CF-POWER"
+        ]
+    ) == 1
+
+
+def test_m4_mixed_valid_and_duplicate_mappings_keep_only_valid_semantic_rows(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    _trees(service)
+    service.save_tree_node(
+        {
+            "node_id": "CF-SECOND",
+            "tree_type": "CIRCUIT_FEATURE",
+            "name": "输入滤波",
+            "path": ["电源", "输入滤波"],
+            "source_ref": "synthetic:circuit.xlsx",
+            "active": True,
+        }
+    )
+
+    def mixed_mapping(document):
+        result = _structurer(document)
+        result["circuit_feature_links"] = [
+            {"node_id": "CF-POWER", "confidence": 0.91, "evidence_block_ids": []},
+            {"node_id": "CF-POWER", "confidence": 0.1, "evidence_block_ids": []},
+            {"node_id": "CF-SECOND", "confidence": 0.88, "evidence_block_ids": []},
+        ]
+        return result
+
+    result = HardwareCaseAIAdapter(service, mixed_mapping).ingest_docx(_docx(tmp_path))
+    mappings = [
+        item
+        for item in service.repository.list_mappings(case_id="A1234")
+        if item["tree_type"] == "CIRCUIT_FEATURE"
+    ]
+
+    assert result["status"] == "NEEDS_REVIEW"
+    assert "DUPLICATE_MAPPING:CIRCUIT_FEATURE:CF-POWER" in result["warnings"]
+    assert {item["node_id"] for item in mappings} == {"CF-POWER", "CF-SECOND"}
+    assert len(mappings) == 2
+
+
 def test_m4_structurer_failure_preserves_source_and_no_fake_confirmed_values(tmp_path: Path):
     service = _backend(tmp_path)
 
