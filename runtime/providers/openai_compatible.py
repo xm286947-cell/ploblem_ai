@@ -165,22 +165,35 @@ def _safe_proxy(value: str) -> str:
 
 
 def _write_provider_trace(event: dict[str, Any]) -> None:
-    line = "[runtime-provider] " + json.dumps(
-        event,
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    print(line, flush=True)
-    path = os.environ.get("RUNTIME_PROVIDER_TRACE_FILE", "").strip()
-    if not path:
-        return
     try:
-        trace_path = Path(path)
-        trace_path.parent.mkdir(parents=True, exist_ok=True)
-        with trace_path.open("a", encoding="utf-8", errors="replace") as handle:
-            handle.write(line + "\n")
-            handle.flush()
+        line = "[runtime-provider] " + json.dumps(
+            event,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     except Exception:
+        # Observability must never change Provider execution semantics.
+        return
+
+    # Persist the UTF-8 trace before touching stdout. Windows consoles may use
+    # CP936/GBK and cannot encode arbitrary datasheet characters. A trace file
+    # is the durable diagnostic channel; console output is only best effort.
+    path = os.environ.get("RUNTIME_PROVIDER_TRACE_FILE", "").strip()
+    if path:
+        try:
+            trace_path = Path(path)
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with trace_path.open("a", encoding="utf-8", errors="replace") as handle:
+                handle.write(line + "\n")
+                handle.flush()
+        except Exception:
+            pass
+
+    try:
+        print(line, flush=True)
+    except Exception:
+        # UnicodeEncodeError is the expected Windows CP936 failure mode, but
+        # all console/logging failures are intentionally non-fatal.
         pass
 
 
