@@ -68,6 +68,11 @@ def main() -> int:
         client = TestClient(app)
         for path in (
             "/p0/overall",
+            "/p0/overall/areas/current-problem",
+            "/p0/overall/areas/cases-knowledge",
+            "/p0/overall/areas/scenarios-insights",
+            "/p0/overall/areas/professional-topics",
+            "/p0/overall/areas/management",
             "/p0/issues",
             "/p0/quality-scenario-insights",
             "/p0/hardware-cases",

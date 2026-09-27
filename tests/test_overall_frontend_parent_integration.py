@@ -123,6 +123,30 @@ def test_case_and_knowledge_navigation_uses_existing_product_pages(tmp_path):
         assert f'href="{path}"><strong>{label}</strong>' in page.text
 
 
+def test_vnext_product_areas_cover_frozen_information_architecture(tmp_path):
+    client = _client(tmp_path)
+    expected = {
+        "current-problem": ("当前问题", "/p0/issues"),
+        "cases-knowledge": ("案例与知识", "/p0/cases"),
+        "scenarios-insights": ("质量场景与洞察", "/p0/quality-scenario-insights?view=PRODUCT"),
+        "professional-topics": ("专业专题", "/storage-workspace/"),
+        "management": ("管理与配置", "/p0/data-intake"),
+    }
+
+    for area_id, (title, capability_path) in expected.items():
+        page = client.get(f"/p0/overall/areas/{area_id}")
+        assert page.status_code == 200
+        assert f"<h1>{title}</h1>" in page.text
+        assert f'href="{capability_path}"' in page.text
+
+    current = client.get("/p0/overall/areas/current-problem")
+    assert "Repeat Risk 保持在当前问题详情和彻底解决流程中" in current.text
+    assert "当前运行环境未绑定 Legacy 数据库" in current.text
+
+    missing = client.get("/p0/overall/areas/not-found")
+    assert missing.status_code == 404
+
+
 def test_parent_workspace_return_paths_all_target_canonical_overall_shell(tmp_path):
     client = _client(tmp_path)
 

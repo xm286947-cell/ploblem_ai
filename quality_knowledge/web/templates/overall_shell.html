@@ -1,6 +1,6 @@
 {% extends "p0_base.html" %}
 {% block title %}总体工作台{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi01">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi03">{% endblock %}
 {% block shell_product %}质量产品总体{% endblock %}
 {% block breadcrumb %}总体工作台{% endblock %}
 {% block body %}
@@ -12,6 +12,12 @@
   </div>
   <a class="overall-secondary" href="/p0/issues">进入问题工作台</a>
 </section>
+
+<nav class="overall-area-nav" aria-label="总体产品工作区">
+  {% for item in product_areas %}
+  <a href="/p0/overall/areas/{{ item.area_id }}">{{ item.title }}</a>
+  {% endfor %}
+</nav>
 
 <section class="overall-card">
   <div class="overall-card-head">
