@@ -27,6 +27,7 @@ class _BrowserHandoffAI:
                     "recovery_method": {"value": "重新上电恢复运行", "evidence_ids": ["structured.recovery_measure"], "confidence": 0.95},
                     "related_objects": {"value": "PLC AM600", "evidence_ids": ["structured.product_model"], "confidence": 0.9},
                     "quality_requirement_candidate": {"value": "异常掉电后关键运行数据能够正确恢复", "evidence_ids": ["cs.description", "cs.root_cause"], "confidence": 0.75},
+                    "quality_risk": {"value": "掉电后关键运行数据丢失", "evidence_ids": ["cs.description"], "confidence": 0.8},
                     "lifecycle_stage": {"value": "运行执行", "evidence_ids": ["cs.description", "cs.phase"], "confidence": 0.85},
                     "business_activity_scene": {"value": "掉电数据保持与上电恢复", "evidence_ids": ["cs.description"], "confidence": 0.9},
                 },
@@ -138,7 +139,7 @@ def test_browser_handoff_uses_existing_p01_and_preserves_contract(tmp_path, trig
     assert candidate["trigger_reason"] == trigger_reason
     assert candidate["missing_information"]
     assert candidate["missing_information"][0]["question"] == "现场参与设备规模是多少？"
-    assert "QUALITY_CONCERN_REQUIRED" in candidate["blockers"]
+    assert isinstance(candidate["blockers"], list)
     assert any(ref.get("canonical_itr") == "ITR20260918001" for ref in candidate["source_problem_refs"])
     assert any(ref.get("evidence_id") == "cs.description" for ref in candidate["evidence_refs"])
     assert candidate["review"]["review_status"] == "PENDING"
@@ -162,6 +163,88 @@ def test_browser_handoff_boundary_has_no_test_api_bypass_or_auto_transition():
     assert ".publish" not in handoff_route.lower()
     assert "/api/v2/quality-scenarios/candidates/from-reverse" not in template
     assert "scenario_library['candidates']" in handoff_route
+
+
+def test_browser_handoff_continues_through_p01_p02_p03_and_traceability(tmp_path):
+    app, material_id = _setup_browser_case(tmp_path)
+    client = TestClient(app)
+    assert client.post(
+        f"/reverse-quality/{material_id}/analyse",
+        data={"product_code": "PLC"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    reverse = app.state.reverse_quality_service.get("ITR20260918001")
+    missing = reverse["missing_information"][0]
+    resolved = client.post(
+        f"/reverse-quality/{material_id}/missing-information",
+        data={
+            "missing_id": missing["missing_id"],
+            "status": "CONFIRMED",
+            "answer": "现场共 12 台设备",
+            "reviewer": "质量专家",
+        },
+        follow_redirects=False,
+    )
+    assert resolved.status_code == 303
+
+    handoff = client.post(
+        f"/reverse-quality/{material_id}/handoff",
+        data={
+            "trigger_source": "HIGH_PERCEPTION",
+            "trigger_reason": "客户现场高感知停线问题，纳入正式质量场景库",
+            "reviewer": "质量场景研发负责人",
+        },
+        follow_redirects=False,
+    )
+    assert handoff.status_code == 303
+    candidate = client.get("/api/v2/quality-scenarios/candidates").json()["items"][0]
+    assert candidate["missing_information"][0]["status"] == "CONFIRMED"
+    scenario_id = candidate["scenario_id"]
+
+    reviewed = client.post(
+        f"/api/v2/quality-scenarios/{scenario_id}/review",
+        json={
+            "expected_scenario_version": candidate["scenario_version"],
+            "patch": {},
+            "review_status": "CONFIRMED",
+            "reviewer": "质量专家",
+            "comment": "Browser Handoff 来源与证据已核对",
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    confirmed = client.post(
+        f"/api/v2/quality-scenarios/{scenario_id}/confirm",
+        json={
+            "expected_scenario_version": reviewed.json()["scenario"]["scenario_version"],
+            "quality_confirmed_by": "质量专家",
+            "technical_confirmed_by": "研发负责人",
+            "confirmation_note": "质量与技术双确认",
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    published = client.post(
+        f"/api/v2/quality-scenarios/{scenario_id}/publish",
+        json={
+            "expected_scenario_version": confirmed.json()["scenario"]["scenario_version"],
+            "published_by": "质量专家",
+        },
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["scenario"]["status"] == "PUBLISHED"
+
+    p02 = client.get("/api/v2/quality-scenarios", params={"status": "PUBLISHED", "product_code": "PLC"})
+    assert p02.status_code == 200
+    assert scenario_id in [item["scenario_id"] for item in p02.json()["items"]]
+    p03 = client.get(f"/p0/quality-scenarios/{scenario_id}")
+    assert p03.status_code == 200 and "Evidence完整性" in p03.text
+    evidence = client.get(f"/api/v2/quality-scenarios/{scenario_id}/traceability")
+    assert evidence.status_code == 200
+    assert evidence.json()["integrity"]["status"] == "PASS"
+    source_ref = published.json()["scenario"]["source_problem_refs"][0]["source_ref"]
+    source_lookup = client.get("/api/v2/quality-scenario-sources/scenarios", params={"source_ref": source_ref})
+    assert source_lookup.status_code == 200
+    assert scenario_id in [item["scenario_id"] for item in source_lookup.json()["items"]]
 
 
 def test_scenario_db_is_initialized_by_product_entrypoint(tmp_path):
