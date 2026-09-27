@@ -1,55 +1,39 @@
-# Overall VNext Complete Product Candidate — M10
+# Overall VNext Integration Candidate Status
 
 TASK=OVERALL-VNEXT-SINGLE-DEV-TAKEOVER-001
-MILESTONE=M10_COMPLETE_PRODUCT_CANDIDATE
-CANDIDATE_ID=OVERALL-VNEXT-CANDIDATE-2026-09-27
-CANDIDATE_DATE=2026-09-27
-SOURCE_MAIN_SHA=dffa846cd30f8dcaf92658f40e29c3cc713be5d6
+STATUS=INTEGRATION_VALIDATION_IN_PROGRESS
+M10_COMPLETE_PRODUCT_CANDIDATE=NOT_READY
 INTEGRATION_BRANCH=integration/overall-vnext
-INTEGRATION_HEAD_BEFORE_M10_MANIFEST=5af79f8cc6f2f5ea520caa5cb0e1b44ca1956e42
+INTEGRATION_HEAD_BEFORE_STATUS_UPDATE=b4ba408df689395f8a9b114194f8eb2aa18793e8
+SOURCE_MAIN_SHA=11a71c7d0155772044752012ffe3d4cc3546e32a
 ARCH_REVIEW=PASS_WITH_CONDITIONS
 ARCH_BLOCKER_COUNT=0
-MILESTONE_REGRESSION=104 passed
 DEPLOYMENT=NOT_EXECUTED
+PRODUCT_TEST_GATE=NOT_CLAIMED
 
-## Candidate scope
+## Current implementation evidence
 
-- One existing `create_p0_app` FastAPI host and Overall Shell.
-- The `/` default continues to redirect to `/p0/issues`; the Overall Shell provides a direct entry to the existing issue workspace.
-- Major / Repeat Risk, Quality Scenario, Hardware Case, and Storage remain existing workspaces with their current domain ownership and route contracts.
-- Common Evidence remains a reference and navigation surface. No second web application, port, cross-domain database, or business schema was introduced.
-- The implementation delta against `SOURCE_MAIN_SHA` is limited to this implementation plan, an explicit root `httpx` dependency, the problem-workspace return link, and its integration regression test. The `httpx` declaration closes an existing direct import requirement for the host test path.
+- The existing `create_p0_app` FastAPI host and Overall Shell remain the single entry point.
+- The Overall areas and existing Major / Repeat Risk, Quality Scenario, Hardware Case, Storage and Legacy pages are reachable through the integrated host.
+- Synthetic OpenAI Mock validation: 78 passed, recorded against its own source commit.
+- Browser navigation check: 9 passed on the synthetic demo candidate. Mobile evidence covers the Overall home at 390×844 only.
+- Candidate ZIP `OVERALL_VNEXT_FAST_MVP_CANDIDATE_8648fe3.zip` belongs to demo commit `8648fe3bd8f4ad18202974a917e3695e89287926`; it is a development demo artifact and is not the canonical integration DUT.
+- Earlier M1–M9 result of 104 passed is historical evidence tied to the source SHAs recorded in `VNEXT_IMPLEMENTATION_PLAN_V0.1.md`. It is not a fresh regression result for this integrated commit.
 
-## Release manifest
+## Remaining M10 acceptance work
 
-| Field | Value |
-| --- | --- |
-| Runtime entry | Existing single FastAPI host created by `create_p0_app` |
-| Overall entry | `/p0/overall` |
-| Default workbench | `/p0/issues` |
-| Integration branch | `integration/overall-vnext` |
-| Candidate source main | `dffa846cd30f8dcaf92658f40e29c3cc713be5d6` |
-| Candidate branch head | `5af79f8cc6f2f5ea520caa5cb0e1b44ca1956e42` |
-| Root test dependency | `httpx>=0.27,<1` alongside existing `httpx2` |
-| Domain migrations | None added by this candidate |
-| Second host / port | None |
-| Production promotion | Not performed; canonical PR review is the promotion gate |
+Complete the business journeys from the frozen product scenarios and record the persistent outcomes:
 
-## Verification evidence
+1. Current issue: import → analysis → human confirmation → saved result.
+2. Case and knowledge: intake → candidate → review → publish → search/consume.
+3. Quality scenario: insight view → P03 detail → Source/Evidence → return, including refresh, Back/Forward, URL state versus stale session state.
+4. Mobile: validate the frozen high-fidelity pages and key workflows on a normal CJK-capable runtime.
+5. Run targeted integration regression against the final canonical candidate and bind the exact source commit, runtime package and evidence.
 
-M1–M8 milestone checks are recorded in `VNEXT_IMPLEMENTATION_PLAN_V0.1.md`. The M9 cross-milestone regression passed 104 tests across 20 targeted modules, including Overall Shell, issue routing, Major / Repeat Risk, Hardware Case, Quality Scenario and insights, Storage, Evidence / Source, settings, forward risk, product reporting, and published knowledge contracts.
+Mocks may replace only the AI Provider boundary. The application workflows, persistence, review states and consumption should exercise the real implementation using synthetic data.
 
-Reproduce the M9 regression from repository root with the exact command in the M9 section of `VNEXT_IMPLEMENTATION_PLAN_V0.1.md`.
+## Promotion gate
 
-## Rollback path
+M10 is ready for canonical promotion only after the scoped business journeys pass, the final candidate is reproducible from a remote-resolvable integration commit, regression evidence and rollback path are attached, and Product Test Center / TSE accepts the package. Until then this branch is integration validation in progress.
 
-1. Before promotion, close or revise the canonical PR and keep the current `main` deployment pinned to `SOURCE_MAIN_SHA`.
-2. If the canonical PR is merged and a rollback is needed, create a revert PR for that canonical merge and promote the prior `main` release at `SOURCE_MAIN_SHA` through the normal release process.
-3. This candidate adds no database or data migration, so rollback does not require cross-domain data repair.
-4. Preserve the candidate branch and its regression evidence for diagnosis; do not rewrite the integration branch history.
-
-## TSE handoff
-
-The branch is a runnable candidate for Product Test Center / TSE review. TSE can use the M9 command and the milestone evidence above as the initial regression set. Legacy routes not consumed by this candidate remain subject to feature-local targeted verification; they do not block this candidate or reopen the superseded full audit.
-
-Canonical PR: https://github.com/xm286947-cell/ploblem_ai/pull/212 (open, targets `main`).
+Canonical PR: https://github.com/xm286947-cell/ploblem_ai/pull/212 (open, targets main).
