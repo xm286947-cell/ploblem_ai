@@ -136,6 +136,20 @@ def _supports_fact_part(part: str, content: str) -> bool:
     return len(part_ngrams & content_ngrams) >= 2
 
 
+def evidence_supports_fact(value: Any, content: Any) -> bool:
+    """Return whether one Evidence excerpt supports every part of a fact.
+
+    This is shared by intake and the Publish Gate so a candidate cannot lose
+    its Evidence link at intake and later fall back to the legacy case-level
+    Evidence availability check.
+    """
+    parts = _normalized_fact_parts(value)
+    normalized_content = re.sub(r"\s+", " ", _text(content)).casefold()
+    return bool(parts and normalized_content) and all(
+        _supports_fact_part(part, normalized_content) for part in parts
+    )
+
+
 def _evidence_trace(item: dict[str, Any]) -> dict[str, Any]:
     locator = item.get("locator") if isinstance(item.get("locator"), dict) else {}
     block_id = (
@@ -224,9 +238,7 @@ def validate_fact_evidence(
                     continue
                 traces.append(_evidence_trace(item))
                 content = _evidence_text(item)
-                if not content or not all(
-                    _supports_fact_part(part, content) for part in parts
-                ):
+                if not evidence_supports_fact(value, content):
                     reason = EVIDENCE_CONTENT_MISMATCH
                 else:
                     supports = True
@@ -294,6 +306,11 @@ def publish_gate(
         "valid_evidence_available": BLOCK_EVIDENCE not in blockers,
         "evidence_validation_status": evidence_validation["status"],
         "evidence_validation": evidence_validation["facts"],
+        "warnings": list(dict.fromkeys(
+            result["code"]
+            for result in evidence_validation["facts"]
+            if result.get("code") == EVIDENCE_CONTENT_MISMATCH
+        )),
         "evidence_traceability": evidence_validation["traceability"],
         "confirmed_mapping_available": BLOCK_MAPPING not in blockers,
         "circuit_mapping_state": circuit,

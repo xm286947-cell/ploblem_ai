@@ -60,6 +60,11 @@ def test_unsupported_fact_fails_closed(tmp_path):
     result = HardwareCaseAIAdapter(service, bad).ingest_docx(next(GOLDEN.glob("A9001*.docx")))
     assert result["status"] == "NEEDS_REVIEW"
     assert "KEY_FACT_UNSUPPORTED:root_cause" in result["warnings"]
+    assert any(
+        warning.startswith("EVIDENCE_CONTENT_MISMATCH:root_cause:")
+        for warning in result["warnings"]
+    )
     case = service.get_case("A9001", role="MAINTAINER")
-    assert case["facts"]["root_cause"]["evidence_refs"] == []
+    assert case["facts"]["root_cause"]["candidate_value"] == "不存在的根因"
+    assert case["facts"]["root_cause"]["evidence_refs"]
     assert case["facts"]["root_cause"]["confirmed_value"] is None

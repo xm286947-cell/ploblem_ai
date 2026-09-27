@@ -155,6 +155,10 @@ def test_m4_adapter_creates_candidate_evidence_and_suggested_mappings(tmp_path: 
     result = HardwareCaseAIAdapter(service, _structurer).ingest_docx(_docx(tmp_path))
 
     assert result["status"] == "SUCCESS"
+    assert not any(
+        warning.startswith("EVIDENCE_CONTENT_MISMATCH")
+        for warning in result["warnings"]
+    )
     case = service.get_case("A1234", role="MAINTAINER")
     assert case["facts"]["root_cause"]["candidate_value"] == "输入浪涌触发保护。"
     assert case["facts"]["root_cause"]["confirmed_value"] is None
@@ -195,9 +199,94 @@ def test_m4_bad_evidence_reference_fails_closed_to_needs_review(tmp_path: Path):
     result = HardwareCaseAIAdapter(service, bad).ingest_docx(_docx(tmp_path))
     assert result["status"] == "NEEDS_REVIEW"
     assert "KEY_FACT_EVIDENCE_MISSING:root_cause" in result["warnings"]
+    assert not any(
+        warning.startswith("EVIDENCE_CONTENT_MISMATCH")
+        for warning in result["warnings"]
+    )
     assert service.get_case("A1234", role="MAINTAINER")["facts"]["root_cause"][
         "confirmed_value"
     ] is None
+
+
+def test_m4_mismatched_evidence_returns_warning_and_preserves_candidate_and_ref(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    _trees(service)
+
+    def mismatched(document):
+        result = _structurer(document)
+        symptom_block = next(
+            block["block_id"]
+            for block in document["blocks"]
+            if block.get("text") == "设备上电后出现复位。"
+        )
+        result["facts"]["symptom"]["value"] = "电池出现热失控。"
+        result["facts"]["symptom"]["evidence_block_ids"] = [symptom_block]
+        return result
+
+    result = HardwareCaseAIAdapter(service, mismatched).ingest_docx(_docx(tmp_path))
+    case = service.get_case("A1234", role="MAINTAINER")
+    symptom = case["facts"]["symptom"]
+    mismatch_warning = next(
+        warning
+        for warning in result["warnings"]
+        if warning.startswith("EVIDENCE_CONTENT_MISMATCH:symptom:")
+    )
+
+    assert result["status"] == "NEEDS_REVIEW"
+    assert mismatch_warning.startswith("EVIDENCE_CONTENT_MISMATCH")
+    assert symptom["candidate_value"] == "电池出现热失控。"
+    assert len(symptom["evidence_refs"]) == 1
+    assert service.repository.get_evidence(symptom["evidence_refs"][0]) is not None
+
+    for field_name in ("symptom", "root_cause", "actions"):
+        service.review_case(
+            "A1234",
+            field_name,
+            disposition="CONFIRMED",
+            confirmed_value=case["facts"][field_name]["candidate_value"],
+        )
+    for item in service.repository.list_mappings(case_id="A1234"):
+        service.set_mapping({**item, "mapping_status": "CONFIRMED"})
+
+    gate = service.publish_case("A1234")
+    assert gate["passed"] is False
+    assert gate["publish_blocked"] is True
+    assert "EVIDENCE_CONTENT_MISMATCH" in gate["warnings"]
+    assert service.repository.get_case("A1234")["case_status"] != "PUBLISHED"
+
+
+def test_m4_one_mismatched_reference_blocks_candidate_even_with_a_valid_reference(
+    tmp_path: Path,
+):
+    service = _backend(tmp_path)
+    _trees(service)
+
+    def mixed_evidence(document):
+        result = _structurer(document)
+        blocks = {block.get("text"): block["block_id"] for block in document["blocks"]}
+        result["facts"]["root_cause"]["evidence_block_ids"] = [
+            blocks["输入浪涌触发保护。"],
+            blocks["设备上电后出现复位。"],
+        ]
+        return result
+
+    result = HardwareCaseAIAdapter(service, mixed_evidence).ingest_docx(_docx(tmp_path))
+    case = service.get_case("A1234", role="MAINTAINER")
+    root_cause = case["facts"]["root_cause"]
+
+    assert result["status"] == "NEEDS_REVIEW"
+    assert any(
+        warning.startswith("EVIDENCE_CONTENT_MISMATCH:root_cause:")
+        for warning in result["warnings"]
+    )
+    assert root_cause["candidate_value"] == "输入浪涌触发保护。"
+    assert len(root_cause["evidence_refs"]) == 2
+    assert all(
+        service.repository.get_evidence(ref) is not None
+        for ref in root_cause["evidence_refs"]
+    )
 
 
 def test_m4_unknown_mapping_node_is_not_persisted(tmp_path: Path):
