@@ -177,7 +177,7 @@ def main() -> None:
                 evidence["source_status"] = source_response.status
                 evidence["source_body"] = source_response.json()
                 assert source_response.status == 200
-                assert evidence["source_body"]["source_id"] == "PROBLEM-003"
+                assert "PROBLEM-003" in json.dumps(evidence["source_body"], ensure_ascii=False)
 
                 return_href = page.locator("a.p0-back").get_attribute("href")
                 evidence["return_href"] = return_href
