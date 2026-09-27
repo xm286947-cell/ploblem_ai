@@ -59,7 +59,9 @@ No new shell, web application, port, cross-domain database, or business schema i
 - The launcher injects the repository's deterministic P04 fixture provider for `QS-FIX-002` → `PROBLEM-003`; this synthetic data is for the demo only. See `OVERALL_VNEXT_MVP_DEMO_HANDOFF.md` for run steps and fresh evidence. The original M10 candidate record remains in `OVERALL_VNEXT_COMPLETE_PRODUCT_CANDIDATE_M10.md`.
 - Run locally with `python scripts/overall_vnext_demo.py --port 8080`; open `http://127.0.0.1:8080/p0/overall`. Demo data is isolated under the operating-system temp directory by default. Use `--data-dir` to choose another isolated directory.
 - `python scripts/overall_vnext_demo.py --check` builds the host and requests Overall, Issues, Quality Scenario Insights, and Hardware Case routes without opening a listening socket.
-- Focused regression on this base: Overall shell, parent integration, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding tests: 22 passed. The launcher `--check` smoke also passed.
+- Overall adds a “案例与知识” area for Major Case, Hardware Case, Published Knowledge, and Unified Knowledge Production, plus direct shortcuts to the other verified legacy-compatible pages. All destinations reuse existing product-owned routes.
+- The demo launcher isolates the shared Knowledge Production repository alongside P0, Hardware Case, uploads, sources, and Storage data.
+- Focused regression after the navigation addition: Overall shell, parent integration, case/knowledge entry bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding tests: 24 passed. Launcher `--check` passed for the shell, shortcuts, P04/P03/source trace, Storage, Published Knowledge, and Knowledge Production routes.
 - This demo result records runnable integration status; it is not a TSE gate, release approval, or S11 browser regression.
 
 ## Delivery sequence

@@ -109,6 +109,20 @@ def test_overall_shell_exposes_existing_capability_routes(tmp_path):
         assert client.get(path).status_code == 200
 
 
+def test_case_and_knowledge_navigation_uses_existing_product_pages(tmp_path):
+    client = _client(tmp_path)
+    page = client.get("/p0/overall")
+
+    assert '<section class="overall-card" id="case-knowledge"' in page.text
+    for path, label in (
+        ("/p0/cases", "重大问题案例库"),
+        ("/p0/hardware-cases", "硬件案例库"),
+        ("/storage-workspace/knowledge-production/published", "已发布知识"),
+        ("/storage-workspace/knowledge-production/sources", "统一知识生产"),
+    ):
+        assert f'href="{path}"><strong>{label}</strong>' in page.text
+
+
 def test_parent_workspace_return_paths_all_target_canonical_overall_shell(tmp_path):
     client = _client(tmp_path)
 

@@ -14,9 +14,10 @@ DEPLOYMENT=LOCAL_DEMO_ONLY
 - Existing unified `create_p0_app` host and Overall Shell at `/p0/overall`.
 - Existing issue workspace, Major / Repeat Risk, Quality Scenario, Hardware Case, and Storage entry points.
 - Overall Shell shortcuts to existing Current Problem, batch analysis, quality insights, P1 reports/risk, data intake, and mapping pages.
+- A four-entry “案例与知识” area linked to Major Case, Hardware Case, Published Knowledge, and Unified Knowledge Production pages.
 - The current `main` changes from PRs #213/#214 and #215, including the complete #207 state-restoration fix.
 - Deterministic synthetic P04 data from the repository's `FixtureP04Provider`, including `QS-FIX-002` and source `PROBLEM-003`.
-- Isolated P0, Hardware Case, uploads, sources, and Storage data paths. The launcher clears any inherited Legacy DB binding so the demo does not touch a production Legacy DB.
+- Isolated P0, Hardware Case, uploads, sources, Storage, and shared Knowledge Production data paths. The launcher clears any inherited Legacy DB binding so the demo does not touch a production Legacy DB or the repository's default Knowledge Production data.
 
 The fixture is visibly identified in startup output as `P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES`; it is demo data and does not represent customer records.
 
@@ -38,8 +39,8 @@ python scripts/overall_vnext_demo.py --check
 
 ## Verification
 
-- Focused Overall/workspace regression: **23 passed** (Overall Shell, parent integration and shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
-- Launcher `--check`: **PASS** for Overall, Issues, P04, Hardware Case, Storage, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
+- Focused Overall/workspace regression: **24 passed** (Overall Shell, parent integration, case/knowledge navigation, shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
+- Launcher `--check`: **PASS** for Overall, Issues, P04, Hardware Case, Storage, Published Knowledge, Unified Knowledge Production, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
 - Formal S11 browser regression was not run. The smoke confirms demo route availability only; it does not claim S11 acceptance.
 - Full historical M1–M9 result of 104 tests is recorded in the original implementation plan and was not rerun on this demo branch.
 

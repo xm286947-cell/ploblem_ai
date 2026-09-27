@@ -23,6 +23,7 @@ from quality_knowledge.web.p0_app import create_p0_app
 def build_app(data_dir: Path):
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ["STORAGE_LIFE_DATA_DIR"] = str(data_dir / "storage")
+    os.environ["STORAGE_KNOWLEDGE_REPOSITORY_DIR"] = str(data_dir / "knowledge_repository")
     os.environ.pop("LEGACY_QUALITY_ISSUE_DB_PATH", None)
     p0_db = data_dir / "quality_capability_p0.sqlite3"
     hardware_db = data_dir / "hardware_case.sqlite3"
@@ -71,10 +72,12 @@ def main() -> int:
             "/p0/quality-scenario-insights",
             "/p0/hardware-cases",
             "/storage-workspace/",
+            "/storage-workspace/knowledge-production/published",
+            "/storage-workspace/knowledge-production/sources",
         ):
             response = client.get(path)
-            if response.status_code != 200:
-                raise RuntimeError(f"MVP_ROUTE_FAILED:{path}:{response.status_code}")
+        if response.status_code != 200:
+            raise RuntimeError(f"MVP_ROUTE_FAILED:{path}:{response.status_code}")
         root = client.get("/", follow_redirects=False)
         if root.status_code not in {302, 307} or root.headers.get("location") != "/p0/issues":
             raise RuntimeError("MVP_DEFAULT_ENTRY_FAILED")
