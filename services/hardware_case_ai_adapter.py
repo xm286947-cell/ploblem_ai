@@ -295,6 +295,7 @@ class HardwareCaseAIAdapter:
         if not isinstance(values, list):
             return 0
         count = 0
+        seen_node_ids: set[str] = set()
         for index, item in enumerate(values, start=1):
             if not isinstance(item, dict):
                 continue
@@ -305,6 +306,24 @@ class HardwareCaseAIAdapter:
             node = self.backend.repository.get_tree_node(node_id)
             if node is None or node.get("tree_type") != tree_type:
                 warnings.append(f"MAPPING_NODE_NOT_FOUND:{tree_type}:{node_id}")
+                continue
+            if node_id in seen_node_ids:
+                warning = f"DUPLICATE_MAPPING:{tree_type}:{node_id}"
+                if warning not in warnings:
+                    warnings.append(warning)
+                continue
+            seen_node_ids.add(node_id)
+            existing = self.backend.repository.get_mapping_by_semantic_key(
+                case_id, tree_type, node_id
+            )
+            if existing is not None:
+                # Keep the already established association intact. Re-ingesting
+                # the same semantic mapping is idempotent, but it still needs
+                # human review because the candidate proposed a duplicate.
+                warning = f"DUPLICATE_MAPPING:{tree_type}:{node_id}"
+                if warning not in warnings:
+                    warnings.append(warning)
+                count += 1
                 continue
             refs = [
                 evidence_by_block[str(block_id)]
