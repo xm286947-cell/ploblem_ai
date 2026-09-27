@@ -13,6 +13,7 @@ DEPLOYMENT=LOCAL_DEMO_ONLY
 
 - Existing unified `create_p0_app` host and Overall Shell at `/p0/overall`.
 - Existing issue workspace, Major / Repeat Risk, Quality Scenario, Hardware Case, and Storage entry points.
+- Overall Shell shortcuts to existing Current Problem, batch analysis, quality insights, P1 reports/risk, data intake, and mapping pages.
 - The current `main` changes from PRs #213/#214 and #215, including the complete #207 state-restoration fix.
 - Deterministic synthetic P04 data from the repository's `FixtureP04Provider`, including `QS-FIX-002` and source `PROBLEM-003`.
 - Isolated P0, Hardware Case, uploads, sources, and Storage data paths. The launcher clears any inherited Legacy DB binding so the demo does not touch a production Legacy DB.
@@ -37,7 +38,7 @@ python scripts/overall_vnext_demo.py --check
 
 ## Verification
 
-- Focused Overall/workspace regression: **22 passed** (Overall Shell, parent integration, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
+- Focused Overall/workspace regression: **23 passed** (Overall Shell, parent integration and shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
 - Launcher `--check`: **PASS** for Overall, Issues, P04, Hardware Case, Storage, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
 - Formal S11 browser regression was not run. The smoke confirms demo route availability only; it does not claim S11 acceptance.
 - Full historical M1–M9 result of 104 tests is recorded in the original implementation plan and was not rerun on this demo branch.

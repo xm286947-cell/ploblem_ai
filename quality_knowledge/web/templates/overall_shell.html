@@ -8,7 +8,7 @@
   <div>
     <div class="overall-kicker">OVERALL SHELL</div>
     <h1>专业质量软件平台</h1>
-    <p>统一入口只负责导航、任务概览与 Evidence 返回；四个 Domain 的业务语义和数据所有权保持独立。</p>
+    <p>统一入口负责产品导航、任务概览与 Evidence 返回；业务语义和数据所有权仍由各产品维护。</p>
   </div>
   <a class="overall-secondary" href="/p0/issues">进入问题工作台</a>
 </section>
@@ -27,6 +27,23 @@
     </a>
     {% endfor %}
   </div>
+</section>
+
+<section class="overall-card" aria-labelledby="overall-shortcuts-title">
+  <div class="overall-card-head">
+    <div><h2 id="overall-shortcuts-title">常用能力</h2><p>直接复用现有页面与路由；P1 能力仍由 P1 提供。</p></div>
+    <span class="overall-chip">快捷入口</span>
+  </div>
+  <nav class="overall-shortcuts" aria-label="常用能力入口">
+    <a href="/p0/issues">当前问题</a>
+    <a href="/p0/batch-analysis">批量 AI 分析</a>
+    <a href="/p0/insights">质量洞察</a>
+    <a href="/p0/quality-scenario-insights">质量画像与洞察</a>
+    <a href="/p1/product-reports">产品综合报告</a>
+    <a href="/p1/risk-assessment">正向风险评估（P1）</a>
+    <a href="/p0/data-intake">数据接入</a>
+    <a href="/p0/settings">字段映射与产品</a>
+  </nav>
 </section>
 
 <section class="overall-card" id="task-overview">

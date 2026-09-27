@@ -90,6 +90,25 @@ def test_current_problem_workspace_keeps_canonical_routes_and_overall_return(tmp
     assert isinstance(issues.json().get("items"), list)
 
 
+def test_overall_shell_exposes_existing_capability_routes(tmp_path):
+    client = _client(tmp_path)
+    page = client.get("/p0/overall")
+
+    assert page.status_code == 200
+    for path, label in (
+        ("/p0/issues", "当前问题"),
+        ("/p0/batch-analysis", "批量 AI 分析"),
+        ("/p0/insights", "质量洞察"),
+        ("/p0/quality-scenario-insights", "质量画像与洞察"),
+        ("/p1/product-reports", "产品综合报告"),
+        ("/p1/risk-assessment", "正向风险评估（P1）"),
+        ("/p0/data-intake", "数据接入"),
+        ("/p0/settings", "字段映射与产品"),
+    ):
+        assert f'href="{path}">{label}</a>' in page.text
+        assert client.get(path).status_code == 200
+
+
 def test_parent_workspace_return_paths_all_target_canonical_overall_shell(tmp_path):
     client = _client(tmp_path)
 
