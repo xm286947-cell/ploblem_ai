@@ -63,6 +63,69 @@ def _p04_return_url(raw_context: str | None) -> str:
     return base + "?" + urlencode({"p04_context": json.dumps(context, ensure_ascii=False, separators=(",", ":"))})
 
 
+def _normalize_p04_url_context(raw_context: str) -> str:
+    """Validate a browser URL context and fill its documented default fields."""
+    if len(raw_context) > 4096:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    try:
+        context = json.loads(raw_context)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    allowed = {
+        "contract", "view", "selected_object", "selected_object_ref", "filters",
+        "matrix_mode", "page", "page_size",
+    }
+    if not isinstance(context, dict) or set(context) - allowed:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if context.get("contract") not in (None, "p04-query-context/v1"):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    view = context.get("view", "PRODUCT")
+    modes = {
+        "PRODUCT": {"LIFECYCLE_X_BUSINESS_ACTIVITY"},
+        "CUSTOMER": {"PRODUCT_X_BUSINESS_ACTIVITY", "PRODUCT_X_QUALITY_FOCUS"},
+        "INDUSTRY": {"CUSTOMER_X_PRODUCT_OR_FAMILY", "BUSINESS_ACTIVITY_X_QUALITY_FOCUS"},
+    }
+    if view not in modes:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    selected = context.get("selected_object", context.get("selected_object_ref"))
+    if isinstance(selected, str):
+        selected = {"selector_ref": selected} if selected else None
+    if selected is not None and (
+        not isinstance(selected, dict)
+        or set(selected) != {"selector_ref"}
+        or not isinstance(selected.get("selector_ref"), str)
+        or not selected["selector_ref"].strip()
+        or len(selected["selector_ref"]) > 300
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    filters = context.get("filters", {})
+    allowed_filters = {"lifecycle", "business_activity", "quality_focus"}
+    if not isinstance(filters, dict) or set(filters) - allowed_filters or any(
+        not isinstance(value, str) or len(value) > 200 for value in filters.values()
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    matrix_mode = context.get("matrix_mode") or next(iter(modes[view]))
+    if matrix_mode not in modes[view]:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    page = context.get("page", 1)
+    page_size = context.get("page_size", 20)
+    if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 100000:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 100:
+        raise HTTPException(status_code=400, detail="INVALID_RETURN_CONTEXT")
+    normalized = {
+        "view": view,
+        "selected_object": selected,
+        "filters": filters,
+        "matrix_mode": matrix_mode,
+        "page": page,
+        "page_size": page_size,
+    }
+    if context.get("contract") is not None:
+        normalized["contract"] = context["contract"]
+    return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
 def create_p0_insights_router(
     *,
     template_dir: str | Path | None = None,
@@ -91,6 +154,27 @@ def create_p0_insights_router(
         return hashlib.sha256(content).hexdigest()
 
     router = APIRouter()
+
+    def resolve_p04_return_context(request: Request) -> tuple[str, str, str]:
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+        } else "/p0/quality-scenario-insights"
+        raw_url_context = request.query_params.get("p04_context")
+        raw_return_context = request.query_params.get("return_context")
+        if raw_url_context is None and raw_return_context is None:
+            return return_to, "", return_to + "?p04_reset=1"
+
+        if raw_url_context is not None:
+            _normalize_p04_url_context(raw_url_context)
+            safe_context = raw_url_context
+        else:
+            # Legacy P03 callers use the stricter frozen return-context contract.
+            _p04_return_url(raw_return_context)
+            safe_context = json.dumps(json.loads(raw_return_context), ensure_ascii=False, separators=(",", ":"))
+        return_url = return_to + "?" + urlencode({"p04_context": safe_context})
+        return return_to, safe_context, return_url
 
     @router.get("/p0/insights", response_class=HTMLResponse, include_in_schema=False)
     async def p0_insights(request: Request) -> HTMLResponse:
@@ -145,7 +229,7 @@ def create_p0_insights_router(
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
         if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
-            return_to = _p04_return_url(request.query_params.get("return_context"))
+            return_to, p04_context, return_url = resolve_p04_return_context(request)
             scenario = scenario_detail_service.scenario_detail(knowledge_id)
             if scenario is None:
                 raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
@@ -157,6 +241,8 @@ def create_p0_insights_router(
                     "scenario_id": knowledge_id,
                     "scenario": scenario,
                     "return_to": return_to,
+                    "return_url": return_url,
+                    "return_context": p04_context,
                     "page_title": "场景详情 · 质量能力",
                 },
             )
@@ -183,8 +269,7 @@ def create_p0_insights_router(
         scenario = scenario_detail_service.scenario_detail(scenario_id)
         if scenario is None:
             raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
-        return_context = request.query_params.get("return_context")
-        return_to = _p04_return_url(return_context)
+        return_to, p04_context, return_url = resolve_p04_return_context(request)
         return templates.TemplateResponse(
             request,
             "p0_quality_scenario_detail.html",
@@ -193,7 +278,31 @@ def create_p0_insights_router(
                 "scenario_id": scenario_id,
                 "scenario": scenario,
                 "return_to": return_to,
+                "return_url": return_url,
+                "return_context": p04_context,
                 "page_title": "场景详情 · 质量能力",
+            },
+        )
+
+    @router.get("/p0/quality-scenario-sources/{source_ref:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_source(request: Request, source_ref: str) -> HTMLResponse:
+        if scenario_detail_service is None:
+            raise HTTPException(status_code=404, detail="SOURCE_REFERENCE_NOT_FOUND")
+        trace = scenario_detail_service.source_trace(source_ref)
+        if trace is None:
+            raise HTTPException(status_code=404, detail="SOURCE_REFERENCE_NOT_FOUND")
+        return_to, p04_context, return_url = resolve_p04_return_context(request)
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_source.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "source_ref": source_ref,
+                "trace": trace,
+                "return_to": return_to,
+                "return_url": return_url,
+                "return_context": p04_context,
+                "page_title": "来源追溯 · 质量能力",
             },
         )
 
@@ -363,7 +472,16 @@ def create_p0_insights_router(
         if not target.is_file():
             raise HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
         media = "text/css" if target.suffix == ".css" else "text/javascript"
-        return FileResponse(target, media_type=media)
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        return FileResponse(
+            target,
+            media_type=media,
+            headers={
+                "X-Content-SHA256": digest,
+                "ETag": f'"{digest}"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     return router
 

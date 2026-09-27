@@ -193,6 +193,23 @@ class P04InsightService:
                 error_code="RESULT_REVISION_CHANGED",
                 warnings=["REFRESH_REQUIRED"],
             )
+        expected_context_id = self._context_id(
+            {
+                "selected_object_ref": payload.get("selected_object_ref"),
+                "filters": payload.get("filters") or {},
+                "matrix_mode": payload.get("matrix_mode") or "",
+            },
+            view,
+        )
+        if not context_id or context_id != expected_context_id:
+            return DrilldownResult(
+                state=P04State.ERROR,
+                status="INVALID_CONTEXT",
+                result_revision=snapshot.result_revision,
+                query_context_id=context_id,
+                error_code="QUERY_CONTEXT_MISMATCH",
+                warnings=["REFRESH_REQUIRED"],
+            )
         selection = self._filters(payload.get("selection"))
         base = {
             "view": view,
@@ -460,9 +477,9 @@ class P04InsightService:
     def _context_id(payload: dict[str, Any], view: P04View) -> str:
         material = {
             "view": view.value,
-            "selected_object": payload.get("selected_object") or payload.get("selected_object_ref"),
+            "selected_object": P04InsightService._selected_ref(payload),
             "filters": payload.get("filters") or {},
-            "matrix_mode": payload.get("matrix_mode") or "",
+            "matrix_mode": payload.get("matrix_mode") or P04InsightService._default_matrix_mode(view),
         }
         return "ctx_" + hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
 
