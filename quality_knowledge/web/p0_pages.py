@@ -129,9 +129,8 @@ def create_p0_insights_router(
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
-        return_context = request.query_params.get("return_context")
-        return_to = _p04_return_url(return_context)
         if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
+            return_to = _p04_return_url(request.query_params.get("return_context"))
             scenario = scenario_detail_service.scenario_detail(knowledge_id)
             if scenario is None:
                 raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
@@ -146,6 +145,11 @@ def create_p0_insights_router(
                     "page_title": "场景详情 · 质量能力",
                 },
             )
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+        } else ""
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
