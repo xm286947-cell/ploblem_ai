@@ -5,12 +5,12 @@ import html
 import json
 import logging
 import tempfile
+from types import SimpleNamespace
 from urllib.parse import urlencode
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import load_workbook
 from quality_knowledge.adapters.base import clean
@@ -168,13 +168,24 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_
     }
 
 
-def create_app(db_path):
-    app = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
-    svc = KnowledgeIssueService(IssueKnowledgeRepository(db_path))
-    capability_extension = QualityCapabilityExtension(db_path)
-    app.state.quality_capability_extension = capability_extension
-    batch_jobs = BatchAnalysisJobManager(db_path)
-    app.state.batch_analysis_jobs = batch_jobs
+def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
+    """Build legacy routes and services without creating a Web application.
+
+    The Overall composition root supplies a prevalidated, existing Legacy DB
+    and sets ``initialize_schema=False``. ``create_app`` below remains a
+    standalone compatibility wrapper for legacy tools and tests.
+    """
+    app = APIRouter()
+    state = SimpleNamespace()
+    repository = IssueKnowledgeRepository(db_path, initialize_schema=initialize_schema)
+    mapping_repository = MappingConfigurationRepository(db_path, initialize_schema=initialize_schema)
+    mapping_svc = MappingConfigurationService(mapping_repository)
+    product_repo = ProductConfigRepository(db_path, initialize_schema=initialize_schema)
+    svc = KnowledgeIssueService(repository, mapping_svc, product_repo)
+    capability_extension = QualityCapabilityExtension(db_path, initialize_schema=initialize_schema)
+    state.quality_capability_extension = capability_extension
+    batch_jobs = BatchAnalysisJobManager(db_path, initialize_schema=initialize_schema)
+    state.batch_analysis_jobs = batch_jobs
 
     def project_capability(knowledge_id):
         issue = svc.get_issue(knowledge_id)
@@ -188,19 +199,16 @@ def create_app(db_path):
         for knowledge_id in selected_ids:
             project_capability(knowledge_id)
         return result
-    product_repo = ProductConfigRepository(db_path)
     for product in product_repo.list(False):
         register_product_adapter(product['product_code'])
-    mapping_svc = MappingConfigurationService(MappingConfigurationRepository(db_path))
-    app.state.mapping_configuration_service = mapping_svc
-    human_svc = HumanAnalysisService(HumanAnalysisRepository(db_path))
-    report_svc = LegacyProductQualityReportService(svc, BASE.parent.parent)
-    app.state.human_analysis_service = human_svc
-    app.state.knowledge_issue_service = svc
-    app.state.product_config_repository = product_repo
+    human_svc = HumanAnalysisService(HumanAnalysisRepository(db_path, initialize_schema=initialize_schema))
+    report_svc = LegacyProductQualityReportService(svc, BASE.parent.parent, initialize_schema=initialize_schema)
+    state.mapping_configuration_service = mapping_svc
+    state.human_analysis_service = human_svc
+    state.knowledge_issue_service = svc
+    state.product_config_repository = product_repo
     intake_svc = IntakeSessionService()
-    app.state.intake_session_service = intake_svc
-    app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
+    state.intake_session_service = intake_svc
     tpl = Jinja2Templates(directory=BASE / 'templates')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
@@ -220,13 +228,22 @@ def create_app(db_path):
             p.write_bytes(f.file.read())
             return svc.import_file(p, bt or None, issue_domain=issue_domain)
 
-    @app.get('/', include_in_schema=False)
-    def root():
-        return RedirectResponse('/issues')
-
     @app.get('/import', response_class=HTMLResponse, include_in_schema=False)
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
+
+    def _mapping_contract_error(error: RuntimeError, business_type: str = '') -> HTTPException | None:
+        message = str(error)
+        if not message.startswith('MAPPING_NOT_INITIALIZED:'):
+            return None
+        missing_business_type = message.split(':', 1)[1].strip() or business_type
+        return HTTPException(
+            status_code=409,
+            detail=(
+                f'MAPPING_NOT_INITIALIZED: {missing_business_type}；'
+                '当前产品 Mapping 尚未初始化或激活，请先在字段映射配置中完成并激活 Mapping。'
+            ),
+        )
 
     def _build_intake_preview(file: UploadFile, business_type: str = '', issue_domain: str = 'AUTO', mapping_config_id: str = ''):
         if Path(file.filename or '').suffix.lower() not in ALLOWED:
@@ -256,7 +273,13 @@ def create_app(db_path):
                     det={'header_row':header,'business_type':requested,'score':score[0],'recognition_mode':'DRAFT_MAPPING_SCORE' if score[0] else 'DRAFT_STRUCTURAL'}
                 else: det=None
             else:
-                det=svc._detect_header(sheet,requested)
+                try:
+                    det=svc._detect_header(sheet,requested)
+                except RuntimeError as error:
+                    contract_error = _mapping_contract_error(error, requested or '')
+                    if contract_error:
+                        raise contract_error from error
+                    raise
             if not det:
                 _intake_diag('SHEET_REJECTED',diagnostic_id,sheet=sn,declared_dimension=declared_dimension,actual_dimension=actual_dimension,max_row=sheet.max_row,max_column=sheet.max_column,reason='HEADER_NOT_DETECTED')
                 continue
@@ -269,7 +292,15 @@ def create_app(db_path):
         if not detected:
             _intake_diag('PREVIEW_REJECTED',diagnostic_id,reason='NO_HEADER_CANDIDATE')
             intake_svc.discard(meta['intake_session_id']); raise HTTPException(400,f'无法识别业务类型或表头；诊断ID：{diagnostic_id}；日志：{DIAG_FILE}')
-        bt=detected['business_type']; preview=mapping_svc.preview_file(path,bt,detected['sheet'],detected['header_row'],mapping_config_id or None); effective=selected_mapping or mapping_svc.get_effective_config(bt)
+        bt=detected['business_type']
+        try:
+            preview=mapping_svc.preview_file(path,bt,detected['sheet'],detected['header_row'],mapping_config_id or None)
+        except RuntimeError as error:
+            contract_error = _mapping_contract_error(error, bt)
+            if contract_error:
+                raise contract_error from error
+            raise
+        effective=selected_mapping or mapping_svc.get_effective_config(bt)
         ws=wb[detected['sheet']]; row_count=detected.get('data_row_count',max(0,ws.max_row-detected['header_row']))
         preview.update({'intake_session_id':meta['intake_session_id'],'detected_business_type':bt,'header_row':detected['header_row'],'detection_score':detected['score'],'recognition_mode':detected.get('recognition_mode','MAPPING_SCORE'),'data_row_count':row_count,'mapping_config_id':effective['config_id'],'mapping_config_version':effective['version']})
         preview['diagnostic_id']=diagnostic_id; preview['diagnostic_log']=str(DIAG_FILE)
@@ -1064,4 +1095,29 @@ def create_app(db_path):
     def api_gaps(knowledge_id: str | None = None):
         return {'items': svc.query_capability_gaps(knowledge_id)}
 
-    return app
+    @app.get('/static/{path:path}', name='static', include_in_schema=False)
+    def legacy_static(path: str):
+        asset_root = (BASE / 'static').resolve()
+        asset = (asset_root / path).resolve()
+        try:
+            asset.relative_to(asset_root)
+        except ValueError:
+            raise HTTPException(404, 'NOT_FOUND')
+        if not asset.is_file():
+            raise HTTPException(404, 'NOT_FOUND')
+        return FileResponse(asset)
+
+    return app, state
+
+
+def create_app(db_path):
+    """Standalone legacy application retained for existing local tools/tests."""
+    router, state = create_legacy_quality_issue_router(db_path, initialize_schema=True)
+    standalone = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
+    standalone.include_router(router)
+    @standalone.get('/', include_in_schema=False)
+    def root():
+        return RedirectResponse('/issues')
+    for name, value in vars(state).items():
+        setattr(standalone.state, name, value)
+    return standalone

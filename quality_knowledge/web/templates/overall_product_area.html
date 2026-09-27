@@ -1,0 +1,47 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ area.title }}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi03">{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}{{ area.title }}{% endblock %}
+{% block body %}
+<section class="overall-head">
+  <div>
+    <div class="overall-kicker">OVERALL VNEXT</div>
+    <h1>{{ area.title }}</h1>
+    <p>{{ area.summary }}</p>
+  </div>
+  <a class="overall-secondary" href="/p0/overall">返回总体工作台</a>
+</section>
+
+<nav class="overall-area-nav" aria-label="总体产品工作区">
+  {% for item in product_areas %}
+  <a href="/p0/overall/areas/{{ item.area_id }}" {% if item.area_id == area.area_id %}aria-current="page"{% endif %}>{{ item.title }}</a>
+  {% endfor %}
+</nav>
+
+<section class="overall-capability-grid" aria-label="{{ area.title }}能力">
+  {% for capability in area.capabilities %}
+    {% if capability.available %}
+    <a class="overall-capability" href="{{ capability.path }}">
+      <strong>{{ capability.title }}</strong>
+      <span>{{ capability.summary }}</span>
+      <small>进入现有能力</small>
+    </a>
+    {% else %}
+    <article class="overall-capability is-unavailable" aria-disabled="true">
+      <strong>{{ capability.title }}</strong>
+      <span>{{ capability.summary }}</span>
+      <small>当前运行环境未绑定 Legacy 数据库</small>
+    </article>
+    {% endif %}
+  {% endfor %}
+</section>
+
+{% if area.area_id == 'current-problem' %}
+<section class="overall-card">
+  <h2>Repeat Risk</h2>
+  <p>Repeat Risk 保持在当前问题详情和彻底解决流程中，通过问题对象进入，不增加独立一级入口。</p>
+  <a class="overall-primary" href="/p0/issues">选择当前问题</a>
+</section>
+{% endif %}
+{% endblock %}

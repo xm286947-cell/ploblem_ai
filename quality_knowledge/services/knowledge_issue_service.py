@@ -14,10 +14,10 @@ from quality_knowledge.product_config import ProductConfigRepository
 class NoRecordsFoundError(ValueError): pass
 
 class KnowledgeIssueService:
-    def __init__(self,repository, mapping_service=None):
+    def __init__(self,repository, mapping_service=None, product_config=None):
         self.repository=repository
         self.mapping_service=mapping_service or MappingConfigurationService(MappingConfigurationRepository(repository.db_path))
-        self.product_config=ProductConfigRepository(repository.db_path)
+        self.product_config=product_config or ProductConfigRepository(repository.db_path)
     def _effective(self,business_type):
         cfg=self.mapping_service.get_effective_config(business_type)
         if not cfg: raise MappingNotInitializedError(f"MAPPING_NOT_INITIALIZED: {business_type}; run knowledge-mapping-migrate --business {business_type} --apply")

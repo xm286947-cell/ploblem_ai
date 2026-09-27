@@ -120,6 +120,40 @@ def test_common_evidence_navigation_and_return_framework_fail_closed():
     ).status_code == 400
 
 
+def test_legacy_capability_links_follow_runtime_binding_state():
+    app = FastAPI()
+    app.state.overall_shell_enabled = True
+    app.state.storage_workspace_binding = None
+    app.state.legacy_quality_issue_status = {"ready": True, "code": "READY"}
+    app.include_router(create_overall_shell_router())
+
+    page = TestClient(app).get("/p0/overall/areas/current-problem")
+    assert page.status_code == 200
+    assert 'href="/issues"' in page.text
+    assert 'href="/analysis"' in page.text
+    assert "当前运行环境未绑定 Legacy 数据库" not in page.text
+
+
+def test_legacy_knowledge_routes_redirect_to_current_product_owners():
+    app = FastAPI()
+    app.include_router(create_overall_shell_router())
+    client = TestClient(app)
+
+    expected = {
+        "/p0/knowledge": "/p0/overall/areas/cases-knowledge",
+        "/p0/knowledge/cases": "/p0/cases",
+        "/p0/knowledge/repeat-case": "/p0/issues",
+        "/p0/knowledge/storage-lifetime": "/storage-workspace/",
+        "/p0/knowledge/hardware": "/p0/hardware-cases",
+    }
+    for source, target in expected.items():
+        response = client.get(source, follow_redirects=False)
+        assert response.status_code in {302, 307}
+        assert response.headers["location"] == target
+
+    assert client.get("/p0/knowledge/unknown", follow_redirects=False).status_code == 404
+
+
 def test_unified_p0_host_mounts_overall_shell_without_breaking_direct_domain_entries(tmp_path):
     db_path = tmp_path / "overall.db"
     P0Initializer(

@@ -41,8 +41,11 @@ CREATE TABLE IF NOT EXISTS mapping_export_run(
 def _j(v): return json.dumps(v or {},ensure_ascii=False,default=str)
 
 class MappingConfigurationRepository:
-    def __init__(self, db_path:str|Path):
-        self.db_path=Path(db_path); self.db_path.parent.mkdir(parents=True,exist_ok=True); self.initialize_schema()
+    def __init__(self, db_path:str|Path, *, initialize_schema: bool = True):
+        self.db_path=Path(db_path)
+        if initialize_schema:
+            self.db_path.parent.mkdir(parents=True,exist_ok=True)
+            self.initialize_schema()
     def connect(self):
         c=sqlite3.connect(self.db_path); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); return c
     def initialize_schema(self):

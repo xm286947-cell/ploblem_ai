@@ -1,8 +1,8 @@
 # VNEXT_IMPLEMENTATION_PLAN_V0.1
 
-TASK=OVERALL-VNEXT-SINGLE-DEV-TAKEOVER-001
-STATUS=ACTIVE
-SOURCE_MAIN_SHA=f232c6d199ff8a943cd3821e2e111c7f8ff31d91
+TASK=OVERALL-VNEXT-MVP-FAST-TRACK-001
+STATUS=INTEGRATION_VALIDATION_IN_PROGRESS
+SOURCE_MAIN_SHA=11a71c7d0155772044752012ffe3d4cc3546e32a
 BRANCH=integration/overall-vnext
 ARCH_REVIEW=PASS_WITH_CONDITIONS
 ARCH_BLOCKER_COUNT=0
@@ -51,6 +51,26 @@ No new shell, web application, port, cross-domain database, or business schema i
 - M1 blockers: none identified in the approved inputs.
 - Feature-local bindings remain pending only for the features that need them: software assessment routes/state owner; legacy `/analysis` relationship to batch analysis; semantic split of `/statistics`; legacy scenario/portrait routes; and per-route `/p0/knowledge/*` Domain ownership. Resolve each with targeted verification immediately before that feature; none reopens the full audit or blocks M1.
 
+### F. Fast MVP demo execution
+
+- The demo branch starts from current `main` at `11a71c7d0155772044752012ffe3d4cc3546e32a`; it is isolated and short-lived. The existing `integration/overall-vnext` candidate branch and PR #212 were left unchanged.
+- Current `main` already contains PR #213 and #214 legacy compatibility updates and PR #215's merge of the #207 P04 deterministic state restoration fix.
+- Added `scripts/overall_vnext_demo.py` to start the existing `create_p0_app` host with a demo-owned P0 database, Hardware Case database, upload/source directories, and Storage data directory. No production Legacy DB is bound. The script reuses the existing Storage app and does not start another host or port.
+- The launcher injects the repository's deterministic P04 fixture provider for `QS-FIX-002` → `PROBLEM-003`; this synthetic data is for the demo only. See `OVERALL_VNEXT_MVP_DEMO_HANDOFF.md` for run steps and fresh evidence. The original M10 candidate record remains in `OVERALL_VNEXT_COMPLETE_PRODUCT_CANDIDATE_M10.md`.
+- Run locally with `python scripts/overall_vnext_demo.py --port 8080`; open `http://127.0.0.1:8080/p0/overall`. Demo data is isolated under the operating-system temp directory by default. Use `--data-dir` to choose another isolated directory.
+- `python scripts/overall_vnext_demo.py --check` builds the host and requests Overall, Issues, Quality Scenario Insights, and Hardware Case routes without opening a listening socket.
+- Overall adds a “案例与知识” area for Major Case, Hardware Case, Published Knowledge, and Unified Knowledge Production, plus direct shortcuts to the other verified legacy-compatible pages. All destinations reuse existing product-owned routes.
+- Added product-manager task-space pages for Current Problem, Cases & Knowledge, Quality Scenario & Insights, and Professional Topics, with Management & Configuration as a secondary page. The shared P0 sidebar exposes these routes when the full Overall composition is active.
+- Missing unified presentation was implemented in the Overall layer. Existing business pages, APIs, repositories, state machines, and ownership remain in their original products. Legacy-only entries report their runtime binding state instead of failing after navigation.
+- Targeted verification found no implemented `/p0/knowledge/*` browser routes. Added minimal compatibility redirects for the frozen cases, repeat-case, storage-lifetime, and hardware links to their current product owners.
+- The demo launcher isolates the shared Knowledge Production repository alongside P0, Hardware Case, uploads, sources, and Storage data.
+- The demo launcher now creates an isolated Legacy Quality Issue database, explicitly applies the repository's existing PLC Mapping baseline, and imports one synthetic issue. This makes the original issue, analysis, import, and statistics pages runnable without binding any production database.
+- The demo injects four synthetic tasks through the approved Overall task-provider boundary. Major, Quality Scenario, Hardware, and Storage deep links are visible in Task Overview without shell access to any Domain repository.
+- Added a reproducible synthetic OpenAI Mock validation runner. It covers unified Runtime, Major, Repeat, Hardware, Knowledge Production, Storage, SDK/protocol, streaming, secret/resume, and Provider Contract without real customer data or real Provider calls.
+- Focused regression after the task-space implementation: Overall shell, parent integration, task-space, Legacy presentation, knowledge route compatibility, and case/knowledge entry bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding tests: 27 passed. Existing P0/P1/Knowledge Production page regression: 32 passed. Legacy binding/import/analysis/statistics plus Overall shell regression: 21 passed. Launcher `--check` passed on fresh and repeated startup for the shell, four-item task provider, task spaces, shortcuts, compatibility redirects, isolated Legacy pages/detail, P04/P03/source trace, Storage, Published Knowledge, and Knowledge Production routes.
+- OpenAI Mock verification: 29 domain Runtime/product tests plus 49 protocol/SDK/streaming/secret/provider-contract tests passed; Overall synthetic product check passed. Evidence and reproduction command are in `OVERALL_VNEXT_OPENAI_MOCK_VALIDATION.md`.
+- This demo result records runnable integration status; it is not a TSE gate, release approval, or S11 browser regression.
+
 ## Delivery sequence
 
 | Milestone | Scope | Runnable delivery / exit evidence |
@@ -65,6 +85,8 @@ No new shell, web application, port, cross-domain database, or business schema i
 | M8 | Existing Capability Compatibility | Compatibility closure only for capabilities actually consumed by VNext; no renewed whole-repository audit. |
 | M9 | End-to-End Integration | Cross-product journeys, route compatibility, public-contract, Evidence/return, and no-second-shell regressions pass; sync current main and regress. |
 | M10 | Complete Product Candidate | One runnable candidate with release manifest, regression evidence, rollback path, and handoff to TSE. Canonical PR is the only path to main. |
+
+The M1–M10 records below are historical evidence from the original candidate and its recorded source SHAs. The current fast-demo base, branch, launcher, and fresh focused results are recorded in “Fast MVP demo execution.”
 
 ## M1 source verification
 
@@ -173,11 +195,25 @@ TEST_RESULT=104 passed
 ## M10 Complete Product Candidate
 
 - Assembled the release manifest, current-main and branch references, milestone regression evidence, and rollback path in `OVERALL_VNEXT_COMPLETE_PRODUCT_CANDIDATE_M10.md`.
-- Candidate remains on `integration/overall-vnext`; deployment and main promotion are not performed by candidate assembly.
-- Canonical PR to `main` is the only promotion path; TSE receives this candidate and regression evidence for acceptance.
+- The original candidate remains recorded on `integration/overall-vnext` / PR #212 and is not changed by this fast-track demo.
+- Current demo work is based on the newer `main` SHA above. It does not supersede the canonical branch or represent a TSE/release decision.
 
 M10_RESULT=READY_FOR_TSE
 CANDIDATE_DATE=2026-09-27
 DEPLOYMENT=NOT_EXECUTED
 CANONICAL_PR=https://github.com/xm286947-cell/ploblem_ai/pull/212 (open; base=main)
 NEXT=TSE_CANDIDATE_ACCEPTANCE
+
+## 2026-09-28 convergence correction (current status)
+
+This section supersedes earlier readiness claims for the current delivery.
+The demo changes are being merged into the canonical integration branch,
+retaining both histories. No further development is planned on the demo branch.
+
+- Complete Product Candidate acceptance: PENDING business-journey coverage.
+- Prior 8648fe3 ZIP: synthetic integration demo evidence, not release acceptance.
+- Startup route checker corrected to assert every route, not only the final route.
+- S11 Only closes the existing P04 defect; VNext changes require their own scoped acceptance.
+- Mobile evidence covers the Overall homepage viewport only; full mobile usability is pending.
+- Next: import/analyze/confirm/persist; knowledge review/publish/consume; scenario/source/return.
+- Existing historic milestone test counts remain tied to their recorded source SHAs.

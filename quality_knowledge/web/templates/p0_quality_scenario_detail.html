@@ -5,7 +5,7 @@
 <main class="p0-card" data-p03-detail data-scenario-id="{{ scenario_id }}">
   <header class="p0-page-head">
     <div>
-      <a class="p0-back" href="{{ return_to or '/p0/quality-scenario-insights' }}">← 返回质量场景工作区</a>
+      <a class="p0-back" href="{{ return_url or '/p0/quality-scenario-insights' }}">← 返回质量场景工作区</a>
       <h1>{{ scenario.scenario_name }}</h1>
       <div class="p0-badges"><span class="p0-badge">{{ scenario.status }}</span><span class="p0-badge">{{ scenario.scenario_id }}</span></div>
     </div>
@@ -30,7 +30,7 @@
       <details class="p0-evidence-item">
         <summary>{{ evidence.evidence_id }}</summary>
         <p>Evidence Type：{{ evidence.evidence_type }}</p>
-        <p>Source Ref：{% if evidence.source_ref %}<a href="/api/v2/quality-scenario-insights/v1/sources/{{ evidence.source_ref|urlencode }}">{{ evidence.source_ref }}</a>{% else %}—{% endif %}</p>
+        <p>Source Ref：{% if evidence.source_ref %}<a href="/p0/quality-scenario-sources/{{ evidence.source_ref|urlencode }}?return_to={{ return_to|urlencode }}{% if return_context %}&amp;p04_context={{ return_context|urlencode }}{% endif %}">{{ evidence.source_ref }}</a>{% else %}—{% endif %}</p>
         <p>Supports：{{ evidence.supports|join('、') if evidence.supports else '—' }}</p>
       </details>
       {% endfor %}
@@ -47,7 +47,7 @@
         <summary>{{ source.source_ref }}</summary>
         <p>Source ID：{{ source.source_id }}</p>
         <p>Relation：{{ source.relation_type }}</p>
-        <a href="/api/v2/quality-scenario-insights/v1/sources/{{ source.source_ref|urlencode }}">打开 Source Reference</a>
+        <a href="/p0/quality-scenario-sources/{{ source.source_ref|urlencode }}?return_to={{ return_to|urlencode }}{% if return_context %}&amp;p04_context={{ return_context|urlencode }}{% endif %}">打开 Source Reference</a>
       </details>
       {% endfor %}
     {% else %}

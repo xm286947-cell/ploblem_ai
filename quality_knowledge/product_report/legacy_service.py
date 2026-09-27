@@ -11,9 +11,10 @@ from builder.json_response import parse_json_object
 
 class LegacyProductQualityReportService:
     """Report adapter for the stable knowledge-web workflow."""
-    def __init__(self, issue_service: Any, root: str|Path|None=None, ai_client=None):
+    def __init__(self, issue_service: Any, root: str|Path|None=None, ai_client=None, *, initialize_schema: bool = True):
         self.issues=issue_service;self.repository=issue_service.repository;self.root=Path(root) if root else Path(__file__).resolve().parents[2];self.ai_client=ai_client
-        with self.repository.connect() as c:c.executescript("""CREATE TABLE IF NOT EXISTS product_quality_report(report_id TEXT PRIMARY KEY,product_code TEXT NOT NULL,start_month TEXT NOT NULL,end_month TEXT NOT NULL,status TEXT NOT NULL,current_version_no INTEGER NOT NULL DEFAULT 1,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS product_quality_report_version(report_version_id TEXT PRIMARY KEY,report_id TEXT NOT NULL,version_no INTEGER NOT NULL,status TEXT NOT NULL,scope_hash TEXT NOT NULL,report_json TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(report_id,version_no));CREATE TABLE IF NOT EXISTS product_quality_report_batch_cache(batch_hash TEXT PRIMARY KEY,agent_id TEXT NOT NULL,model_name TEXT,summary_json TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
+        if initialize_schema:
+            with self.repository.connect() as c:c.executescript("""CREATE TABLE IF NOT EXISTS product_quality_report(report_id TEXT PRIMARY KEY,product_code TEXT NOT NULL,start_month TEXT NOT NULL,end_month TEXT NOT NULL,status TEXT NOT NULL,current_version_no INTEGER NOT NULL DEFAULT 1,created_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS product_quality_report_version(report_version_id TEXT PRIMARY KEY,report_id TEXT NOT NULL,version_no INTEGER NOT NULL,status TEXT NOT NULL,scope_hash TEXT NOT NULL,report_json TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(report_id,version_no));CREATE TABLE IF NOT EXISTS product_quality_report_batch_cache(batch_hash TEXT PRIMARY KEY,agent_id TEXT NOT NULL,model_name TEXT,summary_json TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
     @staticmethod
     def _month(value):
         m=re.search(r"\d+",str(value or ""));return int(m.group()) if m else -1
