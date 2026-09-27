@@ -81,7 +81,7 @@ The shell module is transport/UI-only, exposes four stable workspace entries, us
 M1_SYNC_MAIN_SHA=b0eb3d77bf9cf44162a01fdd79978d266b3caa1f
 M1_SYNC_MERGE_COMMIT=e6694f3
 FIRST_RUNNABLE_TARGET=2026-09-27 (M1 shell/host regression passed)
-COMPLETE_CANDIDATE_TARGET=After M9 integration and M10 release assembly; schedule estimate pending M2 sizing.
+COMPLETE_CANDIDATE_TARGET=2026-09-27 (candidate assembled; canonical PR is the promotion gate)
 M1_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py tests/test_overall_vnext_v03_frontend_binding.py
 TEST_RESULT=13 passed
@@ -169,4 +169,14 @@ M9_SYNC_MAIN_SHA=dffa846cd30f8dcaf92658f40e29c3cc713be5d6
 M9_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py tests/test_overall_vnext_v03_frontend_binding.py tests/test_major_workspace_binding.py tests/test_hardware_workspace_binding.py tests/test_major_knowledge_publication_contract.py tests/test_historical_case_consumer_contract.py tests/test_hardware_case_knowledge_p0_contract.py tests/test_quality_scenario_workspace_binding.py tests/test_p04_real_integration.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_quality_insights_drilldown_fix.py tests/test_storage_workspace_binding.py products/storage_rc1/tests/test_ui_next_issue132.py tests/test_quality_capability_p0_console_ued.py tests/test_forward_risk_p1a_ued.py tests/test_product_quality_report_mvp.py tests/test_hardware_case_evidence_source.py tests/test_source_problem_itr_ref_contract.py
 TEST_RESULT=104 passed
-NEXT=M10_COMPLETE_PRODUCT_CANDIDATE
+
+## M10 Complete Product Candidate
+
+- Assembled the release manifest, current-main and branch references, milestone regression evidence, and rollback path in `OVERALL_VNEXT_COMPLETE_PRODUCT_CANDIDATE_M10.md`.
+- Candidate remains on `integration/overall-vnext`; deployment and main promotion are not performed by candidate assembly.
+- Canonical PR to `main` is the only promotion path; TSE receives this candidate and regression evidence for acceptance.
+
+M10_RESULT=READY_FOR_TSE
+CANDIDATE_DATE=2026-09-27
+DEPLOYMENT=NOT_EXECUTED
+NEXT=CANONICAL_PR_TO_MAIN_AND_TSE_REVIEW
