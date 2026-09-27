@@ -6,9 +6,9 @@ main application without changing the legacy insight page.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
-import json
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request

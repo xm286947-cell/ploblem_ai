@@ -114,3 +114,34 @@ def test_p03_return_context_roundtrip_and_safe_default(tmp_path: Path) -> None:
     safe_href = unescape(missing.text.split('class="p0-back" href="', 1)[1].split('"', 1)[0])
     assert urlparse(safe_href).path == "/p0/quality-scenario-insights"
     assert parse_qs(urlparse(safe_href).query) == {"p04_reset": ["1"]}
+
+
+
+def test_p03_return_context_accepts_each_p04_view(tmp_path: Path) -> None:
+    from html import unescape
+    from urllib.parse import parse_qs, quote, urlparse
+    import json
+
+    client = _client(tmp_path)
+    modes = {
+        "PRODUCT": "LIFECYCLE_X_BUSINESS_ACTIVITY",
+        "CUSTOMER": "PRODUCT_X_BUSINESS_ACTIVITY",
+        "INDUSTRY": "BUSINESS_ACTIVITY_X_QUALITY_FOCUS",
+    }
+    for view, matrix_mode in modes.items():
+        context = {
+            "contract": "p04-query-context/v1",
+            "view": view,
+            "selected_object": None,
+            "filters": {},
+            "matrix_mode": matrix_mode,
+            "page": 1,
+        }
+        encoded = quote(json.dumps(context, separators=(",", ":")))
+        response = client.get(
+            f"/p0/quality-scenarios/QS-FIX-002?return_context={encoded}"
+        )
+        assert response.status_code == 200
+        href = unescape(response.text.split('class="p0-back" href="', 1)[1].split('"', 1)[0])
+        restored = json.loads(parse_qs(urlparse(href).query)["p04_context"][0])
+        assert restored == context
