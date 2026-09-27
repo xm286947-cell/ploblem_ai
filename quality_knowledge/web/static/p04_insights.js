@@ -3,6 +3,8 @@
   const root=document.querySelector('[data-p04-insights]'); if(!root)return;
   const api=(root.dataset.apiPrefix||'/api/v2/quality-scenario-insights/v1').replace(/\/$/,'');
   const state={view:'PRODUCT',selected_object:null,filters:{},matrix_mode:'',result_revision:'',query_context_id:'',page:1,page_size:20};
+  window.__P04_RUNTIME_EVIDENCE__={events:[]};
+  function runtimeEvidence(point,extra){window.__P04_RUNTIME_EVIDENCE__.events.push(Object.assign({point:point,state_view:state.view},extra||{}));}
   const matrices={PRODUCT:['LIFECYCLE_X_BUSINESS_ACTIVITY'],CUSTOMER:['PRODUCT_X_BUSINESS_ACTIVITY','PRODUCT_X_QUALITY_FOCUS'],INDUSTRY:['CUSTOMER_X_PRODUCT_OR_FAMILY','BUSINESS_ACTIVITY_X_QUALITY_FOCUS']};
   const filterKeys=['lifecycle','business_activity','quality_focus'];
   const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
