@@ -167,8 +167,10 @@ def main() -> None:
                 page.wait_for_load_state("networkidle")
                 assert page.locator("[data-p03-detail]").get_attribute("data-scenario-id") == "QS-FIX-002"
 
-                source_link = page.locator('a[href*="/sources/PROBLEM-003"]').first
-                assert source_link.count() == 1
+                source_details = page.locator('#source-trace details', has_text="PROBLEM-003")
+                assert source_details.count() == 1
+                source_details.locator("summary").click()
+                source_link = source_details.locator('a[href*="/sources/PROBLEM-003"]').first
                 source_link.click()
                 page.wait_for_load_state("networkidle")
                 assert "PROBLEM-003" in page.text_content("body")
