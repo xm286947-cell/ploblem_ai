@@ -3,7 +3,9 @@ from datetime import datetime,timezone
 VALID_TYPES={'TEXT','LONG_TEXT','SINGLE_SELECT','MULTI_SELECT','BOOLEAN','NUMBER','DATE'}
 def now(): return datetime.now(timezone.utc).isoformat()
 class HumanAnalysisRepository:
- def __init__(self,db_path): self.db_path=str(db_path);self._schema()
+ def __init__(self,db_path, *, initialize_schema=True):
+  self.db_path=str(db_path)
+  if initialize_schema:self._schema()
  def connect(self):
   c=sqlite3.connect(self.db_path);c.row_factory=sqlite3.Row;c.execute('PRAGMA foreign_keys=ON');return c
  def _schema(self):

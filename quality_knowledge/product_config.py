@@ -9,17 +9,18 @@ DEFAULT_PRODUCTS = [
 ]
 
 class ProductConfigRepository:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, initialize_schema: bool = True):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as c:
-            c.execute('''CREATE TABLE IF NOT EXISTS product_config(
-                product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL,
-                product_kind TEXT NOT NULL DEFAULT 'PRODUCT', default_issue_domain TEXT NOT NULL DEFAULT 'AUTO',
-                enabled INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
-            for row in DEFAULT_PRODUCTS:
-                c.execute('INSERT OR IGNORE INTO product_config(product_code,product_name,product_kind,default_issue_domain,sort_order) VALUES(?,?,?,?,?)', row)
+        if initialize_schema:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.connect() as c:
+                c.execute('''CREATE TABLE IF NOT EXISTS product_config(
+                    product_code TEXT PRIMARY KEY, product_name TEXT NOT NULL,
+                    product_kind TEXT NOT NULL DEFAULT 'PRODUCT', default_issue_domain TEXT NOT NULL DEFAULT 'AUTO',
+                    enabled INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+                for row in DEFAULT_PRODUCTS:
+                    c.execute('INSERT OR IGNORE INTO product_config(product_code,product_name,product_kind,default_issue_domain,sort_order) VALUES(?,?,?,?,?)', row)
     def connect(self):
         c = sqlite3.connect(self.db_path); c.row_factory = sqlite3.Row; return c
     def list(self, enabled_only=True):

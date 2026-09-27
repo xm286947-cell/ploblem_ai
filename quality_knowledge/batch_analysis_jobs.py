@@ -11,11 +11,11 @@ from pathlib import Path
 class BatchAnalysisJobManager:
     """Thread-safe batch runner with an optional SQLite-backed job ledger."""
 
-    def __init__(self, db_path=None):
+    def __init__(self, db_path=None, *, initialize_schema=True):
         self._jobs = {}
         self._lock = threading.Lock()
         self._db_path = Path(db_path) if db_path else None
-        if self._db_path:
+        if self._db_path and initialize_schema:
             with sqlite3.connect(self._db_path) as connection:
                 connection.execute("""CREATE TABLE IF NOT EXISTS qc_batch_analysis_job(
                     job_id TEXT PRIMARY KEY,status TEXT NOT NULL,total INTEGER NOT NULL,

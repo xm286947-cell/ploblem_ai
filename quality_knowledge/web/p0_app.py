@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
@@ -83,6 +83,7 @@ def create_p0_app(
     testability_enabled: bool | None = None,
     testability_token: str | None = None,
     testability_state_root: str | Path | None = None,
+    legacy_quality_issue_db_path: str | Path | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
 
@@ -207,6 +208,10 @@ def create_p0_app(
     app.state.p0_repository = repository
     app.state.v2_stage_runner = stage_runner
     app.state.analysis_runtime_status = analysis_runtime_status
+    app.state.legacy_quality_issue_status = {
+        "ready": False,
+        "code": "DOMAIN_DISABLED" if "QUALITY_ISSUE" not in domains else "LEGACY_DB_PATH_NOT_CONFIGURED",
+    }
     # P04 is intentionally provider-injected.  The default is explicit
     # DATA_UNAVAILABLE until the approved public JSON providers are wired.
     app.state.p04_provider = p04_provider or UnavailableP04Provider()
@@ -380,6 +385,58 @@ def create_p0_app(
             create_p0_insights_router(scenario_detail_service=app.state.p04_service)
         )
         app.include_router(create_p1_router())
+
+        from quality_knowledge.web.legacy_database_binding import validate_legacy_database
+
+        configured_legacy_db = legacy_quality_issue_db_path or os.getenv(
+            "LEGACY_QUALITY_ISSUE_DB_PATH"
+        )
+        # A normalized path collision is a composition error; the validator
+        # raises LEGACY_P0_DATABASE_PATH_COLLISION before the host can serve.
+        legacy_db, legacy_error = validate_legacy_database(db_path, configured_legacy_db)
+        if legacy_error is None and legacy_db is not None:
+            from quality_knowledge.web.app import create_legacy_quality_issue_router
+
+            legacy_router, legacy_services = create_legacy_quality_issue_router(
+                legacy_db,
+                initialize_schema=False,
+            )
+            app.include_router(legacy_router)
+            app.state.legacy_quality_issue_services = legacy_services
+            app.state.legacy_quality_issue_status = {
+                "ready": True,
+                "code": "READY",
+                "database_path": str(legacy_db),
+            }
+            testability_mutable_paths.append(legacy_db)
+        else:
+            app.state.legacy_quality_issue_status = {
+                "ready": False,
+                "code": legacy_error or "LEGACY_DB_UNAVAILABLE",
+                "database_path": str(legacy_db) if legacy_db is not None else None,
+            }
+
+            @app.middleware("http")
+            async def legacy_capability_unavailable(request: Request, call_next):
+                status = app.state.legacy_quality_issue_status
+                path = request.url.path
+                legacy_prefixes = (
+                    "/analysis", "/analysis-batch", "/api/analysis", "/api/analysis-agents",
+                    "/import", "/imports", "/api/import", "/statistics", "/api/statistics",
+                    "/api/common-capability-gaps", "/api/capability-gaps", "/api/issues",
+                    "/issues", "/settings", "/product-reports", "/export",
+                    "/insights/capability-gaps", "/static",
+                )
+                if any(path == prefix or path.startswith(prefix + "/") for prefix in legacy_prefixes):
+                    code = str(status.get("code") or "LEGACY_DB_UNAVAILABLE")
+                    if "text/html" in request.headers.get("accept", ""):
+                        return HTMLResponse(
+                            f"<main><h1>历史质量能力暂不可用</h1><p>{code}</p></main>",
+                            status_code=503,
+                        )
+                    return JSONResponse({"detail": code}, status_code=503)
+                return await call_next(request)
+
         root_target = "/p0/issues"
     else:
         app.include_router(create_hardware_case_pages_router())

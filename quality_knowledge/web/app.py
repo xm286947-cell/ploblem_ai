@@ -5,12 +5,12 @@ import html
 import json
 import logging
 import tempfile
+from types import SimpleNamespace
 from urllib.parse import urlencode
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import load_workbook
 from quality_knowledge.adapters.base import clean
@@ -168,13 +168,24 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_
     }
 
 
-def create_app(db_path):
-    app = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
-    svc = KnowledgeIssueService(IssueKnowledgeRepository(db_path))
-    capability_extension = QualityCapabilityExtension(db_path)
-    app.state.quality_capability_extension = capability_extension
-    batch_jobs = BatchAnalysisJobManager(db_path)
-    app.state.batch_analysis_jobs = batch_jobs
+def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
+    """Build legacy routes and services without creating a Web application.
+
+    The Overall composition root supplies a prevalidated, existing Legacy DB
+    and sets ``initialize_schema=False``. ``create_app`` below remains a
+    standalone compatibility wrapper for legacy tools and tests.
+    """
+    app = APIRouter()
+    state = SimpleNamespace()
+    repository = IssueKnowledgeRepository(db_path, initialize_schema=initialize_schema)
+    mapping_repository = MappingConfigurationRepository(db_path, initialize_schema=initialize_schema)
+    mapping_svc = MappingConfigurationService(mapping_repository)
+    product_repo = ProductConfigRepository(db_path, initialize_schema=initialize_schema)
+    svc = KnowledgeIssueService(repository, mapping_svc, product_repo)
+    capability_extension = QualityCapabilityExtension(db_path, initialize_schema=initialize_schema)
+    state.quality_capability_extension = capability_extension
+    batch_jobs = BatchAnalysisJobManager(db_path, initialize_schema=initialize_schema)
+    state.batch_analysis_jobs = batch_jobs
 
     def project_capability(knowledge_id):
         issue = svc.get_issue(knowledge_id)
@@ -188,19 +199,16 @@ def create_app(db_path):
         for knowledge_id in selected_ids:
             project_capability(knowledge_id)
         return result
-    product_repo = ProductConfigRepository(db_path)
     for product in product_repo.list(False):
         register_product_adapter(product['product_code'])
-    mapping_svc = MappingConfigurationService(MappingConfigurationRepository(db_path))
-    app.state.mapping_configuration_service = mapping_svc
-    human_svc = HumanAnalysisService(HumanAnalysisRepository(db_path))
-    report_svc = LegacyProductQualityReportService(svc, BASE.parent.parent)
-    app.state.human_analysis_service = human_svc
-    app.state.knowledge_issue_service = svc
-    app.state.product_config_repository = product_repo
+    human_svc = HumanAnalysisService(HumanAnalysisRepository(db_path, initialize_schema=initialize_schema))
+    report_svc = LegacyProductQualityReportService(svc, BASE.parent.parent, initialize_schema=initialize_schema)
+    state.mapping_configuration_service = mapping_svc
+    state.human_analysis_service = human_svc
+    state.knowledge_issue_service = svc
+    state.product_config_repository = product_repo
     intake_svc = IntakeSessionService()
-    app.state.intake_session_service = intake_svc
-    app.mount('/static', StaticFiles(directory=BASE / 'static'), name='static')
+    state.intake_session_service = intake_svc
     tpl = Jinja2Templates(directory=BASE / 'templates')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
@@ -219,10 +227,6 @@ def create_app(db_path):
             p = Path(td) / Path(f.filename).name
             p.write_bytes(f.file.read())
             return svc.import_file(p, bt or None, issue_domain=issue_domain)
-
-    @app.get('/', include_in_schema=False)
-    def root():
-        return RedirectResponse('/issues')
 
     @app.get('/import', response_class=HTMLResponse, include_in_schema=False)
     def import_page(request: Request):
@@ -1064,4 +1068,29 @@ def create_app(db_path):
     def api_gaps(knowledge_id: str | None = None):
         return {'items': svc.query_capability_gaps(knowledge_id)}
 
-    return app
+    @app.get('/static/{path:path}', name='static', include_in_schema=False)
+    def legacy_static(path: str):
+        asset_root = (BASE / 'static').resolve()
+        asset = (asset_root / path).resolve()
+        try:
+            asset.relative_to(asset_root)
+        except ValueError:
+            raise HTTPException(404, 'NOT_FOUND')
+        if not asset.is_file():
+            raise HTTPException(404, 'NOT_FOUND')
+        return FileResponse(asset)
+
+    return app, state
+
+
+def create_app(db_path):
+    """Standalone legacy application retained for existing local tools/tests."""
+    router, state = create_legacy_quality_issue_router(db_path, initialize_schema=True)
+    standalone = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
+    standalone.include_router(router)
+    @standalone.get('/', include_in_schema=False)
+    def root():
+        return RedirectResponse('/issues')
+    for name, value in vars(state).items():
+        setattr(standalone.state, name, value)
+    return standalone
