@@ -7,6 +7,7 @@ main application without changing the legacy insight page.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -21,6 +22,7 @@ def create_p0_insights_router(
     template_dir: str | Path | None = None,
     static_dir: str | Path | None = None,
     api_prefix: str = "/api/v2",
+    scenario_detail_service: Any | None = None,
 ) -> APIRouter:
     """Return an isolated router for ``/p0/insights``.
 
@@ -87,6 +89,21 @@ def create_p0_insights_router(
             "/p0/quality-scenario-insights",
             "/p0/insights/p04",
         } else ""
+        if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
+            scenario = scenario_detail_service.scenario_detail(knowledge_id)
+            if scenario is None:
+                raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
+            return templates.TemplateResponse(
+                request,
+                "p0_quality_scenario_detail.html",
+                {
+                    "api_prefix": api_prefix.rstrip("/"),
+                    "scenario_id": knowledge_id,
+                    "scenario": scenario,
+                    "return_to": return_to,
+                    "page_title": "场景详情 · 质量能力",
+                },
+            )
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
@@ -95,6 +112,31 @@ def create_p0_insights_router(
                 "knowledge_id": knowledge_id,
                 "page_title": "问题详情 · 质量能力",
                 "return_to": return_to,
+            },
+        )
+
+    @router.get("/p0/quality-scenarios/{scenario_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_detail(request: Request, scenario_id: str) -> HTMLResponse:
+        if scenario_detail_service is None:
+            raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
+        scenario = scenario_detail_service.scenario_detail(scenario_id)
+        if scenario is None:
+            raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+            "/p0/quality-scenarios",
+        } else ""
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_detail.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "scenario_id": scenario_id,
+                "scenario": scenario,
+                "return_to": return_to,
+                "page_title": "场景详情 · 质量能力",
             },
         )
 
