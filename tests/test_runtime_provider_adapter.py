@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
+import sys
 import threading
 from typing import Iterator
 from urllib.error import HTTPError
@@ -503,6 +504,65 @@ def test_orch_b01_provider_trace_file_is_safe(
     assert '"body_sha256":' in text
     assert SECRET not in text
     assert "Return strict JSON." not in text
+
+
+def test_provider_trace_survives_strict_gbk_console(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class StrictGbkStdout:
+        encoding = "cp936"
+
+        def write(self, value: str) -> int:
+            # Simulate a Windows CP936 console that cannot encode the marker.
+            value.encode("gbk")
+            return len(value)
+
+        def flush(self) -> None:
+            return None
+
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+
+    trace_file = tmp_path / "provider_gbk.log"
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.setattr(sys, "stdout", StrictGbkStdout())
+    monkeypatch.setenv("RUNTIME_PROVIDER_DIAGNOSTICS", "1")
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace_file))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Return strict JSON.",
+        output_schema=SimpleResult,
+        response_shape="json_object",
+    )
+
+    result = adapter(
+        {"datasheet_marker": "Ω ✓"},
+        {
+            "runtime": {
+                "provider_call_seq": 13,
+                "provider_config": {
+                    "base_url": "http://127.0.0.1:18080/v1",
+                    "model": "qwen3.8-max",
+                    "api_key": SECRET,
+                },
+            }
+        },
+    )
+
+    assert result == {"ok": True}
+    trace = trace_file.read_text(encoding="utf-8")
+    assert "Ω ✓" in trace
+    assert '"phase": "request"' in trace
+    assert '"phase": "response"' in trace
 
 
 
