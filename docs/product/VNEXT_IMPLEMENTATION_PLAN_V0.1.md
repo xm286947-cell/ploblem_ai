@@ -95,4 +95,15 @@ TEST_RESULT=13 passed
 M2_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_overall_frontend_parent_integration.py
 TEST_RESULT=5 passed
-NEXT=M3_CASES_AND_KNOWLEDGE
+
+## M3 Cases and Knowledge
+
+- Synchronized current main at `dffa846cd30f8dcaf92658f40e29c3cc713be5d6`; included its legacy capability compatibility contract without changing its scope.
+- Reused the existing Major / Repeat Risk and Hardware Case workspace entries, pages, and Public Contracts.
+- Verified that published Historical Case knowledge remains consumable through `historical-case/v1`; no Domain repository was crossed and no duplicate workspace was created.
+
+M3_SYNC_MAIN_SHA=dffa846cd30f8dcaf92658f40e29c3cc713be5d6
+M3_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_overall_frontend_parent_integration.py tests/test_major_workspace_binding.py tests/test_hardware_workspace_binding.py tests/test_major_knowledge_publication_contract.py tests/test_historical_case_consumer_contract.py tests/test_hardware_case_knowledge_p0_contract.py
+TEST_RESULT=34 passed
+NEXT=M4_QUALITY_SCENARIO_AND_INSIGHTS
