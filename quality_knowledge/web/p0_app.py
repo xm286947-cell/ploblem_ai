@@ -16,7 +16,7 @@ from quality_knowledge.web.p0_pages import (
     create_p0_insights_router,
 )
 from quality_knowledge.p04.adapter import P04Provider, UnavailableP04Provider
-from quality_knowledge.p04.api import create_p04_router
+from quality_knowledge.p04.api import create_p04_router, create_public_scenario_router
 from quality_knowledge.p04.portrait import (
     PortraitArchiveRepository,
     PortraitProvider,
@@ -374,8 +374,11 @@ def create_p0_app(
             )
         )
         app.include_router(create_p04_router(app.state.p04_service))
+        app.include_router(create_public_scenario_router(app.state.p04_service))
         app.include_router(create_portrait_router(app.state.portrait_service))
-        app.include_router(create_p0_insights_router())
+        app.include_router(
+            create_p0_insights_router(scenario_detail_service=app.state.p04_service)
+        )
         app.include_router(create_p1_router())
         root_target = "/p0/insights"
     else:

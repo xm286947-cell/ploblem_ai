@@ -215,6 +215,136 @@ class P04InsightService:
             error_code=result.error_code,
         )
 
+    def scenario_detail(self, scenario_id: str) -> dict[str, Any] | None:
+        """Resolve one published scenario through the P04 public provider port.
+
+        P03 consumes this projection instead of importing a repository or an
+        internal QualityScenario model.  The exact public ``scenario_id`` is
+        the only lookup key; missing or non-published records do not fall back
+        to another object.
+        """
+        requested = str(scenario_id or "").strip()
+        if not requested:
+            return None
+        snapshot = self._snapshot()
+        if self._is_terminal_state(snapshot.state):
+            return None
+        record = next(
+            (
+                item
+                for item in published_records(snapshot)
+                if str(item.get("scenario_id") or "").strip() == requested
+            ),
+            None,
+        )
+        if record is None:
+            return None
+        return self._public_scenario_detail(record, snapshot.result_revision)
+
+    def source_trace(self, source_ref: str) -> dict[str, Any] | None:
+        """Resolve a public source reference without crossing provider boundaries."""
+        requested = str(source_ref or "").strip()
+        if not requested:
+            return None
+        snapshot = self._snapshot()
+        if self._is_terminal_state(snapshot.state):
+            return None
+        matches = []
+        for record in published_records(snapshot):
+            detail = self._public_scenario_detail(record, snapshot.result_revision)
+            for source in detail["source_problem_refs"]:
+                if source["source_ref"] == requested:
+                    matches.append(
+                        {
+                            "scenario_id": detail["scenario_id"],
+                            "scenario_name": detail["scenario_name"],
+                            "source": source,
+                        }
+                    )
+        if not matches:
+            return None
+        return {
+            "contract_version": "quality-scenario-source-trace/v1",
+            "source_ref": requested,
+            "items": matches,
+        }
+
+    @classmethod
+    def _public_scenario_detail(
+        cls, record: dict[str, Any], result_revision: str
+    ) -> dict[str, Any]:
+        scenario_id = str(record.get("scenario_id") or "").strip()
+        source_values = record.get("source_refs") or record.get("source_problem_ids") or []
+        if not isinstance(source_values, list):
+            source_values = [source_values]
+        sources: list[dict[str, Any]] = []
+        for value in source_values:
+            if isinstance(value, dict):
+                source_ref = str(value.get("source_ref") or value.get("source_id") or "").strip()
+                source = dict(value)
+            else:
+                source_ref = str(value or "").strip()
+                source = {}
+            if not source_ref:
+                continue
+            source.setdefault("source_ref", source_ref)
+            source.setdefault("source_id", source_ref)
+            source.setdefault("relation_type", "PRIMARY")
+            sources.append(source)
+
+        raw_evidence = record.get("evidence_refs") or record.get("evidence") or []
+        if not isinstance(raw_evidence, list):
+            raw_evidence = [raw_evidence]
+        evidence: list[dict[str, Any]] = []
+        for index, value in enumerate(raw_evidence, start=1):
+            if isinstance(value, dict):
+                item = dict(value)
+                evidence_id = str(
+                    item.get("evidence_id") or item.get("id") or item.get("source_ref") or ""
+                ).strip()
+            else:
+                evidence_id = str(value or "").strip()
+                item = {}
+            if not evidence_id:
+                continue
+            item.setdefault("evidence_id", evidence_id)
+            item.setdefault("source_ref", str(item.get("source_ref") or "").strip())
+            item.setdefault("evidence_type", "PUBLIC_SCENARIO_EVIDENCE")
+            item.setdefault("supports", [])
+            evidence.append(item)
+
+        # The provider's source problem references are themselves the approved
+        # public evidence anchors when no richer evidence list is supplied.
+        # This keeps the chain explicit and deterministic without inventing a
+        # second evidence store or a test-only object.
+        if not evidence:
+            evidence = [
+                {
+                    "evidence_id": f"source:{source['source_ref']}",
+                    "source_ref": source["source_ref"],
+                    "evidence_type": "SOURCE_PROBLEM_REFERENCE",
+                    "supports": ["scenario_identity"],
+                }
+                for source in sources
+            ]
+        return {
+            "contract_version": "quality-scenario-detail/v1",
+            "result_revision": result_revision,
+            "scenario_id": scenario_id,
+            "scenario_name": str(record.get("scenario_name") or scenario_id),
+            "status": str(record.get("status") or "PUBLISHED").upper(),
+            "lifecycle": str(record.get("lifecycle") or ""),
+            "business_activity": str(record.get("business_activity") or ""),
+            "quality_focus": str(record.get("quality_focus") or ""),
+            "trigger_summary": str(record.get("trigger_summary") or ""),
+            "failure_mode_summary": str(record.get("failure_mode_summary") or ""),
+            "product_context": record.get("product") or record.get("product_family"),
+            "customer_context": record.get("customer"),
+            "industry_context": record.get("industry"),
+            "source_problem_refs": sources,
+            "evidence_refs": evidence,
+        }
+
     def _snapshot(self) -> ProviderSnapshot:
         try:
             snapshot = self.provider.snapshot()

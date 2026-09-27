@@ -1,0 +1,60 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block breadcrumb %}质量场景 / 场景详情{% endblock %}
+{% block body %}
+<main class="p0-card" data-p03-detail data-scenario-id="{{ scenario_id }}">
+  <header class="p0-page-head">
+    <div>
+      <a class="p0-back" href="{{ return_to or '/p0/quality-scenario-insights' }}">← 返回质量场景工作区</a>
+      <h1>{{ scenario.scenario_name }}</h1>
+      <div class="p0-badges"><span class="p0-badge">{{ scenario.status }}</span><span class="p0-badge">{{ scenario.scenario_id }}</span></div>
+    </div>
+    <a class="p0-ghost" href="/p0/quality-scenario-insights">Scenario Library</a>
+  </header>
+
+  <section class="p0-card">
+    <h2>标准质量场景</h2>
+    <dl>
+      <dt>生命周期</dt><dd>{{ scenario.lifecycle or '—' }}</dd>
+      <dt>业务活动</dt><dd>{{ scenario.business_activity or '—' }}</dd>
+      <dt>质量关注</dt><dd>{{ scenario.quality_focus or '—' }}</dd>
+      <dt>触发条件摘要</dt><dd>{{ scenario.trigger_summary or '—' }}</dd>
+      <dt>失效模式摘要</dt><dd>{{ scenario.failure_mode_summary or '—' }}</dd>
+    </dl>
+  </section>
+
+  <section class="p0-card" id="evidence">
+    <h2>Evidence / 证据与来源</h2>
+    {% if scenario.evidence_refs %}
+      {% for evidence in scenario.evidence_refs %}
+      <details class="p0-evidence-item">
+        <summary>{{ evidence.evidence_id }}</summary>
+        <p>Evidence Type：{{ evidence.evidence_type }}</p>
+        <p>Source Ref：{% if evidence.source_ref %}<a href="/api/v2/quality-scenario-insights/v1/sources/{{ evidence.source_ref|urlencode }}">{{ evidence.source_ref }}</a>{% else %}—{% endif %}</p>
+        <p>Supports：{{ evidence.supports|join('、') if evidence.supports else '—' }}</p>
+      </details>
+      {% endfor %}
+    {% else %}
+      <p>Evidence Missing：当前场景没有可用 Evidence。</p>
+    {% endif %}
+  </section>
+
+  <section class="p0-card" id="source-trace">
+    <h2>Source / Source Reference</h2>
+    {% if scenario.source_problem_refs %}
+      {% for source in scenario.source_problem_refs %}
+      <details class="p0-evidence-item">
+        <summary>{{ source.source_ref }}</summary>
+        <p>Source ID：{{ source.source_id }}</p>
+        <p>Relation：{{ source.relation_type }}</p>
+        <a href="/api/v2/quality-scenario-insights/v1/sources/{{ source.source_ref|urlencode }}">打开 Source Reference</a>
+      </details>
+      {% endfor %}
+    {% else %}
+      <p>Source Missing：当前场景未关联来源问题。</p>
+    {% endif %}
+  </section>
+
+  <details class="p0-card" open><summary>技术追溯：原始数据与标准化入库数据</summary><p>本页通过 P04 public provider projection 读取同一稳定 scenario_id；不访问内部 Repository 或数据库。</p></details>
+</main>
+{% endblock %}
