@@ -86,6 +86,14 @@ def main() -> int:
         root = client.get("/", follow_redirects=False)
         if root.status_code not in {302, 307} or root.headers.get("location") != "/p0/issues":
             raise RuntimeError("MVP_DEFAULT_ENTRY_FAILED")
+        knowledge_compatibility = client.get(
+            "/p0/knowledge/hardware", follow_redirects=False
+        )
+        if (
+            knowledge_compatibility.status_code not in {302, 307}
+            or knowledge_compatibility.headers.get("location") != "/p0/hardware-cases"
+        ):
+            raise RuntimeError("MVP_KNOWLEDGE_COMPATIBILITY_FAILED")
         query = client.post(
             "/api/v2/quality-scenario-insights/v1/query",
             json={"view": "INDUSTRY"},

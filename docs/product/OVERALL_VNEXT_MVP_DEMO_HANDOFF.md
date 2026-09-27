@@ -17,6 +17,7 @@ DEPLOYMENT=LOCAL_DEMO_ONLY
 - A four-entry “案例与知识” area linked to Major Case, Hardware Case, Published Knowledge, and Unified Knowledge Production pages.
 - Product-manager task spaces for Current Problem, Cases & Knowledge, Quality Scenario & Insights, and Professional Topics, plus a Management & Configuration secondary page.
 - Overall task-space navigation in the shared P0 sidebar. Repeat Risk remains embedded in the current-problem journey.
+- Compatibility redirects for `/p0/knowledge`, `/p0/knowledge/cases`, `/p0/knowledge/repeat-case`, `/p0/knowledge/storage-lifetime`, and `/p0/knowledge/hardware`.
 - The current `main` changes from PRs #213/#214 and #215, including the complete #207 state-restoration fix.
 - Deterministic synthetic P04 data from the repository's `FixtureP04Provider`, including `QS-FIX-002` and source `PROBLEM-003`.
 - Isolated P0, Hardware Case, uploads, sources, Storage, and shared Knowledge Production data paths. The launcher clears any inherited Legacy DB binding so the demo does not touch a production Legacy DB or the repository's default Knowledge Production data.
@@ -41,7 +42,7 @@ python scripts/overall_vnext_demo.py --check
 
 ## Verification
 
-- Focused Overall/workspace regression: **26 passed** (Overall Shell, product task spaces, Legacy binding presentation, parent integration, case/knowledge navigation, shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
+- Focused Overall/workspace regression: **27 passed** (Overall Shell, product task spaces, Legacy binding presentation, knowledge route compatibility, parent integration, case/knowledge navigation, shortcut route bindings, URL-bound issue workspace, Major, Quality Scenario, Hardware Case, and Storage binding).
 - Existing P0/P1/Knowledge Production page regression: **32 passed**.
 - Launcher `--check`: **PASS** for Overall, Issues, P04, Hardware Case, Storage, Published Knowledge, Unified Knowledge Production, default redirect, the synthetic P04 query, P03 detail, and Source Trace page.
 - Formal S11 browser regression was not run. The smoke confirms demo route availability only; it does not claim S11 acceptance.

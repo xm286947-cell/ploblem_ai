@@ -110,6 +110,13 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
     },
 )
 
+KNOWLEDGE_COMPATIBILITY_ROUTES: dict[str, str] = {
+    "cases": "/p0/cases",
+    "repeat-case": "/p0/issues",
+    "storage-lifetime": "/storage-workspace/",
+    "hardware": "/p0/hardware-cases",
+}
+
 
 def _safe_local_path(value: Any, *, default: str | None = None) -> str | None:
     """Return one same-origin path or fail closed.
@@ -301,5 +308,16 @@ def create_overall_shell_router(
     @router.get("/p0/overall/return", include_in_schema=False)
     def overall_return(to: str = Query("/p0/overall")) -> RedirectResponse:
         return RedirectResponse(_safe_local_path(to, default="/p0/overall"))
+
+    @router.get("/p0/knowledge", include_in_schema=False)
+    def legacy_knowledge_root() -> RedirectResponse:
+        return RedirectResponse("/p0/overall/areas/cases-knowledge")
+
+    @router.get("/p0/knowledge/{capability_id}", include_in_schema=False)
+    def legacy_knowledge_entry(capability_id: str) -> RedirectResponse:
+        target = KNOWLEDGE_COMPATIBILITY_ROUTES.get(capability_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="KNOWLEDGE_CAPABILITY_NOT_FOUND")
+        return RedirectResponse(target)
 
     return router
