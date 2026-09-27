@@ -126,4 +126,15 @@ TEST_RESULT=25 passed
 M5_RESULT=PASS
 TEST_COMMAND=pytest -q tests/test_storage_workspace_binding.py products/storage_rc1/tests/test_ui_next_issue132.py tests/test_overall_frontend_parent_integration.py
 TEST_RESULT=14 passed
-NEXT=M6_EVIDENCE_SOURCE_AND_RETURN
+
+## M6 Evidence / Source / Return
+
+- Verified current main at `dffa846cd30f8dcaf92658f40e29c3cc713be5d6`; it is already in this branch's merge ancestry from M3, and no newer main merge was found.
+- Verified Common Evidence presentation and same-origin return paths in the Overall shell, source contracts for quality scenarios, and Hardware Evidence source metadata / preview lifecycle.
+- Kept Evidence as reference and navigation; no producer Domain store is read by the shell.
+
+M6_SYNC_MAIN_SHA=dffa846cd30f8dcaf92658f40e29c3cc713be5d6
+M6_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py tests/test_p04_real_integration.py tests/test_hardware_case_evidence_source.py tests/test_source_problem_itr_ref_contract.py
+TEST_RESULT=31 passed
+NEXT=M7_SECONDARY_MANAGEMENT
