@@ -76,11 +76,13 @@ The approved main already contains:
 - `tests/test_overall_frontend_shell.py`
 - `create_p0_app` mounts the Overall router when the full platform profile is active.
 
-The shell module is transport/UI-only, exposes four stable workspace entries, uses an injected task provider, and validates same-origin return paths. The minimal M1 dependency closure adds the explicitly imported `httpx` alongside `httpx2` (used by the installed Starlette TestClient path). A clean virtual environment installed the repository root requirements and passed the shell/host regression: `9 passed`. No business behavior or domain boundary changed.
+The shell module is transport/UI-only, exposes four stable workspace entries, uses an injected task provider, and validates same-origin return paths. The minimal M1 dependency closure adds the explicitly imported `httpx` alongside `httpx2` (used by the installed Starlette TestClient path). This is a root dependency declaration only; no product behavior or domain boundary changed. After synchronizing current main at `b0eb3d77bf9cf44162a01fdd79978d266b3caa1f` (Overall URL binding), a clean virtual environment installed the repository root requirements and passed the shell/host regression: `13 passed`.
 
-FIRST_RUNNABLE_TARGET=After M1 shell/host regression passes; calendar date requires execution sizing.
-COMPLETE_CANDIDATE_TARGET=After M9 integration and M10 release assembly; calendar date requires execution sizing.
+M1_SYNC_MAIN_SHA=b0eb3d77bf9cf44162a01fdd79978d266b3caa1f
+M1_SYNC_MERGE_COMMIT=e6694f3
+FIRST_RUNNABLE_TARGET=2026-09-27 (M1 shell/host regression passed)
+COMPLETE_CANDIDATE_TARGET=After M9 integration and M10 release assembly; schedule estimate pending M2 sizing.
 M1_RESULT=PASS
-TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py
-TEST_RESULT=9 passed
+TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py tests/test_overall_vnext_v03_frontend_binding.py
+TEST_RESULT=13 passed
 NEXT=M2_CURRENT_PROBLEM_WORKSPACE
