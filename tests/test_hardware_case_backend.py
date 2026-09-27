@@ -296,6 +296,7 @@ def test_publish_gate_fails_closed_when_fact_evidence_content_mismatches(
     assert gate["publish_blocked"] is True
     assert gate["evidence_validation_status"] == "INVALID"
     assert "EVIDENCE_CONTENT_MISMATCH" in gate["blockers"]
+    assert "EVIDENCE_CONTENT_MISMATCH" in gate["warnings"]
     assert any(
         item["candidate_fact_ref"] == "HC-M2-001:symptom"
         and item["validation"] == "INVALID"
@@ -303,6 +304,31 @@ def test_publish_gate_fails_closed_when_fact_evidence_content_mismatches(
     )
     assert gate["evidence_traceability"][0]["evidence_ref"] == "EV-1"
     assert gate["evidence_traceability"][0]["source_ref"] == "word:A1001.docx"
+
+
+def test_publish_gate_blocks_when_any_linked_evidence_mismatches(tmp_path: Path):
+    service = _backend(tmp_path)
+    case = _case()
+    case["facts"]["symptom"]["evidence_refs"] = ["EV-1", "EV-2"]
+    service.create_case(case)
+    _review_core(service)
+    service.save_tree_node(_node())
+    service.set_mapping(_mapping())
+    service.save_evidence(_evidence())
+    service.save_evidence(
+        {
+            **_evidence(),
+            "evidence_id": "EV-2",
+            "excerpt_or_caption": "按键灯闪烁，设备无法启动",
+        }
+    )
+
+    gate = service.publish_case("HC-M2-001")
+
+    assert gate["passed"] is False
+    assert gate["gate_status"] == "REVIEW_REQUIRED"
+    assert "EVIDENCE_CONTENT_MISMATCH" in gate["warnings"]
+    assert service.repository.get_case("HC-M2-001")["case_status"] != "PUBLISHED"
 
 
 def test_publish_gate_accepts_fact_evidence_that_contains_all_confirmed_facts(

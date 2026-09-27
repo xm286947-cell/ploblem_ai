@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
+PACKAGE_ARCHIVE_VARIANT = "DEPENDENCY_CLOSURE_R1"
 STAGE = DIST / PACKAGE_NAME
 
 INCLUDE_DIRS = [
@@ -72,6 +74,31 @@ INCLUDE_FILES = [
     "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md",
 ]
 
+# These are the executable Product Test entrypoints.  The closure scanner
+# follows their top-level Python imports recursively; it deliberately does
+# not walk unrelated lazy domain imports that are disabled by the
+# HARDWARE_CASE-only composition profile.
+CLOSURE_ROOTS = [
+    "scripts/hardware_case_web_start.py",
+    "scripts/hardware_case_precheck.py",
+    "scripts/hardware_case_mvp_smoke.py",
+    "scripts/hardware_case_product_test_smoke.py",
+    "quality_knowledge/web/p0_app.py",
+    "services/hardware_case_runtime_adapter.py",
+]
+
+LOCAL_IMPORT_PREFIXES = {
+    "builder",
+    "contracts",
+    "models",
+    "parser",
+    "quality_knowledge",
+    "repositories",
+    "retriever",
+    "runtime",
+    "services",
+}
+
 EXCLUDED_NAMES = {
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     ".DS_Store", ".git", "dist",
@@ -129,6 +156,134 @@ def copy_glob(pattern: str) -> None:
         target = STAGE / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+
+
+def _module_name(path: Path, root: Path) -> str:
+    relative = path.relative_to(root).with_suffix("")
+    parts = list(relative.parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _module_path(module: str, root: Path) -> Path | None:
+    if not module:
+        return None
+    candidate = root.joinpath(*module.split("."))
+    file_candidate = candidate.with_suffix(".py")
+    if file_candidate.is_file():
+        return file_candidate
+    package_candidate = candidate / "__init__.py"
+    if package_candidate.is_file():
+        return package_candidate
+    return None
+
+
+def _resolve_import(
+    module: str,
+    level: int,
+    current_module: str,
+    current_path: Path,
+    root: Path,
+) -> list[tuple[str, Path | None]]:
+    if level:
+        package = (
+            current_module.split(".")
+            if current_path.name == "__init__.py"
+            else current_module.split(".")[:-1]
+        )
+        base = package[: len(package) - level + 1]
+        resolved = ".".join(base + ([module] if module else []))
+    else:
+        resolved = module
+    path = _module_path(resolved, root)
+    return [(resolved, path)] if resolved else []
+
+
+def _direct_imports(path: Path, root: Path) -> list[tuple[str, int, str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports: list[tuple[str, int, str]] = []
+    # Only top-level imports represent the HARDWARE_CASE startup profile.
+    # Imports inside QUALITY_ISSUE/REPEAT_RISK branches are intentionally
+    # excluded because those domains are not part of this product package.
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            imports.extend((alias.name, 0, alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                import_module = alias.name if not module and node.level else module
+                imported = f"{module}.{alias.name}" if module else alias.name
+                imports.append((import_module, node.level, imported))
+    return imports
+
+
+def dependency_closure(root: Path = ROOT) -> dict[str, object]:
+    queue = [root / relative for relative in CLOSURE_ROOTS]
+    visited: set[Path] = set()
+    edges: list[dict[str, str]] = []
+    unresolved: list[dict[str, str]] = []
+
+    while queue:
+        path = queue.pop(0).resolve()
+        if path in visited:
+            continue
+        if not path.is_file():
+            unresolved.append({"root": str(path.relative_to(root)), "reason": "ROOT_MISSING"})
+            continue
+        visited.add(path)
+        current_module = _module_name(path, root)
+        for module, level, imported in _direct_imports(path, root):
+            for resolved_module, target in _resolve_import(
+                module, level, current_module, path, root
+            ):
+                if target is not None:
+                    edges.append({
+                        "from": str(path.relative_to(root)),
+                        "import": imported,
+                        "module": resolved_module,
+                        "target": str(target.relative_to(root)),
+                    })
+                    queue.append(target)
+                elif resolved_module.split(".", 1)[0] in LOCAL_IMPORT_PREFIXES:
+                    unresolved.append({
+                        "from": str(path.relative_to(root)),
+                        "module": resolved_module,
+                        "import": imported,
+                        "reason": "LOCAL_MODULE_MISSING",
+                    })
+
+    files = sorted(str(path.relative_to(root)) for path in visited)
+    return {
+        "scanner": "TOP_LEVEL_LOCAL_IMPORT_CLOSURE_V1",
+        "roots": list(CLOSURE_ROOTS),
+        "files": files,
+        "edges": sorted(edges, key=lambda item: (item["from"], item["target"])),
+        "unresolved_local_imports": unresolved,
+        "status": "PASS" if not unresolved else "FAIL",
+    }
+
+
+def copy_dependency_closure() -> dict[str, object]:
+    report = dependency_closure(ROOT)
+    if report["status"] != "PASS":
+        raise SystemExit(
+            "DEPENDENCY_CLOSURE_FAIL="
+            + json.dumps(report["unresolved_local_imports"], ensure_ascii=False)
+        )
+    for relative in report["files"]:
+        copy_relative(str(relative))
+    return report
+
+
+def verify_staged_dependency_closure() -> dict[str, object]:
+    report = dependency_closure(STAGE)
+    if report["status"] != "PASS":
+        raise SystemExit(
+            "STAGED_DEPENDENCY_CLOSURE_FAIL="
+            + json.dumps(report["unresolved_local_imports"], ensure_ascii=False)
+        )
+    return report
 
 
 def sha256(path: Path) -> str:
@@ -193,6 +348,8 @@ def main() -> int:
     for relative in INCLUDE_FILES:
         copy_relative(relative)
 
+    closure = copy_dependency_closure()
+
     # Empty company-local working folders are intentionally created in the
     # package. Real data is supplied only after extraction inside the company.
     for relative in (
@@ -205,12 +362,28 @@ def main() -> int:
     ):
         (STAGE / relative).mkdir(parents=True, exist_ok=True)
 
+    staged_closure = verify_staged_dependency_closure()
+    closure_report = {
+        **closure,
+        "staged_verification": {
+            "status": staged_closure["status"],
+            "file_count": len(staged_closure["files"]),
+        },
+    }
+    (STAGE / "PACKAGE_DEPENDENCY_CLOSURE.json").write_text(
+        json.dumps(closure_report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
     files = inventory()
     security_assertions(files)
     source_commit = os.getenv("GITHUB_SHA", "LOCAL")
+    short = source_commit[:12] if source_commit != "LOCAL" else "LOCAL"
+    archive_name = f"{PACKAGE_NAME}_{PACKAGE_ARCHIVE_VARIANT}_{short}.zip"
 
     manifest = {
         "package": PACKAGE_NAME,
+        "candidate_archive": archive_name,
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
         "package_revision": "FULL_V0.1_P01_P07",
@@ -297,6 +470,13 @@ def main() -> int:
             ".env and real local/secret YAML configuration; only placeholder examples are packaged",
             "provider raw content and prompts from real runs",
         ],
+        "dependency_closure": {
+            "report": "PACKAGE_DEPENDENCY_CLOSURE.json",
+            "status": closure_report["status"],
+            "scanner": closure_report["scanner"],
+            "file_count": len(closure_report["files"]),
+            "staged_verification": closure_report["staged_verification"],
+        },
         "files": files,
     }
 
@@ -306,8 +486,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    short = source_commit[:12] if source_commit != "LOCAL" else "LOCAL"
-    archive = DIST / f"{PACKAGE_NAME}_{short}.zip"
+    archive = DIST / archive_name
     if archive.exists():
         archive.unlink()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
