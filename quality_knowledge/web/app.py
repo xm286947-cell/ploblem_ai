@@ -273,7 +273,22 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         if not detected:
             _intake_diag('PREVIEW_REJECTED',diagnostic_id,reason='NO_HEADER_CANDIDATE')
             intake_svc.discard(meta['intake_session_id']); raise HTTPException(400,f'无法识别业务类型或表头；诊断ID：{diagnostic_id}；日志：{DIAG_FILE}')
-        bt=detected['business_type']; preview=mapping_svc.preview_file(path,bt,detected['sheet'],detected['header_row'],mapping_config_id or None); effective=selected_mapping or mapping_svc.get_effective_config(bt)
+        bt=detected['business_type']
+        try:
+            preview=mapping_svc.preview_file(path,bt,detected['sheet'],detected['header_row'],mapping_config_id or None)
+        except RuntimeError as error:
+            message=str(error)
+            if message.startswith('MAPPING_NOT_INITIALIZED:'):
+                missing_business_type=(message.split(':',1)[1].strip() or bt)
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f'MAPPING_NOT_INITIALIZED: {missing_business_type}；'
+                        '当前产品 Mapping 尚未初始化或激活，请先在字段映射配置中完成并激活 Mapping。'
+                    ),
+                ) from error
+            raise
+        effective=selected_mapping or mapping_svc.get_effective_config(bt)
         ws=wb[detected['sheet']]; row_count=detected.get('data_row_count',max(0,ws.max_row-detected['header_row']))
         preview.update({'intake_session_id':meta['intake_session_id'],'detected_business_type':bt,'header_row':detected['header_row'],'detection_score':detected['score'],'recognition_mode':detected.get('recognition_mode','MAPPING_SCORE'),'data_row_count':row_count,'mapping_config_id':effective['config_id'],'mapping_config_version':effective['version']})
         preview['diagnostic_id']=diagnostic_id; preview['diagnostic_log']=str(DIAG_FILE)
