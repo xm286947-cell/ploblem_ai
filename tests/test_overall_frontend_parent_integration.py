@@ -70,6 +70,26 @@ def test_parent_overall_shell_converges_all_four_workspace_entries(tmp_path):
         assert response.headers["location"] == target
 
 
+def test_current_problem_workspace_keeps_canonical_routes_and_overall_return(tmp_path):
+    client = _client(tmp_path)
+
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307}
+    assert root.headers["location"] == "/p0/issues"
+
+    overall = client.get("/p0/overall")
+    assert overall.status_code == 200
+    assert 'href="/p0/issues">进入问题工作台</a>' in overall.text
+
+    workspace = client.get("/p0/issues")
+    assert workspace.status_code == 200
+    assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
+
+    issues = client.get("/api/v2/issues")
+    assert issues.status_code == 200
+    assert isinstance(issues.json().get("items"), list)
+
+
 def test_parent_workspace_return_paths_all_target_canonical_overall_shell(tmp_path):
     client = _client(tmp_path)
 
