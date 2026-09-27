@@ -6,7 +6,7 @@ SOURCE_MAIN_SHA=f232c6d199ff8a943cd3821e2e111c7f8ff31d91
 BRANCH=integration/overall-vnext
 ARCH_REVIEW=PASS_WITH_CONDITIONS
 ARCH_BLOCKER_COUNT=0
-CODE_CHANGED=NO
+CODE_CHANGED=YES
 PLAN_VERSION=0.1
 
 ## Basis
@@ -76,8 +76,11 @@ The approved main already contains:
 - `tests/test_overall_frontend_shell.py`
 - `create_p0_app` mounts the Overall router when the full platform profile is active.
 
-The shell module is transport/UI-only, exposes four stable workspace entries, uses an injected task provider, and validates same-origin return paths. The branch currently has no product-code changes. M1 is not marked complete until the shell/host tests are executed against this branch and their result is recorded.
+The shell module is transport/UI-only, exposes four stable workspace entries, uses an injected task provider, and validates same-origin return paths. The minimal M1 dependency closure adds the explicitly imported `httpx` alongside `httpx2` (used by the installed Starlette TestClient path). A clean virtual environment installed the repository root requirements and passed the shell/host regression: `9 passed`. No business behavior or domain boundary changed.
 
 FIRST_RUNNABLE_TARGET=After M1 shell/host regression passes; calendar date requires execution sizing.
 COMPLETE_CANDIDATE_TARGET=After M9 integration and M10 release assembly; calendar date requires execution sizing.
-NEXT=M1_VNEXT_BRANCH_AND_OVERALL_SHELL
+M1_RESULT=PASS
+TEST_COMMAND=pytest -q tests/test_overall_frontend_shell.py tests/test_overall_frontend_parent_integration.py
+TEST_RESULT=9 passed
+NEXT=M2_CURRENT_PROBLEM_WORKSPACE
