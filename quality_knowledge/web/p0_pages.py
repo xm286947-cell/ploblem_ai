@@ -6,8 +6,11 @@ main application without changing the legacy insight page.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -34,6 +37,21 @@ def create_p0_insights_router(
     assets = Path(static_dir or (_HERE / "static"))
     router = APIRouter()
 
+    def return_context(request: Request) -> tuple[str, str, str]:
+        requested_return = request.query_params.get("return_to", "")
+        return_to = requested_return if requested_return in {
+            "/p0/quality-scenario-insights",
+            "/p0/insights/p04",
+        } else "/p0/quality-scenario-insights"
+        raw_context = request.query_params.get("p04_context", "")
+        try:
+            parsed_context = json.loads(raw_context) if len(raw_context) <= 4096 else None
+        except (TypeError, ValueError):
+            parsed_context = None
+        safe_context = json.dumps(parsed_context, separators=(",", ":"), ensure_ascii=False) if isinstance(parsed_context, dict) else ""
+        return_url = return_to + ("?" + urlencode({"p04_context": safe_context}) if safe_context else "")
+        return return_to, safe_context, return_url
+
     @router.get("/p0/insights", response_class=HTMLResponse, include_in_schema=False)
     async def p0_insights(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -44,24 +62,30 @@ def create_p0_insights_router(
 
     @router.get("/p0/quality-scenario-insights", response_class=HTMLResponse, include_in_schema=False)
     async def p04_quality_scenario_insights(request: Request) -> HTMLResponse:
+        asset_path = assets / "p04_insights.js"
+        asset_version = hashlib.sha256(asset_path.read_bytes()).hexdigest()[:20] if asset_path.is_file() else "missing"
         return templates.TemplateResponse(
             request,
             "p04_insights.html",
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "p04_js_asset_version": asset_version,
                 "page_title": "质量画像与洞察 · QualityScenario",
             },
         )
 
     @router.get("/p0/insights/p04", response_class=HTMLResponse, include_in_schema=False)
     async def p04_quality_scenario_insights_alias(request: Request) -> HTMLResponse:
+        asset_path = assets / "p04_insights.js"
+        asset_version = hashlib.sha256(asset_path.read_bytes()).hexdigest()[:20] if asset_path.is_file() else "missing"
         return templates.TemplateResponse(
             request,
             "p04_insights.html",
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "p04_js_asset_version": asset_version,
                 "page_title": "质量画像与洞察 · QualityScenario",
             },
         )
@@ -84,11 +108,7 @@ def create_p0_insights_router(
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
-        requested_return = request.query_params.get("return_to", "")
-        return_to = requested_return if requested_return in {
-            "/p0/quality-scenario-insights",
-            "/p0/insights/p04",
-        } else ""
+        return_to, p04_context, return_url = return_context(request)
         if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
             scenario = scenario_detail_service.scenario_detail(knowledge_id)
             if scenario is None:
@@ -101,6 +121,8 @@ def create_p0_insights_router(
                     "scenario_id": knowledge_id,
                     "scenario": scenario,
                     "return_to": return_to,
+                    "return_url": return_url,
+                    "return_context": p04_context,
                     "page_title": "场景详情 · 质量能力",
                 },
             )
@@ -122,12 +144,7 @@ def create_p0_insights_router(
         scenario = scenario_detail_service.scenario_detail(scenario_id)
         if scenario is None:
             raise HTTPException(status_code=404, detail="QUALITY_SCENARIO_NOT_FOUND")
-        requested_return = request.query_params.get("return_to", "")
-        return_to = requested_return if requested_return in {
-            "/p0/quality-scenario-insights",
-            "/p0/insights/p04",
-            "/p0/quality-scenarios",
-        } else ""
+        return_to, p04_context, return_url = return_context(request)
         return templates.TemplateResponse(
             request,
             "p0_quality_scenario_detail.html",
@@ -136,7 +153,31 @@ def create_p0_insights_router(
                 "scenario_id": scenario_id,
                 "scenario": scenario,
                 "return_to": return_to,
+                "return_url": return_url,
+                "return_context": p04_context,
                 "page_title": "场景详情 · 质量能力",
+            },
+        )
+
+    @router.get("/p0/quality-scenario-sources/{source_ref:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_source(request: Request, source_ref: str) -> HTMLResponse:
+        if scenario_detail_service is None:
+            raise HTTPException(status_code=404, detail="SOURCE_REFERENCE_NOT_FOUND")
+        trace = scenario_detail_service.source_trace(source_ref)
+        if trace is None:
+            raise HTTPException(status_code=404, detail="SOURCE_REFERENCE_NOT_FOUND")
+        return_to, p04_context, return_url = return_context(request)
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_source.html",
+            {
+                "api_prefix": api_prefix.rstrip("/"),
+                "source_ref": source_ref,
+                "trace": trace,
+                "return_to": return_to,
+                "return_url": return_url,
+                "return_context": p04_context,
+                "page_title": "来源追溯 · 质量能力",
             },
         )
 
@@ -297,7 +338,7 @@ def create_p0_insights_router(
         )
 
     @router.get("/p0/static/{asset_name}", include_in_schema=False)
-    async def p0_static(asset_name: str) -> FileResponse:
+    async def p0_static(request: Request, asset_name: str) -> FileResponse:
         # Asset names are intentionally one path component: no traversal and
         # no arbitrary file serving from the release directory.
         if Path(asset_name).name != asset_name or Path(asset_name).suffix not in {".css", ".js"}:
@@ -306,7 +347,16 @@ def create_p0_insights_router(
         if not target.is_file():
             raise HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
         media = "text/css" if target.suffix == ".css" else "text/javascript"
-        return FileResponse(target, media_type=media)
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        return FileResponse(
+            target,
+            media_type=media,
+            headers={
+                "Cache-Control": "no-store",
+                "ETag": '"' + digest + '"',
+                "X-Content-SHA256": digest,
+            },
+        )
 
     return router
 
