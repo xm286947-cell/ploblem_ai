@@ -232,6 +232,19 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
 
+    def _mapping_contract_error(error: RuntimeError, business_type: str = '') -> HTTPException | None:
+        message = str(error)
+        if not message.startswith('MAPPING_NOT_INITIALIZED:'):
+            return None
+        missing_business_type = message.split(':', 1)[1].strip() or business_type
+        return HTTPException(
+            status_code=409,
+            detail=(
+                f'MAPPING_NOT_INITIALIZED: {missing_business_type}；'
+                '当前产品 Mapping 尚未初始化或激活，请先在字段映射配置中完成并激活 Mapping。'
+            ),
+        )
+
     def _build_intake_preview(file: UploadFile, business_type: str = '', issue_domain: str = 'AUTO', mapping_config_id: str = ''):
         if Path(file.filename or '').suffix.lower() not in ALLOWED:
             raise HTTPException(400, '仅支持 .xlsx / .xlsm')
@@ -260,7 +273,13 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
                     det={'header_row':header,'business_type':requested,'score':score[0],'recognition_mode':'DRAFT_MAPPING_SCORE' if score[0] else 'DRAFT_STRUCTURAL'}
                 else: det=None
             else:
-                det=svc._detect_header(sheet,requested)
+                try:
+                    det=svc._detect_header(sheet,requested)
+                except RuntimeError as error:
+                    contract_error = _mapping_contract_error(error, requested or '')
+                    if contract_error:
+                        raise contract_error from error
+                    raise
             if not det:
                 _intake_diag('SHEET_REJECTED',diagnostic_id,sheet=sn,declared_dimension=declared_dimension,actual_dimension=actual_dimension,max_row=sheet.max_row,max_column=sheet.max_column,reason='HEADER_NOT_DETECTED')
                 continue
@@ -277,16 +296,9 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         try:
             preview=mapping_svc.preview_file(path,bt,detected['sheet'],detected['header_row'],mapping_config_id or None)
         except RuntimeError as error:
-            message=str(error)
-            if message.startswith('MAPPING_NOT_INITIALIZED:'):
-                missing_business_type=(message.split(':',1)[1].strip() or bt)
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f'MAPPING_NOT_INITIALIZED: {missing_business_type}；'
-                        '当前产品 Mapping 尚未初始化或激活，请先在字段映射配置中完成并激活 Mapping。'
-                    ),
-                ) from error
+            contract_error = _mapping_contract_error(error, bt)
+            if contract_error:
+                raise contract_error from error
             raise
         effective=selected_mapping or mapping_svc.get_effective_config(bt)
         ws=wb[detected['sheet']]; row_count=detected.get('data_row_count',max(0,ws.max_row-detected['header_row']))
