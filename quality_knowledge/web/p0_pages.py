@@ -6,6 +6,7 @@ main application without changing the legacy insight page.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,18 @@ def create_p0_insights_router(
     """
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
+
+    def p04_js_asset_version() -> str:
+        asset = assets / "p04_insights.js"
+        try:
+            content = asset.read_bytes()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="P04_STATIC_ASSET_UNAVAILABLE",
+            ) from exc
+        return hashlib.sha256(content).hexdigest()
+
     router = APIRouter()
 
     @router.get("/p0/insights", response_class=HTMLResponse, include_in_schema=False)
@@ -95,6 +108,7 @@ def create_p0_insights_router(
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "p04_js_asset_version": p04_js_asset_version(),
                 "page_title": "质量画像与洞察 · QualityScenario",
             },
         )
@@ -107,6 +121,7 @@ def create_p0_insights_router(
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "p04_api_prefix": "/api/v2/quality-scenario-insights/v1",
+                "p04_js_asset_version": p04_js_asset_version(),
                 "page_title": "质量画像与洞察 · QualityScenario",
             },
         )

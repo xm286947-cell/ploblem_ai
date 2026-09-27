@@ -42,6 +42,7 @@ jobs:
             tests/test_overall_testability_adapter.py \
             tests/test_major_workspace_binding.py \
             tests/test_quality_scenario_workspace_binding.py \
+            tests/test_qs_p04_p03_published_binding_fix.py \
             tests/test_hardware_workspace_binding.py \
             tests/test_storage_workspace_binding.py
       - name: Legacy stable workspace regression
