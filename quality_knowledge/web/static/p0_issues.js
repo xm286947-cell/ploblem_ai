@@ -4,13 +4,17 @@
   if (!root) return;
   const api = (window.P0_ISSUES_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '');
   const form = root.querySelector('[data-issues-filter]');
-  const state = { page: 1, pageSize: 20, selected: new Set(), running: false, runtimeReady: false };
+  const filterNames = ['business_type', 'month', 'analysis_status', 'q'];
+  const state = { page: 1, pageSize: 20, selectedId: '', selected: new Set(), running: false, runtimeReady: false };
+  let loadSequence = 0;
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const obj = value => value && typeof value === 'object' ? value : {};
   const arr = value => Array.isArray(value) ? value : [];
 
   function url(path, params) {
-    const query = new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== '' && value != null));
+    const query = params instanceof URLSearchParams
+      ? new URLSearchParams(params)
+      : new URLSearchParams(Object.entries(params || {}).filter(([, value]) => value !== '' && value != null));
     return api + path + (query.toString() ? '?' + query : '');
   }
   async function get(path, params) {
@@ -33,8 +37,43 @@
       const option = document.createElement('option'); option.value = value; option.textContent = label; select.appendChild(option);
     });
   }
-  function filters() { return Object.fromEntries([...form.elements].filter(item => item.name).map(item => [item.name, item.value])); }
-  function queryString() { const query = new URLSearchParams(filters()); query.set('page_size', String(state.pageSize)); return query.toString(); }
+  function readUrlState() {
+    const params = new URLSearchParams(location.search);
+    filterNames.forEach(name => {
+      const field = form.elements.namedItem(name);
+      if (field) field.value = params.get(name) || '';
+    });
+    const page = Number(params.get('page'));
+    const pageSize = Number(params.get('page_size'));
+    state.page = Number.isInteger(page) && page > 0 && page <= 100000 ? page : 1;
+    state.pageSize = Number.isInteger(pageSize) && pageSize >= 10 && pageSize <= 200 ? pageSize : 20;
+    state.selectedId = (params.get('selected_id') || '').slice(0, 300);
+  }
+  function urlState(selectedId = state.selectedId) {
+    const params = new URLSearchParams(location.search);
+    filterNames.forEach(name => {
+      const value = String(form.elements.namedItem(name)?.value || '').trim();
+      if (value) params.set(name, value);
+      else params.delete(name);
+    });
+    params.set('page', String(state.page));
+    params.set('page_size', String(state.pageSize));
+    if (selectedId) params.set('selected_id', selectedId);
+    else params.delete('selected_id');
+    return params;
+  }
+  function writeUrl(mode = 'push', selectedId = state.selectedId) {
+    const params = urlState(selectedId);
+    const next = location.pathname + (params.toString() ? '?' + params.toString() : '') + location.hash;
+    if (next === location.pathname + location.search + location.hash) return;
+    history[mode === 'replace' ? 'replaceState' : 'pushState']({p0IssueList: true}, '', next);
+  }
+  function requestParams() {
+    const params = urlState();
+    params.delete('selected_id');
+    return params;
+  }
+  function queryString(selectedId) { return urlState(selectedId).toString(); }
   function setState(name, visible) { const element = root.querySelector('[data-state="' + name + '"]'); if (element) element.hidden = !visible; }
   function updateSelection() {
     const checks = [...root.querySelectorAll('[data-select-issue]')];
@@ -55,22 +94,29 @@
     updateSelection();
   }
   async function load() {
+    const sequence = ++loadSequence;
     root.querySelector('[data-status]').textContent = '正在加载…';
     try {
-      const data = await get('/issues', Object.assign(filters(), {page:state.page, page_size:state.pageSize}));
+      const data = await get('/issues', requestParams());
+      if (sequence !== loadSequence) return;
+      state.page = Number(data.page) || state.page;
+      state.pageSize = Number(data.page_size) || state.pageSize;
       const items = arr(data.items), total = Number(data.total || 0), pages = Math.max(1, Math.ceil(total / state.pageSize));
+      writeUrl('replace');
       setState('error', false); setState('empty', !total);
       root.querySelector('[data-total]').textContent = '共 ' + total + ' 条问题';
       root.querySelector('[data-page-scope]').textContent = '当前第 ' + state.page + ' / ' + pages + ' 页';
       root.querySelector('[data-issue-rows]').innerHTML = items.length ? items.map(item => {
-        const issue = obj(item), id = String(issue.knowledge_id || ''), qs = queryString();
-        return '<tr data-issue-id="' + esc(id) + '"><td class="p0-check-column"><input type="checkbox" data-select-issue value="' + esc(id) + '" aria-label="选择问题 ' + esc(issue.business_issue_id || id) + '"></td><td><a class="p0-issue-id" href="/p0/issues/' + encodeURIComponent(id) + '?' + qs + '">' + esc(issue.business_issue_id || id) + '</a><span class="p0-summary">' + esc(issue.title || issue.description || issue.business_issue_id || '暂无摘要') + '</span></td><td><b>' + esc(issue.business_type || '-') + '</b><small class="p0-muted">' + esc(issue.product_name || issue.product || issue.product_code || '-') + '</small></td><td>' + esc(issue.month || '-') + '</td><td><span class="p0-badge">' + esc(issue.severity || '-') + '</span></td><td><span class="p0-badge">' + esc(issue.analysis_status || 'NOT_ANALYZED') + '</span></td><td>' + esc(issue.updated_at || '-') + '</td></tr>';
+        const issue = obj(item), id = String(issue.knowledge_id || ''), qs = queryString(id);
+        const selected = state.selectedId === id;
+        return '<tr data-issue-id="' + esc(id) + '"' + (selected ? ' data-selected="true" aria-current="true"' : '') + '><td class="p0-check-column"><input type="checkbox" data-select-issue value="' + esc(id) + '" aria-label="选择问题 ' + esc(issue.business_issue_id || id) + '"></td><td><a class="p0-issue-id" href="/p0/issues/' + encodeURIComponent(id) + '?' + esc(qs) + '">' + esc(issue.business_issue_id || id) + '</a><span class="p0-summary">' + esc(issue.title || issue.description || issue.business_issue_id || '暂无摘要') + '</span></td><td><b>' + esc(issue.business_type || '-') + '</b><small class="p0-muted">' + esc(issue.product_name || issue.product || issue.product_code || '-') + '</small></td><td>' + esc(issue.month || '-') + '</td><td><span class="p0-badge">' + esc(issue.severity || '-') + '</span></td><td><span class="p0-badge">' + esc(issue.analysis_status || 'NOT_ANALYZED') + '</span></td><td>' + esc(issue.updated_at || '-') + '</td></tr>';
       }).join('') : '<tr><td colspan="7" class="p0-loading">暂无符合条件的问题。</td></tr>';
       const nav = root.querySelector('[data-pagination]'); nav.hidden = !total;
       nav.querySelector('[data-page-label]').textContent = state.page + ' / ' + pages;
       nav.querySelector('[data-prev]').disabled = state.page <= 1; nav.querySelector('[data-next]').disabled = state.page >= pages;
       root.querySelector('[data-status]').textContent = '已更新'; updateSelection();
     } catch (error) {
+      if (sequence !== loadSequence) return;
       setState('error', true); root.querySelector('[data-error-message]').textContent = '读取失败：' + error.message; root.querySelector('[data-status]').textContent = '';
     }
   }
@@ -87,11 +133,12 @@
     finally { state.running = false; updateSelection(); }
   }
 
-  form.addEventListener('submit', event => { event.preventDefault(); state.page = 1; state.selected.clear(); load(); });
-  root.querySelector('[data-reset]').addEventListener('click', () => { form.reset(); state.page = 1; state.selected.clear(); load(); });
+  form.addEventListener('submit', event => { event.preventDefault(); state.page = 1; state.selectedId = ''; state.selected.clear(); writeUrl(); load(); });
+  root.querySelector('[data-reset]').addEventListener('click', () => { form.reset(); state.page = 1; state.selectedId = ''; state.selected.clear(); writeUrl(); load(); });
   root.querySelector('[data-retry]').addEventListener('click', load);
-  root.querySelector('[data-prev]').addEventListener('click', () => { state.page--; load(); });
-  root.querySelector('[data-next]').addEventListener('click', () => { state.page++; load(); });
+  root.querySelector('[data-prev]').addEventListener('click', () => { state.page--; writeUrl(); load(); });
+  root.querySelector('[data-next]').addEventListener('click', () => { state.page++; writeUrl(); load(); });
+  window.addEventListener('popstate', () => { readUrlState(); state.selected.clear(); load(); });
   root.querySelector('[data-select-all]').addEventListener('change', event => {
     root.querySelectorAll('[data-select-issue]').forEach(check => event.target.checked ? state.selected.add(check.value) : state.selected.delete(check.value)); updateSelection();
   });
@@ -100,5 +147,6 @@
     event.target.checked ? state.selected.add(event.target.value) : state.selected.delete(event.target.value); updateSelection();
   });
   root.querySelector('[data-batch-analyze]').addEventListener('click', runBatch);
-  meta().catch(() => {}).finally(load);
+  readUrlState();
+  meta().catch(() => {}).finally(() => { readUrlState(); writeUrl('replace'); load(); });
 })();

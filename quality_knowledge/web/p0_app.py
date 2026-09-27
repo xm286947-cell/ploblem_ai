@@ -380,7 +380,7 @@ def create_p0_app(
             create_p0_insights_router(scenario_detail_service=app.state.p04_service)
         )
         app.include_router(create_p1_router())
-        root_target = "/p0/insights"
+        root_target = "/p0/issues"
     else:
         app.include_router(create_hardware_case_pages_router())
         root_target = "/p0/hardware-cases"
