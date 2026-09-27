@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import uvicorn
 from fastapi import FastAPI
@@ -155,7 +156,12 @@ def main() -> None:
                 detail_link = page.locator('a[data-p03="QS-FIX-002"]').first
                 detail_href = detail_link.get_attribute("href")
                 evidence["detail_href"] = detail_href
-                assert detail_href and '"view":"INDUSTRY"' in detail_href
+                assert detail_href
+                detail_query = parse_qs(urlparse(detail_href).query)
+                detail_context = json.loads(detail_query["return_context"][0])
+                evidence["detail_return_context"] = detail_context
+                assert detail_context["contract"] == "p04-query-context/v1"
+                assert detail_context["view"] == "INDUSTRY"
 
                 detail_link.click()
                 page.wait_for_load_state("networkidle")
