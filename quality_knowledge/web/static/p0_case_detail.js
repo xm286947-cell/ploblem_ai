@@ -9,14 +9,21 @@ function section(no,title,value,note){
   return '<section class="case-card"><div class="case-card-head"><div><span class="case-section-no">'+no+'</span><h2>'+esc(title)+'</h2></div></div>'+
     '<div class="case-section-body"><p>'+esc(value||empty)+'</p>'+(note?'<small>'+esc(note)+'</small>':'')+'</div></section>';
 }
-function evidence(item,index){
+function evidence(item,index,sourceItr){
   const source=[item.source_type,item.source_id].filter(Boolean).join(' / ')||'未提供';
   const location=[item.file_name,item.page!=null?'Page '+item.page:'',item.section?'Section '+item.section:''].filter(Boolean).join(' · ')||'未提供';
+  const sourceHref=item.url||(
+    sourceItr?'/p0/issues?q='+encodeURIComponent(sourceItr):''
+  );
+  const sourceLabel=item.url?'查看来源':'查看来源 ITR';
   return '<article class="case-evidence"><div class="case-evidence-head"><strong>Evidence '+(index+1)+'</strong><span>'+esc(source)+'</span></div>'+
-    '<dl><dt>Evidence ID</dt><dd>'+esc(item.evidence_id||item.id||'未提供')+'</dd><dt>文档 / 位置</dt><dd>'+esc(location)+'</dd>'+
+    '<dl><dt>Evidence ID</dt><dd>'+esc(item.evidence_id||item.id||'未提供')+'</dd>'+
+    '<dt>Source Version</dt><dd>'+esc(item.source_version||'未提供')+'</dd>'+
+    '<dt>Source Ref</dt><dd>'+esc(item.source_ref||'未提供')+'</dd>'+
+    '<dt>文档 / 位置</dt><dd>'+esc(location)+'</dd>'+
     '<dt>支撑字段 / 结论</dt><dd>'+esc(item.target_path||item.supports||item.field_path||empty)+'</dd></dl>'+
     '<blockquote>'+esc(item.raw_text||item.excerpt||'当前知识存在，但没有可用原始 Evidence。')+'</blockquote>'+
-    (item.url?'<a href="'+esc(item.url)+'" target="_blank" rel="noopener">查看来源</a>':'')+'</article>';
+    (sourceHref?'<a data-source-link href="'+esc(sourceHref)+'"'+(item.url?' target="_blank" rel="noopener"':'')+'>'+sourceLabel+'</a>':'<span>无可用来源链接</span>')+'</article>';
 }
 async function load(){
   const response=await fetch(api+'/historical-cases/'+encodeURIComponent(caseId),{headers:{Accept:'application/json'}});
@@ -36,7 +43,7 @@ async function load(){
     section('07','验证结果',d.verification_result);
   const ev=Array.isArray(d.evidence)?d.evidence:[];
   root.querySelector('[data-case-evidence-count]').textContent=ev.length+' 条';
-  root.querySelector('[data-case-evidence]').innerHTML=ev.length?ev.map(evidence).join(''):'<div class="case-empty">当前知识存在，但没有可用原始 Evidence。</div>';
+  root.querySelector('[data-case-evidence]').innerHTML=ev.length?ev.map((item,index)=>evidence(item,index,d.itr)).join(''):'<div class="case-empty">当前知识存在，但没有可用原始 Evidence。</div>';
   const source=[['来源 ITR',d.itr],['发布时间',d.published_at],['Case Version',d.case_version],['Publication Status',d.publication_status],['Contract',d.contract_version],['Case ID',d.case_id]];
   root.querySelector('[data-case-source]').innerHTML=source.map(([k,v])=>'<div><label>'+esc(k)+'</label><p>'+esc(v||empty)+'</p></div>').join('');
 }
