@@ -4,12 +4,17 @@ from fastapi.testclient import TestClient
 from quality_knowledge.web.overall_shell import create_overall_shell_router
 
 
-def _client(*, shell_enabled=True, legacy_ready=False):
+def _client(*, shell_enabled=True, legacy_ready=False, legacy_scenario_ready=False):
     app = FastAPI()
     app.state.overall_shell_enabled = shell_enabled
     app.state.legacy_quality_issue_status = {
         "ready": legacy_ready,
         "code": "READY" if legacy_ready else "LEGACY_DB_UNAVAILABLE",
+    }
+    app.state.legacy_scenario_status = {
+        "ready": legacy_scenario_ready,
+        "code": "READY" if legacy_scenario_ready else "LEGACY_SCENARIO_TABLE_NOT_FOUND",
+        "mode": "READ_ONLY",
     }
     app.include_router(create_overall_shell_router())
     return TestClient(app)
@@ -56,24 +61,27 @@ def test_r2_w2_current_problem_uses_verified_w1_routes_and_does_not_fake_assessm
     assert "不由 /analysis 或材料页替代" in page.text
 
 
-def test_r2_w2_old_scenario_and_portraits_are_visible_but_not_fabricated_routes():
-    client = _client(legacy_ready=True)
-    page = client.get("/p0/overall/areas/scenarios-insights")
-    assert page.status_code == 200
-
+def test_r2_w2_old_scenario_and_portraits_bind_only_when_legacy_scenario_tables_exist():
+    unavailable = _client(legacy_ready=True, legacy_scenario_ready=False)
+    blocked = unavailable.get("/p0/overall/areas/scenarios-insights")
+    assert blocked.status_code == 200
     for title in (
         "原有质量场景工作台",
         "原产品质量画像",
         "原客户质量画像",
         "原行业质量画像",
     ):
-        assert title in page.text
+        assert title in blocked.text
+    assert blocked.text.count("当前运行环境未绑定 Legacy 数据库") >= 4
+    assert 'href="/quality-scenarios"' not in blocked.text
 
-    # They remain protected but disabled until their authoritative historical
-    # route is recovered. No guessed href is rendered.
-    assert page.text.count("Protected Existing Capability · Route / Binding 待权威确认") >= 4
-
+    client = _client(legacy_ready=True, legacy_scenario_ready=True)
+    page = client.get("/p0/overall/areas/scenarios-insights")
+    assert page.status_code == 200
     for path in (
+        "/quality-scenarios",
+        "/quality-scenario-assets",
+        "/quality-scenario-assets/portrait",
         "/p0/quality-scenario-insights",
         "/p0/quality-scenario-insights?view=PRODUCT",
         "/p0/quality-scenario-insights?view=CUSTOMER",
@@ -100,7 +108,8 @@ def test_r2_w2_product_area_api_exposes_binding_status_without_domain_reads():
         if item["title"] == "原产品质量画像"
     )
     assert old_portrait["available"] is False
-    assert old_portrait["binding_pending"] is True
+    assert old_portrait["requires_legacy_scenario"] is True
+    assert old_portrait["path"] == "/quality-scenario-assets"
 
     current = by_id["current-problem"]
     assessment = next(
