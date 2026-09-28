@@ -16,6 +16,7 @@ Retry/Task/Resume/Budget/Provider HTTP remain owned by Unified Agent Runtime.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import threading
@@ -219,6 +220,34 @@ def _verify_runtime_root(root: Path) -> dict[str, Any]:
     marker = root / "RUNTIME_COMMIT"
     snapshot_commit = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
     actual = head or snapshot_commit
+    # Overall VNext already ships and imports its shared Runtime from the package
+    # root. In that composition the Storage adapter must use that same module,
+    # rather than importing a second vendored package with the same `runtime`
+    # namespace. The immutable trial manifest binds the host Runtime to the DUT.
+    overall_manifest = root / "OVERALL_VNEXT_WINDOWS_TRIAL_MANIFEST.json"
+    if overall_manifest.is_file():
+        try:
+            manifest_data = json.loads(overall_manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeBridgeUnavailable(
+                f"Overall VNext Runtime manifest 无法读取：{overall_manifest}"
+            ) from exc
+        if manifest_data.get("package_type") != "WINDOWS_MANUAL_TRIAL_PACKAGE":
+            raise RuntimeBridgeUnavailable("Overall VNext Runtime manifest 类型不匹配")
+        dut_commit = str(manifest_data.get("dut_source_commit") or "").strip()
+        if not dut_commit or (actual and actual != dut_commit):
+            raise RuntimeBridgeUnavailable(
+                "Overall VNext Runtime 来源与 DUT 不匹配："
+                f"manifest={dut_commit or 'missing'}, actual={actual or 'unverified'}"
+            )
+        return {
+            "root": str(root),
+            "head": head,
+            "snapshot_commit": snapshot_commit,
+            "expected_commit": dut_commit,
+            "pinned": True,
+            "binding_mode": "overall_dut_shared_runtime",
+        }
     allow_unpinned = os.environ.get("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "0") == "1"
     if actual and actual != RUNTIME_EXPECTED_COMMIT and not allow_unpinned:
         raise RuntimeBridgeUnavailable(
@@ -232,6 +261,7 @@ def _verify_runtime_root(root: Path) -> dict[str, Any]:
         "snapshot_commit": snapshot_commit,
         "expected_commit": RUNTIME_EXPECTED_COMMIT,
         "pinned": actual == RUNTIME_EXPECTED_COMMIT,
+        "binding_mode": "pinned_runtime_snapshot",
     }
 
 
@@ -344,10 +374,23 @@ def configured() -> bool:
 
 
 def status() -> dict[str, Any]:
+    expected_commit = RUNTIME_EXPECTED_COMMIT
+    binding_mode = "pinned_runtime_snapshot"
+    root = runtime_root()
+    manifest = root / "OVERALL_VNEXT_WINDOWS_TRIAL_MANIFEST.json" if root else None
+    if manifest and manifest.is_file():
+        try:
+            manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+            if manifest_data.get("package_type") == "WINDOWS_MANUAL_TRIAL_PACKAGE":
+                expected_commit = str(manifest_data.get("dut_source_commit") or expected_commit)
+                binding_mode = "overall_dut_shared_runtime"
+        except (OSError, ValueError):
+            pass
     base = {
         "configured": False,
         "execution_mode": execution_mode(),
-        "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
+        "runtime_expected_commit": expected_commit,
+        "runtime_binding_mode": binding_mode,
         "runtime_root": str(runtime_root()) if runtime_root() else None,
         "provider": None,
         "profile": None,
@@ -374,6 +417,7 @@ def status() -> dict[str, Any]:
     return {
         **base,
         "configured": True,
+        "runtime_expected_commit": runtime_info.get("expected_commit", RUNTIME_EXPECTED_COMMIT),
         "provider": primary.provider.type,
         "profile": primary.provider.profile_ref,
         "model": primary.provider.model,

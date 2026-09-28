@@ -124,10 +124,6 @@ class HardwareCaseIntakeService:
             raise HardwareCaseIntakeError("INTAKE_ALREADY_PROCESSED")
         if item["status"] not in {"UPLOADED", "FAILED"}:
             raise HardwareCaseIntakeError("INTAKE_PROCESSING")
-        # The two independent ACTIVE trees are a prerequisite for this import path.
-        for tree_type in ("CIRCUIT_FEATURE", "MATERIAL_DEVICE"):
-            if not self.backend.repository.get_active_tree_version_id(tree_type):
-                raise HardwareCaseIntakeError("ACTIVE_TREES_REQUIRED")
         try:
             path = self.sources.resolve_path(item["source_ref"])
             parsed = parse_docx(path)

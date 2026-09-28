@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from storage_life import ai, runtime_bridge
+from storage_life import knowledge_product
 from storage_life.app import app
 from storage_life.runtime_domain_strategy import EMMC_FIELD_ORDER
 
@@ -78,3 +79,43 @@ def test_runtime_bridge_defaults_to_public_runtime_model_config(monkeypatch, tmp
 
     monkeypatch.delenv("STORAGE_MODEL_CONFIG", raising=False)
     assert runtime_bridge.model_config_path(runtime_root) == fallback.resolve()
+
+
+def test_overall_trial_binds_storage_to_shared_host_runtime(tmp_path):
+    root = tmp_path / "overall"
+    (root / "runtime").mkdir(parents=True)
+    (root / "config" / "runtime").mkdir(parents=True)
+    (root / "tools" / "openai_mock").mkdir(parents=True)
+    (root / "runtime" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "config" / "runtime" / "model.yaml").write_text(
+        "active_model: qwen_prod\nmodels: {}\n", encoding="utf-8"
+    )
+    (root / "tools" / "openai_mock" / "server.py").write_text("", encoding="utf-8")
+    dut = "b5fb4880afe46546e6e7f25ef1018f3a7adf0079"
+    (root / "OVERALL_VNEXT_WINDOWS_TRIAL_MANIFEST.json").write_text(
+        '{"package_type":"WINDOWS_MANUAL_TRIAL_PACKAGE",'
+        f'"dut_source_commit":"{dut}"' + "}",
+        encoding="utf-8",
+    )
+
+    info = runtime_bridge._verify_runtime_root(root)
+
+    assert info["pinned"] is True
+    assert info["expected_commit"] == dut
+    assert info["binding_mode"] == "overall_dut_shared_runtime"
+
+
+def test_storage_knowledge_production_uses_shared_runtime_model_config(monkeypatch, tmp_path):
+    shared = tmp_path / "config" / "runtime" / "model.yaml"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("active_model: qwen_prod\nmodels: {}\n", encoding="utf-8")
+    monkeypatch.delenv("STORAGE_MODEL_CONFIG", raising=False)
+    assert knowledge_product.resolve_storage_model_config_path(tmp_path) == shared.resolve()
+
+
+def test_storage_knowledge_production_honors_shared_model_config_override(monkeypatch, tmp_path):
+    override = tmp_path / "user" / "model.yaml"
+    override.parent.mkdir(parents=True)
+    override.write_text("active_model: qwen_prod\nmodels: {}\n", encoding="utf-8")
+    monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(override))
+    assert knowledge_product.resolve_storage_model_config_path(tmp_path) == override.resolve()

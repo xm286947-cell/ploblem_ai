@@ -7,7 +7,9 @@ Evidence into a stable projection and never opens a producer repository.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from typing import Any
+from urllib.parse import urlencode, urlsplit
 
 COMMON_EVIDENCE_CONTRACT_VERSION = "common-evidence/v1.0"
 
@@ -171,3 +173,46 @@ def validate_common_evidence(value: Mapping[str, Any]) -> None:
     locator = _mapping(value.get("locator"))
     if not all(key in locator for key in ("page", "section", "anchor")):
         raise CommonEvidenceContractError("locator contract is incomplete")
+
+
+def build_overall_evidence_href(
+    value: Mapping[str, Any],
+    *,
+    return_to: str,
+    presentation: str = "drawer",
+) -> str:
+    """Build a same-origin Overall Evidence link from the frozen public contract.
+
+    The caller supplies the producer-owned projection; this helper never loads
+    Evidence or Source data. The compact contract rides with the navigation
+    request so the Overall viewer can render it without crossing domain
+    ownership boundaries.
+    """
+
+    validate_common_evidence(value)
+    target = str(return_to or "").strip()
+    parsed = urlsplit(target)
+    if (
+        not target.startswith("/")
+        or target.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
+        or "\\" in target
+        or "\r" in target
+        or "\n" in target
+        or len(target) > 4096
+    ):
+        raise CommonEvidenceContractError("return_to must be a same-origin path")
+    if presentation not in {"drawer", "page"}:
+        raise CommonEvidenceContractError("presentation must be drawer or page")
+    encoded = json.dumps(dict(value), ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > 12000:
+        raise CommonEvidenceContractError("common evidence payload is too large")
+    query = urlencode(
+        {
+            "presentation": presentation,
+            "common_evidence": encoded,
+            "return_to": target,
+        }
+    )
+    return "/p0/overall/evidence?" + query

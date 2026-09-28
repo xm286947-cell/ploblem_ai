@@ -1,10 +1,10 @@
 # Overall VNext Browser E2E
 
-TASK=OVERALL-VNEXT-BROWSER-E2E-001  
-STATUS=PASS  
-DATA_MODE=SYNTHETIC_ISOLATED  
-REAL_PROVIDER_CALL=NO  
-FORMAL_S11=NOT_RUN  
+TASK=OVERALL-VNEXT-BROWSER-E2E-001
+STATUS=PASS
+DATA_MODE=SYNTHETIC_ISOLATED
+REAL_PROVIDER_CALL=NO
+FORMAL_S11=NOT_RUN
 
 ## Scope
 
@@ -27,7 +27,7 @@ Nine browser checks passed:
 8. The Overall Shell renders at a 390 × 844 mobile viewport.
 9. The mobile page has no horizontal overflow.
 
-Browser console errors: **0**.  
+Browser console errors: **0**.
 Failed browser requests: **0**.
 
 The Linux executor does not contain CJK glyph fonts. Chromium screenshots

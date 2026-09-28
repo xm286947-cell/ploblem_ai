@@ -122,9 +122,21 @@ def test_case_and_knowledge_navigation_uses_existing_product_pages(tmp_path):
     ):
         assert f'href="{path}"><strong>{label}</strong>' in page.text
 
+    assert '<section class="overall-card" id="new-professional-products"' in page.text
+    for path, label in (
+        ("/p0/hardware-cases", "硬件案例库"),
+        ("/storage-workspace/", "存储器件寿命智能产品"),
+    ):
+        assert f'href="{path}"><strong>{label}</strong>' in page.text
+
 
 def test_vnext_product_areas_cover_frozen_information_architecture(tmp_path):
     client = _client(tmp_path)
+    overall = client.get("/p0/overall")
+    area_nav = overall.text.split('<nav class="overall-area-nav"', 1)[1].split("</nav>", 1)[0]
+    assert area_nav.count('/p0/overall/areas/') == 4
+    assert "/p0/overall/areas/management" not in area_nav
+    assert 'href="/p0/overall/areas/management">管理与配置</a>' in overall.text
     expected = {
         "current-problem": ("当前问题", "/p0/issues"),
         "cases-knowledge": ("案例与知识", "/p0/cases"),
@@ -140,8 +152,43 @@ def test_vnext_product_areas_cover_frozen_information_architecture(tmp_path):
         assert f'href="{capability_path}"' in page.text
 
     current = client.get("/p0/overall/areas/current-problem")
+    assert "ITR / 现场恢复工作台" in current.text
+    assert "ITR 彻底解决工作台" in current.text
+    assert "重大问题案例库" in current.text
+    assert 'href="/p0/cases"' in current.text
     assert "Repeat Risk 保持在当前问题详情和彻底解决流程中" in current.text
-    assert "当前运行环境未绑定 Legacy 数据库" in current.text
+    assert "页面 / Route 待 Targeted Verification" in current.text
+
+    scenarios = client.get("/p0/overall/areas/scenarios-insights")
+    assert 'href="/p0/quality-scenario-insights">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=PRODUCT">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=CUSTOMER">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=INDUSTRY">' in scenarios.text
+    for label in (
+        "新版质量场景库",
+        "新版产品质量画像",
+        "新版客户质量画像",
+        "新版行业质量画像",
+    ):
+        assert label in scenarios.text
+    assert '<a class="overall-capability" href="/p0/quality-scenario-insights?view=CUSTOMER">' in scenarios.text
+
+    cases = client.get("/p0/overall/areas/cases-knowledge")
+    assert "P07 硬件双树导入" in cases.text
+    assert 'href="/p0/hardware-cases/base-data"' in cases.text
+
+    management = client.get("/p0/overall/areas/management")
+    assert "Legacy 问题业务统计" in management.text
+    assert "问题规模、分析状态、再发风险与质量能力缺口" in management.text
+    for path in (
+        "/p0/quality-scenario-insights",
+        "/p0/quality-scenario-insights?view=PRODUCT",
+        "/p0/quality-scenario-insights?view=CUSTOMER",
+        "/p0/quality-scenario-insights?view=INDUSTRY",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "data-p04-insights" in response.text
 
     missing = client.get("/p0/overall/areas/not-found")
     assert missing.status_code == 404

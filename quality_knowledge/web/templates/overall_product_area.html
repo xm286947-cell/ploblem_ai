@@ -15,7 +15,9 @@
 
 <nav class="overall-area-nav" aria-label="总体产品工作区">
   {% for item in product_areas %}
+  {% if item.area_id != 'management' %}
   <a href="/p0/overall/areas/{{ item.area_id }}" {% if item.area_id == area.area_id %}aria-current="page"{% endif %}>{{ item.title }}</a>
+  {% endif %}
   {% endfor %}
 </nav>
 
@@ -31,7 +33,11 @@
     <article class="overall-capability is-unavailable" aria-disabled="true">
       <strong>{{ capability.title }}</strong>
       <span>{{ capability.summary }}</span>
+      {% if capability.binding_pending %}
+      <small>页面 / Route 待 Targeted Verification</small>
+      {% else %}
       <small>当前运行环境未绑定 Legacy 数据库</small>
+      {% endif %}
     </article>
     {% endif %}
   {% endfor %}

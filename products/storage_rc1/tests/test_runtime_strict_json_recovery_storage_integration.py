@@ -85,11 +85,19 @@ def test_case1_legal_json_pass(monkeypatch):
     assert evidence["request_max_completion_tokens"] == "NOT_SENT"
 
 
-def test_case2_wrapper_is_deterministically_recovered(monkeypatch):
+@pytest.mark.parametrize(
+    "provider_content",
+    [
+        "```json\n{\"ok\":true}\n```",
+        "Result follows:\n{\"ok\":true}\nEnd of result.",
+    ],
+    ids=["markdown_fence", "explanatory_wrapper"],
+)
+def test_case2_wrapper_is_deterministically_recovered(monkeypatch, provider_content):
     evidence = {}
     monkeypatch.setattr(
         "runtime.providers.openai_compatible.urlopen",
-        lambda _request, timeout: FakeResponse("```json\n{\"ok\":true}\n```"),
+        lambda _request, timeout: FakeResponse(provider_content),
     )
     result = adapter()({"value": 1}, context(evidence))
     assert result == {"ok": True}

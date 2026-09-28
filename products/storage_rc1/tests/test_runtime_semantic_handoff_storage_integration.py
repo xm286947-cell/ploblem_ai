@@ -51,7 +51,7 @@ def _configure(host: str, port: int, payload: str) -> None:
 
 def test_real_runtime_handoff_to_storage_secondary_extraction(tmp_path: Path, monkeypatch) -> None:
     project_root = Path(__file__).resolve().parent.parent
-    runtime_root = project_root / "vendor" / "unified_agent_runtime"
+    runtime_root = project_root.parent.parent
 
     with _running_mock() as (host, port):
         model_config = tmp_path / "model.yaml"
@@ -76,6 +76,7 @@ models:
         )
 
         monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(runtime_root))
+        monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
         monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
         monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(model_config))
         monkeypatch.setenv("STORAGE_AGENT_API_KEY", "mock-secret")
@@ -170,10 +171,24 @@ def _running_sequence_mock(payloads) -> Iterator[tuple[str, int]]:
         thread.join(timeout=2)
 
 
-def test_real_runtime_openai_mock_identify_semantic_handoff_auto_secondary(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("malformed_kind", ["free_text", "trailing_comma"])
+def test_real_runtime_openai_mock_identify_semantic_handoff_auto_secondary(
+    tmp_path: Path, monkeypatch, malformed_kind: str
+) -> None:
     project_root = Path(__file__).resolve().parent.parent
-    runtime_root = project_root / "vendor" / "unified_agent_runtime"
-    first = "vendor=GigaDevice; model=GD25Q64E; device_type=NOR Flash; response malformed"
+    runtime_root = project_root.parent.parent
+    if malformed_kind == "free_text":
+        first = "vendor=GigaDevice; model=GD25Q64E; device_type=NOR Flash; response malformed"
+    else:
+        primary_content = json.dumps(
+            {
+                "vendor": {"value": "GigaDevice", "page": 1, "quote": "GigaDevice Semiconductor Inc."},
+                "model": {"value": "GD25Q64E", "page": 1, "quote": "GD25Q64E 64M-bit Serial Flash"},
+                "device_type": {"value": "NOR Flash", "page": 1, "quote": "Serial Flash"},
+            },
+            ensure_ascii=False,
+        )
+        first = primary_content[:-1] + ",}"
     second = json.dumps(
         {
             "vendor": {
@@ -220,6 +235,7 @@ models:
             encoding="utf-8",
         )
         monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(runtime_root))
+        monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
         monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
         monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(model_config))
         monkeypatch.setenv("STORAGE_AGENT_API_KEY", "mock-secret")
@@ -256,7 +272,7 @@ def test_real_runtime_openai_mock_secondary_semantic_damage_partitioned_rescue(t
     any Storage-side malformed-JSON parsing.
     """
     project_root = Path(__file__).resolve().parent.parent
-    runtime_root = project_root / "vendor" / "unified_agent_runtime"
+    runtime_root = project_root.parent.parent
 
     pages = [(
         1,
@@ -368,6 +384,7 @@ models:
             encoding="utf-8",
         )
         monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(runtime_root))
+        monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
         monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
         monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(model_config))
         monkeypatch.setenv("STORAGE_AGENT_API_KEY", "mock-secret")

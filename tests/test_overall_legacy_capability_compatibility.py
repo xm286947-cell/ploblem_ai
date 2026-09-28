@@ -187,6 +187,21 @@ def test_legacy_import_analysis_statistics_share_one_host_and_isolated_database(
     assert client.get("/").status_code == 200
     assert client.get("/p0/issues").status_code == 200
 
+    current_problem = client.get("/p0/overall/areas/current-problem")
+    assert "ITR / 现场恢复工作台" in current_problem.text
+    assert 'href="/materials/itr"' not in current_problem.text
+    assert 'href="/issues"' in current_problem.text
+    assert "ITR 彻底解决工作台" in current_problem.text
+    assert 'href="/itr/resolution-workbench"' in current_problem.text
+    assert client.get("/issues").status_code == 200
+    resolution_page = client.get("/itr/resolution-workbench")
+    assert resolution_page.status_code == 200
+    assert "ITR 彻底解决工作台" in resolution_page.text
+    management = client.get("/p0/overall/areas/management")
+    assert 'href="/materials/itr"' in management.text
+    assert 'href="/materials/cs"' in management.text
+    assert 'href="/materials/software-operations"' in management.text
+
     analysis_page = client.get("/analysis")
     import_page = client.get("/import")
     statistics_page = client.get("/statistics?business_type=PLC&month=2026-09")

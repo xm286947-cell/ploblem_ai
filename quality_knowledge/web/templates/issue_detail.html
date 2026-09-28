@@ -18,6 +18,7 @@
     </div>
   </div>
   <div class="compact-hero-actions">
+    <a class="button" data-overall-preserve-context="state-only" href="{{ return_to }}">返回工作台</a>
     <div class="issue-sequence-nav">
       {% if previous_issue %}<a class="button" href="/issues/{{previous_issue.knowledge_id}}" title="{{previous_issue.business_issue_id}}">← 上一条</a>{% else %}<span class="button disabled" aria-disabled="true">← 上一条</span>{% endif %}
       {% if issue_position %}<span class="issue-sequence-position">{{issue_position}} / {{issue_total}}</span>{% endif %}

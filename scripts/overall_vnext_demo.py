@@ -86,7 +86,13 @@ def prepare_demo_legacy_database(data_dir: Path) -> Path:
             raise RuntimeError("DEMO_LEGACY_MAPPING_NOT_ACTIVE")
     service = legacy_state.knowledge_issue_service
     if not service.query_issues({"business_issue_id": DEMO_LEGACY_ISSUE_ID}, limit=1):
-        workbook_path = data_dir / "legacy_demo_seed.xlsx"
+        workbook_fd, workbook_name = tempfile.mkstemp(
+            prefix="legacy_demo_seed_",
+            suffix=".xlsx",
+            dir=data_dir,
+        )
+        os.close(workbook_fd)
+        workbook_path = Path(workbook_name)
         workbook = Workbook()
         sheet = workbook.active
         sheet.append(["ITR单号", "问题描述", "产品", "月份"])
@@ -102,7 +108,37 @@ def prepare_demo_legacy_database(data_dir: Path) -> Path:
         try:
             service.import_file(workbook_path, "PLC")
         finally:
-            workbook_path.unlink(missing_ok=True)
+            try:
+                workbook_path.unlink(missing_ok=True)
+            except PermissionError:
+                # Windows may briefly hold the workbook after import. It is
+                # synthetic demo input; a leftover temp file must not prevent
+                # the single app host from starting.
+                pass
+    material_repo = legacy_state.material_repository
+    if not material_repo.list_materials("ITR-CS", limit=1):
+        workbook_fd, workbook_name = tempfile.mkstemp(
+            prefix="legacy_demo_resolution_",
+            suffix=".xlsx",
+            dir=data_dir,
+        )
+        os.close(workbook_fd)
+        workbook_path = Path(workbook_name)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["问题信息", "解决方案"])
+        sheet.append(["彻底解决单号", "永久措施"])
+        sheet.append(
+            [f"{DEMO_LEGACY_ISSUE_ID}CS", "合成演示措施：修复后执行回归并核对现场恢复结果"]
+        )
+        workbook.save(workbook_path)
+        try:
+            legacy_state.material_import_service.import_file(workbook_path, "ITR-CS", 2)
+        finally:
+            try:
+                workbook_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
     return legacy_db
 
 
@@ -164,6 +200,7 @@ def main() -> int:
             "/p0/overall/areas/management",
             "/p0/issues",
             "/issues",
+            "/itr/resolution-workbench",
             "/analysis",
             "/import",
             "/statistics",
@@ -184,6 +221,13 @@ def main() -> int:
         legacy_detail = client.get(f"/issues/{legacy_issues[0]['knowledge_id']}")
         if legacy_detail.status_code != 200 or DEMO_LEGACY_ISSUE_ID not in legacy_detail.text:
             raise RuntimeError("MVP_LEGACY_DETAIL_FAILED")
+        resolution_page = client.get("/itr/resolution-workbench")
+        if (
+            resolution_page.status_code != 200
+            or f"{DEMO_LEGACY_ISSUE_ID}CS" not in resolution_page.text
+            or "打开关联问题" not in resolution_page.text
+        ):
+            raise RuntimeError("MVP_ITR_RESOLUTION_WORKBENCH_FAILED")
         task_overview = client.get("/api/v2/overall/task-overview")
         if (
             task_overview.status_code != 200

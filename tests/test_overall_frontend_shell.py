@@ -129,9 +129,40 @@ def test_legacy_capability_links_follow_runtime_binding_state():
 
     page = TestClient(app).get("/p0/overall/areas/current-problem")
     assert page.status_code == 200
+    assert 'href="/materials/itr"' not in page.text
+    assert 'href="/p0/cases"' in page.text
+    assert "ITR / 现场恢复工作台" in page.text
     assert 'href="/issues"' in page.text
+    assert "ITR 彻底解决工作台" in page.text
+    assert 'href="/itr/resolution-workbench"' in page.text
+    assert "软件问题考核" in page.text
+    assert "页面 / Route 待 Targeted Verification" in page.text
+    assert "原问题 AI 分析工作台" in page.text
+    assert "尚未与软件问题考核或独立漏测分析建立映射" in page.text
     assert 'href="/analysis"' in page.text
     assert "当前运行环境未绑定 Legacy 数据库" not in page.text
+
+
+def test_material_imports_are_secondary_and_old_scenarios_remain_visible():
+    app = FastAPI()
+    app.state.overall_shell_enabled = True
+    app.state.storage_workspace_binding = None
+    app.state.legacy_quality_issue_status = {"ready": True, "code": "READY"}
+    app.include_router(create_overall_shell_router())
+    client = TestClient(app)
+
+    current_problem = client.get("/p0/overall/areas/current-problem")
+    management = client.get("/p0/overall/areas/management")
+    scenarios = client.get("/p0/overall/areas/scenarios-insights")
+    assert current_problem.status_code == management.status_code == scenarios.status_code == 200
+    assert 'href="/materials/itr"' not in current_problem.text
+    assert 'href="/materials/itr"' in management.text
+    assert "ITR 材料导入" in management.text
+    assert "原有质量场景工作台" in scenarios.text
+    assert "原产品质量画像" in scenarios.text
+    assert "原客户质量画像" in scenarios.text
+    assert "原行业质量画像" in scenarios.text
+    assert "页面 / Route 待 Targeted Verification" in scenarios.text
 
 
 def test_legacy_knowledge_routes_redirect_to_current_product_owners():
