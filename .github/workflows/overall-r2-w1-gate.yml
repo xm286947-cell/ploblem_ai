@@ -9,6 +9,7 @@ on:
       - "tests/test_r2_w1_*.py"
       - "tests/test_rc4_analysis_workbench_ui.py"
       - ".github/workflows/overall-r2-w1-gate.yml"
+      - ".gitattributes"
   pull_request:
     branches:
       - integration/overall-r2
@@ -16,6 +17,7 @@ on:
       - "quality_knowledge/**"
       - "tests/test_r2_w1_*.py"
       - "tests/test_rc4_analysis_workbench_ui.py"
+      - ".gitattributes"
 
 permissions:
   contents: read
@@ -67,6 +69,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
 
+      - name: Verify release-bound seed bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = "443101e36d2c5b610bc62d130701ed7352175a12696bfc20fd9c5fe47fa411c3"
+          $actual = (Get-FileHash -Algorithm SHA256 "quality_knowledge\\config\\plc_fields.yaml").Hash.ToLower()
+          Write-Host "PLC_SEED_EXPECTED=$expected"
+          Write-Host "PLC_SEED_ACTUAL=$actual"
+          if ($actual -ne $expected) {
+            throw "PLC seed checkout is not byte-identical to the frozen manifest"
+          }
+
       - name: Prepare clean local databases
         shell: pwsh
         run: |
@@ -76,9 +90,12 @@ jobs:
           foreach ($path in @($legacy,$p1,"$legacy-wal","$legacy-shm","$p1-wal","$p1-shm")) {
             if (Test-Path $path) { Remove-Item -Force $path }
           }
-          python -c "from quality_knowledge.repositories import IssueKnowledgeRepository; IssueKnowledgeRepository(r'knowledge/quality_issue_v1.db')"
+          python -c "from quality_knowledge.web import create_app; create_app(r'knowledge/quality_issue_v1.db')"
+          $legacyAbsolute = (Resolve-Path $legacy).Path
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacyAbsolute" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "LEGACY_DB_BINDING=$legacyAbsolute"
 
-      - name: Start unified P1 Web
+      - name: Start unified P1 Web and smoke W1 routes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -90,48 +107,47 @@ jobs:
             "--host","127.0.0.1",
             "--port","8080"
           ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          "R2_W1_PID=$($proc.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          $ready = $false
-          for ($i=0; $i -lt 60; $i++) {
-            if ($proc.HasExited) { break }
-            try {
-              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/issues" -UseBasicParsing -TimeoutSec 3
-              if ($r.StatusCode -eq 200) { $ready = $true; break }
-            } catch {}
-            Start-Sleep -Seconds 2
-          }
-          if (-not $ready) {
-            if (Test-Path $stdout) { Get-Content $stdout }
-            if (Test-Path $stderr) { Get-Content $stderr }
-            if (!$proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-            throw "Unified R2 W1 Web did not become ready"
-          }
-
-      - name: Smoke W1 routes
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $routes = @(
-            "http://127.0.0.1:8080/p0/issues",
-            "http://127.0.0.1:8080/p0/itr-recovery",
-            "http://127.0.0.1:8080/itr/resolution-workbench",
-            "http://127.0.0.1:8080/p0/missed-test-analysis",
-            "http://127.0.0.1:8080/p0/batch-analysis",
-            "http://127.0.0.1:8080/analysis"
-          )
-          foreach ($route in $routes) {
-            $response = Invoke-WebRequest -Uri $route -UseBasicParsing -TimeoutSec 10
-            if ($response.StatusCode -ne 200) {
-              throw "W1 route failed: $route => $($response.StatusCode)"
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 60; $i++) {
+              if ($proc.HasExited) { break }
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/issues" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 2
             }
-            Write-Host "$route=PASS"
-          }
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Unified R2 W1 Web did not become ready"
+            }
 
-      - name: Stop unified P1 Web
-        if: always()
-        shell: pwsh
-        run: |
-          if ($env:R2_W1_PID) {
-            Stop-Process -Id ([int]$env:R2_W1_PID) -Force -ErrorAction SilentlyContinue
+            $routes = @(
+              "http://127.0.0.1:8080/p0/issues",
+              "http://127.0.0.1:8080/p0/itr-recovery",
+              "http://127.0.0.1:8080/itr/resolution-workbench",
+              "http://127.0.0.1:8080/p0/itr-resolution",
+              "http://127.0.0.1:8080/p0/missed-test-analysis",
+              "http://127.0.0.1:8080/p0/batch-analysis",
+              "http://127.0.0.1:8080/analysis"
+            )
+            foreach ($route in $routes) {
+              if ($proc.HasExited) {
+                if (Test-Path $stdout) { Get-Content $stdout }
+                if (Test-Path $stderr) { Get-Content $stderr }
+                throw "Unified R2 W1 Web exited before route smoke completed"
+              }
+              $response = Invoke-WebRequest -Uri $route -UseBasicParsing -TimeoutSec 10
+              if ($response.StatusCode -ne 200) {
+                throw "W1 route failed: $route => $($response.StatusCode)"
+              }
+              Write-Host "$route=PASS"
+            }
+          }
+          finally {
+            if (!$proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
           }
