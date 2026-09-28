@@ -1,12 +1,15 @@
 from html.parser import HTMLParser
 from pathlib import Path
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
+from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web import create_app
-from quality_knowledge.web.p0_pages import create_p0_insights_router
+from quality_knowledge.web.p0_app import create_p0_app
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _LinkParser(HTMLParser):
@@ -113,7 +116,7 @@ def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path
         params={"return_to": "/missed-test-analysis?q=边界场景"},
     )
     assert detail.status_code == 200
-    assert 'data-r2-return' in detail.text
+    assert "data-r2-return" in detail.text
     assert 'href="/missed-test-analysis?q=边界场景"' in detail.text
 
     rejected = client.get(
@@ -123,17 +126,70 @@ def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path
     assert rejected.status_code == 400
 
 
-def test_p0_missed_test_entry_is_a_query_preserving_compatibility_adapter():
-    app = FastAPI()
-    app.include_router(create_p0_insights_router())
+def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_path: Path):
+    legacy_db = tmp_path / "legacy.db"
+    legacy_app = create_app(legacy_db)
+    legacy_client = TestClient(legacy_app)
+    ids = _seed_issues(legacy_client, tmp_path)
+
+    p0_db = tmp_path / "p0.db"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(p0_db)
+
+    app = create_p0_app(
+        p0_db,
+        stage_runner=object(),
+        project_root=ROOT,
+        legacy_quality_issue_db_path=legacy_db,
+    )
     client = TestClient(app)
 
     response = client.get(
         "/p0/missed-test-analysis",
-        params={"q": "ITR-1", "analysis_status": "FAILED"},
-        follow_redirects=False,
+        params={"q": "MISS-1", "analysis_status": "NOT_ANALYZED"},
     )
-    assert response.status_code == 307
-    assert response.headers["location"] == (
-        "/missed-test-analysis?q=ITR-1&analysis_status=FAILED"
+    assert response.status_code == 200
+    assert "软件问题漏测分析" in response.text
+    assert "ITR-R2-MISS-1" in response.text
+    assert "ITR-R2-NORMAL-1" not in response.text
+    assert "Existing Capability Adapter" in response.text
+
+    parser = _LinkParser()
+    parser.feed(response.text)
+    detail_links = [
+        href for href in parser.hrefs
+        if href.startswith(f"/p0/issues/{ids['ITR-R2-MISS-1']}?")
+    ]
+    assert len(detail_links) == 1
+    assert (
+        "return_to=%2Fp0%2Fmissed-test-analysis%3Fq%3DMISS-1"
+        in detail_links[0]
     )
+    assert detail_links[0].endswith("#analysis")
+
+    detail = client.get(
+        f"/p0/issues/{ids['ITR-R2-MISS-1']}",
+        params={
+            "return_to": (
+                "/p0/missed-test-analysis?"
+                "q=MISS-1&analysis_status=NOT_ANALYZED"
+            )
+        },
+    )
+    assert detail.status_code == 200
+    assert "返回漏测分析" in detail.text
+    assert "/p0/missed-test-analysis?q=MISS-1" in detail.text
+    assert "r2-w1-missed-test-return-v1" in detail.text
+
+    rejected = client.get(
+        f"/p0/issues/{ids['ITR-R2-MISS-1']}",
+        params={"return_to": "https://example.invalid/escape"},
+    )
+    assert rejected.status_code == 400
+
+    issues = client.get("/p0/issues")
+    assert issues.status_code == 200
+    assert 'href="/p0/missed-test-analysis"' in issues.text
+    assert 'href="/itr/resolution-workbench"' in issues.text
