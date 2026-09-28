@@ -94,7 +94,7 @@ def test_missed_test_adapter_reuses_existing_issue_facts_only(tmp_path: Path):
     ]
     assert len(detail_links) == 1
     assert "return_to=%2Fmissed-test-analysis" in detail_links[0]
-    assert detail_links[0].endswith("#causes")
+    assert detail_links[0].endswith("#analysis")
 
 
 def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path):
