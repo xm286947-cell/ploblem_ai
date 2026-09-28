@@ -34,6 +34,7 @@ from quality_knowledge.product_report.legacy_service import LegacyProductQuality
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
 from .missed_test_adapter import build_missed_test_rows
+from .itr_recovery_adapter import build_itr_recovery_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -90,7 +91,7 @@ def _safe_issue_return_context(raw: str | None) -> str:
     parsed = urlsplit(value)
     if parsed.scheme or parsed.netloc or parsed.fragment:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
-    if parsed.path not in {'/itr/resolution-workbench', '/missed-test-analysis'}:
+    if parsed.path not in {'/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis'}:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
     return parsed.path + (('?' + parsed.query) if parsed.query else '')
 
@@ -314,6 +315,26 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             'total': len(rows),
             'linked': linked_count,
             'unlinked': len(rows) - linked_count,
+        })
+
+    @app.get('/itr/recovery-workbench', response_class=HTMLResponse, include_in_schema=False)
+    def itr_recovery_workbench(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_itr_recovery_rows(
+            svc,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/itr/recovery-workbench',
+        )
+        with_recovery = sum(
+            1 for row in rows
+            if row.get('source_fact_status') == 'SOURCE_FACT_PRESENT'
+        )
+        return tpl.TemplateResponse(request, 'itr_recovery_workbench.html', {
+            'items': rows,
+            'total': len(rows),
+            'with_recovery': with_recovery,
+            'q': q,
         })
 
     @app.get('/missed-test-analysis', response_class=HTMLResponse, include_in_schema=False)
@@ -607,6 +628,11 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         vm['human_fields'] = human_svc.list_field_definitions(True)
         vm['human_analysis'] = human_svc.get_analysis(knowledge_id, issue['issue_version_id']) if issue else None
         vm['return_to'] = return_to
+        vm['return_label'] = {
+            '/itr/resolution-workbench': '返回彻底解决工作台',
+            '/itr/recovery-workbench': '返回 ITR / 现场恢复',
+            '/missed-test-analysis': '返回漏测分析',
+        }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
 
