@@ -25,6 +25,8 @@
     </div>
     <form id="analysis-normal-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}"><input type="hidden" name="analysis_agent" value="DYNAMIC"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><button class="primary">分析未完成项</button></form>
     <form id="analysis-force-form" data-analysis-submit method="post" action="/analysis/{{issue.knowledge_id}}" onsubmit="return confirm('将强制重新分析已完成阶段，确认继续？')"><input type="hidden" name="analysis_agent" value="DYNAMIC"><input type="hidden" name="domain_profile" value="AUTO"><input type="hidden" name="lifecycle_phase" value="AUTO"><input type="hidden" name="force" value="1"><button>强制重新分析</button></form>
+    <a class="button" href="/itr/resolution-workbench">彻底解决工作台</a>
+    {% if return_to %}<a class="button" data-r2-return href="{{ return_to }}">返回彻底解决工作台</a>{% endif %}
     <a class="button" href="#human-analysis">人工分析</a>
   </div>
 </div>
