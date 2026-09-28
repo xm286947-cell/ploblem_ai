@@ -33,6 +33,7 @@ from .statistics_presenter import present_statistics, present_common_gaps, zh_va
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
+from .missed_test_adapter import build_missed_test_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -319,49 +320,13 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     def missed_test_analysis(request: Request):
         q = (request.query_params.get('q') or '').strip()
         analysis_status = (request.query_params.get('analysis_status') or '').strip().upper()
-        issue_count = svc.count_issues({})
-        candidates = svc.query_issues({}, max(issue_count, 1))
-        rows = []
-        for candidate in candidates:
-            knowledge_id = candidate.get('knowledge_id')
-            if not knowledge_id:
-                continue
-            issue = svc.get_issue(knowledge_id)
-            if not issue:
-                continue
-            normalized = _safe_json(issue.get('normalized_json'))
-            if not _is_missed_test_issue(normalized):
-                continue
-            escape_analysis = svc.get_latest_analysis(knowledge_id, 'escape')
-            result = (escape_analysis or {}).get('result') or {}
-            row = {
-                **candidate,
-                'escape_analysis_status': (escape_analysis or {}).get('status') or 'NOT_ANALYZED',
-                'escape_cause_summary': _ev(result.get('escape_cause_summary')),
-                'verification_gap': _ev(result.get('verification_gap')),
-                'expected_detection_stage': result.get('expected_detection_stage') or '',
-                'actual_detection_stage': result.get('actual_detection_stage') or '',
-            }
-            searchable = ' '.join(str(row.get(key) or '') for key in (
-                'business_issue_id', 'title', 'description', 'product', 'platform',
-                'escape_cause_summary', 'verification_gap',
-            )).lower()
-            if q and q.lower() not in searchable:
-                continue
-            if analysis_status and row['escape_analysis_status'].upper() != analysis_status:
-                continue
-            return_params = []
-            if q:
-                return_params.append(('q', q))
-            if analysis_status:
-                return_params.append(('analysis_status', analysis_status))
-            return_url = '/missed-test-analysis'
-            if return_params:
-                return_url += '?' + urlencode(return_params)
-            row['detail_url'] = (
-                f"/issues/{knowledge_id}?" + urlencode({'return_to': return_url}) + "#causes"
-            )
-            rows.append(row)
+        rows = build_missed_test_rows(
+            svc,
+            q=q,
+            analysis_status=analysis_status,
+            detail_prefix='/issues',
+            return_path='/missed-test-analysis',
+        )
         return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
             'items': rows,
             'total': len(rows),
