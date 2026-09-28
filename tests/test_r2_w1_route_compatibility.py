@@ -39,7 +39,7 @@ def test_w1_p0_routes_are_real_entries_and_preserve_adapter_boundaries():
     issues = client.get("/p0/issues")
     assert issues.status_code == 200
     assert "问题工作台" in issues.text
-    assert 'href="/itr/resolution-workbench"' in issues.text
+    assert 'href="/p0/itr-resolution"' in issues.text
     assert 'href="/p0/missed-test-analysis"' in issues.text
 
     batch = client.get("/p0/batch-analysis")
