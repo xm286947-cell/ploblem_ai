@@ -1,10 +1,11 @@
 name: Overall VNext Release Package 927EFEF5
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - ".github/workflows/overall-vnext-release-package-927.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
