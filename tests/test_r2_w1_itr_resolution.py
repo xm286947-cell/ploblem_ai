@@ -1,3 +1,4 @@
+# R2 W1 focused regression: ITR resolution vertical slice.
 from pathlib import Path
 
 from fastapi.testclient import TestClient
