@@ -9,6 +9,7 @@ on:
       - "tests/test_r2_w1_*.py"
       - "tests/test_rc4_analysis_workbench_ui.py"
       - ".github/workflows/overall-r2-w1-gate.yml"
+      - ".gitattributes"
   pull_request:
     branches:
       - integration/overall-r2
@@ -16,6 +17,7 @@ on:
       - "quality_knowledge/**"
       - "tests/test_r2_w1_*.py"
       - "tests/test_rc4_analysis_workbench_ui.py"
+      - ".gitattributes"
 
 permissions:
   contents: read
@@ -66,6 +68,18 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Verify release-bound seed bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = "443101e36d2c5b610bc62d130701ed7352175a12696bfc20fd9c5fe47fa411c3"
+          $actual = (Get-FileHash -Algorithm SHA256 "quality_knowledge\\config\\plc_fields.yaml").Hash.ToLower()
+          Write-Host "PLC_SEED_EXPECTED=$expected"
+          Write-Host "PLC_SEED_ACTUAL=$actual"
+          if ($actual -ne $expected) {
+            throw "PLC seed checkout is not byte-identical to the frozen manifest"
+          }
 
       - name: Prepare clean local databases
         shell: pwsh
