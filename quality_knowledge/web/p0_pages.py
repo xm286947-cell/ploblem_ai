@@ -16,6 +16,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from .missed_test_adapter import build_missed_test_rows
+
 
 _HERE = Path(__file__).resolve().parent
 
@@ -124,6 +126,23 @@ def _normalize_p04_url_context(raw_context: str) -> str:
     if context.get("contract") is not None:
         normalized["contract"] = context["contract"]
     return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
+def _safe_current_problem_return_url(raw: str | None) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if len(value) > 4096 or "\r" in value or "\n" in value:
+        raise HTTPException(status_code=400, detail="INVALID_ISSUE_RETURN_CONTEXT")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or parsed.fragment
+        or parsed.path != "/p0/missed-test-analysis"
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_ISSUE_RETURN_CONTEXT")
+    return parsed.path + (("?" + parsed.query) if parsed.query else "")
 
 
 def _safe_issue_return_url(raw: str | None) -> str:
@@ -276,10 +295,15 @@ def create_p0_insights_router(
                 },
             )
         requested_return = request.query_params.get("return_to", "")
-        return_to = requested_return if requested_return in {
+        if requested_return in {
             "/p0/quality-scenario-insights",
             "/p0/insights/p04",
-        } else ""
+        }:
+            return_to = requested_return
+        elif requested_return:
+            return_to = _safe_current_problem_return_url(requested_return)
+        else:
+            return_to = ""
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
