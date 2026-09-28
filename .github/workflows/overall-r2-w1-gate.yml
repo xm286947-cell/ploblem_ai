@@ -90,7 +90,7 @@ jobs:
           foreach ($path in @($legacy,$p1,"$legacy-wal","$legacy-shm","$p1-wal","$p1-shm")) {
             if (Test-Path $path) { Remove-Item -Force $path }
           }
-          python -c "from quality_knowledge.repositories import IssueKnowledgeRepository; IssueKnowledgeRepository(r'knowledge/quality_issue_v1.db')"
+          python -c "from quality_knowledge.web import create_app; create_app(r'knowledge/quality_issue_v1.db')"
           $legacyAbsolute = (Resolve-Path $legacy).Path
           "LEGACY_QUALITY_ISSUE_DB_PATH=$legacyAbsolute" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "LEGACY_DB_BINDING=$legacyAbsolute"
