@@ -1,0 +1,191 @@
+schema_version: "0.3"
+updated_at: "2026-09-20"
+discovery_mode: AUTO_DISCOVERED
+repository: "xm286947-cell/ploblem_ai"
+
+scan_summary:
+  baseline_ref: "feature/reverse-quality-v01"
+  python_files_observed: 316
+  top_level_python_counts:
+    builder: 45
+    quality_knowledge: 84
+    tests: 119
+    presentation: 13
+    parser: 10
+    models: 10
+    compatibility: 6
+    contracts: 5
+    parsing: 5
+  note: "重大问题专属 major_cases 模块位于其继承分支增量中，不计入上述质量场景基线统计。"
+
+architecture_layers:
+  - layer_id: L0_ENTRY_DELIVERY
+    purpose: "启动、CLI、Web应用装配与交付入口"
+    modules:
+      - module_id: CLI_ENTRY
+        paths: ["main.py", "run.bat", "start_quality_capability_p1.bat"]
+        ownership: SHARED
+        confidence: HIGH
+      - module_id: WEB_APPLICATION_SHELL
+        paths: ["quality_knowledge/web/app.py", "quality_knowledge/web/templates/base.html", "quality_knowledge/web/static/app.css"]
+        ownership: SHARED
+        confidence: HIGH
+
+  - layer_id: L1_DOMAIN_APPLICATION
+    purpose: "面向具体质量业务场景的应用能力"
+    modules:
+      - module_id: QUALITY_SCENARIO_DOMAIN
+        project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+        paths:
+          - "quality_knowledge/reverse_quality.py"
+          - "quality_knowledge/scenario_*.py"
+          - "quality_knowledge/scenarios.py"
+          - "quality_knowledge/web/scenario_asset_pages.py"
+          - "quality_knowledge/web/templates/quality_scenario*.html"
+          - "quality_knowledge/web/templates/scenario_*.html"
+          - "quality_knowledge/web/templates/reverse_quality_issue.html"
+        ownership: OWNED
+        discovery_source: [PATH_SCAN, IMPORT_SCAN, GIT_HISTORY]
+        confidence: HIGH
+        confirmation_status: PENDING_CONFIRMATION
+
+      - module_id: MAJOR_CASE_DOMAIN
+        project_id: MAJOR_PROBLEM_AGENT
+        paths:
+          - "quality_knowledge/major_cases/**"
+          - "quality_knowledge/web/major_case_pages.py"
+          - "quality_knowledge/web/templates/major_*.html"
+        ownership: OWNED
+        discovery_source: [GIT_DELTA_SCAN, IMPORT_SCAN]
+        confidence: HIGH
+        confirmation_status: PENDING_CONFIRMATION
+
+      - module_id: QUALITY_ANALYSIS_APPLICATION
+        paths:
+          - "quality_knowledge/services/analysis_service.py"
+          - "quality_knowledge/services/v1_analysis_service.py"
+          - "quality_knowledge/services/v2_analysis_service.py"
+          - "quality_knowledge/services/v2_batch_analysis_service.py"
+          - "quality_knowledge/services/v2_batch_job_service.py"
+          - "quality_knowledge/analyzers.py"
+        ownership: SHARED
+        confidence: HIGH
+
+      - module_id: MATERIAL_INTAKE_APPLICATION
+        paths:
+          - "quality_knowledge/materials.py"
+          - "quality_knowledge/services/knowledge_issue_service.py"
+          - "quality_knowledge/services/intake_session_service.py"
+          - "quality_knowledge/mapping/**"
+          - "quality_knowledge/adapters/**"
+        ownership: SHARED
+        confidence: HIGH
+
+  - layer_id: L2_AI_RUNTIME
+    purpose: "模型调用、AI结果解析、并发执行与Pipeline运行"
+    modules:
+      - module_id: AI_CLIENT_RUNTIME
+        paths:
+          - "builder/ai_client.py"
+          - "builder/json_response.py"
+          - "quality_knowledge/model_config.py"
+          - "config/model.yaml"
+        ownership: SHARED
+        confidence: HIGH
+        future_owner: AI_ORCHESTRATOR
+
+      - module_id: PIPELINE_BUILDERS
+        paths:
+          - "builder/*_runner.py"
+          - "builder/pipeline_runner.py"
+          - "builder/analysis_pipeline_runner.py"
+        ownership: SHARED
+        confidence: HIGH
+
+      - module_id: PARALLEL_EXECUTION
+        paths:
+          - "builder/parallel_execution.py"
+          - "quality_knowledge/services/v2_batch_job_service.py"
+          - "quality_knowledge/scenario_generation.py"
+        ownership: BOUNDARY_REVIEW_REQUIRED
+        confidence: HIGH
+        issue: "至少三处存在 ThreadPool/并发调度职责；目标应逐步收敛到统一编排能力。"
+
+  - layer_id: L3_DATA_CONTRACT
+    purpose: "领域模型、持久化、Schema与契约版本"
+    modules:
+      - module_id: QUALITY_DATA_REPOSITORIES
+        paths:
+          - "quality_knowledge/repositories/**"
+          - "quality_knowledge/models/**"
+          - "quality_knowledge/sqlite_tuning.py"
+        ownership: SHARED
+        confidence: HIGH
+
+      - module_id: GENERIC_JSON_REPOSITORY
+        paths:
+          - "repositories/json_repository.py"
+          - "services/knowledge_service.py"
+        ownership: SHARED
+        confidence: MEDIUM
+
+      - module_id: CONTRACTS_AND_SCHEMA
+        paths:
+          - "contracts/**"
+          - "schema/**"
+        ownership: SHARED
+        confidence: HIGH
+        contract_versions:
+          dto: "1.0.0"
+          schema: "1.0.0"
+          contract: "1.0.0"
+
+  - layer_id: L4_PARSING_TRANSFORMATION
+    purpose: "输入解析、AI输出提取、标准化与修复"
+    modules:
+      - module_id: INPUT_EVIDENCE_PARSER
+        paths: ["parser/**"]
+        ownership: SHARED
+        confidence: HIGH
+      - module_id: AI_OUTPUT_PARSING
+        paths: ["parsing/**"]
+        ownership: SHARED
+        confidence: HIGH
+      - module_id: RESPONSE_NORMALIZATION
+        paths:
+          - "quality_knowledge/response_normalizer.py"
+          - "quality_knowledge/response_normalizer_v2.py"
+        ownership: BOUNDARY_REVIEW_REQUIRED
+        confidence: HIGH
+
+  - layer_id: L5_PRESENTATION
+    purpose: "报告构建与输出呈现"
+    modules:
+      - module_id: PRESENTATION_ENGINE
+        paths: ["presentation/**"]
+        ownership: SHARED
+        confidence: HIGH
+      - module_id: PRODUCT_REPORT
+        paths: ["quality_knowledge/product_report/**"]
+        ownership: SHARED
+        confidence: HIGH
+
+  - layer_id: L6_COMPATIBILITY_RELEASE
+    purpose: "兼容、迁移、打包和发布辅助"
+    modules:
+      - module_id: COMPATIBILITY_LAYER
+        paths: ["compatibility/**", "quality_knowledge/migration/**", "quality_knowledge/release_migration.py"]
+        ownership: SHARED
+        confidence: HIGH
+      - module_id: PACKAGING_TOOLCHAIN
+        paths:
+          - "scripts/build_baseline_package.py"
+          - "scripts/build_upgrade_package.py"
+          - "scripts/build_req022_package.py"
+        ownership: BOUNDARY_REVIEW_REQUIRED
+        confidence: HIGH
+
+governance:
+  auto_discovery_is_not_final_ownership: true
+  project_confirmation_required_for_owned_modules: true
+  shared_module_change_requires_impact_analysis: true

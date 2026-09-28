@@ -1,0 +1,103 @@
+schema_version: "0.3"
+updated_at: "2026-09-20"
+repository: "xm286947-cell/ploblem_ai"
+evidence_policy: "只登记已观察到的 import / Git lineage /装配关系；规划依赖单独标 target。"
+
+nodes:
+  - QUALITY_SCENARIO_DOMAIN
+  - MAJOR_CASE_DOMAIN
+  - QUALITY_ANALYSIS_APPLICATION
+  - MATERIAL_INTAKE_APPLICATION
+  - AI_CLIENT_RUNTIME
+  - PARALLEL_EXECUTION
+  - QUALITY_DATA_REPOSITORIES
+  - CONTRACTS_AND_SCHEMA
+  - WEB_APPLICATION_SHELL
+  - PRESENTATION_ENGINE
+
+edges:
+  - from: QUALITY_SCENARIO_DOMAIN
+    to: AI_CLIENT_RUNTIME
+    relation: USES
+    evidence:
+      - "quality_knowledge/reverse_quality.py -> builder.ai_client"
+      - "quality_knowledge/reverse_quality.py -> quality_knowledge.model_config"
+      - "quality_knowledge/scenario_generation.py -> builder.ai_client"
+      - "quality_knowledge/scenario_interpretation.py -> builder.ai_client"
+    confidence: HIGH
+
+  - from: QUALITY_SCENARIO_DOMAIN
+    to: MATERIAL_INTAKE_APPLICATION
+    relation: USES
+    evidence:
+      - "quality_knowledge/reverse_quality.py -> quality_knowledge.materials"
+      - "quality_knowledge/scenario_interpretation.py -> quality_knowledge.materials"
+    confidence: HIGH
+
+  - from: MAJOR_CASE_DOMAIN
+    to: MATERIAL_INTAKE_APPLICATION
+    relation: USES
+    evidence:
+      - "quality_knowledge/major_cases/service.py -> quality_knowledge.materials.normalize_itr"
+    confidence: HIGH
+
+  - from: MAJOR_CASE_DOMAIN
+    to: QUALITY_DATA_REPOSITORIES
+    relation: USES_SHARED_SQLITE_INFRA
+    evidence:
+      - "quality_knowledge/major_cases/repository.py -> quality_knowledge.sqlite_tuning.configure_connection"
+    confidence: HIGH
+
+  - from: QUALITY_ANALYSIS_APPLICATION
+    to: AI_CLIENT_RUNTIME
+    relation: USES
+    evidence:
+      - "quality_knowledge/analyzers.py -> builder.ai_client"
+      - "quality_knowledge/analyzers.py -> quality_knowledge.model_config"
+    confidence: HIGH
+
+  - from: QUALITY_ANALYSIS_APPLICATION
+    to: QUALITY_DATA_REPOSITORIES
+    relation: PERSISTS
+    evidence:
+      - "quality_knowledge/services/v2_analysis_service.py uses quality_knowledge.models.analysis_v2"
+      - "quality_knowledge/repositories/v1_repository.py stores analysis results"
+    confidence: HIGH
+
+  - from: WEB_APPLICATION_SHELL
+    to: QUALITY_SCENARIO_DOMAIN
+    relation: ASSEMBLES
+    evidence:
+      - "quality_knowledge/web/app.py imports ScenarioRepository"
+      - "quality_knowledge/web/app.py imports ScenarioGenerationService"
+      - "quality_knowledge/web/app.py imports ReverseQualityService"
+    confidence: HIGH
+
+  - from: WEB_APPLICATION_SHELL
+    to: MATERIAL_INTAKE_APPLICATION
+    relation: ASSEMBLES
+    evidence:
+      - "quality_knowledge/web/app.py imports KnowledgeIssueService"
+      - "quality_knowledge/web/app.py imports MaterialRepository"
+      - "quality_knowledge/web/app.py imports mapping services"
+    confidence: HIGH
+
+  - from: PARALLEL_EXECUTION
+    to: AI_CLIENT_RUNTIME
+    relation: TARGET_ORCHESTRATION
+    current_state: DISTRIBUTED
+    target_state: CENTRALIZED_IN_AI_ORCHESTRATOR
+    evidence:
+      - "builder/parallel_execution.py owns generic ThreadPool execution"
+      - "quality_knowledge/scenario_generation.py directly uses ThreadPoolExecutor"
+      - "quality_knowledge/services/v2_batch_job_service.py directly uses ThreadPoolExecutor"
+    confidence: HIGH
+
+  - from: MAJOR_PROBLEM_AGENT_BASELINE
+    to: QUALITY_SCENARIO_AND_CASE_LIBRARY_BASELINE
+    relation: GIT_BASELINE_INHERITS
+    evidence:
+      parent_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+      child_commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+      delta_commits: 1
+    confidence: HIGH

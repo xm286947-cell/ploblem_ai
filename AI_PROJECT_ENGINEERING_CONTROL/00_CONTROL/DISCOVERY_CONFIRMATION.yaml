@@ -1,0 +1,63 @@
+schema_version: "0.3"
+updated_at: "2026-09-20"
+
+workflow:
+  discovery_owner: ENGINEERING_CONTROL
+  project_input_mode: CONFIRM_AND_SUPPLEMENT
+  rule: "控制面统一扫描首版；各项目不从零填写，只确认归属、补漏、说明有意设计的共享关系。"
+
+status_model:
+  - AUTO_DISCOVERED
+  - PENDING_CONFIRMATION
+  - CONFIRMED
+  - REJECTED
+  - NEEDS_REVIEW
+
+items:
+  - item_id: DISC-001
+    subject: QUALITY_SCENARIO_DOMAIN
+    project_id: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    discovery_source: [PATH_SCAN, IMPORT_SCAN, GIT_HISTORY]
+    confidence: HIGH
+    confirmation_status: PENDING_CONFIRMATION
+    project_action:
+      - "确认该模块集合是否属于质量场景/案例库主工作区"
+      - "补充遗漏的专属文件"
+      - "指出哪些路径实际属于共享层"
+
+  - item_id: DISC-002
+    subject: MAJOR_CASE_DOMAIN
+    project_id: MAJOR_PROBLEM_AGENT
+    discovery_source: [GIT_DELTA_SCAN, IMPORT_SCAN]
+    confidence: HIGH
+    confirmation_status: PENDING_CONFIRMATION
+    project_action:
+      - "确认 major_cases 目录及页面/测试/打包脚本归属"
+      - "补充 REQ-022 后续新增专属模块"
+
+  - item_id: DISC-003
+    subject: SHARED_MODEL_RUNTIME
+    discovery_source: [IMPORT_SCAN, CONFIG_SCAN]
+    confidence: HIGH
+    confirmation_status: PENDING_CONFIRMATION
+    project_action:
+      - "确认 config/model.yaml、model_config.py、builder/ai_client.py 的共享边界"
+      - "确认迁移到 AI_ORCHESTRATOR 的优先级"
+
+  - item_id: DISC-004
+    subject: PARALLEL_EXECUTION
+    discovery_source: [IMPORT_SCAN, SOURCE_SCAN]
+    confidence: HIGH
+    confirmation_status: PENDING_CONFIRMATION
+    project_action:
+      - "确认三处并发执行是否有必须保留的业务差异"
+      - "不能保留的差异后续收敛进统一执行引擎"
+
+  - item_id: DISC-005
+    subject: PACKAGING_TOOLCHAIN
+    discovery_source: [PATH_SCAN]
+    confidence: HIGH
+    confirmation_status: PENDING_CONFIRMATION
+    project_action:
+      - "确认各打包脚本差异"
+      - "抽取公共排除规则、Manifest与基线元数据"

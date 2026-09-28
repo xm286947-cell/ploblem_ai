@@ -1,0 +1,43 @@
+schema_version: "0.2"
+updated_at: "2026-09-20"
+
+source:
+  repository: "xm286947-cell/ploblem_ai"
+  path: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+  verified: true
+
+policy:
+  default: REUSE_EXISTING_CONCLUSION
+  full_repo_reaudit: PROHIBITED_WITHOUT_TRIGGER
+  valid_triggers:
+    - RELATED_FILES_MATERIALLY_CHANGED
+    - REAL_E2E_CONTRADICTS_CONCLUSION
+    - PRODUCT_REQUIREMENT_CHANGED
+    - DATABASE_OR_API_CONTRACT_VERSION_CHANGED
+
+reusable_conclusions:
+  - audit_id: P0_P1_ARCHITECTURE_BASELINE
+    conclusion: "P0/P1 新架构是后续开发基线。"
+    status: ACTIVE
+
+  - audit_id: NO_LEGACY_DB_MIGRATION
+    conclusion: "不迁移、不读取、不兼容旧业务数据库。"
+    status: ACTIVE
+
+  - audit_id: PLC_FIELD_BASELINE
+    conclusion: "PLC 字段作为当前标准字段初始基线。"
+    status: ACTIVE
+
+  - audit_id: SOURCE_ID_NOT_REQUIRED
+    conclusion: "source_id 不是必填业务字段。"
+    status: ACTIVE
+
+  - audit_id: REAL_E2E_REQUIRED
+    conclusion: "不能仅凭单元测试判定业务可用；必须完成真实场景 E2E。"
+    status: ACTIVE
+
+  - audit_id: AI_CONCURRENCY
+    conclusion: "AI 分析支持可配置问题级并发；既有审计台账记录默认并发数为 2。"
+    status: ACTIVE
+
+usage_rule: "任务开始先读取本注册表与源审计台账；仅对本次 changed files 及直接上下游做增量审计。"

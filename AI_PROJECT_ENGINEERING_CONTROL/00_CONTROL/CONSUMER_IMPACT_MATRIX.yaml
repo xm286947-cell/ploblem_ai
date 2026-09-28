@@ -1,0 +1,53 @@
+schema_version: "0.4"
+updated_at: "2026-09-20"
+
+changes:
+  - change_id: EXECUTION_ENGINE_INTRODUCTION
+    affected_consumers:
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+      - MAJOR_PROBLEM_AGENT
+    affected_paths:
+      - "builder/parallel_execution.py"
+      - "quality_knowledge/scenario_generation.py"
+      - "quality_knowledge/services/v2_batch_job_service.py"
+    regression_required:
+      - "scenario generation"
+      - "batch analysis progress"
+      - "parallel AI ordering"
+    risk: HIGH
+
+  - change_id: AI_RUNTIME_INTRODUCTION
+    affected_consumers:
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+      - MAJOR_PROBLEM_AGENT
+    affected_paths:
+      - "builder/ai_client.py"
+      - "quality_knowledge/model_config.py"
+      - "config/model.yaml"
+      - "quality_knowledge/analyzers.py"
+      - "quality_knowledge/reverse_quality.py"
+      - "quality_knowledge/scenario_generation.py"
+      - "quality_knowledge/scenario_interpretation.py"
+    regression_required:
+      - "real model config validation"
+      - "mock/real distinction"
+      - "agent assignment"
+      - "timeout/retry"
+      - "schema parse errors"
+    risk: HIGH
+
+  - change_id: PACKAGING_POLICY_INTRODUCTION
+    affected_consumers:
+      - QUALITY_SCENARIO_AND_CASE_LIBRARY
+      - MAJOR_PROBLEM_AGENT
+    affected_paths:
+      - "scripts/build_baseline_package.py"
+      - "scripts/build_upgrade_package.py"
+      - "scripts/build_req022_package.py"
+    regression_required:
+      - "full package file set"
+      - "delta package file set"
+      - "REQ-022 package file set"
+      - "forbidden file exclusion"
+      - "manifest hash"
+    risk: MEDIUM

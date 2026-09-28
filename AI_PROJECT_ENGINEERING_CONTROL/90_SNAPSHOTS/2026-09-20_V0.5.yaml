@@ -1,0 +1,25 @@
+snapshot_version: "0.5"
+snapshot_date: "2026-09-20"
+focus: "LIGHTWEIGHT_EXECUTION_ASSET_REUSE"
+
+design:
+  heavy_knowledge_base: false
+  raw_log_archive: false
+  asset_index: true
+  stage_record_template: true
+  reuse_rules: true
+
+minimum_asset_model: [TARGET, PLAN, EVIDENCE, DECISION]
+
+existing_sources_reused:
+  - "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+  - "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/AUDIT_REUSE_REGISTRY.yaml"
+  - "AI_PROJECT_ENGINEERING_CONTROL/05_DESIGN/SHARED_COMPONENT_CONVERGENCE_V0.4.md"
+  - "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/MIGRATION_PLAN_V0.4.yaml"
+
+next_target:
+  version: "0.6"
+  focus:
+    - "Execution Engine Adapter 最小实现"
+    - "开发前先读取 EXECUTION_ASSET_INDEX"
+    - "完成后只把新增有效证据写回资产索引"

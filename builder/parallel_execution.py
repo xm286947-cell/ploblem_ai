@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, TypeVar
 
 import yaml
+
+from builder.execution_engine import ExecutionEngine, ExecutionPlan
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -39,12 +40,16 @@ def ordered_map(
     worker: Callable[[T], R],
     config: ParallelExecutionConfig,
 ) -> list[R]:
-    """Execute independent AI tasks concurrently while preserving input order."""
-    materialized = list(items)
-    if not materialized:
-        return []
-    if not config.enabled or config.max_workers <= 1 or len(materialized) == 1:
-        return [worker(item) for item in materialized]
-    workers = min(config.max_workers, len(materialized))
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="repeat-case-ai") as executor:
-        return list(executor.map(worker, materialized))
+    """Compatibility adapter over the shared ExecutionEngine.
+
+    Existing callers keep the same API and fail-fast ordered-map behavior while the
+    ThreadPool implementation is owned by the shared engine.
+    """
+    plan = ExecutionPlan(
+        mode="PARALLEL" if config.enabled else "SEQUENTIAL",
+        max_concurrency=max(1, config.max_workers),
+        preserve_input_order=True,
+        fail_policy="FAIL_FAST",
+        thread_name_prefix="repeat-case-ai",
+    )
+    return ExecutionEngine().map(items, worker, plan)

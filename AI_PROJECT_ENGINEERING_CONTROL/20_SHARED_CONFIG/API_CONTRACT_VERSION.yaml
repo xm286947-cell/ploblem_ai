@@ -1,0 +1,15 @@
+schema_version: "0.1"
+
+contracts:
+  agent_schema:
+    current_version: null
+    status: PENDING_DEFINITION
+
+  ai_api_contract:
+    current_version: null
+    status: PENDING_DEFINITION
+
+versioning_rule:
+  breaking_change: "MAJOR"
+  backward_compatible_feature: "MINOR"
+  compatible_fix: "PATCH"
