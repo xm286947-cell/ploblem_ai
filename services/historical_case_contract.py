@@ -297,9 +297,17 @@ class HistoricalCaseConsumerService:
         sections = raw_evidence.get("sections")
         if not isinstance(sections, list):
             return []
-        source_id = _first_text(raw_evidence.get("source_id"), raw_evidence.get("itr_id"), metadata.get("itr_id"), case_id)
-        file_name = _first_text(raw_evidence.get("report_filename"), metadata.get("report_filename"))
-        source_type = _first_text(raw_evidence.get("source_type"), "REPORT")
+        default_source_id = _first_text(
+            raw_evidence.get("source_id"),
+            raw_evidence.get("itr_id"),
+            metadata.get("itr_id"),
+            case_id,
+        )
+        default_file_name = _first_text(
+            raw_evidence.get("report_filename"),
+            metadata.get("report_filename"),
+        )
+        default_source_type = _first_text(raw_evidence.get("source_type"), "REPORT")
         evidence: list[dict[str, Any]] = []
         for section in sections:
             if not isinstance(section, dict):
@@ -307,12 +315,22 @@ class HistoricalCaseConsumerService:
             pages = section.get("page_numbers")
             page = pages[0] if isinstance(pages, list) and pages else section.get("page")
             evidence.append({
-                "source_type": source_type,
-                "source_id": source_id,
-                "file_name": file_name,
+                "evidence_id": _text(section.get("evidence_id")),
+                "source_type": _first_text(section.get("source_type"), default_source_type),
+                "source_id": _first_text(section.get("source_id"), default_source_id),
+                "source_version": _first_text(
+                    section.get("source_version"),
+                    section.get("revision_id"),
+                ),
+                "source_ref": _text(section.get("source_ref")),
+                "file_name": _first_text(section.get("file_name"), default_file_name),
                 "page": page if isinstance(page, int) else None,
                 "section": _first_text(section.get("section"), section.get("section_type")),
                 "raw_text": _first_text(section.get("raw_text"), section.get("content"), section.get("text")),
-                "url": _text(section.get("url")) or _text(raw_evidence.get("url")),
+                "url": (
+                    _text(section.get("url"))
+                    or _text(section.get("source_reference"))
+                    or _text(raw_evidence.get("url"))
+                ),
             })
         return evidence

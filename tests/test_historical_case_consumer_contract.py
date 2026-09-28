@@ -45,6 +45,11 @@ def _save_case(
     }
     repository.save("knowledge/enriched_case/CASE-H-1.json", case)
     section = {
+        "evidence_id": "MJR-EVD-HIST-001",
+        "source_type": "REPORT",
+        "source_id": "ITR-H-1",
+        "source_version": "KREV-H-1",
+        "source_ref": "REPORT:ITR-H-1@KREV-H-1",
         "section_type": "root_cause",
         "content": "报告确认 CAN 接收队列没有流控。",
         "page_numbers": [] if page is None else [page],
@@ -107,8 +112,11 @@ def test_case_05_solution_missing_is_not_case_failure(tmp_path: Path) -> None:
 def test_case_06_evidence_is_complete_and_traceable(tmp_path: Path) -> None:
     evidence = _save_case(tmp_path).get_case("CASE-H-1")["evidence"]
     assert evidence == [{
+        "evidence_id": "MJR-EVD-HIST-001",
         "source_type": "REPORT",
         "source_id": "ITR-H-1",
+        "source_version": "KREV-H-1",
+        "source_ref": "REPORT:ITR-H-1@KREV-H-1",
         "file_name": "history.pdf",
         "page": 3,
         "section": "root_cause",

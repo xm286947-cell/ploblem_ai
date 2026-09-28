@@ -257,6 +257,11 @@ def test_publish_search_detail_evidence_roundtrip_uses_consumer_contract_only(tm
     assert detail["solution"] == "增加队列水位保护"
     assert detail["evidence"]
     assert detail["evidence"][0]["raw_text"].startswith("原始记录")
+    assert detail["evidence"][0]["evidence_id"].startswith("MJR-EVD-")
+    assert detail["evidence"][0]["source_version"]
+    assert detail["evidence"][0]["source_ref"].startswith(
+        f"ITR:{event['standard_itr']}@"
+    )
     assert "internal_path" not in repr(search)
     assert "internal_path" not in repr(detail)
     assert str(major.db_path) not in repr(search)

@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -124,6 +124,25 @@ def _normalize_p04_url_context(raw_context: str) -> str:
     if context.get("contract") is not None:
         normalized["contract"] = context["contract"]
     return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
+def _safe_issue_return_url(raw: str | None) -> str:
+    """Accept only an in-product P0 issue-detail return target."""
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if len(value) > 4096 or "\r" in value or "\n" in value:
+        raise HTTPException(status_code=400, detail="INVALID_CASE_RETURN_CONTEXT")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or parsed.fragment
+        or not parsed.path.startswith("/p0/issues/")
+        or parsed.path == "/p0/issues/"
+    ):
+        raise HTTPException(status_code=400, detail="INVALID_CASE_RETURN_CONTEXT")
+    return parsed.path + (("?" + parsed.query) if parsed.query else "")
 
 
 def create_p0_insights_router(
@@ -324,12 +343,14 @@ def create_p0_insights_router(
 
     @router.get("/p0/cases/{case_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_case_detail(request: Request, case_id: str) -> HTMLResponse:
+        return_url = _safe_issue_return_url(request.query_params.get("return_to"))
         return templates.TemplateResponse(
             request,
             "p0_case_detail.html",
             {
                 "api_prefix": api_prefix.rstrip("/"),
                 "case_id": case_id,
+                "return_url": return_url,
                 "page_title": "重大问题案例详情",
             },
         )

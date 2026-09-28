@@ -6,6 +6,7 @@ returns existing Historical Case artifact shapes for CASE-PUBLISH-001-B.
 """
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any, Mapping
 import json
 
@@ -32,6 +33,31 @@ def _text(value: Any) -> str | None:
         return None
     result = str(value).strip()
     return result or None
+
+
+def _evidence_id(
+    *,
+    source_type: str,
+    source_id: str,
+    revision_id: str,
+    entry_id: str,
+    raw_text: str,
+) -> str:
+    """Return the same stable evidence identity used by common-evidence/v1.0."""
+    identity = {
+        "source_type": source_type,
+        "source_id": source_id,
+        "revision_id": revision_id,
+        "entry_id": entry_id,
+        "raw_text": raw_text,
+    }
+    canonical = json.dumps(
+        identity,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "MJR-EVD-" + sha256(canonical.encode("utf-8")).hexdigest()[:24]
 
 
 def _entry_values(entries: list[dict[str, Any]], entry_type: str) -> list[str]:
@@ -299,14 +325,36 @@ class MajorCasePublishAdapter:
                     or _text(event.get("standard_itr"))
                     or _text(event.get("event_id"))
                 )
+                entry_id = _text(entry.get("entry_id")) or ""
+                revision_id = _text(entry.get("current_revision_id")) or ""
+                evidence_id = (
+                    _evidence_id(
+                        source_type=source_type,
+                        source_id=source_id or "",
+                        revision_id=revision_id,
+                        entry_id=entry_id,
+                        raw_text=raw_text or "",
+                    )
+                    if entry_id and revision_id and raw_text
+                    else None
+                )
+                source_version = revision_id or None
+                source_ref = (
+                    f"{source_type}:{source_id}@{source_version}"
+                    if source_id and source_version
+                    else None
+                )
 
                 sections.append(
                     {
-                        "entry_id": entry.get("entry_id"),
-                        "revision_id": entry.get("current_revision_id"),
+                        "evidence_id": evidence_id,
+                        "entry_id": entry_id or None,
+                        "revision_id": revision_id or None,
                         "entry_type": entry.get("entry_type"),
                         "source_type": source_type,
                         "source_id": source_id,
+                        "source_version": source_version,
+                        "source_ref": source_ref,
                         "file_name": file_name,
                         "page": page,
                         "page_numbers": [page] if page is not None else [],
