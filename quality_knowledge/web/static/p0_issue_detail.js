@@ -219,7 +219,12 @@
       const returnTo = query.get('return_to');
       const allowedReturn = returnTo === '/p0/quality-scenario-insights' ||
         returnTo === '/p0/insights/p04' ||
-        (returnTo && (returnTo === '/p0/missed-test-analysis' || returnTo.startsWith('/p0/missed-test-analysis?')));
+        (returnTo && (
+          returnTo === '/p0/missed-test-analysis' ||
+          returnTo.startsWith('/p0/missed-test-analysis?') ||
+          returnTo === '/p0/itr-recovery' ||
+          returnTo.startsWith('/p0/itr-recovery?')
+        ));
       root.querySelector('[data-back]').href = allowedReturn
         ? returnTo
         : '/p0/issues' + (query.toString() ? '?' + query : '');
