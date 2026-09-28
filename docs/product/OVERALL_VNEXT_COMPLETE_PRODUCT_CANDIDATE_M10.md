@@ -19,16 +19,16 @@ PRODUCT_TEST_GATE=NOT_CLAIMED
 - Browser navigation check: 9 passed on the synthetic demo candidate. Mobile evidence covers the Overall home at 390×844 only.
 - Candidate ZIP `OVERALL_VNEXT_FAST_MVP_CANDIDATE_8648fe3.zip` belongs to demo commit `8648fe3bd8f4ad18202974a917e3695e89287926`; it is a development demo artifact and is not the canonical integration DUT.
 - Fresh targeted Legacy + Overall integration regression: 16 passed, including the synthetic Current Issue Golden Path, on the integration candidate containing test commit `09d527a06c8a4d2f4f7f77b643bf8894d9fddd23`.
+- Fresh Cases/Knowledge cross-suite integration regression: 45 passed on `21fc3105f016819994b1a9dc4af132bf7e6c4742`; it covers case-to-candidate, Human Gate review/publish, release/query consumption, consumer contracts, and Overall/Storage binding. The synthetic demo launcher `--check` also passed on a clean data directory. This is cross-suite evidence, not one browser-driven end-to-end test.
 - Earlier M1–M9 result of 104 passed is historical evidence tied to the source SHAs recorded in `VNEXT_IMPLEMENTATION_PLAN_V0.1.md`. It is not a fresh regression result for this integrated commit.
 
 ## Remaining M10 acceptance work
 
 Complete the business journeys from the frozen product scenarios and record the persistent outcomes:
 
-1. Case and knowledge: intake → candidate → review → publish → search/consume.
-2. Quality scenario: insight view → P03 detail → Source/Evidence → return, including refresh, Back/Forward, URL state versus stale session state.
-3. Mobile: validate the frozen high-fidelity pages and key workflows on a normal CJK-capable runtime.
-4. Run targeted integration regression against the final canonical candidate and bind the exact source commit, runtime package and evidence.
+1. Quality scenario: insight view → P03 detail → Source/Evidence → return, including refresh, Back/Forward, URL state versus stale session state. This remains untested pending exact DUT/runtime binding and explicit S11 authorization.
+2. Mobile: validate the frozen high-fidelity pages and key workflows on a normal CJK-capable runtime.
+3. Run targeted integration regression against the final canonical candidate and bind the exact source commit, runtime package and evidence.
 
 Mocks may replace only the AI Provider boundary. The application workflows, persistence, review states and consumption should exercise the real implementation using synthetic data.
 
