@@ -100,7 +100,7 @@ def test_legacy_scenario_adapter_restores_historical_read_routes_without_writes(
 
     # Historical mutation endpoints are intentionally absent from the R2
     # compatibility layer. The old database remains byte-semantically read only.
-    assert client.post("/quality-scenario-assets/OLD-SC-1/context").status_code == 405
+    assert client.post("/quality-scenario-assets/OLD-SC-1/context").status_code == 404
     with sqlite3.connect(db) as connection:
         assert connection.execute("SELECT COUNT(*) FROM quality_scenario").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM quality_scenario_scope").fetchone()[0] == 3
