@@ -95,6 +95,7 @@ def create_p0_app(
     root = Path(project_root)
     primary_db = Path(db_path)
     testability_mutable_paths: list[Path] = [primary_db]
+    testability_restore_hooks: list[Any] = []
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
@@ -177,6 +178,13 @@ def create_p0_app(
                         fallback_runner=fallback_runner,
                         model_config_path=runtime_model_config,
                     )
+                    testability_mutable_paths.append(runtime_db_path)
+                    runtime_store = getattr(
+                        getattr(stage_runner, "runtime", None), "store", None
+                    )
+                    ensure_runtime_schema = getattr(runtime_store, "_init_schema", None)
+                    if callable(ensure_runtime_schema):
+                        testability_restore_hooks.append(ensure_runtime_schema)
                 analysis_runtime_status = {
                     **diagnostic,
                     "ready": stage_runner is not None,
@@ -268,6 +276,11 @@ def create_p0_app(
             major_runtime_db,
             provider=major_provider,
         )
+        ensure_major_runtime_schema = getattr(
+            major_case_service.store, "_init_schema", None
+        )
+        if callable(ensure_major_runtime_schema):
+            testability_restore_hooks.append(ensure_major_runtime_schema)
         search = MajorPublishedCaseSearchAdapter(artifacts)
         historical_case_service = HistoricalCaseConsumerService(
             artifacts,
@@ -468,6 +481,7 @@ def create_p0_app(
             mutable_paths=testability_mutable_paths,
             p0_repository=repository,
             hardware_case_service=getattr(app.state, "hardware_case_service", None),
+            restore_hooks=testability_restore_hooks,
         )
         app.state.overall_testability_adapter = adapter
         app.include_router(create_overall_testability_router(adapter))
