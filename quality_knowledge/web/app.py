@@ -35,6 +35,7 @@ from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
 from .missed_test_adapter import build_missed_test_rows
 from .itr_recovery_adapter import build_itr_recovery_rows
+from .itr_resolution_adapter import build_itr_resolution_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -308,13 +309,22 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
 
     @app.get('/itr/resolution-workbench', response_class=HTMLResponse, include_in_schema=False)
     def itr_resolution_workbench(request: Request):
-        rows = material_repo.list_materials_with_issue_links('ITR-CS')
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_itr_resolution_rows(
+            material_repo,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/itr/resolution-workbench',
+        )
         linked_count = sum(1 for row in rows if row.get('knowledge_id'))
+        source_state_count = sum(1 for row in rows if row.get('business_status'))
         return tpl.TemplateResponse(request, 'itr_resolution_workbench.html', {
             'items': rows,
             'total': len(rows),
             'linked': linked_count,
             'unlinked': len(rows) - linked_count,
+            'source_state_count': source_state_count,
+            'q': q,
         })
 
     @app.get('/itr/recovery-workbench', response_class=HTMLResponse, include_in_schema=False)
