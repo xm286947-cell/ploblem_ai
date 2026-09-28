@@ -1,3 +1,4 @@
+from html.parser import HTMLParser
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -6,6 +7,19 @@ from openpyxl import Workbook
 
 from quality_knowledge.web import create_app
 from quality_knowledge.web.p0_pages import create_p0_insights_router
+
+
+class _LinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+        href = dict(attrs).get("href")
+        if href:
+            self.hrefs.append(href)
 
 
 def _seed_issues(client: TestClient, tmp_path: Path) -> dict[str, str]:
@@ -72,9 +86,15 @@ def test_missed_test_adapter_reuses_existing_issue_facts_only(tmp_path: Path):
     assert "Existing Capability Adapter" in response.text
     assert "不创建第二套漏测问题对象" in response.text
 
-    assert f"/issues/{ids['ITR-R2-MISS-1']}?" in response.text
-    assert "return_to=%2Fmissed-test-analysis" in response.text
-    assert "#causes" in response.text
+    parser = _LinkParser()
+    parser.feed(response.text)
+    detail_links = [
+        href for href in parser.hrefs
+        if href.startswith(f"/issues/{ids['ITR-R2-MISS-1']}?")
+    ]
+    assert len(detail_links) == 1
+    assert "return_to=%2Fmissed-test-analysis" in detail_links[0]
+    assert detail_links[0].endswith("#causes")
 
 
 def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path):
