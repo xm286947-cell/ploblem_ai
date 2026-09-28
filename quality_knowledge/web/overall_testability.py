@@ -17,7 +17,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, Header, HTTPException
 from openpyxl import Workbook
@@ -39,6 +39,7 @@ class _StateSnapshot:
     backup: Path
     existed: bool
     is_dir: bool
+    sidecars: tuple[tuple[Path, Path], ...] = ()
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -78,6 +79,7 @@ class OverallTestabilityAdapter:
         mutable_paths: list[str | Path],
         p0_repository: Any,
         hardware_case_service: Any,
+        restore_hooks: list[Callable[[], Any]] | None = None,
     ) -> None:
         self.state_root = Path(state_root).resolve()
         self.token = str(token or "")
@@ -107,6 +109,7 @@ class OverallTestabilityAdapter:
 
         self._p0_repository = p0_repository
         self._hardware_case_service = hardware_case_service
+        self._restore_hooks = tuple(restore_hooks or ())
         self._lock = threading.RLock()
         self._snapshots = self._capture_startup_state(normalized)
         self._fixtures: dict[str, dict[str, Any]] = {}
@@ -117,18 +120,27 @@ class OverallTestabilityAdapter:
             backup = self._baseline_root / f"{index:02d}-{path.name}"
             existed = path.exists()
             is_dir = path.is_dir() if existed else path.suffix == ""
+            sidecars: list[tuple[Path, Path]] = []
             if existed:
                 if is_dir:
                     shutil.copytree(path, backup)
                 else:
                     backup.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(path, backup)
+                    for suffix in ("-wal", "-shm", "-journal"):
+                        sidecar = Path(str(path) + suffix)
+                        if not sidecar.exists():
+                            continue
+                        sidecar_backup = Path(str(backup) + suffix)
+                        shutil.copy2(sidecar, sidecar_backup)
+                        sidecars.append((sidecar, sidecar_backup))
             snapshots.append(
                 _StateSnapshot(
                     path=path,
                     backup=backup,
                     existed=existed,
                     is_dir=is_dir,
+                    sidecars=tuple(sidecars),
                 )
             )
         return snapshots
@@ -157,6 +169,18 @@ class OverallTestabilityAdapter:
                 shutil.copytree(snapshot.backup, path)
             else:
                 shutil.copy2(snapshot.backup, path)
+                for sidecar, backup in snapshot.sidecars:
+                    sidecar.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup, sidecar)
+
+        for hook in self._restore_hooks:
+            try:
+                hook()
+            except Exception as error:
+                raise OverallTestabilityError(
+                    "OVERALL_TESTABILITY_RESTORE_HOOK_FAILED:"
+                    + type(error).__name__
+                ) from error
 
     @staticmethod
     def _validate_fixture_id(fixture_id: str) -> str:
@@ -404,6 +428,7 @@ class OverallTestabilityAdapter:
             "contract_version": "overall-testability/v1",
             "state_root": str(self.state_root),
             "mutable_path_count": len(self._snapshots),
+            "restore_hook_count": len(self._restore_hooks),
             "direct_db_write": False,
             "direct_repository_write": False,
             "production_data_touch": False,

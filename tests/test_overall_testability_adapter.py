@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 
 from quality_knowledge.p0.initializer import P0Initializer
-from quality_knowledge.web.overall_testability import OverallTestabilityError
+from quality_knowledge.web.overall_testability import (
+    OverallTestabilityAdapter,
+    OverallTestabilityError,
+)
+from runtime.store.sqlite import SqliteTaskStore
 from quality_knowledge.web.p0_app import create_p0_app
 
 
@@ -79,6 +84,7 @@ def test_testability_requires_control_token(tmp_path):
     status = client.get("/api/v2/testability/status", headers=AUTH)
     assert status.status_code == 200
     assert status.json()["contract_version"] == "overall-testability/v1"
+    assert status.json()["restore_hook_count"] >= 1
     assert status.json()["direct_db_write"] is False
     assert status.json()["direct_repository_write"] is False
     assert status.json()["production_data_touch"] is False
@@ -183,6 +189,68 @@ def test_testability_refuses_state_paths_outside_isolated_root(tmp_path):
             testability_token=TOKEN,
             testability_state_root=state_root,
         )
+
+
+def test_restore_preserves_sqlite_sidecars_without_process_restart(tmp_path):
+    runtime_db = tmp_path / "runtime.db"
+    runtime_db.write_bytes(b"baseline-db")
+    wal = Path(str(runtime_db) + "-wal")
+    shm = Path(str(runtime_db) + "-shm")
+    wal.write_bytes(b"baseline-wal")
+    shm.write_bytes(b"baseline-shm")
+
+    adapter = OverallTestabilityAdapter(
+        state_root=tmp_path,
+        token=TOKEN,
+        mutable_paths=[runtime_db],
+        p0_repository=None,
+        hardware_case_service=None,
+    )
+
+    runtime_db.write_bytes(b"mutated-db")
+    wal.write_bytes(b"mutated-wal")
+    shm.write_bytes(b"mutated-shm")
+
+    provisioned = adapter.provision("SQLITE-SIDECAR", {})
+    assert provisioned["state"] == "READY"
+    assert runtime_db.read_bytes() == b"baseline-db"
+    assert wal.read_bytes() == b"baseline-wal"
+    assert shm.read_bytes() == b"baseline-shm"
+
+    asserted = adapter.assert_state("SQLITE-SIDECAR")
+    assert asserted["passed"] is True
+
+
+def test_restore_hook_rebuilds_runtime_schema_and_keeps_fixture_registration(tmp_path):
+    runtime_db = tmp_path / "runtime.db"
+    hook_calls = []
+
+    def ensure_runtime_schema():
+        hook_calls.append("called")
+        SqliteTaskStore(runtime_db)
+
+    adapter = OverallTestabilityAdapter(
+        state_root=tmp_path,
+        token=TOKEN,
+        mutable_paths=[runtime_db],
+        p0_repository=None,
+        hardware_case_service=None,
+        restore_hooks=[ensure_runtime_schema],
+    )
+
+    provisioned = adapter.provision("RUNTIME-LIFECYCLE", {})
+    assert provisioned["state"] == "READY"
+    assert hook_calls == ["called"]
+
+    with sqlite3.connect(runtime_db) as connection:
+        runtime_task = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='runtime_task'"
+        ).fetchone()
+    assert runtime_task == ("runtime_task",)
+
+    asserted = adapter.assert_state("RUNTIME-LIFECYCLE")
+    assert asserted["passed"] is True
+    assert asserted["fixture_id"] == "RUNTIME-LIFECYCLE"
 
 
 def test_adapter_has_no_direct_sql_or_repository_write_path():
