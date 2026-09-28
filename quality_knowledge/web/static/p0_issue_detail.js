@@ -217,7 +217,9 @@
       previous.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.previous_id) + '?' + query;
       next.onclick = () => location.href = '/p0/issues/' + encodeURIComponent(navigation.next_id) + '?' + query;
       const returnTo = query.get('return_to');
-      const allowedReturn = returnTo === '/p0/quality-scenario-insights' || returnTo === '/p0/insights/p04';
+      const allowedReturn = returnTo === '/p0/quality-scenario-insights' ||
+        returnTo === '/p0/insights/p04' ||
+        (returnTo && (returnTo === '/p0/missed-test-analysis' || returnTo.startsWith('/p0/missed-test-analysis?')));
       root.querySelector('[data-back]').href = allowedReturn
         ? returnTo
         : '/p0/issues' + (query.toString() ? '?' + query : '');
