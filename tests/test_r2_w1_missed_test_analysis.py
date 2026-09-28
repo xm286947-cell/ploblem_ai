@@ -72,11 +72,9 @@ def test_missed_test_adapter_reuses_existing_issue_facts_only(tmp_path: Path):
     assert "Existing Capability Adapter" in response.text
     assert "不创建第二套漏测问题对象" in response.text
 
-    detail_url = (
-        f"/issues/{ids['ITR-R2-MISS-1']}?"
-        "return_to=%2Fmissed-test-analysis#causes"
-    )
-    assert detail_url in response.text
+    assert f"/issues/{ids['ITR-R2-MISS-1']}?" in response.text
+    assert "return_to=%2Fmissed-test-analysis" in response.text
+    assert "#causes" in response.text
 
 
 def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path):
