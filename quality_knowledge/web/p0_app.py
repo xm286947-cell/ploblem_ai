@@ -220,6 +220,11 @@ def create_p0_app(
         "ready": False,
         "code": "DOMAIN_DISABLED" if "QUALITY_ISSUE" not in domains else "LEGACY_DB_PATH_NOT_CONFIGURED",
     }
+    app.state.legacy_scenario_status = {
+        "ready": False,
+        "code": "DOMAIN_DISABLED" if "QUALITY_ISSUE" not in domains else "LEGACY_DB_PATH_NOT_CONFIGURED",
+        "mode": "READ_ONLY",
+    }
     # P04 is intentionally provider-injected.  The default is explicit
     # DATA_UNAVAILABLE until the approved public JSON providers are wired.
     app.state.p04_provider = p04_provider or UnavailableP04Provider()
@@ -421,12 +426,29 @@ def create_p0_app(
                 "code": "READY",
                 "database_path": str(legacy_db),
             }
+
+            from quality_knowledge.web.legacy_scenario_compat import (
+                create_legacy_scenario_read_router,
+            )
+
+            legacy_scenario_router, legacy_scenario_repository = (
+                create_legacy_scenario_read_router(legacy_db)
+            )
+            app.include_router(legacy_scenario_router)
+            app.state.legacy_scenario_repository = legacy_scenario_repository
+            app.state.legacy_scenario_status = legacy_scenario_repository.status()
             testability_mutable_paths.append(legacy_db)
         else:
             app.state.legacy_quality_issue_status = {
                 "ready": False,
                 "code": legacy_error or "LEGACY_DB_UNAVAILABLE",
                 "database_path": str(legacy_db) if legacy_db is not None else None,
+            }
+            app.state.legacy_scenario_status = {
+                "ready": False,
+                "code": legacy_error or "LEGACY_DB_UNAVAILABLE",
+                "database_path": str(legacy_db) if legacy_db is not None else None,
+                "mode": "READ_ONLY",
             }
 
             @app.middleware("http")
@@ -439,6 +461,8 @@ def create_p0_app(
                     "/api/common-capability-gaps", "/api/capability-gaps", "/api/issues",
                     "/issues", "/settings", "/product-reports", "/export",
                     "/insights/capability-gaps", "/static",
+                    "/quality-scenarios", "/quality-scenario-assets",
+                    "/api/legacy-scenarios",
                 )
                 if any(path == prefix or path.startswith(prefix + "/") for prefix in legacy_prefixes):
                     code = str(status.get("code") or "LEGACY_DB_UNAVAILABLE")

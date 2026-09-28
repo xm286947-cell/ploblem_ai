@@ -86,10 +86,10 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
         "title": "质量场景与洞察",
         "summary": "新版场景/画像与旧能力并行；旧能力在 Projection Parity 前不得静默退役。",
         "capabilities": (
-            {"title": "原有质量场景工作台", "summary": "Protected Existing Capability；原 Route 仍待权威绑定。", "binding_pending": True},
-            {"title": "原产品质量画像", "summary": "Projection Parity 前保留；原 Route 待权威绑定。", "binding_pending": True},
-            {"title": "原客户质量画像", "summary": "Projection Parity 前保留；原 Route 待权威绑定。", "binding_pending": True},
-            {"title": "原行业质量画像", "summary": "Projection Parity 前保留；原 Route 待权威绑定。", "binding_pending": True},
+            {"title": "原有质量场景工作台", "summary": "恢复历史 /quality-scenarios 深链；R2 兼容层只读。", "path": "/quality-scenarios", "requires_legacy_scenario": True},
+            {"title": "原产品质量画像", "summary": "恢复历史场景资产产品聚合视图；只读。", "path": "/quality-scenario-assets", "requires_legacy_scenario": True},
+            {"title": "原客户质量画像", "summary": "恢复历史客户/行业画像页中的客户聚合视图；只读。", "path": "/quality-scenario-assets/portrait", "requires_legacy_scenario": True},
+            {"title": "原行业质量画像", "summary": "恢复历史客户/行业画像页中的行业聚合视图；只读。", "path": "/quality-scenario-assets/portrait", "requires_legacy_scenario": True},
             {"title": "新版质量场景库", "summary": "正式质量场景、详情、来源与 Evidence。", "path": "/p0/quality-scenario-insights"},
             {"title": "新版产品质量画像", "summary": "按产品视角消费正式质量场景。", "path": "/p0/quality-scenario-insights?view=PRODUCT"},
             {"title": "新版客户质量画像", "summary": "按客户视角消费正式质量场景。", "path": "/p0/quality-scenario-insights?view=CUSTOMER"},
@@ -152,17 +152,26 @@ def _product_area_index() -> dict[str, dict[str, Any]]:
     return {item["area_id"]: dict(item) for item in PRODUCT_AREAS}
 
 
-def _present_product_area(area: Mapping[str, Any], *, legacy_ready: bool) -> dict[str, Any]:
+def _present_product_area(
+    area: Mapping[str, Any],
+    *,
+    legacy_ready: bool,
+    legacy_scenario_ready: bool,
+) -> dict[str, Any]:
     result = dict(area)
-    result["capabilities"] = [
-        {
-            **dict(item),
-            "available": False
-            if item.get("binding_pending")
-            else (legacy_ready if item.get("requires_legacy") else True),
-        }
-        for item in area["capabilities"]
-    ]
+    capabilities = []
+    for raw in area["capabilities"]:
+        item = dict(raw)
+        if item.get("binding_pending"):
+            available = False
+        elif item.get("requires_legacy_scenario"):
+            available = legacy_scenario_ready
+        elif item.get("requires_legacy"):
+            available = legacy_ready
+        else:
+            available = True
+        capabilities.append({**item, "available": available})
+    result["capabilities"] = capabilities
     return result
 
 
@@ -257,9 +266,15 @@ def create_overall_shell_router(
     @router.get("/api/v2/overall/product-areas")
     def overall_product_areas(request: Request) -> dict[str, Any]:
         legacy_status = getattr(request.app.state, "legacy_quality_issue_status", {}) or {}
+        legacy_scenario_status = getattr(request.app.state, "legacy_scenario_status", {}) or {}
         legacy_ready = legacy_status.get("ready") is True
+        legacy_scenario_ready = legacy_scenario_status.get("ready") is True
         items = [
-            _present_product_area(area, legacy_ready=legacy_ready)
+            _present_product_area(
+                area,
+                legacy_ready=legacy_ready,
+                legacy_scenario_ready=legacy_scenario_ready,
+            )
             for area in PRODUCT_AREAS
         ]
         return {"items": items, "total": len(items)}
@@ -274,13 +289,19 @@ def create_overall_shell_router(
         if area is None:
             raise HTTPException(status_code=404, detail="PRODUCT_AREA_NOT_FOUND")
         legacy_status = getattr(request.app.state, "legacy_quality_issue_status", {}) or {}
+        legacy_scenario_status = getattr(request.app.state, "legacy_scenario_status", {}) or {}
         legacy_ready = legacy_status.get("ready") is True
+        legacy_scenario_ready = legacy_scenario_status.get("ready") is True
         return templates.TemplateResponse(
             request,
             "overall_product_area.html",
             {
                 "page_title": area["title"],
-                "area": _present_product_area(area, legacy_ready=legacy_ready),
+                "area": _present_product_area(
+                    area,
+                    legacy_ready=legacy_ready,
+                    legacy_scenario_ready=legacy_scenario_ready,
+                ),
                 "product_areas": PRODUCT_AREAS,
             },
         )

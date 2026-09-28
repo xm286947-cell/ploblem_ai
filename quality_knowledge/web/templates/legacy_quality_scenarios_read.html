@@ -1,0 +1,27 @@
+{% extends "p0_base.html" %}
+{% block title %}原有质量场景工作台{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=r2-w2-legacy-01">{% endblock %}
+{% block shell_product %}历史质量场景兼容{% endblock %}
+{% block breadcrumb %}原有质量场景工作台{% endblock %}
+{% block body %}
+<section class="overall-head">
+  <div><div class="overall-kicker">LEGACY · READ ONLY</div><h1>原有质量场景工作台</h1>
+  <p>恢复历史 <code>/quality-scenarios</code> 深链，仅只读消费现有 Legacy 场景资产；不创建、不修改、不删除旧场景。</p></div>
+  <a class="overall-secondary" href="/p0/overall/areas/scenarios-insights">返回质量场景与洞察</a>
+</section>
+<form method="get" action="/quality-scenarios" class="filter-bar">
+  <input name="q" value="{{ q }}" placeholder="场景编号 / 名称 / 产品">
+  <input name="product_code" value="{{ product_code }}" placeholder="产品编码">
+  <input name="status" value="{{ status }}" placeholder="状态">
+  <button class="btn btn-primary">筛选</button>
+  <a class="btn btn-ghost" href="/quality-scenarios">清空</a>
+</form>
+<section class="overall-card">
+  <div class="overall-card-head"><div><h2>历史场景资产</h2><p>共 {{ items|length }} 条。写动作已在 R2 兼容层明确关闭。</p></div><span class="overall-state">READ_ONLY</span></div>
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>场景</th><th>产品</th><th>生命周期 / 活动</th><th>状态</th><th>Evidence</th><th></th></tr></thead><tbody>
+  {% for item in items %}
+  <tr><td><strong>{{ item.scenario_code or item.scenario_id }}</strong><small>{{ item.name }}</small></td><td>{{ item.product_code or '-' }}</td><td>{{ item.lifecycle_code or '-' }} / {{ item.activity_code or '-' }}</td><td>{{ item.status or '-' }}</td><td>{{ item.evidence_count }}</td><td><a href="/quality-scenario-assets/{{ item.scenario_id }}">查看</a></td></tr>
+  {% else %}<tr><td colspan="6">当前 Legacy DB 没有场景记录。</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
