@@ -44,6 +44,7 @@ def build_missed_test_rows(
     analysis_status: str = "",
     detail_prefix: str = "/issues",
     return_path: str = "/missed-test-analysis",
+    detail_anchor: str = "causes",
 ) -> list[dict[str, Any]]:
     """Project existing issue + escape-analysis facts into a missed-test workbench.
 
@@ -103,7 +104,7 @@ def build_missed_test_rows(
         row["detail_url"] = (
             f"{detail_prefix}/{knowledge_id}?"
             + urlencode({"return_to": return_url})
-            + "#analysis"
+            + "#" + detail_anchor
         )
         rows.append(row)
     return rows
