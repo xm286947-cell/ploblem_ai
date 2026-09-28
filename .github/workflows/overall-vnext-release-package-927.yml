@@ -37,6 +37,43 @@ jobs:
           git archive --format=zip --output="$env:RUNNER_TEMP\source.zip" 927efef5b7707d5d2013a34c1f3f40a8ade3d93d
           Expand-Archive -Path "$env:RUNNER_TEMP\source.zip" -DestinationPath $dist
 
+          # Restore the exact PLC seed required by the frozen release manifest.
+          $seedRel = "quality_knowledge/config/plc_fields.yaml"
+          $seedPath = Join-Path $dist $seedRel
+          $expectedSeedHash = "443101e36d2c5b610bc62d130701ed7352175a12696bfc20fd9c5fe47fa411c3"
+          $actualSeedHash = (Get-FileHash -Algorithm SHA256 $seedPath).Hash.ToLower()
+          $seedSourceCommit = "927efef5b7707d5d2013a34c1f3f40a8ade3d93d"
+          if ($actualSeedHash -ne $expectedSeedHash) {
+            $found = $false
+            $commits = git rev-list --all -- $seedRel
+            foreach ($candidate in $commits) {
+              git checkout --quiet $candidate -- $seedRel
+              $candidateHash = (Get-FileHash -Algorithm SHA256 $seedRel).Hash.ToLower()
+              if ($candidateHash -eq $expectedSeedHash) {
+                Copy-Item -Force $seedRel $seedPath
+                $seedSourceCommit = $candidate
+                $found = $true
+                break
+              }
+            }
+            git checkout --quiet 927efef5b7707d5d2013a34c1f3f40a8ade3d93d -- $seedRel
+            if (-not $found) {
+              throw "Manifest-bound PLC seed $expectedSeedHash was not found in Git history"
+            }
+          }
+          $boundHash = (Get-FileHash -Algorithm SHA256 $seedPath).Hash.ToLower()
+          if ($boundHash -ne $expectedSeedHash) {
+            throw "PLC seed binding failed: $boundHash"
+          }
+          @(
+            "SEED_KEY=PLC_MAPPING_SEED_V1",
+            "EXPECTED_SHA256=$expectedSeedHash",
+            "BOUND_SHA256=$boundHash",
+            "SOURCE_COMMIT=$seedSourceCommit",
+            "RELEASE_SOURCE=927efef5b7707d5d2013a34c1f3f40a8ade3d93d",
+            "BINDING_REASON=Restore exact artifact required by frozen p0_seed_manifest.json"
+          ) | Set-Content -Encoding utf8 (Join-Path $dist "PLC_SEED_BINDING.txt")
+
           $install = @(
             '@echo off',
             'setlocal',
