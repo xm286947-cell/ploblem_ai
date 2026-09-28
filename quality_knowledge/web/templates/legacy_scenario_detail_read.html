@@ -1,0 +1,17 @@
+{% extends "p0_base.html" %}
+{% block title %}历史质量场景详情{% endblock %}
+{% block shell_product %}历史质量场景兼容{% endblock %}
+{% block breadcrumb %}历史场景详情{% endblock %}
+{% block body %}
+<section class="overall-head"><div><div class="overall-kicker">LEGACY · READ ONLY</div><h1>{{ item.name }}</h1><p>{{ item.scenario_code or item.scenario_id }}</p></div><a class="overall-secondary" href="/quality-scenarios">返回原场景工作台</a></section>
+<section class="overall-card"><div class="overall-evidence-grid">
+<div><span>Scenario ID</span><strong>{{ item.scenario_id }}</strong></div>
+<div><span>产品</span><strong>{{ item.product_code or '-' }}</strong></div>
+<div><span>状态</span><strong>{{ item.status or '-' }}</strong></div>
+<div><span>生命周期</span><strong>{{ item.lifecycle_code or '-' }}</strong></div>
+<div><span>业务活动</span><strong>{{ item.activity_code or '-' }}</strong></div>
+<div><span>Evidence</span><strong>{{ item.evidence_count }}</strong></div>
+</div></section>
+<section class="overall-card"><h2>历史 Scope</h2>{% for key,values in item.scopes.items() %}<p><strong>{{ key }}</strong>：{{ values|join(' / ') }}</p>{% else %}<p>无结构化 Scope。</p>{% endfor %}</section>
+<p class="muted">兼容层不提供保存、删除、归集、生成或 AI 解读写动作。</p>
+{% endblock %}
