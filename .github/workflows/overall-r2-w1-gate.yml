@@ -91,6 +91,9 @@ jobs:
             if (Test-Path $path) { Remove-Item -Force $path }
           }
           python -c "from quality_knowledge.repositories import IssueKnowledgeRepository; IssueKnowledgeRepository(r'knowledge/quality_issue_v1.db')"
+          $legacyAbsolute = (Resolve-Path $legacy).Path
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacyAbsolute" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "LEGACY_DB_BINDING=$legacyAbsolute"
 
       - name: Start unified P1 Web and smoke W1 routes
         shell: pwsh
