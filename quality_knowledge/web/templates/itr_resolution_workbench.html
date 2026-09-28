@@ -33,7 +33,7 @@
           <td>{{ item.source_file or '-' }}<small>{{ item.sheet_name or '' }} · 第 {{ item.row_number or '-' }} 行</small></td>
           <td>V{{ item.version_no }}</td>
           <td><span class="badge {% if item.link_status == 'LINKED' %}badge-success{% else %}badge-neutral{% endif %}">{{ '已关联' if item.link_status == 'LINKED' else '待关联' }}</span></td>
-          <td>{% if item.knowledge_id %}<a class="btn btn-secondary" data-overall-preserve-context="return" href="/issues/{{ item.knowledge_id }}">打开关联问题</a>{% else %}<span>先核对 ITR 关联</span>{% endif %}</td>
+          <td>{% if item.knowledge_id %}<a class="btn btn-secondary" data-overall-preserve-context="return" href="/issues/{{ item.knowledge_id }}?return_to=%2Fitr%2Fresolution-workbench">打开关联问题</a>{% else %}<span>先核对 ITR 关联</span>{% endif %}</td>
         </tr>
       {% else %}
         <tr><td colspan="6"><div class="empty-state"><b>暂无彻底解决单来源记录</b><span>导入入口会保留在管理与配置中；导入后记录会显示在这里。</span><a class="btn btn-primary" href="/materials/cs">导入彻底解决单材料</a></div></td></tr>
