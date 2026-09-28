@@ -1,0 +1,2 @@
+# Release-bound seed artifacts must have byte-identical checkouts on every OS.
+quality_knowledge/config/plc_fields.yaml text eol=lf
