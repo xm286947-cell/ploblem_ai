@@ -1,0 +1,50 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ area.title }}{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=r2-w2">{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}{{ area.title }}{% endblock %}
+{% block body %}
+<section class="overall-head">
+  <div>
+    <div class="overall-kicker">OVERALL R2</div>
+    <h1>{{ area.title }}</h1>
+    <p>{{ area.summary }}</p>
+  </div>
+  <a class="overall-secondary" href="/p0/overall">返回总体工作台</a>
+</section>
+
+<nav class="overall-area-nav" aria-label="四大 Workspace">
+  {% for item in product_areas %}
+  {% if item.area_id != 'management' %}
+  <a href="/p0/overall/areas/{{ item.area_id }}" {% if item.area_id == area.area_id %}aria-current="page"{% endif %}>{{ item.title }}</a>
+  {% endif %}
+  {% endfor %}
+</nav>
+
+<section class="overall-capability-grid" aria-label="{{ area.title }}能力">
+  {% for capability in area.capabilities %}
+    {% if capability.available %}
+    <a class="overall-capability" href="{{ capability.path }}">
+      <strong>{{ capability.title }}</strong>
+      <span>{{ capability.summary }}</span>
+      {% if capability.cross_workspace %}<small>跨 Workspace 旅程入口 · 正式归属不变</small>{% else %}<small>进入现有能力</small>{% endif %}
+    </a>
+    {% else %}
+    <article class="overall-capability is-unavailable" aria-disabled="true" data-preservation="{{ capability.preservation or '' }}">
+      <strong>{{ capability.title }}</strong>
+      <span>{{ capability.summary }}</span>
+      {% if capability.preservation %}<small>{{ capability.preservation }} · Route Binding Pending</small>
+      {% elif capability.binding_pending %}<small>能力保留 · Route / State Binding Pending</small>
+      {% else %}<small>当前运行环境未绑定 Legacy 数据库</small>{% endif %}
+    </article>
+    {% endif %}
+  {% endfor %}
+</section>
+
+{% if area.area_id == 'scenarios-insights' %}
+<section class="overall-card">
+  <h2>新旧并行规则</h2>
+  <p>旧正向质量场景与旧产品 / 客户 / 行业画像在新版达到 Projection Parity 前不得退役；Route 未核实不等于 Capability 不存在。</p>
+</section>
+{% endif %}
+{% endblock %}
