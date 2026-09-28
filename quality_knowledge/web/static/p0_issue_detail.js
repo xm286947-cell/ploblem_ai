@@ -405,6 +405,9 @@
       ? Math.round(candidate.retrieval_score * 100) + '%'
       : '-';
     const evidenceCount = arr(candidate.evidence).length;
+    const returnTo = location.pathname + location.search;
+    const caseHref = '/p0/cases/' + encodeURIComponent(candidate.case_id || '') +
+      '?return_to=' + encodeURIComponent(returnTo);
     return '<article class="p0-repeat-candidate">' +
       '<header><div><span class="p0-kicker">HISTORICAL CASE · #' + esc(candidate.rank || index + 1) + '</span>' +
       '<h3>' + esc(candidate.title || candidate.case_id || '历史案例') + '</h3>' +
@@ -422,7 +425,7 @@
       '<div class="p0-repeat-secondary"><span><b>Verification</b> ' + esc(candidate.verification || '未确认 / 无已确认内容') + '</span>' +
       '<span><b>Similarity</b> ' + esc(score) + '</span>' +
       '<span><b>Evidence</b> ' + esc(evidenceCount) + '</span></div>' +
-      '<footer><a class="p0-ghost" href="/p0/cases/' + encodeURIComponent(candidate.case_id || '') + '">查看完整案例</a>' +
+      '<footer><a class="p0-ghost" href="' + esc(caseHref) + '">查看完整案例</a>' +
       '<button class="p0-ghost" type="button" data-repeat-evidence="' + esc(index) + '">查看 Evidence</button></footer>' +
       '</article>';
   }
