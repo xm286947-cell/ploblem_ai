@@ -341,7 +341,7 @@ def test_case_detail_evidence_and_unconfirmed_fields_are_not_ai_filled(tmp_path:
 
 def test_case_detail_return_context_is_product_controlled_and_source_trace_is_visible(tmp_path: Path):
     client, _ = _client(tmp_path)
-    return_to = "/p0/issues/K-ITR-1?q=ITR-1"
+    return_to = "/p0/issues/K-ITR-1?q=ITR-1#repeat-risk"
     detail = client.get(
         "/p0/cases/HCASE-1",
         params={"return_to": return_to},
@@ -349,7 +349,7 @@ def test_case_detail_return_context_is_product_controlled_and_source_trace_is_vi
     assert detail.status_code == 200
     assert "返回原 ITR" in detail.text
     assert 'data-case-return' in detail.text
-    assert 'href="/p0/issues/K-ITR-1?q=ITR-1"' in detail.text
+    assert 'href="/p0/issues/K-ITR-1?q=ITR-1#repeat-risk"' in detail.text
 
     rejected = client.get(
         "/p0/cases/HCASE-1",
@@ -357,10 +357,16 @@ def test_case_detail_return_context_is_product_controlled_and_source_trace_is_vi
     )
     assert rejected.status_code == 400
 
+    rejected_fragment = client.get(
+        "/p0/cases/HCASE-1",
+        params={"return_to": "/p0/issues/K-ITR-1#other-section"},
+    )
+    assert rejected_fragment.status_code == 400
+
     issue_js = (WEB / "static/p0_issue_detail.js").read_text(encoding="utf-8")
     case_js = (WEB / "static/p0_case_detail.js").read_text(encoding="utf-8")
     assert "?return_to=" in issue_js
-    assert "location.pathname + location.search" in issue_js
+    assert "location.pathname + location.search + location.hash" in issue_js
     assert "Source Version" in case_js
     assert "Source Ref" in case_js
     assert "data-source-link" in case_js

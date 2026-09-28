@@ -405,7 +405,7 @@
       ? Math.round(candidate.retrieval_score * 100) + '%'
       : '-';
     const evidenceCount = arr(candidate.evidence).length;
-    const returnTo = location.pathname + location.search;
+    const returnTo = location.pathname + location.search + location.hash;
     const caseHref = '/p0/cases/' + encodeURIComponent(candidate.case_id || '') +
       '?return_to=' + encodeURIComponent(returnTo);
     return '<article class="p0-repeat-candidate">' +
