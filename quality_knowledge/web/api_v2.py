@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
+from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
 from quality_knowledge.p1 import ForwardRiskError, ForwardRiskService
 from quality_knowledge.product_report import ProductQualityReportService, ProductReportError
 from quality_knowledge.repeat_risk import (
@@ -376,11 +377,30 @@ def create_v2_router(
         analysis = repository.get_latest_analysis_set(knowledge_id)
         effective = repository.get_effective_analysis(analysis["analysis_set_id"]) if analysis else None
         revisions = repository.get_human_revisions(analysis["analysis_set_id"]) if analysis else []
+        source_problem_ref = None
+        try:
+            source_problem_ref = SourceProblemItrRefV1.from_input(
+                issue.get("business_issue_id")
+            ).to_dict()
+        except InvalidSourceProblemItrRef:
+            # The Current Problem workbench is generic. Only canonical ITR
+            # records expose the public source-problem identity contract.
+            source_problem_ref = None
+        source_snapshot = (
+            {
+                "version_no": issue.get("version_no"),
+                "updated_at": issue.get("updated_at"),
+            }
+            if source_problem_ref is not None
+            else None
+        )
         return {
             "issue": issue,
             "analysis": analysis,
             "effective_analysis": effective,
             "human_revisions": revisions,
+            "source_problem_ref": source_problem_ref,
+            "source_snapshot": source_snapshot,
         }
 
     @router.get("/issues/{knowledge_id}/navigation")
