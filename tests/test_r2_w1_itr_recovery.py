@@ -1,11 +1,14 @@
 from pathlib import Path
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
+from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web import create_app
-from quality_knowledge.web.p0_pages import create_p0_insights_router
+from quality_knowledge.web.p0_app import create_p0_app
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _seed_itr(client: TestClient, tmp_path: Path) -> str:
@@ -103,10 +106,18 @@ def test_p0_itr_recovery_is_real_shell_page_and_preserves_return_context(tmp_pat
     legacy_client = TestClient(legacy)
     knowledge_id = _seed_itr(legacy_client, tmp_path)
 
-    app = FastAPI()
-    app.state.legacy_quality_issue_services = legacy.state.legacy_quality_issue_services
-    app.state.legacy_quality_issue_status = {"code": "READY"}
-    app.include_router(create_p0_insights_router())
+    p0_db = tmp_path / "p0.db"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(p0_db)
+
+    app = create_p0_app(
+        p0_db,
+        stage_runner=object(),
+        project_root=ROOT,
+        legacy_quality_issue_db_path=tmp_path / "p0-itr-recovery.db",
+    )
     client = TestClient(app)
 
     page = client.get("/p0/itr-recovery", params={"q": "通信服务"})
