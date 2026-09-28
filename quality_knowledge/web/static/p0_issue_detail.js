@@ -80,6 +80,26 @@
     root.querySelector('[data-normalized]').innerHTML = '<dl>' + flatten(normalized, '', []).join('') + '</dl>';
   }
 
+  function renderItrSource(sourceRef, sourceSnapshot) {
+    const mount = root.querySelector('[data-itr-source]');
+    const body = root.querySelector('[data-itr-source-body]');
+    if (!mount || !body) return;
+    const ref = obj(sourceRef);
+    if (!ref.public_ref) {
+      mount.hidden = true;
+      return;
+    }
+    const snapshot = obj(sourceSnapshot);
+    mount.hidden = false;
+    body.innerHTML =
+      '<div class="p0-fact-summary-grid">' +
+      '<div class="p0-fact"><label>Public Ref</label><strong>' + esc(ref.public_ref) + '</strong></div>' +
+      '<div class="p0-fact"><label>Contract</label><strong>' + esc(ref.contract_version || '-') + '</strong></div>' +
+      '<div class="p0-fact"><label>当前消费快照</label><strong>V' + esc(snapshot.version_no || '-') + '</strong></div>' +
+      '<div class="p0-fact"><label>来源关系</label><strong>Existing Problem / ITR</strong></div>' +
+      '</div>';
+  }
+
   function renderDiagnostics(analysis) {
     const mount = root.querySelector('[data-analysis-diagnostic]');
     const stages = arr(analysis.stages);
@@ -207,6 +227,7 @@
     try {
       const detail = await get('/issues/' + encodeURIComponent(knowledgeId));
       renderFacts(detail.issue || {});
+      renderItrSource(detail.source_problem_ref, detail.source_snapshot);
       renderAnalysis(detail.analysis || null, detail.effective_analysis || null);
       const navigation = await get('/issues/' + encodeURIComponent(knowledgeId) + '/navigation', Object.fromEntries(query.entries()));
       root.querySelector('[data-position]').textContent = '第 ' + esc(navigation.position || '-') + ' / ' + esc(navigation.total || '-');
