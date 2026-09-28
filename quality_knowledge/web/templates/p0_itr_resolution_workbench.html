@@ -1,0 +1,59 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block breadcrumb %}当前问题 / ITR 彻底解决{% endblock %}
+{% block body %}
+<main class="p0-workbench" data-r2-itr-resolution>
+  <header class="p0-page-head">
+    <div>
+      <span class="p0-kicker">SOURCE-ALIGNED RESOLUTION VIEW</span>
+      <h1>ITR 彻底解决</h1>
+      <p>展示 ITR-CS Source Fact 中的原因、措施、验证和源业务状态。保存 / 提交 / 流转必须绑定原系统动作，Overall 不创建第二状态机。</p>
+    </div>
+    <div class="p0-nav">
+      <a class="p0-ghost" href="/p0/issues">返回问题工作台</a>
+      <a class="p0-ghost" href="/p0/itr-recovery">ITR / 现场恢复</a>
+    </div>
+  </header>
+
+  <section class="p0-card p0-scope-bar">
+    <strong>Action Boundary</strong>
+    <span>SOURCE_OWNED_READ_ONLY · SOURCE_ACTION_BINDING_PENDING · NO_SECOND_STATE_MACHINE</span>
+  </section>
+
+  <section class="p0-card p0-filter-card">
+    <form method="get" action="/p0/itr-resolution">
+      <label class="p0-search">搜索<input name="q" value="{{q or ''}}" placeholder="彻底解决单、ITR、问题、原因、措施、验证、状态"></label>
+      <button class="p0-primary">筛选</button>
+      <a class="p0-ghost" href="/p0/itr-resolution">清空</a>
+    </form>
+  </section>
+
+  <section class="p0-columns">
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">SOURCE</span><h2>{{total}}</h2><p>彻底解决单 Source Fact</p></div></div></article>
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">LINKED</span><h2>{{linked}}</h2><p>已关联现有 ITR</p></div></div></article>
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">STATE</span><h2>{{source_state_count}}</h2><p>Source 明确提供业务状态</p></div></div></article>
+  </section>
+
+  <section class="p0-card p0-table-card">
+    <div class="p0-card-head"><div><h2>彻底解决 Source Fact</h2><p>不推断未提供字段，不把 Source 状态升级为 Overall 状态。</p></div><span>Existing Problem Domain</span></div>
+    <div class="p0-table-wrap"><table class="p0-table">
+      <thead><tr><th>彻底解决单 / ITR</th><th>问题</th><th>原因</th><th>措施</th><th>验证</th><th>业务状态</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td><strong>{{item.business_key}}</strong><small>{{item.linked_issue_id or '未匹配 ITR'}} · {{item.link_status}}</small></td>
+        <td>{{item.problem_description or 'Source 未提供'}}</td>
+        <td>{{item.root_cause or 'Source 未提供'}}</td>
+        <td>{% if item.measures %}{{item.measures|join('；')}}{% else %}Source 未提供{% endif %}</td>
+        <td>{{item.verification_result or 'Source 未提供'}}</td>
+        <td>{{item.business_status or 'Source 未提供'}}<small>{{item.action_binding_status}}</small>{% if item.source_owner %}<small>Owner：{{item.source_owner}}</small>{% endif %}</td>
+        <td>{% if item.detail_url %}<a class="p0-ghost" href="{{item.detail_url}}">打开关联问题</a>{% else %}<span>先核对 ITR 关联</span>{% endif %}<small>{{item.source_file or '-'}} · Row {{item.row_number or '-'}}</small></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="p0-loading">当前没有符合条件的彻底解决 Source Fact。系统不会补造完成状态或流转动作。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+{% endblock %}

@@ -181,7 +181,7 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     assert detail.status_code == 200
     assert "返回漏测分析" in detail.text
     assert "/p0/missed-test-analysis?q=MISS-1" in detail.text
-    assert "r2-w1-current-problem-return-v2" in detail.text
+    assert "r2-w1-current-problem-return-v3" in detail.text
 
     rejected = client.get(
         f"/p0/issues/{ids['ITR-R2-MISS-1']}",
@@ -192,4 +192,4 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     issues = client.get("/p0/issues")
     assert issues.status_code == 200
     assert 'href="/p0/missed-test-analysis"' in issues.text
-    assert 'href="/itr/resolution-workbench"' in issues.text
+    assert 'href="/p0/itr-resolution"' in issues.text
