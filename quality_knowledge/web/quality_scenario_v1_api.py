@@ -42,7 +42,7 @@ def _expected_version(payload: dict[str, Any]) -> int:
 
 
 def create_quality_scenario_v1_router(db_path: str) -> APIRouter:
-    router = APIRouter(prefix="/api/v2", tags=["QualityScenario V1"])
+    router = APIRouter(prefix="/api/v2/quality-scenario-workflow/v1", tags=["QualityScenario V1 Workflow"])
     repository = SQLiteQualityScenarioV1Repository(db_path)
     candidates = CandidateV1Service(repository)
     workflow = QualityScenarioV1WorkflowService(repository)
