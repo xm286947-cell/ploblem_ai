@@ -10,16 +10,16 @@
     <div class="p04-context" data-context>正在读取 P04 数据…</div>
   </header>
   <nav class="p04-tabs" aria-label="洞察视角">
-    <button type="button" data-view="PRODUCT" class="active">产品</button>
-    <button type="button" data-view="CUSTOMER">客户</button>
-    <button type="button" data-view="INDUSTRY">行业</button>
+    <button type="button" data-view="PRODUCT" data-overall-tab="PRODUCT" class="active">产品</button>
+    <button type="button" data-view="CUSTOMER" data-overall-tab="CUSTOMER">客户</button>
+    <button type="button" data-view="INDUSTRY" data-overall-tab="INDUSTRY">行业</button>
   </nav>
   <section class="p04-card p04-controls">
     <div class="p04-control-row">
-      <label>对象<select data-selector aria-label="对象选择"><option value="">全部对象</option></select></label>
-      <label>生命周期<select data-filter="lifecycle"><option value="">全部生命周期</option></select></label>
-      <label>业务活动<select data-filter="business_activity"><option value="">全部业务活动</option></select></label>
-      <label>质量关注<select data-filter="quality_focus"><option value="">全部质量关注</option></select></label>
+      <label>对象<select data-selector data-overall-state-field="p04.selected_object"><option value="">全部对象</option></select></label>
+      <label>生命周期<select data-filter="lifecycle" data-overall-state-field="p04.filter.lifecycle"><option value="">全部生命周期</option></select></label>
+      <label>业务活动<select data-filter="business_activity" data-overall-state-field="p04.filter.business_activity"><option value="">全部业务活动</option></select></label>
+      <label>质量关注<select data-filter="quality_focus" data-overall-state-field="p04.filter.quality_focus"><option value="">全部质量关注</option></select></label>
       <button type="button" class="p04-primary" data-apply>应用筛选</button>
       <button type="button" class="p04-ghost" data-reset>重置</button>
     </div>

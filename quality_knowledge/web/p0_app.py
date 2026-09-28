@@ -434,7 +434,7 @@ def create_p0_app(
                 status = app.state.legacy_quality_issue_status
                 path = request.url.path
                 legacy_prefixes = (
-                    "/analysis", "/analysis-batch", "/api/analysis", "/api/analysis-agents",
+                    "/analysis", "/analysis-batch", "/api/analysis", "/api/analysis-agents", "/itr",
                     "/import", "/imports", "/api/import", "/statistics", "/api/statistics",
                     "/api/common-capability-gaps", "/api/capability-gaps", "/api/issues",
                     "/issues", "/settings", "/product-reports", "/export",

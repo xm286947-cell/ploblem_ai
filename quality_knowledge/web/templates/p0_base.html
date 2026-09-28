@@ -8,12 +8,22 @@
   {% block page_styles %}{% endblock %}
   <link rel="stylesheet" href="/p0/static/app.css?v=p1-rc4-ued-shell">
   <link rel="stylesheet" href="/p0/static/p0_ued_bridge.css?v=p1-rc4">
+  <link rel="stylesheet" href="/p0/static/overall_navigation.css?v={{ overall_navigation_asset_version }}">
 </head>
 <body class="p0-page">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
     <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
     <nav class="main-nav">
+      {% if request.app.state.overall_shell_enabled %}
+      <a class="nav-item {% if request.url.path == '/p0/overall' %}active{% endif %}" href="/p0/overall">总体工作台</a>
+      <a class="nav-item {% if request.url.path == '/p0/overall/areas/current-problem' %}active{% endif %}" href="/p0/overall/areas/current-problem">当前问题</a>
+      <a class="nav-item {% if request.url.path == '/p0/overall/areas/cases-knowledge' %}active{% endif %}" href="/p0/overall/areas/cases-knowledge">案例与知识</a>
+      <a class="nav-item {% if request.url.path == '/p0/overall/areas/scenarios-insights' %}active{% endif %}" href="/p0/overall/areas/scenarios-insights">质量场景与洞察</a>
+      <a class="nav-item {% if request.url.path == '/p0/overall/areas/professional-topics' %}active{% endif %}" href="/p0/overall/areas/professional-topics">专业专题</a>
+      <div class="nav-divider"></div>
+      <div class="nav-label">现有能力</div>
+      {% endif %}
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/cases') %}active{% endif %}" href="/p0/cases">重大问题案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/major-production') %}active{% endif %}" href="/p0/major-production">重大问题知识生产</a>
@@ -28,6 +38,7 @@
       {% endif %}
       <div class="nav-divider"></div>
       <div class="nav-label">管理</div>
+      <a class="nav-item {% if request.url.path == '/p0/overall/areas/management' %}active{% endif %}" href="/p0/overall/areas/management">管理与配置</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
     </nav>
@@ -41,6 +52,7 @@
     <main class="content">{% block body %}{% endblock %}</main>
   </div>
 </div>
+<script src="/p0/static/overall_navigation.js?v={{ overall_navigation_asset_version }}"></script>
 {% block page_scripts %}{% endblock %}
 </body>
 </html>

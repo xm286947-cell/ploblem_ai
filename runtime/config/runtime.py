@@ -45,10 +45,22 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
         agent_definition = runtime_context.get("agent_definition") or {}
         metadata = agent_definition.get("metadata") or {}
         model_policy = runtime_context.get("model_policy") or {}
+        capabilities = metadata.get("provider_capabilities")
+        if not isinstance(capabilities, dict):
+            capabilities = fallback.provider.metadata.get("capabilities", {})
         return {
             "type": agent_definition.get("provider") or fallback.provider.type,
             "model": agent_definition.get("model") or fallback.provider.model,
-            "profile_ref": metadata.get("provider_ref"),
+            "model_ref": metadata.get("model_ref") or fallback.provider.profile_ref,
+            "profile_ref": metadata.get("provider_ref") or fallback.provider.profile_ref,
+            "agent_config_source": metadata.get("agent_config_source") or fallback.source_path,
+            "model_config_source": metadata.get("model_config_source"),
+            "config_hash": metadata.get("agent_config_hash") or fallback.config_hash,
+            "capabilities": capabilities if isinstance(capabilities, dict) else {},
+            "capability_source": metadata.get(
+                "provider_capability_source",
+                "UNKNOWN",
+            ),
             "mode": metadata.get("provider_mode", fallback.provider.mode),
             "auth": metadata.get("provider_auth", fallback.provider.auth),
             "base_url_env": metadata.get("base_url_env"),
@@ -234,6 +246,28 @@ class ConfiguredAgentRuntime(LightweightExecutionEngine):
             return self._resolved_agent_configs[agent_id]
         except KeyError as exc:
             raise KeyError(f"configured agent not found: {agent_id}") from exc
+
+    def get_semantic_handoff(
+        self,
+        *,
+        task_id: str,
+        content_ref: str,
+    ):
+        return self.store.get_semantic_handoff(
+            content_ref,
+            task_id=task_id,
+        )
+
+    def read_semantic_handoff_content(
+        self,
+        *,
+        task_id: str,
+        content_ref: str,
+    ) -> str | None:
+        return self.store.read_semantic_handoff_content(
+            content_ref,
+            task_id=task_id,
+        )
 
     def invoke(self, request: AgentRequest):
         resolved = self._resolved_agent_configs.get(request.agent_id)

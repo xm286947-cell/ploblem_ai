@@ -57,9 +57,13 @@ def test_hardware_domain_host_keeps_existing_case_workspace_routes(
     for path in (
         "/p0/hardware-cases",
         "/p0/hardware-cases/tree",
+        "/p0/hardware-cases/base-data",
         "/p0/hardware-cases/search",
         "/p0/hardware-cases/HC-OFI-04-DIRECT-ACCESS",
     ):
         response = client.get(path)
         assert response.status_code == 200
         assert 'href="/p0/overall">返回总体工作台</a>' in response.text
+        if path.endswith("/base-data"):
+            assert 'data-hardware-tree-import' in response.text
+            assert "HARDWARE CASE · P07" in response.text

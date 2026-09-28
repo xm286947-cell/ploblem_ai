@@ -70,6 +70,130 @@ def test_parent_overall_shell_converges_all_four_workspace_entries(tmp_path):
         assert response.headers["location"] == target
 
 
+def test_current_problem_workspace_keeps_canonical_routes_and_overall_return(tmp_path):
+    client = _client(tmp_path)
+
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307}
+    assert root.headers["location"] == "/p0/issues"
+
+    overall = client.get("/p0/overall")
+    assert overall.status_code == 200
+    assert 'href="/p0/issues">进入问题工作台</a>' in overall.text
+
+    workspace = client.get("/p0/issues")
+    assert workspace.status_code == 200
+    assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
+
+    issues = client.get("/api/v2/issues")
+    assert issues.status_code == 200
+    assert isinstance(issues.json().get("items"), list)
+
+
+def test_overall_shell_exposes_existing_capability_routes(tmp_path):
+    client = _client(tmp_path)
+    page = client.get("/p0/overall")
+
+    assert page.status_code == 200
+    for path, label in (
+        ("/p0/issues", "当前问题"),
+        ("/p0/batch-analysis", "批量 AI 分析"),
+        ("/p0/insights", "质量洞察"),
+        ("/p0/quality-scenario-insights", "质量画像与洞察"),
+        ("/p1/product-reports", "产品综合报告"),
+        ("/p1/risk-assessment", "正向风险评估（P1）"),
+        ("/p0/data-intake", "数据接入"),
+        ("/p0/settings", "字段映射与产品"),
+    ):
+        assert f'href="{path}">{label}</a>' in page.text
+        assert client.get(path).status_code == 200
+
+
+def test_case_and_knowledge_navigation_uses_existing_product_pages(tmp_path):
+    client = _client(tmp_path)
+    page = client.get("/p0/overall")
+
+    assert '<section class="overall-card" id="case-knowledge"' in page.text
+    for path, label in (
+        ("/p0/cases", "重大问题案例库"),
+        ("/p0/hardware-cases", "硬件案例库"),
+        ("/storage-workspace/knowledge-production/published", "已发布知识"),
+        ("/storage-workspace/knowledge-production/sources", "统一知识生产"),
+    ):
+        assert f'href="{path}"><strong>{label}</strong>' in page.text
+
+    assert '<section class="overall-card" id="new-professional-products"' in page.text
+    for path, label in (
+        ("/p0/hardware-cases", "硬件案例库"),
+        ("/storage-workspace/", "存储器件寿命智能产品"),
+    ):
+        assert f'href="{path}"><strong>{label}</strong>' in page.text
+
+
+def test_vnext_product_areas_cover_frozen_information_architecture(tmp_path):
+    client = _client(tmp_path)
+    overall = client.get("/p0/overall")
+    area_nav = overall.text.split('<nav class="overall-area-nav"', 1)[1].split("</nav>", 1)[0]
+    assert area_nav.count('/p0/overall/areas/') == 4
+    assert "/p0/overall/areas/management" not in area_nav
+    assert 'href="/p0/overall/areas/management">管理与配置</a>' in overall.text
+    expected = {
+        "current-problem": ("当前问题", "/p0/issues"),
+        "cases-knowledge": ("案例与知识", "/p0/cases"),
+        "scenarios-insights": ("质量场景与洞察", "/p0/quality-scenario-insights?view=PRODUCT"),
+        "professional-topics": ("专业专题", "/storage-workspace/"),
+        "management": ("管理与配置", "/p0/data-intake"),
+    }
+
+    for area_id, (title, capability_path) in expected.items():
+        page = client.get(f"/p0/overall/areas/{area_id}")
+        assert page.status_code == 200
+        assert f"<h1>{title}</h1>" in page.text
+        assert f'href="{capability_path}"' in page.text
+
+    current = client.get("/p0/overall/areas/current-problem")
+    assert "ITR / 现场恢复工作台" in current.text
+    assert "ITR 彻底解决工作台" in current.text
+    assert "重大问题案例库" in current.text
+    assert 'href="/p0/cases"' in current.text
+    assert "Repeat Risk 保持在当前问题详情和彻底解决流程中" in current.text
+    assert "页面 / Route 待 Targeted Verification" in current.text
+
+    scenarios = client.get("/p0/overall/areas/scenarios-insights")
+    assert 'href="/p0/quality-scenario-insights">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=PRODUCT">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=CUSTOMER">' in scenarios.text
+    assert 'href="/p0/quality-scenario-insights?view=INDUSTRY">' in scenarios.text
+    for label in (
+        "新版质量场景库",
+        "新版产品质量画像",
+        "新版客户质量画像",
+        "新版行业质量画像",
+    ):
+        assert label in scenarios.text
+    assert '<a class="overall-capability" href="/p0/quality-scenario-insights?view=CUSTOMER">' in scenarios.text
+
+    cases = client.get("/p0/overall/areas/cases-knowledge")
+    assert "P07 硬件双树导入" in cases.text
+    assert 'href="/p0/hardware-cases/base-data"' in cases.text
+
+    management = client.get("/p0/overall/areas/management")
+    assert "Legacy 问题业务统计" in management.text
+    assert "问题规模、分析状态、再发风险与质量能力缺口" in management.text
+    for path in (
+        "/p0/quality-scenario-insights",
+        "/p0/quality-scenario-insights?view=PRODUCT",
+        "/p0/quality-scenario-insights?view=CUSTOMER",
+        "/p0/quality-scenario-insights?view=INDUSTRY",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "data-p04-insights" in response.text
+
+    missing = client.get("/p0/overall/areas/not-found")
+    assert missing.status_code == 404
+
+
 def test_parent_workspace_return_paths_all_target_canonical_overall_shell(tmp_path):
     client = _client(tmp_path)
 

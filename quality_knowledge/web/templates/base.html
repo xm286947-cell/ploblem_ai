@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>{{ title or '质量问题分析' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=product-report-ai-synthesis-patch16">
+<link rel="stylesheet" href="/p0/static/overall_navigation.css?v={{ overall_navigation_asset_version }}">
 {% block page_styles %}{% endblock %}
 <!-- legacy css cache markers: app.css?v=ued2 ; ?v=ued-r4v2-cg-fix01 ; ?v=p3-mapping-difference-entry2 -->
 </head>
@@ -14,13 +15,18 @@
 <aside class="side-nav" aria-label="主导航">
   <a class="brand" href="/issues"><strong>INOVANCE</strong><small>Quality Issue Analysis</small></a>
   <nav class="main-nav">
-    <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">ITR / 问题工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/itr/resolution-workbench') %}active{% endif %}" href="/itr/resolution-workbench">ITR 彻底解决工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
     <div class="nav-divider"></div>
     <div class="nav-label">管理</div>
+    <a class="nav-item {% if request.url.path.startswith('/materials/itr') %}active{% endif %}" href="/materials/itr">ITR材料导入</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials/cs') %}active{% endif %}" href="/materials/cs">彻底解决单材料导入</a>
+    <a class="nav-item {% if request.url.path.startswith('/materials/software-operations') %}active{% endif %}" href="/materials/software-operations">软件运营数据导入</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/associations') %}active{% endif %}" href="/settings/associations">数据关联配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
   </nav>
@@ -31,6 +37,7 @@
 <main class="content">{% block body %}{% endblock %}</main>
 </div>
 </div>
+<script src="/p0/static/overall_navigation.js?v={{ overall_navigation_asset_version }}"></script>
 <script>document.addEventListener('change',function(e){if(e.target.closest('.human-form,.human-compact-form')){var s=document.querySelector('#human-save-state');if(s)s.textContent='已修改未保存';}});</script>
 {% block page_scripts %}{% endblock %}
 </body></html>

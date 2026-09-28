@@ -339,6 +339,7 @@
     renderDistributions(data.distributions);
     renderList(data.scenario_list);
     persistSession();
+    if (window.OverallNavigation) window.OverallNavigation.restoreNow({ready: true});
   }
 
   function readControls() {

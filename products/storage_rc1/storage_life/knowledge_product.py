@@ -47,6 +47,16 @@ def processing_app():
     return create_processing_app(repository_root())
 
 
+def resolve_storage_model_config_path(root: str | Path | None = None) -> Path:
+    """Resolve Storage knowledge extraction through the shared Runtime profile."""
+    project = Path(root or project_root()).resolve()
+    configured = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
+    selected = Path(configured).expanduser() if configured else project / "config/runtime/model.yaml"
+    if not selected.is_absolute():
+        selected = project / selected
+    return selected.resolve()
+
+
 def ingest_source(
     payload: bytes,
     *,
@@ -108,14 +118,7 @@ def extract_source(
     requested_topics: list[str] | None = None,
 ) -> dict:
     root = project_root()
-    model_config = Path(
-        os.environ.get(
-            "STORAGE_MODEL_CONFIG",
-            str(root / "config" / "model.windows.real.yaml"),
-        )
-    )
-    if not model_config.is_absolute():
-        model_config = (root / model_config).resolve()
+    model_config = resolve_storage_model_config_path(root)
     bootstrap = KnowledgeExtractionService.from_project(
         root,
         model_config_path=model_config,

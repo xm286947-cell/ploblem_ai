@@ -29,6 +29,8 @@ long_content:
 
 metadata:
   provider_response_shape: json_object
+  provider_capabilities:
+    structured_output: json_object
   business_domain: STORAGE
   adapter_owner: STORAGE
   runtime_owner: UNIFIED_AGENT_RUNTIME

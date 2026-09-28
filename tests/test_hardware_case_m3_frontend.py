@@ -41,6 +41,8 @@ def test_m3_p01_is_clear_hardware_case_product_entry(tmp_path: Path):
     assert "案例搜索" in html
     assert "电路 / 特性树" in html
     assert "物料 / 器件树" in html
+    assert 'href="/p0/hardware-cases/intake">案例数据导入（Word）</a>' in html
+    assert 'href="/p0/hardware-cases/base-data">树数据导入（Excel · P07）</a>' in html
     assert "批量 AI 分析 · P01" not in html
     assert "案例确认" not in html
     assert "基础数据管理" not in html

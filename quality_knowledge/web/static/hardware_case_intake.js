@@ -15,9 +15,9 @@
     try{
       const versions=await Promise.all(['CIRCUIT_FEATURE','MATERIAL_DEVICE'].map(type=>call('/tree-imports/active-version/'+type)));
       const ready=versions.every(v=>v.active_version);
-      $('[data-intake-tree-status]').textContent=ready?'两棵树均有 ACTIVE Version，可以处理案例。':'请先导入基础树，并分别 Apply 电路/特性树和物料/器件树。';
-      return ready;
-    }catch(error){$('[data-intake-tree-status]').textContent='无法确认树版本：'+error.message;return false}
+      $('[data-intake-tree-status]').textContent=ready?'两棵树均有 ACTIVE Version；处理 Word 时可生成双树挂接建议。':'当前缺少完整 ACTIVE 双树；仍可处理 Word 并形成 Candidate / Evidence，本次不生成双树建议。';
+      return true;
+    }catch(error){$('[data-intake-tree-status]').textContent='暂时无法确认树版本；仍可处理 Word，挂接建议需在双树可用后完成。';return true}
   }
   async function list(){
     const items=(await call('/intakes')).items;

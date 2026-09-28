@@ -36,6 +36,10 @@ def test_overall_shell_binds_existing_storage_host_and_keeps_product_routes(
 
     workspace = client.get("/storage-workspace/")
     assert workspace.status_code == 200
+    assert 'data-storage-pdf-import-entry' in workspace.text
+    assert 'onclick="openPdfImport()">导入 PDF 规格书</button>' in workspace.text
+    assert 'id="pdfFile" name="file" type="file" accept=".pdf"' in workspace.text
+    assert 'id="confirmIdentity"' in workspace.text
     assert 'id="overallShellBack"' in workspace.text
     assert 'href="/p0/overall"' in workspace.text
     assert 'window.__STORAGE_WORKSPACE_PREFIX__ = "/storage-workspace"' in workspace.text

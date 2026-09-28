@@ -1,0 +1,312 @@
+"""Run the Overall VNext MVP on the existing single P0 host.
+
+The demo initializes only its own P0 and Hardware Case databases. Product
+composition stays in create_p0_app, including the existing Storage mount.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+from openpyxl import Workbook
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from quality_knowledge.p0.initializer import P0Initializer
+from quality_knowledge.p04.fixtures import FixtureP04Provider
+from quality_knowledge.web.p0_app import create_p0_app
+
+
+DEMO_LEGACY_ISSUE_ID = "ITR-VNEXT-DEMO-001"
+
+
+def demo_overall_tasks() -> dict:
+    return {
+        "items": [
+            {
+                "task_id": "DEMO-MAJOR-01",
+                "title": "查看重大问题案例与 Repeat Risk",
+                "workspace_id": "major",
+                "status": "READY",
+                "deep_link": "/p0/cases",
+                "common_evidence": {
+                    "contract_version": "common-evidence/v1.0",
+                    "evidence_id": "EV-DEMO-1",
+                    "evidence_type": "SOURCE_EXCERPT",
+                    "source": {
+                        "source_type": "SYNTHETIC_DOCUMENT",
+                        "source_id": "DEMO-DOC-1",
+                        "source_version": "V1",
+                    },
+                    "locator": {"page": 1, "section": "演示证据", "anchor": "demo-1"},
+                    "excerpt": "仅用于验证 Overall Common Evidence Drawer 的合成证据摘录。",
+                    "source_text": "合成来源正文，不对应任何真实业务资料。",
+                    "content_hash": "sha256:overall-demo-evidence-1",
+                    "source_ref": "DEMO-DOC-1@V1",
+                    "source_reference": "https://example.test/demo-source/DEMO-DOC-1",
+                    "producer_domain": "Major Issue",
+                    "producer_object_id": "DEMO-MAJOR-01",
+                    "producer_object_version": 1,
+                    "verification_status": "SYNTHETIC_TEST_DATA",
+                    "evidence_status": "ACTIVE",
+                    "created_at": None,
+                },
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-QS-01",
+                "title": "查看 QS-FIX-002 场景与来源",
+                "workspace_id": "quality-scenario",
+                "status": "READY",
+                "deep_link": "/p0/quality-scenarios/QS-FIX-002?return_to=/p0/overall",
+                "evidence_link": "/p0/quality-scenario-sources/PROBLEM-003?return_to=/p0/overall",
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-HARDWARE-01",
+                "title": "进入硬件案例与双树工作区",
+                "workspace_id": "hardware",
+                "status": "READY",
+                "deep_link": "/p0/hardware-cases",
+                "return_to": "/p0/overall",
+            },
+            {
+                "task_id": "DEMO-STORAGE-01",
+                "title": "进入存储器件寿命专题",
+                "workspace_id": "storage",
+                "status": "READY",
+                "deep_link": "/storage-workspace/",
+                "return_to": "/p0/overall",
+            },
+        ]
+    }
+
+
+def prepare_demo_legacy_database(data_dir: Path) -> Path:
+    """Create an isolated Legacy store and one synthetic issue for the demo."""
+    from quality_knowledge.web.app import create_legacy_quality_issue_router
+
+    legacy_db = data_dir / "legacy_quality_issue.sqlite3"
+    _, legacy_state = create_legacy_quality_issue_router(
+        legacy_db,
+        initialize_schema=True,
+    )
+    mapping_service = legacy_state.mapping_configuration_service
+    if mapping_service.get_effective_config("PLC") is None:
+        mapping_result = mapping_service.migrate_yaml(
+            ROOT / "quality_knowledge/config/plc_fields.yaml",
+            "PLC",
+            dry_run=False,
+        )
+        if mapping_result.get("status") != "ACTIVE":
+            raise RuntimeError("DEMO_LEGACY_MAPPING_NOT_ACTIVE")
+    service = legacy_state.knowledge_issue_service
+    if not service.query_issues({"business_issue_id": DEMO_LEGACY_ISSUE_ID}, limit=1):
+        workbook_fd, workbook_name = tempfile.mkstemp(
+            prefix="legacy_demo_seed_",
+            suffix=".xlsx",
+            dir=data_dir,
+        )
+        os.close(workbook_fd)
+        workbook_path = Path(workbook_name)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["ITR单号", "问题描述", "产品", "月份"])
+        sheet.append(
+            [
+                DEMO_LEGACY_ISSUE_ID,
+                "合成问题：Overall VNext Legacy 工作台与分析链演示",
+                "PLC",
+                "2026-09",
+            ]
+        )
+        workbook.save(workbook_path)
+        try:
+            service.import_file(workbook_path, "PLC")
+        finally:
+            try:
+                workbook_path.unlink(missing_ok=True)
+            except PermissionError:
+                # Windows may briefly hold the workbook after import. It is
+                # synthetic demo input; a leftover temp file must not prevent
+                # the single app host from starting.
+                pass
+    material_repo = legacy_state.material_repository
+    if not material_repo.list_materials("ITR-CS", limit=1):
+        workbook_fd, workbook_name = tempfile.mkstemp(
+            prefix="legacy_demo_resolution_",
+            suffix=".xlsx",
+            dir=data_dir,
+        )
+        os.close(workbook_fd)
+        workbook_path = Path(workbook_name)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["问题信息", "解决方案"])
+        sheet.append(["彻底解决单号", "永久措施"])
+        sheet.append(
+            [f"{DEMO_LEGACY_ISSUE_ID}CS", "合成演示措施：修复后执行回归并核对现场恢复结果"]
+        )
+        workbook.save(workbook_path)
+        try:
+            legacy_state.material_import_service.import_file(workbook_path, "ITR-CS", 2)
+        finally:
+            try:
+                workbook_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
+    return legacy_db
+
+
+def build_app(data_dir: Path):
+    data_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["STORAGE_LIFE_DATA_DIR"] = str(data_dir / "storage")
+    os.environ["STORAGE_KNOWLEDGE_REPOSITORY_DIR"] = str(data_dir / "knowledge_repository")
+    os.environ.pop("LEGACY_QUALITY_ISSUE_DB_PATH", None)
+    p0_db = data_dir / "quality_capability_p0.sqlite3"
+    hardware_db = data_dir / "hardware_case.sqlite3"
+    initializer = P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    )
+    if p0_db.exists():
+        initializer.verify_ready(p0_db)
+    else:
+        initializer.initialize(p0_db)
+    legacy_db = prepare_demo_legacy_database(data_dir)
+    app = create_p0_app(
+        p0_db,
+        project_root=ROOT,
+        hardware_case_db_path=hardware_db,
+        hardware_tree_upload_dir=data_dir / "hardware_tree_uploads",
+        hardware_case_source_root=data_dir / "hardware_case_sources",
+        p04_provider=FixtureP04Provider(result_revision="overall-vnext-demo-v1"),
+        legacy_quality_issue_db_path=legacy_db,
+        overall_task_provider=demo_overall_tasks,
+    )
+    if not app.state.overall_shell_enabled:
+        raise RuntimeError("OVERALL_SHELL_NOT_ENABLED")
+    return app
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(tempfile.gettempdir()) / "overall-vnext-fast-mvp",
+        help="Isolated P0 and Hardware Case data directory (default: OS temp directory).",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--check", action="store_true", help="Build app and resolve MVP routes without serving.")
+    args = parser.parse_args()
+
+    app = build_app(args.data_dir)
+    if args.check:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app)
+        for path in (
+            "/p0/overall",
+            "/p0/overall/areas/current-problem",
+            "/p0/overall/areas/cases-knowledge",
+            "/p0/overall/areas/scenarios-insights",
+            "/p0/overall/areas/professional-topics",
+            "/p0/overall/areas/management",
+            "/p0/issues",
+            "/issues",
+            "/itr/resolution-workbench",
+            "/analysis",
+            "/import",
+            "/statistics",
+            "/p0/quality-scenario-insights",
+            "/p0/hardware-cases",
+            "/storage-workspace/",
+            "/storage-workspace/knowledge-production/published",
+            "/storage-workspace/knowledge-production/sources",
+        ):
+            response = client.get(path)
+            if response.status_code != 200:
+                raise RuntimeError(f"MVP_ROUTE_FAILED:{path}:{response.status_code}")
+        legacy_issues = app.state.legacy_quality_issue_services.knowledge_issue_service.query_issues(
+            {"business_issue_id": DEMO_LEGACY_ISSUE_ID}, limit=1
+        )
+        if not legacy_issues:
+            raise RuntimeError("MVP_LEGACY_FIXTURE_FAILED")
+        legacy_detail = client.get(f"/issues/{legacy_issues[0]['knowledge_id']}")
+        if legacy_detail.status_code != 200 or DEMO_LEGACY_ISSUE_ID not in legacy_detail.text:
+            raise RuntimeError("MVP_LEGACY_DETAIL_FAILED")
+        resolution_page = client.get("/itr/resolution-workbench")
+        if (
+            resolution_page.status_code != 200
+            or f"{DEMO_LEGACY_ISSUE_ID}CS" not in resolution_page.text
+            or "打开关联问题" not in resolution_page.text
+        ):
+            raise RuntimeError("MVP_ITR_RESOLUTION_WORKBENCH_FAILED")
+        task_overview = client.get("/api/v2/overall/task-overview")
+        if (
+            task_overview.status_code != 200
+            or task_overview.json().get("state") != "READY"
+            or task_overview.json().get("total") != 4
+        ):
+            raise RuntimeError("MVP_OVERALL_TASK_PROVIDER_FAILED")
+        root = client.get("/", follow_redirects=False)
+        if root.status_code not in {302, 307} or root.headers.get("location") != "/p0/issues":
+            raise RuntimeError("MVP_DEFAULT_ENTRY_FAILED")
+        knowledge_compatibility = client.get(
+            "/p0/knowledge/hardware", follow_redirects=False
+        )
+        if (
+            knowledge_compatibility.status_code not in {302, 307}
+            or knowledge_compatibility.headers.get("location") != "/p0/hardware-cases"
+        ):
+            raise RuntimeError("MVP_KNOWLEDGE_COMPATIBILITY_FAILED")
+        query = client.post(
+            "/api/v2/quality-scenario-insights/v1/query",
+            json={"view": "INDUSTRY"},
+        )
+        if query.status_code != 200:
+            raise RuntimeError(f"MVP_P04_QUERY_FAILED:{query.status_code}")
+        scenario_ids = {
+            item["scenario_id"] for item in query.json().get("scenario_list", [])
+        }
+        if "QS-FIX-002" not in scenario_ids:
+            raise RuntimeError("MVP_P04_FIXTURE_FAILED")
+        detail = client.get(
+            "/p0/quality-scenarios/QS-FIX-002?return_to=/p0/quality-scenario-insights"
+        )
+        source = client.get(
+            "/p0/quality-scenario-sources/PROBLEM-003?return_to=/p0/quality-scenario-insights"
+        )
+        if (
+            detail.status_code != 200
+            or source.status_code != 200
+            or "PROBLEM-003" not in source.text
+        ):
+            raise RuntimeError("MVP_P04_DETAIL_SOURCE_SMOKE_FAILED")
+
+    print("APP_FACTORY=create_p0_app")
+    print("OVERALL_SHELL=READY")
+    print("P04_DEMO_DATA=SYNTHETIC_QS-FIX_FIXTURES")
+    print(f"LEGACY_DEMO_DATA=SYNTHETIC_{DEMO_LEGACY_ISSUE_ID}")
+    print("OVERALL_TASKS=SYNTHETIC_4_WORKSPACE_TASKS")
+    print(f"DATA_DIR={args.data_dir.resolve()}")
+    print(f"WEB_URL=http://{args.host}:{args.port}/p0/overall")
+    if args.check:
+        print("RESULT=PASS")
+        return 0
+
+    import uvicorn
+
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

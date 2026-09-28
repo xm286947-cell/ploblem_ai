@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}ITR 彻底解决工作台{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div>
+    <span class="eyebrow">ITR RESOLUTION WORKBENCH</span>
+    <h1>ITR 彻底解决工作台</h1>
+    <p>查看已导入的彻底解决单来源记录及其已建立的 ITR 关联；进入原问题详情继续使用现有原因、措施、验证和人工确认能力。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="/issues">返回 ITR / 问题工作台</a>
+    <a class="btn btn-primary" href="/materials/cs">导入彻底解决单材料</a>
+  </div>
+</div>
+<div class="metric-grid task-metrics">
+  <div class="metric-card"><span>彻底解决单来源</span><strong>{{ total }}</strong><small>已有导入记录</small></div>
+  <div class="metric-card info-soft"><span>已关联 ITR</span><strong>{{ linked }}</strong><small>使用现有 ITR 关联规则</small></div>
+  <div class="metric-card warning-soft"><span>待关联</span><strong>{{ unlinked }}</strong><small>未建立关联，不猜测匹配</small></div>
+</div>
+<div class="data-card">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>彻底解决单号</th><th>关联 ITR</th><th>来源</th><th>版本</th><th>关联状态</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+        <tr>
+          <td><strong>{{ item.business_key }}</strong>
+            <details><summary>查看来源记录</summary><dl class="source-fields">
+              {% for key, value in item.raw.items() %}<dt>{{ key }}</dt><dd>{{ value if value is not none else '-' }}</dd>{% endfor %}
+            </dl></details>
+          </td>
+          <td>{% if item.linked_issue_id %}<strong>{{ item.linked_issue_id }}</strong>{% else %}<span class="badge badge-neutral">未匹配</span>{% endif %}</td>
+          <td>{{ item.source_file or '-' }}<small>{{ item.sheet_name or '' }} · 第 {{ item.row_number or '-' }} 行</small></td>
+          <td>V{{ item.version_no }}</td>
+          <td><span class="badge {% if item.link_status == 'LINKED' %}badge-success{% else %}badge-neutral{% endif %}">{{ '已关联' if item.link_status == 'LINKED' else '待关联' }}</span></td>
+          <td>{% if item.knowledge_id %}<a class="btn btn-secondary" data-overall-preserve-context="return" href="/issues/{{ item.knowledge_id }}">打开关联问题</a>{% else %}<span>先核对 ITR 关联</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6"><div class="empty-state"><b>暂无彻底解决单来源记录</b><span>导入入口会保留在管理与配置中；导入后记录会显示在这里。</span><a class="btn btn-primary" href="/materials/cs">导入彻底解决单材料</a></div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="muted">此工作台复用 Legacy 问题详情与已导入的 ITR-CS 来源事实，不创建第二套问题主数据，也不从未匹配字段推断关联。原始材料导入继续由“彻底解决单材料导入”负责。</p>
+{% endblock %}

@@ -84,17 +84,24 @@ def test_import_golden_path_and_missing_fact_fail_closed(tmp_path):
         assert client.get(route).status_code == 200
     assert "知识导入" in client.get("/p0/hardware-cases/intake").text
     assert client.get(API + "/intakes").status_code == 403
-    word = next(FIXTURES.glob("A9001*.docx"))
+    word = next(FIXTURES.glob("A9002*.docx"))
     early = client.post(API + "/intakes", files={"file": (word.name, word.read_bytes())}, headers=MAINTAINER)
     early_id = early.json()["intake_id"]
-    blocked = client.post(API + "/intakes/" + early_id + "/process", headers=MAINTAINER)
-    assert blocked.status_code == 409 and blocked.json()["detail"] == "ACTIVE_TREES_REQUIRED"
+    processed_without_trees = client.post(API + "/intakes/" + early_id + "/process", headers=MAINTAINER)
+    assert processed_without_trees.status_code == 200, processed_without_trees.text
+    assert processed_without_trees.json()["status"] in {"CANDIDATE_READY", "NEEDS_REVIEW"}
+    assert processed_without_trees.json()["candidate"]["evidence"]
+    assert processed_without_trees.json()["candidate"]["mappings"] == []
+    assert client.get(API + "/A9002/publish-gate", headers=MAINTAINER).json()["passed"] is False
 
     circuit_version = _apply_tree(client, "CIRCUIT_FEATURE", "circuit_feature.xlsx")
     material_version = _apply_tree(client, "MATERIAL_DEVICE", "material.xlsx")
     assert circuit_version != material_version
     item = _upload_and_process(client, "A9001")
-    assert item["intake_id"] == early_id  # upload is idempotent for the same Source
+    assert item["intake_id"] != early_id
+    duplicate_word = next(FIXTURES.glob("A9001*.docx"))
+    duplicate = client.post(API + "/intakes", files={"file": (duplicate_word.name, duplicate_word.read_bytes())}, headers=MAINTAINER)
+    assert duplicate.json()["intake_id"] == item["intake_id"]  # same Source is idempotent
     assert item["status"] == "CANDIDATE_READY"
     candidate = item["candidate"]
     assert candidate["case_id"] == "A9001"

@@ -1,6 +1,6 @@
 {% extends "p0_base.html" %}
 {% block title %}总体工作台{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi01">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/overall_shell.css?v=ofi03">{% endblock %}
 {% block shell_product %}质量产品总体{% endblock %}
 {% block breadcrumb %}总体工作台{% endblock %}
 {% block body %}
@@ -8,10 +8,18 @@
   <div>
     <div class="overall-kicker">OVERALL SHELL</div>
     <h1>专业质量软件平台</h1>
-    <p>统一入口只负责导航、任务概览与 Evidence 返回；四个 Domain 的业务语义和数据所有权保持独立。</p>
+    <p>统一入口负责产品导航、任务概览与 Evidence 返回；业务语义和数据所有权仍由各产品维护。</p>
   </div>
   <a class="overall-secondary" href="/p0/issues">进入问题工作台</a>
 </section>
+
+<nav class="overall-area-nav" aria-label="总体产品工作区">
+  {% for item in product_areas %}
+  {% if item.area_id != 'management' %}
+  <a href="/p0/overall/areas/{{ item.area_id }}">{{ item.title }}</a>
+  {% endif %}
+  {% endfor %}
+</nav>
 
 <section class="overall-card">
   <div class="overall-card-head">
@@ -27,6 +35,47 @@
     </a>
     {% endfor %}
   </div>
+</section>
+
+<section class="overall-card" id="case-knowledge" aria-labelledby="case-knowledge-title">
+  <div class="overall-card-head">
+    <div><h2 id="case-knowledge-title">案例与知识</h2><p>四个入口复用各产品已有工作台与统一知识生产链。</p></div>
+    <span class="overall-chip">案例 · 知识</span>
+  </div>
+  <nav class="overall-knowledge-tabs" aria-label="案例与知识">
+    <a href="/p0/cases"><strong>重大问题案例库</strong><span>历史案例、Repeat Risk 与复盘证据</span></a>
+    <a href="/p0/hardware-cases"><strong>硬件案例库</strong><span>硬件案例、电路树映射与来源追溯</span></a>
+    <a href="/storage-workspace/knowledge-production/published"><strong>已发布知识</strong><span>浏览统一知识生产发布的正式知识</span></a>
+    <a href="/storage-workspace/knowledge-production/sources"><strong>统一知识生产</strong><span>资料接入、Candidate、审核与发布</span></a>
+  </nav>
+</section>
+
+<section class="overall-card" id="new-professional-products" aria-labelledby="new-professional-products-title">
+  <div class="overall-card-head">
+    <div><h2 id="new-professional-products-title">新增专业产品</h2><p>Hardware Case 与 Storage 并列发现，各自保留产品域、Owner 和内部工作流程。</p></div>
+    <span class="overall-chip">专业产品</span>
+  </div>
+  <nav class="overall-knowledge-tabs" aria-label="新增专业产品">
+    <a href="/p0/hardware-cases"><strong>硬件案例库</strong><span>硬件问题、双树映射、案例与证据</span></a>
+    <a href="/storage-workspace/"><strong>存储器件寿命智能产品</strong><span>器件事实、寿命评估、诊断与变更影响</span></a>
+  </nav>
+</section>
+
+<section class="overall-card" aria-labelledby="overall-shortcuts-title">
+  <div class="overall-card-head">
+    <div><h2 id="overall-shortcuts-title">常用能力</h2><p>直接复用现有页面与路由；P1 能力仍由 P1 提供。</p></div>
+    <span class="overall-chip">快捷入口</span>
+  </div>
+  <nav class="overall-shortcuts" aria-label="常用能力入口">
+    <a href="/p0/issues">当前问题</a>
+    <a href="/p0/batch-analysis">批量 AI 分析</a>
+    <a href="/p0/insights">质量洞察</a>
+    <a href="/p0/quality-scenario-insights">质量画像与洞察</a>
+    <a href="/p1/product-reports">产品综合报告</a>
+    <a href="/p1/risk-assessment">正向风险评估（P1）</a>
+    <a href="/p0/data-intake">数据接入</a>
+    <a href="/p0/settings">字段映射与产品</a>
+  </nav>
 </section>
 
 <section class="overall-card" id="task-overview">

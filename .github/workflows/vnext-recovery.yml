@@ -1,0 +1,61 @@
+name: Recover Overall VNext snapshot
+
+on:
+  push:
+    branches:
+      - integration/overall-vnext
+    paths:
+      - .github/workflows/vnext-recovery.yml
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout VNext
+        uses: actions/checkout@v4
+        with:
+          ref: integration/overall-vnext
+          fetch-depth: 0
+
+      - name: Reconstruct and verify recovery patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .vnext-recovery/recovery.part01.txt \
+              .vnext-recovery/recovery.part02.txt \
+              .vnext-recovery/recovery.part03.txt \
+              .vnext-recovery/recovery.part04.txt \
+            | base64 -d > /tmp/vnext_recovery.patch.gz
+          echo "358ee3c5107d964c1f91d3c739d539f88d1be406d59940bf50fc4134c79fa5d2  /tmp/vnext_recovery.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/vnext_recovery.patch.gz > /tmp/vnext_recovery.patch
+          echo "60247bbba239d486d8a0f2c6789e34f4cdf0449df1a18b75b192effc282ebc3c  /tmp/vnext_recovery.patch" | sha256sum -c -
+          git apply --check /tmp/vnext_recovery.patch
+
+      - name: Apply recovered VNext source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply /tmp/vnext_recovery.patch
+          git diff --check
+          test -f START_OVERALL_VNEXT_WINDOWS.bat
+          test -f scripts/overall_vnext_windows_start.py
+          test -f scripts/build_overall_vnext_windows_trial.py
+          test -f quality_knowledge/web/templates/itr_resolution_workbench.html
+          test -f products/storage_rc1/tests/test_runtime_openai_mock_storage_golden_path.py
+          test -f tests/test_hardware_case_runtime_mock_word_candidate.py
+          test ! -e output/diagnostics/data_intake.log
+
+      - name: Commit recovered source and cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r .vnext-recovery
+          git rm .github/workflows/vnext-recovery.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(overall): publish recovered VNext development snapshot"
+          git push origin HEAD:integration/overall-vnext
