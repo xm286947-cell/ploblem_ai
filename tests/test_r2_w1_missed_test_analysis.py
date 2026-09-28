@@ -86,7 +86,7 @@ def test_missed_test_adapter_reuses_existing_issue_facts_only(tmp_path: Path):
     assert "软件问题漏测分析" in response.text
     assert "ITR-R2-MISS-1" in response.text
     assert "ITR-R2-NORMAL-1" not in response.text
-    assert "不复制问题，不新增漏测状态机" in response.text
+    assert "Existing Capability Adapter" in response.text
     assert "不创建第二套漏测问题对象" in response.text
 
     parser = _LinkParser()
@@ -154,7 +154,7 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     assert "软件问题漏测分析" in response.text
     assert "ITR-R2-MISS-1" in response.text
     assert "ITR-R2-NORMAL-1" not in response.text
-    assert "Existing Capability Adapter" in response.text
+    assert "不复制问题，不新增漏测状态机" in response.text
 
     parser = _LinkParser()
     parser.feed(response.text)
