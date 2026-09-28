@@ -24,6 +24,8 @@ jobs:
   w1-focused-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
 
