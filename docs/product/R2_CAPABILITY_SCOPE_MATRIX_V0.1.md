@@ -40,6 +40,40 @@ CURRENT_RELEASE_BACKWRITE=NO
 - Software assessment: repository, current/demo/compat/archive branches and control-plane baselines confirm the capability historically exists, but no verifiable Route / Handler / State Owner / Data Owner is available. Status=`EXTERNAL_FACT_BINDING_PENDING / NON_CODE`; no route invented and no `/analysis` or material-page substitution.
 - Missed-test analysis: code/history verification found no reusable independent old page/handler. PR #226 upgraded `/p0/missed-test-analysis` from compatibility redirect to a real unified-host P0 workbench while retaining legacy `/missed-test-analysis`; both use the same Existing Problem SoT. Merge=`4491652abf66eed02959a1ab26010889c59d4cd2`; pre/post-merge W1 Gate **9/9 PASS**. Query + analysis status round-trip is preserved; Legacy returns to `#causes`, P0 returns to `#analysis`; arbitrary/external return targets fail closed.
 
+## W1 final development gate
+
+W1_DEVELOPMENT_GATE=PASS_WITH_EXTERNAL_BINDINGS  
+R2_SOURCE=05029d00face67ba2be202e77e038601db5c670e  
+LINUX_FOCUSED_REGRESSION=12_PASSED  
+WINDOWS_CLEAN_START=PASS  
+PLC_SEED_LINEAGE=PASS  
+LEGACY_DB_BINDING=PASS  
+LEGACY_DB_SCHEMA_COMPATIBILITY=PASS  
+UNIFIED_P1_STARTUP=PASS  
+WINDOWS_ROUTE_SMOKE=7/7_PASS  
+W1_CODE_BLOCKER=0  
+W1_EXTERNAL_BINDING_COUNT=2  
+
+Windows verified routes:
+
+- `/p0/issues`
+- `/p0/itr-recovery`
+- `/itr/resolution-workbench`
+- `/p0/itr-resolution`
+- `/p0/missed-test-analysis`
+- `/p0/batch-analysis`
+- `/analysis`
+
+External/non-code bindings retained for later release binding:
+
+1. Original source-system save / submit / transition contract for ITR thorough resolution.
+2. Original software issue assessment Route / State Owner / Data Owner.
+
+These are not R2 code blockers and must not be replaced by invented Overall states or guessed routes.
+
+W1_STATUS=DEVELOPMENT_COMPLETE  
+NEXT=W2_EXISTING_SCENARIO_PORTRAIT_AND_NAVIGATION
+
 ## Selective absorb candidates
 
 The following are **candidate groups**, not approved code merges:
