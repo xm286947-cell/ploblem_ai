@@ -137,12 +137,16 @@ def _safe_issue_return_url(raw: str | None) -> str:
     if (
         parsed.scheme
         or parsed.netloc
-        or parsed.fragment
+        or parsed.fragment not in {"", "repeat-risk"}
         or not parsed.path.startswith("/p0/issues/")
         or parsed.path == "/p0/issues/"
     ):
         raise HTTPException(status_code=400, detail="INVALID_CASE_RETURN_CONTEXT")
-    return parsed.path + (("?" + parsed.query) if parsed.query else "")
+    return (
+        parsed.path
+        + (("?" + parsed.query) if parsed.query else "")
+        + (("#" + parsed.fragment) if parsed.fragment else "")
+    )
 
 
 def create_p0_insights_router(
