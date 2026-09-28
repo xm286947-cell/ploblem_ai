@@ -44,5 +44,5 @@ jobs:
       - name: Run W1 focused regression
         run: |
           pytest -q \
-            tests/test_r2_w1_itr_resolution.py \
+            tests/test_r2_w1_*.py \
             tests/test_rc4_analysis_workbench_ui.py

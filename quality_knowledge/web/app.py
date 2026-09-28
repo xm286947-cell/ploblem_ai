@@ -6,7 +6,7 @@ import json
 import logging
 import tempfile
 from types import SimpleNamespace
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -33,6 +33,7 @@ from .statistics_presenter import present_statistics, present_common_gaps, zh_va
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
+from .missed_test_adapter import build_missed_test_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -78,6 +79,30 @@ def _confidence(obj):
         except Exception:
             return 0.0
     return 0.0
+
+
+def _safe_issue_return_context(raw: str | None) -> str:
+    value = str(raw or '').strip()
+    if not value:
+        return ''
+    if len(value) > 4096 or '\r' in value or '\n' in value:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    if parsed.path not in {'/itr/resolution-workbench', '/missed-test-analysis'}:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    return parsed.path + (('?' + parsed.query) if parsed.query else '')
+
+
+def _is_missed_test_issue(normalized: dict) -> bool:
+    escape = normalized.get('escape') if isinstance(normalized, dict) else {}
+    if not isinstance(escape, dict):
+        return False
+    raw = escape.get('is_escape')
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or '').strip().upper() in {'1', 'TRUE', 'YES', 'Y', '是', '漏测'}
 
 
 
@@ -289,6 +314,24 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             'total': len(rows),
             'linked': linked_count,
             'unlinked': len(rows) - linked_count,
+        })
+
+    @app.get('/missed-test-analysis', response_class=HTMLResponse, include_in_schema=False)
+    def missed_test_analysis(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        analysis_status = (request.query_params.get('analysis_status') or '').strip().upper()
+        rows = build_missed_test_rows(
+            svc,
+            q=q,
+            analysis_status=analysis_status,
+            detail_prefix='/issues',
+            return_path='/missed-test-analysis',
+        )
+        return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
+            'items': rows,
+            'total': len(rows),
+            'q': q,
+            'analysis_status': analysis_status,
         })
 
     @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
@@ -549,9 +592,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
 
     @app.get('/issues/{knowledge_id}', response_class=HTMLResponse, include_in_schema=False)
     def issue_detail(request: Request, knowledge_id: str):
-        return_to = (request.query_params.get('return_to') or '').strip()
-        if return_to not in {'', '/itr/resolution-workbench'}:
-            raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+        return_to = _safe_issue_return_context(request.query_params.get('return_to'))
         vm = _build_issue_view(svc, knowledge_id, capability_extension)
         if not vm:
             raise HTTPException(404, 'NOT_FOUND')
