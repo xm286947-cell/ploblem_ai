@@ -13,6 +13,14 @@
   <a class="overall-secondary" href="/p0/issues">进入问题工作台</a>
 </section>
 
+<nav class="overall-area-nav" aria-label="总体产品工作区">
+  {% for item in product_areas %}
+  {% if item.area_id != 'management' %}
+  <a href="/p0/overall/areas/{{ item.area_id }}">{{ item.title }}</a>
+  {% endif %}
+  {% endfor %}
+</nav>
+
 <section class="overall-card">
   <div class="overall-card-head">
     <div><h2>四工作空间</h2><p>通过稳定 Shell Entry 进入现有 Domain，不复制 Domain 页面。</p></div>
