@@ -16,6 +16,7 @@ on:
       - "quality_knowledge/**"
       - "tests/test_r2_w1_*.py"
       - "tests/test_rc4_analysis_workbench_ui.py"
+      - ".github/workflows/overall-r2-w1-gate.yml"
 
 permissions:
   contents: read
@@ -55,6 +56,8 @@ jobs:
       PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -67,26 +70,47 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
 
-      - name: Prepare clean local databases
+      - name: Materialize clean source directory
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $legacy = "knowledge\\quality_issue_v1.db"
-          $p1 = "knowledge\\r2_w1_windows_smoke.db"
-          foreach ($path in @($legacy,$p1,"$legacy-wal","$legacy-shm","$p1-wal","$p1-shm")) {
-            if (Test-Path $path) { Remove-Item -Force $path }
+          $root = Join-Path $env:RUNNER_TEMP "r2-w1-clean-source"
+          $zip = Join-Path $env:RUNNER_TEMP "r2-w1-source.zip"
+          if (Test-Path $root) { Remove-Item -Recurse -Force $root }
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          New-Item -ItemType Directory -Path $root | Out-Null
+          git archive --format=zip --output="$zip" HEAD
+          Expand-Archive -Path $zip -DestinationPath $root
+          if (Test-Path (Join-Path $root ".git")) {
+            throw "Clean source unexpectedly contains .git"
           }
-          python -c "from quality_knowledge.repositories import IssueKnowledgeRepository; IssueKnowledgeRepository(r'knowledge/quality_issue_v1.db')"
+          "R2_W1_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Start unified P1 Web
+      - name: Prepare independent Legacy and P1 databases
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          Set-Location $env:R2_W1_ROOT
+          $knowledge = Join-Path $env:R2_W1_ROOT "knowledge"
+          New-Item -ItemType Directory -Path $knowledge -Force | Out-Null
+          $legacy = Join-Path $knowledge "r2_w1_legacy.db"
+          $p1 = Join-Path $knowledge "r2_w1_p1.db"
+          $env:R2_LEGACY_DB = $legacy
+          python -c "import os; from quality_knowledge.web import create_app; create_app(os.environ['R2_LEGACY_DB'])"
+          if (!(Test-Path $legacy)) { throw "Legacy DB initialization failed" }
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "R2_W1_P1_DB=$p1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Start unified P1 Web from clean source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:R2_W1_ROOT
           $stdout = Join-Path $env:RUNNER_TEMP "r2-w1.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "r2-w1.stderr.log"
           $proc = Start-Process -FilePath "python" -ArgumentList @(
             "main.py","knowledge-p1-start",
-            "--db","knowledge\\r2_w1_windows_smoke.db",
+            "--db",$env:R2_W1_P1_DB,
             "--host","127.0.0.1",
             "--port","8080"
           ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -108,14 +132,14 @@ jobs:
             throw "Unified R2 W1 Web did not become ready"
           }
 
-      - name: Smoke W1 routes
+      - name: Smoke W1 formal routes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $routes = @(
             "http://127.0.0.1:8080/p0/issues",
             "http://127.0.0.1:8080/p0/itr-recovery",
-            "http://127.0.0.1:8080/itr/resolution-workbench",
+            "http://127.0.0.1:8080/p0/itr-resolution",
             "http://127.0.0.1:8080/p0/missed-test-analysis",
             "http://127.0.0.1:8080/p0/batch-analysis",
             "http://127.0.0.1:8080/analysis"
@@ -127,6 +151,11 @@ jobs:
             }
             Write-Host "$route=PASS"
           }
+          if (!(Test-Path $env:R2_W1_P1_DB)) { throw "P1 DB was not initialized" }
+          if (!(Test-Path $env:LEGACY_QUALITY_ISSUE_DB_PATH)) { throw "Legacy DB missing" }
+          Write-Host "WINDOWS_CLEAN_SOURCE_START=PASS"
+          Write-Host "LEGACY_DB_BINDING=PASS"
+          Write-Host "P1_DB_INITIALIZED=PASS"
 
       - name: Stop unified P1 Web
         if: always()
