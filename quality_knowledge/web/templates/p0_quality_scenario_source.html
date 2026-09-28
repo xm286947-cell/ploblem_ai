@@ -14,7 +14,7 @@
     <h2>关联的已发布质量场景</h2>
     {% for item in trace["items"] %}
     <article class="p0-evidence-item">
-      <h3><a href="/p0/quality-scenarios/{{ item.scenario_id|urlencode }}?return_to={{ return_to|urlencode }}{% if return_context %}&amp;p04_context={{ return_context|urlencode }}{% endif %}">{{ item.scenario_name }}</a></h3>
+      <h3><a href="/p0/quality-scenarios/{{ item.scenario_id|urlencode }}?return_to={{ return_to|urlencode }}{% if return_context %}&amp;p04_context={{ return_context|urlencode }}{% endif %}{% if overall_return_state %}&amp;overall_return_state={{ overall_return_state|urlencode }}{% endif %}">{{ item.scenario_name }}</a></h3>
       <p>Scenario ID：{{ item.scenario_id }}</p>
       <p>Source Ref：{{ item.source.source_ref }}</p>
       <p>Relation：{{ item.source.relation_type }}</p>

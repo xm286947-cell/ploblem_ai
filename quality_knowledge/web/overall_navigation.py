@@ -7,7 +7,9 @@ their producing domains and are accepted through common-evidence/v1.0.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -16,6 +18,21 @@ from fastapi import HTTPException
 
 OVERALL_RETURN_CONTEXT_VERSION = "overall-return-context/v1"
 _FIELD_KEY = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+
+
+def overall_navigation_asset_version(static_dir: str | Path | None = None) -> str:
+    """Return a cache key that changes whenever shared navigation assets change."""
+
+    fallback = Path(__file__).resolve().parent / "static"
+    root = Path(static_dir) if static_dir is not None else fallback
+    digest = hashlib.sha256()
+    for name in ("overall_navigation.css", "overall_navigation.js"):
+        path = root / name
+        if not path.is_file():
+            path = fallback / name
+        digest.update(name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def normalize_overall_return_state(raw: str | None) -> dict[str, Any] | None:

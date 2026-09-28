@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>{{ title or '质量问题分析' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=product-report-ai-synthesis-patch16">
-<link rel="stylesheet" href="/p0/static/overall_navigation.css?v=nav01">
+<link rel="stylesheet" href="/p0/static/overall_navigation.css?v={{ overall_navigation_asset_version }}">
 {% block page_styles %}{% endblock %}
 <!-- legacy css cache markers: app.css?v=ued2 ; ?v=ued-r4v2-cg-fix01 ; ?v=p3-mapping-difference-entry2 -->
 </head>
@@ -37,7 +37,7 @@
 <main class="content">{% block body %}{% endblock %}</main>
 </div>
 </div>
-<script src="/p0/static/overall_navigation.js?v=nav01"></script>
+<script src="/p0/static/overall_navigation.js?v={{ overall_navigation_asset_version }}"></script>
 <script>document.addEventListener('change',function(e){if(e.target.closest('.human-form,.human-compact-form')){var s=document.querySelector('#human-save-state');if(s)s.textContent='已修改未保存';}});</script>
 {% block page_scripts %}{% endblock %}
 </body></html>

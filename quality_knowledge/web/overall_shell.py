@@ -26,6 +26,7 @@ from compatibility.common_evidence import (
 from quality_knowledge.web.overall_navigation import (
     append_overall_return_state,
     normalize_overall_return_state,
+    overall_navigation_asset_version,
 )
 
 
@@ -264,6 +265,7 @@ def create_overall_shell_router(
     """
 
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
+    templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version()
     router = APIRouter()
 
     @router.get("/api/v2/overall/workspaces")

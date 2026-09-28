@@ -33,7 +33,11 @@ from .statistics_presenter import present_statistics, present_common_gaps, zh_va
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
 from quality_knowledge.materials import MaterialRepository, MaterialImportService
-from .overall_navigation import append_overall_return_state, normalize_overall_return_state
+from .overall_navigation import (
+    append_overall_return_state,
+    normalize_overall_return_state,
+    overall_navigation_asset_version,
+)
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -218,6 +222,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     state.material_repository = material_repo
     state.material_import_service = material_svc
     tpl = Jinja2Templates(directory=BASE / 'templates')
+    tpl.env.globals['overall_navigation_asset_version'] = overall_navigation_asset_version(BASE / 'static')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
     tpl.env.globals['zh_value'] = zh_value

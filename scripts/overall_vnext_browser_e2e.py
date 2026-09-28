@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from contextlib import closing
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -101,30 +102,82 @@ def _run_desktop(page: Page, base_url: str, evidence_dir: Path) -> list[dict[str
     _assert_text(page, "ITR-VNEXT-DEMO-001")
     checks.append({"check": "legacy_synthetic_issue", "result": "PASS"})
 
-    _goto(page, base_url, "/p0/quality-scenario-insights?view=INDUSTRY")
+    p04_return_context = {
+        "contract": "p04-query-context/v1",
+        "view": "INDUSTRY",
+        "selected_object": None,
+        "filters": {"lifecycle": "OPERATE"},
+        "matrix_mode": "BUSINESS_ACTIVITY_X_QUALITY_FOCUS",
+        "page": 1,
+        "page_size": 1,
+    }
+    p04_context_param = quote(json.dumps(p04_return_context, ensure_ascii=False, separators=(",", ":")))
+    _goto(page, base_url, "/p0/quality-scenario-insights?p04_context=" + p04_context_param)
     assert page.locator('button[data-view="INDUSTRY"].active').count() == 1
+    lifecycle = page.locator('select[data-filter="lifecycle"]')
+    assert lifecycle.input_value() == "OPERATE"
+    selector = page.locator("select[data-selector]")
+    selector_options = selector.locator("option").evaluate_all(
+        "options => options.map(option => option.value).filter(Boolean)"
+    )
+    selected_object = selector_options[0] if selector_options else ""
+    if selected_object:
+        selector.select_option(selected_object)
+    page.locator("[data-apply]").click()
+    page.get_by_text("已更新", exact=True).wait_for(state="visible", timeout=10_000)
     row = page.locator("tr").filter(has_text="QS-FIX-002").first
     row.wait_for(state="visible", timeout=10_000)
     scenario_href = row.locator("a").first.get_attribute("href")
     assert scenario_href and "p04_context=" in scenario_href
-    _goto(page, base_url, scenario_href)
+    scenario_context = parse_qs(urlsplit(scenario_href).query).get("p04_context", [""])[0]
+    scenario_state = json.loads(scenario_context)
+    assert scenario_state["view"] == "INDUSTRY"
+    assert scenario_state["filters"].get("lifecycle") == "OPERATE"
+    assert scenario_state["page_size"] == 1
+    if selected_object:
+        assert scenario_state["selected_object"]["selector_ref"] == selected_object
+    page.evaluate("window.scrollTo(0, Math.min(520, document.documentElement.scrollHeight))")
+    original_scroll = page.evaluate("window.scrollY")
+    row.locator("a").first.click()
+    page.wait_for_url("**/p0/quality-scenarios/QS-FIX-002**")
     _assert_text(page, "QS-FIX-002")
     source_href = page.locator(
         'a[href*="/p0/quality-scenario-sources/PROBLEM-003"]'
     ).first.get_attribute("href")
     assert source_href and "p04_context=" in source_href
-    _goto(page, base_url, source_href)
+    assert "overall_return_state=" in source_href
+    source_group = page.locator("details.p0-evidence-item").filter(has_text="PROBLEM-003").first
+    source_group.locator("summary").click()
+    page.locator('a[href*="/p0/quality-scenario-sources/PROBLEM-003"]').first.click()
+    page.wait_for_url("**/p0/quality-scenario-sources/PROBLEM-003**")
     _assert_text(page, "Source Reference")
     return_href = page.get_by_role("link", name="← 返回质量场景工作区", exact=True).get_attribute("href")
-    assert return_href and "p04_context=" in return_href
-    _goto(page, base_url, return_href)
+    assert return_href and "p04_context=" in return_href and "overall_return_state=" in return_href
+    page.get_by_role("link", name="← 返回质量场景工作区", exact=True).click()
+    page.wait_for_url("**/p0/quality-scenario-insights**")
+    page.locator("[data-status]").filter(has_text="已更新").wait_for(timeout=10_000)
     assert page.locator('button[data-view="INDUSTRY"].active').count() == 1
+    assert page.locator('select[data-filter="lifecycle"]').input_value() == "OPERATE"
+    assert page.locator("select[data-selector]").input_value() == selected_object
+    restored_scroll = page.evaluate("window.scrollY")
+    assert abs(restored_scroll - original_scroll) <= 100, (original_scroll, restored_scroll)
     assert "p04_context=" not in page.url
-    checks.append({"check": "p04_industry_detail_source_return", "result": "PASS"})
+    checks.append({"check": "p04_filter_selection_tab_and_scroll_return", "result": "PASS"})
 
-    _goto(page, base_url, "/p0/overall/evidence?producer_domain=Major&evidence_id=EV-DEMO-1&return_to=/p0/overall")
-    _assert_text(page, "common-evidence/v1.0")
-    checks.append({"check": "common_evidence", "result": "PASS"})
+    _goto(page, base_url, "/p0/overall")
+    evidence_link = page.get_by_role("link", name="Evidence", exact=True).first
+    assert "presentation=drawer" in (evidence_link.get_attribute("href") or "")
+    original_url = page.url
+    evidence_link.click()
+    dialog = page.get_by_role("dialog", name="统一 Evidence / Source Viewer")
+    dialog.wait_for(state="visible", timeout=5_000)
+    viewer = page.frame_locator('iframe[title="Evidence / Source Viewer"]')
+    viewer.get_by_text("EV-DEMO-1", exact=False).wait_for(state="visible", timeout=10_000)
+    viewer.get_by_text("仅用于验证 Overall Common Evidence Drawer", exact=False).wait_for(state="visible")
+    viewer.get_by_role("link", name="返回来源工作区", exact=True).click()
+    dialog.wait_for(state="hidden", timeout=5_000)
+    assert page.url == original_url
+    checks.append({"check": "common_evidence_drawer_source_return", "result": "PASS"})
 
     _goto(page, base_url, "/storage-workspace/")
     assert page.locator('a[href="/p0/overall"]').count() >= 1

@@ -143,6 +143,43 @@ def test_legacy_issue_detail_carries_state_to_safe_return_target(tmp_path: Path)
     ).status_code == 400
 
 
+def test_p0_issue_detail_returns_to_filtered_page_with_validated_context(tmp_path: Path):
+    db = tmp_path / "p0.db"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(db)
+    client = TestClient(
+        create_p0_app(
+            db,
+            stage_runner=object(),
+            p04_provider=FixtureP04Provider(),
+            hardware_case_db_path=tmp_path / "hardware.sqlite3",
+            hardware_tree_upload_dir=tmp_path / "tree_uploads",
+            hardware_case_source_root=tmp_path / "sources",
+        )
+    )
+    state = '{"contract":"overall-return-context/v1","scroll_y":420,"selected_object":"QK-42","fields":{"issues.filter.q":"PLC-42"}}'
+    response = client.get(
+        "/p0/issues/QK-42",
+        params={
+            "return_to": "/p0/issues?business_type=PLC&page=3&page_size=20&selected_id=QK-42",
+            "overall_return_state": state,
+        },
+    )
+    assert response.status_code == 200
+    assert "/p0/issues?business_type=PLC&amp;page=3&amp;page_size=20&amp;selected_id=QK-42&amp;overall_return_state=" in response.text
+    assert "overall_navigation.css?v=" in response.text
+
+    external = client.get(
+        "/p0/issues/QK-42",
+        params={"return_to": "//evil.test/"},
+    )
+    assert external.status_code == 200
+    assert 'data-back href="/p0/issues"' in external.text
+    assert "evil.test" not in external.text
+
+
 def test_p04_source_return_keeps_valid_cross_workspace_state(tmp_path: Path):
     db = tmp_path / "p0.db"
     P0Initializer(
@@ -166,6 +203,32 @@ def test_p04_source_return_keeps_valid_cross_workspace_state(tmp_path: Path):
     )
     assert response.status_code == 200
     assert "overall_return_state" in response.text
+
+    detail = client.get(
+        "/p0/quality-scenarios/QS-FIX-002",
+        params={
+            "return_to": "/p0/quality-scenario-insights",
+            "p04_context": json.dumps(
+                {
+                    "contract": "p04-query-context/v1",
+                    "view": "INDUSTRY",
+                    "selected_object": {"selector_ref": "selector_0123456789abcdef01234567"},
+                    "filters": {"lifecycle": "运行执行"},
+                    "matrix_mode": "BUSINESS_ACTIVITY_X_QUALITY_FOCUS",
+                    "page": 2,
+                    "page_size": 20,
+                },
+                ensure_ascii=False,
+            ),
+            "overall_return_state": json.dumps(
+                {"contract": "overall-return-context/v1", "scroll_y": 725, "fields": {}},
+                ensure_ascii=False,
+            ),
+        },
+    )
+    assert detail.status_code == 200
+    source_links = [line for line in detail.text.splitlines() if "/p0/quality-scenario-sources/" in line]
+    assert source_links and all("overall_return_state=" in line for line in source_links)
 
 
 def test_return_context_validator_rejects_unknown_fields_and_accepts_contract():

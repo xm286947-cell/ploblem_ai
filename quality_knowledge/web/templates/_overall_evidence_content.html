@@ -15,7 +15,7 @@
   <div class="overall-actions-row">
     {% if source_reference and (source_reference.startswith('https://') or source_reference.startswith('http://')) %}<a class="overall-primary" href="{{ source_reference }}" target="_blank" rel="noopener noreferrer">打开生产方来源</a>{% endif %}
     {% if object_href %}<a class="overall-secondary" href="{{ object_href }}">查看业务对象</a>{% endif %}
-    <a class="overall-secondary" href="{{ return_url }}">返回来源工作区</a>
+    <a class="overall-secondary" data-overall-evidence-return href="{{ return_url }}">返回来源工作区</a>
   </div>
   <p class="overall-evidence-boundary">Evidence ID 与 Source Ref 按生产方原值展示。Overall 不查询、不复制任何 Domain Evidence Store。</p>
 </section>

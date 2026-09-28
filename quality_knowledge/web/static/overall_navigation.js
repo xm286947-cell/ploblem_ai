@@ -48,8 +48,9 @@
     };
   }
 
-  function restoreNow() {
+  function restoreNow(options) {
     if (!pendingRestore || restored) return;
+    const ready = options === true || Boolean(options && options.ready);
     Object.entries(pendingRestore.fields || {}).forEach(([key, value]) => {
       const element = [...document.querySelectorAll('[data-overall-state-field]')]
         .find(candidate => candidate.dataset.overallStateField === key);
@@ -69,6 +70,7 @@
         .find(candidate => candidate.dataset.overallTab === pendingRestore.tab);
       if (tab && tab.getAttribute('aria-selected') !== 'true' && !tab.classList.contains('active')) tab.click();
     }
+    if (!ready) return;
     restored = true;
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       window.scrollTo({top: pendingRestore.scroll_y || 0, left: 0, behavior: 'auto'});
@@ -127,6 +129,11 @@
     returnFocus = null;
   }
 
+  window.addEventListener('message', event => {
+    if (!drawer || event.origin !== window.location.origin || event.source !== drawer.frame.contentWindow) return;
+    if (event.data && event.data.type === 'overall:evidence:return') closeDrawer();
+  });
+
   function preserveReturnState(anchor) {
     const url = new URL(anchor.href, window.location.href);
     if (url.origin !== window.location.origin) return;
@@ -168,5 +175,8 @@
     try { pendingRestore = safeJson(sessionStorage.getItem(STORAGE_KEY)); sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
   }
   window.OverallNavigation = {capture, restoreNow, closeDrawer};
-  window.addEventListener('load', () => window.setTimeout(restoreNow, 80), {once: true});
+  window.addEventListener('load', () => window.setTimeout(() => {
+    const asyncPage = document.querySelector('[data-p04-insights], [data-p0-issues]');
+    restoreNow({ready: !asyncPage});
+  }, 80), {once: true});
 })();
