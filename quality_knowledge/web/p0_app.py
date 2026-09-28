@@ -379,6 +379,9 @@ def create_p0_app(
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router
         from quality_knowledge.web.p1_pages import create_p1_router
+        from quality_knowledge.web.quality_scenario_v1_api import (
+            create_quality_scenario_v1_router,
+        )
 
         if app.state.overall_shell_enabled:
             from quality_knowledge.web.overall_shell import create_overall_shell_router
@@ -396,6 +399,7 @@ def create_p0_app(
                 repeat_web=repeat_web,
             )
         )
+        app.include_router(create_quality_scenario_v1_router(str(primary_db)))
         app.include_router(create_p04_router(app.state.p04_service))
         app.include_router(create_public_scenario_router(app.state.p04_service))
         app.include_router(create_portrait_router(app.state.portrait_service))
