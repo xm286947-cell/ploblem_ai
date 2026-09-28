@@ -87,7 +87,8 @@ def test_missed_test_adapter_preserves_filter_on_issue_round_trip(tmp_path: Path
     filtered = client.get("/missed-test-analysis", params={"q": "边界场景"})
     assert filtered.status_code == 200
     assert "ITR-R2-MISS-1" in filtered.text
-    assert "q=%E8%BE%B9%E7%95%8C%E5%9C%BA%E6%99%AF" in filtered.text
+    assert "return_to=%2Fmissed-test-analysis%3Fq%3D" in filtered.text
+    assert "%25E8%25BE%25B9%25E7%2595%258C" in filtered.text
 
     detail = client.get(
         f"/issues/{ids['ITR-R2-MISS-1']}",
