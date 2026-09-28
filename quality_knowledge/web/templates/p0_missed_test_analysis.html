@@ -1,0 +1,49 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block breadcrumb %}当前问题 / 漏测分析{% endblock %}
+{% block body %}
+<main class="p0-workbench" data-r2-missed-test-analysis>
+  <header class="p0-page-head">
+    <div>
+      <span class="p0-kicker">EXISTING CAPABILITY ADAPTER</span>
+      <h1>软件问题漏测分析</h1>
+      <p>复用 Existing Problem 的问题事实与 Escape 分析；不复制问题，不新增漏测状态机。</p>
+    </div>
+    <div class="p0-nav"><a class="p0-ghost" href="/p0/issues">返回问题工作台</a></div>
+  </header>
+  <section class="p0-card p0-filter-card">
+    <form method="get" action="/p0/missed-test-analysis">
+      <label class="p0-search">搜索<input name="q" value="{{q or ''}}" placeholder="问题编号、摘要、产品、流出原因、验证缺口"></label>
+      <label>Escape 状态<select name="analysis_status">
+        <option value="">全部状态</option>
+        {% for x in ['COMPLETED','PARTIAL_FAILED','FAILED','RUNNING','NOT_ANALYZED'] %}
+        <option value="{{x}}" {% if analysis_status==x %}selected{% endif %}>{{x}}</option>
+        {% endfor %}
+      </select></label>
+      <button class="p0-primary">筛选</button>
+      <a class="p0-ghost" href="/p0/missed-test-analysis">清空</a>
+    </form>
+  </section>
+  <section class="p0-card p0-table-card">
+    <div class="p0-card-head"><div><h2>漏测问题</h2><p>当前筛选 {{total}} 条</p></div><span>Source Fact + Escape Analysis</span></div>
+    <div class="p0-table-wrap"><table class="p0-table">
+      <thead><tr><th>问题</th><th>产品 / 平台</th><th>Escape 状态</th><th>流出原因</th><th>验证缺口</th><th>应发现 / 实际发现</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td><strong>{{item.business_issue_id}}</strong><small>{{item.title or item.description or '-'}}</small></td>
+        <td>{{item.product or '-'}}<small>{{item.platform or '-'}}</small></td>
+        <td><span class="p0-badge">{{item.escape_analysis_status}}</span></td>
+        <td>{{item.escape_cause_summary or '待分析'}}</td>
+        <td>{{item.verification_gap or '待分析'}}</td>
+        <td>{{item.expected_detection_stage or '-'}} / {{item.actual_detection_stage or '-'}}</td>
+        <td><a class="p0-ghost" href="{{item.detail_url}}">打开原问题</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="p0-loading">当前没有符合条件的漏测问题。系统不会根据分析结果反推 Source Fact。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+{% endblock %}
