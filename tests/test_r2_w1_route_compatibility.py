@@ -51,5 +51,5 @@ def test_w1_p0_routes_are_real_entries_and_preserve_adapter_boundaries():
         params={"q": "ITR-1"},
         follow_redirects=False,
     )
-    assert missed.status_code == 307
-    assert missed.headers["location"] == "/missed-test-analysis?q=ITR-1"
+    assert missed.status_code == 503
+    assert missed.json()["detail"] == "LEGACY_DB_UNAVAILABLE"
