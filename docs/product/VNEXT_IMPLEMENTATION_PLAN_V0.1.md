@@ -210,11 +210,13 @@ This section supersedes earlier readiness claims for the current delivery.
 The demo changes are being merged into the canonical integration branch,
 retaining both histories. No further development is planned on the demo branch.
 
-- Complete Product Candidate acceptance: PENDING remaining business-journey coverage.
+- Complete Product Candidate acceptance: PENDING P04 state-restoration and full mobile evidence, final DUT/runtime binding, and Product Test Center / TSE acceptance.
 - Current Issue Golden Path: PASS with synthetic workbook import, real four-stage analysis service, deterministic OpenAI-compatible mock, persisted analysis, and human MRC confirmation with evidence. Regression: 16 passed across `tests/test_overall_legacy_business_golden_path.py`, `tests/test_overall_legacy_capability_compatibility.py`, and `tests/test_quality_capability_legacy_integration.py`.
+- Cases/Knowledge: PASS by cross-suite integration regression (45 passed), covering Historical Case → candidate → evaluate/review/publish → release/query consumption, Knowledge Production UI, publication/consumer contracts, and Overall/Storage binding. This is not one browser-driven end-to-end test.
+- Clean synthetic Overall launcher check: PASS.
 - Prior 8648fe3 ZIP: synthetic integration demo evidence, not release acceptance.
 - Startup route checker corrected to assert every route, not only the final route.
-- S11 Only closes the existing P04 defect; VNext changes require their own scoped acceptance.
+- S11 Only closes the existing P04 defect. The P04 refresh/Back/Forward return regression is not authorized yet; exact DUT/runtime binding and explicit test authorization are still required.
 - Mobile evidence covers the Overall homepage viewport only; full mobile usability is pending.
-- Next: case/knowledge review-publish-consume; scenario/source/return; full mobile validation; final DUT/runtime/evidence binding.
+- Next: complete P04 test prerequisites/authorization; validate frozen mobile workflows; bind final DUT/runtime/evidence; then hand off to Product Test Center / TSE.
 - Existing historic milestone test counts remain tied to their recorded source SHAs.
