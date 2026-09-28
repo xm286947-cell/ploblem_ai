@@ -1,0 +1,11 @@
+{% extends "p0_base.html" %}
+{% block title %}原客户 / 行业质量画像{% endblock %}
+{% block shell_product %}历史质量场景兼容{% endblock %}
+{% block breadcrumb %}原客户 / 行业质量画像{% endblock %}
+{% block body %}
+<section class="overall-head"><div><div class="overall-kicker">LEGACY · READ ONLY</div><h1>原客户 / 行业质量画像</h1><p>恢复历史 <code>/quality-scenario-assets/portrait</code>。客户、行业与产品仍是同一批旧场景资产的并列聚合视角。</p></div><a class="overall-secondary" href="/p0/overall/areas/scenarios-insights">返回质量场景与洞察</a></section>
+<section class="overall-card"><h2>产品</h2><div class="overall-capability-grid">{% for row in portrait.product %}<article class="overall-capability"><strong>{{ row.label }}</strong><span>{{ row.scenario_count }} 个场景</span></article>{% else %}<p>暂无产品画像。</p>{% endfor %}</div></section>
+<section class="overall-card"><h2>客户</h2><div class="overall-capability-grid">{% for row in portrait.customer %}<article class="overall-capability"><strong>{{ row.label }}</strong><span>{{ row.scenario_count }} 个场景</span></article>{% else %}<p>暂无客户画像。</p>{% endfor %}</div></section>
+<section class="overall-card"><h2>行业</h2><div class="overall-capability-grid">{% for row in portrait.industry %}<article class="overall-capability"><strong>{{ row.label }}</strong><span>{{ row.scenario_count }} 个场景</span></article>{% else %}<p>暂无行业画像。</p>{% endfor %}</div></section>
+<p class="muted">READ_ONLY / NO_GUESSED_MASTER_DATA / NO_LEGACY_WRITE</p>
+{% endblock %}
