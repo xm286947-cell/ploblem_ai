@@ -223,7 +223,9 @@
           returnTo === '/p0/missed-test-analysis' ||
           returnTo.startsWith('/p0/missed-test-analysis?') ||
           returnTo === '/p0/itr-recovery' ||
-          returnTo.startsWith('/p0/itr-recovery?')
+          returnTo.startsWith('/p0/itr-recovery?') ||
+          returnTo === '/p0/itr-resolution' ||
+          returnTo.startsWith('/p0/itr-resolution?')
         ));
       root.querySelector('[data-back]').href = allowedReturn
         ? returnTo
