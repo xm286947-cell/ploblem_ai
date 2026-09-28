@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 
@@ -248,6 +248,12 @@ def create_p0_insights_router(
             "p0_batch_analysis.html",
             {"api_prefix": api_prefix.rstrip("/"), "page_title": "批量 AI 分析 · 质量能力"},
         )
+
+    @router.get("/p0/missed-test-analysis", include_in_schema=False)
+    async def p0_missed_test_analysis(request: Request) -> RedirectResponse:
+        query = request.url.query
+        target = "/missed-test-analysis" + (("?" + query) if query else "")
+        return RedirectResponse(target, status_code=307)
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
