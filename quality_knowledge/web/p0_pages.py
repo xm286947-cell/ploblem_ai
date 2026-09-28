@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .missed_test_adapter import build_missed_test_rows
+from .itr_recovery_adapter import build_itr_recovery_rows
 
 
 _HERE = Path(__file__).resolve().parent
@@ -139,7 +140,10 @@ def _safe_current_problem_return_url(raw: str | None) -> str:
         parsed.scheme
         or parsed.netloc
         or parsed.fragment
-        or parsed.path != "/p0/missed-test-analysis"
+        or parsed.path not in {
+            "/p0/missed-test-analysis",
+            "/p0/itr-recovery",
+        }
     ):
         raise HTTPException(status_code=400, detail="INVALID_ISSUE_RETURN_CONTEXT")
     return parsed.path + (("?" + parsed.query) if parsed.query else "")
@@ -297,6 +301,38 @@ def create_p0_insights_router(
                 "q": q,
                 "analysis_status": analysis_status,
                 "page_title": "软件问题漏测分析 · 质量能力",
+            },
+        )
+
+    @router.get("/p0/itr-recovery", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_itr_recovery(request: Request) -> HTMLResponse:
+        legacy = getattr(request.app.state, "legacy_quality_issue_services", None)
+        service = getattr(legacy, "knowledge_issue_service", None) if legacy is not None else None
+        if service is None:
+            status = getattr(request.app.state, "legacy_quality_issue_status", {}) or {}
+            raise HTTPException(
+                status_code=503,
+                detail=str(status.get("code") or "LEGACY_DB_UNAVAILABLE"),
+            )
+        q = (request.query_params.get("q") or "").strip()
+        rows = build_itr_recovery_rows(
+            service,
+            q=q,
+            detail_prefix="/p0/issues",
+            return_path="/p0/itr-recovery",
+        )
+        return templates.TemplateResponse(
+            request,
+            "p0_itr_recovery_workbench.html",
+            {
+                "items": rows,
+                "total": len(rows),
+                "with_recovery": sum(
+                    1 for row in rows
+                    if row.get("source_fact_status") == "SOURCE_FACT_PRESENT"
+                ),
+                "q": q,
+                "page_title": "ITR / 现场恢复 · 质量能力",
             },
         )
 
