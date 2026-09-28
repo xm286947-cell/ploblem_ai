@@ -210,10 +210,11 @@ This section supersedes earlier readiness claims for the current delivery.
 The demo changes are being merged into the canonical integration branch,
 retaining both histories. No further development is planned on the demo branch.
 
-- Complete Product Candidate acceptance: PENDING business-journey coverage.
+- Complete Product Candidate acceptance: PENDING remaining business-journey coverage.
+- Current Issue Golden Path: PASS with synthetic workbook import, real four-stage analysis service, deterministic OpenAI-compatible mock, persisted analysis, and human MRC confirmation with evidence. Regression: 16 passed across `tests/test_overall_legacy_business_golden_path.py`, `tests/test_overall_legacy_capability_compatibility.py`, and `tests/test_quality_capability_legacy_integration.py`.
 - Prior 8648fe3 ZIP: synthetic integration demo evidence, not release acceptance.
 - Startup route checker corrected to assert every route, not only the final route.
 - S11 Only closes the existing P04 defect; VNext changes require their own scoped acceptance.
 - Mobile evidence covers the Overall homepage viewport only; full mobile usability is pending.
-- Next: import/analyze/confirm/persist; knowledge review/publish/consume; scenario/source/return.
+- Next: case/knowledge review-publish-consume; scenario/source/return; full mobile validation; final DUT/runtime/evidence binding.
 - Existing historic milestone test counts remain tied to their recorded source SHAs.
