@@ -1,0 +1,5 @@
+# Release-bound seed/config artifacts are byte-hashed by P0Initializer.
+# Keep their checkout representation stable across Linux/macOS/Windows.
+quality_knowledge/config/*.yaml text eol=lf
+quality_knowledge/config/*.yml text eol=lf
+quality_knowledge/config/p0_seed_manifest.json text eol=lf
