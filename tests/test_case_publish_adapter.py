@@ -154,7 +154,7 @@ def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> 
         role="CURRENT_EVENT",
         status="LINKED",
     )
-    _entry(
+    root_entry = _entry(
         repo,
         case["case_id"],
         "ROOT_CAUSE",
@@ -177,6 +177,11 @@ def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> 
     assert sections[0]["section"] == "root-cause"
     assert sections[0]["source_type"] == "ITR"
     assert sections[0]["source_id"] == event["standard_itr"]
+    assert sections[0]["evidence_id"].startswith("MJR-EVD-")
+    assert sections[0]["source_version"] == root_entry["current_revision_id"]
+    assert sections[0]["source_ref"] == (
+        f"ITR:{event['standard_itr']}@{root_entry['current_revision_id']}"
+    )
     assert sections[0]["page"] is None
     assert sections[0]["page_numbers"] == []
     assert sections[0]["file_name"] is None
