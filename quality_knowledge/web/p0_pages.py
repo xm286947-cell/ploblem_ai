@@ -268,11 +268,37 @@ def create_p0_insights_router(
             {"api_prefix": api_prefix.rstrip("/"), "page_title": "批量 AI 分析 · 质量能力"},
         )
 
-    @router.get("/p0/missed-test-analysis", include_in_schema=False)
-    async def p0_missed_test_analysis(request: Request) -> RedirectResponse:
-        query = request.url.query
-        target = "/missed-test-analysis" + (("?" + query) if query else "")
-        return RedirectResponse(target, status_code=307)
+    @router.get("/p0/missed-test-analysis", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_missed_test_analysis(request: Request) -> HTMLResponse:
+        legacy = getattr(request.app.state, "legacy_quality_issue_services", None)
+        service = getattr(legacy, "knowledge_issue_service", None) if legacy is not None else None
+        if service is None:
+            status = getattr(request.app.state, "legacy_quality_issue_status", {}) or {}
+            raise HTTPException(
+                status_code=503,
+                detail=str(status.get("code") or "LEGACY_DB_UNAVAILABLE"),
+            )
+        q = (request.query_params.get("q") or "").strip()
+        analysis_status = (request.query_params.get("analysis_status") or "").strip().upper()
+        rows = build_missed_test_rows(
+            service,
+            q=q,
+            analysis_status=analysis_status,
+            detail_prefix="/p0/issues",
+            return_path="/p0/missed-test-analysis",
+            detail_anchor="analysis",
+        )
+        return templates.TemplateResponse(
+            request,
+            "p0_missed_test_analysis.html",
+            {
+                "items": rows,
+                "total": len(rows),
+                "q": q,
+                "analysis_status": analysis_status,
+                "page_title": "软件问题漏测分析 · 质量能力",
+            },
+        )
 
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:

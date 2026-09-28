@@ -326,6 +326,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             analysis_status=analysis_status,
             detail_prefix='/issues',
             return_path='/missed-test-analysis',
+            detail_anchor='causes',
         )
         return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
             'items': rows,
