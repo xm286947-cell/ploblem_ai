@@ -86,6 +86,21 @@ jobs:
           }
           "R2_W1_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Verify frozen PLC seed byte contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:R2_W1_ROOT
+          $manifest = Get-Content "quality_knowledge/config/p0_seed_manifest.json" -Raw | ConvertFrom-Json
+          $expected = ($manifest.seeds | Where-Object { $_.seed_key -eq "PLC_MAPPING_SEED_V1" -and $_.version -eq 1 }).sha256.ToLower()
+          $actual = (Get-FileHash -Algorithm SHA256 "quality_knowledge/config/plc_fields.yaml").Hash.ToLower()
+          Write-Host "PLC_SEED_EXPECTED_SHA256=$expected"
+          Write-Host "PLC_SEED_ACTUAL_SHA256=$actual"
+          if ($actual -ne $expected) {
+            throw "PLC_SEED_BYTE_CONTRACT_MISMATCH expected=$expected actual=$actual"
+          }
+          Write-Host "PLC_SEED_BYTE_CONTRACT=PASS"
+
       - name: Prepare independent Legacy and P1 databases
         shell: pwsh
         run: |
