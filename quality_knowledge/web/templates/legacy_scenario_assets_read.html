@@ -1,0 +1,17 @@
+{% extends "p0_base.html" %}
+{% block title %}原质量场景资产与产品画像{% endblock %}
+{% block shell_product %}历史质量场景兼容{% endblock %}
+{% block breadcrumb %}原质量场景资产{% endblock %}
+{% block body %}
+<section class="overall-head"><div><div class="overall-kicker">LEGACY · READ ONLY</div><h1>原质量场景资产与产品画像</h1><p>恢复历史 <code>/quality-scenario-assets</code> 入口；只读展示场景资产、产品分布和 Evidence 计数。</p></div><a class="overall-secondary" href="/p0/overall/areas/scenarios-insights">返回质量场景与洞察</a></section>
+<section class="overall-grid">
+  <article class="overall-card"><h2>场景资产</h2><strong>{{ portrait.scenario_count }}</strong><p>Legacy quality_scenario</p></article>
+  <article class="overall-card"><h2>Evidence 绑定</h2><strong>{{ portrait.evidence_count }}</strong><p>Legacy quality_scenario_evidence</p></article>
+</section>
+<section class="overall-card"><h2>产品画像</h2><div class="overall-capability-grid">
+{% for row in portrait.product %}<article class="overall-capability"><strong>{{ row.label }}</strong><span>{{ row.scenario_count }} 个历史场景</span><small>Legacy Product View</small></article>{% else %}<p>暂无产品聚合。</p>{% endfor %}
+</div></section>
+<section class="overall-card"><h2>历史资产清单</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>场景</th><th>产品</th><th>状态</th><th></th></tr></thead><tbody>
+{% for item in items %}<tr><td>{{ item.name }}</td><td>{{ item.product_code or '-' }}</td><td>{{ item.status or '-' }}</td><td><a href="/quality-scenario-assets/{{ item.scenario_id }}">查看</a></td></tr>{% else %}<tr><td colspan="4">暂无历史场景资产。</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}
