@@ -1,0 +1,58 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block breadcrumb %}当前问题 / ITR / 现场恢复{% endblock %}
+{% block body %}
+<main class="p0-workbench" data-r2-itr-recovery>
+  <header class="p0-page-head">
+    <div>
+      <span class="p0-kicker">ALIGNED CONSUMPTION VIEW</span>
+      <h1>ITR / 现场恢复</h1>
+      <p>只读展示原始 ITR / 现场恢复 Source Fact。原业务事实源继续拥有写入与状态机，Overall 不复制、不静默覆盖。</p>
+    </div>
+    <div class="p0-nav">
+      <a class="p0-ghost" href="/p0/issues">返回问题工作台</a>
+      <a class="p0-ghost" href="/itr/resolution-workbench">彻底解决单</a>
+    </div>
+  </header>
+
+  <section class="p0-card p0-scope-bar">
+    <strong>Source Ownership</strong>
+    <span>READ_ONLY_SOURCE_OWNED · SOURCE_CHANGED → REFRESH / RECONCILE · CONFLICT → HUMAN_CONFIRM · NO_SILENT_OVERWRITE</span>
+  </section>
+
+  <section class="p0-card p0-filter-card">
+    <form method="get" action="/p0/itr-recovery">
+      <label class="p0-search">搜索<input name="q" value="{{q or ''}}" placeholder="ITR、问题摘要、产品、现场记录、临时措施"></label>
+      <button class="p0-primary">筛选</button>
+      <a class="p0-ghost" href="/p0/itr-recovery">清空</a>
+    </form>
+  </section>
+
+  <section class="p0-columns">
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">CURRENT</span><h2>{{total}}</h2><p>当前 ITR / 问题</p></div></div></article>
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">SOURCE FACT</span><h2>{{with_recovery}}</h2><p>含现场恢复事实</p></div></div></article>
+  </section>
+
+  <section class="p0-card p0-table-card">
+    <div class="p0-card-head"><div><h2>ITR Source Fact</h2><p>现场恢复信息只从原始 Source Fact / 已对齐事实读取。</p></div><span>Existing Problem Domain</span></div>
+    <div class="p0-table-wrap"><table class="p0-table">
+      <thead><tr><th>ITR / 问题</th><th>产品 / 平台</th><th>发生阶段</th><th>现场作业 / 恢复记录</th><th>临时措施</th><th>Source</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td><strong>{{item.business_issue_id}}</strong><small>{{item.title or item.description or '-'}}</small><small>{{item.source_fact_status}}</small></td>
+        <td>{{item.product or '-'}}<small>{{item.platform or '-'}}</small></td>
+        <td>{{item.occurrence_stage or 'Source 未提供'}}</td>
+        <td>{{item.field_work_record or 'Source 未提供现场作业记录'}}</td>
+        <td>{{item.workaround or 'Source 未提供临时措施'}}</td>
+        <td>{{item.source_file or '未知文件'}}<small>{{item.source_sheet or '-'}}{% if item.source_row %} · Row {{item.source_row}}{% endif %}</small>{% if item.source_url %}<small><a href="{{item.source_url}}" target="_blank" rel="noopener">打开原 Source</a></small>{% endif %}</td>
+        <td><a class="p0-ghost" href="{{item.detail_url}}">打开对齐问题详情</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="p0-loading">当前没有符合条件的 ITR。系统不会推断或补造现场恢复事实。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+{% endblock %}
