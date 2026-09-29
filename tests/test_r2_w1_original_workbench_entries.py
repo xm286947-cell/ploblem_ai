@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
@@ -175,6 +176,12 @@ def test_original_current_problem_entries_are_restored_in_p0_shell(tmp_path: Pat
     _software_assessment_source(source)
     _import_software_assessment(legacy_client, source)
 
+    # Simulate a historical database whose source facts survived but whose
+    # association-link projection was not rebuilt during R2 assembly.
+    with sqlite3.connect(legacy_db) as connection:
+        connection.execute("DELETE FROM issue_material_link")
+        assert connection.execute("SELECT COUNT(*) FROM issue_material_link").fetchone()[0] == 0
+
     p0_db = tmp_path / "p0.db"
     P0Initializer(
         manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
@@ -214,5 +221,19 @@ def test_original_current_problem_entries_are_restored_in_p0_shell(tmp_path: Pat
     )
     assert detail.status_code == 200
     assert 'href="/p0/software-assessment?q=责任确认"' in detail.text
+    assert "返回软件考核工作台" in detail.text
+    assert "关联业务对象" in detail.text
+    assert "/p0/software-assessment?q=ITR-R2-SW-1" in detail.text
+    assert "CANONICAL_PROBLEM_IDENTITY" in detail.text
+    assert "未发现已确认关联" in detail.text
+
+    static_js = client.get("/p0/static/p0_issue_detail.js")
+    assert static_js.status_code == 200
+    assert "returnTo === '/p0/software-assessment'" in static_js.text
+
+    # Read-time recovery must remain read-only; it may project the unique
+    # canonical relation but must not silently repopulate the Legacy link table.
+    with sqlite3.connect(legacy_db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM issue_material_link").fetchone()[0] == 0
 
     assert client.post("/p0/software-assessment").status_code == 405
