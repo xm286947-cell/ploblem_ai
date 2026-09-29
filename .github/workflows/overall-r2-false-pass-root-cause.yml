@@ -1,0 +1,59 @@
+name: R2 False-PASS Root-Cause Closure Gate
+
+on:
+  push:
+    branches:
+      - hotfix/r2-false-pass-root-cause
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "scripts/build_overall_r2_windows_candidate.py"
+      - "scripts/overall_r2_windows_start.py"
+      - "tests/test_r2_w5_windows_package_builder.py"
+      - "tests/test_r2_false_pass_built_zip_windows_e2e.py"
+      - "tests/support/r2_false_pass_openai_mock.py"
+      - ".github/workflows/overall-r2-false-pass-root-cause.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  assembly-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package-builder test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Validate candidate assembly and Knowledge Release initialization
+        run: |
+          pytest -q tests/test_r2_w5_windows_package_builder.py
+
+  built-zip-windows-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install orchestration test dependency only
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+      - name: Run actual built ZIP through Windows child process
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pytest -q -s tests/test_r2_false_pass_built_zip_windows_e2e.py
