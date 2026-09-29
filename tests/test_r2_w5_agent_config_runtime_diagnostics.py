@@ -15,6 +15,7 @@ from quality_knowledge.web.overall_runtime_control import (
     create_overall_runtime_control_router,
 )
 from quality_knowledge.web.overall_shell import PRODUCT_AREAS
+from scripts.overall_r2_windows_start import _active_runtime_model_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -431,6 +432,63 @@ def test_w5_runtime_diagnostics_projects_existing_trace_and_kp_failure(
         failures["items"][0]["error"]["code"]
         == "PROVIDER_TIMEOUT"
     )
+
+
+
+def test_w5_windows_restart_reuses_active_external_revision(
+    tmp_path: Path,
+    monkeypatch,
+):
+    control = _control(tmp_path, monkeypatch)
+    revision = control.create_revision(
+        ConfigRevisionRequest(
+            active_model="local",
+            models={
+                "local": {
+                    "provider": "openai_compatible",
+                    "base_url": "http://127.0.0.1:11434/v1",
+                    "model": "local-model",
+                    "temperature": 0,
+                    "max_tokens": 512,
+                }
+            },
+            note="restart-persistence",
+        ),
+        actor="pytest",
+    )
+    control.activate_revision(
+        revision["revision_id"],
+        actor="pytest",
+    )
+
+    resolved = _active_runtime_model_config(
+        ROOT,
+        control.state_root,
+    )
+    assert resolved == Path(revision["path"]).resolve()
+
+    outside = tmp_path / "outside.yaml"
+    outside.write_text(
+        "active_model: x\nmodels: {}\n",
+        encoding="utf-8",
+    )
+    control.active_path.write_text(
+        json.dumps(
+            {
+                "revision_id": "tampered",
+                "path": str(outside),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="OVERALL_RUNTIME_ACTIVE_REVISION_INVALID",
+    ):
+        _active_runtime_model_config(
+            ROOT,
+            control.state_root,
+        )
 
 
 def test_w5_common_routes_pages_navigation_and_storage_deep_links(
