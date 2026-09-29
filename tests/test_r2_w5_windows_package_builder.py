@@ -67,6 +67,14 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
         "/p0/missed-test-analysis",
     ]
     assert manifest["data_binding"]["legacy_quality_issue_db"] == "EXTERNAL_REQUIRED"
+    assert manifest["data_binding"]["storage_runtime_db_env"] == "STORAGE_LIFE_RUNTIME_DB"
+    assert manifest["data_binding"]["knowledge_repository_env"] == "STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+    assert manifest["data_binding"]["knowledge_release_env"] == "STORAGE_KNOWLEDGE_RELEASE_DIR"
+    assert manifest["data_binding"]["package_local_runtime_state"] is False
+    assert manifest["data_binding"]["package_local_knowledge_state"] is False
+    assert manifest["runtime_binding"]["storage_execution_mode"] == "runtime"
+    assert manifest["runtime_binding"]["storage_agent_id"] == "storage.emmc.parameter_extract"
+    assert manifest["runtime_binding"]["storage_model_ref"] == "qwen_prod"
     assert manifest["data_binding"]["real_internal_data_included"] is False
     assert manifest["provider_binding"]["real_secret_included"] is False
     assert manifest["rollback"]["formal_release_source"] == PREVIOUS_RELEASE
