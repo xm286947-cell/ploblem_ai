@@ -18,7 +18,6 @@ INCLUDE_DIRS = [
     "compatibility",
     "contracts",
     "models",
-    "parser",
     "quality_knowledge",
     "repositories",
     "retriever",
