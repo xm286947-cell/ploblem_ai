@@ -41,6 +41,13 @@ FULL_DOMAINS = frozenset({"QUALITY_ISSUE", "REPEAT_RISK", "HARDWARE_CASE"})
 KNOWN_DOMAINS = FULL_DOMAINS
 
 
+def _normalize_hardware_case_host_role(value: str | None) -> str:
+    role = str(value or "CONSUMER").strip().upper()
+    if role not in {"CONSUMER", "MAINTAINER"}:
+        raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
+    return role
+
+
 def _normalize_domains(
     enabled_domains: set[str] | frozenset[str] | None,
 ) -> frozenset[str]:
@@ -67,6 +74,7 @@ def create_p0_app(
     hardware_tree_upload_dir: str | Path | None = None,
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
+    hardware_case_host_role: str | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -99,6 +107,11 @@ def create_p0_app(
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
+    app.state.hardware_case_host_role = _normalize_hardware_case_host_role(
+        hardware_case_host_role
+        if hardware_case_host_role is not None
+        else os.getenv("HARDWARE_CASE_HOST_ROLE", "CONSUMER")
+    )
     app.state.storage_workspace_binding = None
     if storage_app is not None or app.state.overall_shell_enabled:
         from quality_knowledge.web.storage_workspace import bind_storage_workspace
@@ -374,6 +387,7 @@ def create_p0_app(
             create_hardware_tree_import_router(
                 hardware_tree_import_repository,
                 hardware_tree_file_store,
+                host_role=app.state.hardware_case_host_role,
             )
         )
         app.include_router(
@@ -381,6 +395,7 @@ def create_p0_app(
                 hardware_case_service,
                 source_store=hardware_case_source_store,
                 intake_service=hardware_case_intake_service,
+                host_role=app.state.hardware_case_host_role,
             )
         )
 
@@ -392,7 +407,10 @@ def create_p0_app(
             from quality_knowledge.web.overall_shell import create_overall_shell_router
 
             app.include_router(
-                create_overall_shell_router(task_provider=overall_task_provider)
+                create_overall_shell_router(
+                    task_provider=overall_task_provider,
+                    hardware_case_host_role=app.state.hardware_case_host_role,
+                )
             )
 
         app.include_router(
@@ -408,7 +426,10 @@ def create_p0_app(
         app.include_router(create_public_scenario_router(app.state.p04_service))
         app.include_router(create_portrait_router(app.state.portrait_service))
         app.include_router(
-            create_p0_insights_router(scenario_detail_service=app.state.p04_service)
+            create_p0_insights_router(
+                scenario_detail_service=app.state.p04_service,
+                hardware_case_host_role=app.state.hardware_case_host_role,
+            )
         )
         app.include_router(create_p1_router())
 
