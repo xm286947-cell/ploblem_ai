@@ -34,6 +34,29 @@ def _is_missed_test_issue(normalized: dict[str, Any]) -> bool:
     return str(raw or "").strip().upper() in {"1", "TRUE", "YES", "Y", "是", "漏测"}
 
 
+def _material_source_ref(row: dict[str, Any]) -> dict[str, Any]:
+    material_id = str(row.get("material_id") or "").strip()
+    return {
+        "object_ref": (
+            {
+                "domain": "EXISTING_PROBLEM",
+                "object_type": "source_material",
+                "object_id": material_id,
+            }
+            if material_id
+            else None
+        ),
+        "material_type": str(row.get("material_type") or ""),
+        "business_key": str(row.get("business_key") or ""),
+        "version_no": row.get("version_no"),
+        "source_hash": str(row.get("source_hash") or ""),
+        "source_file": str(row.get("source_file") or ""),
+        "source_sheet": str(row.get("sheet_name") or row.get("source_sheet") or ""),
+        "source_row": row.get("row_number") or row.get("source_row"),
+        "link_status": str(row.get("link_status") or ""),
+    }
+
+
 def build_current_problem_associations(
     service: Any,
     material_repository: Any,
@@ -94,6 +117,14 @@ def build_current_problem_associations(
             href=link(routes["itr"], itr_present),
             evidence=[identity.source_problem_ref.public_ref] if identity else [],
             source_domain="EXISTING_PROBLEM",
+            source_refs=[
+                {
+                    "source_problem_ref": identity.source_problem_ref.to_dict(),
+                    "master_object_ref": identity.to_dict()["master_object_ref"],
+                    "version_ref": identity.to_dict()["version_ref"],
+                }
+            ] if identity else [],
+            no_relation_reason="INVALID_OR_NON_ITR_BUSINESS_IDENTITY",
         ),
         build_relation_contract(
             identity,
@@ -108,6 +139,8 @@ def build_current_problem_associations(
                 for row in resolution[:3]
             ],
             source_domain="ITR_RESOLUTION_SOURCE",
+            source_refs=[_material_source_ref(row) for row in resolution],
+            no_relation_reason="RELATION_NOT_FOUND_OR_AMBIGUOUS",
         ),
         build_relation_contract(
             identity,
@@ -122,6 +155,8 @@ def build_current_problem_associations(
                 for row in assessment[:3]
             ],
             source_domain="SOFTWARE_ASSESSMENT_SOURCE",
+            source_refs=[_material_source_ref(row) for row in assessment],
+            no_relation_reason="RELATION_NOT_FOUND_OR_AMBIGUOUS",
         ),
         build_relation_contract(
             identity,
@@ -133,6 +168,14 @@ def build_current_problem_associations(
             href=link(routes["missed"], missed),
             evidence=["escape.is_escape"] if missed else [],
             source_domain="EXISTING_PROBLEM",
+            source_refs=[
+                {
+                    "master_object_ref": identity.to_dict()["master_object_ref"],
+                    "version_ref": identity.to_dict()["version_ref"],
+                    "field": "escape.is_escape",
+                }
+            ] if identity else [],
+            no_relation_reason="SOURCE_FACT_NOT_PRESENT",
         ),
     ]
 
