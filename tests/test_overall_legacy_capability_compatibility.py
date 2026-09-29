@@ -193,6 +193,11 @@ def test_legacy_import_analysis_statistics_share_one_host_and_isolated_database(
     assert analysis_page.status_code == import_page.status_code == statistics_page.status_code == 200
     assert "/analysis-batch" in analysis_page.text
     assert 'action="/import/preview"' in import_page.text
+    assert 'href="/import/template"' in import_page.text
+    template_response = client.get("/import/template")
+    assert template_response.status_code == 200
+    assert template_response.content.startswith(b"PK")
+    assert "major_case_excel_import_template.xlsx" in template_response.headers["content-disposition"]
     assert 'name="month"' in statistics_page.text
     assert client.get("/static/app.css").status_code == 200
 
