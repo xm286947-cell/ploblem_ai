@@ -197,6 +197,8 @@ def test_w5_clean_external_data_root_seeds_packaged_formal_knowledge_release(tmp
     ).read_bytes()
     second = module._initialize_packaged_knowledge_release(ROOT, target)
     assert second["status"] == "EXISTING_EXTERNAL_RELEASE"
+    assert second["knowledge_release_version"] == "KP-STORAGE-RC1-VALIDATION-001"
+    assert second["snapshot_hash"] == result["snapshot_hash"]
     assert (
         ROOT
         / "products"
