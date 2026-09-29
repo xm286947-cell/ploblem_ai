@@ -134,12 +134,19 @@ class MaterialRepository:
                     c.execute("INSERT OR IGNORE INTO issue_material_link(link_id,knowledge_id,material_id,rule_id,link_status,match_value) VALUES(?,?,?,?,?,?)", (f"LNK-{uuid.uuid4().hex}", issues[0][0], material["material_id"], rule["rule_id"], status, material["canonical_itr"]))
 
     def materials_for_issue(self, knowledge_id):
-        with self.connect() as c:
-            rows = c.execute("SELECT m.*,g.group_name,l.link_status FROM issue_material_link l JOIN source_material m ON m.material_id=l.material_id JOIN data_group g ON g.group_id=m.group_id WHERE l.knowledge_id=? ORDER BY m.material_type,m.version_no DESC", (knowledge_id,)).fetchall()
-            result=[]
-            for row in rows:
-                item=dict(row); item["raw"]=json.loads(item.pop("raw_json") or "{}"); result.append(item)
-            return result
+        """Return only source materials proven to belong to one canonical issue.
+
+        Persisted links remain authoritative.  For historical databases where
+        the link table was not rebuilt during R2 assembly, an exact unique
+        canonical ITR match is projected read-only.  Ambiguous or missing
+        matches remain fail-closed and are never exposed as relations.
+        """
+        return [
+            row
+            for row in self.list_materials_with_issue_links(limit=100000)
+            if row.get("knowledge_id") == knowledge_id
+            and row.get("link_status") in {"LINKED", "MANUAL_LINKED", "DERIVED_CANONICAL_LINK"}
+        ]
 
     def list_materials(self, group_code="", limit=200):
         sql="SELECT m.*,g.group_code,g.group_name FROM source_material m JOIN data_group g ON g.group_id=m.group_id"
@@ -168,9 +175,28 @@ class MaterialRepository:
         values.append(limit)
         with self.connect() as connection:
             rows = [dict(row) for row in connection.execute(sql, values)]
-        for row in rows:
-            row["raw"] = json.loads(row.pop("raw_json") or "{}")
-            row["link_status"] = row.get("link_status") or "UNLINKED"
+            for row in rows:
+                row["raw"] = json.loads(row.pop("raw_json") or "{}")
+                if row.get("knowledge_id"):
+                    row["link_status"] = row.get("link_status") or "LINKED"
+                    continue
+                canonical = normalize_itr(row.get("canonical_itr"))
+                if not canonical:
+                    row["link_status"] = "UNLINKED"
+                    continue
+                issues = connection.execute(
+                    "SELECT knowledge_id,business_issue_id FROM quality_issue "
+                    "WHERE UPPER(REPLACE(business_issue_id,' ',''))=?",
+                    (canonical,),
+                ).fetchall()
+                if len(issues) == 1:
+                    row["knowledge_id"] = issues[0]["knowledge_id"]
+                    row["linked_issue_id"] = issues[0]["business_issue_id"]
+                    row["link_status"] = "DERIVED_CANONICAL_LINK"
+                elif len(issues) > 1:
+                    row["link_status"] = "CONFLICT"
+                else:
+                    row["link_status"] = "ITR_NOT_FOUND"
         return rows
 
     def rules(self):
@@ -194,8 +220,18 @@ class MaterialRepository:
 class MaterialImportService:
     KEY_ALIASES = {
         "ITR_SOURCE": ("问题信息_ITR单号", "ITR单号"),
-        "ITR_CS": ("问题信息_彻底解决单号", "彻底解决单号"),
-        "SOFTWARE_OPERATION": ("问题信息_彻底解决单号", "彻底解决单号"),
+        "ITR_CS": (
+            "问题信息_彻底解决单号",
+            "彻底解决单号",
+            "问题信息_ITR单号",
+            "ITR单号",
+        ),
+        "SOFTWARE_OPERATION": (
+            "问题信息_彻底解决单号",
+            "彻底解决单号",
+            "问题信息_ITR单号",
+            "ITR单号",
+        ),
     }
 
     def __init__(self, repository: MaterialRepository):
