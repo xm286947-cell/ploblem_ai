@@ -1,0 +1,197 @@
+name: STEP1 Legacy Quality Scenario Restore
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/**"
+      - "tests/test_quality_scenario_library.py"
+      - "tests/test_step1_legacy_quality_scenario_restore.py"
+      - ".github/workflows/step1-legacy-quality-scenario-restore.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mature-capability-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run mature Quality Scenario focused regression
+        run: |
+          pytest -q \
+            tests/test_step1_legacy_quality_scenario_restore.py \
+            tests/test_quality_scenario_library.py
+      - name: Prove Overall-only substitute is not the restored implementation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("quality_knowledge/web/legacy_quality_scenario_mature.py").read_text(encoding="utf-8")
+          assert "/quality-scenarios" in source
+          assert "/quality-scenario-assets" in source
+          assert "/quality-scenario-assets/portrait" in source
+          assert "/p0/quality-scenario-insights" not in source
+          print("NEW_R2_SCENARIO_SUBSTITUTION=NO")
+          PY
+
+  windows-legacy-entry-and-package:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: .
+      REPEAT_CASE_NO_PAUSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+          python -m pip install playwright
+          if (Get-Command py -ErrorAction SilentlyContinue) {
+            py -m pip install --disable-pip-version-check -r requirements.txt -r requirements-runtime-p0-test.txt
+          }
+      - name: Start through the real legacy BAT and smoke restored pages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $db = Join-Path $PWD "knowledge\quality_issue_v1.db"
+          if (Test-Path $db) { Remove-Item -Force $db }
+          $stdout = Join-Path $env:RUNNER_TEMP "step1-legacy-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "step1-legacy-stderr.log"
+          $args = '/c set REPEAT_CASE_NO_PAUSE=1&& start_quality_capability_p1.bat --host 127.0.0.1 --port 8099'
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8099/issues" -TimeoutSec 2
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              if ($proc.HasExited) { break }
+            }
+            if (-not $ready) {
+              Get-Content $stdout -ErrorAction SilentlyContinue
+              Get-Content $stderr -ErrorAction SilentlyContinue
+              throw "LEGACY_START_ENTRY_FAILED"
+            }
+            foreach ($path in @(
+              "/quality-scenarios",
+              "/quality-scenario-assets",
+              "/quality-scenario-assets/portrait",
+              "/issues",
+              "/analysis",
+              "/import"
+            )) {
+              $response = Invoke-WebRequest -UseBasicParsing ("http://127.0.0.1:8099" + $path) -TimeoutSec 10
+              if ($response.StatusCode -ne 200) { throw "LEGACY_ROUTE_FAILED:$path" }
+              Write-Host "LEGACY_ENTRY_SMOKE=$path=PASS"
+            }
+            Write-Host "LEGACY_START_ENTRY=PASS"
+
+            $browserEvidence = Join-Path $env:RUNNER_TEMP "step1-browser-evidence"
+            python scripts/step1_legacy_browser_evidence.py --base-url "http://127.0.0.1:8099" --db $db --output-dir $browserEvidence
+            if ($LASTEXITCODE -ne 0) { throw "STEP1_BROWSER_EVIDENCE_FAILED" }
+            "BROWSER_EVIDENCE_DIR=$browserEvidence" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "BROWSER_VISIBLE_EVIDENCE=PASS"
+          } finally {
+            if (-not $proc.HasExited) {
+              taskkill /PID $proc.Id /T /F | Out-Null
+            }
+          }
+      - name: Build exact-source manual validation package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sha = (git rev-parse HEAD).Trim()
+          $short = $sha.Substring(0,12)
+          $name = "LEGACY_QUALITY_SCENARIO_PORTRAIT_RESTORE_$short"
+          $stageRoot = Join-Path $env:RUNNER_TEMP "step1-package-stage"
+          $sourceZip = Join-Path $env:RUNNER_TEMP "step1-source.zip"
+          $zip = Join-Path $env:RUNNER_TEMP ($name + ".zip")
+
+          if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
+          if (Test-Path $sourceZip) { Remove-Item -Force $sourceZip }
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+          git archive --format=zip --prefix="$name/" --output="$sourceZip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw "GIT_ARCHIVE_FAILED" }
+          Expand-Archive -Path $sourceZip -DestinationPath $stageRoot -Force
+
+          $note = Join-Path $stageRoot "$name\STEP1_MANUAL_VALIDATION.txt"
+          @(
+            "CANDIDATE_CLASS=STEP1_MANUAL_VALIDATION",
+            "SOURCE_SHA=$sha",
+            "START_ENTRY=start_quality_capability_p1.bat",
+            "MATURE_SOURCE_COMMIT=ce2eca157c4403b97036dd66e5218cd74fe53700",
+            "TARGET_1=/quality-scenarios",
+            "TARGET_2=/quality-scenario-assets",
+            "TARGET_3=/quality-scenario-assets/portrait",
+            "DATA_POLICY=NO_REAL_INTERNAL_DB_IN_PACKAGE",
+            "MANUAL_DATA_BINDING=use approved existing knowledge\quality_issue_v1.db on target",
+            "ACCEPTANCE=real browser page/data/filter/drill-down; route 200 alone is not acceptance"
+          ) | Set-Content -Encoding utf8 $note
+
+          Compress-Archive -Path (Join-Path $stageRoot $name) -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+
+          "PACKAGE_ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGE_SHA256=$hash" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "SOURCE_SHA=$sha" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SOURCE_SHA=$sha"
+          Write-Host "PACKAGE_FILENAME=$($name).zip"
+          Write-Host "PACKAGE_SHA256=$hash"
+          Write-Host "START_ENTRY=start_quality_capability_p1.bat"
+          Write-Host "FORMAL_W6_FINAL_CANDIDATE=NO"
+      - name: Write package evidence
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "STEP1_LEGACY_QUALITY_SCENARIO_PACKAGE_EVIDENCE.txt"
+          @(
+            "TASK=STEP1-LEGACY-QUALITY-SCENARIO-AND-PORTRAIT-RESTORE-001",
+            "SOURCE_SHA=$env:SOURCE_SHA",
+            "PACKAGE_SHA256=$env:PACKAGE_SHA256",
+            "START_ENTRY=start_quality_capability_p1.bat",
+            "LEGACY_START_ENTRY=PASS",
+            "QUALITY_SCENARIO_ROUTE=/quality-scenarios",
+            "PRODUCT_PORTRAIT_ROUTE=/quality-scenario-assets",
+            "CUSTOMER_INDUSTRY_PORTRAIT_ROUTE=/quality-scenario-assets/portrait",
+            "OLD_PROBLEM_PLATFORM_SMOKE=/issues,/analysis,/import",
+            "NO_REAL_INTERNAL_DB_IN_PACKAGE=YES",
+            "USER_VISIBLE_RESULT=PENDING_MANUAL_CONFIRMATION",
+            "FORMAL_W6_FINAL_CANDIDATE=NO"
+          ) | Set-Content -Encoding utf8 $report
+          "EVIDENCE_REPORT=$report" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STEP1_LEGACY_QUALITY_SCENARIO_MANUAL_VALIDATION
+          path: |
+            ${{ env.PACKAGE_ZIP }}
+            ${{ env.EVIDENCE_REPORT }}
+            ${{ env.BROWSER_EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

@@ -1368,4 +1368,10 @@ def create_app(db_path):
         return RedirectResponse('/issues')
     for name, value in vars(state).items():
         setattr(standalone.state, name, value)
+
+    # STEP1 #299: restore the mature Quality Scenario / Portrait capability only
+    # for the standalone legacy knowledge-web entry. Overall composition uses
+    # create_legacy_quality_issue_router directly and remains unchanged.
+    from .legacy_quality_scenario_mature import attach_mature_quality_scenario_routes
+    attach_mature_quality_scenario_routes(standalone, db_path)
     return standalone
