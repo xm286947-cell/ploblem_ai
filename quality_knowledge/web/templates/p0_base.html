@@ -25,6 +25,10 @@
       <div class="nav-label">现有能力</div>
       {% endif %}
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/itr-recovery') %}active{% endif %}" href="/p0/itr-recovery">ITR工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/itr-resolution') %}active{% endif %}" href="/p0/itr-resolution">彻底解决工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/software-assessment') %}active{% endif %}" href="/p0/software-assessment">软件考核工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/missed-test-analysis') %}active{% endif %}" href="/p0/missed-test-analysis">漏测分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/cases') %}active{% endif %}" href="/p0/cases">重大问题案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/major-production') %}active{% endif %}" href="/p0/major-production">重大问题知识生产</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/hardware-cases') %}active{% endif %}" href="/p0/hardware-cases">硬件案例库</a>

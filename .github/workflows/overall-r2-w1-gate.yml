@@ -129,6 +129,8 @@ jobs:
               "http://127.0.0.1:8080/p0/itr-recovery",
               "http://127.0.0.1:8080/itr/resolution-workbench",
               "http://127.0.0.1:8080/p0/itr-resolution",
+              "http://127.0.0.1:8080/software-assessment",
+              "http://127.0.0.1:8080/p0/software-assessment",
               "http://127.0.0.1:8080/p0/missed-test-analysis",
               "http://127.0.0.1:8080/p0/batch-analysis",
               "http://127.0.0.1:8080/analysis"

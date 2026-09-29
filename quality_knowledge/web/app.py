@@ -36,6 +36,7 @@ from quality_knowledge.materials import MaterialRepository, MaterialImportServic
 from .missed_test_adapter import build_missed_test_rows
 from .itr_recovery_adapter import build_itr_recovery_rows
 from .itr_resolution_adapter import build_itr_resolution_rows
+from .software_assessment_adapter import build_software_assessment_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -92,7 +93,7 @@ def _safe_issue_return_context(raw: str | None) -> str:
     parsed = urlsplit(value)
     if parsed.scheme or parsed.netloc or parsed.fragment:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
-    if parsed.path not in {'/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis'}:
+    if parsed.path not in {'/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis', '/software-assessment'}:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
     return parsed.path + (('?' + parsed.query) if parsed.query else '')
 
@@ -364,6 +365,29 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             'total': len(rows),
             'q': q,
             'analysis_status': analysis_status,
+        })
+
+    @app.get('/software-assessment', response_class=HTMLResponse, include_in_schema=False)
+    def software_assessment(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_software_assessment_rows(
+            material_repo,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/software-assessment',
+        )
+        linked = sum(1 for row in rows if row.get('knowledge_id'))
+        source_state = sum(
+            1 for row in rows
+            if row.get('assessment_status') or row.get('assessment_result')
+        )
+        return tpl.TemplateResponse(request, 'software_assessment_workbench.html', {
+            'items': rows,
+            'total': len(rows),
+            'linked': linked,
+            'unlinked': len(rows) - linked,
+            'source_state': source_state,
+            'q': q,
         })
 
     @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
@@ -642,6 +666,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             '/itr/resolution-workbench': '返回彻底解决工作台',
             '/itr/recovery-workbench': '返回 ITR / 现场恢复',
             '/missed-test-analysis': '返回漏测分析',
+            '/software-assessment': '返回软件考核工作台',
         }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
