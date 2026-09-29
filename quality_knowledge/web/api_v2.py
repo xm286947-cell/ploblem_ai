@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from compatibility.common_evidence import CommonEvidenceContractError, map_common_evidence
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
 from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
@@ -674,9 +675,51 @@ def create_v2_router(
     @router.get("/historical-cases/{case_id}")
     def historical_case_detail(case_id: str) -> dict[str, Any]:
         try:
-            return _repeat_service().case_detail(case_id)
+            detail = _repeat_service().case_detail(case_id)
         except HistoricalCaseContractError as error:
             raise _repeat_http_error(error) from error
+
+        # Overall adds a transport-only Common Evidence projection at the
+        # consumer boundary. Historical Case storage/contract stays unchanged.
+        evidence_items = detail.get("evidence")
+        if isinstance(evidence_items, list):
+            projected: list[dict[str, Any]] = []
+            for evidence in evidence_items:
+                item = dict(evidence) if isinstance(evidence, dict) else {}
+                raw_text = item.get("raw_text")
+                common_raw = {
+                    "evidence_id": item.get("evidence_id"),
+                    "evidence_type": (
+                        "SOURCE_EXCERPT" if raw_text else "SOURCE_REFERENCE"
+                    ),
+                    "source_type": item.get("source_type"),
+                    "source_id": item.get("source_id"),
+                    "source_version": item.get("source_version"),
+                    "source_ref": item.get("source_ref"),
+                    "page": item.get("page"),
+                    "section": item.get("section"),
+                    "excerpt": raw_text,
+                    "source_reference": item.get("url"),
+                }
+                try:
+                    item["common_evidence"] = map_common_evidence(
+                        common_raw,
+                        producer_domain="Historical Case",
+                        producer_object_id=str(detail.get("case_id") or case_id),
+                        producer_object_version=(
+                            detail.get("case_version") or detail.get("version")
+                        ),
+                    )
+                    item["common_evidence_status"] = "AVAILABLE"
+                except CommonEvidenceContractError:
+                    # Older published artifacts can pre-date stable Evidence
+                    # identity. They remain readable, but Overall never invents
+                    # missing identity/version data just to open the viewer.
+                    item["common_evidence"] = None
+                    item["common_evidence_status"] = "UNAVAILABLE"
+                projected.append(item)
+            detail = {**detail, "evidence": projected}
+        return detail
 
     def insight_filters(business_type: str, month: str, issue_domain: str, lifecycle_phase: str) -> dict[str, str]:
         return {key: value for key, value in {
