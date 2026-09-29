@@ -5,24 +5,44 @@ on:
     branches:
       - integration/overall-r2
     paths:
+      - "main.py"
+      - "quality_knowledge/**"
+      - "runtime/**"
+      - "products/storage_rc1/**"
+      - "requirements.txt"
+      - "requirements-runtime-p0-test.txt"
       - "scripts/build_overall_r2_windows_candidate.py"
       - "scripts/overall_r2_windows_start.py"
       - "INSTALL_OVERALL_R2_WINDOWS.bat"
       - "START_OVERALL_R2_WINDOWS.bat"
       - "STOP_OVERALL_R2_WINDOWS.bat"
       - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
+      - "tests/test_r2_w1_*.py"
+      - "tests/test_r2_w2_*.py"
+      - "tests/test_r2_w3_*.py"
+      - "tests/test_r2_w4_*.py"
       - "tests/test_r2_w5_*.py"
       - ".github/workflows/overall-r2-w5-release-engineering.yml"
   pull_request:
     branches:
       - integration/overall-r2
     paths:
+      - "main.py"
+      - "quality_knowledge/**"
+      - "runtime/**"
+      - "products/storage_rc1/**"
+      - "requirements.txt"
+      - "requirements-runtime-p0-test.txt"
       - "scripts/build_overall_r2_windows_candidate.py"
       - "scripts/overall_r2_windows_start.py"
       - "INSTALL_OVERALL_R2_WINDOWS.bat"
       - "START_OVERALL_R2_WINDOWS.bat"
       - "STOP_OVERALL_R2_WINDOWS.bat"
       - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
+      - "tests/test_r2_w1_*.py"
+      - "tests/test_r2_w2_*.py"
+      - "tests/test_r2_w3_*.py"
+      - "tests/test_r2_w4_*.py"
       - "tests/test_r2_w5_*.py"
 
 permissions:
