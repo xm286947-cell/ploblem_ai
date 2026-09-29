@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Evidence / Source Viewer</title>
+  <link rel="stylesheet" href="/p0/static/overall_navigation.css?v={{ overall_navigation_asset_version }}">
+</head>
+<body class="overall-evidence-drawer-frame">
+  {% include "_overall_evidence_content.html" %}
+  <script>
+    document.addEventListener('click', event => {
+      const link = event.target.closest('a[data-overall-evidence-return]');
+      if (!link || window.parent === window) return;
+      event.preventDefault();
+      window.parent.postMessage({type: 'overall:evidence:return'}, window.location.origin);
+    });
+  </script>
+</body>
+</html>
