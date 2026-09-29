@@ -444,7 +444,11 @@ class OverallRuntimeControlPlane:
             actor=actor,
             details={"previous_revision": previous},
         )
-        pointer["environment"] = self.apply_active_config_environment()
+        # Activation is intentionally restart-scoped. Existing Runtime
+        # execution snapshots stay immutable; the Overall composition root
+        # applies this active pointer to the existing domain model-config
+        # override variables on the next process start/runtime build.
+        pointer["environment_activation"] = "NEXT_OVERALL_START"
         return pointer
 
     def rollback(
