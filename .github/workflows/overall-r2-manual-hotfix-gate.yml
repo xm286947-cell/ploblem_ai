@@ -62,6 +62,7 @@ jobs:
           python -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
           $env:LEGACY_QUALITY_ISSUE_DB_PATH = $legacy
           "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "HOTFIX_P1_DB=$p1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           $stdout = Join-Path $env:RUNNER_TEMP "hotfix-web.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "hotfix-web.stderr.log"
           $proc = Start-Process -FilePath "python" -ArgumentList @(
@@ -84,6 +85,38 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          # GitHub Actions may clean child processes at a PowerShell step boundary.
+          # Confirm the web process is still reachable; if not, start it again in
+          # this same browser-validation step so Edge observes the real application.
+          $webReady = $false
+          try {
+            $probe = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/issues" -UseBasicParsing -TimeoutSec 3
+            if ($probe.StatusCode -eq 200) { $webReady = $true }
+          } catch {}
+          if (-not $webReady) {
+            $stdout = Join-Path $env:RUNNER_TEMP "hotfix-browser.stdout.log"
+            $stderr = Join-Path $env:RUNNER_TEMP "hotfix-browser.stderr.log"
+            $proc = Start-Process -FilePath "python" -ArgumentList @(
+              "main.py","knowledge-p1-start","--db",$env:HOTFIX_P1_DB,
+              "--host","127.0.0.1","--port","8088"
+            ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $env:HOTFIX_WEB_PID = [string]$proc.Id
+            "HOTFIX_WEB_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            for ($i=0; $i -lt 60; $i++) {
+              if ($proc.HasExited) { break }
+              try {
+                $probe = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/issues" -UseBasicParsing -TimeoutSec 3
+                if ($probe.StatusCode -eq 200) { $webReady = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $webReady) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Hotfix unified Web unavailable inside browser-validation step"
+            }
+          }
+
           $browserCandidates = @(
             "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
             "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
