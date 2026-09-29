@@ -189,7 +189,7 @@ def create_p0_insights_router(
     static_dir: str | Path | None = None,
     api_prefix: str = "/api/v2",
     scenario_detail_service: Any | None = None,
-    hardware_case_host_role: str = "CONSUMER",
+    hardware_case_host_role: str | None = None,
 ) -> APIRouter:
     """Return an isolated router for ``/p0/insights``.
 
@@ -200,12 +200,27 @@ def create_p0_insights_router(
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version(assets)
-    hardware_role = str(hardware_case_host_role or "CONSUMER").strip().upper()
-    if hardware_role not in {"CONSUMER", "MAINTAINER"}:
+    hardware_host_role = (
+        str(hardware_case_host_role).strip().upper()
+        if hardware_case_host_role is not None
+        else None
+    )
+    if hardware_host_role not in {None, "CONSUMER", "MAINTAINER"}:
         raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
 
+    def resolve_hardware_role(request: Request) -> str:
+        if hardware_host_role is not None:
+            return hardware_host_role
+        # Legacy/internal composition fallback. Formal Overall R2 packages bind
+        # HARDWARE_CASE_HOST_ROLE explicitly and never depend on this query.
+        return (
+            "MAINTAINER"
+            if request.query_params.get("role") == "maintainer"
+            else "CONSUMER"
+        )
+
     def require_hardware_maintainer() -> None:
-        if hardware_role != "MAINTAINER":
+        if hardware_host_role == "CONSUMER":
             raise HTTPException(
                 status_code=403,
                 detail="HARDWARE_CASE_MAINTAINER_REQUIRED",
@@ -574,7 +589,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": resolve_hardware_role(request),
                 "hardware_active": "home",
             },
         )
@@ -587,7 +602,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "双树导航 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": resolve_hardware_role(request),
                 "hardware_active": "tree",
             },
         )
@@ -600,7 +615,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例搜索 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": resolve_hardware_role(request),
                 "hardware_active": "search",
             },
         )
@@ -614,7 +629,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例确认 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": "MAINTAINER",
                 "hardware_active": "review",
                 "case_id": "",
             },
@@ -629,7 +644,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例确认 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": "MAINTAINER",
                 "hardware_active": "review",
                 "case_id": case_id,
             },
@@ -645,7 +660,7 @@ def create_p0_insights_router(
                 "import_api_prefix": "/api/v2/hardware-cases/tree-imports",
                 "tree_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "基础数据管理 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": "MAINTAINER",
                 "hardware_active": "base-data",
             },
         )
@@ -659,7 +674,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "知识导入 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": "MAINTAINER",
                 "hardware_active": "intake",
             },
         )
@@ -672,7 +687,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例详情 · 硬件案例库",
-                "hardware_role": hardware_role,
+                "hardware_role": "MAINTAINER",
                 "hardware_active": "",
                 "case_id": case_id,
             },
@@ -722,7 +737,7 @@ def create_hardware_case_pages_router(
     *,
     template_dir: str | Path | None = None,
     static_dir: str | Path | None = None,
-    hardware_case_host_role: str = "CONSUMER",
+    hardware_case_host_role: str | None = None,
 ) -> APIRouter:
     """Return only Hardware Case P01-P07 pages plus their shared static route.
 
