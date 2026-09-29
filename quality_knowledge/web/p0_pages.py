@@ -20,6 +20,7 @@ from .missed_test_adapter import build_missed_test_rows
 from .itr_recovery_adapter import build_itr_recovery_rows
 from .itr_resolution_adapter import build_itr_resolution_rows
 from .software_assessment_adapter import build_software_assessment_rows
+from .current_problem_associations import build_current_problem_associations
 from .overall_navigation import (
     append_overall_return_state,
     normalize_overall_return_state,
@@ -457,6 +458,15 @@ def create_p0_insights_router(
         )
         if return_to:
             return_to = append_overall_return_state(return_to, overall_state)
+        legacy = getattr(request.app.state, "legacy_quality_issue_services", None)
+        legacy_service = getattr(legacy, "knowledge_issue_service", None) if legacy is not None else None
+        material_repository = getattr(legacy, "material_repository", None) if legacy is not None else None
+        associations = build_current_problem_associations(
+            legacy_service,
+            material_repository,
+            knowledge_id,
+            p0=True,
+        )
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
@@ -465,6 +475,7 @@ def create_p0_insights_router(
                 "knowledge_id": knowledge_id,
                 "page_title": "问题详情 · 质量能力",
                 "return_to": return_to,
+                "current_problem_associations": associations,
             },
         )
 
