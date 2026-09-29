@@ -269,6 +269,20 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
 
+    @app.get('/import/template', include_in_schema=False)
+    def import_template():
+        # Reuse the checked-in legacy Excel template.  This is only a download
+        # surface for the existing /import pipeline; it does not create a second
+        # parser, Mapping model, or problem master dataset.
+        template_path = BASE.parent.parent / 'input' / 'new_cases.xlsx'
+        if not template_path.is_file():
+            raise HTTPException(404, 'EXCEL_IMPORT_TEMPLATE_NOT_FOUND')
+        return FileResponse(
+            template_path,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            filename='major_case_excel_import_template.xlsx',
+        )
+
     material_workbenches = {
         'itr': {
             'group_code': 'ITR',
