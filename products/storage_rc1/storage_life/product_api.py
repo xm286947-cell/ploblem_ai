@@ -510,9 +510,233 @@ def maintenance() -> dict[str, Any]:
         "datasheet_review_queue": import_review,
         "knowledge_source_queue": [x for x in sources if x.get("verify_status") != "verified"],
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
+        "knowledge_flow": {
+            "canonical": "FORMAL_KNOWLEDGE_PRODUCTION",
+            "source_intake": "/api/product/knowledge-production/sources",
+            "candidate_review": "/knowledge-production/candidates",
+            "formal_release": "/api/product/knowledge-production/releases",
+            "legacy_local_source": {
+                "status": "SUPPORTING_LEGACY",
+                "source_intake": "/api/v1/knowledge/sources",
+                "formal_publish": False,
+            },
+        },
         "publish_gate": {
             "owner": "Knowledge Production",
             "storage_can_publish": False,
             "rule": "Storage only consumes formally published Knowledge Release; AI/source review cannot auto-publish formal knowledge.",
         },
+    }
+
+
+PROJECT_TARGET_SYSTEM = "project"
+
+
+def _project_links(project_ref: str) -> list[dict[str, Any]]:
+    ref = str(project_ref or "").strip()
+    if not ref:
+        raise ValueError("PROJECT_REF_REQUIRED")
+    with core.connect() as con:
+        return core.rows(
+            con,
+            """SELECT l.*,d.vendor,d.model,d.device_type,d.source_id
+               FROM links l
+               JOIN devices d ON d.id=l.device_id
+               WHERE lower(l.target_system)=? AND l.target_id=?
+               ORDER BY d.device_type,d.vendor,d.model,d.id""",
+            (PROJECT_TARGET_SYSTEM, ref),
+        )
+
+
+def project_device_context(project_ref: str) -> dict[str, Any]:
+    links = _project_links(project_ref)
+    project_ref = str(project_ref).strip()
+    seen: set[str] = set()
+    devices: list[dict[str, Any]] = []
+    for link in links:
+        device_id = str(link.get("device_id") or "")
+        if not device_id or device_id in seen:
+            continue
+        seen.add(device_id)
+        detail = device_slots(device_id)
+        device = detail["device"]
+        lifecycle = detail["lifecycle"]
+        extraction = core.get_extraction_run(device_id) or {}
+        evidence = []
+        for fact in detail.get("device_facts") or []:
+            for item in fact.get("evidence") or []:
+                ref = {
+                    "source_id": item.get("source_id") or device.get("source_id"),
+                    "source_page": item.get("source_page") or item.get("page"),
+                    "source_section": item.get("source_section") or item.get("section"),
+                }
+                if ref not in evidence:
+                    evidence.append(ref)
+        if lifecycle.get("formal_ready"):
+            current_status = "READY"
+            failure_reason = None
+            next_action = "CONSUME_EXISTING_STORAGE_CAPABILITIES"
+            owner_role = "STORAGE_CONSUMER"
+        else:
+            current_status = "ACTION_REQUIRED"
+            failure_reason = lifecycle.get("reason") or "REVIEW_REQUIRED"
+            next_action = "COMPLETE_EXISTING_DEVICE_REVIEW"
+            owner_role = "STORAGE_MAINTAINER"
+        devices.append({
+            "device_id": device_id,
+            "device": device,
+            "relation": link.get("relation"),
+            "current_status": current_status,
+            "failure_reason": failure_reason,
+            "next_action": next_action,
+            "owner_role": owner_role,
+            "evidence": evidence,
+            "version": {
+                "document_number": device.get("document_number"),
+                "revision": device.get("revision"),
+                "identity_key": device.get("identity_key"),
+                "extraction_run_id": extraction.get("id"),
+                "extraction_created_at": extraction.get("created_at"),
+            },
+            "lifecycle": lifecycle,
+        })
+
+    if not devices:
+        current_status = "UNBOUND"
+        failure_reason = "PROJECT_DEVICE_LINK_NOT_FOUND"
+        next_action = "LINK_EXISTING_DEVICE_TO_PROJECT"
+        owner_role = "STORAGE_MAINTAINER"
+    elif all(x["current_status"] == "READY" for x in devices):
+        current_status = "READY"
+        failure_reason = None
+        next_action = "CONSUME_EXISTING_STORAGE_CAPABILITIES"
+        owner_role = "STORAGE_CONSUMER"
+    else:
+        current_status = "ACTION_REQUIRED"
+        failure_reason = "ONE_OR_MORE_DEVICES_NOT_FORMAL_READY"
+        next_action = "COMPLETE_EXISTING_DEVICE_REVIEW"
+        owner_role = "STORAGE_MAINTAINER"
+
+    return {
+        "projection_version": "storage-project-device-context/v1",
+        "project_ref": project_ref,
+        "device_count": len(devices),
+        "device_ids": [x["device_id"] for x in devices],
+        "devices": devices,
+        "status_projection": {
+            "current_status": current_status,
+            "failure_reason": failure_reason,
+            "next_action": next_action,
+            "owner_role": owner_role,
+            "evidence": [e for x in devices for e in x["evidence"]],
+            "version": KnowledgeReleaseConsumer.current().status().get("knowledge_release_version"),
+        },
+        "knowledge_release": KnowledgeReleaseConsumer.current().status(),
+        "ownership": {
+            "project_master": False,
+            "device_master": "EXISTING_DEVICES",
+            "binding": "EXISTING_LINKS",
+        },
+    }
+
+
+def project_device_matrix(
+    project_ref: str,
+    device_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    context = project_device_context(project_ref)
+    allowed = context["device_ids"]
+    selected = list(dict.fromkeys(device_ids or allowed))
+    if any(device_id not in allowed for device_id in selected):
+        raise ValueError("PROJECT_DEVICE_SCOPE_VIOLATION")
+    if len(selected) < 2:
+        return {
+            "project_ref": context["project_ref"],
+            "status": "INSUFFICIENT_DEVICES",
+            "device_ids": selected,
+            "available_device_ids": allowed,
+            "comparison": None,
+            "matrix_engine": "DIRECT_REUSE:product_api.compare_devices",
+            "next_action": "LINK_OR_SELECT_AT_LEAST_TWO_EXISTING_DEVICES",
+        }
+    return {
+        "project_ref": context["project_ref"],
+        "status": "READY",
+        "device_ids": selected,
+        "available_device_ids": allowed,
+        "comparison": compare_devices(selected),
+        "matrix_engine": "DIRECT_REUSE:product_api.compare_devices",
+    }
+
+
+def provider_operability() -> dict[str, Any]:
+    from . import runtime_bridge
+
+    runtime_status = runtime_bridge.status()
+    executions = runtime_bridge.last_executions()
+    last = executions[-1] if executions else None
+    configured = bool(runtime_status.get("configured"))
+    error = (last or {}).get("error") or {}
+    last_status = str((last or {}).get("status") or "").upper()
+
+    if not configured:
+        connectivity = "NOT_CONFIGURED"
+        current_status = "BLOCKED"
+        failure_reason = runtime_status.get("error") or "RUNTIME_PROVIDER_NOT_CONFIGURED"
+        next_action = "USE_OVERALL_AGENT_CONFIG_WHEN_AVAILABLE"
+    elif last is None:
+        connectivity = "NOT_CHECKED"
+        current_status = "CONFIGURED"
+        failure_reason = None
+        next_action = "RUN_EXISTING_STORAGE_AI_FLOW"
+    elif last_status in {"COMPLETED", "SUCCESS", "SUCCEEDED"}:
+        connectivity = "PASS"
+        current_status = "READY"
+        failure_reason = None
+        next_action = "NONE"
+    else:
+        connectivity = "FAIL"
+        current_status = "ACTION_REQUIRED"
+        failure_reason = error.get("code") or error.get("message") or last_status or "RUNTIME_EXECUTION_FAILED"
+        next_action = "USE_OVERALL_RUNTIME_DIAGNOSTICS_WHEN_AVAILABLE"
+
+    return {
+        "projection_version": "storage-provider-operability/v1",
+        "provider_configured": configured,
+        "provider": runtime_status.get("provider"),
+        "provider_profile": runtime_status.get("profile"),
+        "model_binding": runtime_status.get("model"),
+        "api_key_present": bool(runtime_status.get("api_key_present")),
+        "connectivity": connectivity,
+        "last_check": (last or {}).get("observed_at"),
+        "last_error": {
+            "code": error.get("code"),
+            "category": error.get("category"),
+            "message": error.get("message"),
+        } if error else None,
+        "last_execution": last,
+        "status_projection": {
+            "current_status": current_status,
+            "failure_reason": failure_reason,
+            "next_action": next_action,
+            "owner_role": "OVERALL_RUNTIME_AGENT_CONFIG_OWNER",
+            "evidence": {
+                "runtime_status_endpoint": "/api/v1/runtime/status",
+                "runtime_executions_endpoint": "/api/v1/runtime/executions",
+            },
+            "version": runtime_status.get("runtime_expected_commit"),
+        },
+        "management_deep_links": {
+            "agent_config": {
+                "status": "DEPENDENCY_PENDING",
+                "href": None,
+                "owner": "OVERALL_COMMON_CAPABILITY",
+            },
+            "runtime_diagnostics": {
+                "status": "DEPENDENCY_PENDING",
+                "href": None,
+                "owner": "OVERALL_COMMON_CAPABILITY",
+            },
+        },
+        "probe_performed": False,
     }
