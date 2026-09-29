@@ -324,7 +324,7 @@ def create_overall_shell_router(
     *,
     task_provider: TaskProvider | None = None,
     template_dir: str | Path | None = None,
-    hardware_case_host_role: str = "CONSUMER",
+    hardware_case_host_role: str | None = None,
 ) -> APIRouter:
     """Return the platform-owned Overall Shell router.
 
@@ -334,9 +334,11 @@ def create_overall_shell_router(
 
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version()
+    # None preserves the historical internal/test composition. Formal Overall
+    # packages always bind the host role explicitly through the launcher.
     hardware_maintainer_enabled = (
-        str(hardware_case_host_role or "CONSUMER").strip().upper()
-        == "MAINTAINER"
+        hardware_case_host_role is None
+        or str(hardware_case_host_role).strip().upper() == "MAINTAINER"
     )
     router = APIRouter()
 
