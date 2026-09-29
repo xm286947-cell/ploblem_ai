@@ -443,13 +443,43 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
             assert len(runtime_coverage.get("states") or []) >= 37, runtime_facts
             assert "review_required" in runtime_facts
 
+            detail = _json(
+                f"http://127.0.0.1:18088/storage-workspace/api/product/devices/{device_id}"
+            )
+            slots = detail.get("slots") if isinstance(detail, dict) else None
+            assert isinstance(slots, list) and slots, detail
+
             review = _json(
                 f"http://127.0.0.1:18088/storage-workspace/api/product/devices/{device_id}/review-workbench"
             )
             rows = review.get("rows") if isinstance(review, dict) else None
-            assert isinstance(rows, list), review
-            assert len(rows) >= 37, review
+            assert isinstance(rows, list) and rows, review
+            slot_fields = {
+                str(item.get("canonical_name") or "")
+                for item in slots
+                if str(item.get("canonical_name") or "")
+            }
+            review_fields = {
+                str(item.get("canonical_name") or "")
+                for item in rows
+                if str(item.get("canonical_name") or "")
+            }
+            assert review_fields == slot_fields, {
+                "missing_in_review": sorted(slot_fields - review_fields),
+                "unexpected_in_review": sorted(review_fields - slot_fields),
+                "slot_count": len(slot_fields),
+                "review_field_count": len(review_fields),
+            }
+            assert all(
+                str(item.get("coverage_status") or "")
+                and str(item.get("review_status") or "")
+                for item in rows
+            ), review
+            counts = review.get("counts") or {}
+            assert sum(int(value or 0) for value in counts.values()) == len(rows), review
             print("REVIEW_WORKBENCH=PASS")
+            print("REVIEW_FIELD_PARITY=PASS")
+            print("REVIEW_ROW_COUNT=" + str(len(rows)))
 
             status = _json(
                 "http://127.0.0.1:18088/storage-workspace/api/v1/runtime/status"
