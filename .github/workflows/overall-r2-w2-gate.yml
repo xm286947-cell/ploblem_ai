@@ -1,35 +1,81 @@
-name: Overall R2 W2 Gate
+name: Overall R2 W2 Major Gate
 
 on:
   push:
     branches:
       - integration/overall-r2
+      - feature/r2-w2-major-governed-production
     paths:
-      - "quality_knowledge/web/overall_shell.py"
-      - "quality_knowledge/web/templates/overall_*.html"
-      - "quality_knowledge/web/templates/p0_base.html"
-      - "quality_knowledge/web/static/overall_shell.css"
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/web/major_production_api.py"
+      - "quality_knowledge/web/templates/major_production.html"
+      - "quality_knowledge/web/static/major_production.js"
+      - "services/major_case_production.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "services/major_case_retrieval.py"
+      - "services/historical_case_contract.py"
       - "tests/test_r2_w2_*.py"
-      - "tests/test_overall_frontend_shell.py"
-      - "tests/test_overall_frontend_parent_integration.py"
+      - "tests/test_r2_w5_major_excel_import_restore.py"
+      - "tests/test_major_repeat_gp01_browser_production.py"
+      - "tests/test_case_publish_service.py"
+      - "tests/test_repeat_web_mvp.py"
+      - "tests/test_r2_w1_*.py"
+      - "tests/test_rc4_analysis_workbench_ui.py"
       - ".github/workflows/overall-r2-w2-gate.yml"
   pull_request:
     branches:
       - integration/overall-r2
     paths:
-      - "quality_knowledge/web/overall_shell.py"
-      - "quality_knowledge/web/templates/overall_*.html"
-      - "quality_knowledge/web/templates/p0_base.html"
-      - "quality_knowledge/web/static/overall_shell.css"
+      - "quality_knowledge/major_cases/**"
+      - "quality_knowledge/web/major_production_api.py"
+      - "quality_knowledge/web/templates/major_production.html"
+      - "quality_knowledge/web/static/major_production.js"
+      - "services/major_case_production.py"
+      - "services/major_case_publish.py"
+      - "services/major_case_publisher.py"
+      - "services/major_case_retrieval.py"
+      - "services/historical_case_contract.py"
       - "tests/test_r2_w2_*.py"
-      - "tests/test_overall_frontend_shell.py"
-      - "tests/test_overall_frontend_parent_integration.py"
+      - "tests/test_r2_w5_major_excel_import_restore.py"
+      - "tests/test_major_repeat_gp01_browser_production.py"
+      - "tests/test_case_publish_service.py"
+      - "tests/test_repeat_web_mvp.py"
+      - "tests/test_r2_w1_*.py"
+      - "tests/test_rc4_analysis_workbench_ui.py"
+      - ".github/workflows/overall-r2-w2-gate.yml"
 
 permissions:
   contents: read
 
 jobs:
-  w2-ia-regression:
+  w2-major-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile Major domain
+        run: |
+          python -m compileall -q quality_knowledge/major_cases quality_knowledge/web services
+      - name: Run W2 governed Major regression
+        run: |
+          pytest -q \
+            tests/test_r2_w2_*.py \
+            tests/test_r2_w5_major_excel_import_restore.py \
+            tests/test_major_repeat_gp01_browser_production.py \
+            tests/test_case_publish_service.py \
+            tests/test_repeat_web_mvp.py
+
+  w2-w1-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -43,20 +89,75 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
-      - name: Compile Overall web
-        run: python -m compileall -q quality_knowledge/web
-      - name: Run Overall Shell baseline
+      - name: Run frozen W1 regression
         run: |
           pytest -q \
-            tests/test_overall_frontend_shell.py \
-            tests/test_overall_frontend_parent_integration.py
-      - name: Run W2 focused tests when present
-        shell: bash
+            tests/test_r2_w1_*.py \
+            tests/test_rc4_analysis_workbench_ui.py
+
+  w2-windows-clean-start:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime
+        shell: pwsh
         run: |
-          shopt -s nullglob
-          files=(tests/test_r2_w2_*.py)
-          if (( ${#files[@]} )); then
-            pytest -q "${files[@]}"
-          else
-            echo "No W2 focused tests yet; baseline gate only."
-          fi
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Prepare clean W2 databases
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem "knowledge" -Filter "r2_w2_windows_smoke*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+      - name: Start unified P1 Web and smoke W2/W1 routes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stdout = Join-Path $env:RUNNER_TEMP "r2-w2.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "r2-w2.stderr.log"
+          $proc = Start-Process -FilePath "python" -ArgumentList @(
+            "main.py","knowledge-p1-start",
+            "--db","knowledge\r2_w2_windows_smoke.db",
+            "--host","127.0.0.1",
+            "--port","8080"
+          ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 60; $i++) {
+              if ($proc.HasExited) { break }
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/major-production" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 2
+            }
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Unified R2 W2 Web did not become ready"
+            }
+            $routes = @(
+              "http://127.0.0.1:8080/p0/major-production",
+              "http://127.0.0.1:8080/api/v2/major-production/excel/template",
+              "http://127.0.0.1:8080/p0/issues"
+            )
+            foreach ($route in $routes) {
+              $response = Invoke-WebRequest -Uri $route -UseBasicParsing -TimeoutSec 10
+              if ($response.StatusCode -ne 200) {
+                throw "W2 route failed: $route => $($response.StatusCode)"
+              }
+              Write-Host "$route=PASS"
+            }
+          }
+          finally {
+            if (!$proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
