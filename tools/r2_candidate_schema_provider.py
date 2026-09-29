@@ -43,7 +43,15 @@ def _content(body: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         payload = {}
 
-    marker = system.casefold()
+    business_instructions = str(
+        payload.get("instructions") or ""
+    )
+    provider_payload = payload.get("provider_payload")
+    if isinstance(provider_payload, dict):
+        business_instructions += "\n" + str(
+            provider_payload.get("instructions") or ""
+        )
+    marker = (system + "\n" + business_instructions).casefold()
     if "identify basic device metadata" in marker:
         empty = {"value": "", "page": 0, "quote": "", "confidence": 0}
         return {"vendor": empty, "model": empty, "device_type": empty}
@@ -72,7 +80,6 @@ def _content(body: dict[str, Any]) -> dict[str, Any]:
         return {"fields": [_missing_field(str(x)) for x in field_map.keys()]}
 
     # Runtime domain strategy may wrap the business payload.
-    provider_payload = payload.get("provider_payload")
     if isinstance(provider_payload, dict):
         target_fields = provider_payload.get("target_fields")
         if isinstance(target_fields, list) and target_fields:
