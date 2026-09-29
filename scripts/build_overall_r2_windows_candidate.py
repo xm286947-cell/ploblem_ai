@@ -13,6 +13,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_FORMAL_RELEASE = "927efef5b7707d5d2013a34c1f3f40a8ade3d93d"
 
+_ROOT_USER_ENTRYPOINTS = {
+    "INSTALL_OVERALL_R2_WINDOWS.bat",
+    "START_OVERALL_R2_WINDOWS.bat",
+    "STOP_OVERALL_R2_WINDOWS.bat",
+    "CONFIG_OVERALL_R2_WINDOWS.cmd.template",
+}
+_ROOT_OBSOLETE_ENTRYPOINTS = {
+    "CHECK_ENV.bat",
+    "INIT_LOCAL_CONFIG.bat",
+    "INIT_LOCAL_CONFIG.sh",
+    "RUN_REAL_AI_VALIDATION.bat",
+    "RUN_REAL_AI_VALIDATION.sh",
+    "START_HARDWARE_CASE.bat",
+    "START_HARDWARE_CASE.sh",
+    "run.bat",
+    "run_hardware_case_mvp_smoke.bat",
+    "run_hardware_case_mvp_smoke.sh",
+    "run_hardware_case_product_test.bat",
+    "run_hardware_case_product_test.sh",
+    "run_major_case_mvp_smoke.bat",
+    "run_major_case_mvp_smoke.sh",
+    "start_quality_capability_p1.bat",
+}
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -45,6 +69,14 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
     package_dir.mkdir()
     with zipfile.ZipFile(io.BytesIO(archive)) as source:
         source.extractall(package_dir)
+
+    # A Complete Product Candidate must expose one obvious user startup path.
+    # Historical product-test launchers remain source-controlled for their own
+    # domains, but must not compete at the candidate root.
+    for name in sorted(_ROOT_OBSOLETE_ENTRYPOINTS):
+        path = package_dir / name
+        if path.is_file():
+            path.unlink()
 
     required = (
         "runtime/__init__.py",
@@ -83,16 +115,37 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
         "product_test_gate": "NOT_RUN_FOR_THIS_CANDIDATE",
         "release_decision": "NOT_REQUESTED",
         "development_gate": {
-            "w1": "PASS_WITH_EXTERNAL_BINDINGS",
+            "w1": "BLOCKED_BY_HISTORICAL_BINDING_EVIDENCE",
             "w2": "PASS",
             "w3": "PASS",
             "w4": "PASS",
         },
         "current_problem_workbenches": [
-            {"label": "ITR工作台", "route": "/p0/itr-recovery", "mode": "SOURCE_OWNED_READ_ONLY"},
-            {"label": "彻底解决工作台", "route": "/p0/itr-resolution", "mode": "SOURCE_ALIGNED_READ_ONLY"},
-            {"label": "软件考核工作台", "route": "/p0/software-assessment", "mode": "EXISTING_CAPABILITY_MOUNT"},
-            {"label": "漏测分析", "route": "/p0/missed-test-analysis", "mode": "EXISTING_FACT_ADAPTER"},
+            {
+                "label": "问题 / ITR 工作台",
+                "route": "/issues",
+                "mode": "VERIFIED_PRIOR_FORMAL_CAPABILITY",
+                "binding_status": "VERIFIED",
+                "evidence_release": PREVIOUS_FORMAL_RELEASE,
+            },
+            {
+                "label": "彻底解决工作台",
+                "route": None,
+                "mode": "SOURCE_CAPABILITY_BINDING_REQUIRED",
+                "binding_status": "IMPLEMENTATION_BINDING_PENDING",
+            },
+            {
+                "label": "软件问题考核工作台",
+                "route": None,
+                "mode": "SOURCE_CAPABILITY_BINDING_REQUIRED",
+                "binding_status": "NEEDS_OWNER_CONFIRMATION",
+            },
+            {
+                "label": "软件问题漏测分析工作台",
+                "route": None,
+                "mode": "SOURCE_CAPABILITY_BINDING_REQUIRED",
+                "binding_status": "IMPLEMENTATION_BINDING_PENDING",
+            },
         ],
         "runtime_binding": {
             "mode": "single_shared_package_root",
@@ -155,13 +208,20 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
         encoding="utf-8",
     )
 
-    readme = """OVERALL R2 Complete Product Candidate — W5
+    readme = """OVERALL R2 — WINDOWS MANUAL VALIDATION CANDIDATE
 
+ONLY USER STARTUP PATH
+======================
 1. Copy CONFIG_OVERALL_R2_WINDOWS.cmd.template to CONFIG_OVERALL_R2_WINDOWS.cmd.
 2. Set LEGACY_QUALITY_ISSUE_DB_PATH to the approved existing Quality Issue DB.
-3. Double-click START_OVERALL_R2_WINDOWS.bat.
-4. Open http://127.0.0.1:8080/p0/overall.
-5. Use STOP_OVERALL_R2_WINDOWS.bat to stop the host.
+3. Configure only the external Provider environment references required by the
+   Active Agent Config revision. Never write a real secret into this package.
+4. Double-click START_OVERALL_R2_WINDOWS.bat.
+5. Open http://127.0.0.1:8080/p0/overall.
+6. Use STOP_OVERALL_R2_WINDOWS.bat to stop the host.
+
+Do NOT use historical Hardware Case / legacy test launchers from older packages.
+They are intentionally excluded from this candidate root.
 
 The package starts the existing single FastAPI host through:
   main.py knowledge-p1-start -> create_p0_app
@@ -178,6 +238,17 @@ This artifact is a Complete Product Candidate. Product Test Gate and Release
 Decision do not transfer from the previous release and must be run separately.
 """
     (package_dir / "WINDOWS_START_HERE.txt").write_text(readme, encoding="utf-8")
+    (package_dir / "00_README_FIRST.txt").write_text(readme, encoding="utf-8")
+
+    competing = sorted(
+        path.name
+        for path in package_dir.glob("*.bat")
+        if path.name not in _ROOT_USER_ENTRYPOINTS
+    )
+    if competing:
+        raise RuntimeError(
+            "COMPETING_ROOT_STARTUP_BAT_PRESENT:" + ",".join(competing)
+        )
 
     files = sorted(p for p in package_dir.rglob("*") if p.is_file())
     sums = "".join(

@@ -55,16 +55,24 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
     assert manifest["product_test_gate"] == "NOT_RUN_FOR_THIS_CANDIDATE"
     assert manifest["release_decision"] == "NOT_REQUESTED"
     assert manifest["development_gate"] == {
-        "w1": "PASS_WITH_EXTERNAL_BINDINGS",
+        "w1": "BLOCKED_BY_HISTORICAL_BINDING_EVIDENCE",
         "w2": "PASS",
         "w3": "PASS",
         "w4": "PASS",
     }
-    assert [item["route"] for item in manifest["current_problem_workbenches"]] == [
-        "/p0/itr-recovery",
-        "/p0/itr-resolution",
-        "/p0/software-assessment",
-        "/p0/missed-test-analysis",
+    workbenches = manifest["current_problem_workbenches"]
+    assert workbenches[0] == {
+        "label": "问题 / ITR 工作台",
+        "route": "/issues",
+        "mode": "VERIFIED_PRIOR_FORMAL_CAPABILITY",
+        "binding_status": "VERIFIED",
+        "evidence_release": PREVIOUS_RELEASE,
+    }
+    assert [item["route"] for item in workbenches[1:]] == [None, None, None]
+    assert [item["binding_status"] for item in workbenches[1:]] == [
+        "IMPLEMENTATION_BINDING_PENDING",
+        "NEEDS_OWNER_CONFIRMATION",
+        "IMPLEMENTATION_BINDING_PENDING",
     ]
     assert manifest["data_binding"]["legacy_quality_issue_db"] == "EXTERNAL_REQUIRED"
     assert manifest["data_binding"]["storage_runtime_db_env"] == "STORAGE_LIFE_RUNTIME_DB"
@@ -88,6 +96,16 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
     assert (package_dir / "START_OVERALL_R2_WINDOWS.bat").is_file()
     assert (package_dir / "STOP_OVERALL_R2_WINDOWS.bat").is_file()
     assert (package_dir / "CONFIG_OVERALL_R2_WINDOWS.cmd.template").is_file()
+    root_bats = sorted(path.name for path in package_dir.glob("*.bat"))
+    assert root_bats == [
+        "INSTALL_OVERALL_R2_WINDOWS.bat",
+        "START_OVERALL_R2_WINDOWS.bat",
+        "STOP_OVERALL_R2_WINDOWS.bat",
+    ]
+    first_readme = (package_dir / "00_README_FIRST.txt").read_text(encoding="utf-8")
+    assert "OVERALL R2" in first_readme
+    assert "ONLY USER STARTUP PATH" in first_readme
+    assert "HARDWARE CASE PRODUCT TEST FULL V0.1" not in first_readme
     assert (package_dir / "quality_knowledge/web/software_assessment_adapter.py").is_file()
     assert (package_dir / "quality_knowledge/web/itr_recovery_adapter.py").is_file()
     assert (package_dir / "quality_knowledge/web/itr_resolution_adapter.py").is_file()
@@ -148,3 +166,123 @@ def test_w5_launcher_fails_closed_without_legacy_database_binding(candidate):
     )
     assert completed.returncode == 6
     assert "LEGACY_DB_PATH_NOT_CONFIGURED" in completed.stderr
+
+
+
+def test_w5_clean_external_data_root_seeds_packaged_formal_knowledge_release(tmp_path):
+    import importlib.util
+
+    launcher_path = ROOT / "scripts" / "overall_r2_windows_start.py"
+    spec = importlib.util.spec_from_file_location("r2_release_seed_launcher", launcher_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    target = tmp_path / "external" / "knowledge_release" / "current"
+    result = module._initialize_packaged_knowledge_release(ROOT, target)
+
+    assert result["status"] == "SEEDED_FROM_PACKAGE"
+    assert result["knowledge_release_version"] == "KP-STORAGE-RC1-VALIDATION-001"
+    assert (target / "release_manifest.json").is_file()
+    manifest = json.loads((target / "release_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["knowledge_release_version"] == "KP-STORAGE-RC1-VALIDATION-001"
+
+    package_manifest_before = (
+        ROOT
+        / "products"
+        / "storage_rc1"
+        / "knowledge_release"
+        / "current"
+        / "release_manifest.json"
+    ).read_bytes()
+    second = module._initialize_packaged_knowledge_release(ROOT, target)
+    assert second["status"] == "EXISTING_EXTERNAL_RELEASE"
+    assert second["knowledge_release_version"] == "KP-STORAGE-RC1-VALIDATION-001"
+    assert second["snapshot_hash"] == result["snapshot_hash"]
+    assert (
+        ROOT
+        / "products"
+        / "storage_rc1"
+        / "knowledge_release"
+        / "current"
+        / "release_manifest.json"
+    ).read_bytes() == package_manifest_before
+
+
+def test_w5_invalid_nonempty_external_release_fails_closed(tmp_path):
+    import importlib.util
+
+    launcher_path = ROOT / "scripts" / "overall_r2_windows_start.py"
+    spec = importlib.util.spec_from_file_location("r2_invalid_release_launcher", launcher_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    target = tmp_path / "external" / "knowledge_release" / "current"
+    target.mkdir(parents=True)
+    (target / "stale.txt").write_text("do-not-overwrite", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="KNOWLEDGE_RELEASE_TARGET_INVALID_NONEMPTY"):
+        module._initialize_packaged_knowledge_release(ROOT, target)
+    assert (target / "stale.txt").read_text(encoding="utf-8") == "do-not-overwrite"
+
+
+def test_w5_extracted_zip_seeds_formal_release_into_clean_external_root(
+    candidate,
+    tmp_path,
+):
+    import importlib.util
+
+    _, package_zip, commit, _ = candidate
+    extract_root = tmp_path / "unzipped"
+    with zipfile.ZipFile(package_zip) as bundle:
+        bundle.extractall(extract_root)
+
+    package_root = extract_root / (
+        f"OVERALL_R2_COMPLETE_PRODUCT_CANDIDATE_{commit[:12]}_W5"
+    )
+    assert package_root.is_dir()
+    assert (package_root / "R2_SOURCE_COMMIT").read_text().strip() == commit
+
+    launcher_path = package_root / "scripts" / "overall_r2_windows_start.py"
+    spec = importlib.util.spec_from_file_location(
+        "r2_extracted_release_seed_launcher",
+        launcher_path,
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    target = tmp_path / "clean-data" / "knowledge_release" / "current"
+    result = module._initialize_packaged_knowledge_release(
+        package_root,
+        target,
+    )
+
+    assert result["status"] == "SEEDED_FROM_PACKAGE"
+    assert (
+        result["knowledge_release_version"]
+        == "KP-STORAGE-RC1-VALIDATION-001"
+    )
+    manifest = json.loads(
+        (target / "release_manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        manifest["knowledge_release_version"]
+        == "KP-STORAGE-RC1-VALIDATION-001"
+    )
+    assert (target / "knowledge_objects.json").is_file()
+    assert (target / "evidences.json").is_file()
+    assert (target / "source_references.json").is_file()
+
+    root_bats = sorted(path.name for path in package_root.glob("*.bat"))
+    assert root_bats == [
+        "INSTALL_OVERALL_R2_WINDOWS.bat",
+        "START_OVERALL_R2_WINDOWS.bat",
+        "STOP_OVERALL_R2_WINDOWS.bat",
+    ]
+    readme = (package_root / "00_README_FIRST.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "ONLY USER STARTUP PATH" in readme
+    assert "START_HARDWARE_CASE.bat" not in readme
