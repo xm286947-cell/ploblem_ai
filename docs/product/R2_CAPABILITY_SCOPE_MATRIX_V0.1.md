@@ -118,3 +118,48 @@ W1_VERIFIED_CODE_SCOPE=PASS
 W1_EXTERNAL_BINDINGS_PENDING=2
 W1_EXTERNAL_BINDINGS=ITR_RESOLUTION_SOURCE_ACTIONS;SOFTWARE_ASSESSMENT_ORIGINAL_BINDING
 NEXT=W1_CLEAN_START_AND_PACKAGE_SMOKE_THEN_W2
+
+
+## W2 final development gate
+
+W2_DEVELOPMENT_GATE=PASS  
+R2_SOURCE=c275e49afd5995593970a45b41c14c9251c2c635  
+OVERALL_SHELL_BASELINE=9_PASSED  
+W2_FOCUSED_REGRESSION=15_PASSED  
+W1_REGRESSION_ON_W2_SOURCE=PASS  
+WINDOWS_CLEAN_START_ON_W2_SOURCE=PASS  
+W2_CODE_BLOCKER=0  
+
+Delivered:
+- Four formal Overall product areas + management area.
+- Read-only legacy quality-scenario / product / customer / industry portrait compatibility.
+- `overall-return-context/v1` for query/filter/selection/tab/scroll/focus return.
+- Projection Parity status contract `overall-scenario-projection-parity/v1`.
+- `KEEP_LEGACY_UNTIL_PROJECTION_PARITY`; legacy retirement is not allowed without evidence.
+- Shared navigation asset is content-versioned rather than fixed-version.
+
+W2_STATUS=DEVELOPMENT_COMPLETE  
+NEXT=W3_EVIDENCE_SOURCE_RETURN
+
+## W3 development status
+
+W3_SLICE_01=COMMON_EVIDENCE_SOURCE_VIEWER  
+PR=#241  
+MERGE=d7889eec04357006ed8e3d005a69446a5d7ecb17  
+COMPAT_TEST_FIX_PR=#242  
+CURRENT_R2_SOURCE=c275e49afd5995593970a45b41c14c9251c2c635  
+
+Delivered:
+- Frozen `common-evidence/v1.0` transport into Overall.
+- Same-origin Evidence / Source Viewer page + drawer.
+- Evidence ID / type / producer / Source Type-ID-Version / Source Ref / Locator / excerpt / source text / verification/status projection.
+- Producer-owned http/https source reference only; no inferred source URL.
+- Task Overview can carry a producer-supplied Common Evidence projection.
+- W2 return context survives Evidence navigation.
+- Overall does not query or copy Domain Evidence Stores.
+
+W3_GATE=PASS  
+W3_PRODUCER_CONTRACT_REGRESSION=PASS  
+W3_CODE_BLOCKER=0  
+W3_STATUS=DEVELOPMENT_COMPLETE  
+NEXT=W4_FORMAL_DOMAIN_ASSEMBLY
