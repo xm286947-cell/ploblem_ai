@@ -255,6 +255,7 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
         assert "BASE_URL_PRESENT=PRESENT" in preflight_text
         assert "API_KEY_ENV_REF=acca1" in preflight_text
         assert "API_KEY_PRESENT=PRESENT" in preflight_text
+        assert "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE" in preflight_text
         assert "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001" in preflight_text
         assert SECRET not in preflight_text
 
@@ -319,7 +320,7 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
             assert "BASE_URL_PRESENT=PRESENT" in start_text
             assert "API_KEY_ENV_REF=acca1" in start_text
             assert "API_KEY_PRESENT=PRESENT" in start_text
-            assert "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE" in start_text
+            assert "KNOWLEDGE_RELEASE_INIT_STATUS=EXISTING_EXTERNAL_RELEASE" in start_text
             assert "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001" in start_text
             assert SECRET not in start_text
 
