@@ -59,12 +59,14 @@ class HardwareCaseSourceStore:
         source_root: str | Path,
         *,
         max_upload_bytes: int = 100 * 1024 * 1024,
+        initialize_schema: bool = True,
     ):
         self.db_path = Path(db_path)
         self.source_root = Path(source_root).resolve()
         self.max_upload_bytes = int(max_upload_bytes)
         self.source_root.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        if initialize_schema:
+            self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
