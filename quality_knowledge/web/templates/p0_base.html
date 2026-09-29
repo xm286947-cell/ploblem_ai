@@ -13,7 +13,7 @@
 <body class="p0-page">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
-    <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
+    <a class="brand" href="{{ '/p0/overall' if request.app.state.overall_shell_enabled|default(false) else '/p0/issues' }}"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
     <nav class="main-nav">
       {% if request.app.state.overall_shell_enabled|default(false) %}
       <a class="nav-item {% if request.url.path == '/p0/overall' %}active{% endif %}" href="/p0/overall">总体工作台</a>
@@ -24,7 +24,9 @@
       <div class="nav-divider"></div>
       <div class="nav-label">现有能力</div>
       {% endif %}
+      {% if not request.app.state.overall_shell_enabled|default(false) %}
       <a class="nav-item {% if request.url.path.startswith('/p0/issues') %}active{% endif %}" href="/p0/issues">问题工作台</a>
+      {% endif %}
       <a class="nav-item {% if request.url.path.startswith('/p0/itr-recovery') %}active{% endif %}" href="/p0/itr-recovery">ITR工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/itr-resolution') %}active{% endif %}" href="/p0/itr-resolution">彻底解决工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/software-assessment') %}active{% endif %}" href="/p0/software-assessment">软件考核工作台</a>

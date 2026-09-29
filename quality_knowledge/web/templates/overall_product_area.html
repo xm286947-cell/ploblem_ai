@@ -23,22 +23,24 @@
 
 <section class="overall-capability-grid" aria-label="{{ area.title }}能力">
   {% for capability in area.capabilities %}
-    {% if capability.available %}
-    <a class="overall-capability" href="{{ capability.path }}">
-      <strong>{{ capability.title }}</strong>
-      <span>{{ capability.summary }}</span>
-      <small>进入现有能力</small>
-    </a>
-    {% else %}
-    <article class="overall-capability is-unavailable" aria-disabled="true">
-      <strong>{{ capability.title }}</strong>
-      <span>{{ capability.summary }}</span>
-      {% if capability.binding_pending %}
-      <small>Protected Existing Capability · Route / Binding 待权威确认</small>
+    {% if not capability.supporting|default(false) %}
+      {% if capability.available %}
+      <a class="overall-capability" href="{{ capability.path }}">
+        <strong>{{ capability.title }}</strong>
+        <span>{{ capability.summary }}</span>
+        <small>进入现有能力</small>
+      </a>
       {% else %}
-      <small>当前运行环境未绑定 Legacy 数据库</small>
+      <article class="overall-capability is-unavailable" aria-disabled="true">
+        <strong>{{ capability.title }}</strong>
+        <span>{{ capability.summary }}</span>
+        {% if capability.binding_pending %}
+        <small>Protected Existing Capability · Route / Binding 待权威确认</small>
+        {% else %}
+        <small>当前运行环境未绑定 Legacy 数据库</small>
+        {% endif %}
+      </article>
       {% endif %}
-    </article>
     {% endif %}
   {% endfor %}
 </section>
@@ -69,8 +71,20 @@
 
 {% if area.area_id == 'current-problem' %}
 <section class="overall-card">
-  <h2>Current Problem 边界</h2>
-  <p>Repeat Risk 继续通过具体问题对象进入；软件问题考核保持 External Binding Pending，不由 /analysis 或材料页替代。</p>
+  <h2>Common Problem View · 公共问题视图</h2>
+  <p>公共问题视图承载 Canonical Problem Identity、问题列表、详情、关联对象与 Deep Link；它是四个业务工作台共享的底座，不是第五个业务工作台。</p>
+  <p><a class="overall-secondary" href="{{ area.common_problem_path }}">进入公共问题视图</a></p>
+</section>
+<section class="overall-card">
+  <h2>支撑能力</h2>
+  <div class="overall-actions">
+    {% for capability in area.capabilities %}
+      {% if capability.supporting|default(false) and capability.available %}
+      <a href="{{ capability.path }}">{{ capability.title }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <p>Repeat Risk 继续通过具体问题对象进入；批量 AI 与历史 /analysis 深链保留，但不作为四个业务工作台之一。</p>
 </section>
 {% endif %}
 {% endblock %}
