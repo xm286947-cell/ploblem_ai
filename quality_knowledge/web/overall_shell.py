@@ -8,13 +8,26 @@ points.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+
+from compatibility.common_evidence import (
+    CommonEvidenceContractError,
+    build_overall_evidence_href,
+    validate_common_evidence,
+)
+from quality_knowledge.web.overall_navigation import (
+    append_overall_return_state,
+    normalize_overall_return_state,
+    overall_navigation_asset_version,
+)
 
 
 _HERE = Path(__file__).resolve().parent
@@ -194,12 +207,16 @@ def _safe_local_path(value: Any, *, default: str | None = None) -> str | None:
     if value is None or value == "":
         return default
     path = str(value).strip()
+    parsed = urlsplit(path)
     if (
         not path.startswith("/")
         or path.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
         or "\\" in path
         or "\n" in path
         or "\r" in path
+        or len(path) > 4096
     ):
         raise HTTPException(status_code=400, detail="OVERALL_NAVIGATION_PATH_INVALID")
     return path
@@ -247,14 +264,25 @@ def _normalize_task(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("task_id/title/workspace_id are required")
     if workspace_id not in _workspace_index():
         raise ValueError("unknown workspace_id")
+    return_to = _safe_local_path(raw.get("return_to"), default="/p0/overall")
+    evidence = raw.get("common_evidence")
+    evidence_link = (
+        build_overall_evidence_href(
+            evidence,
+            return_to=return_to or "/p0/overall",
+            presentation="drawer",
+        )
+        if isinstance(evidence, Mapping)
+        else _safe_local_path(raw.get("evidence_link"))
+    )
     return {
         "task_id": task_id,
         "title": title,
         "workspace_id": workspace_id,
         "status": status,
         "deep_link": _safe_local_path(raw.get("deep_link")),
-        "evidence_link": _safe_local_path(raw.get("evidence_link")),
-        "return_to": _safe_local_path(raw.get("return_to"), default="/p0/overall"),
+        "evidence_link": evidence_link,
+        "return_to": return_to,
     }
 
 
@@ -300,6 +328,7 @@ def create_overall_shell_router(
     """
 
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
+    templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version()
     router = APIRouter()
 
     @router.get("/api/v2/overall/workspaces")
@@ -401,19 +430,56 @@ def create_overall_shell_router(
         source_ref: str = Query(""),
         object_href: str = Query(""),
         return_to: str = Query("/p0/overall"),
+        return_state: str = Query(""),
+        common_evidence: str = Query(""),
+        presentation: str = Query("page"),
     ) -> HTMLResponse:
+        if presentation not in {"page", "drawer"}:
+            raise HTTPException(status_code=400, detail="OVERALL_EVIDENCE_PRESENTATION_INVALID")
+
+        evidence: dict[str, Any] | None = None
+        if common_evidence:
+            if len(common_evidence.encode("utf-8")) > 12000:
+                raise HTTPException(status_code=400, detail="COMMON_EVIDENCE_PAYLOAD_INVALID")
+            try:
+                parsed_evidence = json.loads(common_evidence)
+                if not isinstance(parsed_evidence, dict):
+                    raise ValueError("object required")
+                validate_common_evidence(parsed_evidence)
+            except (TypeError, ValueError, CommonEvidenceContractError) as exc:
+                raise HTTPException(status_code=400, detail="COMMON_EVIDENCE_PAYLOAD_INVALID") from exc
+            evidence = parsed_evidence
+
+        state = normalize_overall_return_state(return_state or None)
+        safe_return = _safe_local_path(return_to, default="/p0/overall") or "/p0/overall"
+        return_url = append_overall_return_state(safe_return, state)
+        template_name = (
+            "overall_evidence_drawer.html"
+            if presentation == "drawer"
+            else "overall_evidence.html"
+        )
         return templates.TemplateResponse(
             request,
-            "overall_evidence.html",
+            template_name,
             {
-                "page_title": "Common Evidence",
+                "page_title": "Evidence / Source Viewer",
                 "contract_version": COMMON_EVIDENCE_CONTRACT_VERSION,
-                "producer_domain": producer_domain.strip(),
-                "evidence_id": evidence_id.strip(),
-                "producer_object_id": producer_object_id.strip(),
-                "source_ref": source_ref.strip(),
+                "evidence": evidence,
+                "producer_domain": (evidence or {}).get("producer_domain", producer_domain).strip(),
+                "evidence_id": (evidence or {}).get("evidence_id", evidence_id).strip(),
+                "evidence_type": (evidence or {}).get("evidence_type", ""),
+                "producer_object_id": (evidence or {}).get("producer_object_id", producer_object_id) or "",
+                "source_ref": (evidence or {}).get("source_ref", source_ref) or "",
+                "source": (evidence or {}).get("source", {}),
+                "locator": (evidence or {}).get("locator", {}),
+                "excerpt": (evidence or {}).get("excerpt", ""),
+                "source_text": (evidence or {}).get("source_text", ""),
+                "verification_status": (evidence or {}).get("verification_status", ""),
+                "evidence_status": (evidence or {}).get("evidence_status", ""),
+                "source_reference": (evidence or {}).get("source_reference", ""),
                 "object_href": _safe_local_path(object_href),
-                "return_to": _safe_local_path(return_to, default="/p0/overall"),
+                "return_to": safe_return,
+                "return_url": return_url,
             },
         )
 
