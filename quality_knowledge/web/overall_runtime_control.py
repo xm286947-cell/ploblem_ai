@@ -130,7 +130,11 @@ class OverallRuntimeControlPlane:
         self.operator_model_config_overrides = {
             name: os.environ.get(name, "").strip()
             for name in _DOMAIN_MODEL_CONFIG_ENVS
-            if os.environ.get(name, "").strip()
+            if (
+                os.environ.get(name, "").strip()
+                and os.environ.get(f"{name}_SOURCE", "").strip().upper()
+                != "OVERALL_AGENT_CONFIG"
+            )
         }
         self.revision_root.mkdir(parents=True, exist_ok=True)
         self.diagnostic_root.mkdir(parents=True, exist_ok=True)
@@ -182,13 +186,16 @@ class OverallRuntimeControlPlane:
         preserved: dict[str, str] = {}
         for name in _DOMAIN_MODEL_CONFIG_ENVS:
             operator_value = self.operator_model_config_overrides.get(name)
+            source_key = f"{name}_SOURCE"
             if operator_value:
                 os.environ[name] = operator_value
+                os.environ[source_key] = "OPERATOR_OVERRIDE"
                 preserved[name] = operator_value
             else:
                 os.environ[name] = str(path)
+                os.environ[source_key] = "OVERALL_AGENT_CONFIG"
                 applied[name] = str(path)
-        os.environ.setdefault("OVERALL_RUNTIME_MODEL_CONFIG", str(path))
+        os.environ["OVERALL_RUNTIME_MODEL_CONFIG"] = str(path)
         return {
             "applied": applied,
             "preserved_operator_overrides": preserved,
@@ -279,11 +286,9 @@ class OverallRuntimeControlPlane:
             ) if active_model else None,
             "models": projected,
             "formal_bindings": self.formal_bindings(),
-            "operator_overrides": {
-                name: os.environ.get(name)
-                for name in _DOMAIN_MODEL_CONFIG_ENVS
-                if os.environ.get(name)
-            },
+            "operator_overrides": dict(
+                self.operator_model_config_overrides
+            ),
             "secret_policy": "SECRET_REF_ONLY_FOR_CONTROL_PLANE_WRITES",
         }
 
