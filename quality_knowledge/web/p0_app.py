@@ -505,7 +505,11 @@ def create_p0_app(
 
         root_target = "/p0/issues"
     else:
-        app.include_router(create_hardware_case_pages_router())
+        app.include_router(
+            create_hardware_case_pages_router(
+                hardware_case_host_role=app.state.hardware_case_host_role,
+            )
+        )
         root_target = "/p0/hardware-cases"
 
     effective_testability = testability_enabled
