@@ -127,6 +127,11 @@ class OverallRuntimeControlPlane:
             name: Path(path).resolve()
             for name, path in (runtime_dbs or {}).items()
         }
+        self.operator_model_config_overrides = {
+            name: os.environ.get(name, "").strip()
+            for name in _DOMAIN_MODEL_CONFIG_ENVS
+            if os.environ.get(name, "").strip()
+        }
         self.revision_root.mkdir(parents=True, exist_ok=True)
         self.diagnostic_root.mkdir(parents=True, exist_ok=True)
 
@@ -169,9 +174,10 @@ class OverallRuntimeControlPlane:
         applied: dict[str, str] = {}
         preserved: dict[str, str] = {}
         for name in _DOMAIN_MODEL_CONFIG_ENVS:
-            current = os.environ.get(name, "").strip()
-            if current:
-                preserved[name] = current
+            operator_value = self.operator_model_config_overrides.get(name)
+            if operator_value:
+                os.environ[name] = operator_value
+                preserved[name] = operator_value
             else:
                 os.environ[name] = str(path)
                 applied[name] = str(path)
@@ -418,6 +424,7 @@ class OverallRuntimeControlPlane:
             actor=actor,
             details={"previous_revision": previous},
         )
+        pointer["environment"] = self.apply_active_config_environment()
         return pointer
 
     def rollback(
