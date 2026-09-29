@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS issue_material_link(
  link_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,material_id TEXT NOT NULL REFERENCES source_material(material_id),
  rule_id TEXT REFERENCES association_rule(rule_id),link_status TEXT NOT NULL,match_value TEXT,
  created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(knowledge_id,material_id));
+CREATE TABLE IF NOT EXISTS source_material_reporting_year(
+ material_id TEXT PRIMARY KEY REFERENCES source_material(material_id) ON DELETE CASCADE,
+ reporting_year TEXT NOT NULL,year_source TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_source_material_reporting_year ON source_material_reporting_year(reporting_year,material_id);
 """
 
 
