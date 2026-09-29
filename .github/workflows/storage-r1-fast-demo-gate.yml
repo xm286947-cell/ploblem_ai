@@ -84,6 +84,7 @@ jobs:
       - name: Build complete R1 demo candidate
         env:
           STORAGE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+          STORAGE_RUNTIME_COMMIT: ${{ github.event.pull_request.base.sha }}
           STORAGE_PACKAGE_ID: STORAGE-R1-FAST-DEMO-CANDIDATE-${{ github.event.pull_request.head.sha }}
           STORAGE_ZIP_NAME: STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
           STORAGE_ASSEMBLY_NAME: Storage R1 Fast Demo - Device Lifetime Assessment
