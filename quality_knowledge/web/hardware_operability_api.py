@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from services.hardware_data_reliability import HardwareDataReliabilityManager
 from services.hardware_operability import (
     contract_descriptor,
     health_status,
@@ -38,6 +39,12 @@ def create_hardware_operability_router(
     @router.get("/api/public/hardware/v1/contract")
     def contract() -> dict[str, Any]:
         return contract_descriptor(root)
+
+    @router.get("/api/system/hardware/schema")
+    def schema_status() -> JSONResponse:
+        payload = HardwareDataReliabilityManager(hardware_db).inspect_status()
+        status_code = 200 if payload.get("status") == "READY" else 503
+        return JSONResponse(payload, status_code=status_code)
 
     return router
 
