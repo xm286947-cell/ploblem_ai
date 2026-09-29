@@ -206,11 +206,15 @@ def _parameter_response(payload: Any) -> dict[str, Any]:
     if isinstance(field_map, dict) and field_map:
         fields = [str(key) for key in field_map.keys()]
     else:
-        required_fields = _find_first(payload, "required_fields")
-        if isinstance(required_fields, list) and required_fields:
-            fields = [str(item) for item in required_fields]
+        target_fields = _find_first(payload, "target_fields")
+        if isinstance(target_fields, list) and target_fields:
+            fields = [str(item) for item in target_fields]
         else:
-            fields = list(EMMC_FIELDS)
+            required_fields = _find_first(payload, "required_fields")
+            if isinstance(required_fields, list) and required_fields:
+                fields = [str(item) for item in required_fields]
+            else:
+                fields = list(EMMC_FIELDS)
 
     source_id = str(_find_first(payload, "primary_source_id") or "primary")
     out: list[dict[str, Any]] = []
@@ -270,6 +274,8 @@ def response_for(instructions: str, payload: Any) -> dict[str, Any]:
         return _model_response()
     if (
         "extract storage-device datasheet facts" in text
+        or "targeted supplement pass" in text
+        or "target_fields" in text
         or "required_fields" in text
         or "field_map" in text
         or "storageparameterextractresult" in text
