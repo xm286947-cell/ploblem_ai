@@ -131,6 +131,27 @@ def product_compare(body: ProductCompareRequest):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.get("/api/product/projects/{project_ref}/context", tags=["Storage Product MVP"])
+def product_project_context(project_ref: str):
+    try:
+        return product_api.project_device_context(project_ref)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/projects/{project_ref}/matrix", tags=["Storage Product MVP"])
+def product_project_matrix(project_ref: str, body: ProductCompareRequest):
+    try:
+        return product_api.project_device_matrix(project_ref, body.device_ids)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/product/provider-operability", tags=["Storage Product MVP"])
+def product_provider_operability():
+    return product_api.provider_operability()
+
+
 @app.get("/api/product/diagnostics", tags=["Storage Product MVP"])
 def product_diagnostics(device_type: str = "", device_id: str = ""):
     try:
@@ -864,7 +885,7 @@ def impact(old_id: str, new_id: str):
 
 @app.post("/api/links", status_code=201)
 def create_link(body: Link):
-    if body.target_system not in {"quality_issue", "quality_scenario", "review"} or not body.target_id.strip():
+    if body.target_system not in {"quality_issue", "quality_scenario", "review", "project"} or not body.target_id.strip():
         raise HTTPException(422, "不支持的外部对象")
     with core.connect() as con:
         if not con.execute("SELECT 1 FROM devices WHERE id=?", (body.device_id,)).fetchone():
