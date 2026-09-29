@@ -54,6 +54,18 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
     assert manifest["previous_formal_release"] == PREVIOUS_RELEASE
     assert manifest["product_test_gate"] == "NOT_RUN_FOR_THIS_CANDIDATE"
     assert manifest["release_decision"] == "NOT_REQUESTED"
+    assert manifest["development_gate"] == {
+        "w1": "PASS_WITH_EXTERNAL_BINDINGS",
+        "w2": "PASS",
+        "w3": "PASS",
+        "w4": "PASS",
+    }
+    assert [item["route"] for item in manifest["current_problem_workbenches"]] == [
+        "/p0/itr-recovery",
+        "/p0/itr-resolution",
+        "/p0/software-assessment",
+        "/p0/missed-test-analysis",
+    ]
     assert manifest["data_binding"]["legacy_quality_issue_db"] == "EXTERNAL_REQUIRED"
     assert manifest["data_binding"]["real_internal_data_included"] is False
     assert manifest["provider_binding"]["real_secret_included"] is False
@@ -64,6 +76,10 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
     assert (package_dir / "START_OVERALL_R2_WINDOWS.bat").is_file()
     assert (package_dir / "STOP_OVERALL_R2_WINDOWS.bat").is_file()
     assert (package_dir / "CONFIG_OVERALL_R2_WINDOWS.cmd.template").is_file()
+    assert (package_dir / "quality_knowledge/web/software_assessment_adapter.py").is_file()
+    assert (package_dir / "quality_knowledge/web/itr_recovery_adapter.py").is_file()
+    assert (package_dir / "quality_knowledge/web/itr_resolution_adapter.py").is_file()
+    assert (package_dir / "quality_knowledge/web/missed_test_adapter.py").is_file()
     assert not (package_dir / "CONFIG_OVERALL_R2_WINDOWS.cmd").exists()
     assert (package_dir / "R2_SOURCE_COMMIT").read_text().strip() == commit
 
