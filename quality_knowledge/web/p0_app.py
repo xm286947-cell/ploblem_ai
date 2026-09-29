@@ -25,8 +25,6 @@ from quality_knowledge.p04.portrait import (
 )
 from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
-from quality_knowledge.major_cases.context import UnavailableMajorProblemContextProvider
-from quality_knowledge.web.major_context_api import create_major_context_router
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -107,10 +105,15 @@ def create_p0_app(
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
-    app.state.hardware_case_host_role = _normalize_hardware_case_host_role(
+    hardware_role_raw = (
         hardware_case_host_role
         if hardware_case_host_role is not None
-        else os.getenv("HARDWARE_CASE_HOST_ROLE", "CONSUMER")
+        else os.getenv("HARDWARE_CASE_HOST_ROLE")
+    )
+    app.state.hardware_case_host_role = (
+        _normalize_hardware_case_host_role(hardware_role_raw)
+        if hardware_role_raw is not None and str(hardware_role_raw).strip()
+        else None
     )
     app.state.storage_workspace_binding = None
     if storage_app is not None or app.state.overall_shell_enabled:
@@ -254,12 +257,21 @@ def create_p0_app(
         app.state.portrait_provider,
         app.state.portrait_repository,
     )
-    app.state.major_context_provider = (
-        major_context_provider or UnavailableMajorProblemContextProvider()
-    )
-    # The provider is injected at the composition boundary.  P04 can only see
-    # this HTTP JSON route and never imports the provider's repository/domain.
-    app.include_router(create_major_context_router(app.state.major_context_provider))
+    app.state.major_context_provider = None
+    if "QUALITY_ISSUE" in domains:
+        from quality_knowledge.major_cases.context import (
+            UnavailableMajorProblemContextProvider,
+        )
+        from quality_knowledge.web.major_context_api import create_major_context_router
+
+        app.state.major_context_provider = (
+            major_context_provider or UnavailableMajorProblemContextProvider()
+        )
+        # The provider is injected at the composition boundary. P04 can only see
+        # this HTTP JSON route and never imports the provider's repository/domain.
+        app.include_router(
+            create_major_context_router(app.state.major_context_provider)
+        )
 
     # Major production owns its SQLite store; downstream domains receive only
     # historical-case/v1 over the published artifact repository.
