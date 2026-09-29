@@ -11,7 +11,7 @@ from quality_knowledge.web.p0_app import create_p0_app
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _client(tmp_path: Path, *, host_role: str = "CONSUMER") -> TestClient:
     p0_db = tmp_path / "quality_capability_p0.db"
     hardware_db = tmp_path / "hardware_case_mvp.db"
     P0Initializer(
@@ -25,6 +25,7 @@ def _client(tmp_path: Path) -> TestClient:
             hardware_case_db_path=hardware_db,
             hardware_tree_upload_dir=tmp_path / "tree_uploads",
             hardware_case_source_root=tmp_path / "sources",
+            hardware_case_host_role=host_role,
         )
     )
 
@@ -47,8 +48,8 @@ def test_m3_p01_is_clear_hardware_case_product_entry(tmp_path: Path):
 
 
 def test_m3_maintainer_product_nav_exposes_review_and_p07(tmp_path: Path):
-    client = _client(tmp_path)
-    html = client.get("/p0/hardware-cases?role=maintainer").text
+    client = _client(tmp_path, host_role="MAINTAINER")
+    html = client.get("/p0/hardware-cases").text
     assert "维护视图" in html
     assert "案例确认" in html
     assert "基础数据管理" in html
@@ -57,8 +58,18 @@ def test_m3_maintainer_product_nav_exposes_review_and_p07(tmp_path: Path):
     assert "HARDWARE CASE · P05" in review.text
 
 
+def test_m3_query_param_cannot_escalate_consumer(tmp_path: Path):
+    client = _client(tmp_path, host_role="CONSUMER")
+    html = client.get("/p0/hardware-cases?role=maintainer").text
+    assert "维护视图" not in html
+    assert "案例确认" not in html
+    assert "基础数据管理" not in html
+    assert client.get("/p0/hardware-cases/review?role=maintainer").status_code == 403
+    assert client.get("/p0/hardware-cases/base-data?role=maintainer").status_code == 403
+
+
 def test_m3_p02_p03_p04_and_p07_routes_are_mounted(tmp_path: Path):
-    client = _client(tmp_path)
+    client = _client(tmp_path, host_role="MAINTAINER")
     tree = client.get("/p0/hardware-cases/tree")
     search = client.get("/p0/hardware-cases/search")
     detail = client.get("/p0/hardware-cases/HC-SYNTHETIC")

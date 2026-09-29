@@ -31,7 +31,7 @@ def _workbook_bytes() -> bytes:
     return out.getvalue()
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _client(tmp_path: Path, *, host_role: str = "MAINTAINER") -> TestClient:
     root = Path(__file__).resolve().parents[1]
     p0_db = tmp_path / "quality_capability_p0.db"
     hardware_db = tmp_path / "hardware_case_mvp.db"
@@ -48,12 +48,13 @@ def _client(tmp_path: Path) -> TestClient:
         stage_runner=object(),
         hardware_case_db_path=hardware_db,
         hardware_tree_upload_dir=upload_dir,
+        hardware_case_host_role=host_role,
     )
     return TestClient(app)
 
 
 def test_m3a_tree_import_requires_maintainer(tmp_path: Path):
-    client = _client(tmp_path)
+    client = _client(tmp_path, host_role="CONSUMER")
     response = client.post(
         "/api/v2/hardware-cases/tree-imports",
         data={"tree_type": "CIRCUIT_FEATURE"},
@@ -199,7 +200,8 @@ def test_m3a_upload_analyze_review_apply_and_consume_through_unified_app(tmp_pat
     assert "circuit.xlsx" in serialized
 
 
-def test_m3a_operator_is_required_for_auditable_import(tmp_path: Path):
+def test_m3a_operator_header_cannot_spoof_trusted_actor(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("HARDWARE_CASE_HOST_ACTOR", "trusted-maintainer-01")
     client = _client(tmp_path)
     response = client.post(
         "/api/v2/hardware-cases/tree-imports",
@@ -211,7 +213,10 @@ def test_m3a_operator_is_required_for_auditable_import(tmp_path: Path):
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         },
-        headers={"X-Hardware-Case-Role": "MAINTAINER"},
+        headers={
+            "X-Hardware-Case-Role": "MAINTAINER",
+            "X-Hardware-Case-Operator": "spoofed-browser-user",
+        },
     )
-    assert response.status_code == 400
-    assert response.json()["detail"] == "HARDWARE_TREE_OPERATOR_REQUIRED"
+    assert response.status_code == 201
+    assert response.json()["job"]["operator"] == "trusted-maintainer-01"

@@ -53,6 +53,7 @@ def main() -> int:
             p0_db,
             hardware_case_db_path=hardware_db,
             enabled_domains={"HARDWARE_CASE"},
+            hardware_case_host_role="MAINTAINER",
         )
         client = TestClient(app)
 

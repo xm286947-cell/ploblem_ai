@@ -200,27 +200,19 @@ def create_p0_insights_router(
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version(assets)
-    hardware_host_role = (
-        str(hardware_case_host_role).strip().upper()
-        if hardware_case_host_role is not None
-        else None
-    )
-    if hardware_host_role not in {None, "CONSUMER", "MAINTAINER"}:
+    hardware_host_role = str(
+        hardware_case_host_role or "CONSUMER"
+    ).strip().upper()
+    if hardware_host_role not in {"CONSUMER", "MAINTAINER"}:
         raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
 
     def resolve_hardware_role(request: Request) -> str:
-        if hardware_host_role is not None:
-            return hardware_host_role
-        # Legacy/internal composition fallback. Formal Overall R2 packages bind
-        # HARDWARE_CASE_HOST_ROLE explicitly and never depend on this query.
-        return (
-            "MAINTAINER"
-            if request.query_params.get("role") == "maintainer"
-            else "CONSUMER"
-        )
+        # Reuse the existing host-role model. Query/browser state is never
+        # authority; an unbound host fails closed to CONSUMER.
+        return hardware_host_role
 
     def require_hardware_maintainer() -> None:
-        if hardware_host_role == "CONSUMER":
+        if hardware_host_role != "MAINTAINER":
             raise HTTPException(
                 status_code=403,
                 detail="HARDWARE_CASE_MAINTAINER_REQUIRED",

@@ -1,0 +1,60 @@
+name: R2 W3 Hardware Auth Audit
+
+on:
+  pull_request:
+    branches: [integration/overall-r2]
+    paths:
+      - "quality_knowledge/web/hardware_*.py"
+      - "quality_knowledge/web/p0_pages.py"
+      - "repositories/hardware_*.py"
+      - "scripts/hardware_case_*.py"
+      - "START_HARDWARE_CASE.bat"
+      - "START_HARDWARE_CASE.sh"
+      - "tests/test_hardware_*.py"
+      - ".github/workflows/r2-w3-hardware-auth-audit.yml"
+  workflow_dispatch:
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Hardware W3 focused regression
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_trusted_auth_audit_r2_w3.py
+          tests/test_hardware_case_web_api.py
+          tests/test_hardware_case_m3_frontend.py
+          tests/test_hardware_case_domain_boundary.py
+          tests/test_hardware_case_evidence_source.py
+          tests/test_hardware_case_product_api_e2e.py
+          tests/test_hardware_tree_import_m1.py
+          tests/test_hardware_tree_import_m2.py
+          tests/test_hardware_tree_import_m3a_api.py
+          tests/test_hardware_tree_import_m3b_frontend.py
+
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run existing Hardware Web startup check
+        shell: cmd
+        env:
+          HARDWARE_CASE_HOST_ROLE: "MAINTAINER"
+          HARDWARE_CASE_HOST_ACTOR: "github-actions:windows-maintainer"
+        run: >-
+          python scripts\hardware_case_web_start.py --check
+          --db data\ci_quality.db
+          --hardware-db data\ci_hardware.db
+          --tree-upload-dir data\ci_tree_uploads
+          --source-root data\ci_sources

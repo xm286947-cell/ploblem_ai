@@ -26,6 +26,7 @@ def frontend_smoke() -> None:
             hardware_case_db_path=hardware_db,
             hardware_tree_upload_dir=root / "tree_uploads",
             enabled_domains={"HARDWARE_CASE"},
+            hardware_case_host_role="MAINTAINER",
         )
         assert app.state.p0_repository is None
         assert app.state.repeat_risk_service is None

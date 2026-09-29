@@ -23,6 +23,7 @@ def _client(tmp_path: Path) -> TestClient:
         stage_runner=object(),
         hardware_case_db_path=hardware_db,
         hardware_tree_upload_dir=tmp_path / "tree_uploads",
+        hardware_case_host_role="MAINTAINER",
     )
     return TestClient(app)
 
