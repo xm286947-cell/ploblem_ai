@@ -46,92 +46,92 @@ jobs:
             ! -name 'start_quality_capability_p1.bat' \
             ! -name 'INSTALL_OVERALL_R2_WINDOWS.bat' -delete
           rm -f "$stage/00_README_FIRST.txt" "$stage/WINDOWS_START_HERE.txt"
-
           chmod +x "$stage/start_quality_capability_p1.command"
 
-          cat >"$stage/00_STEP1_README_FIRST.txt" <<EOF
-STEP1 LEGACY QUALITY SCENARIO / PORTRAIT REAL RESTORE VALIDATION
-
-CANDIDATE_CLASS=STEP1_REAL_RESTORE_VALIDATION
-FORMAL_W6_FINAL_CANDIDATE=NO
-SOURCE_SHA=$source_sha
-
-IMPORTANT:
-This package intentionally does NOT contain production/internal SQLite data.
-It must bind an existing mature quality_issue_v1.db.
-An absent/empty DB is FAIL-CLOSED and must never be accepted as restored.
-
-WINDOWS:
-1. Run INSTALL_OVERALL_R2_WINDOWS.bat once.
-2. In the same cmd session:
-   set LEGACY_QUALITY_ISSUE_DB_PATH=C:\path\to\existing\quality_issue_v1.db
-3. Run start_quality_capability_p1.bat
-
-macOS:
-1. Existing Python 3.12 is supported; Python 3.11 is NOT mandatory.
-2. In Terminal:
-   export LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/existing/quality_issue_v1.db
-3. Double-click start_quality_capability_p1.command or run:
-   ./start_quality_capability_p1.command
-4. The launcher uses .venv when present; otherwise it creates an isolated .venv
-   with python3.12 -> python3.11 -> python3.
-
-REAL RESTORE VALIDATION:
-- /quality-scenarios must show mature non-empty scenario data
-- scenario detail must be usable
-- /quality-scenario-assets must show mature assets
-- /quality-scenario-assets/portrait must show customer/industry/product portrait content
-- Evidence/filter/drill-down must work
-- /issues /analysis /import must remain available
-
-HTTP 200 alone is NOT PASS.
-Do not use /p0/quality-scenario-insights as a substitute.
-EOF
-
           SOURCE_SHA="$source_sha" python - "$stage" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
+          import json
+          import os
+          import sys
+          from pathlib import Path
 
-stage = Path(sys.argv[1])
-manifest = {
-    "contract": "step1-legacy-quality-scenario-real-restore/v2",
-    "candidate_class": "STEP1_REAL_RESTORE_VALIDATION",
-    "formal_w6_final_candidate": False,
-    "source_sha": os.environ["SOURCE_SHA"],
-    "restore_source": "QUALITY_SCENARIO_MVP_RC1@ce2eca157c4403b97036dd66e5218cd74fe53700",
-    "windows_start_entry": "start_quality_capability_p1.bat",
-    "macos_start_entry": "start_quality_capability_p1.command",
-    "windows_installer": "INSTALL_OVERALL_R2_WINDOWS.bat",
-    "data_binding": "LEGACY_QUALITY_ISSUE_DB_PATH",
-    "mature_db_fail_closed": True,
-    "python_policy": [".venv", "python3.12", "python3.11", "python3"],
-    "routes": [
-        "/quality-scenarios",
-        "/quality-scenario-assets",
-        "/quality-scenario-assets/portrait",
-    ],
-    "regression_routes": ["/issues", "/analysis", "/import"],
-    "pass_requires_real_data": True,
-    "r2_substitution": False,
-}
-(stage / "STEP1_MANUAL_VALIDATION_MANIFEST.json").write_text(
-    json.dumps(manifest, ensure_ascii=False, indent=2),
-    encoding="utf-8",
-)
-(stage / "STEP1_SOURCE_COMMIT").write_text(os.environ["SOURCE_SHA"] + "\n", encoding="ascii")
-PY
+          stage = Path(sys.argv[1])
+          source_sha = os.environ["SOURCE_SHA"]
+          readme = f"""STEP1 LEGACY QUALITY SCENARIO / PORTRAIT REAL RESTORE VALIDATION
+
+          CANDIDATE_CLASS=STEP1_REAL_RESTORE_VALIDATION
+          FORMAL_W6_FINAL_CANDIDATE=NO
+          SOURCE_SHA={source_sha}
+
+          IMPORTANT:
+          This package intentionally does NOT contain production/internal SQLite data.
+          It must bind an existing mature quality_issue_v1.db.
+          An absent/empty DB is FAIL-CLOSED and must never be accepted as restored.
+
+          WINDOWS:
+          1. Run INSTALL_OVERALL_R2_WINDOWS.bat once.
+          2. In the same cmd session:
+             set LEGACY_QUALITY_ISSUE_DB_PATH=C:\\path\\to\\existing\\quality_issue_v1.db
+          3. Run start_quality_capability_p1.bat
+
+          macOS:
+          1. Existing Python 3.12 is supported; Python 3.11 is NOT mandatory.
+          2. In Terminal:
+             export LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/existing/quality_issue_v1.db
+          3. Double-click start_quality_capability_p1.command or run:
+             ./start_quality_capability_p1.command
+          4. The launcher uses .venv when present; otherwise it creates an isolated .venv
+             with python3.12 -> python3.11 -> python3.
+
+          REAL RESTORE VALIDATION:
+          - /quality-scenarios must show mature non-empty scenario data
+          - scenario detail must be usable
+          - /quality-scenario-assets must show mature assets
+          - /quality-scenario-assets/portrait must show customer/industry/product portrait content
+          - Evidence/filter/drill-down must work
+          - /issues /analysis /import must remain available
+
+          HTTP 200 alone is NOT PASS.
+          Do not use /p0/quality-scenario-insights as a substitute.
+          """
+          (stage / "00_STEP1_README_FIRST.txt").write_text(readme, encoding="utf-8")
+
+          manifest = {
+              "contract": "step1-legacy-quality-scenario-real-restore/v2",
+              "candidate_class": "STEP1_REAL_RESTORE_VALIDATION",
+              "formal_w6_final_candidate": False,
+              "source_sha": source_sha,
+              "restore_source": "QUALITY_SCENARIO_MVP_RC1@ce2eca157c4403b97036dd66e5218cd74fe53700",
+              "windows_start_entry": "start_quality_capability_p1.bat",
+              "macos_start_entry": "start_quality_capability_p1.command",
+              "windows_installer": "INSTALL_OVERALL_R2_WINDOWS.bat",
+              "data_binding": "LEGACY_QUALITY_ISSUE_DB_PATH",
+              "mature_db_fail_closed": True,
+              "python_policy": [".venv", "python3.12", "python3.11", "python3"],
+              "routes": [
+                  "/quality-scenarios",
+                  "/quality-scenario-assets",
+                  "/quality-scenario-assets/portrait",
+              ],
+              "regression_routes": ["/issues", "/analysis", "/import"],
+              "pass_requires_real_data": True,
+              "r2_substitution": False,
+          }
+          (stage / "STEP1_MANUAL_VALIDATION_MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          (stage / "STEP1_SOURCE_COMMIT").write_text(source_sha + "\n", encoding="ascii")
+          PY
 
           python - "$stage/start_quality_capability_p1.command" <<'PY'
-import sys
-from pathlib import Path
-p = Path(sys.argv[1])
-data = p.read_bytes()
-assert b"\r\n" not in data, "macOS launcher contains CRLF"
-assert data.startswith(b"#!/bin/zsh\n")
-print("MAC_COMMAND_LF=PASS")
-PY
+          import sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          data = p.read_bytes()
+          assert b"\r\n" not in data, "macOS launcher contains CRLF"
+          assert data.startswith(b"#!/bin/zsh\n")
+          print("MAC_COMMAND_LF=PASS")
+          PY
           zsh -n "$stage/start_quality_capability_p1.command"
           test -x "$stage/start_quality_capability_p1.command"
 
@@ -183,12 +183,12 @@ PY
           test -f "$check/tools/verify_legacy_quality_db.py"
 
           python - "$check/start_quality_capability_p1.command" <<'PY'
-import sys
-from pathlib import Path
-data = Path(sys.argv[1]).read_bytes()
-assert b"\r\n" not in data
-print("PACKAGED_MAC_COMMAND_LF=PASS")
-PY
+          import sys
+          from pathlib import Path
+          data = Path(sys.argv[1]).read_bytes()
+          assert b"\r\n" not in data
+          print("PACKAGED_MAC_COMMAND_LF=PASS")
+          PY
           zsh -n "$check/start_quality_capability_p1.command"
 
           echo "STEP1_PACKAGE_IDENTITY=PASS"
