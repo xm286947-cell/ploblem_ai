@@ -155,9 +155,21 @@ def create_p0_app(
                 )
             ),
         )
-        app.state.overall_runtime_config_environment = (
-            runtime_control.apply_active_config_environment()
+        active_runtime_model_config = (
+            runtime_control.effective_model_config_path()
         )
+        app.state.overall_runtime_config_environment = {
+            "apply_mode": "EXPLICIT_BINDING_OR_PROCESS_LAUNCH",
+            "active_model_config": str(active_runtime_model_config),
+            "operator_overrides": dict(
+                runtime_control.operator_model_config_overrides
+            ),
+        }
+        if (
+            runtime_model_config is None
+            and not os.getenv("MAJOR_MODEL_CONFIG", "").strip()
+        ):
+            runtime_model_config = active_runtime_model_config
         app.state.overall_runtime_control = runtime_control
     hardware_role_raw = (
         hardware_case_host_role
@@ -432,8 +444,22 @@ def create_p0_app(
         def intake_structurer() -> Any:
             if hardware_case_structurer is not None:
                 return hardware_case_structurer
-            from services.hardware_case_runtime_adapter import build_hardware_case_structurer
-            return build_hardware_case_structurer()
+            from services.hardware_case_runtime_adapter import (
+                HardwareCaseRuntimeStructurer,
+            )
+
+            runtime_environ = dict(os.environ)
+            if (
+                app.state.overall_runtime_control is not None
+                and not runtime_environ.get("HARDWARE_CASE_MODEL_CONFIG", "").strip()
+            ):
+                runtime_environ["HARDWARE_CASE_MODEL_CONFIG"] = str(
+                    app.state.overall_runtime_control.effective_model_config_path()
+                )
+            return HardwareCaseRuntimeStructurer(
+                root=root,
+                environ=runtime_environ,
+            )
 
         hardware_case_intake_service = HardwareCaseIntakeService(
             hardware_db,
