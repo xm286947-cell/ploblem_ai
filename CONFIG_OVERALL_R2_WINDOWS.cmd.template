@@ -1,0 +1,17 @@
+@echo off
+rem Copy this file to CONFIG_OVERALL_R2_WINDOWS.cmd before first startup.
+rem Bind the approved EXISTING Legacy Quality Issue database. The package will
+rem validate it read-only and will NOT create or migrate a substitute database.
+set "LEGACY_QUALITY_ISSUE_DB_PATH=C:\REPLACE\WITH\APPROVED\quality_issue_v1.db"
+
+rem Optional. Default: %LOCALAPPDATA%\OverallR2\data
+rem set "OVERALL_R2_DATA_DIR=D:\QualityPlatform\OverallR2\data"
+
+rem Optional. Default: %OVERALL_R2_DATA_DIR%\quality_capability_p1.db
+rem set "OVERALL_R2_P1_DB=D:\QualityPlatform\OverallR2\data\quality_capability_p1.db"
+
+rem Optional. Default: %OVERALL_R2_DATA_DIR%\storage
+rem set "STORAGE_LIFE_DATA_DIR=D:\QualityPlatform\OverallR2\data\storage"
+
+rem Configure provider credentials through the environment names referenced by
+rem config/runtime/model.yaml. Never put real secrets into this package.
