@@ -166,14 +166,14 @@ def test_current_problem_four_workbench_association_closure_is_read_only(tmp_pat
     )
     assert resolution_page.status_code == 200
     assert "ITR-R2-ASSOC-1CS" in resolution_page.text
-    assert f"/p0/issues/{ids['ITR-R2-ASSOC-1']}" in resolution_page.text
+    assert f"/issues/{ids['ITR-R2-ASSOC-1']}" in resolution_page.text
 
     assessment_page = client.get(
         "/p0/software-assessment", params={"q": "ITR-R2-ASSOC-1"}
     )
     assert assessment_page.status_code == 200
     assert "ITR-R2-ASSOC-1CS" in assessment_page.text
-    assert f"/p0/issues/{ids['ITR-R2-ASSOC-1']}" in assessment_page.text
+    assert f"/issues/{ids['ITR-R2-ASSOC-1']}" in assessment_page.text
 
     missed_page = client.get(
         "/p0/missed-test-analysis", params={"q": "ITR-R2-ASSOC-1"}
@@ -182,13 +182,13 @@ def test_current_problem_four_workbench_association_closure_is_read_only(tmp_pat
     assert "ITR-R2-ASSOC-1" in missed_page.text
 
     detail = client.get(
-        f"/p0/issues/{ids['ITR-R2-ASSOC-1']}",
+        f"/issues/{ids['ITR-R2-ASSOC-1']}",
         params={
             "return_to": "/p0/missed-test-analysis?q=ITR-R2-ASSOC-1"
         },
     )
     assert detail.status_code == 200
-    assert "4/4 已关联" in detail.text
+    assert "4 / 4 已关联" in detail.text
     assert "/p0/itr-recovery?q=ITR-R2-ASSOC-1" in detail.text
     assert "/p0/itr-resolution?q=ITR-R2-ASSOC-1" in detail.text
     assert "/p0/software-assessment?q=ITR-R2-ASSOC-1" in detail.text

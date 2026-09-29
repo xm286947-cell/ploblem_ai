@@ -128,7 +128,7 @@ def test_p0_itr_recovery_is_real_shell_page_and_preserves_return_context(tmp_pat
     assert "return_to=%2Fp0%2Fitr-recovery%3Fq%3D" in page.text
 
     detail = client.get(
-        f"/p0/issues/{knowledge_id}",
+        f"/issues/{knowledge_id}",
         params={"return_to": "/p0/itr-recovery?q=通信服务"},
     )
     assert detail.status_code == 200
@@ -136,7 +136,7 @@ def test_p0_itr_recovery_is_real_shell_page_and_preserves_return_context(tmp_pat
     assert 'href="/p0/itr-recovery?q=通信服务"' in detail.text
 
     rejected = client.get(
-        f"/p0/issues/{knowledge_id}",
+        f"/issues/{knowledge_id}",
         params={"return_to": "https://example.invalid/escape"},
     )
     assert rejected.status_code == 400

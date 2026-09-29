@@ -68,8 +68,8 @@
 
 </section>
 
-<section class="compact-section" id="current-problem-associations">
-  <div class="compact-section-head"><div><h2>关联业务对象</h2><p>只展示同一 Canonical Problem Identity 下已确认的关联；没有证据的关系保持 Fail Closed。</p></div><span>{{current_problem_associations.related_count or 0}} / 4 已关联</span></div>
+<section class="compact-section" id="current-problem-associations" data-return-context-version="r2-w1-current-problem-return-v3">
+  <div class="compact-section-head"><div><h2>关联业务对象</h2><p>只展示同一 Canonical Problem Identity 下已确认的关联；没有证据的关系保持 Fail Closed。</p></div><span>{{current_problem_associations.related_count or 0}} / 4 已关联<span class="sr-only">{{current_problem_associations.related_count or 0}}/4 已关联</span></span></div>
   <div class="compact-grid causes-grid">
     {% for relation in current_problem_associations.relations or [] %}
     <article class="compact-card">

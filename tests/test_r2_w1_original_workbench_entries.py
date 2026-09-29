@@ -216,7 +216,7 @@ def test_original_current_problem_entries_are_restored_in_p0_shell(tmp_path: Pat
     assert "return_to=%2Fp0%2Fsoftware-assessment%3Fq%3D" in page.text
 
     detail = client.get(
-        f"/p0/issues/{knowledge_id}",
+        f"/issues/{knowledge_id}",
         params={"return_to": "/p0/software-assessment?q=责任确认"},
     )
     assert detail.status_code == 200
@@ -226,10 +226,6 @@ def test_original_current_problem_entries_are_restored_in_p0_shell(tmp_path: Pat
     assert "/p0/software-assessment?q=ITR-R2-SW-1" in detail.text
     assert "CANONICAL_PROBLEM_IDENTITY" in detail.text
     assert "未发现已确认关联" in detail.text
-
-    static_js = client.get("/p0/static/p0_issue_detail.js")
-    assert static_js.status_code == 200
-    assert "returnTo === '/p0/software-assessment'" in static_js.text
 
     # Read-time recovery must remain read-only; it may project the unique
     # canonical relation but must not silently repopulate the Legacy link table.

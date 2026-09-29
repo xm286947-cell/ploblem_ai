@@ -323,7 +323,7 @@ def create_p0_insights_router(
             service,
             q=q,
             analysis_status=analysis_status,
-            detail_prefix="/p0/issues",
+            detail_prefix="/issues",
             return_path="/p0/missed-test-analysis",
             detail_anchor="analysis",
         )
@@ -353,7 +353,7 @@ def create_p0_insights_router(
         rows = build_itr_recovery_rows(
             service,
             q=q,
-            detail_prefix="/p0/issues",
+            detail_prefix="/issues",
             return_path="/p0/itr-recovery",
         )
         return templates.TemplateResponse(
@@ -385,7 +385,7 @@ def create_p0_insights_router(
         rows = build_itr_resolution_rows(
             material_repository,
             q=q,
-            detail_prefix="/p0/issues",
+            detail_prefix="/issues",
             return_path="/p0/itr-resolution",
         )
         linked = sum(1 for row in rows if row.get("knowledge_id"))
@@ -419,7 +419,7 @@ def create_p0_insights_router(
         rows = build_software_assessment_rows(
             material_repository,
             q=q,
-            detail_prefix="/p0/issues",
+            detail_prefix="/issues",
             return_path="/p0/software-assessment",
         )
         linked = sum(1 for row in rows if row.get("knowledge_id"))
