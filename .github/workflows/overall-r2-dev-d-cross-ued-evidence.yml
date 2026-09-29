@@ -1,0 +1,55 @@
+name: R2 DEV-D Cross-UED Evidence Only
+
+on:
+  push:
+    branches:
+      - dev-d/evidence-only-cross-ued
+    paths:
+      - ".github/workflows/overall-r2-dev-d-cross-ued-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-cross-ued:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+      EXACT_R2_SOURCE: 983ad269a5e03c550d2138c54ba0fa2b3324eead
+    steps:
+      - name: Checkout exact integrated R2 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXACT_R2_SOURCE }}
+
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "EXPECTED_SOURCE=$EXACT_R2_SOURCE"
+          echo "ACTUAL_SOURCE=$actual"
+          test "$actual" = "$EXACT_R2_SOURCE"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Run cross-UED binding and protection evidence
+        run: |
+          pytest -q             tests/test_overall_frontend_parent_integration.py             tests/test_overall_frontend_shell.py             tests/test_overall_legacy_capability_compatibility.py             tests/test_quality_capability_legacy_integration.py             tests/test_p04_quality_scenario_insight.py             tests/test_p04_portrait_archive.py             tests/test_r2_w2_return_context.py             tests/test_r2_w3_common_evidence.py             tests/test_r2_w4_domain_assembly.py             tests/test_r2_w4_storage_direct_reuse.py             tests/test_r2_w5_agent_config_runtime_diagnostics.py             tests/test_hardware_trusted_auth_audit_r2_w3.py             tests/test_storage_workspace_binding.py
+
+      - name: Record evidence boundary
+        shell: bash
+        run: |
+          echo "DEV_D_EXACT_SOURCE=$EXACT_R2_SOURCE"
+          echo "PRODUCT_CODE_CHANGED=NO"
+          echo "FINAL_W6_CANDIDATE_BUILT=NO"
+          echo "EVIDENCE_ONLY_BRANCH=YES"
