@@ -72,15 +72,15 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
     {
         "area_id": "current-problem",
         "title": "当前问题",
-        "summary": "从权威问题事实进入现场恢复、彻底解决、漏测分析与批量分析；不创建第二套问题主数据。",
+        "summary": "围绕同一 Canonical Problem Identity 进入四个业务工作台；公共问题视图作为共享底座，不作为第五个业务工作台。",
+        "common_problem_path": "/p0/issues",
         "capabilities": (
-            {"title": "问题工作台", "summary": "当前有效问题入口。", "path": "/p0/issues"},
-            {"title": "ITR / 现场恢复", "summary": "Source-owned 现场恢复事实只读消费视图。", "path": "/p0/itr-recovery"},
-            {"title": "ITR 彻底解决", "summary": "Source-aligned 原因、措施、验证与业务状态视图。", "path": "/p0/itr-resolution"},
-            {"title": "软件问题漏测分析", "summary": "复用 Existing Problem + Escape Analysis。", "path": "/p0/missed-test-analysis"},
-            {"title": "软件问题考核", "summary": "历史能力已确认，但原 Route / State Owner 尚未完成权威绑定。", "binding_pending": True},
-            {"title": "批量 AI 分析", "summary": "保留正式 P0 批量分析入口。", "path": "/p0/batch-analysis"},
-            {"title": "原问题 AI 分析", "summary": "保留 /analysis 历史深链，不替代软件问题考核。", "path": "/analysis", "requires_legacy": True},
+            {"title": "ITR工作台", "summary": "Source-owned ITR / 现场恢复事实只读消费视图。", "path": "/p0/itr-recovery"},
+            {"title": "彻底解决工作台", "summary": "Source-aligned 原因、措施、验证与业务状态视图。", "path": "/p0/itr-resolution"},
+            {"title": "软件考核工作台", "summary": "复用 Existing Capability 与历史考核事实；不创建第二套状态机。", "path": "/p0/software-assessment"},
+            {"title": "漏测分析", "summary": "复用 Existing Problem + Escape Analysis。", "path": "/p0/missed-test-analysis"},
+            {"title": "批量 AI 分析", "summary": "保留正式 P0 批量分析入口。", "path": "/p0/batch-analysis", "supporting": True},
+            {"title": "原问题 AI 分析", "summary": "保留 /analysis 历史深链；属于支撑能力，不替代四个业务工作台。", "path": "/analysis", "requires_legacy": True, "supporting": True},
         ),
     },
     {
