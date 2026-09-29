@@ -1,0 +1,264 @@
+name: Overall R2 Candidate Real Product Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "scripts/build_overall_r2_windows_candidate.py"
+      - "scripts/overall_r2_windows_start.py"
+      - "tools/r2_candidate_schema_provider.py"
+      - "products/storage_rc1/**"
+      - "tests/test_r2_w5_windows_package_builder.py"
+      - ".github/workflows/overall-r2-candidate-real-product-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-real-product-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and extract exact candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = Join-Path $env:RUNNER_TEMP "candidate-dist"
+          $build = & python scripts/build_overall_r2_windows_candidate.py --output-dir $dist
+          $build | ForEach-Object { Write-Host $_ }
+          $zipLine = $build | Where-Object { $_ -like "PACKAGE_ZIP=*" } | Select-Object -Last 1
+          if (-not $zipLine) { throw "PACKAGE_ZIP was not emitted" }
+          $zip = $zipLine.Substring("PACKAGE_ZIP=".Length)
+          $shaLine = $build | Where-Object { $_ -like "PACKAGE_SHA256=*" } | Select-Object -Last 1
+          $sourceLine = $build | Where-Object { $_ -like "DUT_SOURCE_COMMIT=*" } | Select-Object -Last 1
+          $extract = Join-Path $env:RUNNER_TEMP "candidate-unzipped"
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $packageName = [IO.Path]::GetFileNameWithoutExtension($zip)
+          $package = Join-Path $extract $packageName
+          if (!(Test-Path $package)) { throw "Extracted candidate root missing: $package" }
+          "CANDIDATE_PACKAGE=$package" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_SHA256=$($shaLine.Substring('PACKAGE_SHA256='.Length))" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_SOURCE=$($sourceLine.Substring('DUT_SOURCE_COMMIT='.Length))" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "CANDIDATE_ZIP_EXTRACT=PASS"
+
+      - name: Verify candidate root has one startup UX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bats = @(Get-ChildItem -Path $env:CANDIDATE_PACKAGE -Filter "*.bat" -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $expected = @("INSTALL_OVERALL_R2_WINDOWS.bat","START_OVERALL_R2_WINDOWS.bat","STOP_OVERALL_R2_WINDOWS.bat")
+          if (($bats -join "|") -ne ($expected -join "|")) {
+            throw "COMPETING_ROOT_BAT: $($bats -join ',')"
+          }
+          $readme = Get-Content -Raw (Join-Path $env:CANDIDATE_PACKAGE "00_README_FIRST.txt")
+          if ($readme -notmatch "ONLY USER STARTUP PATH") { throw "Overall README marker missing" }
+          if ($readme -match "HARDWARE CASE PRODUCT TEST FULL V0.1") { throw "Stale Hardware README present" }
+          Write-Host "CANDIDATE_SINGLE_STARTUP=PASS"
+
+      - name: Install extracted candidate using packaged installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location $env:CANDIDATE_PACKAGE
+          try {
+            cmd.exe /c INSTALL_OVERALL_R2_WINDOWS.bat
+            if ($LASTEXITCODE -ne 0) { throw "INSTALL failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          Write-Host "CANDIDATE_INSTALL=PASS"
+
+      - name: Prepare clean Legacy DB, Data Root and Provider
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $py = Join-Path $env:CANDIDATE_PACKAGE ".venv\Scripts\python.exe"
+          $legacy = Join-Path $env:RUNNER_TEMP "candidate-legacy.db"
+          $data = Join-Path $env:RUNNER_TEMP "candidate-data"
+          & $py -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
+          if ($LASTEXITCODE -ne 0) { throw "Legacy DB seed failed" }
+
+          $providerOut = Join-Path $env:RUNNER_TEMP "candidate-provider.stdout.log"
+          $providerErr = Join-Path $env:RUNNER_TEMP "candidate-provider.stderr.log"
+          $provider = Start-Process -FilePath $py -ArgumentList @(
+            "tools/r2_candidate_schema_provider.py",
+            "--host","127.0.0.1","--port","9011"
+          ) -WorkingDirectory $env:CANDIDATE_PACKAGE -PassThru -WindowStyle Hidden -RedirectStandardOutput $providerOut -RedirectStandardError $providerErr
+          "CANDIDATE_PROVIDER_PID=$($provider.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          $config = @"
+@echo off
+set "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy"
+set "OVERALL_R2_DATA_DIR=$data"
+set "DASHSCOPE_BASE_URL=http://127.0.0.1:9011/v1"
+set "DASHSCOPE_API_KEY=CANDIDATE_TEST_SECRET_NOT_REAL"
+set "OVERALL_R2_NO_PAUSE=1"
+"@
+          Set-Content -Path (Join-Path $env:CANDIDATE_PACKAGE "CONFIG_OVERALL_R2_WINDOWS.cmd") -Value $config -Encoding ascii
+          "CANDIDATE_DATA_ROOT=$data" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_LEGACY_DB=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "CANDIDATE_ENV_PREP=PASS"
+
+      - name: Start extracted candidate through root BAT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stdout = Join-Path $env:RUNNER_TEMP "candidate-start.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "candidate-start.stderr.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @(
+            "/c","START_OVERALL_R2_WINDOWS.bat --no-browser --port 8088"
+          ) -WorkingDirectory $env:CANDIDATE_PACKAGE -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          "CANDIDATE_START_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_START_STDOUT=$stdout" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_START_STDERR=$stderr" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          $ready = $false
+          for ($i=0; $i -lt 90; $i++) {
+            if ($proc.HasExited) { break }
+            try {
+              $response = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/overall" -UseBasicParsing -TimeoutSec 3
+              if ($response.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ready) {
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            throw "Candidate did not become ready through START_OVERALL_R2_WINDOWS.bat"
+          }
+          Write-Host "CANDIDATE_ROOT_START=PASS"
+
+      - name: Verify seeded formal Knowledge Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $status = Invoke-RestMethod -Uri "http://127.0.0.1:8088/storage-workspace/api/product/knowledge/status" -TimeoutSec 15
+          $status | ConvertTo-Json -Depth 10
+          if (-not $status.available) { throw "Formal Knowledge Release is not available" }
+          if ($status.knowledge_release_version -ne "KP-STORAGE-RC1-VALIDATION-001") {
+            throw "Unexpected Knowledge Release version: $($status.knowledge_release_version)"
+          }
+          $manifest = Join-Path $env:CANDIDATE_DATA_ROOT "knowledge_release\current\release_manifest.json"
+          if (!(Test-Path $manifest)) { throw "External seeded release manifest missing" }
+          Write-Host "CANDIDATE_KNOWLEDGE_RELEASE=PASS"
+
+      - name: Run real PDF identify to Coverage to Review
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pdf = Join-Path $env:CANDIDATE_PACKAGE "products\storage_rc1\examples\synthetic_emmc.pdf"
+          if (!(Test-Path $pdf)) { throw "Packaged synthetic eMMC PDF missing" }
+
+          $identify = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8088/storage-workspace/api/documents/identify" -Form @{
+            file = Get-Item $pdf
+          } -TimeoutSec 120
+          $identify | ConvertTo-Json -Depth 12
+          if (-not $identify.identify_mode) { throw "PDF identify did not return identify_mode" }
+          if (-not $identify.markdown) { throw "PDF identify did not build Markdown" }
+          Write-Host "CANDIDATE_PDF_IDENTIFY=PASS"
+
+          $job = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8088/storage-workspace/api/documents/jobs" -Form @{
+            file = Get-Item $pdf
+            vendor = "CandidateTestVendor"
+            model = "CandidateTestEMMC"
+            device_type = "eMMC"
+            publisher = "R2 Candidate Product Gate"
+            models_json = "[]"
+          } -TimeoutSec 60
+          if (-not $job.job_id) { throw "Import job id missing" }
+
+          $final = $null
+          for ($i=0; $i -lt 120; $i++) {
+            Start-Sleep -Seconds 2
+            $final = Invoke-RestMethod -Uri ("http://127.0.0.1:8088/storage-workspace/api/documents/jobs/" + $job.job_id) -TimeoutSec 15
+            Write-Host ("JOB_STATUS=" + $final.status + ";STAGE=" + $final.stage + ";PROGRESS=" + $final.progress)
+            if ($final.status -eq "completed" -or $final.status -eq "failed") { break }
+          }
+          if (-not $final) { throw "Import job status missing" }
+          if ($final.status -ne "completed") {
+            $final | ConvertTo-Json -Depth 20
+            throw "PDF import job failed: $($final.error)"
+          }
+          $result = $final.result
+          if (-not $result.device_id) { throw "Completed import missing device_id" }
+          if (-not $result.coverage) { throw "Completed import missing Coverage" }
+          if (-not $result.expected_field_count -or $result.expected_field_count -lt 37) {
+            throw "Expected eMMC field universe was not produced"
+          }
+          Write-Host ("CANDIDATE_PDF_JOB=PASS;DEVICE_ID=" + $result.device_id)
+          Write-Host ("CANDIDATE_COVERAGE=PASS;EXPECTED_FIELDS=" + $result.expected_field_count)
+
+          $review = Invoke-RestMethod -Uri ("http://127.0.0.1:8088/storage-workspace/api/product/devices/" + $result.device_id + "/review-workbench") -TimeoutSec 30
+          if (-not $review.rows -or $review.rows.Count -lt 37) {
+            $review | ConvertTo-Json -Depth 10
+            throw "Review Workbench did not expose the full eMMC field review surface"
+          }
+          if (-not $review.coverage_counts) { throw "Review Workbench coverage counts missing" }
+          Write-Host ("CANDIDATE_REVIEW_WORKBENCH=PASS;ROWS=" + $review.rows.Count)
+
+          $runtime = Invoke-RestMethod -Uri "http://127.0.0.1:8088/storage-workspace/api/v1/runtime/status" -TimeoutSec 15
+          if (-not $runtime.configured) { throw "Storage Runtime is not configured" }
+          if ($runtime.api_key_env -ne "DASHSCOPE_API_KEY") { throw "Runtime SecretRef mismatch" }
+          $executions = Invoke-RestMethod -Uri "http://127.0.0.1:8088/storage-workspace/api/v1/runtime/executions" -TimeoutSec 15
+          if (-not $executions.items -or $executions.items.Count -lt 1) {
+            throw "No Runtime Provider execution evidence after real PDF flow"
+          }
+          $providerCalls = @($executions.items | ForEach-Object { [int]($_.provider_calls) } | Measure-Object -Sum).Sum
+          if ($providerCalls -lt 1) { throw "Runtime execution has zero Provider calls" }
+          Write-Host ("CANDIDATE_RUNTIME_PROVIDER_CALLS=PASS;CALLS=" + $providerCalls)
+
+      - name: Stop candidate and verify START preflight evidence
+        if: always()
+        shell: pwsh
+        run: |
+          Push-Location $env:CANDIDATE_PACKAGE
+          try {
+            cmd.exe /c STOP_OVERALL_R2_WINDOWS.bat
+          } finally {
+            Pop-Location
+          }
+          Start-Sleep -Seconds 2
+          if ($env:CANDIDATE_PROVIDER_PID) {
+            Stop-Process -Id ([int]$env:CANDIDATE_PROVIDER_PID) -Force -ErrorAction SilentlyContinue
+          }
+
+          if (Test-Path $env:CANDIDATE_START_STDOUT) {
+            $log = Get-Content -Raw $env:CANDIDATE_START_STDOUT
+            Write-Host $log
+            foreach ($marker in @(
+              "ACTIVE_REVISION=CANONICAL",
+              "MODEL_REF=qwen_prod",
+              "BASE_URL_ENV_REF=DASHSCOPE_BASE_URL",
+              "BASE_URL_PRESENT=PRESENT",
+              "API_KEY_ENV_REF=DASHSCOPE_API_KEY",
+              "API_KEY_PRESENT=PRESENT",
+              "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE"
+            )) {
+              if (-not $log.Contains($marker)) { throw "START evidence missing: $marker" }
+            }
+            if ($log.Contains("CANDIDATE_TEST_SECRET_NOT_REAL")) {
+              throw "Secret value leaked into START stdout"
+            }
+            Write-Host "CANDIDATE_START_SECRETREF_CHILD_PROCESS=PASS"
+          } else {
+            throw "Candidate START stdout log missing"
+          }
+
+          if (Test-Path $env:CANDIDATE_START_STDERR) {
+            $err = Get-Content -Raw $env:CANDIDATE_START_STDERR
+            if ($err.Contains("CANDIDATE_TEST_SECRET_NOT_REAL")) {
+              throw "Secret value leaked into START stderr"
+            }
+          }
