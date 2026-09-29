@@ -20,6 +20,8 @@ COMMON_PROBLEM_VIEW_IS_WORKBENCH = False
 RELATION_KEYS = ("ITR", "RESOLUTION", "SOFTWARE_ASSESSMENT", "MISSED_TEST")
 READ_ONLY_ACCESS_MODE = "READ_ONLY_PROJECTION"
 PERMISSION_AUTHORITY = "SOURCE_DOMAIN"
+RELATION_POLICY = "EXPLICIT_OR_EXACT_UNIQUE_ONLY"
+RETURN_CONTEXT_CONTRACT_VERSION = "overall-return-context/v1"
 
 
 def _text(value: Any) -> str:
@@ -105,12 +107,23 @@ def build_relation_contract(
     href: str,
     evidence: list[str],
     source_domain: str,
+    source_refs: list[dict[str, Any] | str] | None = None,
+    no_relation_reason: str = "",
 ) -> dict[str, Any]:
     if key not in RELATION_KEYS:
         raise ValueError("CANONICAL_PROBLEM_RELATION_KEY_INVALID")
     clean_evidence = [str(item).strip() for item in evidence if str(item).strip()]
+    clean_source_refs: list[dict[str, Any] | str] = []
+    for item in source_refs if source_refs is not None else clean_evidence:
+        if isinstance(item, dict):
+            clean_source_refs.append(dict(item))
+            continue
+        text = str(item or "").strip()
+        if text:
+            clean_source_refs.append(text)
     return {
         "relation_contract_version": RELATION_CONTRACT_VERSION,
+        "relation_policy": RELATION_POLICY,
         "key": key,
         "label": label,
         "present": bool(present),
@@ -119,11 +132,16 @@ def build_relation_contract(
         "relation_status": "LINKED" if present else "NO_RELATION",
         "href": href if present else "",
         "evidence": clean_evidence,
-        "source_refs": clean_evidence,
+        "source_refs": clean_source_refs if present else [],
+        "no_relation_reason": "" if present else str(no_relation_reason or "RELATION_NOT_FOUND"),
         "canonical_problem_id": identity.canonical_problem_id if identity else "",
+        "canonical_problem_ref": (
+            identity.to_dict()["master_object_ref"] if identity else None
+        ),
         "source_domain": source_domain,
         "access_mode": READ_ONLY_ACCESS_MODE,
         "permission_authority": PERMISSION_AUTHORITY,
+        "return_context_contract": RETURN_CONTEXT_CONTRACT_VERSION,
         "version_ref": identity.to_dict()["version_ref"] if identity else {
             "issue_version_id": "",
             "version_no": None,
@@ -138,6 +156,8 @@ __all__ = [
     "OWNER_DOMAIN",
     "PERMISSION_AUTHORITY",
     "READ_ONLY_ACCESS_MODE",
+    "RELATION_POLICY",
+    "RETURN_CONTEXT_CONTRACT_VERSION",
     "RELATION_CONTRACT_VERSION",
     "RELATION_KEYS",
     "WORKBENCH_COUNT",
