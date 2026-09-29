@@ -30,7 +30,10 @@ class HardwareTrustedAuthContext:
     def resolve_read_role(self, client_claim: str | None = None) -> str:
         """Allow optional de-escalation but never client-side escalation."""
         if client_claim is None or not str(client_claim).strip():
-            return self.role
+            # Existing consumer APIs remain consumer-by-default even on a
+            # maintainer host.  Maintainer read visibility requires an explicit
+            # client claim that the trusted host is allowed to honor.
+            return "CONSUMER"
         claim = str(client_claim).strip().upper()
         if claim not in _ALLOWED_ROLES:
             raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
