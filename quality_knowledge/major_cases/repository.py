@@ -40,7 +40,7 @@ class _ClosingSQLiteConnection(sqlite3.Connection):
 
 
 class MajorKnowledgeRepository:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str | Path, attachment_root: str | Path):
         self.db_path = Path(db_path)
