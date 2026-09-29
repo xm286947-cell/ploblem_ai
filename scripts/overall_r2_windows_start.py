@@ -340,14 +340,21 @@ def build_process_env(
         "HARDWARE_CASE_MODEL_CONFIG",
         "STORAGE_MODEL_CONFIG",
     ):
-        explicit = os.environ.get(name, "").strip()
+        source_key = f"{name}_SOURCE"
+        source = os.environ.get(source_key, "").strip().upper()
+        raw_value = os.environ.get(name, "").strip()
+        explicit = (
+            raw_value
+            if raw_value and source != "OVERALL_AGENT_CONFIG"
+            else ""
+        )
         env[name] = explicit or str(active_model_config)
+        env[source_key] = (
+            "OPERATOR_OVERRIDE"
+            if explicit
+            else "OVERALL_AGENT_CONFIG"
+        )
     env["OVERALL_RUNTIME_MODEL_CONFIG"] = str(active_model_config)
-    env["STORAGE_MODEL_CONFIG_SOURCE"] = (
-        "OPERATOR_OVERRIDE"
-        if os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
-        else "OVERALL_AGENT_CONFIG"
-    )
     env["STORAGE_LIFE_RUNTIME_DB"] = str(bindings["storage_runtime_db"])
     env["STORAGE_KNOWLEDGE_REPOSITORY_DIR"] = str(
         bindings["knowledge_repository"]
