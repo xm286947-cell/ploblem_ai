@@ -77,6 +77,10 @@ def test_w5_builder_binds_complete_candidate_to_exact_r2_source(candidate):
     assert manifest["runtime_binding"]["storage_model_ref"] == "qwen_prod"
     assert manifest["data_binding"]["real_internal_data_included"] is False
     assert manifest["provider_binding"]["real_secret_included"] is False
+    assert manifest["hardware_maintenance_binding"]["host_role_env"] == "HARDWARE_CASE_HOST_ROLE"
+    assert manifest["hardware_maintenance_binding"]["default_role"] == "CONSUMER"
+    assert manifest["hardware_maintenance_binding"]["query_parameter_escalation"] is False
+    assert manifest["hardware_maintenance_binding"]["consumer_mutation_privilege"] is False
     assert manifest["rollback"]["formal_release_source"] == PREVIOUS_RELEASE
     assert manifest["rollback"]["legacy_db_mutated_by_package"] is False
 
