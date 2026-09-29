@@ -128,6 +128,8 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"title": "数据接入", "summary": "统一 P0 数据接入。", "path": "/p0/data-intake"},
             {"title": "字段映射与产品", "summary": "统一 P0 设置。", "path": "/p0/settings"},
+            {"title": "Agent 配置", "summary": "公共 Model / Provider / SecretRef / Agent Binding / Revision / Rollback 控制面。", "path": "/p0/system/agent-config"},
+            {"title": "Runtime Diagnostics", "summary": "公共 Task / Run / Step / Attempt / Retry / Hard Cap / Failure 诊断投影。", "path": "/p0/system/runtime-diagnostics"},
             {"title": "Legacy 问题导入", "summary": "保留原问题导入。", "path": "/import", "requires_legacy": True},
             {"title": "ITR 材料导入", "summary": "来源材料导入，不是业务工作台。", "path": "/materials/itr", "requires_legacy": True},
             {"title": "彻底解决单材料导入", "summary": "ITR-CS 来源材料导入。", "path": "/materials/cs", "requires_legacy": True},
