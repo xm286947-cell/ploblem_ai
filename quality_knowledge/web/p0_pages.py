@@ -448,6 +448,40 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/api/v2/issues/{knowledge_id}/workbench-relations")
+    async def current_problem_workbench_relations(
+        request: Request,
+        knowledge_id: str,
+    ) -> dict[str, Any]:
+        """Read-only public projection for Canonical Problem workbench relations."""
+
+        legacy = getattr(request.app.state, "legacy_quality_issue_services", None)
+        service = (
+            getattr(legacy, "knowledge_issue_service", None)
+            if legacy is not None
+            else None
+        )
+        material_repository = (
+            getattr(legacy, "material_repository", None)
+            if legacy is not None
+            else None
+        )
+        if service is None or material_repository is None:
+            status = getattr(request.app.state, "legacy_quality_issue_status", {}) or {}
+            raise HTTPException(
+                status_code=503,
+                detail=str(status.get("code") or "LEGACY_DB_UNAVAILABLE"),
+            )
+        projection = build_current_problem_associations(
+            service,
+            material_repository,
+            knowledge_id,
+            p0=True,
+        )
+        if projection.get("identity") is None and service.get_issue(knowledge_id) is None:
+            raise HTTPException(status_code=404, detail="CURRENT_PROBLEM_NOT_FOUND")
+        return projection
+
     @router.get("/p0/issues/{knowledge_id}", response_class=HTMLResponse, include_in_schema=False)
     async def p0_issue_detail(request: Request, knowledge_id: str) -> HTMLResponse:
         if scenario_detail_service is not None and str(knowledge_id).startswith("QS-"):
