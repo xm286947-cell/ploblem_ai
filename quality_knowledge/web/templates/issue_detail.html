@@ -68,6 +68,23 @@
 
 </section>
 
+<section class="compact-section" id="current-problem-associations">
+  <div class="compact-section-head"><div><h2>关联业务对象</h2><p>只展示同一 Canonical Problem Identity 下已确认的关联；没有证据的关系保持 Fail Closed。</p></div><span>{{current_problem_associations.related_count or 0}} / 4 已关联</span></div>
+  <div class="compact-grid causes-grid">
+    {% for relation in current_problem_associations.relations or [] %}
+    <article class="compact-card">
+      <div class="compact-card-head"><h3>{{relation.label}}</h3><span>{{relation.status}}</span></div>
+      {% if relation.present and relation.href %}
+      <p><a class="button" href="{{relation.href}}">打开关联对象（{{relation.count}}）</a></p>
+      {% if relation.evidence %}<small>关联依据：{{relation.evidence|join(' / ')}}</small>{% endif %}
+      {% else %}
+      <div class="compact-empty">未发现已确认关联；系统不会猜测关系。</div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
 <section id="causes" class="compact-section">
   <div class="compact-section-head"><div><h2>为什么发生 / 为什么流出</h2><p>Occurrence 与 Escape 并排，首屏即可完成核心原因判断。</p></div></div>
   <div class="compact-grid causes-grid">

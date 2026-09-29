@@ -37,6 +37,7 @@ from .missed_test_adapter import build_missed_test_rows
 from .itr_recovery_adapter import build_itr_recovery_rows
 from .itr_resolution_adapter import build_itr_resolution_rows
 from .software_assessment_adapter import build_software_assessment_rows
+from .current_problem_associations import build_current_problem_associations
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -668,6 +669,12 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             '/missed-test-analysis': '返回漏测分析',
             '/software-assessment': '返回软件考核工作台',
         }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
+        vm['current_problem_associations'] = build_current_problem_associations(
+            svc,
+            material_repo,
+            knowledge_id,
+            p0=False,
+        )
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
 

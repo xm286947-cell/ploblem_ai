@@ -3,7 +3,7 @@
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_issue_detail.css">{% endblock %}
 {% block breadcrumb %}问题分析{% endblock %}
 {% block body %}<main class="p0-detail" data-p0-issue-detail data-knowledge-id="{{knowledge_id}}" data-api-prefix="{{api_prefix}}">
-  <header class="p0-page-head"><div>{% set missed_return = return_to and return_to.startswith('/p0/missed-test-analysis') %}{% set itr_recovery_return = return_to and return_to.startswith('/p0/itr-recovery') %}{% set itr_resolution_return = return_to and return_to.startswith('/p0/itr-resolution') %}<a class="p0-back" data-back href="{{ return_to or '/p0/issues' }}">← {{ '返回漏测分析' if missed_return else ('返回 ITR / 现场恢复' if itr_recovery_return else ('返回彻底解决单' if itr_resolution_return else ('返回质量场景工作区' if return_to else '返回问题工作台'))) }}</a>{% if return_to and not missed_return and not itr_recovery_return and not itr_resolution_return %}<a class="p0-qs-return" href="{{ return_to }}">返回质量场景工作区</a>{% endif %}<h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
+  <header class="p0-page-head"><div>{% set missed_return = return_to and return_to.startswith('/p0/missed-test-analysis') %}{% set itr_recovery_return = return_to and return_to.startswith('/p0/itr-recovery') %}{% set itr_resolution_return = return_to and return_to.startswith('/p0/itr-resolution') %}{% set software_assessment_return = return_to and return_to.startswith('/p0/software-assessment') %}<a class="p0-back" data-back href="{{ return_to or '/p0/issues' }}">← {{ '返回漏测分析' if missed_return else ('返回 ITR / 现场恢复' if itr_recovery_return else ('返回彻底解决单' if itr_resolution_return else ('返回软件考核工作台' if software_assessment_return else ('返回质量场景工作区' if return_to else '返回问题工作台')))) }}</a>{% if return_to and not missed_return and not itr_recovery_return and not itr_resolution_return and not software_assessment_return %}<a class="p0-qs-return" href="{{ return_to }}">返回质量场景工作区</a>{% endif %}<h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
   <nav class="p0-detail-tabs" aria-label="问题详情导航"><a href="#overview">概览</a><a href="#analysis">原因与防控</a><a href="#repeat-risk">Repeat Risk</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">原始与入库数据</a></nav>
   <section class="p0-card p0-scope-bar" data-scope-status>正在读取问题与分析状态…</section>
   <section class="p0-card p0-source-context" data-itr-source hidden>
@@ -15,6 +15,28 @@
       </div>
     </div>
     <div data-itr-source-body></div>
+  </section>
+  <section class="p0-card p0-source-context" data-current-problem-associations>
+    <div class="p0-card-head">
+      <div>
+        <span class="p0-kicker">ASSOCIATION</span>
+        <h2>关联业务对象</h2>
+        <p>只展示同一 Canonical Problem Identity 下已确认的真实关联；不存在的关系保持 Fail Closed。</p>
+      </div>
+      <span>{{ current_problem_associations.related_count or 0 }}/4 已关联</span>
+    </div>
+    <div class="p0-fact-summary-grid">
+      {% for relation in current_problem_associations.relations or [] %}
+      <div class="p0-fact">
+        <label>{{ relation.label }}</label>
+        {% if relation.present and relation.href %}
+        <strong><a href="{{ relation.href }}">{{ relation.status }} · {{ relation.count }}</a></strong>
+        {% else %}
+        <strong>未发现已确认关联</strong>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
   </section>
   <section class="p0-card p0-facts" id="overview" data-facts><div class="p0-loading">正在加载问题事实…</div></section>
   <section class="p0-card p0-analysis-diagnostic" id="analysis" data-analysis-diagnostic hidden></section>
