@@ -36,6 +36,8 @@ on:
       - "STOP_OVERALL_R2_WINDOWS.bat"
       - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
       - "tests/test_r2_w*.py"
+      - "tests/test_r2_storage_real_kp_e2e.py"
+      - ".github/workflows/overall-r2-w5-release-engineering.yml"
 
 permissions:
   contents: read
