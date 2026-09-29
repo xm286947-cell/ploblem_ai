@@ -75,4 +75,8 @@ def test_w2_shell_loads_one_overall_navigation_contract():
     page = client.get("/p0/overall/areas/scenarios-insights")
     assert page.status_code == 200
     assert page.text.count("/p0/static/overall_navigation.js") == 1
-    assert "r2-w2-v1" in page.text
+    marker = '/p0/static/overall_navigation.js?v='
+    assert marker in page.text
+    asset_version = page.text.split(marker, 1)[1].split('"', 1)[0]
+    assert len(asset_version) == 16
+    assert all(ch in "0123456789abcdef" for ch in asset_version)
