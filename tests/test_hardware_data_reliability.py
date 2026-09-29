@@ -181,10 +181,14 @@ def test_restore_same_environment_roundtrip(tmp_path):
         target_schema=1,
     )
 
-    with sqlite3.connect(db) as connection:
+    connection = sqlite3.connect(db)
+    try:
         connection.execute(
             "UPDATE hardware_case SET title='Mutated' WHERE case_id='HC-LEGACY-1'"
         )
+        connection.commit()
+    finally:
+        connection.close()
     assert _case_title(db) == "Mutated"
 
     restored = manager.restore(backup["backup_id"])
