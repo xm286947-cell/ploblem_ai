@@ -10,6 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
+from quality_knowledge.web.hardware_public_api import create_hardware_public_router
+from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
 from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
@@ -368,6 +370,13 @@ def create_p0_app(
                 hardware_case_service,
                 source_store=hardware_case_source_store,
                 intake_service=hardware_case_intake_service,
+            )
+        )
+        app.include_router(create_hardware_public_router(hardware_case_service))
+        app.include_router(
+            create_hardware_operability_router(
+                project_root=root,
+                hardware_db_path=hardware_db,
             )
         )
 

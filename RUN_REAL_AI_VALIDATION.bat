@@ -26,12 +26,20 @@ echo Running company-local Hardware Case Real AI validation...
 echo Real source content stays in this machine. The report contains aggregate metrics only.
 echo.
 
-where py >nul 2>nul
-if %errorlevel%==0 (
-  py tools\hardware_case_real_validation.py --config "config\hardware_case_real_validation.local.json"
-) else (
-  python tools\hardware_case_real_validation.py --config "config\hardware_case_real_validation.local.json"
+set "PYTHON_CMD="
+where python >nul 2>nul
+if %errorlevel%==0 set "PYTHON_CMD=python"
+if not defined PYTHON_CMD (
+  where py >nul 2>nul
+  if %errorlevel%==0 set "PYTHON_CMD=py"
 )
+if not defined PYTHON_CMD (
+  echo [FAILED] Python 3.11+ not found on PATH.
+  pause
+  exit /b 2
+)
+
+%PYTHON_CMD% tools\hardware_case_real_validation.py --config "config\hardware_case_real_validation.local.json"
 set EXIT_CODE=%errorlevel%
 echo.
 if %EXIT_CODE%==0 (

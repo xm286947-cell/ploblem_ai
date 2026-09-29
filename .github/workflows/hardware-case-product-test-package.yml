@@ -13,6 +13,7 @@ on:
       - "RUN_REAL_AI_VALIDATION.bat"
       - "INIT_LOCAL_CONFIG.sh"
       - "START_HARDWARE_CASE.sh"
+      - "START_HARDWARE_CASE.command"
       - "RUN_REAL_AI_VALIDATION.sh"
       - "config/runtime/agents/hardware_case.structure.yaml"
       - "config/runtime/model.local.hardware_case.example.yaml"
@@ -29,6 +30,7 @@ on:
     paths:
       - "scripts/build_hardware_case_product_test_package.py"
       - "scripts/hardware_case_product_test_smoke.py"
+      - "scripts/hardware_case_fresh_extract_gate.py"
       - "scripts/hardware_case_precheck.py"
       - "scripts/hardware_case_web_start.py"
       - "run_hardware_case_product_test.bat"
@@ -39,6 +41,7 @@ on:
       - "RUN_REAL_AI_VALIDATION.bat"
       - "INIT_LOCAL_CONFIG.sh"
       - "START_HARDWARE_CASE.sh"
+      - "START_HARDWARE_CASE.command"
       - "RUN_REAL_AI_VALIDATION.sh"
       - "00_README_FIRST.txt"
       - "config/runtime/agents/hardware_case.structure.yaml"
@@ -89,6 +92,14 @@ jobs:
           assert manifest["release_status"] == "TEST_PACKAGE_NOT_RELEASE"
           assert manifest["web_entry"] == "/p0/hardware-cases"
           assert manifest["package_revision"] == "FULL_V0.1_P01_P07"
+          assert manifest["product_version"] == "MVP_V0.1"
+          assert manifest["public_contract_version"] == "hardware-public-consumer/v1"
+          assert manifest["schema_version"] == "PRE_W3_2_LEGACY_SCHEMA"
+          assert manifest["public_api_prefix"] == "/api/public/hardware/v1"
+          assert manifest["system_endpoints"]["health"] == "/health"
+          assert manifest["system_endpoints"]["readiness"] == "/ready"
+          assert manifest["release_semantics"]["contract_version_independent_from_product_version"] is True
+          assert manifest["release_semantics"]["fresh_extract_gate_required"] is True
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
@@ -96,6 +107,7 @@ jobs:
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
           assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is False
           assert manifest["entrypoints"]["start_product_windows"] == "START_HARDWARE_CASE.bat"
+          assert manifest["entrypoints"]["start_product_macos"] == "START_HARDWARE_CASE.command"
           assert manifest["entrypoints"]["web_launcher"] == "scripts/hardware_case_web_start.py"
           assert manifest["entrypoints"]["real_ai_validation_windows"] == "RUN_REAL_AI_VALIDATION.bat"
           assert manifest["frozen_tree_change_types"] == [
@@ -127,6 +139,13 @@ jobs:
           assert "services/hardware_case_runtime_adapter.py" in paths
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
+          assert "START_HARDWARE_CASE.sh" in paths
+          assert "START_HARDWARE_CASE.command" in paths
+          assert "quality_knowledge/web/hardware_public_api.py" in paths
+          assert "quality_knowledge/web/hardware_operability_api.py" in paths
+          assert "services/hardware_operability.py" in paths
+          assert "schema/hardware_public_consumer_v1.schema.json" in paths
+          assert "scripts/hardware_case_fresh_extract_gate.py" in paths
           assert "RUN_REAL_AI_VALIDATION.bat" in paths
           assert "scripts/hardware_case_web_start.py" in paths
           assert "main.py" not in paths
@@ -172,6 +191,12 @@ jobs:
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
+
+      - name: Run W3.1 Public HTTP and Operability regression
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_public_consumer_http.py
+          tests/test_hardware_operability.py
 
       - name: Stage delivery files
         run: |
