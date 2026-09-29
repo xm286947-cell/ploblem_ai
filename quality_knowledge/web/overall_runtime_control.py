@@ -27,6 +27,21 @@ _FORBIDDEN_SECRET_KEYS = {
     "secret",
     "token",
 }
+
+
+def _env_ref_value(name: str | None) -> str:
+    """Resolve environment references using host OS name semantics."""
+    ref = str(name or "").strip()
+    if not ref:
+        return ""
+    value = str(os.environ.get(ref) or "").strip()
+    if value or os.name != "nt":
+        return value
+    wanted = ref.casefold()
+    for key, candidate in os.environ.items():
+        if str(key).casefold() == wanted:
+            return str(candidate or "").strip()
+    return ""
 _DOMAIN_MODEL_CONFIG_ENVS = (
     "MAJOR_MODEL_CONFIG",
     "HARDWARE_CASE_MODEL_CONFIG",
@@ -265,13 +280,13 @@ class OverallRuntimeControlPlane:
                     model.get("base_url")
                     or (
                         base_url_env
-                        and os.environ.get(base_url_env, "").strip()
+                        and _env_ref_value(base_url_env)
                     )
                 ),
                 "api_key_env": api_key_env,
                 "api_key_present": bool(
                     api_key_env
-                    and os.environ.get(api_key_env, "").strip()
+                    and _env_ref_value(api_key_env)
                 ),
                 "max_tokens": model.get("max_tokens"),
                 "temperature": model.get("temperature"),
@@ -549,7 +564,7 @@ class OverallRuntimeControlPlane:
             model.get("base_url")
             or (
                 endpoint_ref
-                and os.environ.get(str(endpoint_ref), "").strip()
+                and _env_ref_value(str(endpoint_ref))
             )
         )
         return {
