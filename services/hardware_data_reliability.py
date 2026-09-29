@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,7 +198,7 @@ class HardwareDataReliabilityManager:
     def current_version(self) -> int | None:
         if not self.db_path.is_file():
             return None
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             if not self._table_exists(connection, VERSION_TABLE):
                 return None
             row = connection.execute(
@@ -224,7 +225,7 @@ class HardwareDataReliabilityManager:
                 "schema_name": None,
             }
         try:
-            with self.connect() as connection:
+            with closing(self.connect()) as connection:
                 if self._integrity(connection).lower() != "ok":
                     return {
                         "status": "UNREADY",
@@ -316,7 +317,7 @@ class HardwareDataReliabilityManager:
         backup_db = self.backup_root / f"{backup_id}.sqlite3"
         manifest_path = self.backup_root / f"{backup_id}.json"
         try:
-            with self.connect() as source, sqlite3.connect(backup_db) as target:
+            with closing(self.connect()) as source, closing(sqlite3.connect(backup_db)) as target:
                 source.backup(target)
                 target.execute("PRAGMA foreign_keys=ON")
                 integrity = self._integrity(target)
@@ -363,7 +364,7 @@ class HardwareDataReliabilityManager:
             raise HardwareDataReliabilityError("BACKUP_FILE_MISSING")
         if _sha256(backup_db) != str(manifest.get("backup_sha256") or ""):
             raise HardwareDataReliabilityError("BACKUP_HASH_MISMATCH")
-        with sqlite3.connect(backup_db) as connection:
+        with closing(sqlite3.connect(backup_db)) as connection:
             if self._integrity(connection).lower() != "ok":
                 raise HardwareDataReliabilityError("BACKUP_INTEGRITY_FAILED")
         return manifest, backup_db
@@ -381,7 +382,7 @@ class HardwareDataReliabilityManager:
         try:
             if temp_path.exists():
                 temp_path.unlink()
-            with sqlite3.connect(backup_db) as source, sqlite3.connect(temp_path) as target:
+            with closing(sqlite3.connect(backup_db)) as source, closing(sqlite3.connect(temp_path)) as target:
                 source.backup(target)
                 if self._integrity(target).lower() != "ok":
                     raise HardwareDataReliabilityError("RESTORE_INTEGRITY_FAILED")
@@ -412,7 +413,7 @@ class HardwareDataReliabilityManager:
     def _legacy_version(self) -> int:
         if not self.db_path.is_file():
             return 0
-        with self.connect() as connection:
+        with closing(self.connect()) as connection:
             tables = self._user_tables(connection)
             if not tables:
                 return 0
@@ -479,7 +480,7 @@ class HardwareDataReliabilityManager:
         backup_id = backup.get("backup_id") if backup else None
         migration = self._migration_for(source_version)
         try:
-            with self.connect() as connection:
+            with closing(self.connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 self._bootstrap_metadata(connection)
                 started_at = _utc_now()
