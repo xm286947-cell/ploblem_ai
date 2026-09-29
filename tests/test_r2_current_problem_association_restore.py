@@ -140,6 +140,13 @@ def test_r2_p0_resolution_and_assessment_use_legacy_problem_identity_and_real_li
     assert f"/p0/issues/{knowledge_id}?" not in assessment.text
     assert "return_to=%2Fp0%2Fsoftware-assessment%3Fq%3D" in assessment.text
 
+    recovery = client.get("/p0/itr-recovery", params={"q": itr})
+    assert recovery.status_code == 200
+    assert itr in recovery.text
+    assert f"/issues/{knowledge_id}?" in recovery.text
+    assert f"/p0/issues/{knowledge_id}?" not in recovery.text
+    assert "return_to=%2Fp0%2Fitr-recovery%3Fq%3D" in recovery.text
+
     detail = client.get(
         f"/issues/{knowledge_id}",
         params={"return_to": f"/p0/itr-resolution?q={itr}"},
