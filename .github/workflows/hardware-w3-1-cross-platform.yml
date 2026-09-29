@@ -1,0 +1,100 @@
+name: Hardware W3.1 Cross Platform Fresh Extract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-1-cross-platform.yml"
+      - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_fresh_extract_gate.py"
+      - "scripts/hardware_case_cross_platform_package_gate.py"
+      - "scripts/hardware_case_compare_cross_platform_semantics.py"
+      - "START_HARDWARE_CASE.bat"
+      - "START_HARDWARE_CASE.sh"
+      - "START_HARDWARE_CASE.command"
+      - "CHECK_ENV.bat"
+      - "quality_knowledge/web/hardware_*.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "services/hardware_*.py"
+      - "schema/hardware_*.json"
+      - "config/runtime/**"
+      - "prompts/runtime/hardware_case/**"
+      - "requirements*.txt"
+      - "tests/test_hardware_operability.py"
+      - "tests/test_hardware_public_consumer_http.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hardware-w3-1-cross-platform.yml"
+      - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_fresh_extract_gate.py"
+      - "scripts/hardware_case_cross_platform_package_gate.py"
+      - "scripts/hardware_case_compare_cross_platform_semantics.py"
+      - "START_HARDWARE_CASE.bat"
+      - "START_HARDWARE_CASE.sh"
+      - "START_HARDWARE_CASE.command"
+      - "CHECK_ENV.bat"
+      - "quality_knowledge/web/hardware_*.py"
+      - "quality_knowledge/web/p0_app.py"
+      - "services/hardware_*.py"
+      - "schema/hardware_*.json"
+      - "config/runtime/**"
+      - "prompts/runtime/hardware_case/**"
+      - "requirements*.txt"
+  workflow_dispatch:
+
+jobs:
+  fresh-extract:
+    name: fresh-extract-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HARDWARE_RELEASE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Build release candidate package
+        run: python scripts/build_hardware_case_product_test_package.py
+
+      - name: Fresh extract system gate
+        run: python scripts/hardware_case_cross_platform_package_gate.py
+
+      - name: Upload platform semantics
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-w3-1-semantics-${{ runner.os }}
+          path: dist/cross-platform-semantics-*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  cross-platform-consistency:
+    name: cross-platform-consistency
+    needs: fresh-extract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hardware-w3-1-semantics-*
+          path: dist/cross-platform-semantics
+          merge-multiple: true
+
+      - name: Compare release semantics
+        run: >
+          python scripts/hardware_case_compare_cross_platform_semantics.py
+          dist/cross-platform-semantics
