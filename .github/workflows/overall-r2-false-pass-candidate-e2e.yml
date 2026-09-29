@@ -1,0 +1,327 @@
+name: R2 False-PASS Candidate Real E2E
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "scripts/build_overall_r2_windows_candidate.py"
+      - "scripts/overall_r2_windows_start.py"
+      - "scripts/r2_candidate_e2e_provider.py"
+      - "scripts/r2_candidate_product_e2e.py"
+      - "products/storage_rc1/**"
+      - "quality_knowledge/**"
+      - "tests/test_r2_false_pass_candidate_assembly.py"
+      - ".github/workflows/overall-r2-false-pass-candidate-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-real-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUNBUFFERED: "1"
+      OVERALL_R2_NO_PAUSE: "1"
+      R2_E2E_PROVIDER_URL: "http://127.0.0.1:18080/v1"
+      acca1: "R2_E2E_SECRET_VALUE_MUST_NEVER_APPEAR"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install builder validation dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Build candidate ZIP from exact PR source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = Join-Path $env:RUNNER_TEMP "false-pass-dist"
+          $output = python scripts/build_overall_r2_windows_candidate.py --output-dir $dist
+          $output | ForEach-Object { Write-Host $_ }
+          foreach ($line in $output) {
+            if ($line -match '^PACKAGE_ZIP=(.+)$') {
+              "PACKAGE_ZIP=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^PACKAGE_DIR=(.+)$') {
+              "BUILDER_PACKAGE_DIR=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^PACKAGE_SHA256=(.+)$') {
+              "PACKAGE_SHA256=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^DUT_SOURCE_COMMIT=(.+)$') {
+              "DUT_SOURCE_COMMIT=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
+
+      - name: Re-extract actual ZIP and validate candidate assembly
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (Test-Path $env:BUILDER_PACKAGE_DIR) {
+            Remove-Item -Recurse -Force $env:BUILDER_PACKAGE_DIR
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "actual-candidate-zip"
+          Expand-Archive -Path $env:PACKAGE_ZIP -DestinationPath $extract -Force
+          $root = Get-ChildItem -Path $extract -Directory | Select-Object -First 1
+          if (-not $root) { throw "Candidate ZIP root missing" }
+          $package = $root.FullName
+          "ACTUAL_PACKAGE_ROOT=$package" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          $allowed = @(
+            "INSTALL_OVERALL_R2_WINDOWS.bat",
+            "START_OVERALL_R2_WINDOWS.bat",
+            "STOP_OVERALL_R2_WINDOWS.bat"
+          )
+          $rootBats = @(Get-ChildItem -Path $package -Filter "*.bat" -File | Select-Object -ExpandProperty Name)
+          $unexpected = @($rootBats | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0) {
+            throw "Competing candidate root BATs: $($unexpected -join ',')"
+          }
+          foreach ($required in $allowed) {
+            if ($required -notin $rootBats) { throw "Missing candidate entry: $required" }
+          }
+
+          $readme = Get-Content -Raw (Join-Path $package "00_README_FIRST.txt")
+          if ($readme -match "HARDWARE CASE PRODUCT TEST|START_HARDWARE_CASE|INIT_LOCAL_CONFIG") {
+            throw "Stale Hardware Case startup instructions remain in Overall candidate"
+          }
+          if ($readme -notmatch "ONLY USER STARTUP PATH") {
+            throw "Overall unique-startup instruction missing"
+          }
+
+          $manifest = Get-Content -Raw (Join-Path $package "OVERALL_R2_RELEASE_CANDIDATE_MANIFEST.json") | ConvertFrom-Json
+          if ($manifest.dut_source_commit -ne $env:DUT_SOURCE_COMMIT) {
+            throw "Candidate manifest source mismatch"
+          }
+          if ($manifest.development_gate.w1 -ne "BLOCKED_BY_HISTORICAL_BINDING_EVIDENCE") {
+            throw "Manifest still falsely claims W1 closure"
+          }
+          $badRoutes = @($manifest.current_problem_workbenches | Where-Object {
+            $_.route -in @(
+              "/p0/itr-recovery",
+              "/p0/itr-resolution",
+              "/p0/software-assessment",
+              "/p0/missed-test-analysis",
+              "/itr/recovery-workbench",
+              "/itr/resolution-workbench",
+              "/software-assessment",
+              "/missed-test-analysis"
+            )
+          })
+          if ($badRoutes.Count -gt 0) {
+            throw "Manifest still labels R2-created workbench routes as historical mature capability"
+          }
+          Write-Host "CANDIDATE_STARTUP_UNAMBIGUOUS=PASS"
+          Write-Host "BUILDER_MANIFEST_FALSE_PASS_REMOVED=PASS"
+
+      - name: Prepare clean external state and Active Revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = $env:ACTUAL_PACKAGE_ROOT
+          $legacy = Join-Path $env:RUNNER_TEMP "candidate-e2e-legacy.db"
+          Push-Location $package
+          try {
+            $env:PYTHONPATH = $package
+            python -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
+          } finally {
+            Pop-Location
+          }
+
+          $data = Join-Path $env:RUNNER_TEMP "candidate-e2e-data"
+          if (Test-Path $data) { Remove-Item -Recurse -Force $data }
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          $control = Join-Path $data "overall_runtime_control"
+          $revisions = Join-Path $control "revisions"
+          New-Item -ItemType Directory -Force -Path $revisions | Out-Null
+          $revision = Join-Path $revisions "candidate-e2e.yaml"
+          @"
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url_env: R2_E2E_PROVIDER_URL
+    api_key_env: acca1
+    model: candidate-e2e-model
+    temperature: 0
+    max_tokens: 8192
+"@ | Set-Content -Encoding utf8 $revision
+          @{
+            revision_id = "CANDIDATE-E2E"
+            path = $revision
+            activated_at = "candidate-e2e"
+            actor = "github-actions"
+            previous_revision = "CANONICAL"
+            apply_mode = "NEXT_RUNTIME_BUILD_OR_RESTART"
+          } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $control "active.json")
+
+          $config = Join-Path $package "CONFIG_OVERALL_R2_WINDOWS.cmd"
+          @"
+@echo off
+set "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy"
+set "OVERALL_R2_DATA_DIR=$data"
+set "HARDWARE_CASE_HOST_ROLE=MAINTAINER"
+"@ | Set-Content -Encoding ascii $config
+
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVERALL_R2_DATA_DIR=$data" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "RUNTIME_CONTROL_ROOT=$control" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "ACTIVE_REVISION_PREPARED=CANDIDATE-E2E"
+          Write-Host "SECRETREF_PREPARED=acca1"
+
+      - name: Start external OpenAI-compatible E2E provider
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $log = Join-Path $env:RUNNER_TEMP "candidate-provider-requests.jsonl"
+          $stdout = Join-Path $env:RUNNER_TEMP "candidate-provider.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "candidate-provider.stderr.log"
+          $script = Join-Path $env:ACTUAL_PACKAGE_ROOT "scripts\r2_candidate_e2e_provider.py"
+          $proc = Start-Process -FilePath "python" -ArgumentList @(
+            $script, "--port", "18080", "--log", $log
+          ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          "E2E_PROVIDER_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "E2E_PROVIDER_LOG=$log" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          for ($i=0; $i -lt 30; $i++) {
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:18080/health" -UseBasicParsing -TimeoutSec 2
+              if ($r.StatusCode -eq 200) { Write-Host "E2E_PROVIDER_READY=PASS"; exit 0 }
+            } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (Test-Path $stdout) { Get-Content $stdout }
+          if (Test-Path $stderr) { Get-Content $stderr }
+          throw "External E2E provider did not start"
+
+      - name: Install actual ZIP candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location $env:ACTUAL_PACKAGE_ROOT
+          try {
+            cmd /c "INSTALL_OVERALL_R2_WINDOWS.bat"
+            if ($LASTEXITCODE -ne 0) { throw "Candidate INSTALL failed: $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          Write-Host "CANDIDATE_INSTALL=PASS"
+
+      - name: Start actual ZIP through unique Windows BAT
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = $env:ACTUAL_PACKAGE_ROOT
+          $stdout = Join-Path $env:RUNNER_TEMP "candidate-start.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "candidate-start.stderr.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @(
+            "/c", "START_OVERALL_R2_WINDOWS.bat --no-browser"
+          ) -WorkingDirectory $package -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          "CANDIDATE_START_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_START_STDOUT=$stdout" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_START_STDERR=$stderr" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          for ($i=0; $i -lt 90; $i++) {
+            if ($proc.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/overall" -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { Write-Host "CANDIDATE_START=PASS"; exit 0 }
+            } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (Test-Path $stdout) { Get-Content $stdout }
+          if (Test-Path $stderr) { Get-Content $stderr }
+          throw "Actual ZIP candidate did not start"
+
+      - name: Validate startup preflight and packaged Knowledge Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Start-Sleep -Seconds 2
+          $text = ""
+          if (Test-Path $env:CANDIDATE_START_STDOUT) {
+            $text += Get-Content -Raw $env:CANDIDATE_START_STDOUT
+          }
+          if (Test-Path $env:CANDIDATE_START_STDERR) {
+            $text += Get-Content -Raw $env:CANDIDATE_START_STDERR
+          }
+          foreach ($marker in @(
+            "ACTIVE_REVISION=CANDIDATE-E2E",
+            "MODEL_REF=qwen_prod",
+            "BASE_URL_ENV_REF=R2_E2E_PROVIDER_URL",
+            "BASE_URL_PRESENT=PRESENT",
+            "API_KEY_ENV_REF=acca1",
+            "API_KEY_PRESENT=PRESENT",
+            "PREFLIGHT=PASS",
+            "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE",
+            "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001"
+          )) {
+            if (-not $text.Contains($marker)) {
+              Write-Host $text
+              throw "Startup evidence missing: $marker"
+            }
+          }
+          if ($text.Contains($env:acca1)) {
+            throw "Secret value leaked into startup output"
+          }
+          Write-Host "SECRETREF_START_PROCESS_PREFLIGHT=PASS"
+          Write-Host "FORMAL_RELEASE_SEED_PREFLIGHT=PASS"
+
+      - name: Run real PDF -> identify -> job -> Coverage -> Review through candidate APIs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $validator = Join-Path $env:ACTUAL_PACKAGE_ROOT "scripts\r2_candidate_product_e2e.py"
+          python $validator --package-root $env:ACTUAL_PACKAGE_ROOT --provider-log $env:E2E_PROVIDER_LOG --base-url http://127.0.0.1:8080 --timeout-seconds 300
+
+      - name: Validate external release persistence and package immutability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $external = Join-Path $env:OVERALL_R2_DATA_DIR "knowledge_release\current\release_manifest.json"
+          $packaged = Join-Path $env:ACTUAL_PACKAGE_ROOT "products\storage_rc1\knowledge_release\current\release_manifest.json"
+          if (!(Test-Path $external)) { throw "External formal Knowledge Release was not initialized" }
+          if (!(Test-Path $packaged)) { throw "Packaged formal Knowledge Release disappeared" }
+          $externalJson = Get-Content -Raw $external | ConvertFrom-Json
+          $packagedJson = Get-Content -Raw $packaged | ConvertFrom-Json
+          if ($externalJson.knowledge_release_version -ne "KP-STORAGE-RC1-VALIDATION-001") {
+            throw "External release version mismatch"
+          }
+          if ($externalJson.snapshot_hash -ne $packagedJson.snapshot_hash) {
+            throw "Seeded release snapshot mismatch"
+          }
+          Write-Host "FORMAL_KNOWLEDGE_RELEASE_LOADED_ON_CLEAN_START=PASS"
+          Write-Host "PACKAGE_RELEASE_IMMUTABLE=PASS"
+
+      - name: Stop through unique candidate STOP entry
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:ACTUAL_PACKAGE_ROOT -and (Test-Path (Join-Path $env:ACTUAL_PACKAGE_ROOT "STOP_OVERALL_R2_WINDOWS.bat"))) {
+            Push-Location $env:ACTUAL_PACKAGE_ROOT
+            try { cmd /c "STOP_OVERALL_R2_WINDOWS.bat" } finally { Pop-Location }
+          }
+          if ($env:E2E_PROVIDER_PID) {
+            Stop-Process -Id ([int]$env:E2E_PROVIDER_PID) -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Mark development evidence only
+        shell: pwsh
+        run: |
+          Write-Host "CANDIDATE_REAL_E2E=PASS"
+          Write-Host "DEVELOPMENT_EVIDENCE_ONLY=YES"
+          Write-Host "USER_MANUAL_VALIDATION_CANDIDATE=NO"
+          Write-Host "FORMAL_W6_FINAL_CANDIDATE=NO"
