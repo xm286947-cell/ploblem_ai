@@ -84,6 +84,7 @@ def test_unknown_schema_version_fails_closed(tmp_path):
         connection.execute(
             "UPDATE hardware_schema_version SET schema_version=999 WHERE singleton=1"
         )
+        connection.commit()
 
     status = manager.inspect_status()
     assert status["status"] == "UNREADY"
@@ -100,6 +101,7 @@ def test_schema_drift_is_detected_even_when_sqlite_opens(tmp_path):
 
     with closing(sqlite3.connect(db)) as connection:
         connection.execute("CREATE TABLE unauthorized_drift(id TEXT)")
+        connection.commit()
 
     status = manager.inspect_status()
     assert status["status"] == "UNREADY"
