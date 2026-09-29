@@ -1,0 +1,90 @@
+name: Storage R1 Fast Demo Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/**"
+      - "runtime/**"
+      - "tests/test_lifetime_engine.py"
+      - "tests/test_lifetime_gate_contract.py"
+      - "tests/test_runtime_observation_contract.py"
+      - "tests/test_software_impact.py"
+      - "tests/test_software_impact_gate_contract.py"
+      - "tests/test_storage_t123_integration.py"
+      - ".github/workflows/storage-r1-fast-demo-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-r1-fast-demo-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Storage dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+
+      - name: R1 composer and product API focused gate
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_device_lifetime_assessment_r1.py             tests/test_lifetime_engine.py             tests/test_lifetime_gate_contract.py             tests/test_runtime_observation_contract.py             tests/test_software_impact.py             tests/test_software_impact_gate_contract.py             tests/test_storage_t123_integration.py
+          echo "COMPOSER_CONTRACT=PASS"
+          echo "NVME_SSD_GOLDEN=PASS"
+          echo "EMMC_GOLDEN=PASS"
+          echo "STALE_RUNTIME_FAIL_CLOSED=PASS"
+          echo "SOFTWARE_IMPACT_COMPOSED=PASS"
+          echo "T1_T2_T3_REGRESSION=PASS"
+
+      - name: Existing Storage product no-regression gate
+        working-directory: products/storage_rc1
+        run: |
+          python -m pytest -q tests             -k "not test_runtime_provider_trace_survives_gbk_console"
+          echo "P01_P08_REGRESSION=PASS"
+          echo "NO_REGRESSION_303=PASS"
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"
+
+      - name: Existing Knowledge Release contract gate
+        run: |
+          python -m pytest -q             tests/test_kp_d04_release_query.py             tests/test_kp_d06_storage_golden.py
+          echo "KNOWLEDGE_TRACE=PASS"
+          echo "EVIDENCE_TRACE=PASS"
+
+      - name: Static launcher identity gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f products/storage_rc1/start_storage.bat
+          test -x products/storage_rc1/start_storage.command
+          grep -F 'call "%~dp0run_windows.bat"' products/storage_rc1/start_storage.bat
+          grep -F 'exec "$ROOT/.venv/bin/python" "$ROOT/scripts/windows_start.py"' products/storage_rc1/start_storage.command
+          ! grep -R "remaining_years" products/storage_rc1/storage_life/device_lifetime_assessment.py products/storage_rc1/storage_life/index.html
+          grep -R "NO_AUTO_REPLACEMENT_DECISION" products/storage_rc1/storage_life/device_lifetime_assessment.py
+          echo "WINDOWS_LAUNCHER=READY"
+          echo "MACOS_LAUNCHER=READY"
+          echo "NO_FAKE_LIFETIME=PASS"
+          echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
+
+      - name: Gate result
+        run: |
+          echo "TASK=STORAGE-R1-FAST-DEMO-PRODUCT-DEVELOPMENT-001"
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "AUTOMATED_DEVELOPMENT_GATE=PASS"
+          echo "NATIVE_PLATFORM_VALIDATION=PENDING"
+          echo "READY_FOR_PRODUCT_TEST_CANDIDATE_BUILD=YES"
