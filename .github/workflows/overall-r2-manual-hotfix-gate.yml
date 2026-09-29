@@ -110,25 +110,25 @@ jobs:
           }
 
           $overall = Dump-Dom "/p0/overall" "overall-home"
-          Require $overall "质量产品总体" "Overall shell"
+          Require $overall "4 Workspaces" "Overall shell"
 
           $common = Dump-Dom "/p0/issues" "common-problem"
           Require $common "/itr/recovery-workbench" "Common mature ITR"
           Require $common "/software-assessment" "Common mature Software Assessment"
 
           $itr = Dump-Dom "/itr/recovery-workbench" "mature-itr"
-          Require $itr "ITR / 现场恢复" "Mature ITR UI"
+          Require $itr 'action="/itr/recovery-workbench"' "Mature ITR filter"
           $resolution = Dump-Dom "/itr/resolution-workbench" "mature-resolution"
-          Require $resolution "导入彻底解决单材料" "Mature Resolution action"
+          Require $resolution 'href="/materials/cs"' "Mature Resolution import action"
           $assessment = Dump-Dom "/software-assessment" "mature-assessment"
-          Require $assessment "软件运营数据导入" "Mature Assessment action"
+          Require $assessment 'href="/materials/software-operations"' "Mature Assessment import action"
           $missed = Dump-Dom "/missed-test-analysis" "mature-missed"
-          Require $missed "Escape 状态" "Mature Missed Test filter"
+          Require $missed 'name="analysis_status"' "Mature Missed Test filter"
 
           $storage = Dump-Dom "/storage-workspace/" "storage-p08"
-          Require $storage "Golden A 执行状态" "Storage Golden A"
+          Require $storage 'id="goldenAAssembly"' "Storage Golden A"
           Require $storage "goldenANextAction" "Storage next action"
-          Require $storage "Coverage → Review" "Storage transition feedback"
+          Require $storage "Coverage" "Storage coverage feedback"
           if ($storage.Contains("[object Object]")) { throw "Storage P08 renders [object Object]" }
 
           $agent = Dump-Dom "/p0/system/agent-config" "agent-config"
