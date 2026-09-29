@@ -223,6 +223,51 @@ def test_unexpected_mid_commit_failure_rolls_back_major_store(tmp_path: Path):
     assert batch["runs"][-1]["failed_count"] == 1
 
 
+def test_single_source_and_excel_batch_share_source_fact_store(tmp_path: Path):
+    client = _client(tmp_path)
+
+    source = ROOT / "tests/golden/hardware_case_scenarios/A9001-LDO 输出振荡.docx"
+    single = client.post(
+        "/api/v2/major-production/sources",
+        data={
+            "title": "单份来源收敛到 Source Fact",
+            "group_code": "SINGLE",
+            "domain": "PLC",
+            "standard_itr": "ITR-R2-W2-SINGLE-1",
+        },
+        files={
+            "file": (
+                source.name,
+                source.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert single.status_code == 201, single.text
+    single_body = single.json()
+    assert single_body["source_fact"]["source_type"] == "DOCUMENT"
+    assert single_body["source_fact"]["case_id"] == single_body["case"]["case_id"]
+
+    preview = _preview(client, _xlsx()).json()
+    confirm = client.post(
+        "/api/v2/major-production/excel/confirm",
+        data={"batch_id": preview["batch_id"], "actor": "w2-confirm"},
+    )
+    assert confirm.status_code == 200, confirm.text
+    excel_case_id = confirm.json()["result"]["case_ids"][0]
+
+    with client.app.state.major_case_repository.connect() as connection:
+        source_types = {
+            row["source_type"]
+            for row in connection.execute(
+                """SELECT source_type FROM kb_source_fact_revision
+                   WHERE case_id IN (?,?)""",
+                (single_body["case"]["case_id"], excel_case_id),
+            ).fetchall()
+        }
+    assert source_types == {"DOCUMENT", "EXCEL"}
+
+
 def test_excel_source_fact_continues_existing_ai_review_publish_repeat_chain(
     tmp_path: Path,
 ):
