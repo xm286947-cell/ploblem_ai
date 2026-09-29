@@ -172,9 +172,9 @@ jobs:
           $config = Join-Path $package "CONFIG_OVERALL_R2_WINDOWS.cmd"
           @(
             "@echo off",
-            "set \"LEGACY_QUALITY_ISSUE_DB_PATH=$legacy\"",
-            "set \"OVERALL_R2_DATA_DIR=$data\"",
-            "set \"HARDWARE_CASE_HOST_ROLE=MAINTAINER\""
+            ('set "LEGACY_QUALITY_ISSUE_DB_PATH={0}"' -f $legacy),
+            ('set "OVERALL_R2_DATA_DIR={0}"' -f $data),
+            'set "HARDWARE_CASE_HOST_ROLE=MAINTAINER"'
           ) | Set-Content -Encoding ascii $config
 
           "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
