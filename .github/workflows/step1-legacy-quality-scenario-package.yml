@@ -1,0 +1,151 @@
+name: STEP1 Legacy Quality Scenario Validation Package
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/**"
+      - "start_quality_capability_p1.bat"
+      - "INSTALL_OVERALL_R2_WINDOWS.bat"
+      - "requirements.txt"
+      - "requirements-runtime-p0-test.txt"
+      - ".github/workflows/step1-legacy-quality-scenario-package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-validation-package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build source-bound STEP1 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = (git rev-parse HEAD).Trim()
+          $short = $source.Substring(0,12)
+          $name = "STEP1_LEGACY_QUALITY_SCENARIO_PORTRAIT_$short"
+          $stage = Join-Path $env:RUNNER_TEMP $name
+          $zip = Join-Path $env:RUNNER_TEMP ($name + ".zip")
+
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          New-Item -ItemType Directory -Force $stage | Out-Null
+
+          git archive --format=zip -o (Join-Path $env:RUNNER_TEMP "source.zip") HEAD
+          Expand-Archive -Path (Join-Path $env:RUNNER_TEMP "source.zip") -DestinationPath $stage -Force
+
+          # This is a STEP1 old-platform validation package, not an Overall/W6 DUT.
+          # Remove competing root launchers/readmes only from the generated package.
+          Get-ChildItem -Path $stage -File -Filter "*.bat" |
+            Where-Object { $_.Name -notin @("start_quality_capability_p1.bat","INSTALL_OVERALL_R2_WINDOWS.bat") } |
+            Remove-Item -Force
+          foreach ($oldReadme in @("00_README_FIRST.txt","WINDOWS_START_HERE.txt")) {
+            $p = Join-Path $stage $oldReadme
+            if (Test-Path $p) { Remove-Item -Force $p }
+          }
+
+          @"
+          STEP1 LEGACY QUALITY SCENARIO / PORTRAIT MANUAL VALIDATION
+
+          CANDIDATE_CLASS=STEP1_MANUAL_VALIDATION
+          FORMAL_W6_FINAL_CANDIDATE=NO
+          SOURCE_SHA=$source
+
+          REQUIRED START SEQUENCE:
+          1. Run INSTALL_OVERALL_R2_WINDOWS.bat once.
+          2. Bind the existing mature Legacy DB in the same cmd session:
+             set LEGACY_QUALITY_ISSUE_DB_PATH=C:\path\to\your\existing\quality_issue_v1.db
+          3. Run start_quality_capability_p1.bat
+
+          MANUAL VALIDATION:
+          http://127.0.0.1:8080/quality-scenarios
+          http://127.0.0.1:8080/quality-scenario-assets
+          http://127.0.0.1:8080/quality-scenario-assets/portrait
+
+          REGRESSION:
+          http://127.0.0.1:8080/issues
+          http://127.0.0.1:8080/analysis
+          http://127.0.0.1:8080/import
+
+          PASS is based on real page/data/filter/drill-down behavior, not route=200.
+          Do not use /p0/quality-scenario-insights as a substitute.
+          "@ | Set-Content -Encoding UTF8 (Join-Path $stage "00_STEP1_README_FIRST.txt")
+
+          $manifest = [ordered]@{
+            contract = "step1-legacy-quality-scenario-validation/v1"
+            candidate_class = "STEP1_MANUAL_VALIDATION"
+            formal_w6_final_candidate = $false
+            source_sha = $source
+            restore_source = "QUALITY_SCENARIO_MVP_RC1@ce2eca157c4403b97036dd66e5218cd74fe53700"
+            start_entry = "start_quality_capability_p1.bat"
+            installer = "INSTALL_OVERALL_R2_WINDOWS.bat"
+            data_binding = "LEGACY_QUALITY_ISSUE_DB_PATH"
+            routes = @(
+              "/quality-scenarios",
+              "/quality-scenario-assets",
+              "/quality-scenario-assets/portrait"
+            )
+            regression_routes = @("/issues","/analysis","/import")
+            r2_substitution = $false
+          }
+          $manifest | ConvertTo-Json -Depth 6 |
+            Set-Content -Encoding UTF8 (Join-Path $stage "STEP1_MANUAL_VALIDATION_MANIFEST.json")
+          $source | Set-Content -Encoding ASCII (Join-Path $stage "STEP1_SOURCE_COMMIT")
+
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+
+          "STEP1_PACKAGE_NAME=$name" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STEP1_PACKAGE_ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STEP1_PACKAGE_SHA256=$sha" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STEP1_SOURCE_SHA=$source" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "SOURCE_SHA=$source"
+          Write-Host "PACKAGE=$name.zip"
+          Write-Host "SHA256=$sha"
+          Write-Host "START_ENTRY=start_quality_capability_p1.bat"
+          Write-Host "FORMAL_W6_FINAL_CANDIDATE=NO"
+
+      - name: Verify package identity and single obvious launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $check = Join-Path $env:RUNNER_TEMP "step1-package-check"
+          if (Test-Path $check) { Remove-Item -Recurse -Force $check }
+          Expand-Archive -Path $env:STEP1_PACKAGE_ZIP -DestinationPath $check -Force
+          if ((Get-Content -Raw (Join-Path $check "STEP1_SOURCE_COMMIT")).Trim() -ne $env:STEP1_SOURCE_SHA) {
+            throw "STEP1 source binding mismatch"
+          }
+          $bats = @(Get-ChildItem -Path $check -File -Filter "*.bat" | Select-Object -ExpandProperty Name)
+          if ("start_quality_capability_p1.bat" -notin $bats) { throw "Legacy start BAT missing" }
+          if ("INSTALL_OVERALL_R2_WINDOWS.bat" -notin $bats) { throw "Installer missing" }
+          if ($bats.Count -ne 2) { throw "Competing root BATs remain: $($bats -join ',')" }
+          foreach ($required in @(
+            "quality_knowledge\web\templates\quality_scenarios.html",
+            "quality_knowledge\web\templates\scenario_asset_overview.html",
+            "quality_knowledge\web\templates\scenario_customer_portrait.html"
+          )) {
+            if (!(Test-Path (Join-Path $check $required))) { throw "Missing restored mature asset: $required" }
+          }
+          Write-Host "STEP1_PACKAGE_IDENTITY=PASS"
+          Write-Host "STEP1_ROOT_LAUNCHERS=2"
+          Write-Host "STEP1_LEGACY_START_ENTRY=PASS"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STEP1_LEGACY_QUALITY_SCENARIO_PORTRAIT_MANUAL_VALIDATION
+          path: ${{ env.STEP1_PACKAGE_ZIP }}
+          if-no-files-found: error
+          retention-days: 30
