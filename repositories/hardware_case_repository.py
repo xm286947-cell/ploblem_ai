@@ -111,10 +111,16 @@ def _load(value: str | None, default: Any) -> Any:
 class HardwareCaseRepository:
     """Durable repository used by M2 Backend Core."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        initialize_schema: bool = True,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.initialize()
+        if initialize_schema:
+            self.initialize()
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -123,27 +129,12 @@ class HardwareCaseRepository:
         return connection
 
     def initialize(self) -> None:
+        """Fresh-schema bootstrap for direct repository use.
+
+        Versioned upgrades are owned by HardwareDataReliabilityManager.
+        """
         with self.connect() as connection:
             connection.executescript(SCHEMA)
-            self._ensure_column(connection, "hardware_tree_node", "business_key", "TEXT")
-            self._ensure_column(connection, "hardware_case_mapping", "tree_version", "TEXT")
-            self._ensure_column(connection, "hardware_case_mapping", "path_snapshot", "TEXT")
-
-    @staticmethod
-    def _ensure_column(
-        connection: sqlite3.Connection,
-        table: str,
-        column: str,
-        declaration: str,
-    ) -> None:
-        existing = {
-            str(row["name"])
-            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        if column not in existing:
-            connection.execute(
-                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
-            )
 
     def save_case(self, case: dict[str, Any]) -> dict[str, Any]:
         case_id = str(case.get("case_id") or "").strip()
