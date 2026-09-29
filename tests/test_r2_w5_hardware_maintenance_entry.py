@@ -28,6 +28,7 @@ def _storage_stub() -> FastAPI:
 
 
 def _client(tmp_path: Path, *, role: str | None = None) -> TestClient:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / f"overall-{role or 'default'}.db"
     P0Initializer(
         manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
