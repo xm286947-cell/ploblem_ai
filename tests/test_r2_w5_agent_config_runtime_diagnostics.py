@@ -151,25 +151,29 @@ def test_w5_revision_activate_audit_and_rollback_use_external_state_root(
         actor="pytest",
     )
     assert active["apply_mode"] == "NEXT_RUNTIME_BUILD_OR_RESTART"
+    assert active["environment_activation"] == "NEXT_OVERALL_START"
+    assert control.effective_model_config_path() == revision_path
     for name in (
         "MAJOR_MODEL_CONFIG",
         "HARDWARE_CASE_MODEL_CONFIG",
         "STORAGE_MODEL_CONFIG",
     ):
-        assert Path(active["environment"]["applied"][name]) == (
-            revision_path
-        )
-        assert Path(__import__("os").environ[name]) == revision_path
+        assert not __import__("os").environ.get(name)
 
     rolled = control.rollback(
         "CANONICAL",
         actor="pytest",
     )
     assert rolled["revision_id"] == "CANONICAL"
-    assert (
-        Path(__import__("os").environ["MAJOR_MODEL_CONFIG"])
-        == control.canonical_model_config
+    assert control.effective_model_config_path() == (
+        control.canonical_model_config
     )
+    for name in (
+        "MAJOR_MODEL_CONFIG",
+        "HARDWARE_CASE_MODEL_CONFIG",
+        "STORAGE_MODEL_CONFIG",
+    ):
+        assert not __import__("os").environ.get(name)
 
     history = control.list_revisions()
     assert history["items"][0]["revision_id"] == revision["revision_id"]
