@@ -204,23 +204,26 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
     revision_id = revision.stdout.strip().splitlines()[-1]
     assert revision_id
 
-    mock_log = tmp_path / "mock.log"
-    with mock_log.open("w", encoding="utf-8") as mock_stream:
+    provider_log = tmp_path / "provider-requests.jsonl"
+    provider_stdout = tmp_path / "provider.log"
+    with provider_stdout.open("w", encoding="utf-8") as provider_stream:
         mock = subprocess.Popen(
             [
                 str(package_python),
-                str(package_root / "tests" / "support" / "r2_false_pass_openai_mock.py"),
+                str(package_root / "scripts" / "r2_candidate_e2e_provider.py"),
                 "--port",
                 "18081",
+                "--log",
+                str(provider_log),
             ],
             cwd=package_root,
             env={**env, "PYTHONPATH": str(package_root)},
-            stdout=mock_stream,
+            stdout=provider_stream,
             stderr=subprocess.STDOUT,
             text=True,
         )
     try:
-        _wait_json("http://127.0.0.1:18081/__e2e__/health", timeout=30)
+        _wait_json("http://127.0.0.1:18081/health", timeout=30)
 
         child_env = env.copy()
         child_env["OVERALL_R2_DATA_DIR"] = str(data_root)
@@ -348,7 +351,73 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
             assert device_type == "eMMC"
 
             assert isinstance(identify, dict), identify
-            print("SECRETREF_PROVIDER_HTTP_CALL_TRIGGERED=PASS")
+            print("PDF_IDENTIFY=PASS")
+
+            document_identity = identify.get("document_identity") or {}
+            models = identify.get("models") or []
+
+            def identity_value(field: str) -> str:
+                value = document_identity.get(field)
+                if isinstance(value, dict):
+                    return str(value.get("value") or "")
+                return str(value or "")
+
+            job = _multipart(
+                "http://127.0.0.1:18088/storage-workspace/api/documents/jobs",
+                fields={
+                    "vendor": vendor,
+                    "model": model,
+                    "device_type": device_type,
+                    "models_json": json.dumps(models, ensure_ascii=False),
+                    "document_number": identity_value("document_number"),
+                    "revision": identity_value("revision"),
+                    "revision_date": identity_value("revision_date"),
+                    "document_variant": identity_value("document_variant"),
+                    "publisher": "R2 built-ZIP canonical E2E",
+                },
+                file_field="file",
+                filename=pdf_path.name,
+                file_bytes=pdf_bytes,
+            )
+            job_id = str(job.get("job_id") or "")
+            assert job_id, job
+            print("PDF_JOB_CREATED=PASS")
+
+            deadline = time.time() + 300
+            state = {}
+            while time.time() < deadline:
+                state = _json(
+                    f"http://127.0.0.1:18088/storage-workspace/api/documents/jobs/{job_id}"
+                )
+                if state.get("status") in {"completed", "failed"}:
+                    break
+                time.sleep(1)
+            assert state.get("status") == "completed", state
+
+            result = state.get("result") or {}
+            device_id = str(result.get("device_id") or "")
+            assert device_id, result
+            assert int(result.get("expected_field_count") or 0) >= 37, result
+            coverage = result.get("coverage") or {}
+            assert isinstance(coverage, dict)
+            assert len(coverage.get("states") or []) >= 37, coverage
+            print("PDF_JOB_COMPLETED=PASS")
+            print("COVERAGE=PASS")
+
+            runtime_facts = _json(
+                f"http://127.0.0.1:18088/storage-workspace/api/devices/{device_id}/runtime-facts"
+            )
+            runtime_coverage = runtime_facts.get("coverage") or {}
+            assert len(runtime_coverage.get("states") or []) >= 37, runtime_facts
+            assert "review_required" in runtime_facts
+
+            review = _json(
+                f"http://127.0.0.1:18088/storage-workspace/api/product/devices/{device_id}/review-workbench"
+            )
+            rows = review.get("rows") if isinstance(review, dict) else None
+            assert isinstance(rows, list), review
+            assert len(rows) >= 37, review
+            print("REVIEW_WORKBENCH=PASS")
 
             status = _json(
                 "http://127.0.0.1:18088/storage-workspace/api/v1/runtime/status"
@@ -358,10 +427,23 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
             assert status["api_key_env"] == "acca1"
             assert status["api_key_present"] is True
 
-            stats = _json("http://127.0.0.1:18081/__e2e__/stats")
-            assert stats["requests"] >= 1, stats
-            assert stats["auth_present"] == stats["requests"], stats
+            assert provider_log.is_file(), "provider request log missing"
+            provider_events = [
+                json.loads(line)
+                for line in provider_log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            assert len(provider_events) >= 2, provider_events
+            assert all(
+                item.get("authorization") == "PRESENT"
+                for item in provider_events
+            ), provider_events
+            assert not any(
+                item.get("contains_acca1_value")
+                for item in provider_events
+            ), provider_events
             print("SECRETREF_CHILD_PROCESS_RUNTIME_PROVIDER_E2E=PASS")
+            print("PDF_E2E_FROM_BUILT_ZIP=PASS")
 
             web_log = tmp_path / "logs" / "overall-r2.log"
             if web_log.is_file():
