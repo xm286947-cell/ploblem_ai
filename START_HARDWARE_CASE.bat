@@ -6,6 +6,8 @@ if not exist "data" mkdir data
 if not exist "data\runtime" mkdir data\runtime
 
 set HARDWARE_CASE_NO_PAUSE=1
+set HARDWARE_CASE_HOST_ROLE=MAINTAINER
+if "%HARDWARE_CASE_HOST_ACTOR%"=="" set HARDWARE_CASE_HOST_ACTOR=windows:hardware-maintainer
 call CHECK_ENV.bat web
 if errorlevel 1 (
   echo.
