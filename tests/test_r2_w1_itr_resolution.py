@@ -203,7 +203,7 @@ def test_r2_w1_resolution_p0_shell_reuses_same_source_facts(tmp_path: Path):
         params={"return_to": "/p0/itr-resolution?q=通信边界"},
     )
     assert detail.status_code == 200
-    assert "返回彻底解决单" in detail.text
+    assert "返回彻底解决工作台" in detail.text
     assert 'href="/p0/itr-resolution?q=通信边界"' in detail.text
 
     rejected = client.get(
