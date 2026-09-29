@@ -9,6 +9,10 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
+from quality_knowledge.major_cases.import_governance import (
+    TEMPLATE_VERSION,
+    add_template_metadata,
+)
 from services.major_case_production import MajorCaseProductionService, MajorProductionError
 
 
@@ -58,6 +62,11 @@ def create_major_production_router(
             "Trigger Condition": "示例触发条件",
         }
         sheet.append([example.get(header, "") for header in headers])
+        current_mapping_version = restore_service.current_mapping_version()
+        add_template_metadata(
+            workbook,
+            current_mapping_version=current_mapping_version,
+        )
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -65,7 +74,9 @@ def create_major_production_router(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": 'attachment; filename="MAJOR_CASE_IMPORT_TEMPLATE_V1.0.xlsx"'
+                "Content-Disposition": 'attachment; filename="MAJOR_CASE_IMPORT_TEMPLATE_V1.0.xlsx"',
+                "X-Major-Template-Version": TEMPLATE_VERSION,
+                "X-Major-Mapping-Version": current_mapping_version,
             },
         )
 
@@ -75,6 +86,7 @@ def create_major_production_router(
         materials: list[UploadFile] = File(default=[]),
         group_code: str = Form("MAJOR"),
         domain: str = Form("QUALITY"),
+        actor: str = Form("web-user"),
     ) -> dict[str, Any]:
         if restore_service is None:
             raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
@@ -97,11 +109,13 @@ def create_major_production_router(
                 material_payload,
                 group_code=group_code.strip() or "MAJOR",
                 domain=domain.strip(),
+                actor=actor.strip() or "web-user",
             )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         preview["mapping"] = {
-            "contract": "major-excel-field-mapping/v1",
+            "contract": preview["mapping_contract"],
+            "version": preview["mapping_version"],
             "detected_sheet": preview.get("parse_summary", {}).get("sheet_name"),
             "header_row": preview.get("parse_summary", {}).get("header_row"),
             "fields": dict(restore_service.excel_parser.field_mapping),
@@ -110,11 +124,17 @@ def create_major_production_router(
         return preview
 
     @router.post("/excel/confirm")
-    def excel_confirm(batch_id: str = Form(...)) -> dict[str, Any]:
+    def excel_confirm(
+        batch_id: str = Form(...),
+        actor: str = Form("web-user"),
+    ) -> dict[str, Any]:
         if restore_service is None:
             raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
         try:
-            result = restore_service.commit(batch_id)
+            result = restore_service.commit(
+                batch_id,
+                actor=actor.strip() or "web-user",
+            )
         except KeyError as error:
             raise HTTPException(404, "MAJOR_EXCEL_BATCH_NOT_FOUND") from error
         except ValueError as error:
