@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 import shutil
+import sqlite3
 import uuid
 
 from parser.excel_parser import ExcelParser, normalize_header
@@ -23,6 +24,12 @@ from quality_knowledge.materials import normalize_itr
 from .document_parser import parse_document
 
 from .repository import MajorKnowledgeRepository
+from .import_governance import (
+    IMPORT_GOVERNANCE_CONTRACT,
+    MAPPING_CONTRACT,
+    inspect_template,
+    mapping_version,
+)
 
 
 def _id(prefix: str) -> str:
@@ -128,6 +135,9 @@ class MajorCaseRestoreService:
         self.staging_root = self.repository.attachment_root.parent / "import_staging"
         self.staging_root.mkdir(parents=True, exist_ok=True)
 
+    def current_mapping_version(self) -> str:
+        return mapping_version(dict(self.excel_parser.field_mapping))
+
     def _enrich_record(self, record: dict) -> dict:
         raw = dict(record.get("raw_fields") or {})
         mapped = dict(record.get("mapped_fields") or {})
@@ -209,6 +219,8 @@ class MajorCaseRestoreService:
         group_code: str,
         domain: str = "",
     ) -> dict:
+        template = inspect_template(excel_path)
+        current_mapping_version = self.current_mapping_version()
         temp_out = self.staging_root / "_parse_preview" / uuid.uuid4().hex
         records, summary = self.excel_parser.parse(excel_path, temp_out)
         enriched = [self._enrich_record(record) for record in records]
@@ -243,6 +255,11 @@ class MajorCaseRestoreService:
             "group_code": group_code,
             "domain": domain,
             "source_file": Path(excel_path).name,
+            "template_contract": template["template_contract"],
+            "template_version": template["template_version"],
+            "template_status": template["template_status"],
+            "mapping_contract": MAPPING_CONTRACT,
+            "mapping_version": current_mapping_version,
             "parse_summary": summary.to_dict(),
             "match_summary": match_summary,
             "rows": rows,
@@ -260,6 +277,7 @@ class MajorCaseRestoreService:
         *,
         group_code: str,
         domain: str = "",
+        actor: str = "web-user",
     ) -> dict:
         batch_id = f"MIMP-{uuid.uuid4().hex[:16]}"
         root = self.staging_root / batch_id
@@ -285,7 +303,19 @@ class MajorCaseRestoreService:
         )
         preview["batch_id"] = batch_id
         preview["staged_material_count"] = len(used_names)
-        with self.repository.connect() as connection:
+        actor = str(actor or "").strip() or "web-user"
+        preview["governance"] = {
+            "contract_version": IMPORT_GOVERNANCE_CONTRACT,
+            "template_contract": preview["template_contract"],
+            "template_version": preview["template_version"],
+            "template_status": preview["template_status"],
+            "mapping_contract": preview["mapping_contract"],
+            "mapping_version": preview["mapping_version"],
+            "preview_actor": actor,
+        }
+        preview_hash = _hash(preview)
+        source_sha256 = hashlib.sha256(excel_content).hexdigest()
+        with self.repository.transaction() as connection:
             connection.execute(
                 """INSERT INTO kb_major_import_batch(
                      batch_id,source_file,group_code,domain,status,staging_path,preview_json)
@@ -299,6 +329,25 @@ class MajorCaseRestoreService:
                     _json(preview),
                 ),
             )
+            connection.execute(
+                """INSERT INTO kb_major_import_governance(
+                     batch_id,contract_version,template_contract,template_version,
+                     template_status,mapping_contract,mapping_version,source_sha256,
+                     preview_sha256,preview_actor)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    batch_id,
+                    IMPORT_GOVERNANCE_CONTRACT,
+                    preview["template_contract"],
+                    preview["template_version"],
+                    preview["template_status"],
+                    preview["mapping_contract"],
+                    preview["mapping_version"],
+                    source_sha256,
+                    preview_hash,
+                    actor,
+                ),
+            )
         return preview
 
     def batch(self, batch_id: str) -> dict | None:
@@ -307,11 +356,26 @@ class MajorCaseRestoreService:
                 "SELECT * FROM kb_major_import_batch WHERE batch_id=?",
                 (batch_id,),
             ).fetchone()
+            governance = connection.execute(
+                "SELECT * FROM kb_major_import_governance WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            runs = connection.execute(
+                """SELECT * FROM kb_major_import_run
+                   WHERE batch_id=? ORDER BY started_at,run_id""",
+                (batch_id,),
+            ).fetchall()
         if not row:
             return None
         result = dict(row)
         result["preview"] = json.loads(result.pop("preview_json") or "{}")
         result["result"] = json.loads(result.pop("result_json") or "{}")
+        result["governance"] = dict(governance) if governance else None
+        result["runs"] = []
+        for run_row in runs:
+            item = dict(run_row)
+            item["result"] = json.loads(item.pop("result_json") or "{}")
+            result["runs"].append(item)
         return result
 
     def _identity_case(self, group_code: str, identity_type: str, value: str) -> str | None:
@@ -379,43 +443,14 @@ class MajorCaseRestoreService:
         source_ref: str,
         actor: str = "IMPORT",
     ) -> dict:
-        source_hash = _hash({"raw": raw, "normalized": normalized, "source_ref": source_ref})
-        with self.repository.transaction() as connection:
-            existing = connection.execute(
-                """SELECT * FROM kb_source_fact_revision
-                   WHERE case_id=? AND source_hash=?""",
-                (case_id, source_hash),
-            ).fetchone()
-            if existing:
-                return dict(existing)
-            revision_no = int(
-                connection.execute(
-                    "SELECT COALESCE(MAX(revision_no),0)+1 FROM kb_source_fact_revision WHERE case_id=?",
-                    (case_id,),
-                ).fetchone()[0]
-            )
-            revision_id = _id("KSF")
-            connection.execute(
-                """INSERT INTO kb_source_fact_revision(
-                     source_fact_revision_id,case_id,revision_no,source_type,source_ref,
-                     source_hash,raw_json,normalized_json,created_by)
-                   VALUES(?,?,?,'EXCEL',?,?,?,?,?)""",
-                (
-                    revision_id,
-                    case_id,
-                    revision_no,
-                    source_ref,
-                    source_hash,
-                    _json(raw),
-                    _json(normalized),
-                    actor,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM kb_source_fact_revision WHERE source_fact_revision_id=?",
-                (revision_id,),
-            ).fetchone()
-        return dict(row)
+        return self.repository.add_source_fact_revision(
+            case_id,
+            source_type="EXCEL",
+            source_ref=source_ref,
+            raw=raw,
+            normalized=normalized,
+            actor=actor,
+        )
 
     def source_fact_history(self, case_id: str) -> list[dict]:
         with self.repository.connect() as connection:
@@ -432,43 +467,198 @@ class MajorCaseRestoreService:
             result.append(item)
         return result
 
-    def commit(self, batch_id: str) -> dict:
-        """Commit a staged Excel batch into the existing Major knowledge store.
+    def _preflight_commit(self, batch: dict) -> list[dict]:
+        preview = batch["preview"]
+        errors: list[dict] = []
+        rows = list(preview.get("rows") or [])
+        if not rows:
+            return [{"row": None, "error": "MAJOR_EXCEL_BATCH_EMPTY"}]
+        for row in rows:
+            row_no = row.get("excel_row")
+            if not row.get("completeness", {}).get("importable"):
+                errors.append({"row": row_no, "error": "ROW_NOT_IMPORTABLE"})
+                continue
+            match = row.get("report_match") or {}
+            if match.get("match_type") == "AMBIGUOUS":
+                errors.append({"row": row_no, "error": "AMBIGUOUS_REPORT_MATCH"})
+            matched_path = str(match.get("matched_report_path") or "").strip()
+            if matched_path and not Path(matched_path).is_file():
+                errors.append({"row": row_no, "error": "MATCHED_REPORT_NOT_FOUND"})
+            group_code = str(preview.get("group_code") or "")
+            igr = str(row.get("igr") or "")
+            source_key = str(row.get("source_key") or "")
+            igr_case = self._identity_case(group_code, "IGR", igr)
+            source_case = self._identity_case(group_code, "SOURCE_KEY", source_key)
+            if igr_case and source_case and igr_case != source_case:
+                errors.append({"row": row_no, "error": "CASE_IDENTITY_CONFLICT"})
+        return errors
 
-        This is deliberately an adapter over the existing repository. It does
-        not create another problem/case master or another Excel parser.
-        """
+    def _record_failed_run(
+        self,
+        batch: dict,
+        *,
+        actor: str,
+        errors: list[dict],
+        error_code: str,
+    ) -> dict:
+        run_id = f"MIR-{uuid.uuid4().hex[:16]}"
+        result = {
+            "batch_id": batch["batch_id"],
+            "run_id": run_id,
+            "total": len(batch["preview"].get("rows") or []),
+            "imported": 0,
+            "rejected": len(errors),
+            "failed": 0 if errors else 1,
+            "errors": errors or [{"error": error_code}],
+            "case_ids": [],
+            "atomic_rollback": False,
+        }
+        with self.repository.transaction() as connection:
+            connection.execute(
+                """INSERT INTO kb_major_import_run(
+                     run_id,batch_id,actor,status,imported_count,rejected_count,
+                     failed_count,result_json,completed_at)
+                   VALUES(?,?,?,'FAILED',0,?,?,?,CURRENT_TIMESTAMP)""",
+                (
+                    run_id,
+                    batch["batch_id"],
+                    actor,
+                    result["rejected"],
+                    result["failed"],
+                    _json(result),
+                ),
+            )
+            connection.execute(
+                """UPDATE kb_major_import_batch
+                   SET status='FAILED',result_json=?,committed_at=CURRENT_TIMESTAMP
+                   WHERE batch_id=?""",
+                (_json(result), batch["batch_id"]),
+            )
+        return result
+
+    def _atomic_snapshot(self, batch: dict) -> Path:
+        snapshot_root = Path(batch["staging_path"]) / "_atomic_rollback"
+        shutil.rmtree(snapshot_root, ignore_errors=True)
+        snapshot_root.mkdir(parents=True, exist_ok=True)
+        db_backup = snapshot_root / "major.sqlite3"
+        with self.repository.connect() as source:
+            with sqlite3.connect(db_backup) as target:
+                source.backup(target)
+        attachment_backup = snapshot_root / "attachments"
+        if self.repository.attachment_root.exists():
+            shutil.copytree(
+                self.repository.attachment_root,
+                attachment_backup,
+                dirs_exist_ok=True,
+            )
+        return snapshot_root
+
+    def _restore_atomic_snapshot(self, snapshot_root: Path) -> None:
+        db_backup = snapshot_root / "major.sqlite3"
+        with sqlite3.connect(db_backup) as source:
+            target = self.repository.connect()
+            try:
+                source.backup(target)
+                target.commit()
+            finally:
+                target.close()
+        shutil.rmtree(self.repository.attachment_root, ignore_errors=True)
+        attachment_backup = snapshot_root / "attachments"
+        if attachment_backup.exists():
+            shutil.copytree(
+                attachment_backup,
+                self.repository.attachment_root,
+                dirs_exist_ok=True,
+            )
+        else:
+            self.repository.attachment_root.mkdir(parents=True, exist_ok=True)
+
+    def commit(self, batch_id: str, *, actor: str = "web-user") -> dict:
+        """Commit a governed batch atomically into the existing Major store."""
+
         batch = self.batch(batch_id)
         if not batch:
             raise KeyError(batch_id)
-        if batch["status"] in {"COMPLETED", "PARTIAL"}:
+        if batch["status"] == "COMPLETED":
             return batch["result"]
+        if batch["status"] != "PREVIEW":
+            raise ValueError("MAJOR_EXCEL_BATCH_NOT_CONFIRMABLE")
+
+        governance = batch.get("governance")
+        actor = str(actor or "").strip() or "web-user"
+        if not governance:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=[],
+                error_code="MAJOR_EXCEL_GOVERNANCE_MISSING",
+            )
+            raise ValueError("MAJOR_EXCEL_GOVERNANCE_MISSING")
+
+        actor = str(actor or "").strip() or str(governance["preview_actor"])
+        if self.current_mapping_version() != governance["mapping_version"]:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=[],
+                error_code="MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW",
+            )
+            raise ValueError("MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW")
+        if _hash(batch["preview"]) != governance["preview_sha256"]:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=[],
+                error_code="MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW",
+            )
+            raise ValueError("MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW")
+
+        preflight_errors = self._preflight_commit(batch)
+        if preflight_errors:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=preflight_errors,
+                error_code="MAJOR_EXCEL_BATCH_PRECHECK_FAILED",
+            )
+            raise ValueError("MAJOR_EXCEL_BATCH_PRECHECK_FAILED")
+
         preview = batch["preview"]
+        run_id = f"MIR-{uuid.uuid4().hex[:16]}"
         stats = {
             "batch_id": batch_id,
+            "run_id": run_id,
+            "actor": actor,
+            "template_version": governance["template_version"],
+            "mapping_version": governance["mapping_version"],
             "total": len(preview.get("rows") or []),
+            "imported": 0,
+            "rejected": 0,
             "created_cases": 0,
             "reused_cases": 0,
             "source_fact_revisions": 0,
             "events": 0,
             "documents": 0,
-            "ambiguous_documents": 0,
             "failed": 0,
             "errors": [],
             "case_ids": [],
+            "atomic_rollback": False,
         }
-        with self.repository.connect() as connection:
+        with self.repository.transaction() as connection:
+            connection.execute(
+                """INSERT INTO kb_major_import_run(
+                     run_id,batch_id,actor,status,result_json)
+                   VALUES(?,?,?,'RUNNING','{}')""",
+                (run_id, batch_id, actor),
+            )
             connection.execute(
                 "UPDATE kb_major_import_batch SET status='COMMITTING' WHERE batch_id=?",
                 (batch_id,),
             )
+        snapshot_root = self._atomic_snapshot(batch)
 
-        for row in preview.get("rows") or []:
-            if not row.get("completeness", {}).get("importable"):
-                stats["failed"] += 1
-                stats["errors"].append({"row": row.get("excel_row"), "error": "ROW_NOT_IMPORTABLE"})
-                continue
-            try:
+        try:
+            for row in preview.get("rows") or []:
                 group_code = preview["group_code"]
                 igr = str(row.get("igr") or "")
                 source_key = str(row["source_key"])
@@ -489,8 +679,13 @@ class MajorCaseRestoreService:
                     case_id = case["case_id"]
                     stats["created_cases"] += 1
                 stats["case_ids"].append(case_id)
-                self._set_identity(case_id, group_code, "SOURCE_KEY", source_key, primary=not bool(igr))
-                self._set_identity(case_id, group_code, "IGR", igr, primary=bool(igr))
+                self._set_identity(
+                    case_id, group_code, "SOURCE_KEY", source_key,
+                    primary=not bool(igr),
+                )
+                self._set_identity(
+                    case_id, group_code, "IGR", igr, primary=bool(igr),
+                )
 
                 source_ref = (
                     f"{preview['source_file']}#"
@@ -501,18 +696,20 @@ class MajorCaseRestoreService:
                     raw=row.get("raw_fields") or {},
                     normalized=row.get("normalized_fields") or {},
                     source_ref=source_ref,
+                    actor=actor,
                 )
                 stats["source_fact_revisions"] += 1
 
                 events = []
                 for itr in row.get("itrs") or []:
-                    event = self.repository.upsert_event(
-                        case_id,
-                        standard_itr=itr,
-                        internal_event_key=itr,
-                        title=itr,
+                    events.append(
+                        self.repository.upsert_event(
+                            case_id,
+                            standard_itr=itr,
+                            internal_event_key=itr,
+                            title=itr,
+                        )
                     )
-                    events.append(event)
                 if not events:
                     events.append(
                         self.repository.upsert_event(
@@ -523,8 +720,6 @@ class MajorCaseRestoreService:
                     )
                 stats["events"] += len(events)
 
-                # The Excel Source Fact is a first-class source. Keep one source
-                # link per event so downstream traceability remains explicit.
                 for event in events:
                     self.repository.add_source_link(
                         case_id,
@@ -536,6 +731,10 @@ class MajorCaseRestoreService:
                             "group_code": group_code,
                             "source_hash": source_fact["source_hash"],
                             "source_ref": source_ref,
+                            "batch_id": batch_id,
+                            "run_id": run_id,
+                            "template_version": governance["template_version"],
+                            "mapping_version": governance["mapping_version"],
                         },
                         standard_itr=event.get("standard_itr") or "",
                         role="CURRENT_EVENT",
@@ -543,17 +742,19 @@ class MajorCaseRestoreService:
                     )
 
                 match = row.get("report_match") or {}
-                if match.get("match_type") == "AMBIGUOUS":
-                    stats["ambiguous_documents"] += 1
-                elif match.get("matched_report_path"):
+                if match.get("matched_report_path"):
                     document = self.repository.ingest_file(
                         case_id,
                         match["matched_report_path"],
                         role="PRIMARY",
                     )
                     if document.get("media_type") != "DOC":
-                        parsed = parse_document(self.repository.attachment_path(document["version_id"]))
-                        self.repository.save_parse_result(document["version_id"], parsed)
+                        parsed = parse_document(
+                            self.repository.attachment_path(document["version_id"])
+                        )
+                        self.repository.save_parse_result(
+                            document["version_id"], parsed
+                        )
                     primary_event = events[0]
                     self.repository.add_source_link(
                         case_id,
@@ -567,34 +768,91 @@ class MajorCaseRestoreService:
                             "file_name": document["original_filename"],
                             "version_id": document["version_id"],
                             "document_id": document["document_id"],
+                            "batch_id": batch_id,
+                            "run_id": run_id,
                         },
                         standard_itr=primary_event.get("standard_itr") or "",
                         role="CURRENT_EVENT",
-                        status="LINKED" if primary_event.get("standard_itr") else "NOT_FOUND",
+                        status=(
+                            "LINKED"
+                            if primary_event.get("standard_itr")
+                            else "NOT_FOUND"
+                        ),
                     )
                     stats["documents"] += 1
 
                 self.repository.update_case_status(case_id, "ACTIVE")
-            except Exception as exc:
-                stats["failed"] += 1
-                stats["errors"].append(
-                    {
-                        "row": row.get("excel_row"),
-                        "source_key": row.get("source_key"),
-                        "error": str(exc),
-                    }
-                )
+                stats["imported"] += 1
 
-        stats["case_ids"] = list(dict.fromkeys(stats["case_ids"]))
-        final = "PARTIAL" if stats["failed"] or stats["ambiguous_documents"] else "COMPLETED"
-        with self.repository.connect() as connection:
-            connection.execute(
-                """UPDATE kb_major_import_batch
-                   SET status=?,result_json=?,committed_at=CURRENT_TIMESTAMP
-                   WHERE batch_id=?""",
-                (final, _json(stats), batch_id),
+            stats["case_ids"] = list(dict.fromkeys(stats["case_ids"]))
+            with self.repository.transaction() as connection:
+                connection.execute(
+                    """UPDATE kb_major_import_batch
+                       SET status='COMPLETED',result_json=?,
+                           committed_at=CURRENT_TIMESTAMP
+                       WHERE batch_id=?""",
+                    (_json(stats), batch_id),
+                )
+                connection.execute(
+                    """UPDATE kb_major_import_run
+                       SET status='COMPLETED',imported_count=?,rejected_count=0,
+                           failed_count=0,result_json=?,completed_at=CURRENT_TIMESTAMP
+                       WHERE run_id=?""",
+                    (stats["imported"], _json(stats), run_id),
+                )
+            return stats
+        except Exception as exc:
+            attempted = {
+                key: stats[key]
+                for key in (
+                    "created_cases",
+                    "reused_cases",
+                    "source_fact_revisions",
+                    "events",
+                    "documents",
+                    "imported",
+                )
+            }
+            try:
+                self._restore_atomic_snapshot(snapshot_root)
+            except Exception as rollback_error:
+                raise ValueError(
+                    "MAJOR_EXCEL_ATOMIC_ROLLBACK_FAILED"
+                ) from rollback_error
+
+            stats.update(
+                {
+                    "imported": 0,
+                    "created_cases": 0,
+                    "reused_cases": 0,
+                    "source_fact_revisions": 0,
+                    "events": 0,
+                    "documents": 0,
+                    "failed": 1,
+                    "case_ids": [],
+                    "atomic_rollback": True,
+                    "attempted_before_rollback": attempted,
+                    "errors": [{"error": str(exc) or type(exc).__name__}],
+                }
             )
-        return stats
+            with self.repository.transaction() as connection:
+                connection.execute(
+                    """UPDATE kb_major_import_batch
+                       SET status='FAILED',result_json=?,
+                           committed_at=CURRENT_TIMESTAMP
+                       WHERE batch_id=?""",
+                    (_json(stats), batch_id),
+                )
+                connection.execute(
+                    """UPDATE kb_major_import_run
+                       SET status='FAILED',imported_count=0,rejected_count=0,
+                           failed_count=1,result_json=?,completed_at=CURRENT_TIMESTAMP
+                       WHERE run_id=?""",
+                    (_json(stats), run_id),
+                )
+            raise ValueError("MAJOR_EXCEL_ATOMIC_COMMIT_FAILED") from exc
+        finally:
+            shutil.rmtree(snapshot_root, ignore_errors=True)
 
     def annotate_revision(
         self,
