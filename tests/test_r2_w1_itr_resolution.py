@@ -199,7 +199,7 @@ def test_r2_w1_resolution_p0_shell_reuses_same_source_facts(tmp_path: Path):
     assert "return_to=%2Fp0%2Fitr-resolution%3Fq%3D" in page.text
 
     detail = client.get(
-        f"/p0/issues/{knowledge_id}",
+        f"/issues/{knowledge_id}",
         params={"return_to": "/p0/itr-resolution?q=通信边界"},
     )
     assert detail.status_code == 200
@@ -208,7 +208,7 @@ def test_r2_w1_resolution_p0_shell_reuses_same_source_facts(tmp_path: Path):
     assert "r2-w1-current-problem-return-v3" in detail.text
 
     rejected = client.get(
-        f"/p0/issues/{knowledge_id}",
+        f"/issues/{knowledge_id}",
         params={"return_to": "https://example.invalid/escape"},
     )
     assert rejected.status_code == 400
