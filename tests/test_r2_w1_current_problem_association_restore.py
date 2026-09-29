@@ -195,6 +195,37 @@ def test_current_problem_four_workbench_association_closure_is_read_only(tmp_pat
     assert "/p0/missed-test-analysis?q=ITR-R2-ASSOC-1" in detail.text
     assert "返回漏测分析" in detail.text
 
+    contract = client.get(
+        f"/api/v2/issues/{ids['ITR-R2-ASSOC-1']}/workbench-relations"
+    )
+    assert contract.status_code == 200
+    payload = contract.json()
+    assert payload["contract_version"] == "canonical-problem/v1"
+    assert payload["identity"]["master_object_ref"] == {
+        "domain": "EXISTING_PROBLEM",
+        "object_type": "quality_issue",
+        "object_id": ids["ITR-R2-ASSOC-1"],
+    }
+    assert payload["workbench_count"] == 4
+    assert all(
+        relation["relation_contract_version"] == "canonical-problem-relation/v1"
+        for relation in payload["relations"]
+    )
+    assert all(
+        relation["relation_policy"] == "EXPLICIT_OR_EXACT_UNIQUE_ONLY"
+        for relation in payload["relations"]
+    )
+    assert all(
+        relation["return_context_contract"] == "overall-return-context/v1"
+        for relation in payload["relations"]
+    )
+    for key in ("RESOLUTION", "SOFTWARE_ASSESSMENT"):
+        relation = next(item for item in payload["relations"] if item["key"] == key)
+        assert relation["source_refs"]
+        assert relation["source_refs"][0]["version_no"] == 1
+        assert relation["source_refs"][0]["source_hash"]
+        assert relation["source_refs"][0]["object_ref"]["object_type"] == "source_material"
+
     no_relation = client.get(f"/p0/issues/{ids['ITR-R2-ASSOC-2']}")
     assert no_relation.status_code == 200
     assert "1/4 已关联" in no_relation.text
@@ -204,3 +235,83 @@ def test_current_problem_four_workbench_association_closure_is_read_only(tmp_pat
         assert connection.execute(
             "SELECT COUNT(*) FROM issue_material_link"
         ).fetchone()[0] == 0
+
+
+
+def test_current_problem_ambiguous_canonical_relation_fails_closed(tmp_path: Path):
+    legacy_db = tmp_path / "association-ambiguous.db"
+    legacy_client = TestClient(create_app(legacy_db))
+    ids = _seed_issues(legacy_client, tmp_path)
+
+    resolution = tmp_path / "resolution-ambiguous.xlsx"
+    _resolution_source(resolution)
+    _import_material(
+        legacy_client,
+        resolution,
+        workbench="cs",
+        group_code="ITR-CS",
+    )
+
+    assessment = tmp_path / "assessment-ambiguous.xlsx"
+    _assessment_source(assessment)
+    _import_material(
+        legacy_client,
+        assessment,
+        workbench="software-operations",
+        group_code="SW-OPS",
+    )
+
+    # Same normalized ITR across two business-type uniqueness domains is
+    # intentionally ambiguous to the cross-workbench resolver. Reading the
+    # Common Problem View must never choose one by recency/title/product.
+    with sqlite3.connect(legacy_db) as connection:
+        connection.execute("DELETE FROM issue_material_link")
+        connection.execute(
+            """
+            INSERT INTO quality_issue(
+                knowledge_id,business_type,business_issue_id,status
+            ) VALUES(?,?,?,?)
+            """,
+            (
+                "QK-HMI-R2-AMBIGUOUS",
+                "HMI",
+                "ITR-R2-ASSOC-1",
+                "ACTIVE",
+            ),
+        )
+
+    p0_db = tmp_path / "p0-ambiguous.db"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(p0_db)
+    client = TestClient(
+        create_p0_app(
+            p0_db,
+            stage_runner=object(),
+            project_root=ROOT,
+            legacy_quality_issue_db_path=legacy_db,
+        )
+    )
+
+    response = client.get(
+        f"/api/v2/issues/{ids['ITR-R2-ASSOC-1']}/workbench-relations"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    by_key = {relation["key"]: relation for relation in payload["relations"]}
+
+    assert by_key["ITR"]["present"] is True
+    assert by_key["MISSED_TEST"]["present"] is True
+    for key in ("RESOLUTION", "SOFTWARE_ASSESSMENT"):
+        relation = by_key[key]
+        assert relation["present"] is False
+        assert relation["relation_status"] == "NO_RELATION"
+        assert relation["href"] == ""
+        assert relation["source_refs"] == []
+        assert relation["no_relation_reason"] == "RELATION_NOT_FOUND_OR_AMBIGUOUS"
+
+    page = client.get(f"/p0/issues/{ids['ITR-R2-ASSOC-1']}")
+    assert page.status_code == 200
+    assert "2/4 已关联" in page.text
+    assert page.text.count("未发现已确认关联") >= 2
