@@ -13,7 +13,7 @@ from services.major_case_production import MajorCaseProductionService, MajorProd
 
 
 def _error(error: MajorProductionError) -> HTTPException:
-    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
+    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND", "MAJOR_EVENT_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
     return HTTPException(status, error.code)
 
 
@@ -160,9 +160,9 @@ def create_major_production_router(
             raise _error(error) from error
 
     @router.post("/cases/{case_id}/analysis")
-    def analyze(case_id: str) -> dict[str, Any]:
+    def analyze(case_id: str, event_id: str = "") -> dict[str, Any]:
         try:
-            return service.analyze(case_id)
+            return service.analyze(case_id, event_id=event_id)
         except MajorProductionError as error:
             raise _error(error) from error
 
