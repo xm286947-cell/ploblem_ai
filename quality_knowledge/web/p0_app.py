@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.hardware_public_api import create_hardware_public_router
+from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
 from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
@@ -372,6 +373,12 @@ def create_p0_app(
             )
         )
         app.include_router(create_hardware_public_router(hardware_case_service))
+        app.include_router(
+            create_hardware_operability_router(
+                project_root=root,
+                hardware_db_path=hardware_db,
+            )
+        )
 
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router
