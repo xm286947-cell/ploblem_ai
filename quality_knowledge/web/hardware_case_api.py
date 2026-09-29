@@ -16,37 +16,12 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
+from quality_knowledge.web.hardware_auth import trusted_hardware_auth_context
+from repositories.hardware_maintenance_audit_repository import HardwareMaintenanceAuditRepository
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
-
-
-_ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
-
-
-def _role(value: str | None, *, host_role: str | None = None) -> str:
-    role = str(value or "CONSUMER").strip().upper()
-    if role not in _ALLOWED_ROLES:
-        raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
-    if host_role is not None:
-        configured = str(host_role).strip().upper()
-        if configured not in _ALLOWED_ROLES:
-            raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
-        if role == "MAINTAINER" and configured != "MAINTAINER":
-            raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-    return role
-
-
-def _require_maintainer(
-    value: str | None,
-    *,
-    host_role: str | None = None,
-) -> str:
-    role = _role(value, host_role=host_role)
-    if role != "MAINTAINER":
-        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-    return role
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -73,12 +48,28 @@ def create_hardware_case_router(
     host_role: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
+    auth = trusted_hardware_auth_context(host_role)
+    audit = HardwareMaintenanceAuditRepository(service.repository.db_path)
 
     def resolve_role(value: str | None) -> str:
-        return _role(value, host_role=host_role)
+        return auth.resolve_read_role(value)
 
     def require_maintainer(value: str | None) -> str:
-        return _require_maintainer(value, host_role=host_role)
+        return auth.require_maintainer(value)
+
+    def record_audit(
+        action: str,
+        target_type: str,
+        target_id: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        audit.record(
+            actor=auth.actor,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            details=details,
+        )
 
     @router.get("")
     def search_cases(
@@ -146,6 +137,23 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         require_maintainer(x_hardware_case_role)
         items = service.maintenance_anomalies()
+        return {"items": items, "total": len(items)}
+
+    @router.get("/maintenance/audit")
+    def maintenance_audit(
+        action: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        require_maintainer(x_hardware_case_role)
+        items = audit.list(
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+        )
         return {"items": items, "total": len(items)}
 
     if source_store is not None:
@@ -296,12 +304,23 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         require_maintainer(x_hardware_case_role)
         try:
-            return service.review_case(
+            result = service.review_case(
                 case_id,
                 str(payload.get("field_name") or ""),
                 disposition=str(payload.get("disposition") or ""),
                 confirmed_value=payload.get("confirmed_value"),
             )
+            disposition = str(payload.get("disposition") or "").strip().upper()
+            record_audit(
+                "CASE_CONFIRM" if disposition == "CONFIRMED" else "CASE_REVIEW",
+                "HARDWARE_CASE",
+                case_id,
+                {
+                    "field_name": str(payload.get("field_name") or ""),
+                    "disposition": disposition,
+                },
+            )
+            return result
         except HardwareCaseContractError as error:
             raise _http_error(error) from error
 
@@ -317,7 +336,24 @@ def create_hardware_case_router(
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
-            return service.set_mapping(normalized)
+            previous = service.repository.get_mapping_by_semantic_key(
+                case_id,
+                str(normalized.get("tree_type") or ""),
+                str(normalized.get("node_id") or ""),
+            )
+            result = service.set_mapping(normalized)
+            record_audit(
+                "MAPPING_REVISION" if previous is not None else "MAPPING_CREATE",
+                "HARDWARE_CASE_MAPPING",
+                str(result.get("mapping_id") or normalized.get("mapping_id") or case_id),
+                {
+                    "case_id": case_id,
+                    "tree_type": normalized.get("tree_type"),
+                    "node_id": normalized.get("node_id"),
+                    "mapping_status": result.get("mapping_status"),
+                },
+            )
+            return result
         except HardwareCaseContractError as error:
             raise _http_error(error) from error
 
@@ -359,7 +395,15 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         require_maintainer(x_hardware_case_role)
         try:
-            return service.publish_case(case_id)
+            result = service.publish_case(case_id)
+            if result.get("case_status") == "PUBLISHED":
+                record_audit(
+                    "CASE_PUBLISH",
+                    "HARDWARE_CASE",
+                    case_id,
+                    {"gate_status": result.get("gate_status", "VALID")},
+                )
+            return result
         except HardwareCaseContractError as error:
             raise _http_error(error) from error
 
