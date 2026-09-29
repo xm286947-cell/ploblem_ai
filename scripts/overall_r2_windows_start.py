@@ -186,6 +186,11 @@ def _smoke(base_url: str) -> None:
     routes = (
         "/p0/overall",
         "/p0/issues",
+        "/p0/itr-recovery",
+        "/p0/itr-resolution",
+        "/p0/software-assessment",
+        "/p0/missed-test-analysis",
+        "/p0/batch-analysis",
         "/p0/cases",
         "/p0/quality-scenario-insights",
         "/p0/hardware-cases",
