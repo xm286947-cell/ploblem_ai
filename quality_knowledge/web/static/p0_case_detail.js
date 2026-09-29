@@ -16,6 +16,13 @@ function evidence(item,index,sourceItr){
     sourceItr?'/p0/issues?q='+encodeURIComponent(sourceItr):''
   );
   const sourceLabel=item.url?'查看来源':'查看来源 ITR';
+  const common=item.common_evidence&&typeof item.common_evidence==='object'?item.common_evidence:null;
+  const commonHref=common
+    ?'/p0/overall/evidence?'+new URLSearchParams({
+      presentation:'drawer',
+      common_evidence:JSON.stringify(common)
+    }).toString()
+    :'';
   return '<article class="case-evidence"><div class="case-evidence-head"><strong>Evidence '+(index+1)+'</strong><span>'+esc(source)+'</span></div>'+
     '<dl><dt>Evidence ID</dt><dd>'+esc(item.evidence_id||item.id||'未提供')+'</dd>'+
     '<dt>Source Version</dt><dd>'+esc(item.source_version||'未提供')+'</dd>'+
@@ -23,7 +30,10 @@ function evidence(item,index,sourceItr){
     '<dt>文档 / 位置</dt><dd>'+esc(location)+'</dd>'+
     '<dt>支撑字段 / 结论</dt><dd>'+esc(item.target_path||item.supports||item.field_path||empty)+'</dd></dl>'+
     '<blockquote>'+esc(item.raw_text||item.excerpt||'当前知识存在，但没有可用原始 Evidence。')+'</blockquote>'+
-    (sourceHref?'<a data-source-link href="'+esc(sourceHref)+'"'+(item.url?' target="_blank" rel="noopener"':'')+'>'+sourceLabel+'</a>':'<span>无可用来源链接</span>')+'</article>';
+    '<div class="case-evidence-actions">'+
+    (commonHref?'<a data-common-evidence-link href="'+esc(commonHref)+'">统一 Evidence Viewer</a>':'')+
+    (sourceHref?'<a data-source-link href="'+esc(sourceHref)+'"'+(item.url?' target="_blank" rel="noopener"':'')+'>'+sourceLabel+'</a>':'<span>无可用来源链接</span>')+
+    '</div></article>';
 }
 async function load(){
   const response=await fetch(api+'/historical-cases/'+encodeURIComponent(caseId),{headers:{Accept:'application/json'}});

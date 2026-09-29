@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable
+from compatibility.common_evidence import map_common_evidence
 
 import yaml
 
@@ -314,7 +315,7 @@ class HistoricalCaseConsumerService:
                 continue
             pages = section.get("page_numbers")
             page = pages[0] if isinstance(pages, list) and pages else section.get("page")
-            evidence.append({
+            item = {
                 "evidence_id": _text(section.get("evidence_id")),
                 "source_type": _first_text(section.get("source_type"), default_source_type),
                 "source_id": _first_text(section.get("source_id"), default_source_id),
@@ -332,5 +333,33 @@ class HistoricalCaseConsumerService:
                     or _text(section.get("source_reference"))
                     or _text(raw_evidence.get("url"))
                 ),
-            })
+            }
+            if (
+                item["evidence_id"]
+                and item["source_id"]
+                and item["source_version"]
+                and item["raw_text"]
+            ):
+                item["common_evidence"] = map_common_evidence(
+                    {
+                        "evidence_id": item["evidence_id"],
+                        "evidence_type": "SOURCE_EXCERPT",
+                        "source": {
+                            "source_type": item["source_type"],
+                            "source_id": item["source_id"],
+                            "source_version": item["source_version"],
+                        },
+                        "locator": {
+                            "page": item["page"],
+                            "section": item["section"],
+                            "anchor": None,
+                        },
+                        "excerpt": item["raw_text"],
+                        "source_ref": item["source_ref"],
+                        "source_reference": item["url"],
+                    },
+                    producer_domain="MAJOR_CASE",
+                    producer_object_id=case_id,
+                )
+            evidence.append(item)
         return evidence
