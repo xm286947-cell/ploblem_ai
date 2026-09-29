@@ -37,6 +37,35 @@
   </div>
 </section>
 
+<section class="overall-card" id="domain-assembly" data-domain-assembly>
+  <div class="overall-card-head">
+    <div>
+      <h2>正式 Domain 装配</h2>
+      <p>Overall 只登记公开入口和契约；业务数据、状态机、Repository 继续由各 Domain 持有。</p>
+    </div>
+    <span class="overall-state state-{{ 'ready' if domain_assembly.all_ready else 'unavailable' }}">
+      {{ domain_assembly.ready }}/{{ domain_assembly.total }} READY
+    </span>
+  </div>
+  <div class="overall-task-list">
+    {% for item in domain_assembly['items'] %}
+    <div class="overall-task" data-domain-id="{{ item.domain_id }}">
+      <div>
+        <strong>{{ item.title }}</strong>
+        <small>{{ item.owner }} · {{ item.binding_kind }}</small>
+        <small>{{ item.public_contracts|join(' · ') }}</small>
+      </div>
+      <span class="overall-state state-{{ 'ready' if item.bound else 'unavailable' }}">{{ item.state }}</span>
+      <div class="overall-actions">
+        {% if item.bound %}<a href="{{ item.entry_path }}">进入</a>{% endif %}
+      </div>
+      <small>DATA={{ item.data_ownership }} · DIRECT_REPOSITORY={{ 'YES' if item.overall_direct_repository_access else 'NO' }} · FAIL_CLOSED={{ 'YES' if item.fail_closed else 'NO' }}</small>
+    </div>
+    {% endfor %}
+  </div>
+  <p><code>{{ domain_assembly.contract_version }}</code> · {{ domain_assembly.composition_policy }}</p>
+</section>
+
 <section class="overall-card" id="task-overview">
   <div class="overall-card-head">
     <div><h2>任务总览</h2><p>任务只能由公共 Provider 注入；Overall 不直接读任何 Domain Repository / Table。</p></div>
