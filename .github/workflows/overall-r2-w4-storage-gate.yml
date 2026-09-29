@@ -1,0 +1,43 @@
+name: Overall R2 W4 Storage Gate
+
+on:
+  pull_request:
+    branches: [integration/overall-r2]
+    paths:
+      - "products/storage_rc1/storage_life/**"
+      - "tests/test_r2_w4_storage_direct_reuse.py"
+      - "tests/test_r2_w1_canonical_problem_contract.py"
+      - "tests/test_r2_w2_major_governed_production.py"
+      - "docs/product/R2_W4_STORAGE_DIRECT_REUSE_CONTRACT_V1.md"
+      - ".github/workflows/overall-r2-w4-storage-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: W4 Storage focused + frozen W1/W2 regression
+        run: >-
+          python -m pytest -q --noconftest
+          tests/test_r2_w4_storage_direct_reuse.py
+          tests/test_r2_w1_canonical_problem_contract.py
+          tests/test_r2_w2_major_governed_production.py
+
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Storage W4 projection smoke
+        shell: cmd
+        run: python -m pytest -q --noconftest tests\test_r2_w4_storage_direct_reuse.py
