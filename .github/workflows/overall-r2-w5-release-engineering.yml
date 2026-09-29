@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/overall-r2
+      - release/overall-r2-cpc2
     paths:
       - "scripts/build_overall_r2_windows_candidate.py"
       - "scripts/overall_r2_windows_start.py"
