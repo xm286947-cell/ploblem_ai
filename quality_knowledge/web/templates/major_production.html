@@ -5,11 +5,12 @@
 {% block body %}
 <main class="case-page major-production" data-major-production data-api-prefix="{{api_prefix}}">
   <header class="case-head"><div><span class="case-kicker">MAJOR KNOWLEDGE PRODUCTION</span><h1>从 Major Source 到正式 Historical Case</h1><p>AI 只生成待审核候选；人工确认修订后才可发布。</p></div><a class="case-button secondary" href="/p0/cases">查看案例库</a></header>
-  <section class="case-card"><div class="case-card-head"><div><h2>1A. Excel 批量导入</h2><p>复用既有 ExcelParser + field_mapping：Upload → Preview / Mapping → Confirm → Import。</p></div><a class="case-button secondary" href="{{api_prefix}}/major-production/excel/template">下载正式 Excel 模板</a></div>
+  <section class="case-card"><div class="case-card-head"><div><h2>1A. Excel 批量导入</h2><p>复用既有 ExcelParser + field_mapping：Official Template / Version → Preview / Mapping Version → Confirm → Atomic Import → Source Fact。</p></div><a class="case-button secondary" href="{{api_prefix}}/major-production/excel/template">下载正式 Excel 模板</a></div>
     <form data-major-excel class="major-form">
       <label class="major-file">重大问题维护表<input name="file" type="file" accept=".xlsx,.xlsm" required></label>
       <label>Group Code<input name="group_code" value="MAJOR" required></label>
       <label>领域<input name="domain" value="QUALITY"></label>
+      <label>操作人<input name="actor" value="web-user" required></label>
       <label class="major-file">复盘材料（可选，多选）<input name="materials" type="file" accept=".pdf,.docx,.doc" multiple></label>
       <button class="case-button primary" type="submit">预检并查看 Mapping</button>
     </form>
@@ -22,4 +23,4 @@
   <p data-major-message class="major-message" role="status"></p>
 </main>
 {% endblock %}
-{% block page_scripts %}<script>window.P0_MAJOR_API={{api_prefix|tojson}};</script><script src="/p0/static/major_production.js?v=major-excel-restore-v1" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.P0_MAJOR_API={{api_prefix|tojson}};</script><script src="/p0/static/major_production.js?v=r2-w2-major-governance-v1" defer></script>{% endblock %}
