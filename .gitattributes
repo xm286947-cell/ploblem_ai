@@ -1,2 +1,5 @@
 # Release-bound seed artifacts must have byte-identical checkouts on every OS.
 quality_knowledge/config/plc_fields.yaml text eol=lf
+
+# macOS launchers must remain parseable after Windows packaging/checkouts.
+start_quality_capability_p1.command text eol=lf

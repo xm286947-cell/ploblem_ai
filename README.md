@@ -150,6 +150,37 @@ pip install -r requirements.txt
 python main.py --help
 ```
 
+### STEP1 老质量场景 / 画像启动入口
+
+`start_quality_capability_p1` 是老平台质量能力的唯一业务启动入口。Windows
+和 macOS 只提供两个平台外壳，继续复用同一份 `main.py`、Web、SQLite 数据库
+和运行时，不引入第二套实现。
+
+Windows 双击：
+
+```text
+start_quality_capability_p1.bat
+```
+
+macOS 双击 Finder 中的：
+
+```text
+start_quality_capability_p1.command
+```
+
+两个入口都按以下顺序选择 Python：项目 `.venv`，再回退系统 Python 3.11；默认
+使用 `knowledge/quality_issue_v1.db`。现场已有成熟库时，在启动前设置
+`LEGACY_QUALITY_ISSUE_DB_PATH` 即可覆盖数据库路径：
+
+```bash
+LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/quality_issue_v1.db ./start_quality_capability_p1.command
+```
+
+启动后应在同一个老平台 Web 中验证 `/quality-scenarios`、
+`/quality-scenario-assets`、`/quality-scenario-assets/portrait`，以及既有的
+`/issues`、`/analysis`、`/import`。详细的 Windows/macOS 验证矩阵见
+[`docs/STEP1_LEGACY_PLATFORM_STARTUP.md`](docs/STEP1_LEGACY_PLATFORM_STARTUP.md)。
+
 ## 6. 推荐输入目录
 
 ```text
