@@ -27,6 +27,7 @@ INCLUDE_GLOBS = [
     "repositories/hardware_tree*.py",
     "schema/hardware_case*.json",
     "schema/hardware_tree*.json",
+    "schema/hardware_public*.json",
     "quality_knowledge/web/templates/hardware_case*.html",
     "quality_knowledge/web/static/hardware_case*.css",
     "quality_knowledge/web/static/hardware_case*.js",
@@ -41,6 +42,8 @@ INCLUDE_FILES = [
     "quality_knowledge/web/p0_app.py",
     "quality_knowledge/web/p0_pages.py",
     "quality_knowledge/web/hardware_case_api.py",
+    "quality_knowledge/web/hardware_public_api.py",
+    "quality_knowledge/web/hardware_operability_api.py",
     "quality_knowledge/web/hardware_tree_import_api.py",
     "quality_knowledge/web/templates/p0_base.html",
     "quality_knowledge/web/templates/_hardware_case_nav.html",
@@ -51,6 +54,7 @@ INCLUDE_FILES = [
     "quality_knowledge/web/static/hardware_tree_import.js",
     "repositories/__init__.py",
     "services/__init__.py",
+    "services/hardware_operability.py",
     "config/runtime/model.local.hardware_case.example.yaml",
     "config/runtime/agents/hardware_case.structure.yaml",
     "config/hardware_case_real_validation.local.example.json",
@@ -60,12 +64,14 @@ INCLUDE_FILES = [
     "scripts/hardware_case_product_test_smoke.py",
     "scripts/hardware_case_precheck.py",
     "scripts/hardware_case_web_start.py",
+    "scripts/hardware_case_fresh_extract_gate.py",
     "INIT_LOCAL_CONFIG.bat",
     "CHECK_ENV.bat",
     "START_HARDWARE_CASE.bat",
     "RUN_REAL_AI_VALIDATION.bat",
     "INIT_LOCAL_CONFIG.sh",
     "START_HARDWARE_CASE.sh",
+    "START_HARDWARE_CASE.command",
     "RUN_REAL_AI_VALIDATION.sh",
     "run_hardware_case_product_test.bat",
     "run_hardware_case_product_test.sh",
@@ -348,6 +354,18 @@ def main() -> int:
     for relative in INCLUDE_FILES:
         copy_relative(relative)
 
+    # Release wrappers must remain directly executable after ZIP extraction.
+    for relative in (
+        "INIT_LOCAL_CONFIG.sh",
+        "START_HARDWARE_CASE.sh",
+        "START_HARDWARE_CASE.command",
+        "RUN_REAL_AI_VALIDATION.sh",
+        "run_hardware_case_product_test.sh",
+        "run_hardware_case_mvp_smoke.sh",
+    ):
+        path = STAGE / relative
+        path.chmod(path.stat().st_mode | 0o111)
+
     closure = copy_dependency_closure()
 
     # Empty company-local working folders are intentionally created in the
@@ -377,7 +395,11 @@ def main() -> int:
 
     files = inventory()
     security_assertions(files)
-    source_commit = os.getenv("GITHUB_SHA", "LOCAL")
+    source_commit = (
+        os.getenv("HARDWARE_RELEASE_SOURCE_COMMIT")
+        or os.getenv("GITHUB_SHA")
+        or "LOCAL"
+    )
     short = source_commit[:12] if source_commit != "LOCAL" else "LOCAL"
     archive_name = f"{PACKAGE_NAME}_{PACKAGE_ARCHIVE_VARIANT}_{short}.zip"
 
@@ -386,14 +408,23 @@ def main() -> int:
         "candidate_archive": archive_name,
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
+        "product_version": "MVP_V0.1",
+        "schema_version": "PRE_W3_2_LEGACY_SCHEMA",
         "package_revision": "FULL_V0.1_P01_P07",
         "package_status": "READY_FOR_INTERNAL_TEST",
         "release_status": "TEST_PACKAGE_NOT_RELEASE",
         "source_commit": source_commit,
         "contract_version": "hardware-case/v1",
         "tree_import_contract_version": "hardware-tree-import/v1",
+        "public_contract_version": "hardware-public-consumer/v1",
         "web_entry": "/p0/hardware-cases",
         "api_prefix": "/api/v2/hardware-cases",
+        "public_api_prefix": "/api/public/hardware/v1",
+        "system_endpoints": {
+            "health": "/health",
+            "readiness": "/ready",
+            "contract_descriptor": "/api/public/hardware/v1/contract",
+        },
         "entrypoints": {
             "init_local_config_windows": "INIT_LOCAL_CONFIG.bat",
             "precheck_windows": "CHECK_ENV.bat",
@@ -401,7 +432,20 @@ def main() -> int:
             "web_launcher": "scripts/hardware_case_web_start.py",
             "real_ai_validation_windows": "RUN_REAL_AI_VALIDATION.bat",
             "start_product_shell": "START_HARDWARE_CASE.sh",
+            "start_product_macos": "START_HARDWARE_CASE.command",
             "real_ai_validation_shell": "RUN_REAL_AI_VALIDATION.sh",
+        },
+        "release_semantics": {
+            "source_binding": "EXACT_SOURCE_COMMIT",
+            "contract_version_independent_from_product_version": True,
+            "cross_platform": "SAME_SOURCE_CONTRACT_SCHEMA_STARTUP_HEALTH_READINESS",
+            "fresh_extract_gate_required": True,
+        },
+        "config_lifecycle": {
+            "precedence": ["ENV_SECRET_REFERENCE", "LOCAL_CONFIG", "PACKAGED_NON_SECRET_DEFAULT"],
+            "secret_in_package": False,
+            "missing_required_config": "FAIL_CLOSED",
+            "windows_macos_semantics": "SAME",
         },
         "runtime": {
             "agent_id": "hardware_case.structure",
