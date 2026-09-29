@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import sqlite3
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def _legacy_db(path: Path) -> None:
 
 
 def _case_title(path: Path) -> str:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         row = connection.execute(
             "SELECT title FROM hardware_case WHERE case_id='HC-LEGACY-1'"
         ).fetchone()
@@ -66,7 +67,7 @@ def test_migration_is_idempotent_and_not_reapplied(tmp_path):
     second = manager.ensure_ready()
 
     assert first["status"] == second["status"] == "READY"
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         count = connection.execute(
             "SELECT COUNT(*) FROM hardware_schema_migration"
         ).fetchone()[0]
@@ -79,7 +80,7 @@ def test_unknown_schema_version_fails_closed(tmp_path):
     manager = HardwareDataReliabilityManager(db)
     manager.ensure_ready()
 
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         connection.execute(
             "UPDATE hardware_schema_version SET schema_version=999 WHERE singleton=1"
         )
@@ -97,7 +98,7 @@ def test_schema_drift_is_detected_even_when_sqlite_opens(tmp_path):
     manager = HardwareDataReliabilityManager(db)
     manager.ensure_ready()
 
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         connection.execute("CREATE TABLE unauthorized_drift(id TEXT)")
 
     status = manager.inspect_status()
@@ -137,7 +138,7 @@ def test_backup_failure_blocks_migration_without_touching_data(tmp_path, monkeyp
 
     assert exc.value.code == "BACKUP_FAILED"
     assert _case_title(db) == "Legacy case"
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hardware_schema_version'"
         ).fetchone()
