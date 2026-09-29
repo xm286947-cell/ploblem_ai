@@ -94,7 +94,16 @@ def _safe_issue_return_context(raw: str | None) -> str:
     parsed = urlsplit(value)
     if parsed.scheme or parsed.netloc or parsed.fragment:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
-    if parsed.path not in {'/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis', '/software-assessment'}:
+    if parsed.path not in {
+        '/itr/resolution-workbench',
+        '/itr/recovery-workbench',
+        '/missed-test-analysis',
+        '/software-assessment',
+        '/p0/itr-resolution',
+        '/p0/itr-recovery',
+        '/p0/missed-test-analysis',
+        '/p0/software-assessment',
+    }:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
     return parsed.path + (('?' + parsed.query) if parsed.query else '')
 
@@ -668,12 +677,19 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             '/itr/recovery-workbench': '返回 ITR / 现场恢复',
             '/missed-test-analysis': '返回漏测分析',
             '/software-assessment': '返回软件考核工作台',
+            '/p0/itr-resolution': '返回彻底解决工作台',
+            '/p0/itr-recovery': '返回 ITR / 现场恢复',
+            '/p0/missed-test-analysis': '返回漏测分析',
+            '/p0/software-assessment': '返回软件考核工作台',
         }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
+        p0_return = bool(
+            return_to and urlsplit(return_to).path.startswith('/p0/')
+        )
         vm['current_problem_associations'] = build_current_problem_associations(
             svc,
             material_repo,
             knowledge_id,
-            p0=False,
+            p0=p0_return,
         )
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
