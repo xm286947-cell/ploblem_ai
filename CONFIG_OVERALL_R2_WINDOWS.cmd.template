@@ -28,4 +28,12 @@ rem This is a host-side role binding; do not use ?role=maintainer as an access m
 rem set "HARDWARE_CASE_HOST_ROLE=MAINTAINER"
 
 rem Configure provider credentials through the environment names referenced by
-rem config/runtime/model.yaml. Never put real secrets into this package.
+rem the ACTIVE Agent Config revision. Never commit real secrets into this package.
+rem START_OVERALL_R2_WINDOWS.bat runs a preflight against the environment inherited
+rem by the actual Python process and prints only Ref names + PRESENT/ABSENT.
+rem If you set a Windows user/system environment variable after opening cmd/PowerShell,
+rem close and reopen the terminal (or restart Overall R2) before START so the process
+rem can inherit it. Custom revisions may reference custom names such as "acca1".
+rem Example for the canonical qwen_prod profile:
+rem set "DASHSCOPE_BASE_URL=https://your-approved-provider/v1"
+rem set "DASHSCOPE_API_KEY=REPLACE_LOCALLY_ONLY"
