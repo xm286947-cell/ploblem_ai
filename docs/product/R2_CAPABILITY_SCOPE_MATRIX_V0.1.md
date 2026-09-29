@@ -163,3 +163,27 @@ W3_PRODUCER_CONTRACT_REGRESSION=PASS
 W3_CODE_BLOCKER=0  
 W3_STATUS=DEVELOPMENT_COMPLETE  
 NEXT=W4_FORMAL_DOMAIN_ASSEMBLY
+
+
+## W4 final development gate
+
+W4_DEVELOPMENT_GATE=PASS  
+R2_SOURCE=064a40c78590ec739aac6390ef1850c9fdc2dd1c  
+W4_ASSEMBLY_REGRESSION=14_PASSED  
+W3_EVIDENCE_REGRESSION_ON_W4_SOURCE=6_PASSED  
+W2_GATE_ON_W4_SOURCE=PASS  
+W1_FOCUSED_REGRESSION_ON_W4_SOURCE=PASS  
+WINDOWS_CLEAN_START_ON_W4_SOURCE=PASS  
+W4_CODE_BLOCKER=0  
+
+Delivered:
+- `overall-domain-assembly/v1`.
+- Major / Hardware / Quality Scenario / Storage formal assembly registry.
+- Runtime `GET /api/v2/overall/assembly`.
+- Domain Owner / canonical entry / binding state / public contracts / Evidence / Return metadata.
+- `DOMAIN_OWNED` data ownership and `DIRECT_REPOSITORY=NO` frozen for all four domains.
+- Storage remains the existing ASGI-mounted product host; no second app or DB.
+- UNBOUND domains fail closed rather than being guessed or silently substituted.
+
+W4_STATUS=DEVELOPMENT_COMPLETE  
+NEXT=W5_RELEASE_ENGINEERING_COMPLETE_PRODUCT_CANDIDATE
