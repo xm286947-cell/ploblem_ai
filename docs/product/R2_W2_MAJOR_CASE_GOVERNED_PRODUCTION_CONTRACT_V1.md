@@ -55,6 +55,17 @@ PARTIAL_VALID_CASE=NO for new W2 governed confirms.
 The historical PARTIAL status remains readable only for backward
 compatibility.
 
+## Source Fact convergence
+
+Both supported intake modes persist into the same existing
+`kb_source_fact_revision` model before downstream analysis:
+
+- Excel Batch → `source_type=EXCEL`
+- Single Major Source → `source_type=DOCUMENT`
+
+This is convergence on the existing Source Fact store, not a second master.
+Excel keeps its frozen idempotence/hash semantics.
+
 ## Existing production continuation
 
 Excel Source Fact
