@@ -77,6 +77,34 @@ jobs:
                   "PRODUCT_MODEL": ["PLC-STEP1"],
               },
           )
+          # Mature asset/portrait pages consume scenario + linked problem
+          # evidence. Seed both sides instead of weakening product semantics.
+          import json
+          with repo.connect() as connection:
+              connection.execute(
+                  "INSERT OR IGNORE INTO quality_scenario_evidence(scenario_id,knowledge_id,evidence_summary) VALUES(?,?,?)",
+                  ("STEP1-SCN-001","STEP1-ISSUE-001",json.dumps({"source":"STEP1_BROWSER_GATE"},ensure_ascii=False)),
+              )
+              connection.execute(
+                  "INSERT OR REPLACE INTO scenario_generation_source(generation_id,records_json) VALUES(?,?)",
+                  (
+                      "STEP1-GEN-001",
+                      json.dumps([{
+                          "knowledge_id":"STEP1-ISSUE-001",
+                          "business_issue_id":"ITR20260001",
+                          "description":"STEP1 客户在线监控状态不一致",
+                          "itr_cs_context":{
+                              "customer_industry":"锂电",
+                              "customer_name":"STEP1客户",
+                              "product_model":"PLC-STEP1"
+                          },
+                          "year":"2026",
+                          "month":"9",
+                          "source_workbench":"cs",
+                          "source_status":"LINKED"
+                      }],ensure_ascii=False),
+                  ),
+              )
           print("STEP1_SEED=PASS")
           '@ | python -
 
