@@ -1,13 +1,13 @@
-from products.storage_rc1.storage_life.device_lifetime_assessment import (
+from storage_life.device_lifetime_assessment import (
     DeviceLifetimeAssessmentComposer,
     DeviceLifetimeOverallStatus,
 )
-from products.storage_rc1.storage_life.lifetime_engine import (
+from storage_life.lifetime_engine import (
     LifetimeAssessmentResult,
     LifetimeAssessmentStatus,
     ResultKind,
 )
-from products.storage_rc1.storage_life.software_impact import (
+from storage_life.software_impact import (
     SoftwareImpactAnalysisResult,
     SoftwareImpactAnalysisStatus,
 )
