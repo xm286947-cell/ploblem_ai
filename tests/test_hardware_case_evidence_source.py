@@ -71,6 +71,7 @@ def _stack(tmp_path: Path, *, status: str = "PUBLISHED"):
         create_hardware_case_router(
             backend,
             source_store=source_store,
+            host_role="MAINTAINER",
         )
     )
     return TestClient(app), backend, source_store
