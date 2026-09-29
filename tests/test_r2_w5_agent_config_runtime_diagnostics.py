@@ -231,7 +231,7 @@ def test_w5_formal_agent_smoke_is_binding_based_and_no_legacy_fallback(
         "storage.emmc.parameter_extract"
     )
 
-    assert result["status"] == "PASS"
+    assert result["status"] == "PASS", result
     assert result["execution_owner"] == "UNIFIED_RUNTIME"
     assert result["silent_legacy_fallback"] is False
     assert result["secret_ref"] == "DASHSCOPE_API_KEY"
