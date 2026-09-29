@@ -224,7 +224,7 @@ jobs:
             $results = @()
             foreach ($route in $routes) {
               $response = Invoke-WebRequest -Uri ("http://127.0.0.1:8080" + $route) -UseBasicParsing -TimeoutSec 15
-              if ($response.StatusCode -ne 200) { throw "ROUTE_FAILED:$route:$($response.StatusCode)" }
+              if ($response.StatusCode -ne 200) { throw ("ROUTE_FAILED:{0}:{1}" -f $route, $response.StatusCode) }
               $results += "$route=PASS"
             }
             $assembly = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v2/overall/assembly" -TimeoutSec 15
