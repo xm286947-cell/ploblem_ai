@@ -109,12 +109,15 @@
       root.querySelector('[data-issue-rows]').innerHTML = items.length ? items.map(item => {
         const issue = obj(item), id = String(issue.knowledge_id || ''), qs = queryString(id);
         const selected = state.selectedId === id;
-        return '<tr data-issue-id="' + esc(id) + '"' + (selected ? ' data-selected="true" aria-current="true"' : '') + '><td class="p0-check-column"><input type="checkbox" data-select-issue value="' + esc(id) + '" aria-label="选择问题 ' + esc(issue.business_issue_id || id) + '"></td><td><a class="p0-issue-id" href="/p0/issues/' + encodeURIComponent(id) + '?' + esc(qs) + '">' + esc(issue.business_issue_id || id) + '</a><span class="p0-summary">' + esc(issue.title || issue.description || issue.business_issue_id || '暂无摘要') + '</span></td><td><b>' + esc(issue.business_type || '-') + '</b><small class="p0-muted">' + esc(issue.product_name || issue.product || issue.product_code || '-') + '</small></td><td>' + esc(issue.month || '-') + '</td><td><span class="p0-badge">' + esc(issue.severity || '-') + '</span></td><td><span class="p0-badge">' + esc(issue.analysis_status || 'NOT_ANALYZED') + '</span></td><td>' + esc(issue.updated_at || '-') + '</td></tr>';
+        const returnTo = '/p0/issues?' + qs;
+        const detailParams = new URLSearchParams({return_to:returnTo});
+        return '<tr data-issue-id="' + esc(id) + '" data-overall-selected-object="' + esc(id) + '"' + (selected ? ' data-selected="true" aria-current="true"' : '') + '><td class="p0-check-column"><input type="checkbox" data-select-issue value="' + esc(id) + '" aria-label="选择问题 ' + esc(issue.business_issue_id || id) + '"></td><td><a class="p0-issue-id" data-overall-preserve-context="return" href="/p0/issues/' + encodeURIComponent(id) + '?' + esc(detailParams.toString()) + '">' + esc(issue.business_issue_id || id) + '</a><span class="p0-summary">' + esc(issue.title || issue.description || issue.business_issue_id || '暂无摘要') + '</span></td><td><b>' + esc(issue.business_type || '-') + '</b><small class="p0-muted">' + esc(issue.product_name || issue.product || issue.product_code || '-') + '</small></td><td>' + esc(issue.month || '-') + '</td><td><span class="p0-badge">' + esc(issue.severity || '-') + '</span></td><td><span class="p0-badge">' + esc(issue.analysis_status || 'NOT_ANALYZED') + '</span></td><td>' + esc(issue.updated_at || '-') + '</td></tr>';
       }).join('') : '<tr><td colspan="7" class="p0-loading">暂无符合条件的问题。</td></tr>';
       const nav = root.querySelector('[data-pagination]'); nav.hidden = !total;
       nav.querySelector('[data-page-label]').textContent = state.page + ' / ' + pages;
       nav.querySelector('[data-prev]').disabled = state.page <= 1; nav.querySelector('[data-next]').disabled = state.page >= pages;
       root.querySelector('[data-status]').textContent = '已更新'; updateSelection();
+      if (window.OverallNavigation) window.OverallNavigation.restoreNow({ready:true});
     } catch (error) {
       if (sequence !== loadSequence) return;
       setState('error', true); root.querySelector('[data-error-message]').textContent = '读取失败：' + error.message; root.querySelector('[data-status]').textContent = '';

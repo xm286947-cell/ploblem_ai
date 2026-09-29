@@ -316,7 +316,8 @@
           '</small></td><td>' + esc(item.lifecycle) + '</td><td>' + esc(item.business_activity) +
           '</td><td>' + esc(item.quality_focus) + '</td><td>' + esc(item.product_context || '—') +
           '</td><td>' + esc(item.customer_context || '—') + '</td><td><a class="p04-link" href="' +
-          esc(href) + '" data-p03="' + esc(item.scenario_id) + '">查看 Scenario Detail</a></td></tr>';
+          esc(href) + '" data-p03="' + esc(item.scenario_id) + '" data-overall-selected-object="' +
+          esc(item.scenario_id) + '">查看 Scenario Detail</a></td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -339,6 +340,7 @@
     renderDistributions(data.distributions);
     renderList(data.scenario_list);
     persistSession();
+    if (window.OverallNavigation) window.OverallNavigation.restoreNow({ready:true});
   }
 
   function readControls() {

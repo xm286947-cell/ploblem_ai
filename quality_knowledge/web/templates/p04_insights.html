@@ -10,16 +10,16 @@
     <div class="p04-context" data-context>正在读取 P04 数据…</div>
   </header>
   <nav class="p04-tabs" aria-label="洞察视角">
-    <button type="button" data-view="PRODUCT" class="active">产品</button>
-    <button type="button" data-view="CUSTOMER">客户</button>
-    <button type="button" data-view="INDUSTRY">行业</button>
+    <button type="button" data-view="PRODUCT" data-overall-tab="PRODUCT" class="active">产品</button>
+    <button type="button" data-view="CUSTOMER" data-overall-tab="CUSTOMER">客户</button>
+    <button type="button" data-view="INDUSTRY" data-overall-tab="INDUSTRY">行业</button>
   </nav>
   <section class="p04-card p04-controls">
     <div class="p04-control-row">
-      <label>对象<select data-selector aria-label="对象选择"><option value="">全部对象</option></select></label>
-      <label>生命周期<select data-filter="lifecycle"><option value="">全部生命周期</option></select></label>
-      <label>业务活动<select data-filter="business_activity"><option value="">全部业务活动</option></select></label>
-      <label>质量关注<select data-filter="quality_focus"><option value="">全部质量关注</option></select></label>
+      <label>对象<select data-selector data-overall-state-field="p04.selector" aria-label="对象选择"><option value="">全部对象</option></select></label>
+      <label>生命周期<select data-filter="lifecycle" data-overall-state-field="p04.lifecycle"><option value="">全部生命周期</option></select></label>
+      <label>业务活动<select data-filter="business_activity" data-overall-state-field="p04.business_activity"><option value="">全部业务活动</option></select></label>
+      <label>质量关注<select data-filter="quality_focus" data-overall-state-field="p04.quality_focus"><option value="">全部质量关注</option></select></label>
       <button type="button" class="p04-primary" data-apply>应用筛选</button>
       <button type="button" class="p04-ghost" data-reset>重置</button>
     </div>
@@ -31,7 +31,7 @@
   <section class="p04-state p04-state-empty" data-state="EMPTY" hidden><strong>当前条件暂无已发布场景</strong><span data-state-message>请调整筛选条件后重试。</span></section>
   <section class="p04-cards" data-stat-cards></section>
   <section class="p04-grid">
-    <article class="p04-card"><header><div><span class="p04-kicker">MATRIX</span><h2>聚合矩阵</h2></div><select data-matrix-mode aria-label="矩阵模式"></select></header><div class="p04-table-wrap" data-matrix></div></article>
+    <article class="p04-card"><header><div><span class="p04-kicker">MATRIX</span><h2>聚合矩阵</h2></div><select data-matrix-mode data-overall-state-field="p04.matrix_mode" aria-label="矩阵模式"></select></header><div class="p04-table-wrap" data-matrix></div></article>
     <article class="p04-card"><header><div><span class="p04-kicker">DISTRIBUTION</span><h2>结构化分布</h2></div></header><div class="p04-distributions" data-distributions></div></article>
   </section>
   <section class="p04-card p04-scenarios" data-scenario-library><header><div><span class="p04-kicker">PUBLISHED QUALITYSCENARIO</span><h2>Scenario Library</h2></div><span data-total>0 个场景</span></header><div class="p04-table-wrap" data-scenario-list></div></section>
