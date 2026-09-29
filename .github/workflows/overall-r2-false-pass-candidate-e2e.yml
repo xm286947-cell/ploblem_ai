@@ -149,17 +149,17 @@ jobs:
           $revisions = Join-Path $control "revisions"
           New-Item -ItemType Directory -Force -Path $revisions | Out-Null
           $revision = Join-Path $revisions "candidate-e2e.yaml"
-          @"
-active_model: qwen_prod
-models:
-  qwen_prod:
-    provider: openai_compatible
-    base_url_env: R2_E2E_PROVIDER_URL
-    api_key_env: acca1
-    model: candidate-e2e-model
-    temperature: 0
-    max_tokens: 8192
-"@ | Set-Content -Encoding utf8 $revision
+          @(
+            "active_model: qwen_prod",
+            "models:",
+            "  qwen_prod:",
+            "    provider: openai_compatible",
+            "    base_url_env: R2_E2E_PROVIDER_URL",
+            "    api_key_env: acca1",
+            "    model: candidate-e2e-model",
+            "    temperature: 0",
+            "    max_tokens: 8192"
+          ) | Set-Content -Encoding utf8 $revision
           @{
             revision_id = "CANDIDATE-E2E"
             path = $revision
@@ -170,12 +170,12 @@ models:
           } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $control "active.json")
 
           $config = Join-Path $package "CONFIG_OVERALL_R2_WINDOWS.cmd"
-          @"
-@echo off
-set "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy"
-set "OVERALL_R2_DATA_DIR=$data"
-set "HARDWARE_CASE_HOST_ROLE=MAINTAINER"
-"@ | Set-Content -Encoding ascii $config
+          @(
+            "@echo off",
+            "set \"LEGACY_QUALITY_ISSUE_DB_PATH=$legacy\"",
+            "set \"OVERALL_R2_DATA_DIR=$data\"",
+            "set \"HARDWARE_CASE_HOST_ROLE=MAINTAINER\""
+          ) | Set-Content -Encoding ascii $config
 
           "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "OVERALL_R2_DATA_DIR=$data" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
