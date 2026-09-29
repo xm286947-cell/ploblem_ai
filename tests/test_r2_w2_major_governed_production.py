@@ -286,3 +286,67 @@ def test_excel_source_fact_continues_existing_ai_review_publish_repeat_chain(
         item["case_id"] == historical_case_id
         for item in repeat["candidates"]
     )
+
+
+
+def test_single_and_batch_intake_converge_on_same_source_fact_store(
+    tmp_path: Path,
+):
+    client = _client(tmp_path)
+    repository = client.app.state.major_case_repository
+    source = (
+        ROOT
+        / "tests/golden/hardware_case_scenarios/A9001-LDO 输出振荡.docx"
+    )
+    single = client.post(
+        "/api/v2/major-production/sources",
+        data={
+            "title": "单份 Source Fact 收敛验证",
+            "group_code": "SINGLE",
+            "domain": "PLC",
+            "standard_itr": "ITR-R2-W2-SINGLE-1",
+        },
+        files={
+            "file": (
+                source.name,
+                source.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert single.status_code == 201, single.text
+    single_body = single.json()
+    assert single_body["source_fact"]["source_type"] == "DOCUMENT"
+    assert single_body["source_fact"]["created_by"] == "SOURCE_INTAKE"
+
+    preview = _preview(client, _xlsx()).json()
+    confirmed = client.post(
+        "/api/v2/major-production/excel/confirm",
+        data={"batch_id": preview["batch_id"], "actor": "w2-confirm"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    batch_case_id = confirmed.json()["result"]["case_ids"][0]
+
+    with repository.connect() as connection:
+        single_types = {
+            row["source_type"]
+            for row in connection.execute(
+                """SELECT source_type FROM kb_source_fact_revision
+                   WHERE case_id=?""",
+                (single_body["case"]["case_id"],),
+            ).fetchall()
+        }
+        batch_types = {
+            row["source_type"]
+            for row in connection.execute(
+                """SELECT source_type FROM kb_source_fact_revision
+                   WHERE case_id=?""",
+                (batch_case_id,),
+            ).fetchall()
+        }
+
+    assert single_types == {"DOCUMENT"}
+    assert batch_types == {"EXCEL"}
+    # Both inputs terminate at the same existing versioned Source Fact table;
+    # neither creates a second Case/Problem/Source Fact master.
+    assert repository.list_cases()["total"] == 2

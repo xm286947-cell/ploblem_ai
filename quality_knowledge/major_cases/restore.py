@@ -443,43 +443,15 @@ class MajorCaseRestoreService:
         source_ref: str,
         actor: str = "IMPORT",
     ) -> dict:
-        source_hash = _hash({"raw": raw, "normalized": normalized, "source_ref": source_ref})
-        with self.repository.transaction() as connection:
-            existing = connection.execute(
-                """SELECT * FROM kb_source_fact_revision
-                   WHERE case_id=? AND source_hash=?""",
-                (case_id, source_hash),
-            ).fetchone()
-            if existing:
-                return dict(existing)
-            revision_no = int(
-                connection.execute(
-                    "SELECT COALESCE(MAX(revision_no),0)+1 FROM kb_source_fact_revision WHERE case_id=?",
-                    (case_id,),
-                ).fetchone()[0]
-            )
-            revision_id = _id("KSF")
-            connection.execute(
-                """INSERT INTO kb_source_fact_revision(
-                     source_fact_revision_id,case_id,revision_no,source_type,source_ref,
-                     source_hash,raw_json,normalized_json,created_by)
-                   VALUES(?,?,?,'EXCEL',?,?,?,?,?)""",
-                (
-                    revision_id,
-                    case_id,
-                    revision_no,
-                    source_ref,
-                    source_hash,
-                    _json(raw),
-                    _json(normalized),
-                    actor,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM kb_source_fact_revision WHERE source_fact_revision_id=?",
-                (revision_id,),
-            ).fetchone()
-        return dict(row)
+        """Route Excel into the shared Major Source Fact persistence primitive."""
+        return self.repository.add_source_fact_revision(
+            case_id,
+            source_type="EXCEL",
+            source_ref=source_ref,
+            raw=raw,
+            normalized=normalized,
+            actor=actor,
+        )
 
     def source_fact_history(self, case_id: str) -> list[dict]:
         with self.repository.connect() as connection:
