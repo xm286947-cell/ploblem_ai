@@ -59,7 +59,7 @@ def copy_file(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
-def runtime_vendor_closure_gate(runtime_root: Path) -> None:
+def runtime_vendor_closure_gate(runtime_root: Path, expected_commit: str = RUNTIME_EXPECTED_COMMIT) -> None:
     required = [
         "RUNTIME_COMMIT",
         "requirements-runtime-p0-test.txt",
@@ -72,13 +72,13 @@ def runtime_vendor_closure_gate(runtime_root: Path) -> None:
     if missing:
         raise SystemExit("RUNTIME_VENDOR_CLOSURE_FAILED:MISSING:" + ",".join(missing))
     actual = (runtime_root / "RUNTIME_COMMIT").read_text(encoding="utf-8").strip()
-    if actual != RUNTIME_EXPECTED_COMMIT:
+    if actual != expected_commit:
         raise SystemExit(
             f"RUNTIME_VENDOR_CLOSURE_FAILED:COMMIT:"
-            f"expected={RUNTIME_EXPECTED_COMMIT},actual={actual}"
+            f"expected={expected_commit},actual={actual}"
         )
     print("RUNTIME_VENDOR_CLOSURE=PASS")
-    print(f"RUNTIME_EXPECTED_COMMIT={RUNTIME_EXPECTED_COMMIT}")
+    print(f"RUNTIME_EXPECTED_COMMIT={expected_commit}")
     print(f"RUNTIME_SNAPSHOT_COMMIT={actual}")
 
 
@@ -133,6 +133,7 @@ def write_hash_manifest(package_root: Path) -> None:
 
 def build() -> tuple[Path, Path, Path]:
     commit = source_commit()
+    runtime_commit = os.environ.get("STORAGE_RUNTIME_COMMIT", "").strip() or RUNTIME_EXPECTED_COMMIT
     date = (
         os.environ.get("STORAGE_BUILD_DATE", "").strip()
         or os.environ.get("STORAGE_R6_BUILD_DATE", "").strip()
@@ -184,7 +185,7 @@ def build() -> tuple[Path, Path, Path]:
         [
             "git", "archive", "--format=tar",
             f"--prefix={runtime_source.name}/",
-            RUNTIME_EXPECTED_COMMIT,
+            runtime_commit,
             "runtime",
             "config/runtime/model.yaml",
             "tools/openai_mock/server.py",
@@ -220,9 +221,9 @@ def build() -> tuple[Path, Path, Path]:
     )
     # The marker describes the bundled Runtime snapshot, never the Storage assembly HEAD.
     (runtime_root / "RUNTIME_COMMIT").write_text(
-        RUNTIME_EXPECTED_COMMIT + "\n", encoding="utf-8"
+        runtime_commit + "\n", encoding="utf-8"
     )
-    runtime_vendor_closure_gate(runtime_root)
+    runtime_vendor_closure_gate(runtime_root, runtime_commit)
 
     # Keep the root run-log contract valid on a clean extraction before any
     # platform launcher overwrites it with the concrete session log.
@@ -242,8 +243,8 @@ def build() -> tuple[Path, Path, Path]:
         "assembly": assembly_name,
         "source_commit": commit,
         "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
-        "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
-        "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
+        "runtime_expected_commit": runtime_commit,
+        "runtime_snapshot_commit": runtime_commit,
         "runtime_provenance_source": "RUNTIME_COMMIT",
         "runtime_vendor_closure": "PASS",
         "supersedes": "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925",
