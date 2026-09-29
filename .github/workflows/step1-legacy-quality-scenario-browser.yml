@@ -12,7 +12,10 @@ on:
       - "quality_knowledge/web/scenario_asset_pages.py"
       - "quality_knowledge/web/templates/quality_scenario*.html"
       - "quality_knowledge/web/templates/scenario_*.html"
+      - "tools/verify_legacy_quality_db.py"
       - "start_quality_capability_p1.bat"
+      - "start_quality_capability_p1.command"
+      - ".gitattributes"
       - ".github/workflows/step1-legacy-quality-scenario-browser.yml"
 
 permissions:
