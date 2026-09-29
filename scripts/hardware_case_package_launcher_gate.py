@@ -14,6 +14,7 @@ PACKAGE_DIR = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
 POSIX_ENTRYPOINTS = (
     "INIT_LOCAL_CONFIG.sh",
     "START_HARDWARE_CASE.sh",
+    "START_HARDWARE_CASE.command",
     "RUN_REAL_AI_VALIDATION.sh",
     "run_hardware_case_mvp_smoke.sh",
     "run_hardware_case_product_test.sh",
