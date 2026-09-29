@@ -68,6 +68,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+          python -m pip install playwright
           if (Get-Command py -ErrorAction SilentlyContinue) {
             py -m pip install --disable-pip-version-check -r requirements.txt -r requirements-runtime-p0-test.txt
           }
@@ -109,6 +110,12 @@ jobs:
               Write-Host "LEGACY_ENTRY_SMOKE=$path=PASS"
             }
             Write-Host "LEGACY_START_ENTRY=PASS"
+
+            $browserEvidence = Join-Path $env:RUNNER_TEMP "step1-browser-evidence"
+            python scripts/step1_legacy_browser_evidence.py --base-url "http://127.0.0.1:8099" --db $db --output-dir $browserEvidence
+            if ($LASTEXITCODE -ne 0) { throw "STEP1_BROWSER_EVIDENCE_FAILED" }
+            "BROWSER_EVIDENCE_DIR=$browserEvidence" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "BROWSER_VISIBLE_EVIDENCE=PASS"
           } finally {
             if (-not $proc.HasExited) {
               taskkill /PID $proc.Id /T /F | Out-Null
@@ -184,6 +191,7 @@ jobs:
           path: |
             ${{ env.PACKAGE_ZIP }}
             ${{ env.EVIDENCE_REPORT }}
+            ${{ env.BROWSER_EVIDENCE_DIR }}
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
