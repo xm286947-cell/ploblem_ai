@@ -40,7 +40,7 @@ class _ClosingSQLiteConnection(sqlite3.Connection):
 
 
 class MajorKnowledgeRepository:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, db_path: str | Path, attachment_root: str | Path):
         self.db_path = Path(db_path)
@@ -77,6 +77,69 @@ class MajorKnowledgeRepository:
     def schema_version(self) -> int:
         with self.connect() as connection:
             return int(connection.execute("SELECT MAX(version) FROM kb_schema_version").fetchone()[0] or 0)
+
+    def add_source_fact_revision(
+        self,
+        case_id: str,
+        *,
+        source_type: str,
+        source_ref: str,
+        raw: dict,
+        normalized: dict,
+        actor: str,
+    ) -> dict:
+        if not self.get_case(case_id):
+            raise KeyError(case_id)
+        source_type = str(source_type or "").strip().upper()
+        source_ref = str(source_ref or "").strip()
+        actor = str(actor or "").strip()
+        if not source_type or not source_ref or not actor:
+            raise ValueError("SOURCE_FACT_GOVERNANCE_REQUIRED")
+        hash_payload = {
+            "raw": raw,
+            "normalized": normalized,
+            "source_ref": source_ref,
+        }
+        if source_type != "EXCEL":
+            hash_payload["source_type"] = source_type
+        source_hash = hashlib.sha256(_json(hash_payload).encode("utf-8")).hexdigest()
+        with self.transaction() as connection:
+            existing = connection.execute(
+                """SELECT * FROM kb_source_fact_revision
+                   WHERE case_id=? AND source_hash=?""",
+                (case_id, source_hash),
+            ).fetchone()
+            if existing:
+                return dict(existing)
+            revision_no = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(revision_no),0)+1 FROM kb_source_fact_revision WHERE case_id=?",
+                    (case_id,),
+                ).fetchone()[0]
+            )
+            revision_id = _id("KSF")
+            connection.execute(
+                """INSERT INTO kb_source_fact_revision(
+                     source_fact_revision_id,case_id,revision_no,source_type,
+                     source_ref,source_hash,raw_json,normalized_json,created_by)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    revision_id,
+                    case_id,
+                    revision_no,
+                    source_type,
+                    source_ref,
+                    source_hash,
+                    _json(raw),
+                    _json(normalized),
+                    actor,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM kb_source_fact_revision WHERE source_fact_revision_id=?",
+                (revision_id,),
+            ).fetchone()
+        return dict(row)
 
     def create_case(self, title: str, group_code: str, domain: str = "", case_type: str = "MAJOR_REVIEW", legacy_case_id: str = "") -> dict:
         if not title.strip() or not group_code.strip():
