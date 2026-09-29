@@ -443,6 +443,7 @@ class MajorCaseRestoreService:
         source_ref: str,
         actor: str = "IMPORT",
     ) -> dict:
+        """Route Excel into the shared Major Source Fact persistence primitive."""
         return self.repository.add_source_fact_revision(
             case_id,
             source_type="EXCEL",
