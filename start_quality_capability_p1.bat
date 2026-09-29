@@ -12,11 +12,17 @@ echo Legacy DB: %QUALITY_DB%
 if exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" main.py knowledge-web --db "%QUALITY_DB%" %*
 ) else (
-  where py >nul 2>nul
+  where python >nul 2>nul
   if not errorlevel 1 (
-    py main.py knowledge-web --db "%QUALITY_DB%" %*
-  ) else (
     python main.py knowledge-web --db "%QUALITY_DB%" %*
+  ) else (
+    where py >nul 2>nul
+    if not errorlevel 1 (
+      py -3.11 main.py knowledge-web --db "%QUALITY_DB%" %*
+    ) else (
+      echo Python 3.11 was not found.
+      exit /b 2
+    )
   )
 )
 set EXIT_CODE=%errorlevel%
