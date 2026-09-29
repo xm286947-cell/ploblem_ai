@@ -59,9 +59,45 @@ def _string_value(path: tuple[str, ...], schema: dict[str, Any]) -> str:
     return "mock-e2e"
 
 
-def generate(schema: Any, path: tuple[str, ...] = ()) -> Any:
+def _resolve_ref(ref: str, root: dict[str, Any]) -> Any:
+    if not ref.startswith("#/"):
+        return {}
+    node: Any = root
+    for token in ref[2:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict):
+            return {}
+        node = node.get(token)
+    return node if isinstance(node, dict) else {}
+
+
+def find_schema(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        direct = value.get("schema")
+        if isinstance(direct, dict):
+            return direct
+        for child in value.values():
+            found = find_schema(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = find_schema(child)
+            if found:
+                return found
+    return {}
+
+
+def generate(
+    schema: Any,
+    path: tuple[str, ...] = (),
+    root: dict[str, Any] | None = None,
+) -> Any:
     if not isinstance(schema, dict):
         return {}
+    root = root or schema
+    if "$ref" in schema:
+        return generate(_resolve_ref(str(schema["$ref"]), root), path, root)
     if "const" in schema:
         return schema["const"]
     if schema.get("enum"):
@@ -71,14 +107,14 @@ def generate(schema: Any, path: tuple[str, ...] = ()) -> Any:
         if isinstance(options, list):
             for option in options:
                 if isinstance(option, dict) and _first_type(option) != "null":
-                    return generate(option, path)
+                    return generate(option, path, root)
     stype = _first_type(schema)
     if stype == "object" or schema.get("properties") is not None:
         props = schema.get("properties") or {}
         required = list(schema.get("required") or [])
         keys = list(dict.fromkeys(required + list(props.keys())))
         return {
-            key: generate(props.get(key, {}), path + (str(key),))
+            key: generate(props.get(key, {}), path + (str(key),), root)
             for key in keys
         }
     if stype == "array":
@@ -88,7 +124,7 @@ def generate(schema: Any, path: tuple[str, ...] = ()) -> Any:
         maximum = schema.get("maxItems")
         if isinstance(maximum, int):
             count = min(count, maximum)
-        return [generate(item_schema, path + ("item",)) for _ in range(count)]
+        return [generate(item_schema, path + ("item",), root) for _ in range(count)]
     if stype == "integer":
         key = path[-1] if path else ""
         return 1 if key != "confidence" else 1
@@ -131,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
             business = json.loads(user_content)
         except Exception:
             business = {}
-        schema = business.get("schema") if isinstance(business, dict) else {}
+        schema = find_schema(business)
         payload = generate(schema or {"type": "object"})
         with LOCK:
             STATE["requests"] += 1
