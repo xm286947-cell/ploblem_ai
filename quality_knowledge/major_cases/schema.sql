@@ -301,6 +301,38 @@ CREATE TABLE IF NOT EXISTS kb_major_import_batch(
   committed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS kb_major_import_governance(
+  batch_id TEXT PRIMARY KEY REFERENCES kb_major_import_batch(batch_id),
+  contract_version TEXT NOT NULL,
+  template_contract TEXT NOT NULL,
+  template_version TEXT NOT NULL,
+  template_status TEXT NOT NULL
+    CHECK(template_status IN ('OFFICIAL','LEGACY_COMPATIBLE')),
+  mapping_contract TEXT NOT NULL,
+  mapping_version TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  preview_sha256 TEXT NOT NULL,
+  preview_actor TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS kb_major_import_run(
+  run_id TEXT PRIMARY KEY,
+  batch_id TEXT NOT NULL REFERENCES kb_major_import_batch(batch_id),
+  actor TEXT NOT NULL,
+  status TEXT NOT NULL
+    CHECK(status IN ('RUNNING','COMPLETED','FAILED')),
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  result_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_major_import_run_batch
+ON kb_major_import_run(batch_id,started_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_kb_case_identity_lookup
 ON kb_case_identity(group_code,identity_type,identity_value);
 CREATE INDEX IF NOT EXISTS idx_kb_source_fact_case_revision
