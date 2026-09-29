@@ -53,6 +53,51 @@ def _http_error(error: Exception) -> HTTPException:
     return HTTPException(400, code)
 
 
+def _project_historical_case_common_evidence(
+    detail: dict[str, Any],
+    *,
+    requested_case_id: str,
+) -> dict[str, Any]:
+    """Attach transport-only Common Evidence without changing producer storage."""
+    evidence_items = detail.get("evidence")
+    if not isinstance(evidence_items, list):
+        return detail
+
+    projected: list[dict[str, Any]] = []
+    for evidence in evidence_items:
+        item = dict(evidence) if isinstance(evidence, dict) else {}
+        raw_text = item.get("raw_text")
+        common_raw = {
+            "evidence_id": item.get("evidence_id"),
+            "evidence_type": "SOURCE_EXCERPT" if raw_text else "SOURCE_REFERENCE",
+            "source_type": item.get("source_type"),
+            "source_id": item.get("source_id"),
+            "source_version": item.get("source_version"),
+            "source_ref": item.get("source_ref"),
+            "page": item.get("page"),
+            "section": item.get("section"),
+            "excerpt": raw_text,
+            "source_reference": item.get("url"),
+        }
+        try:
+            item["common_evidence"] = map_common_evidence(
+                common_raw,
+                producer_domain="Historical Case",
+                producer_object_id=str(
+                    detail.get("case_id") or requested_case_id
+                ),
+                producer_object_version=(
+                    detail.get("case_version") or detail.get("version")
+                ),
+            )
+            item["common_evidence_status"] = "AVAILABLE"
+        except CommonEvidenceContractError:
+            item["common_evidence"] = None
+            item["common_evidence_status"] = "UNAVAILABLE"
+        projected.append(item)
+    return {**detail, "evidence": projected}
+
+
 def create_v2_router(
     repository: Any,
     *,
@@ -679,47 +724,10 @@ def create_v2_router(
         except HistoricalCaseContractError as error:
             raise _repeat_http_error(error) from error
 
-        # Overall adds a transport-only Common Evidence projection at the
-        # consumer boundary. Historical Case storage/contract stays unchanged.
-        evidence_items = detail.get("evidence")
-        if isinstance(evidence_items, list):
-            projected: list[dict[str, Any]] = []
-            for evidence in evidence_items:
-                item = dict(evidence) if isinstance(evidence, dict) else {}
-                raw_text = item.get("raw_text")
-                common_raw = {
-                    "evidence_id": item.get("evidence_id"),
-                    "evidence_type": (
-                        "SOURCE_EXCERPT" if raw_text else "SOURCE_REFERENCE"
-                    ),
-                    "source_type": item.get("source_type"),
-                    "source_id": item.get("source_id"),
-                    "source_version": item.get("source_version"),
-                    "source_ref": item.get("source_ref"),
-                    "page": item.get("page"),
-                    "section": item.get("section"),
-                    "excerpt": raw_text,
-                    "source_reference": item.get("url"),
-                }
-                try:
-                    item["common_evidence"] = map_common_evidence(
-                        common_raw,
-                        producer_domain="Historical Case",
-                        producer_object_id=str(detail.get("case_id") or case_id),
-                        producer_object_version=(
-                            detail.get("case_version") or detail.get("version")
-                        ),
-                    )
-                    item["common_evidence_status"] = "AVAILABLE"
-                except CommonEvidenceContractError:
-                    # Older published artifacts can pre-date stable Evidence
-                    # identity. They remain readable, but Overall never invents
-                    # missing identity/version data just to open the viewer.
-                    item["common_evidence"] = None
-                    item["common_evidence_status"] = "UNAVAILABLE"
-                projected.append(item)
-            detail = {**detail, "evidence": projected}
-        return detail
+        return _project_historical_case_common_evidence(
+            detail,
+            requested_case_id=case_id,
+        )
 
     def insight_filters(business_type: str, month: str, issue_domain: str, lifecycle_phase: str) -> dict[str, str]:
         return {key: value for key, value in {
