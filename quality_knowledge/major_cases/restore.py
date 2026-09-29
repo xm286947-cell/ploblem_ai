@@ -20,6 +20,7 @@ import uuid
 from parser.excel_parser import ExcelParser, normalize_header
 from parser.report_matcher import ReportMatcher
 from quality_knowledge.materials import normalize_itr
+from .document_parser import parse_document
 
 from .repository import MajorKnowledgeRepository
 
@@ -431,11 +432,16 @@ class MajorCaseRestoreService:
             result.append(item)
         return result
 
-    def commit(self, batch_id: str, case_service) -> dict:
+    def commit(self, batch_id: str) -> dict:
+        """Commit a staged Excel batch into the existing Major knowledge store.
+
+        This is deliberately an adapter over the existing repository. It does
+        not create another problem/case master or another Excel parser.
+        """
         batch = self.batch(batch_id)
         if not batch:
             raise KeyError(batch_id)
-        if batch["status"] == "COMPLETED":
+        if batch["status"] in {"COMPLETED", "PARTIAL"}:
             return batch["result"]
         preview = batch["preview"]
         stats = {
@@ -490,7 +496,7 @@ class MajorCaseRestoreService:
                     f"{preview['source_file']}#"
                     f"{row.get('sheet_name')}:{row.get('excel_row')}"
                 )
-                self.save_source_fact(
+                source_fact = self.save_source_fact(
                     case_id,
                     raw=row.get("raw_fields") or {},
                     normalized=row.get("normalized_fields") or {},
@@ -498,26 +504,77 @@ class MajorCaseRestoreService:
                 )
                 stats["source_fact_revisions"] += 1
 
-                before_events = len(self.repository.events(case_id))
-                case_service.associate(case_id, row.get("itrs") or [])
-                after_events = len(self.repository.events(case_id))
-                stats["events"] += max(0, after_events - before_events)
+                events = []
+                for itr in row.get("itrs") or []:
+                    event = self.repository.upsert_event(
+                        case_id,
+                        standard_itr=itr,
+                        internal_event_key=itr,
+                        title=itr,
+                    )
+                    events.append(event)
+                if not events:
+                    events.append(
+                        self.repository.upsert_event(
+                            case_id,
+                            internal_event_key=f"{case_id}:UNLINKED",
+                            title=row["title"],
+                        )
+                    )
+                stats["events"] += len(events)
+
+                # The Excel Source Fact is a first-class source. Keep one source
+                # link per event so downstream traceability remains explicit.
+                for event in events:
+                    self.repository.add_source_link(
+                        case_id,
+                        event["event_id"],
+                        {
+                            "record_id": source_fact["source_fact_revision_id"],
+                            "source_type": "MAJOR_EXCEL_SOURCE_FACT",
+                            "source_system": "MAJOR_EXCEL_IMPORT",
+                            "group_code": group_code,
+                            "source_hash": source_fact["source_hash"],
+                            "source_ref": source_ref,
+                        },
+                        standard_itr=event.get("standard_itr") or "",
+                        role="CURRENT_EVENT",
+                        status="LINKED" if event.get("standard_itr") else "NOT_FOUND",
+                    )
 
                 match = row.get("report_match") or {}
                 if match.get("match_type") == "AMBIGUOUS":
                     stats["ambiguous_documents"] += 1
                 elif match.get("matched_report_path"):
-                    ingest = case_service.ingest(
+                    document = self.repository.ingest_file(
                         case_id,
                         match["matched_report_path"],
-                        current_itrs=row.get("itrs") or [],
                         role="PRIMARY",
                     )
-                    if ingest.get("action") in {"NEW", "UPDATED", "SKIPPED"}:
-                        stats["documents"] += 1
+                    if document.get("media_type") != "DOC":
+                        parsed = parse_document(self.repository.attachment_path(document["version_id"]))
+                        self.repository.save_parse_result(document["version_id"], parsed)
+                    primary_event = events[0]
+                    self.repository.add_source_link(
+                        case_id,
+                        primary_event["event_id"],
+                        {
+                            "record_id": document["version_id"],
+                            "source_type": "MAJOR_SOURCE_DOCUMENT",
+                            "source_system": "MAJOR_SOURCE_INTAKE",
+                            "group_code": group_code,
+                            "source_hash": document["content_hash"],
+                            "file_name": document["original_filename"],
+                            "version_id": document["version_id"],
+                            "document_id": document["document_id"],
+                        },
+                        standard_itr=primary_event.get("standard_itr") or "",
+                        role="CURRENT_EVENT",
+                        status="LINKED" if primary_event.get("standard_itr") else "NOT_FOUND",
+                    )
+                    stats["documents"] += 1
 
-                if row.get("completeness", {}).get("retrieval_ready"):
-                    self.repository.update_case_status(case_id, "ACTIVE")
+                self.repository.update_case_status(case_id, "ACTIVE")
             except Exception as exc:
                 stats["failed"] += 1
                 stats["errors"].append(
