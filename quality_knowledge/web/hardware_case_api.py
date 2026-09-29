@@ -11,17 +11,59 @@ This module is deliberately thin:
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from quality_knowledge.web.hardware_auth import trusted_hardware_auth_context
 from repositories.hardware_maintenance_audit_repository import HardwareMaintenanceAuditRepository
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
+
+
+_ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
+
+
+def _configured_host_role(host_role: str | None) -> str:
+    configured = str(host_role or "CONSUMER").strip().upper()
+    if configured not in _ALLOWED_ROLES:
+        raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
+    return configured
+
+
+def _role(value: str | None, *, host_role: str | None = None) -> str:
+    role = str(value or "CONSUMER").strip().upper()
+    if role not in _ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+    configured = _configured_host_role(host_role)
+    if role == "MAINTAINER" and configured != "MAINTAINER":
+        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
+    return role
+
+
+def _require_maintainer(value: str | None, *, host_role: str | None = None) -> str:
+    configured = _configured_host_role(host_role)
+    if configured != "MAINTAINER":
+        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
+    if value is not None and str(value).strip():
+        claim = str(value).strip().upper()
+        if claim not in _ALLOWED_ROLES:
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+    return "MAINTAINER"
+
+
+def _trusted_actor(host_role: str | None) -> str:
+    actor = os.getenv("HARDWARE_CASE_HOST_ACTOR", "").strip()
+    if actor:
+        return actor
+    return (
+        "server:hardware-maintainer"
+        if _configured_host_role(host_role) == "MAINTAINER"
+        else "server:hardware-consumer"
+    )
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -48,14 +90,14 @@ def create_hardware_case_router(
     host_role: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
-    auth = trusted_hardware_auth_context(host_role)
     audit = HardwareMaintenanceAuditRepository(service.repository.db_path)
+    trusted_actor = _trusted_actor(host_role)
 
     def resolve_role(value: str | None) -> str:
-        return auth.resolve_read_role(value)
+        return _role(value, host_role=host_role)
 
     def require_maintainer(value: str | None) -> str:
-        return auth.require_maintainer(value)
+        return _require_maintainer(value, host_role=host_role)
 
     def record_audit(
         action: str,
@@ -64,7 +106,7 @@ def create_hardware_case_router(
         details: dict[str, Any] | None = None,
     ) -> None:
         audit.record(
-            actor=auth.actor,
+            actor=trusted_actor,
             action=action,
             target_type=target_type,
             target_id=target_id,
