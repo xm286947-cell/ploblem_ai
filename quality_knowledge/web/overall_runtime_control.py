@@ -310,6 +310,15 @@ class OverallRuntimeControlPlane:
                 )
             except (OSError, json.JSONDecodeError):
                 continue
+        audit: list[dict[str, Any]] = []
+        if self.audit_path.is_file():
+            for line in self.audit_path.read_text(
+                encoding="utf-8"
+            ).splitlines():
+                try:
+                    audit.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
         pointer = self._active_pointer()
         return {
             "active_revision": pointer.get(
@@ -317,6 +326,7 @@ class OverallRuntimeControlPlane:
                 "CANONICAL",
             ),
             "items": items,
+            "audit": audit[-100:],
         }
 
     def create_revision(
@@ -475,8 +485,20 @@ class OverallRuntimeControlPlane:
             model.get("api_key_present")
             or not model.get("api_key_env")
         )
+        endpoint_ref = model.get("base_url_env")
+        endpoint_ready = bool(
+            model.get("base_url")
+            or (
+                endpoint_ref
+                and os.environ.get(str(endpoint_ref), "").strip()
+            )
+        )
         return {
-            "status": "PASS" if secret_ready else "BLOCKED",
+            "status": (
+                "PASS"
+                if secret_ready and endpoint_ready
+                else "BLOCKED"
+            ),
             "agent_id": agent_id,
             "model_ref": active_model,
             "provider": model.get("provider"),
@@ -485,6 +507,8 @@ class OverallRuntimeControlPlane:
             "secret_present": bool(
                 model.get("api_key_present")
             ),
+            "endpoint_ref": endpoint_ref,
+            "endpoint_present": endpoint_ready,
             "formal_binding": item,
             "execution_owner": "UNIFIED_RUNTIME",
             "silent_legacy_fallback": False,
