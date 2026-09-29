@@ -81,6 +81,11 @@ jobs:
     timeout-minutes: 45
     env:
       PYTHONPATH: .
+      # W5 proves deterministic qwen_prod config resolution without making a
+      # network call or depending on repository secrets. Live connectivity is
+      # a separate #260 acceptance gate.
+      DASHSCOPE_BASE_URL: https://provider-not-contacted.invalid/v1
+      DASHSCOPE_API_KEY: W5_CONFIG_BINDING_ONLY_NOT_A_REAL_SECRET
     steps:
       - uses: actions/checkout@v4
         with:
