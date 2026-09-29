@@ -9,12 +9,22 @@ function section(no,title,value,note){
   return '<section class="case-card"><div class="case-card-head"><div><span class="case-section-no">'+no+'</span><h2>'+esc(title)+'</h2></div></div>'+
     '<div class="case-section-body"><p>'+esc(value||empty)+'</p>'+(note?'<small>'+esc(note)+'</small>':'')+'</div></section>';
 }
+function commonEvidenceHref(item){
+  const common=item&&item.common_evidence;
+  if(!common||common.contract_version!=='common-evidence/v1.0')return '';
+  const params=new URLSearchParams();
+  params.set('presentation','drawer');
+  params.set('common_evidence',JSON.stringify(common));
+  params.set('return_to',location.pathname+location.search+location.hash);
+  return '/p0/overall/evidence?'+params.toString();
+}
 function evidence(item,index,sourceItr){
   const source=[item.source_type,item.source_id].filter(Boolean).join(' / ')||'未提供';
   const location=[item.file_name,item.page!=null?'Page '+item.page:'',item.section?'Section '+item.section:''].filter(Boolean).join(' · ')||'未提供';
   const sourceHref=item.url||(
     sourceItr?'/p0/issues?q='+encodeURIComponent(sourceItr):''
   );
+  const commonHref=commonEvidenceHref(item);
   const sourceLabel=item.url?'查看来源':'查看来源 ITR';
   return '<article class="case-evidence"><div class="case-evidence-head"><strong>Evidence '+(index+1)+'</strong><span>'+esc(source)+'</span></div>'+
     '<dl><dt>Evidence ID</dt><dd>'+esc(item.evidence_id||item.id||'未提供')+'</dd>'+
@@ -23,7 +33,10 @@ function evidence(item,index,sourceItr){
     '<dt>文档 / 位置</dt><dd>'+esc(location)+'</dd>'+
     '<dt>支撑字段 / 结论</dt><dd>'+esc(item.target_path||item.supports||item.field_path||empty)+'</dd></dl>'+
     '<blockquote>'+esc(item.raw_text||item.excerpt||'当前知识存在，但没有可用原始 Evidence。')+'</blockquote>'+
-    (sourceHref?'<a data-source-link href="'+esc(sourceHref)+'"'+(item.url?' target="_blank" rel="noopener"':'')+'>'+sourceLabel+'</a>':'<span>无可用来源链接</span>')+'</article>';
+    (commonHref
+      ?'<a data-common-evidence data-overall-preserve-context="state-only" href="'+esc(commonHref)+'">打开统一 Evidence / Source</a>'
+      :(sourceHref?'<a data-source-link href="'+esc(sourceHref)+'"'+(item.url?' target="_blank" rel="noopener"':'')+'>'+sourceLabel+'</a>':'<span>无可用来源链接</span>'))+
+    '</article>';
 }
 async function load(){
   const response=await fetch(api+'/historical-cases/'+encodeURIComponent(caseId),{headers:{Accept:'application/json'}});
