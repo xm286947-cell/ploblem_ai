@@ -15,6 +15,7 @@ Retry/Task/Resume/Budget/Provider HTTP remain owned by Unified Agent Runtime.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -173,6 +174,8 @@ def runtime_root() -> Path | None:
         return Path(explicit).expanduser().resolve()
     project = _project_root()
     candidates = [
+        # Overall R2 packages the shared Runtime at the monorepo/package root.
+        project.parent.parent,
         project.parent / "ploblem_ai",
         project.parent / "unified_agent_runtime",
         project / ".external" / "ploblem_ai",
@@ -201,6 +204,31 @@ def _git_head(root: Path) -> str | None:
         return None
 
 
+def _overall_r2_source_binding(root: Path) -> dict[str, str] | None:
+    marker = root / "R2_SOURCE_COMMIT"
+    manifest_path = root / "OVERALL_R2_RELEASE_CANDIDATE_MANIFEST.json"
+    if not marker.exists() and not manifest_path.exists():
+        return None
+    if not marker.is_file() or not manifest_path.is_file():
+        raise RuntimeBridgeUnavailable("Overall R2 Runtime source binding incomplete")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeBridgeUnavailable("Overall R2 Runtime manifest invalid") from exc
+    if manifest.get("contract") != "overall-r2-release-candidate/v1":
+        raise RuntimeBridgeUnavailable("Overall R2 Runtime manifest contract invalid")
+    expected = str(manifest.get("dut_source_commit") or "").strip()
+    actual = marker.read_text(encoding="utf-8").strip()
+    if not expected or expected != actual:
+        raise RuntimeBridgeUnavailable(
+            f"Overall R2 Runtime source mismatch: expected={expected}, actual={actual}"
+        )
+    return {
+        "source_commit": actual,
+        "manifest": str(manifest_path),
+    }
+
+
 def _verify_runtime_root(root: Path) -> dict[str, Any]:
     missing = [
         str(x.relative_to(root))
@@ -215,9 +243,23 @@ def _verify_runtime_root(root: Path) -> dict[str, Any]:
         raise RuntimeBridgeUnavailable(
             "Unified Runtime 路径不完整，缺少：" + ", ".join(missing)
         )
+
+    overall_binding = _overall_r2_source_binding(root)
     head = _git_head(root)
     marker = root / "RUNTIME_COMMIT"
     snapshot_commit = marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
+    if overall_binding is not None:
+        return {
+            "root": str(root),
+            "head": head,
+            "snapshot_commit": snapshot_commit,
+            "expected_commit": RUNTIME_EXPECTED_COMMIT,
+            "source_binding": "OVERALL_R2_SOURCE_COMMIT",
+            "source_commit": overall_binding["source_commit"],
+            "source_manifest": overall_binding["manifest"],
+            "pinned": True,
+        }
+
     actual = head or snapshot_commit
     allow_unpinned = os.environ.get("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "0") == "1"
     if actual and actual != RUNTIME_EXPECTED_COMMIT and not allow_unpinned:
@@ -231,6 +273,8 @@ def _verify_runtime_root(root: Path) -> dict[str, Any]:
         "head": head,
         "snapshot_commit": snapshot_commit,
         "expected_commit": RUNTIME_EXPECTED_COMMIT,
+        "source_binding": "STANDALONE_RUNTIME_COMMIT",
+        "source_commit": actual,
         "pinned": actual == RUNTIME_EXPECTED_COMMIT,
     }
 

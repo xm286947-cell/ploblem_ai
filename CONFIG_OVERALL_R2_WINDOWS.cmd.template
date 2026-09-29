@@ -13,5 +13,14 @@ rem set "OVERALL_R2_P1_DB=D:\QualityPlatform\OverallR2\data\quality_capability_p
 rem Optional. Default: %OVERALL_R2_DATA_DIR%\storage
 rem set "STORAGE_LIFE_DATA_DIR=D:\QualityPlatform\OverallR2\data\storage"
 
+rem Optional persistent Storage Runtime / Knowledge locations.
+rem Defaults are all under %OVERALL_R2_DATA_DIR% and therefore survive package replacement.
+rem set "STORAGE_LIFE_RUNTIME_DB=D:\QualityPlatform\OverallR2\data\runtime\storage_runtime.sqlite3"
+rem set "STORAGE_KNOWLEDGE_REPOSITORY_DIR=D:\QualityPlatform\OverallR2\data\knowledge_repository"
+rem set "STORAGE_KNOWLEDGE_RELEASE_DIR=D:\QualityPlatform\OverallR2\data\knowledge_release\current"
+
+rem Overall R2 always binds Storage to the package's shared Unified Runtime and
+rem config\runtime\model.yaml. Do not point UNIFIED_AGENT_RUNTIME_ROOT at a second Runtime.
+
 rem Configure provider credentials through the environment names referenced by
 rem config/runtime/model.yaml. Never put real secrets into this package.

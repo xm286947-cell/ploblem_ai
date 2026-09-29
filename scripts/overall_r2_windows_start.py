@@ -81,6 +81,18 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
         os.environ.get("STORAGE_LIFE_DATA_DIR")
         or (data_root / "storage")
     ).expanduser().resolve()
+    storage_runtime_db = Path(
+        os.environ.get("STORAGE_LIFE_RUNTIME_DB")
+        or (data_root / "runtime" / "storage_runtime.sqlite3")
+    ).expanduser().resolve()
+    knowledge_repository = Path(
+        os.environ.get("STORAGE_KNOWLEDGE_REPOSITORY_DIR")
+        or (data_root / "knowledge_repository")
+    ).expanduser().resolve()
+    knowledge_release = Path(
+        os.environ.get("STORAGE_KNOWLEDGE_RELEASE_DIR")
+        or (data_root / "knowledge_release" / "current")
+    ).expanduser().resolve()
     legacy_raw = os.environ.get("LEGACY_QUALITY_ISSUE_DB_PATH", "").strip()
     if not legacy_raw:
         raise RuntimeError("LEGACY_DB_PATH_NOT_CONFIGURED")
@@ -106,10 +118,16 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
     data_root.mkdir(parents=True, exist_ok=True)
     p1_db.parent.mkdir(parents=True, exist_ok=True)
     storage_data.mkdir(parents=True, exist_ok=True)
+    storage_runtime_db.parent.mkdir(parents=True, exist_ok=True)
+    knowledge_repository.mkdir(parents=True, exist_ok=True)
+    knowledge_release.parent.mkdir(parents=True, exist_ok=True)
     return {
         "data_root": data_root,
         "p1_db": p1_db,
         "storage_data": storage_data,
+        "storage_runtime_db": storage_runtime_db,
+        "knowledge_repository": knowledge_repository,
+        "knowledge_release": knowledge_release,
         "legacy_db": legacy_db,
     }
 
@@ -214,6 +232,61 @@ def _smoke(base_url: str) -> None:
         )
     print("DOMAIN_ASSEMBLY=4/4_READY")
 
+    storage_runtime = _get_json(
+        base_url + "/storage-workspace/api/v1/runtime/status"
+    )
+    if storage_runtime.get("execution_mode") != "runtime":
+        raise RuntimeError("STORAGE_RUNTIME_MODE_NOT_RUNTIME")
+    if not storage_runtime.get("configured"):
+        raise RuntimeError(
+            "STORAGE_AGENT_NOT_CONFIGURED:"
+            + str(storage_runtime.get("error") or "UNKNOWN")
+        )
+    agents = set(storage_runtime.get("agents") or [])
+    if "storage.emmc.parameter_extract" not in agents:
+        raise RuntimeError("STORAGE_EMMC_AGENT_NOT_RESOLVED")
+    if storage_runtime.get("profile") != "qwen_prod":
+        raise RuntimeError(
+            "STORAGE_MODEL_REF_NOT_QWEN_PROD:"
+            + str(storage_runtime.get("profile"))
+        )
+    runtime_binding = storage_runtime.get("runtime") or {}
+    if runtime_binding.get("source_binding") != "OVERALL_R2_SOURCE_COMMIT":
+        raise RuntimeError(
+            "STORAGE_RUNTIME_SOURCE_BINDING_INVALID:"
+            + str(runtime_binding.get("source_binding"))
+        )
+    print("STORAGE_AGENT_CONFIGURED=PASS")
+    print("STORAGE_AGENT_ID=storage.emmc.parameter_extract=PASS")
+    print("STORAGE_MODEL_REF=qwen_prod=PASS")
+    print("STORAGE_RUNTIME_SOURCE_BINDING=OVERALL_R2_SOURCE_COMMIT=PASS")
+    print("PROVIDER_CONFIG_RESOLVED=PASS")
+    print("PROVIDER_CONNECTIVITY=NOT_RUN_W5_SMOKE")
+
+
+def build_process_env(
+    package_root: Path,
+    bindings: dict[str, Path],
+) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = str(package_root)
+    env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(bindings["legacy_db"])
+    env["STORAGE_LIFE_DATA_DIR"] = str(bindings["storage_data"])
+    env["STORAGE_LIFE_EXECUTION_MODE"] = "runtime"
+    env["UNIFIED_AGENT_RUNTIME_ROOT"] = str(package_root)
+    env["STORAGE_MODEL_CONFIG"] = str(
+        (package_root / "config" / "runtime" / "model.yaml").resolve()
+    )
+    env["STORAGE_LIFE_RUNTIME_DB"] = str(bindings["storage_runtime_db"])
+    env["STORAGE_KNOWLEDGE_REPOSITORY_DIR"] = str(
+        bindings["knowledge_repository"]
+    )
+    env["STORAGE_KNOWLEDGE_RELEASE_DIR"] = str(bindings["knowledge_release"])
+    env["REPEAT_CASE_NO_PAUSE"] = "1"
+    return env
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -248,16 +321,13 @@ def main() -> int:
     print(f"LEGACY_DB={bindings['legacy_db']}")
     print(f"P1_DB={bindings['p1_db']}")
     print(f"STORAGE_DATA={bindings['storage_data']}")
+    print(f"STORAGE_RUNTIME_DB={bindings['storage_runtime_db']}")
+    print(f"KNOWLEDGE_REPOSITORY={bindings['knowledge_repository']}")
+    print(f"KNOWLEDGE_RELEASE={bindings['knowledge_release']}")
     if args.check_only:
         return 0
 
-    env = os.environ.copy()
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONPATH"] = str(package_root)
-    env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(bindings["legacy_db"])
-    env["STORAGE_LIFE_DATA_DIR"] = str(bindings["storage_data"])
-    env["REPEAT_CASE_NO_PAUSE"] = "1"
+    env = build_process_env(package_root, bindings)
 
     log_dir = bindings["data_root"].parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)

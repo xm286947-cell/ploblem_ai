@@ -43,6 +43,38 @@ def repository() -> JsonArtifactRepository:
     return JsonArtifactRepository(repository_root())
 
 
+def model_config_path() -> Path:
+    configured = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
+    root = project_root()
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else root / "config" / "runtime" / "model.yaml"
+    )
+    if not path.is_absolute():
+        path = (root / path).resolve()
+    else:
+        path = path.resolve()
+    if not path.is_file():
+        raise StorageKnowledgeProductError(
+            f"STORAGE_MODEL_CONFIG_NOT_FOUND:{path}"
+        )
+    return path
+
+
+def active_release_dir() -> Path:
+    configured = os.environ.get("STORAGE_KNOWLEDGE_RELEASE_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (
+        project_root()
+        / "products"
+        / "storage_rc1"
+        / "knowledge_release"
+        / "current"
+    ).resolve()
+
+
 def processing_app():
     return create_processing_app(repository_root())
 
@@ -108,17 +140,9 @@ def extract_source(
     requested_topics: list[str] | None = None,
 ) -> dict:
     root = project_root()
-    model_config = Path(
-        os.environ.get(
-            "STORAGE_MODEL_CONFIG",
-            str(root / "config" / "model.windows.real.yaml"),
-        )
-    )
-    if not model_config.is_absolute():
-        model_config = (root / model_config).resolve()
     bootstrap = KnowledgeExtractionService.from_project(
         root,
-        model_config_path=model_config,
+        model_config_path=model_config_path(),
         runtime_db_path=repository_root() / "runtime" / "knowledge_production_runtime.sqlite3",
         environ=dict(os.environ),
     )
@@ -149,11 +173,10 @@ def build_and_activate_release(release_version: str) -> dict:
         created_at=datetime.now(timezone.utc),
     )
     source = repo.resolve(f"knowledge/production/releases/{version}")
-    root = project_root() / "knowledge_release"
-    root.mkdir(parents=True, exist_ok=True)
-    current = root / "current"
-    staged = root / f".next-{uuid4().hex}"
-    backup = root / f".previous-{uuid4().hex}"
+    current = active_release_dir()
+    current.parent.mkdir(parents=True, exist_ok=True)
+    staged = current.parent / f".next-{uuid4().hex}"
+    backup = current.parent / f".previous-{uuid4().hex}"
     shutil.copytree(source, staged)
     try:
         if current.exists():
