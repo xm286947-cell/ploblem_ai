@@ -98,6 +98,9 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
             "mode": "single_shared_package_root",
             "runtime_source": "runtime/__init__.py",
             "commit_marker": "R2_SOURCE_COMMIT",
+            "storage_execution_mode": "runtime",
+            "storage_agent_id": "storage.emmc.parameter_extract",
+            "storage_model_ref": "qwen_prod",
             "duplicate_vendor_runtime": False,
         },
         "startup": {
@@ -114,6 +117,11 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
             "legacy_env": "LEGACY_QUALITY_ISSUE_DB_PATH",
             "r2_data_env": "OVERALL_R2_DATA_DIR",
             "storage_data_env": "STORAGE_LIFE_DATA_DIR",
+            "storage_runtime_db_env": "STORAGE_LIFE_RUNTIME_DB",
+            "knowledge_repository_env": "STORAGE_KNOWLEDGE_REPOSITORY_DIR",
+            "knowledge_release_env": "STORAGE_KNOWLEDGE_RELEASE_DIR",
+            "package_local_runtime_state": False,
+            "package_local_knowledge_state": False,
             "real_internal_data_included": False,
         },
         "provider_binding": {
