@@ -380,18 +380,24 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
             result = state.get("result") or {}
             device_id = str(result.get("device_id") or "")
             assert device_id
-            assert isinstance(result.get("coverage"), dict)
+            coverage = result.get("coverage") or {}
+            assert isinstance(coverage, dict)
+            assert len(coverage.get("states") or []) > 0, coverage
 
             runtime_facts = _json(
                 f"http://127.0.0.1:18088/storage-workspace/api/devices/{device_id}/runtime-facts"
             )
-            assert isinstance(runtime_facts.get("coverage"), dict)
+            runtime_coverage = runtime_facts.get("coverage") or {}
+            assert isinstance(runtime_coverage, dict)
+            assert len(runtime_coverage.get("states") or []) > 0, runtime_facts
             assert "review_required" in runtime_facts
 
             review = _json(
                 f"http://127.0.0.1:18088/storage-workspace/api/product/devices/{device_id}/review-workbench"
             )
             assert isinstance(review, dict)
+            assert isinstance(review.get("rows"), list), review
+            assert len(review["rows"]) > 0, review
 
             status = _json(
                 "http://127.0.0.1:18088/storage-workspace/api/v1/runtime/status"
