@@ -28,12 +28,12 @@ def _configured_host_role(host_role: str | None) -> str:
 
 
 def _require_maintainer(value: str | None, *, host_role: str | None = None) -> None:
-    if _configured_host_role(host_role) != "MAINTAINER":
+    configured = _configured_host_role(host_role)
+    claim = str(value or "CONSUMER").strip().upper()
+    if claim not in {"CONSUMER", "MAINTAINER"}:
+        raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+    if configured != "MAINTAINER" or claim != "MAINTAINER":
         raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-    if value is not None and str(value).strip():
-        claim = str(value).strip().upper()
-        if claim not in {"CONSUMER", "MAINTAINER"}:
-            raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
 
 
 def _trusted_actor(host_role: str | None) -> str:
