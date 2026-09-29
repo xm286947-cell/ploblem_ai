@@ -1,0 +1,59 @@
+{% extends "p0_base.html" %}
+{% block title %}{{page_title}}{% endblock %}
+{% block breadcrumb %}当前问题 / 软件问题考核{% endblock %}
+{% block body %}
+<main class="p0-workbench" data-r2-software-assessment>
+  <header class="p0-page-head">
+    <div>
+      <span class="p0-kicker">EXISTING CAPABILITY MOUNT</span>
+      <h1>软件问题考核</h1>
+      <p>恢复原稳定用户入口。当前只读承接软件运营 / 考核 Source Fact 与现有问题关联；原保存、提交、流转和状态机待权威实现绑定。</p>
+    </div>
+    <div class="p0-nav">
+      <a class="p0-ghost" href="/p0/issues">返回问题工作台</a>
+      <a class="p0-ghost" href="/p0/missed-test-analysis">漏测分析</a>
+    </div>
+  </header>
+
+  <section class="p0-card p0-scope-bar">
+    <strong>Existing Capability Binding</strong>
+    <span>ENTRY_RESTORED · SOURCE_OWNED_READ_ONLY · SOURCE_ACTION_BINDING_PENDING · NO_SECOND_ASSESSMENT_STATE_MACHINE</span>
+  </section>
+
+  <section class="p0-card p0-filter-card">
+    <form method="get" action="/p0/software-assessment">
+      <label class="p0-search">搜索<input name="q" value="{{q or ''}}" placeholder="ITR、问题、责任部门、责任人、考核状态、考核结果"></label>
+      <button class="p0-primary">筛选</button>
+      <a class="p0-ghost" href="/p0/software-assessment">清空</a>
+    </form>
+  </section>
+
+  <section class="p0-columns">
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">SOURCE</span><h2>{{total}}</h2><p>软件考核 Source Fact</p></div></div></article>
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">LINKED</span><h2>{{linked}}</h2><p>已关联现有问题</p></div></div></article>
+    <article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">STATE</span><h2>{{source_state}}</h2><p>Source 明确提供状态 / 结果</p></div></div></article>
+  </section>
+
+  <section class="p0-card p0-table-card">
+    <div class="p0-card-head"><div><h2>软件问题考核来源</h2><p>不推断考核状态、责任人、结果或分值。</p></div><span>Existing Problem Domain</span></div>
+    <div class="p0-table-wrap"><table class="p0-table">
+      <thead><tr><th>来源 / ITR</th><th>问题</th><th>责任部门 / 人</th><th>考核状态</th><th>考核结果</th><th>分值</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td><strong>{{item.business_key}}</strong><small>{{item.linked_issue_id or '未匹配现有问题'}} · {{item.link_status}}</small></td>
+        <td>{{item.problem_description or 'Source 未提供'}}</td>
+        <td>{{item.assessment_department or '-'}} / {{item.assessment_owner or '-'}}</td>
+        <td>{{item.assessment_status or 'Source 未提供'}}<small>{{item.action_binding_status}}</small></td>
+        <td>{{item.assessment_result or 'Source 未提供'}}</td>
+        <td>{{item.assessment_score or '-'}}</td>
+        <td>{% if item.detail_url %}<a class="p0-ghost" href="{{item.detail_url}}">打开关联问题</a>{% else %}<span>先核对问题关联</span>{% endif %}<small>{{item.source_file or '-'}} · Row {{item.row_number or '-'}}</small></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="p0-loading">当前没有软件考核 Source Fact。入口已恢复，但系统不会补造考核业务状态或动作。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+{% endblock %}
