@@ -122,6 +122,67 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
     },
 )
 
+SCENARIO_PROJECTION_PARITY: tuple[dict[str, Any], ...] = (
+    {
+        "capability_id": "legacy-scenario",
+        "legacy_title": "原有质量场景工作台",
+        "legacy_path": "/quality-scenarios",
+        "replacement_title": "新版质量场景库",
+        "replacement_path": "/p0/quality-scenario-insights",
+        "parity_status": "PENDING_EVIDENCE",
+        "retirement_allowed": False,
+    },
+    {
+        "capability_id": "product-portrait",
+        "legacy_title": "原产品质量画像",
+        "legacy_path": "/quality-scenario-assets",
+        "replacement_title": "新版产品质量画像",
+        "replacement_path": "/p0/quality-scenario-insights?view=PRODUCT",
+        "parity_status": "PENDING_EVIDENCE",
+        "retirement_allowed": False,
+    },
+    {
+        "capability_id": "customer-portrait",
+        "legacy_title": "原客户质量画像",
+        "legacy_path": "/quality-scenario-assets/portrait",
+        "replacement_title": "新版客户质量画像",
+        "replacement_path": "/p0/quality-scenario-insights?view=CUSTOMER",
+        "parity_status": "PENDING_EVIDENCE",
+        "retirement_allowed": False,
+    },
+    {
+        "capability_id": "industry-portrait",
+        "legacy_title": "原行业质量画像",
+        "legacy_path": "/quality-scenario-assets/portrait",
+        "replacement_title": "新版行业质量画像",
+        "replacement_path": "/p0/quality-scenario-insights?view=INDUSTRY",
+        "parity_status": "PENDING_EVIDENCE",
+        "retirement_allowed": False,
+    },
+)
+
+
+def _scenario_projection_parity(*, legacy_scenario_ready: bool) -> dict[str, Any]:
+    items = []
+    for raw in SCENARIO_PROJECTION_PARITY:
+        item = dict(raw)
+        item["legacy_available"] = legacy_scenario_ready
+        item["coexistence_required"] = True
+        item["retirement_reason"] = (
+            "Projection Parity evidence not yet approved"
+            if legacy_scenario_ready
+            else "Legacy scenario source is not bound in this runtime; retirement cannot be inferred"
+        )
+        items.append(item)
+    return {
+        "contract": "overall-scenario-projection-parity/v1",
+        "items": items,
+        "total": len(items),
+        "all_parity_pass": False,
+        "retirement_allowed": False,
+        "policy": "KEEP_LEGACY_UNTIL_PROJECTION_PARITY",
+    }
+
 
 def _safe_local_path(value: Any, *, default: str | None = None) -> str | None:
     """Return one same-origin path or fail closed.
@@ -249,6 +310,13 @@ def create_overall_shell_router(
     def overall_task_overview() -> dict[str, Any]:
         return _task_overview(task_provider)
 
+    @router.get("/api/v2/overall/scenario-parity")
+    def overall_scenario_parity(request: Request) -> dict[str, Any]:
+        legacy_scenario_status = getattr(request.app.state, "legacy_scenario_status", {}) or {}
+        return _scenario_projection_parity(
+            legacy_scenario_ready=legacy_scenario_status.get("ready") is True,
+        )
+
     @router.get("/p0/overall", response_class=HTMLResponse, include_in_schema=False)
     def overall_home(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -303,6 +371,13 @@ def create_overall_shell_router(
                     legacy_scenario_ready=legacy_scenario_ready,
                 ),
                 "product_areas": PRODUCT_AREAS,
+                "scenario_parity": (
+                    _scenario_projection_parity(
+                        legacy_scenario_ready=legacy_scenario_ready,
+                    )
+                    if area_id == "scenarios-insights"
+                    else None
+                ),
             },
         )
 
