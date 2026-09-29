@@ -166,6 +166,13 @@ def build() -> tuple[Path, Path, Path]:
     copy_tree(ROOT / "knowledge_production", package_root / "knowledge_production")
     copy_tree(ROOT / "repositories", package_root / "repositories")
     copy_tree(ROOT / "parser", package_root / "parser")
+    # Unified Knowledge public adapters import shared public contracts and
+    # evidence compatibility code at package import time.  A fresh-extracted
+    # standalone Storage candidate must carry that shared dependency closure
+    # rather than accidentally resolving it from the source checkout.
+    copy_tree(ROOT / "services", package_root / "services")
+    copy_tree(ROOT / "quality_knowledge", package_root / "quality_knowledge")
+    copy_tree(ROOT / "compatibility", package_root / "compatibility")
 
     # Preserve the existing launcher contract and provenance: the bundled Runtime
     # must be the exact pinned public Runtime snapshot, not the current assembly HEAD.
