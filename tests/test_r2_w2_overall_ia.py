@@ -46,10 +46,10 @@ def test_r2_w2_current_problem_has_four_business_workbenches_and_common_problem_
 
     assert page.status_code == 200
     for path in (
-        "/p0/itr-recovery",
-        "/p0/itr-resolution",
-        "/p0/software-assessment",
-        "/p0/missed-test-analysis",
+        "/itr/recovery-workbench",
+        "/itr/resolution-workbench",
+        "/software-assessment",
+        "/missed-test-analysis",
     ):
         assert f'href="{path}"' in page.text
 
@@ -110,7 +110,7 @@ def test_r2_w2_old_scenario_and_portraits_bind_only_when_legacy_scenario_tables_
 
 
 def test_r2_w2_product_area_api_exposes_binding_status_without_domain_reads():
-    client = _client(legacy_ready=False)
+    client = _client(legacy_ready=True)
     payload = client.get("/api/v2/overall/product-areas").json()
 
     assert payload["total"] == 5
@@ -132,12 +132,15 @@ def test_r2_w2_product_area_api_exposes_binding_status_without_domain_reads():
         if item["title"] == "软件考核工作台"
     )
     assert assessment["available"] is True
-    assert assessment["path"] == "/p0/software-assessment"
+    assert assessment["path"] == "/software-assessment"
+    assert assessment["requires_legacy"] is True
     assert assessment.get("binding_pending") is None
 
-    # Current verified R2 entries do not depend on Legacy DB readiness.
+    # Mature Existing Capability entries are the formal routes and require the approved Legacy DB binding.
     recovery = next(
         item for item in current["capabilities"]
         if item["title"] == "ITR工作台"
     )
     assert recovery["available"] is True
+    assert recovery["path"] == "/itr/recovery-workbench"
+    assert recovery["requires_legacy"] is True
