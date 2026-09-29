@@ -1,0 +1,21 @@
+<section class="overall-card overall-evidence-viewer" data-overall-evidence-viewer data-contract-version="{{ contract_version }}">
+  <div class="overall-card-head"><div><h2>证据摘要</h2><p>只显示公共契约明确提供的事实；空字段表示未提供。</p></div><span class="overall-chip">{{ evidence_status or '未提供状态' }}</span></div>
+  <dl class="overall-evidence-grid">
+    <div><dt>Producer Domain</dt><dd>{{ producer_domain or '未提供' }}</dd></div>
+    <div><dt>Evidence ID</dt><dd>{{ evidence_id or '未提供' }}</dd></div>
+    <div><dt>Evidence Type</dt><dd>{{ evidence_type or '未提供' }}</dd></div>
+    <div><dt>Business Object</dt><dd>{{ producer_object_id or '未提供' }}</dd></div>
+    <div><dt>Source Type / ID / Version</dt><dd>{{ source.source_type or '—' }} / {{ source.source_id or '—' }} / {{ source.source_version or '—' }}</dd></div>
+    <div><dt>Source Ref</dt><dd>{{ source_ref or '未提供' }}</dd></div>
+    <div><dt>Locator</dt><dd>{% if locator.page %}第 {{ locator.page }} 页{% else %}页码未提供{% endif %}{% if locator.section %} · {{ locator.section }}{% endif %}{% if locator.anchor %} · {{ locator.anchor }}{% endif %}</dd></div>
+    <div><dt>Verification</dt><dd>{{ verification_status or '未提供' }}</dd></div>
+  </dl>
+  {% if excerpt %}<section class="overall-evidence-text"><h3>证据摘录</h3><blockquote>{{ excerpt }}</blockquote></section>{% endif %}
+  {% if source_text %}<details class="overall-evidence-text"><summary>查看来源文本</summary><pre>{{ source_text }}</pre></details>{% endif %}
+  <div class="overall-actions-row">
+    {% if source_reference and (source_reference.startswith('https://') or source_reference.startswith('http://')) %}<a class="overall-primary" href="{{ source_reference }}" target="_blank" rel="noopener noreferrer">打开生产方来源</a>{% endif %}
+    {% if object_href %}<a class="overall-secondary" href="{{ object_href }}">查看业务对象</a>{% endif %}
+    <a class="overall-secondary" data-overall-evidence-return href="{{ return_url }}">返回来源工作区</a>
+  </div>
+  <p class="overall-evidence-boundary">Evidence ID 与 Source Ref 按生产方原值展示。Overall 不查询、不复制任何 Domain Evidence Store。</p>
+</section>

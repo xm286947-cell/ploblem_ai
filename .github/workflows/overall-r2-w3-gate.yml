@@ -1,0 +1,67 @@
+name: Overall R2 W3 Gate
+
+on:
+  push:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "compatibility/common_evidence.py"
+      - "quality_knowledge/web/overall_shell.py"
+      - "quality_knowledge/web/overall_navigation.py"
+      - "quality_knowledge/web/static/overall_navigation.*"
+      - "quality_knowledge/web/templates/overall_evidence*.html"
+      - "quality_knowledge/web/templates/_overall_evidence_content.html"
+      - "quality_knowledge/web/templates/p0_base.html"
+      - "tests/test_r2_w3_*.py"
+      - "tests/test_overall_frontend_shell.py"
+      - "tests/test_historical_case_consumer_contract.py"
+      - "tests/test_major_knowledge_publication_contract.py"
+      - "tests/test_hardware_case_evidence_source.py"
+      - ".github/workflows/overall-r2-w3-gate.yml"
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "compatibility/common_evidence.py"
+      - "quality_knowledge/web/overall_shell.py"
+      - "quality_knowledge/web/overall_navigation.py"
+      - "quality_knowledge/web/static/overall_navigation.*"
+      - "quality_knowledge/web/templates/overall_evidence*.html"
+      - "quality_knowledge/web/templates/_overall_evidence_content.html"
+      - "quality_knowledge/web/templates/p0_base.html"
+      - "tests/test_r2_w3_*.py"
+
+permissions:
+  contents: read
+
+jobs:
+  w3-evidence-source-return:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile shared boundaries
+        run: |
+          python -m compileall -q compatibility quality_knowledge/web
+      - name: Run W3 focused regression
+        run: |
+          pytest -q \
+            tests/test_r2_w3_*.py \
+            tests/test_r2_w2_return_context.py \
+            tests/test_overall_frontend_shell.py
+
+      - name: Run producer Evidence contract regressions
+        run: |
+          pytest -q \
+            tests/test_historical_case_consumer_contract.py \
+            tests/test_major_knowledge_publication_contract.py \
+            tests/test_hardware_case_evidence_source.py

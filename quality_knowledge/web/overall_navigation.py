@@ -20,11 +20,17 @@ _FIELD_KEY = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
 
 
 def overall_navigation_asset_version(static_dir: str | Path | None = None) -> str:
-    root = Path(static_dir) if static_dir is not None else Path(__file__).resolve().parent / "static"
-    asset = root / "overall_navigation.js"
-    if not asset.is_file():
-        raise FileNotFoundError(asset)
-    return hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+    """Return a cache key that changes whenever shared navigation assets change."""
+    fallback = Path(__file__).resolve().parent / "static"
+    root = Path(static_dir) if static_dir is not None else fallback
+    digest = hashlib.sha256()
+    for name in ("overall_navigation.css", "overall_navigation.js"):
+        asset = root / name
+        if not asset.is_file():
+            asset = fallback / name
+        digest.update(name.encode("utf-8"))
+        digest.update(asset.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def normalize_overall_return_state(raw: str | None) -> dict[str, Any] | None:

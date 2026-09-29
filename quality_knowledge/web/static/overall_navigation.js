@@ -4,6 +4,8 @@
   const STORAGE_KEY = 'overall-return-context-v1';
   const FIELD_KEY = /^[A-Za-z0-9_.:-]{1,80}$/;
   let pendingRestore = null;
+  let drawer = null;
+  let returnFocus = null;
   let restored = false;
 
   function safeJson(raw) {
@@ -81,6 +83,66 @@
     }));
   }
 
+  function ensureDrawer() {
+    if (drawer) return drawer;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'overall-navigation-backdrop';
+    backdrop.hidden = true;
+    backdrop.setAttribute('data-overall-evidence-backdrop', '');
+    const panel = document.createElement('aside');
+    panel.className = 'overall-evidence-drawer';
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', '统一 Evidence / Source Viewer');
+    panel.innerHTML =
+      '<header><div><h2>Evidence / Source Viewer</h2><p>生产方公共 Evidence 契约</p></div>' +
+      '<button type="button" data-overall-evidence-close aria-label="关闭">×</button></header>' +
+      '<iframe title="Evidence / Source Viewer"></iframe>';
+    document.body.append(backdrop, panel);
+    backdrop.addEventListener('click', closeDrawer);
+    panel.querySelector('[data-overall-evidence-close]').addEventListener('click', closeDrawer);
+    panel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeDrawer();
+      }
+    });
+    drawer = {backdrop, panel, frame: panel.querySelector('iframe')};
+    return drawer;
+  }
+
+  function openDrawer(anchor) {
+    const parts = ensureDrawer();
+    const url = new URL(anchor.href, window.location.href);
+    if (url.origin !== window.location.origin || url.pathname !== '/p0/overall/evidence') return false;
+    url.searchParams.set('presentation', 'drawer');
+    url.searchParams.set('return_to', window.location.pathname + window.location.search + window.location.hash);
+    url.searchParams.set('return_state', JSON.stringify(capture()));
+    returnFocus = anchor;
+    parts.frame.src = url.pathname + url.search + url.hash;
+    parts.backdrop.hidden = false;
+    parts.panel.hidden = false;
+    document.body.classList.add('overall-navigation-open');
+    parts.panel.querySelector('[data-overall-evidence-close]').focus();
+    return true;
+  }
+
+  function closeDrawer() {
+    if (!drawer) return;
+    drawer.frame.src = 'about:blank';
+    drawer.panel.hidden = true;
+    drawer.backdrop.hidden = true;
+    document.body.classList.remove('overall-navigation-open');
+    if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+    returnFocus = null;
+  }
+
+  window.addEventListener('message', event => {
+    if (!drawer || event.origin !== window.location.origin || event.source !== drawer.frame.contentWindow) return;
+    if (event.data && event.data.type === 'overall:evidence:return') closeDrawer();
+  });
+
   function preserveReturnState(anchor) {
     const url = new URL(anchor.href, window.location.href);
     if (url.origin !== window.location.origin) return;
@@ -99,6 +161,13 @@
   document.addEventListener('click', event => {
     const anchor = event.target.closest && event.target.closest('a[href]');
     if (!anchor || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+    const url = new URL(anchor.href, window.location.href);
+    if (url.origin !== window.location.origin) return;
+    if (url.pathname === '/p0/overall/evidence') {
+      event.preventDefault();
+      openDrawer(anchor);
+      return;
+    }
     preserveReturnState(anchor);
   });
 
@@ -117,7 +186,7 @@
     } catch (_) {}
   }
 
-  window.OverallNavigation = {capture, restoreNow};
+  window.OverallNavigation = {capture, restoreNow, closeDrawer};
   window.addEventListener('load', () => window.setTimeout(() => {
     const asyncPage = document.querySelector('[data-p04-insights], [data-p0-issues]');
     restoreNow({ready: !asyncPage});
