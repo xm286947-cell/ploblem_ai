@@ -83,17 +83,24 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $edgeCandidates = @(
-            "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
-            "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+          $browserCandidates = @(
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
           )
-          $edge = $edgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $edge) { throw "Microsoft Edge not found on windows-latest" }
+          $browser = $browserCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $browser) {
+            $cmd = Get-Command msedge.exe,chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cmd) { $browser = $cmd.Source }
+          }
+          if (-not $browser) { throw "Edge/Chrome headless browser not found on windows-latest" }
+          Write-Host "HEADLESS_BROWSER=$browser"
 
           function Dump-Dom([string]$Path, [string]$Name) {
             $out = Join-Path $env:RUNNER_TEMP ($Name + ".html")
             $url = "http://127.0.0.1:8088" + $Path
-            & $edge --headless --disable-gpu --no-first-run --dump-dom $url 2>$null | Set-Content -Encoding utf8 $out
+            & $browser --headless --disable-gpu --no-first-run --dump-dom $url 2>$null | Set-Content -Encoding utf8 $out
             if (!(Test-Path $out)) { throw "DOM dump missing: $Path" }
             return (Get-Content -Raw $out)
           }
