@@ -73,7 +73,6 @@ def create_p0_app(
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
     hardware_case_host_role: str | None = None,
-    hardware_case_host_actor: str | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -111,26 +110,10 @@ def create_p0_app(
         if hardware_case_host_role is not None
         else os.getenv("HARDWARE_CASE_HOST_ROLE")
     )
-    # Hardware authorization is server-trusted.  An unbound host is always a
-    # CONSUMER; browser query/header/storage state can never opt into maintenance.
     app.state.hardware_case_host_role = (
         _normalize_hardware_case_host_role(hardware_role_raw)
         if hardware_role_raw is not None and str(hardware_role_raw).strip()
-        else "CONSUMER"
-    )
-    hardware_actor_raw = (
-        hardware_case_host_actor
-        if hardware_case_host_actor is not None
-        else os.getenv("HARDWARE_CASE_HOST_ACTOR")
-    )
-    app.state.hardware_case_host_actor = (
-        str(hardware_actor_raw).strip()
-        if hardware_actor_raw is not None and str(hardware_actor_raw).strip()
-        else (
-            "server:hardware-maintainer"
-            if app.state.hardware_case_host_role == "MAINTAINER"
-            else "server:hardware-consumer"
-        )
+        else None
     )
     app.state.storage_workspace_binding = None
     if storage_app is not None or app.state.overall_shell_enabled:
@@ -417,7 +400,6 @@ def create_p0_app(
                 hardware_tree_import_repository,
                 hardware_tree_file_store,
                 host_role=app.state.hardware_case_host_role,
-                host_actor=app.state.hardware_case_host_actor,
             )
         )
         app.include_router(
@@ -426,7 +408,6 @@ def create_p0_app(
                 source_store=hardware_case_source_store,
                 intake_service=hardware_case_intake_service,
                 host_role=app.state.hardware_case_host_role,
-                host_actor=app.state.hardware_case_host_actor,
             )
         )
 
