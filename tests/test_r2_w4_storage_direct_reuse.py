@@ -149,8 +149,16 @@ def test_provider_operability_is_projection_only(monkeypatch):
     assert result["connectivity"] == "PASS"
     assert result["last_check"] == "2026-09-29T07:00:00+00:00"
     assert result["probe_performed"] is False
-    assert result["management_deep_links"]["agent_config"]["href"] is None
-    assert result["management_deep_links"]["runtime_diagnostics"]["href"] is None
+    assert result["management_deep_links"]["agent_config"] == {
+        "status": "READY",
+        "href": "/p0/system/agent-config",
+        "owner": "OVERALL_COMMON_CAPABILITY",
+    }
+    assert result["management_deep_links"]["runtime_diagnostics"] == {
+        "status": "READY",
+        "href": "/p0/system/runtime-diagnostics",
+        "owner": "OVERALL_COMMON_CAPABILITY",
+    }
     assert result["status_projection"]["owner_role"] == "OVERALL_RUNTIME_AGENT_CONFIG_OWNER"
 
 
