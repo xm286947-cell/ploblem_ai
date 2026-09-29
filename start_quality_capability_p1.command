@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Double-click-friendly macOS launcher for the mature legacy quality capability.
-# This launcher must stay LF-only; see .gitattributes.
+# This launcher must stay LF-only; see .gitattributes. STEP1 real-restore gate depends on it.
 
 set -u
 
