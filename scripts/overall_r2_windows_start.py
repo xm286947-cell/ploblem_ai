@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ import webbrowser
 import yaml
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,6 +139,84 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
         "knowledge_release": knowledge_release,
         "runtime_control_root": runtime_control_root,
         "legacy_db": legacy_db,
+    }
+
+
+def _initialize_packaged_knowledge_release(
+    package_root: Path,
+    target: Path,
+) -> dict[str, Any]:
+    """Seed the shipped formal Knowledge Release into a clean external Data Root.
+
+    Existing external state always wins.  The package is read-only; initialization
+    copies the validated shipped release to external persistent storage exactly once.
+    """
+    packaged = (
+        package_root
+        / "products"
+        / "storage_rc1"
+        / "knowledge_release"
+        / "current"
+    ).resolve()
+    manifest = packaged / "release_manifest.json"
+    if not manifest.is_file():
+        raise RuntimeError("PACKAGED_KNOWLEDGE_RELEASE_MISSING")
+
+    target = target.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists():
+        if (target / "release_manifest.json").is_file():
+            return {
+                "status": "EXISTING_EXTERNAL_RELEASE",
+                "target": str(target),
+            }
+        try:
+            has_entries = any(target.iterdir())
+        except OSError as exc:
+            raise RuntimeError("KNOWLEDGE_RELEASE_TARGET_UNREADABLE") from exc
+        if has_entries:
+            raise RuntimeError(
+                "KNOWLEDGE_RELEASE_TARGET_INVALID_NONEMPTY:"
+                + str(target)
+            )
+        target.rmdir()
+
+    root_text = str(package_root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    from products.storage_rc1.storage_life.knowledge_release import (
+        KnowledgeReleaseConsumer,
+    )
+
+    packaged_status = KnowledgeReleaseConsumer(packaged).status()
+    if not packaged_status.get("available"):
+        raise RuntimeError(
+            "PACKAGED_KNOWLEDGE_RELEASE_INVALID:"
+            + str(packaged_status.get("code") or "UNKNOWN")
+        )
+
+    staged = target.parent / f".seed-{uuid4().hex}"
+    try:
+        shutil.copytree(packaged, staged)
+        staged_status = KnowledgeReleaseConsumer(staged).status()
+        if not staged_status.get("available"):
+            raise RuntimeError(
+                "SEEDED_KNOWLEDGE_RELEASE_INVALID:"
+                + str(staged_status.get("code") or "UNKNOWN")
+            )
+        staged.rename(target)
+    except Exception:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+
+    return {
+        "status": "SEEDED_FROM_PACKAGE",
+        "target": str(target),
+        "knowledge_release_version": packaged_status.get(
+            "knowledge_release_version"
+        ),
+        "snapshot_hash": packaged_status.get("snapshot_hash"),
     }
 
 
@@ -500,6 +580,10 @@ def main() -> int:
 
     try:
         bindings = resolve_bindings(package_root)
+        release_seed = _initialize_packaged_knowledge_release(
+            package_root,
+            bindings["knowledge_release"],
+        )
         env = build_process_env(package_root, bindings)
         _runtime_provider_preflight(
             package_root,
@@ -511,6 +595,12 @@ def main() -> int:
         return 6
 
     print("PREFLIGHT=PASS")
+    print("KNOWLEDGE_RELEASE_INIT_STATUS=" + str(release_seed["status"]))
+    if release_seed.get("knowledge_release_version"):
+        print(
+            "KNOWLEDGE_RELEASE_VERSION="
+            + str(release_seed["knowledge_release_version"])
+        )
     print(f"SOURCE_COMMIT={binding['source_commit']}")
     print(f"RUNTIME_SOURCE={binding['runtime_source']}")
     print(f"LEGACY_DB={bindings['legacy_db']}")
