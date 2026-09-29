@@ -856,6 +856,7 @@ class OverallRuntimeControlPlane:
     ) -> dict[str, Any]:
         diagnostics = self.diagnostics(limit=limit)
         items: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
         for store in diagnostics["stores"]:
             for item in store.get("tasks") or []:
                 task = item.get("task") or {}
@@ -879,6 +880,13 @@ class OverallRuntimeControlPlane:
                         str(task.get("status"))
                         != "COMPLETED"
                     ):
+                        dedupe_key = (
+                            str(store.get("path") or ""),
+                            str(task.get("task_id") or request_id),
+                        )
+                        if dedupe_key in seen:
+                            continue
+                        seen.add(dedupe_key)
                         items.append(
                             {
                                 "store": store["name"],
