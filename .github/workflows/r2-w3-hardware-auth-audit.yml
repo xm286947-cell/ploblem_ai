@@ -47,10 +47,14 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
-      - name: Run existing Hardware Windows launcher in smoke-only mode
+      - name: Run existing Hardware Web startup check
         shell: cmd
         env:
-          HARDWARE_CASE_SMOKE_ONLY: "1"
-          HARDWARE_CASE_NO_PAUSE: "1"
+          HARDWARE_CASE_HOST_ROLE: "MAINTAINER"
           HARDWARE_CASE_HOST_ACTOR: "github-actions:windows-maintainer"
-        run: call START_HARDWARE_CASE.bat
+        run: >-
+          python scripts\hardware_case_web_start.py --check
+          --db data\ci_quality.db
+          --hardware-db data\ci_hardware.db
+          --tree-upload-dir data\ci_tree_uploads
+          --source-root data\ci_sources
