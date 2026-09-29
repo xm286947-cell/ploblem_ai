@@ -74,95 +74,106 @@ jobs:
           print("STEP1_SEED=PASS")
           '@ | python -
 
-      - name: Start from legacy BAT entry
+      - name: Start legacy BAT and validate mature pages in real Edge or Chrome
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $stdout = Join-Path $env:RUNNER_TEMP "step1-legacy.stdout.log"
-          $stderr = Join-Path $env:RUNNER_TEMP "step1-legacy.stderr.log"
-          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @(
-            "/c", "start_quality_capability_p1.bat --host 127.0.0.1 --port 8090"
-          ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          "STEP1_LAUNCHER_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          $ready = $false
-          for ($i=0; $i -lt 90; $i++) {
-            try {
-              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8090/quality-scenarios" -UseBasicParsing -TimeoutSec 3
-              if ($r.StatusCode -eq 200) { $ready = $true; break }
-            } catch {}
-            Start-Sleep -Seconds 1
-          }
-          if (-not $ready) {
-            if (Test-Path $stdout) { Get-Content $stdout }
-            if (Test-Path $stderr) { Get-Content $stderr }
-            throw "Legacy BAT entry did not become ready"
-          }
-          Write-Host "LEGACY_START_ENTRY=PASS"
+          $repoRoot = (Get-Location).Path
+          $legacyJob = Start-Job -ScriptBlock {
+            param($root)
+            Set-Location $root
+            $env:REPEAT_CASE_NO_PAUSE = "1"
+            cmd.exe /d /s /c "start_quality_capability_p1.bat --host 127.0.0.1 --port 8090"
+          } -ArgumentList $repoRoot
 
-      - name: Validate mature pages in real Edge or Chrome
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $browserCandidates = @(
-            "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            "C:\Program Files\Google\Chrome\Application\chrome.exe",
-            "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-          )
-          $browser = $browserCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $browser) { throw "Edge/Chrome headless browser not found" }
-
-          function Dump-Dom([string]$Path, [string]$Name) {
-            $out = Join-Path $env:RUNNER_TEMP ($Name + ".html")
-            & $browser --headless --disable-gpu --no-first-run --dump-dom ("http://127.0.0.1:8090" + $Path) 2>$null | Set-Content -Encoding utf8 $out
-            if (!(Test-Path $out)) { throw "DOM dump missing: $Path" }
-            return (Get-Content -Raw $out)
-          }
-          function Require([string]$Text, [string]$Needle, [string]$Name) {
-            if (-not $Text.Contains($Needle)) { throw "$Name missing marker: $Needle" }
-          }
-
-          $scenario = Dump-Dom "/quality-scenarios?product_code=PLC&industry=%E9%94%82%E7%94%B5&q=STEP1" "quality-scenarios"
-          Require $scenario "STEP1 老质量场景浏览器验证" "Quality Scenario data"
-          Require $scenario 'name="industry"' "Quality Scenario industry filter"
-          Require $scenario 'name="q"' "Quality Scenario keyword filter"
-          Require $scenario "/quality-scenarios/STEP1-SCN-001" "Quality Scenario detail drill-down"
-
-          $detail = Dump-Dom "/quality-scenarios/STEP1-SCN-001" "quality-scenario-detail"
-          Require $detail "STEP1 老质量场景浏览器验证" "Quality Scenario detail"
-          Require $detail "状态一致性" "Quality Scenario mature detail data"
-
-          $assets = Dump-Dom "/quality-scenario-assets?industry=%E9%94%82%E7%94%B5" "scenario-assets"
-          Require $assets "STEP1 老质量场景浏览器验证" "Product portrait asset data"
-          Require $assets "/quality-scenario-assets/STEP1-SCN-001" "Asset detail drill-down"
-
-          $assetDetail = Dump-Dom "/quality-scenario-assets/STEP1-SCN-001" "scenario-asset-detail"
-          Require $assetDetail "STEP1 老质量场景浏览器验证" "Asset detail"
-
-          $portrait = Dump-Dom "/quality-scenario-assets/portrait?industry=%E9%94%82%E7%94%B5" "scenario-portrait"
-          Require $portrait "客户 / 行业质量场景画像" "Customer/Industry portrait page"
-          Require $portrait 'name="industry"' "Portrait industry filter"
-          Require $portrait 'name="customer"' "Portrait customer filter"
-          Require $portrait 'name="product_group"' "Portrait product group filter"
-          Require $portrait 'name="product"' "Portrait product model filter"
-
-          foreach ($path in @("/issues", "/analysis", "/import")) {
-            try {
-              $probe = Invoke-WebRequest -Uri ("http://127.0.0.1:8090" + $path) -UseBasicParsing -TimeoutSec 10
-              if ($probe.StatusCode -ne 200) { throw "$path status $($probe.StatusCode)" }
-            } catch {
-              throw "Old problem platform regression at $path : $($_.Exception.Message)"
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8090/quality-scenarios" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              $state = (Get-Job -Id $legacyJob.Id).State
+              if ($state -in @("Completed","Failed","Stopped")) { break }
+              Start-Sleep -Seconds 1
             }
-          }
+            if (-not $ready) {
+              Write-Host "LEGACY_BAT_JOB_STATE=$((Get-Job -Id $legacyJob.Id).State)"
+              Receive-Job -Id $legacyJob.Id -Keep -ErrorAction SilentlyContinue | Write-Host
+              throw "Legacy BAT entry did not become ready"
+            }
+            Write-Host "LEGACY_START_ENTRY=PASS"
 
-          Write-Host "LEGACY_QUALITY_SCENARIO=PASS"
-          Write-Host "LEGACY_PRODUCT_PORTRAIT=PASS"
-          Write-Host "LEGACY_CUSTOMER_PORTRAIT=PASS"
-          Write-Host "LEGACY_INDUSTRY_PORTRAIT=PASS"
-          Write-Host "LEGACY_FILTERS_ACTIONS=PASS"
-          Write-Host "LEGACY_DATA_VISIBLE=PASS"
-          Write-Host "OLD_PROBLEM_PLATFORM_REGRESSION=PASS"
-          Write-Host "NEW_R2_SCENARIO_SUBSTITUTION=NO"
+            $browserCandidates = @(
+              "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+              "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+              "C:\Program Files\Google\Chrome\Application\chrome.exe",
+              "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            )
+            $browser = $browserCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $browser) { throw "Edge/Chrome headless browser not found" }
+            Write-Host "HEADLESS_BROWSER=$browser"
+
+            function Dump-Dom([string]$Path, [string]$Name) {
+              $out = Join-Path $env:RUNNER_TEMP ($Name + ".html")
+              & $browser --headless --disable-gpu --no-first-run --dump-dom ("http://127.0.0.1:8090" + $Path) 2>$null | Set-Content -Encoding utf8 $out
+              if (!(Test-Path $out)) { throw "DOM dump missing: $Path" }
+              return (Get-Content -Raw $out)
+            }
+            function Require([string]$Text, [string]$Needle, [string]$Name) {
+              if (-not $Text.Contains($Needle)) { throw "$Name missing marker: $Needle" }
+            }
+
+            $scenario = Dump-Dom "/quality-scenarios?product_code=PLC&industry=%E9%94%82%E7%94%B5&q=STEP1" "quality-scenarios"
+            Require $scenario "STEP1 老质量场景浏览器验证" "Quality Scenario data"
+            Require $scenario 'name="industry"' "Quality Scenario industry filter"
+            Require $scenario 'name="q"' "Quality Scenario keyword filter"
+            Require $scenario "/quality-scenarios/STEP1-SCN-001" "Quality Scenario detail drill-down"
+
+            $detail = Dump-Dom "/quality-scenarios/STEP1-SCN-001" "quality-scenario-detail"
+            Require $detail "STEP1 老质量场景浏览器验证" "Quality Scenario detail"
+            Require $detail "状态一致性" "Quality Scenario mature detail data"
+
+            $assets = Dump-Dom "/quality-scenario-assets?industry=%E9%94%82%E7%94%B5" "scenario-assets"
+            Require $assets "STEP1 老质量场景浏览器验证" "Product portrait asset data"
+            Require $assets "/quality-scenario-assets/STEP1-SCN-001" "Asset detail drill-down"
+
+            $assetDetail = Dump-Dom "/quality-scenario-assets/STEP1-SCN-001" "scenario-asset-detail"
+            Require $assetDetail "STEP1 老质量场景浏览器验证" "Asset detail"
+
+            $portrait = Dump-Dom "/quality-scenario-assets/portrait?industry=%E9%94%82%E7%94%B5" "scenario-portrait"
+            Require $portrait "客户 / 行业质量场景画像" "Customer/Industry portrait page"
+            Require $portrait 'name="industry"' "Portrait industry filter"
+            Require $portrait 'name="customer"' "Portrait customer filter"
+            Require $portrait 'name="product_group"' "Portrait product group filter"
+            Require $portrait 'name="product"' "Portrait product model filter"
+
+            foreach ($path in @("/issues", "/analysis", "/import")) {
+              try {
+                $probe = Invoke-WebRequest -Uri ("http://127.0.0.1:8090" + $path) -UseBasicParsing -TimeoutSec 10
+                if ($probe.StatusCode -ne 200) { throw "$path status $($probe.StatusCode)" }
+              } catch {
+                throw "Old problem platform regression at $path : $($_.Exception.Message)"
+              }
+            }
+
+            Write-Host "LEGACY_QUALITY_SCENARIO=PASS"
+            Write-Host "LEGACY_PRODUCT_PORTRAIT=PASS"
+            Write-Host "LEGACY_CUSTOMER_PORTRAIT=PASS"
+            Write-Host "LEGACY_INDUSTRY_PORTRAIT=PASS"
+            Write-Host "LEGACY_FILTERS_ACTIONS=PASS"
+            Write-Host "LEGACY_DATA_VISIBLE=PASS"
+            Write-Host "OLD_PROBLEM_PLATFORM_REGRESSION=PASS"
+            Write-Host "NEW_R2_SCENARIO_SUBSTITUTION=NO"
+          }
+          finally {
+            Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique |
+              ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            Stop-Job -Id $legacyJob.Id -ErrorAction SilentlyContinue
+            Receive-Job -Id $legacyJob.Id -ErrorAction SilentlyContinue | Write-Host
+            Remove-Job -Id $legacyJob.Id -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Stop legacy Web
         if: always()
