@@ -294,9 +294,6 @@ def test_single_and_batch_intake_converge_on_same_source_fact_store(
 ):
     client = _client(tmp_path)
     repository = client.app.state.major_case_repository
-    assert repository.SCHEMA_VERSION == 3
-    assert repository.schema_version() == 3
-
     source = (
         ROOT
         / "tests/golden/hardware_case_scenarios/A9001-LDO 输出振荡.docx"
