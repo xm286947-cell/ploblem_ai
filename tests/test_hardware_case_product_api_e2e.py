@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from quality_knowledge.p0.initializer import P0Initializer
@@ -28,6 +29,17 @@ def _field(candidate: str):
     }
 
 
+def _storage_stub() -> FastAPI:
+    """Keep the Hardware E2E independent from Storage-only PDF dependencies."""
+    app = FastAPI()
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok", "service": "storage-stub"}
+
+    return app
+
+
 def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
     p0_db = tmp_path / "quality_capability_p0.db"
     hardware_db = tmp_path / "hardware_case_mvp.db"
@@ -38,6 +50,7 @@ def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
             p0_db,
             stage_runner=object(),
             hardware_case_db_path=hardware_db,
+            storage_app=_storage_stub(),
         )
     )
 
