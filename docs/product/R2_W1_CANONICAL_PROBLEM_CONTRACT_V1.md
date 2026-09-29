@@ -66,15 +66,18 @@ A non-ITR or invalid public ref is not silently promoted to a Canonical Problem 
 
 Every relation exposes:
 - relation_contract_version
+- relation_policy=EXPLICIT_OR_EXACT_UNIQUE_ONLY
 - key
 - relation_status
-- canonical_problem_id
+- canonical_problem_id + canonical_problem_ref
 - source_domain
-- source_refs
+- structured source_refs (material/source object, business key, material version, hash and locator where available)
 - version_ref
 - access_mode=READ_ONLY_PROJECTION
 - permission_authority=SOURCE_DOMAIN
+- return_context_contract=overall-return-context/v1
 - href only when the relation is proven
+- no_relation_reason when the relation is not proven
 
 Allowed relation keys:
 1. ITR
@@ -101,3 +104,19 @@ The following semantics remain frozen:
 - integration/overall-vnext is not merged wholesale.
 
 NEXT=W1_FOCUSED_REGRESSION
+
+
+## 6. Public Projection / W1 Closure Evidence
+
+Unified Overall host exposes a read-only projection:
+
+`GET /api/v2/issues/{knowledge_id}/workbench-relations`
+
+The endpoint reads Existing Problem plus source-material relations only. It does
+not persist a relation during reads and does not provide mutation endpoints.
+
+W1 focused regression includes an ambiguity case where the same normalized ITR
+exists in two business-type uniqueness domains. Resolution and Software
+Assessment must return `NO_RELATION`, empty `href`, empty `source_refs` and
+`RELATION_NOT_FOUND_OR_AMBIGUOUS`; no candidate may be selected by recency,
+title, product or insertion order.
