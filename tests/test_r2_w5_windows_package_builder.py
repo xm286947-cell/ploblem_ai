@@ -223,3 +223,64 @@ def test_w5_invalid_nonempty_external_release_fails_closed(tmp_path):
     with pytest.raises(RuntimeError, match="KNOWLEDGE_RELEASE_TARGET_INVALID_NONEMPTY"):
         module._initialize_packaged_knowledge_release(ROOT, target)
     assert (target / "stale.txt").read_text(encoding="utf-8") == "do-not-overwrite"
+
+
+def test_w5_extracted_zip_seeds_formal_release_into_clean_external_root(
+    candidate,
+    tmp_path,
+):
+    import importlib.util
+
+    _, package_zip, commit, _ = candidate
+    extract_root = tmp_path / "unzipped"
+    with zipfile.ZipFile(package_zip) as bundle:
+        bundle.extractall(extract_root)
+
+    package_root = extract_root / (
+        f"OVERALL_R2_COMPLETE_PRODUCT_CANDIDATE_{commit[:12]}_W5"
+    )
+    assert package_root.is_dir()
+    assert (package_root / "R2_SOURCE_COMMIT").read_text().strip() == commit
+
+    launcher_path = package_root / "scripts" / "overall_r2_windows_start.py"
+    spec = importlib.util.spec_from_file_location(
+        "r2_extracted_release_seed_launcher",
+        launcher_path,
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    target = tmp_path / "clean-data" / "knowledge_release" / "current"
+    result = module._initialize_packaged_knowledge_release(
+        package_root,
+        target,
+    )
+
+    assert result["status"] == "SEEDED_FROM_PACKAGE"
+    assert (
+        result["knowledge_release_version"]
+        == "KP-STORAGE-RC1-VALIDATION-001"
+    )
+    manifest = json.loads(
+        (target / "release_manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        manifest["knowledge_release_version"]
+        == "KP-STORAGE-RC1-VALIDATION-001"
+    )
+    assert (target / "knowledge_objects.json").is_file()
+    assert (target / "evidences.json").is_file()
+    assert (target / "source_references.json").is_file()
+
+    root_bats = sorted(path.name for path in package_root.glob("*.bat"))
+    assert root_bats == [
+        "INSTALL_OVERALL_R2_WINDOWS.bat",
+        "START_OVERALL_R2_WINDOWS.bat",
+        "STOP_OVERALL_R2_WINDOWS.bat",
+    ]
+    readme = (package_root / "00_README_FIRST.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "ONLY USER STARTUP PATH" in readme
+    assert "START_HARDWARE_CASE.bat" not in readme
