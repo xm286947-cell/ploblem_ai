@@ -122,8 +122,10 @@ def test_overall_windows_launcher_binds_single_runtime_and_persistent_knowledge(
         "knowledge_release": tmp_path / "data" / "knowledge_release" / "current",
     }
 
+    monkeypatch.delenv("HARDWARE_CASE_HOST_ROLE", raising=False)
     env = launcher.build_process_env(package_root.resolve(), bindings)
 
+    assert env["HARDWARE_CASE_HOST_ROLE"] == "CONSUMER"
     assert env["STORAGE_LIFE_EXECUTION_MODE"] == "runtime"
     assert Path(env["UNIFIED_AGENT_RUNTIME_ROOT"]) == package_root.resolve()
     assert Path(env["STORAGE_MODEL_CONFIG"]) == (
