@@ -50,7 +50,7 @@
     const mappings=Array.isArray(item&&item.mappings)?item.mappings:[];
     return mappings.filter(x=>x.tree_type===type&&x.mapping_status==='CONFIRMED').map(x=>x.node_path||x.path_snapshot).filter(Boolean);
   };
-  const caseHref=(id,maintainer=false)=>'/p0/hardware-cases/'+encodeURIComponent(id)+(maintainer?'?role=maintainer':'');
+  const caseHref=id=>'/p0/hardware-cases/'+encodeURIComponent(id);
   const evidenceHealth=item=>item.evidence_health||'AVAILABLE';
   function caseCard(item,{maintainer=false}={}){
     const facts=item.facts||{};
@@ -110,8 +110,7 @@
     form&&form.addEventListener('submit',event=>{
       event.preventDefault();
       const q=qs('[data-home-query]').value.trim();
-      const suffix=role==='MAINTAINER'?'&role=maintainer':'';
-      location.href='/p0/hardware-cases/search?q='+encodeURIComponent(q)+suffix;
+      location.href='/p0/hardware-cases/search?q='+encodeURIComponent(q);
     });
   }
 
@@ -164,7 +163,7 @@
     qs('[data-tree-list]').addEventListener('click',e=>{
       const b=e.target.closest('[data-node-id]');if(b)selectNode(b.dataset.nodeId);
     });
-    const searchAll=qs('[data-search-all]');if(searchAll&&role==='MAINTAINER')searchAll.href+='?role=maintainer';
+    const searchAll=qs('[data-search-all]');
     await loadTree(treeState.type);
   }
 
