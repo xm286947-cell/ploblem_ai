@@ -377,7 +377,12 @@ def create_hardware_case_router(
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
-            previous = service.repository.get_mapping_by_semantic_key(
+            mapping_id = str(normalized.get("mapping_id") or "").strip()
+            previous = (
+                service.repository.get_mapping(mapping_id)
+                if mapping_id
+                else None
+            ) or service.repository.get_mapping_by_semantic_key(
                 case_id,
                 str(normalized.get("tree_type") or ""),
                 str(normalized.get("node_id") or ""),
