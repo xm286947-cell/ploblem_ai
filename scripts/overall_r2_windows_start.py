@@ -322,7 +322,14 @@ def build_process_env(
     env["STORAGE_LIFE_DATA_DIR"] = str(bindings["storage_data"])
     env["STORAGE_LIFE_EXECUTION_MODE"] = "runtime"
     env["UNIFIED_AGENT_RUNTIME_ROOT"] = str(package_root)
-    control_root = bindings["runtime_control_root"]
+    control_root = Path(
+        bindings.get("runtime_control_root")
+        or (
+            Path(bindings["storage_data"]).resolve().parent
+            / "overall_runtime_control"
+        )
+    ).resolve()
+    control_root.mkdir(parents=True, exist_ok=True)
     env["OVERALL_RUNTIME_CONTROL_ROOT"] = str(control_root)
     active_model_config = _active_runtime_model_config(
         package_root,
