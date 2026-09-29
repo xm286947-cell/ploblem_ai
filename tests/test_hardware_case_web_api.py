@@ -36,12 +36,14 @@ def _case(status="PENDING_REVIEW"):
     }
 
 
-def _client(tmp_path):
+def _client(tmp_path, *, host_role: str = "MAINTAINER"):
     backend = HardwareCaseBackendService(
         HardwareCaseRepository(tmp_path / "hardware_case.sqlite3")
     )
     app = FastAPI()
-    app.include_router(create_hardware_case_router(backend))
+    app.include_router(
+        create_hardware_case_router(backend, host_role=host_role)
+    )
     return TestClient(app), backend
 
 
@@ -116,7 +118,7 @@ def test_consumer_default_cannot_see_unpublished_case(tmp_path):
 
 
 def test_mutations_require_maintainer_role(tmp_path):
-    client, _ = _client(tmp_path)
+    client, _ = _client(tmp_path, host_role="CONSUMER")
     response = client.post("/api/v2/hardware-cases", json=_case())
     assert response.status_code == 403
     assert response.json()["detail"] == "HARDWARE_CASE_MAINTAINER_REQUIRED"
