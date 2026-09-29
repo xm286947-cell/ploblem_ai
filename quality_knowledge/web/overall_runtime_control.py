@@ -159,11 +159,18 @@ class OverallRuntimeControlPlane:
                 "path": str(self.canonical_model_config),
             }
         path = Path(str(raw.get("path") or "")).resolve()
-        if raw.get("revision_id") == "CANONICAL" or not path.is_file():
+        revision_id = str(raw.get("revision_id") or "").strip()
+        if revision_id == "CANONICAL":
             return {
                 "revision_id": "CANONICAL",
                 "path": str(self.canonical_model_config),
             }
+        if (
+            not revision_id
+            or not path.is_file()
+            or self.revision_root not in path.parents
+        ):
+            raise ValueError("ACTIVE_CONFIG_POINTER_INVALID")
         return raw
 
     def effective_model_config_path(self) -> Path:
@@ -414,7 +421,10 @@ class OverallRuntimeControlPlane:
                 meta_path.read_text(encoding="utf-8")
             )
             target = Path(meta["path"]).resolve()
-            if not target.is_file():
+            if (
+                not target.is_file()
+                or self.revision_root not in target.parents
+            ):
                 raise KeyError("CONFIG_REVISION_FILE_NOT_FOUND")
         pointer = {
             "revision_id": revision_id,
@@ -581,10 +591,9 @@ class OverallRuntimeControlPlane:
                 },
                 environ=os.environ,
             )
+            runtime_db = self._connectivity_runtime_db()
             runtime = ConfiguredAgentRuntime(
-                SqliteTaskStore(
-                    self.diagnostic_root / "runtime.sqlite3"
-                ),
+                SqliteTaskStore(runtime_db),
                 config_loader=loader,
             )
             resolved = runtime.load_agent(agent_path)
@@ -626,7 +635,24 @@ class OverallRuntimeControlPlane:
             ),
             "runtime_owned": True,
             "probe_stack": "UNIFIED_RUNTIME",
+            "runtime_db": str(runtime_db),
+            "second_trace_store": False,
         }
+
+    def _connectivity_runtime_db(self) -> Path:
+        for name in (
+            "QUALITY_ISSUE",
+            "MAJOR_ISSUE",
+            "STORAGE",
+            "KNOWLEDGE",
+            "HARDWARE_CASE",
+        ):
+            path = self.runtime_dbs.get(name)
+            if path is not None:
+                return path
+        if self.runtime_dbs:
+            return next(iter(self.runtime_dbs.values()))
+        raise ValueError("EXISTING_RUNTIME_STORE_REQUIRED")
 
     @staticmethod
     def _table_exists(
