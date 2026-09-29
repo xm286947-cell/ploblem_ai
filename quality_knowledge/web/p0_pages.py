@@ -19,6 +19,11 @@ from fastapi.templating import Jinja2Templates
 from .missed_test_adapter import build_missed_test_rows
 from .itr_recovery_adapter import build_itr_recovery_rows
 from .itr_resolution_adapter import build_itr_resolution_rows
+from .overall_navigation import (
+    append_overall_return_state,
+    normalize_overall_return_state,
+    overall_navigation_asset_version,
+)
 
 
 _HERE = Path(__file__).resolve().parent
@@ -142,6 +147,7 @@ def _safe_current_problem_return_url(raw: str | None) -> str:
         or parsed.netloc
         or parsed.fragment
         or parsed.path not in {
+            "/p0/issues",
             "/p0/missed-test-analysis",
             "/p0/itr-recovery",
             "/p0/itr-resolution",
@@ -189,6 +195,7 @@ def create_p0_insights_router(
     """
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
+    templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version(assets)
 
     def p04_js_asset_version() -> str:
         asset = assets / "p04_insights.js"
@@ -211,8 +218,12 @@ def create_p0_insights_router(
         } else "/p0/quality-scenario-insights"
         raw_url_context = request.query_params.get("p04_context")
         raw_return_context = request.query_params.get("return_context")
+        overall_state = normalize_overall_return_state(
+            request.query_params.get("overall_return_state")
+        )
         if raw_url_context is None and raw_return_context is None:
-            return return_to, "", return_to + "?p04_reset=1"
+            return_url = return_to + "?p04_reset=1"
+            return return_to, "", append_overall_return_state(return_url, overall_state)
 
         if raw_url_context is not None:
             _normalize_p04_url_context(raw_url_context)
@@ -222,6 +233,7 @@ def create_p0_insights_router(
             _p04_return_url(raw_return_context)
             safe_context = json.dumps(json.loads(raw_return_context), ensure_ascii=False, separators=(",", ":"))
         return_url = return_to + "?" + urlencode({"p04_context": safe_context})
+        return_url = append_overall_return_state(return_url, overall_state)
         return return_to, safe_context, return_url
 
     @router.get("/p0/insights", response_class=HTMLResponse, include_in_schema=False)
@@ -389,6 +401,7 @@ def create_p0_insights_router(
                     "return_to": return_to,
                     "return_url": return_url,
                     "return_context": p04_context,
+                    "overall_return_state": request.query_params.get("overall_return_state", ""),
                     "page_title": "场景详情 · 质量能力",
                 },
             )
@@ -402,6 +415,11 @@ def create_p0_insights_router(
             return_to = _safe_current_problem_return_url(requested_return)
         else:
             return_to = ""
+        overall_state = normalize_overall_return_state(
+            request.query_params.get("overall_return_state")
+        )
+        if return_to:
+            return_to = append_overall_return_state(return_to, overall_state)
         return templates.TemplateResponse(
             request,
             "p0_issue_detail.html",
@@ -431,6 +449,7 @@ def create_p0_insights_router(
                 "return_to": return_to,
                 "return_url": return_url,
                 "return_context": p04_context,
+                "overall_return_state": request.query_params.get("overall_return_state", ""),
                 "page_title": "场景详情 · 质量能力",
             },
         )
@@ -453,6 +472,7 @@ def create_p0_insights_router(
                 "return_to": return_to,
                 "return_url": return_url,
                 "return_context": p04_context,
+                "overall_return_state": request.query_params.get("overall_return_state", ""),
                 "page_title": "来源追溯 · 质量能力",
             },
         )
