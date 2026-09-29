@@ -13,6 +13,10 @@ on:
       - "quality_knowledge/web/templates/_overall_evidence_content.html"
       - "quality_knowledge/web/templates/p0_base.html"
       - "tests/test_r2_w3_*.py"
+      - "tests/test_overall_frontend_shell.py"
+      - "tests/test_historical_case_consumer_contract.py"
+      - "tests/test_major_knowledge_publication_contract.py"
+      - "tests/test_hardware_case_evidence_source.py"
       - ".github/workflows/overall-r2-w3-gate.yml"
   pull_request:
     branches:
@@ -54,3 +58,10 @@ jobs:
             tests/test_r2_w3_*.py \
             tests/test_r2_w2_return_context.py \
             tests/test_overall_frontend_shell.py
+
+      - name: Run producer Evidence contract regressions
+        run: |
+          pytest -q \
+            tests/test_historical_case_consumer_contract.py \
+            tests/test_major_knowledge_publication_contract.py \
+            tests/test_hardware_case_evidence_source.py
