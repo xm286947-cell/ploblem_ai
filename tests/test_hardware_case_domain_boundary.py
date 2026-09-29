@@ -37,7 +37,7 @@ def test_hardware_case_only_composition_does_not_load_other_business_domains(tmp
     assert response.status_code in {302, 307}
     assert response.headers["location"] == "/p0/hardware-cases"
     assert client.get("/p0/hardware-cases").status_code == 200
-    assert client.get("/p0/hardware-cases/base-data").status_code == 200
+    assert client.get("/p0/hardware-cases/base-data").status_code == 403
     assert client.get("/api/v2/hardware-cases").status_code == 200
 
     # Other product surfaces are deliberately absent in this composition.
