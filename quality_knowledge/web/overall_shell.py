@@ -28,6 +28,7 @@ from quality_knowledge.web.overall_navigation import (
     normalize_overall_return_state,
     overall_navigation_asset_version,
 )
+from quality_knowledge.web.overall_assembly import build_domain_assembly
 
 
 _HERE = Path(__file__).resolve().parent
@@ -339,6 +340,10 @@ def create_overall_shell_router(
     def overall_task_overview() -> dict[str, Any]:
         return _task_overview(task_provider)
 
+    @router.get("/api/v2/overall/assembly")
+    def overall_assembly(request: Request) -> dict[str, Any]:
+        return build_domain_assembly(request.app.state)
+
     @router.get("/api/v2/overall/scenario-parity")
     def overall_scenario_parity(request: Request) -> dict[str, Any]:
         legacy_scenario_status = getattr(request.app.state, "legacy_scenario_status", {}) or {}
@@ -355,6 +360,7 @@ def create_overall_shell_router(
                 "page_title": "总体工作台",
                 "workspaces": WORKSPACES,
                 "task_overview": _task_overview(task_provider),
+                "domain_assembly": build_domain_assembly(request.app.state),
                 "common_evidence_contract": COMMON_EVIDENCE_CONTRACT_VERSION,
                 "product_areas": PRODUCT_AREAS,
             },
