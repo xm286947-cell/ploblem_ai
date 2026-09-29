@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 cd "$(dirname "$0")"
+export HARDWARE_CASE_HOST_ROLE=MAINTAINER
+: "${HARDWARE_CASE_HOST_ACTOR:=posix:hardware-maintainer}"
+export HARDWARE_CASE_HOST_ACTOR
 mkdir -p data/runtime
 python scripts/hardware_case_precheck.py --mode web
 echo "P01: http://127.0.0.1:8080/p0/hardware-cases"
