@@ -110,10 +110,8 @@ jobs:
           }
 
           $overall = Dump-Dom "/p0/overall/areas/current-problem" "overall-current-problem"
-          Require $overall "/itr/recovery-workbench" "Overall mature ITR"
-          Require $overall "/itr/resolution-workbench" "Overall mature Resolution"
-          Require $overall "/software-assessment" "Overall mature Software Assessment"
-          Require $overall "/missed-test-analysis" "Overall mature Missed Test"
+          Require $overall "/p0/issues" "Overall Common Problem View"
+          Require $overall "当前问题" "Overall Current Problem area"
 
           $common = Dump-Dom "/p0/issues" "common-problem"
           Require $common "/itr/recovery-workbench" "Common mature ITR"
