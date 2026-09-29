@@ -209,7 +209,11 @@ def create_p0_insights_router(
         return hardware_auth.role
 
     def require_hardware_maintainer() -> None:
-        hardware_auth.require_maintainer()
+        if hardware_auth.role != "MAINTAINER":
+            raise HTTPException(
+                status_code=403,
+                detail="HARDWARE_CASE_MAINTAINER_REQUIRED",
+            )
 
     def p04_js_asset_version() -> str:
         asset = assets / "p04_insights.js"
