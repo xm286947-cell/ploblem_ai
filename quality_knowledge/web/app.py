@@ -93,7 +93,10 @@ def _safe_issue_return_context(raw: str | None) -> str:
     parsed = urlsplit(value)
     if parsed.scheme or parsed.netloc or parsed.fragment:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
-    if parsed.path not in {'/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis', '/software-assessment'}:
+    if parsed.path not in {
+        '/itr/resolution-workbench', '/itr/recovery-workbench', '/missed-test-analysis', '/software-assessment',
+        '/p0/itr-resolution', '/p0/itr-recovery', '/p0/missed-test-analysis', '/p0/software-assessment',
+    }:
         raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
     return parsed.path + (('?' + parsed.query) if parsed.query else '')
 
@@ -661,12 +664,56 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         vm['issue_total'] = len(sequence)
         vm['human_fields'] = human_svc.list_field_definitions(True)
         vm['human_analysis'] = human_svc.get_analysis(knowledge_id, issue['issue_version_id']) if issue else None
+        related_materials = material_repo.materials_for_issue(knowledge_id)
+        related_types = {
+            str(item.get('material_type') or '')
+            for item in related_materials
+            if str(item.get('link_status') or '').upper() in {'LINKED', 'MANUAL_LINKED'}
+        }
+        problem_ref = str((issue or {}).get('business_issue_id') or '').strip()
+        relation_query = urlencode({'q': problem_ref}) if problem_ref else ''
+        associations = []
+        if problem_ref:
+            associations.append({
+                'kind': 'ITR',
+                'label': 'ITR / 现场恢复',
+                'url': '/p0/itr-recovery?' + relation_query,
+                'relation_owner': 'quality_issue.business_issue_id',
+            })
+        if 'ITR_CS' in related_types:
+            associations.append({
+                'kind': 'RESOLUTION',
+                'label': '彻底解决',
+                'url': '/p0/itr-resolution?' + relation_query,
+                'relation_owner': 'issue_material_link',
+            })
+        if 'SOFTWARE_OPERATION' in related_types:
+            associations.append({
+                'kind': 'SOFTWARE_ASSESSMENT',
+                'label': '软件考核',
+                'url': '/p0/software-assessment?' + relation_query,
+                'relation_owner': 'issue_material_link',
+            })
+        normalized = _safe_json((issue or {}).get('normalized_json'))
+        if _is_missed_test_issue(normalized):
+            associations.append({
+                'kind': 'MISSED_TEST',
+                'label': '漏测分析',
+                'url': '/p0/missed-test-analysis?' + relation_query,
+                'relation_owner': 'quality_issue.escape.is_escape',
+            })
+        vm['current_problem_associations'] = associations
+        vm['canonical_problem_identity'] = problem_ref
         vm['return_to'] = return_to
         vm['return_label'] = {
             '/itr/resolution-workbench': '返回彻底解决工作台',
             '/itr/recovery-workbench': '返回 ITR / 现场恢复',
             '/missed-test-analysis': '返回漏测分析',
             '/software-assessment': '返回软件考核工作台',
+            '/p0/itr-resolution': '返回彻底解决工作台',
+            '/p0/itr-recovery': '返回 ITR / 现场恢复',
+            '/p0/missed-test-analysis': '返回漏测分析',
+            '/p0/software-assessment': '返回软件考核工作台',
         }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
