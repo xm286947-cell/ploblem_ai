@@ -4,7 +4,12 @@ import json
 from typing import Any
 from urllib.parse import urlencode
 
-from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
+from quality_knowledge.current_problem_contract import (
+    CONTRACT_VERSION,
+    WORKBENCH_COUNT,
+    CanonicalProblemIdentityV1,
+    build_relation_contract,
+)
 
 
 def _safe_json(value: Any) -> dict[str, Any]:
@@ -36,32 +41,24 @@ def build_current_problem_associations(
     *,
     p0: bool = True,
 ) -> dict[str, Any]:
-    """Build one fail-closed relation view around the canonical Existing Problem.
-
-    No relation is inferred from title, description, owner or other fuzzy fields.
-    Resolution/software relations require an established or exact-unique canonical
-    ITR material link. Missed-test requires an explicit Existing Problem source fact.
-    """
+    """Build the fail-closed W1 relation view around Existing Problem."""
 
     issue = service.get_issue(knowledge_id) if service is not None else None
+    identity = CanonicalProblemIdentityV1.from_issue(issue)
     if not issue:
         return {
+            "contract_version": CONTRACT_VERSION,
+            "identity": None,
             "knowledge_id": knowledge_id,
             "canonical_problem_id": "",
             "relations": [],
             "related_count": 0,
+            "workbench_count": WORKBENCH_COUNT,
         }
-
-    business_issue_id = str(issue.get("business_issue_id") or "").strip()
-    canonical_itr = ""
-    try:
-        canonical_itr = SourceProblemItrRefV1.from_input(business_issue_id).canonical_itr
-    except InvalidSourceProblemItrRef:
-        canonical_itr = ""
 
     materials = (
         material_repository.materials_for_issue(knowledge_id)
-        if material_repository is not None
+        if material_repository is not None and identity is not None
         else []
     )
     resolution = [row for row in materials if row.get("material_type") == "ITR_CS"]
@@ -70,7 +67,7 @@ def build_current_problem_associations(
     ]
 
     normalized = _safe_json(issue.get("normalized_json"))
-    missed = _is_missed_test_issue(normalized)
+    missed = bool(identity) and _is_missed_test_issue(normalized)
 
     routes = {
         "itr": "/p0/itr-recovery" if p0 else "/itr/recovery-workbench",
@@ -78,61 +75,73 @@ def build_current_problem_associations(
         "assessment": "/p0/software-assessment" if p0 else "/software-assessment",
         "missed": "/p0/missed-test-analysis" if p0 else "/missed-test-analysis",
     }
-    query = canonical_itr or business_issue_id
+    query = identity.source_problem_ref.canonical_itr if identity else ""
 
     def link(route: str, present: bool) -> str:
         if not present or not query:
             return ""
         return route + "?" + urlencode({"q": query})
 
+    itr_present = identity is not None
     relations = [
-        {
-            "key": "ITR",
-            "label": "ITR工作台",
-            "present": bool(canonical_itr),
-            "count": 1 if canonical_itr else 0,
-            "status": "CANONICAL_PROBLEM_IDENTITY" if canonical_itr else "NO_RELATION",
-            "href": link(routes["itr"], bool(canonical_itr)),
-            "evidence": [business_issue_id] if canonical_itr else [],
-        },
-        {
-            "key": "RESOLUTION",
-            "label": "彻底解决工作台",
-            "present": bool(resolution),
-            "count": len(resolution),
-            "status": "LINKED" if resolution else "NO_RELATION",
-            "href": link(routes["resolution"], bool(resolution)),
-            "evidence": [
+        build_relation_contract(
+            identity,
+            key="ITR",
+            label="ITR工作台",
+            present=itr_present,
+            count=1 if itr_present else 0,
+            status="CANONICAL_PROBLEM_IDENTITY" if itr_present else "NO_RELATION",
+            href=link(routes["itr"], itr_present),
+            evidence=[identity.source_problem_ref.public_ref] if identity else [],
+            source_domain="EXISTING_PROBLEM",
+        ),
+        build_relation_contract(
+            identity,
+            key="RESOLUTION",
+            label="彻底解决工作台",
+            present=bool(resolution),
+            count=len(resolution),
+            status="LINKED" if resolution else "NO_RELATION",
+            href=link(routes["resolution"], bool(resolution)),
+            evidence=[
                 str(row.get("business_key") or row.get("source_file") or "")
                 for row in resolution[:3]
             ],
-        },
-        {
-            "key": "SOFTWARE_ASSESSMENT",
-            "label": "软件考核工作台",
-            "present": bool(assessment),
-            "count": len(assessment),
-            "status": "LINKED" if assessment else "NO_RELATION",
-            "href": link(routes["assessment"], bool(assessment)),
-            "evidence": [
+            source_domain="ITR_RESOLUTION_SOURCE",
+        ),
+        build_relation_contract(
+            identity,
+            key="SOFTWARE_ASSESSMENT",
+            label="软件考核工作台",
+            present=bool(assessment),
+            count=len(assessment),
+            status="LINKED" if assessment else "NO_RELATION",
+            href=link(routes["assessment"], bool(assessment)),
+            evidence=[
                 str(row.get("business_key") or row.get("source_file") or "")
                 for row in assessment[:3]
             ],
-        },
-        {
-            "key": "MISSED_TEST",
-            "label": "漏测分析",
-            "present": missed,
-            "count": 1 if missed else 0,
-            "status": "SOURCE_FACT_PRESENT" if missed else "NO_RELATION",
-            "href": link(routes["missed"], missed),
-            "evidence": ["escape.is_escape"] if missed else [],
-        },
+            source_domain="SOFTWARE_ASSESSMENT_SOURCE",
+        ),
+        build_relation_contract(
+            identity,
+            key="MISSED_TEST",
+            label="漏测分析",
+            present=missed,
+            count=1 if missed else 0,
+            status="SOURCE_FACT_PRESENT" if missed else "NO_RELATION",
+            href=link(routes["missed"], missed),
+            evidence=["escape.is_escape"] if missed else [],
+            source_domain="EXISTING_PROBLEM",
+        ),
     ]
 
     return {
+        "contract_version": CONTRACT_VERSION,
+        "identity": identity.to_dict() if identity else None,
         "knowledge_id": knowledge_id,
-        "canonical_problem_id": canonical_itr or business_issue_id,
+        "canonical_problem_id": identity.canonical_problem_id if identity else "",
         "relations": relations,
         "related_count": sum(1 for relation in relations if relation["present"]),
+        "workbench_count": WORKBENCH_COUNT,
     }

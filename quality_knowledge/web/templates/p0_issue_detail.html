@@ -16,12 +16,12 @@
     </div>
     <div data-itr-source-body></div>
   </section>
-  <section class="p0-card p0-source-context" data-current-problem-associations>
+  <section class="p0-card p0-source-context" data-current-problem-associations data-contract-version="{{ current_problem_associations.contract_version or 'canonical-problem/v1' }}">
     <div class="p0-card-head">
       <div>
         <span class="p0-kicker">ASSOCIATION</span>
         <h2>关联业务对象</h2>
-        <p>只展示同一 Canonical Problem Identity 下已确认的真实关联；不存在的关系保持 Fail Closed。</p>
+        <p>只展示同一 Canonical Problem Identity 下已确认的真实关联；不存在或冲突的关系统一保持 NO_RELATION / Fail Closed。Common Problem View 仅消费与导航，不接管源工作台状态机。</p>
       </div>
       <span>{{ current_problem_associations.related_count or 0 }}/4 已关联</span>
     </div>
