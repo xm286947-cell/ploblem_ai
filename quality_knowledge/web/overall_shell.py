@@ -90,7 +90,7 @@ PRODUCT_AREAS: tuple[dict[str, Any], ...] = (
         "capabilities": (
             {"title": "重大问题案例库", "summary": "Historical Case、Repeat Risk 与 Evidence。", "path": "/p0/cases"},
             {"title": "硬件案例库", "summary": "硬件案例、电路树与来源追溯。", "path": "/p0/hardware-cases"},
-            {"title": "硬件基础数据", "summary": "双树导入与基础数据管理。", "path": "/p0/hardware-cases/base-data"},
+            {"title": "硬件基础数据", "summary": "双树导入与基础数据管理。", "path": "/p0/hardware-cases/base-data", "requires_hardware_maintainer": True},
             {"title": "已发布知识", "summary": "统一知识生产正式发布对象。", "path": "/storage-workspace/knowledge-production/published"},
             {"title": "统一知识生产", "summary": "Source、Candidate、审核与发布。", "path": "/storage-workspace/knowledge-production/sources"},
         ),
@@ -236,6 +236,7 @@ def _present_product_area(
     *,
     legacy_ready: bool,
     legacy_scenario_ready: bool,
+    hardware_maintainer_enabled: bool = False,
 ) -> dict[str, Any]:
     result = dict(area)
     capabilities = []
@@ -247,6 +248,8 @@ def _present_product_area(
             available = legacy_scenario_ready
         elif item.get("requires_legacy"):
             available = legacy_ready
+        elif item.get("requires_hardware_maintainer"):
+            available = hardware_maintainer_enabled
         else:
             available = True
         capabilities.append({**item, "available": available})
@@ -321,6 +324,7 @@ def create_overall_shell_router(
     *,
     task_provider: TaskProvider | None = None,
     template_dir: str | Path | None = None,
+    hardware_case_host_role: str = "CONSUMER",
 ) -> APIRouter:
     """Return the platform-owned Overall Shell router.
 
@@ -330,6 +334,10 @@ def create_overall_shell_router(
 
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version()
+    hardware_maintainer_enabled = (
+        str(hardware_case_host_role or "CONSUMER").strip().upper()
+        == "MAINTAINER"
+    )
     router = APIRouter()
 
     @router.get("/api/v2/overall/workspaces")
@@ -377,6 +385,7 @@ def create_overall_shell_router(
                 area,
                 legacy_ready=legacy_ready,
                 legacy_scenario_ready=legacy_scenario_ready,
+                hardware_maintainer_enabled=hardware_maintainer_enabled,
             )
             for area in PRODUCT_AREAS
         ]
@@ -404,6 +413,7 @@ def create_overall_shell_router(
                     area,
                     legacy_ready=legacy_ready,
                     legacy_scenario_ready=legacy_scenario_ready,
+                    hardware_maintainer_enabled=hardware_maintainer_enabled,
                 ),
                 "product_areas": PRODUCT_AREAS,
                 "scenario_parity": (
