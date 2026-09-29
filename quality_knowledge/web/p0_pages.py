@@ -21,7 +21,6 @@ from .itr_recovery_adapter import build_itr_recovery_rows
 from .itr_resolution_adapter import build_itr_resolution_rows
 from .software_assessment_adapter import build_software_assessment_rows
 from .current_problem_associations import build_current_problem_associations
-from .hardware_auth import trusted_hardware_auth_context
 from .overall_navigation import (
     append_overall_return_state,
     normalize_overall_return_state,
@@ -201,15 +200,19 @@ def create_p0_insights_router(
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version(assets)
-    hardware_auth = trusted_hardware_auth_context(hardware_case_host_role)
+    hardware_host_role = str(
+        hardware_case_host_role or "CONSUMER"
+    ).strip().upper()
+    if hardware_host_role not in {"CONSUMER", "MAINTAINER"}:
+        raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
 
     def resolve_hardware_role(request: Request) -> str:
-        # Query parameters and browser storage are presentation state only.
-        # The server-bound role is the sole authority for page visibility.
-        return hardware_auth.role
+        # Reuse the existing host-role model. Query/browser state is never
+        # authority; an unbound host fails closed to CONSUMER.
+        return hardware_host_role
 
     def require_hardware_maintainer() -> None:
-        if hardware_auth.role != "MAINTAINER":
+        if hardware_host_role != "MAINTAINER":
             raise HTTPException(
                 status_code=403,
                 detail="HARDWARE_CASE_MAINTAINER_REQUIRED",
