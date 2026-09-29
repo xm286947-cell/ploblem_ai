@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -460,6 +461,7 @@ def _invoke_json(agent_id: str, instructions: str, payload: dict[str, Any], sche
     event = {
         "agent_id": agent_id,
         "request_id": request_id,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
         "task_id": result.task_id,
         "run_id": result.run_id,
         "status": result.status.value if hasattr(result.status, "value") else str(result.status),
