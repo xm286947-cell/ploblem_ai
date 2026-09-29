@@ -677,7 +677,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             '/itr/recovery-workbench': '返回 ITR / 现场恢复',
             '/missed-test-analysis': '返回漏测分析',
             '/software-assessment': '返回软件考核工作台',
-            '/p0/itr-resolution': '返回彻底解决工作台',
+            '/p0/itr-resolution': '返回彻底解决单',
             '/p0/itr-recovery': '返回 ITR / 现场恢复',
             '/p0/missed-test-analysis': '返回漏测分析',
             '/p0/software-assessment': '返回软件考核工作台',
