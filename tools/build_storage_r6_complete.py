@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
 PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
-RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+RUNTIME_EXPECTED_COMMIT = "023dc785cb06187acd2509f2304dcc1c18f2be09"
 
 
 def sha256(path: Path) -> str:
@@ -67,6 +67,9 @@ def runtime_vendor_closure_gate(runtime_root: Path, expected_commit: str = RUNTI
         "tools/openai_mock/server.py",
         "runtime/__init__.py",
         "runtime/providers/openai_compatible.py",
+        "runtime/observation.py",
+        "runtime/store/observation.py",
+        "runtime/adapters/observation.py",
     ]
     missing = [rel for rel in required if not (runtime_root / rel).is_file()]
     if missing:
