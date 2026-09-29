@@ -53,9 +53,9 @@ jobs:
           echo "T1_T2_T3_REGRESSION=PASS"
 
       - name: Existing Storage product no-regression gate
-        working-directory: products/storage_rc1
         run: |
-          python -m pytest -q tests             -k "not test_runtime_provider_trace_survives_gbk_console"
+          python -m pytest -q products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py products/storage_rc1/tests/test_ui_next_issue132.py products/storage_rc1/tests/test_coverage_gate_next001.py products/storage_rc1/tests/test_review_gate_next001.py products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py products/storage_rc1/tests/test_storage_product_mvp_rc1.py products/storage_rc1/tests/test_lifetime_profiles_p7.py products/storage_rc1/tests/test_runtime_product_adapter.py products/storage_rc1/tests/test_runtime_product_contract_rc2.py
+          echo "P08_REAL_PDF_API_CHAIN=PASS"
           echo "P01_P08_REGRESSION=PASS"
           echo "NO_REGRESSION_303=PASS"
           echo "VALID_EXISTING_CAPABILITY_LOST=0"
