@@ -81,6 +81,74 @@ jobs:
           echo "NO_FAKE_LIFETIME=PASS"
           echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
 
+      - name: Build complete R1 demo candidate
+        env:
+          STORAGE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+          STORAGE_PACKAGE_ID: STORAGE-R1-FAST-DEMO-CANDIDATE-${{ github.event.pull_request.head.sha }}
+          STORAGE_ZIP_NAME: STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+          STORAGE_ASSEMBLY_NAME: Storage R1 Fast Demo - Device Lifetime Assessment
+          STORAGE_NEXT_STATUS: READY_FOR_PRODUCT_TEST
+        run: |
+          python tools/build_storage_r6_complete.py
+          test -f dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+          sha256sum -c dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256
+          echo "COMPLETE_DEMO_CANDIDATE=BUILT"
+
+      - name: Fresh extract demo smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/storage-r1-demo
+          mkdir -p /tmp/storage-r1-demo
+          unzip -q dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip -d /tmp/storage-r1-demo
+          PKG=/tmp/storage-r1-demo/STORAGE_PRODUCT_MVP_RC1
+          test -f "$PKG/start_storage.bat"
+          test -x "$PKG/start_storage.command"
+          test -f "$PKG/storage_life/device_lifetime_assessment.py"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
+          python -m pytest -q tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
+          python -m uvicorn storage_life.app:app --host 127.0.0.1 --port 8765 >/tmp/storage-r1-uvicorn.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(40):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=1) as r:
+                      assert r.status == 200
+                      break
+              except Exception:
+                  time.sleep(0.25)
+          else:
+              raise SystemExit("STORAGE_SERVER_HEALTH_TIMEOUT")
+          with urllib.request.urlopen("http://127.0.0.1:8765/", timeout=2) as r:
+              home = r.read().decode("utf-8")
+          assert "Storage 器件寿命智能产品 MVP" in home
+          assert "lifetimeAssessment" in home
+          print("START=PASS")
+          print("HEALTH=PASS")
+          print("PRODUCT_HOME=PASS")
+          PY
+          kill "$SERVER_PID"
+          wait "$SERVER_PID" || true
+          trap - EXIT
+          echo "DEVICE_LIFETIME_PACKAGE_TEST=PASS"
+          echo "EVIDENCE_PACKAGE_TEST=PASS"
+          echo "FRESH_EXTRACT_SMOKE=PASS"
+
+      - name: Upload complete demo candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r1-fast-demo-complete-candidate
+          path: |
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
+
       - name: Gate result
         run: |
           echo "TASK=STORAGE-R1-FAST-DEMO-PRODUCT-DEVELOPMENT-001"
