@@ -1,0 +1,199 @@
+name: Overall R2 W5 Release Engineering Gate
+
+on:
+  push:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "scripts/build_overall_r2_windows_candidate.py"
+      - "scripts/overall_r2_windows_start.py"
+      - "INSTALL_OVERALL_R2_WINDOWS.bat"
+      - "START_OVERALL_R2_WINDOWS.bat"
+      - "STOP_OVERALL_R2_WINDOWS.bat"
+      - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
+      - "tests/test_r2_w5_*.py"
+      - ".github/workflows/overall-r2-w5-release-engineering.yml"
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "scripts/build_overall_r2_windows_candidate.py"
+      - "scripts/overall_r2_windows_start.py"
+      - "INSTALL_OVERALL_R2_WINDOWS.bat"
+      - "START_OVERALL_R2_WINDOWS.bat"
+      - "STOP_OVERALL_R2_WINDOWS.bat"
+      - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
+      - "tests/test_r2_w5_*.py"
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Compile release engineering code
+        run: |
+          python -m py_compile scripts/build_overall_r2_windows_candidate.py
+          python -m py_compile scripts/overall_r2_windows_start.py
+
+      - name: Run W5 package contract tests
+        run: pytest -q tests/test_r2_w5_*.py
+
+      - name: Regress W1-W4 frozen slices
+        run: |
+          pytest -q \
+            tests/test_r2_w1_*.py \
+            tests/test_r2_w2_*.py \
+            tests/test_r2_w3_*.py \
+            tests/test_r2_w4_*.py \
+            tests/test_overall_frontend_parent_integration.py \
+            tests/test_storage_workspace_binding.py
+
+  windows-target-deploy:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install validation runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Build exact-source Complete Product Candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dist = Join-Path $env:RUNNER_TEMP "r2-w5-dist"
+          $output = python scripts/build_overall_r2_windows_candidate.py --output-dir $dist
+          $output | ForEach-Object { Write-Host $_ }
+          foreach ($line in $output) {
+            if ($line -match '^PACKAGE_DIR=(.+)$') {
+              "PACKAGE_DIR=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^PACKAGE_ZIP=(.+)$') {
+              "PACKAGE_ZIP=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^PACKAGE_SHA256=(.+)$') {
+              "PACKAGE_SHA256=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^DUT_SOURCE_COMMIT=(.+)$') {
+              "DUT_SOURCE_COMMIT=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+            if ($line -match '^PACKAGE_ID=(.+)$') {
+              "PACKAGE_ID=$($Matches[1])" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
+
+      - name: Prepare target bindings and pre-deploy snapshot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $legacyDir = Join-Path $env:RUNNER_TEMP "legacy"
+          New-Item -ItemType Directory -Force -Path $legacyDir | Out-Null
+          $legacy = Join-Path $legacyDir "quality_issue_v1.db"
+          python -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
+          $legacyHash = (Get-FileHash -Algorithm SHA256 $legacy).Hash.ToLower()
+
+          $data = Join-Path $env:RUNNER_TEMP "target-r2-data"
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          "PREVIOUS_FORMAL_RELEASE=927efef5b7707d5d2013a34c1f3f40a8ade3d93d" | Set-Content -Encoding ascii (Join-Path $data "PRE_DEPLOY_BASELINE.txt")
+          $backup = Join-Path $env:RUNNER_TEMP "target-r2-data-backup"
+          if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+          New-Item -ItemType Directory -Force -Path $backup | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $data "*") $backup
+
+          $deploy = Join-Path $env:RUNNER_TEMP "target-deployment"
+          if (Test-Path $deploy) { Remove-Item -Recurse -Force $deploy }
+          Copy-Item -Recurse -Force $env:PACKAGE_DIR $deploy
+
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LEGACY_SHA_BEFORE=$legacyHash" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "OVERALL_R2_DATA_DIR=$data" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "STORAGE_LIFE_DATA_DIR=$(Join-Path $data 'storage')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PREDEPLOY_BACKUP=$backup" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "TARGET_DEPLOY_DIR=$deploy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run native Windows target smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python "$env:TARGET_DEPLOY_DIR\scripts\overall_r2_windows_start.py" --package-root "$env:TARGET_DEPLOY_DIR" --smoke --no-browser
+
+          $legacyAfter = (Get-FileHash -Algorithm SHA256 $env:LEGACY_QUALITY_ISSUE_DB_PATH).Hash.ToLower()
+          if ($legacyAfter -ne $env:LEGACY_SHA_BEFORE) {
+            throw "External Legacy database changed during W5 startup smoke"
+          }
+          $p1 = Join-Path $env:OVERALL_R2_DATA_DIR "quality_capability_p1.db"
+          if (!(Test-Path $p1)) {
+            throw "R2 P1 runtime database was not initialized"
+          }
+          Write-Host "LEGACY_DB_IMMUTABLE_DURING_SMOKE=PASS"
+          Write-Host "TARGET_DEPLOY_SMOKE=PASS"
+
+      - name: Validate local-data rollback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $data = $env:OVERALL_R2_DATA_DIR
+          Remove-Item -Recurse -Force $data
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $env:PREDEPLOY_BACKUP "*") $data
+
+          $sentinel = Join-Path $data "PRE_DEPLOY_BASELINE.txt"
+          $p1 = Join-Path $data "quality_capability_p1.db"
+          if (!(Test-Path $sentinel)) { throw "Rollback did not restore pre-deploy marker" }
+          if (Test-Path $p1) { throw "Rollback left R2-created P1 data behind" }
+
+          $report = Join-Path $env:RUNNER_TEMP "OVERALL_R2_W5_WINDOWS_VALIDATION.txt"
+          @(
+            "PACKAGE_ID=$env:PACKAGE_ID",
+            "DUT_SOURCE_COMMIT=$env:DUT_SOURCE_COMMIT",
+            "PACKAGE_SHA256=$env:PACKAGE_SHA256",
+            "WINDOWS_NATIVE_STARTUP=PASS",
+            "TARGET_DEPLOY_SMOKE=PASS",
+            "DOMAIN_ASSEMBLY=4/4_READY",
+            "LEGACY_DB_IMMUTABLE_DURING_SMOKE=PASS",
+            "LOCAL_DATA_ROLLBACK=PASS",
+            "PREVIOUS_FORMAL_RELEASE=927efef5b7707d5d2013a34c1f3f40a8ade3d93d",
+            "PRODUCT_TEST_GATE=NOT_RUN_FOR_THIS_CANDIDATE",
+            "RELEASE_DECISION=NOT_REQUESTED"
+          ) | Set-Content -Encoding utf8 $report
+          "VALIDATION_REPORT=$report" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Get-Content $report
+
+      - name: Upload W5 Complete Product Candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: OVERALL_R2_W5_COMPLETE_PRODUCT_CANDIDATE
+          path: |
+            ${{ env.PACKAGE_ZIP }}
+            ${{ env.VALIDATION_REPORT }}
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
