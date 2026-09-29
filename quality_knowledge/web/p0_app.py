@@ -25,8 +25,6 @@ from quality_knowledge.p04.portrait import (
 )
 from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
-from quality_knowledge.major_cases.context import UnavailableMajorProblemContextProvider
-from quality_knowledge.web.major_context_api import create_major_context_router
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -39,6 +37,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORAGE_WORKSPACE_PREFIX = "/storage-workspace"
 FULL_DOMAINS = frozenset({"QUALITY_ISSUE", "REPEAT_RISK", "HARDWARE_CASE"})
 KNOWN_DOMAINS = FULL_DOMAINS
+
+
+def _normalize_hardware_case_host_role(value: str | None) -> str:
+    role = str(value or "CONSUMER").strip().upper()
+    if role not in {"CONSUMER", "MAINTAINER"}:
+        raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
+    return role
 
 
 def _normalize_domains(
@@ -67,6 +72,7 @@ def create_p0_app(
     hardware_tree_upload_dir: str | Path | None = None,
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
+    hardware_case_host_role: str | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -99,6 +105,16 @@ def create_p0_app(
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
+    hardware_role_raw = (
+        hardware_case_host_role
+        if hardware_case_host_role is not None
+        else os.getenv("HARDWARE_CASE_HOST_ROLE")
+    )
+    app.state.hardware_case_host_role = (
+        _normalize_hardware_case_host_role(hardware_role_raw)
+        if hardware_role_raw is not None and str(hardware_role_raw).strip()
+        else None
+    )
     app.state.storage_workspace_binding = None
     if storage_app is not None or app.state.overall_shell_enabled:
         from quality_knowledge.web.storage_workspace import bind_storage_workspace
@@ -241,12 +257,21 @@ def create_p0_app(
         app.state.portrait_provider,
         app.state.portrait_repository,
     )
-    app.state.major_context_provider = (
-        major_context_provider or UnavailableMajorProblemContextProvider()
-    )
-    # The provider is injected at the composition boundary.  P04 can only see
-    # this HTTP JSON route and never imports the provider's repository/domain.
-    app.include_router(create_major_context_router(app.state.major_context_provider))
+    app.state.major_context_provider = None
+    if "QUALITY_ISSUE" in domains:
+        from quality_knowledge.major_cases.context import (
+            UnavailableMajorProblemContextProvider,
+        )
+        from quality_knowledge.web.major_context_api import create_major_context_router
+
+        app.state.major_context_provider = (
+            major_context_provider or UnavailableMajorProblemContextProvider()
+        )
+        # The provider is injected at the composition boundary. P04 can only see
+        # this HTTP JSON route and never imports the provider's repository/domain.
+        app.include_router(
+            create_major_context_router(app.state.major_context_provider)
+        )
 
     # Major production owns its SQLite store; downstream domains receive only
     # historical-case/v1 over the published artifact repository.
@@ -374,6 +399,7 @@ def create_p0_app(
             create_hardware_tree_import_router(
                 hardware_tree_import_repository,
                 hardware_tree_file_store,
+                host_role=app.state.hardware_case_host_role,
             )
         )
         app.include_router(
@@ -381,6 +407,7 @@ def create_p0_app(
                 hardware_case_service,
                 source_store=hardware_case_source_store,
                 intake_service=hardware_case_intake_service,
+                host_role=app.state.hardware_case_host_role,
             )
         )
 
@@ -392,7 +419,10 @@ def create_p0_app(
             from quality_knowledge.web.overall_shell import create_overall_shell_router
 
             app.include_router(
-                create_overall_shell_router(task_provider=overall_task_provider)
+                create_overall_shell_router(
+                    task_provider=overall_task_provider,
+                    hardware_case_host_role=app.state.hardware_case_host_role,
+                )
             )
 
         app.include_router(
@@ -408,7 +438,10 @@ def create_p0_app(
         app.include_router(create_public_scenario_router(app.state.p04_service))
         app.include_router(create_portrait_router(app.state.portrait_service))
         app.include_router(
-            create_p0_insights_router(scenario_detail_service=app.state.p04_service)
+            create_p0_insights_router(
+                scenario_detail_service=app.state.p04_service,
+                hardware_case_host_role=app.state.hardware_case_host_role,
+            )
         )
         app.include_router(create_p1_router())
 
@@ -484,7 +517,11 @@ def create_p0_app(
 
         root_target = "/p0/issues"
     else:
-        app.include_router(create_hardware_case_pages_router())
+        app.include_router(
+            create_hardware_case_pages_router(
+                hardware_case_host_role=app.state.hardware_case_host_role,
+            )
+        )
         root_target = "/p0/hardware-cases"
 
     effective_testability = testability_enabled

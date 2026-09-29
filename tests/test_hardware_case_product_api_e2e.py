@@ -38,15 +38,16 @@ def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
             p0_db,
             stage_runner=object(),
             hardware_case_db_path=hardware_db,
+            enabled_domains={"HARDWARE_CASE"},
+            hardware_case_host_role="MAINTAINER",
         )
     )
 
-    # Existing platform entrypoints stay alive.
-    init = client.get("/api/v2/initialization/status")
-    assert init.status_code == 200
-    assert init.json()["initialization_state"] == "READY"
-    assert client.get("/api/v2/products").status_code == 200
-    assert client.get("/", follow_redirects=False).headers["location"] == "/p0/insights"
+    # Hardware product test uses the same create_p0_app host and /api/v2
+    # surface, but explicitly disables unrelated domains and their dependencies.
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307}
+    assert root.headers["location"] == "/p0/hardware-cases"
 
     # Hardware Case starts on the same /api/v2 surface.
     case_payload = {

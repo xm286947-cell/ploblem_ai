@@ -25,15 +25,25 @@ from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseI
 _ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
 
 
-def _role(value: str | None) -> str:
+def _role(value: str | None, *, host_role: str | None = None) -> str:
     role = str(value or "CONSUMER").strip().upper()
     if role not in _ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+    if host_role is not None:
+        configured = str(host_role).strip().upper()
+        if configured not in _ALLOWED_ROLES:
+            raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
+        if role == "MAINTAINER" and configured != "MAINTAINER":
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
     return role
 
 
-def _require_maintainer(value: str | None) -> str:
-    role = _role(value)
+def _require_maintainer(
+    value: str | None,
+    *,
+    host_role: str | None = None,
+) -> str:
+    role = _role(value, host_role=host_role)
     if role != "MAINTAINER":
         raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
     return role
@@ -60,8 +70,15 @@ def create_hardware_case_router(
     prefix: str = "/api/v2/hardware-cases",
     source_store: HardwareCaseSourceStore | None = None,
     intake_service: HardwareCaseIntakeService | None = None,
+    host_role: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
+
+    def resolve_role(value: str | None) -> str:
+        return _role(value, host_role=host_role)
+
+    def require_maintainer(value: str | None) -> str:
+        return _require_maintainer(value, host_role=host_role)
 
     @router.get("")
     def search_cases(
@@ -72,7 +89,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = resolve_role(x_hardware_case_role)
         try:
             return service.search_cases(
                 q,
@@ -97,7 +114,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return service.save_tree_node(payload)
         except HardwareCaseContractError as error:
@@ -111,7 +128,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = resolve_role(x_hardware_case_role)
         try:
             return service.list_cases_by_tree_node(
                 node_id,
@@ -127,7 +144,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         items = service.maintenance_anomalies()
         return {"items": items, "total": len(items)}
 
@@ -140,7 +157,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            require_maintainer(x_hardware_case_role)
             payload = await file.read()
             ref = str(source_ref or "").strip()
             if not ref:
@@ -174,7 +191,7 @@ def create_hardware_case_router(
             file: UploadFile = File(...),
             x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"),
         ) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            require_maintainer(x_hardware_case_role)
             try:
                 return intake_service.upload(str(file.filename or ""), await file.read())
             except (HardwareCaseIntakeError, HardwareCaseSourceError) as error:
@@ -182,13 +199,13 @@ def create_hardware_case_router(
 
         @router.get("/intakes")
         def list_intakes(x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            require_maintainer(x_hardware_case_role)
             items = intake_service.list()
             return {"items": items, "total": len(items)}
 
         @router.get("/intakes/{intake_id}")
         def get_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            require_maintainer(x_hardware_case_role)
             try:
                 return intake_service.detail(intake_id)
             except HardwareCaseIntakeError as error:
@@ -196,7 +213,7 @@ def create_hardware_case_router(
 
         @router.post("/intakes/{intake_id}/process")
         def process_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            require_maintainer(x_hardware_case_role)
             try:
                 return intake_service.process(intake_id)
             except HardwareCaseIntakeError as error:
@@ -209,7 +226,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return service.create_case(payload)
         except HardwareCaseContractError as error:
@@ -223,7 +240,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = resolve_role(x_hardware_case_role)
         try:
             return service.get_case(
                 case_id,
@@ -241,7 +258,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = resolve_role(x_hardware_case_role)
         try:
             return service.get_mappings(
                 case_id,
@@ -259,7 +276,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = resolve_role(x_hardware_case_role)
         try:
             return service.get_evidence(
                 case_id,
@@ -277,7 +294,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return service.review_case(
                 case_id,
@@ -296,7 +313,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
@@ -312,7 +329,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
@@ -327,7 +344,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return service.check_publish_gate(case_id)
         except HardwareCaseContractError as error:
@@ -340,7 +357,7 @@ def create_hardware_case_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return service.publish_case(case_id)
         except HardwareCaseContractError as error:
@@ -383,7 +400,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            role = _role(x_hardware_case_role)
+            role = resolve_role(x_hardware_case_role)
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,
@@ -411,7 +428,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            role = _role(x_hardware_case_role)
+            role = resolve_role(x_hardware_case_role)
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,
@@ -443,7 +460,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> FileResponse:
-            role = _role(x_hardware_case_role)
+            role = resolve_role(x_hardware_case_role)
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,

@@ -128,6 +128,18 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
             "real_secret_included": False,
             "provider_config_source": "existing config/runtime + environment",
         },
+        "hardware_maintenance_binding": {
+            "host_role_env": "HARDWARE_CASE_HOST_ROLE",
+            "default_role": "CONSUMER",
+            "maintainer_role": "MAINTAINER",
+            "query_parameter_escalation": False,
+            "consumer_mutation_privilege": False,
+            "maintenance_entries": [
+                "/p0/hardware-cases/base-data",
+                "/p0/hardware-cases/intake",
+                "/p0/hardware-cases/review",
+            ],
+        },
         "rollback": {
             "formal_release_source": PREVIOUS_FORMAL_RELEASE,
             "strategy": "restore previous deployment directory and pre-deploy R2 local-data backup",

@@ -18,10 +18,20 @@ from services.hardware_tree_import_contract import HardwareTreeImportContractErr
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
-def _require_maintainer(value: str | None) -> None:
+def _require_maintainer(
+    value: str | None,
+    *,
+    host_role: str | None = None,
+) -> None:
     role = str(value or "CONSUMER").strip().upper()
     if role != "MAINTAINER":
         raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
+    if host_role is not None:
+        configured = str(host_role).strip().upper()
+        if configured not in {"CONSUMER", "MAINTAINER"}:
+            raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
+        if configured != "MAINTAINER":
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
 
 
 def _operator(value: str | None) -> str:
@@ -62,9 +72,13 @@ def create_hardware_tree_import_router(
     file_store: HardwareTreeImportFileStore,
     *,
     prefix: str = "/api/v2/hardware-cases/tree-imports",
+    host_role: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-tree-import"])
     analyzer = HardwareTreeImportAnalyzer(repository)
+
+    def require_maintainer(value: str | None) -> None:
+        _require_maintainer(value, host_role=host_role)
 
     @router.post("", status_code=201)
     async def upload_excel(
@@ -77,7 +91,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Operator"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         operator = _operator(x_hardware_case_operator)
         filename = str(file.filename or "").strip()
         payload = await file.read()
@@ -106,7 +120,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             items = repository.list_jobs(tree_type)
             return {"items": items, "total": len(items)}
@@ -120,7 +134,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             items = repository.list_versions(tree_type)
             return {"tree_type": tree_type.upper(), "items": items, "total": len(items)}
@@ -134,7 +148,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             version = repository.get_active_version(tree_type)
             return {"tree_type": tree_type.upper(), "active_version": version}
@@ -149,7 +163,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             job = repository.get_job(job_id)
             staged = file_store.get(job_id, job["source_filename"])
@@ -171,7 +185,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return {
                 "job": repository.get_job(job_id),
@@ -189,7 +203,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             job = repository.get_job(job_id)
             staged = file_store.get(job_id, job["source_filename"])
@@ -206,7 +220,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             change = repository.get_change(change_id)
             if change["job_id"] != job_id:
@@ -227,7 +241,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             issue = repository.get_issue(issue_id)
             if issue["job_id"] != job_id:
@@ -243,7 +257,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return repository.mark_ready_to_apply(job_id)
         except HardwareTreeImportContractError as error:
@@ -256,7 +270,7 @@ def create_hardware_tree_import_router(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        require_maintainer(x_hardware_case_role)
         try:
             return repository.apply_job(job_id)
         except HardwareTreeImportContractError as error:

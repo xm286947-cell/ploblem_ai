@@ -22,5 +22,10 @@ rem set "STORAGE_KNOWLEDGE_RELEASE_DIR=D:\QualityPlatform\OverallR2\data\knowled
 rem Overall R2 always binds Storage to the package's shared Unified Runtime and
 rem config\runtime\model.yaml. Do not point UNIFIED_AGENT_RUNTIME_ROOT at a second Runtime.
 
+rem Hardware Case host role. Default is CONSUMER. Authorized maintenance deployments
+rem may explicitly enable the existing tree import / knowledge intake / review entries.
+rem This is a host-side role binding; do not use ?role=maintainer as an access mechanism.
+rem set "HARDWARE_CASE_HOST_ROLE=MAINTAINER"
+
 rem Configure provider credentials through the environment names referenced by
 rem config/runtime/model.yaml. Never put real secrets into this package.

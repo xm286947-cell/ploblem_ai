@@ -36,6 +36,8 @@
         <span>{{ capability.summary }}</span>
         {% if capability.binding_pending %}
         <small>Protected Existing Capability · Route / Binding 待权威确认</small>
+        {% elif capability.requires_hardware_maintainer|default(false) %}
+        <small>仅维护角色可进入；当前 Host 为 Consumer</small>
         {% else %}
         <small>当前运行环境未绑定 Legacy 数据库</small>
         {% endif %}

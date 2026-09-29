@@ -88,6 +88,7 @@ jobs:
       # a separate #260 acceptance gate.
       DASHSCOPE_BASE_URL: https://provider-not-contacted.invalid/v1
       DASHSCOPE_API_KEY: W5_CONFIG_BINDING_ONLY_NOT_A_REAL_SECRET
+      HARDWARE_CASE_HOST_ROLE: MAINTAINER
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,6 +204,9 @@ jobs:
             "STORAGE_RUNTIME_SOURCE_BINDING=OVERALL_R2_SOURCE_COMMIT",
             "STORAGE_RUNTIME_EXTERNAL_STATE=PASS",
             "FORMAL_KNOWLEDGE_EXTERNAL_STATE=PASS",
+            "HARDWARE_CASE_HOST_ROLE=MAINTAINER",
+            "HARDWARE_MAINTAINER_ENTRY=PASS",
+            "HARDWARE_CONSUMER_DEFAULT=PASS_BY_FOCUSED_TEST",
             "LEGACY_DB_IMMUTABLE_DURING_SMOKE=PASS",
             "LOCAL_DATA_ROLLBACK=PASS",
             "PREVIOUS_FORMAL_RELEASE=927efef5b7707d5d2013a34c1f3f40a8ade3d93d",
