@@ -821,16 +821,20 @@ class OverallRuntimeControlPlane:
         limit: int = 20,
     ) -> dict[str, Any]:
         safe_limit = max(1, min(int(limit), 100))
-        stores = [
-            self._read_runtime_db(
-                name,
-                path,
-                limit=safe_limit,
+        stores: list[dict[str, Any]] = []
+        seen_paths: set[Path] = set()
+        for name, path in sorted(self.runtime_dbs.items()):
+            resolved_path = path.resolve()
+            if resolved_path in seen_paths:
+                continue
+            seen_paths.add(resolved_path)
+            stores.append(
+                self._read_runtime_db(
+                    name,
+                    resolved_path,
+                    limit=safe_limit,
+                )
             )
-            for name, path in sorted(
-                self.runtime_dbs.items()
-            )
-        ]
         ready = sum(
             item["status"] == "READY"
             for item in stores
