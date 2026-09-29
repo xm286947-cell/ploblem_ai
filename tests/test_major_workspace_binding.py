@@ -44,6 +44,11 @@ def test_major_repeat_workspace_and_case_deep_link_bind_to_existing_overall_shel
     assert 'href="/p0/cases">重大问题案例库</a>' in workspace.text
     assert 'href="/p0/overall">返回总体工作台</a>' in workspace.text
 
+    production = client.get("/p0/major-production")
+    assert production.status_code == 200
+    assert 'href="/import">进入 Excel 批量导入</a>' in production.text
+    assert 'href="/import/template">下载 Excel 模板</a>' in production.text
+
     detail = client.get("/p0/cases/CASE-OFI-02-DEEP-LINK")
     assert detail.status_code == 200
     assert 'href="/p0/cases">← 返回重大问题案例库</a>' in detail.text
