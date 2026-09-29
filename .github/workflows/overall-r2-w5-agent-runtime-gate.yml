@@ -35,7 +35,7 @@ jobs:
           tests/compatibility/test_runtime_four_domain_binding.py
       - name: W1-W4 frozen regression
         run: >-
-          python -m pytest -q --noconftest
+          python -m pytest -q
           tests/test_r2_w1_*.py
           tests/test_r2_w2_*.py
           tests/test_r2_w3_*.py
