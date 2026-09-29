@@ -45,11 +45,10 @@ class HardwareTrustedAuthContext:
         return claim
 
     def require_maintainer(self, client_claim: str | None = None) -> str:
-        if client_claim is not None and str(client_claim).strip():
-            claim = str(client_claim).strip().upper()
-            if claim not in _ALLOWED_ROLES:
-                raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
-        if self.role != "MAINTAINER":
+        claim = str(client_claim or "CONSUMER").strip().upper()
+        if claim not in _ALLOWED_ROLES:
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+        if self.role != "MAINTAINER" or claim != "MAINTAINER":
             raise HTTPException(
                 status_code=403,
                 detail="HARDWARE_CASE_MAINTAINER_REQUIRED",
