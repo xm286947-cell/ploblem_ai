@@ -167,9 +167,26 @@ def _initialize_packaged_knowledge_release(
 
     if target.exists():
         if (target / "release_manifest.json").is_file():
+            root_text = str(package_root)
+            if root_text not in sys.path:
+                sys.path.insert(0, root_text)
+            from products.storage_rc1.storage_life.knowledge_release import (
+                KnowledgeReleaseConsumer,
+            )
+
+            existing_status = KnowledgeReleaseConsumer(target).status()
+            if not existing_status.get("available"):
+                raise RuntimeError(
+                    "EXISTING_KNOWLEDGE_RELEASE_INVALID:"
+                    + str(existing_status.get("code") or "UNKNOWN")
+                )
             return {
                 "status": "EXISTING_EXTERNAL_RELEASE",
                 "target": str(target),
+                "knowledge_release_version": existing_status.get(
+                    "knowledge_release_version"
+                ),
+                "snapshot_hash": existing_status.get("snapshot_hash"),
             }
         try:
             has_entries = any(target.iterdir())
