@@ -67,6 +67,9 @@ def _control(
     return OverallRuntimeControlPlane(
         project_root=ROOT,
         state_root=tmp_path / "runtime-control",
+        runtime_dbs={
+            "QUALITY_ISSUE": tmp_path / "existing-runtime.sqlite3",
+        },
     )
 
 
@@ -264,9 +267,16 @@ def test_w5_connectivity_test_executes_through_unified_runtime_only(
     assert result["provider_calls"] == 1
     assert result["runtime_owned"] is True
     assert result["probe_stack"] == "UNIFIED_RUNTIME"
+    assert Path(result["runtime_db"]) == (
+        tmp_path / "existing-runtime.sqlite3"
+    ).resolve()
+    assert result["second_trace_store"] is False
     assert (
-        control.diagnostic_root / "runtime.sqlite3"
+        tmp_path / "existing-runtime.sqlite3"
     ).is_file()
+    assert not (
+        control.diagnostic_root / "runtime.sqlite3"
+    ).exists()
 
 
 def _seed_runtime_trace(path: Path) -> None:
