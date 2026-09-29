@@ -227,6 +227,7 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
         child_env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(legacy_db)
         child_env["R2_E2E_PROVIDER_BASE_URL"] = "http://127.0.0.1:18081/v1"
         child_env["acca1"] = SECRET
+        child_env["PYTHONUNBUFFERED"] = "1"
         child_env.pop("DASHSCOPE_BASE_URL", None)
         child_env.pop("DASHSCOPE_API_KEY", None)
 
