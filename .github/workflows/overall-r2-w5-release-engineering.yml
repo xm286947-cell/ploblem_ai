@@ -36,7 +36,7 @@ on:
       - "STOP_OVERALL_R2_WINDOWS.bat"
       - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
       - "tests/test_r2_w*.py"
-      - "tests/test_r2_storage_real_kp_e2e.py"
+      - "tests/test_r2_w5_storage_real_kp_e2e.py"
       - ".github/workflows/overall-r2-w5-release-engineering.yml"
 
 permissions:
@@ -267,4 +267,4 @@ jobs:
 
       - name: Run real Knowledge Production to Storage consumer smoke
         run: |
-          python -m pytest -q -s             tests/test_r2_storage_real_kp_e2e.py::test_r2_storage_real_provider_knowledge_production_to_consumer
+          python -m pytest -q -s             tests/test_r2_w5_storage_real_kp_e2e.py::test_r2_storage_real_provider_knowledge_production_to_consumer
