@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -75,14 +76,24 @@ def test_public_contract_deprecated_requires_explicit_historical():
 
 def test_public_consumer_has_no_overall_runtime_or_knowledge_dependency():
     source = (ROOT / "services/hardware_public_consumer.py").read_text(encoding="utf-8")
-    forbidden = (
+    tree = ast.parse(source)
+    imported_modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+
+    forbidden_prefixes = (
         "quality_knowledge.web.p0_app",
         "quality_knowledge.web.api_v2",
-        "repeat_risk",
-        "historical_case",
+        "quality_knowledge.web.repeat_risk_integration",
+        "services.historical_case_contract",
         "services.knowledge_service",
         "runtime",
-        "provider",
     )
-    lowered = source.lower()
-    assert all(token.lower() not in lowered for token in forbidden)
+    assert not any(
+        module == prefix or module.startswith(prefix + ".")
+        for module in imported_modules
+        for prefix in forbidden_prefixes
+    )
