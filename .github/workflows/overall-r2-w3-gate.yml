@@ -14,6 +14,8 @@ on:
       - "quality_knowledge/web/templates/p0_base.html"
       - "tests/test_r2_w3_*.py"
       - "tests/test_overall_frontend_shell.py"
+      - "services/historical_case_contract.py"
+      - "quality_knowledge/web/static/p0_case_detail.js"
       - "tests/test_historical_case_consumer_contract.py"
       - "tests/test_major_knowledge_publication_contract.py"
       - "tests/test_hardware_case_evidence_source.py"
@@ -30,6 +32,11 @@ on:
       - "quality_knowledge/web/templates/_overall_evidence_content.html"
       - "quality_knowledge/web/templates/p0_base.html"
       - "tests/test_r2_w3_*.py"
+      - "services/historical_case_contract.py"
+      - "quality_knowledge/web/static/p0_case_detail.js"
+      - "tests/test_historical_case_consumer_contract.py"
+      - "tests/test_major_knowledge_publication_contract.py"
+      - "tests/test_hardware_case_evidence_source.py"
 
 permissions:
   contents: read
