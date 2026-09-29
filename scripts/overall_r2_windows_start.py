@@ -246,6 +246,17 @@ def _active_runtime_model_config(
     return path
 
 
+def _env_value(env: dict[str, str], name: str) -> str:
+    value = str(env.get(name) or "").strip()
+    if value or os.name != "nt":
+        return value
+    wanted = name.casefold()
+    for key, candidate in env.items():
+        if str(key).casefold() == wanted:
+            return str(candidate or "").strip()
+    return ""
+
+
 def _runtime_provider_preflight(
     package_root: Path,
     control_root: Path,
@@ -292,12 +303,12 @@ def _runtime_provider_preflight(
     api_key_ref = str(model.get("api_key_env") or "").strip()
     base_url_present = bool(
         str(model.get("base_url") or "").strip()
-        or (base_url_ref and env.get(base_url_ref, "").strip())
+        or (base_url_ref and _env_value(env, base_url_ref))
     )
     api_key_required = bool(api_key_ref)
     api_key_present = bool(
         not api_key_required
-        or env.get(api_key_ref, "").strip()
+        or _env_value(env, api_key_ref)
         or str(model.get("api_key") or "").strip()
     )
 
