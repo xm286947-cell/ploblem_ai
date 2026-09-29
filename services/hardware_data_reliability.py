@@ -1,6 +1,7 @@
 """Hardware-owned schema, migration, backup, restore and recovery control."""
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
@@ -386,6 +387,11 @@ class HardwareDataReliabilityManager:
                 source.backup(target)
                 if self._integrity(target).lower() != "ok":
                     raise HardwareDataReliabilityError("RESTORE_INTEGRITY_FAILED")
+            # CPython sqlite connections created by callers can be GC-finalized
+            # slightly after their last reference disappears. Collect only stale,
+            # unreferenced handles; genuinely active target handles still make
+            # os.replace fail closed as RESTORE_TARGET_BUSY.
+            gc.collect()
             os.replace(temp_path, target_path)
         except Exception as error:
             try:
