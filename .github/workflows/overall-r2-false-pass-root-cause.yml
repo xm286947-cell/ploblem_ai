@@ -57,4 +57,4 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          python -m pytest -q -s tests/test_r2_false_pass_built_zip_windows_e2e.py
+          python -m pytest -q -s --noconftest tests/test_r2_false_pass_built_zip_windows_e2e.py
