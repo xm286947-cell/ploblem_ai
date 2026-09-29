@@ -1,0 +1,80 @@
+{% extends "p0_base.html" %}
+{% block title %}Runtime Diagnostics{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}系统设置 / Runtime Diagnostics{% endblock %}
+{% block body %}
+<section class="card">
+  <div class="pagehead">
+    <div>
+      <div class="kicker">UNIFIED RUNTIME</div>
+      <h1>Runtime Diagnostics</h1>
+      <div class="muted">只读投影 Existing Runtime Task / Run / Step / Attempt / Retry / Hard Cap / Failure；不创建第二套 Trace Store。</div>
+    </div>
+    <div class="row">
+      <a class="secondary" href="/p0/system/agent-config">Agent 配置</a>
+      <a class="secondary" href="/p0/overall/areas/management">返回管理与配置</a>
+    </div>
+  </div>
+  <div class="grid4">
+    <div><b>Projection</b><div>{{ diagnostics.projection_version }}</div></div>
+    <div><b>Trace Owner</b><div>{{ diagnostics.trace_owner }}</div></div>
+    <div><b>Stores Ready</b><div>{{ diagnostics.stores_ready }}/{{ diagnostics.stores_total }}</div></div>
+    <div><b>Knowledge Failures</b><div>{{ knowledge_failures['items']|length }}</div></div>
+  </div>
+</section>
+
+{% for store in diagnostics.stores %}
+<section class="card">
+  <div class="pagehead">
+    <div>
+      <h2>{{ store.name }}</h2>
+      <div class="muted"><code>{{ store.path }}</code></div>
+    </div>
+    <span>{{ store.status }}</span>
+  </div>
+  {% if store.tasks %}
+    {% for item in store.tasks %}
+    <details class="card" style="margin-top:10px">
+      <summary>
+        <b>{{ item.task.request_id or item.task.task_id }}</b>
+        · {{ item.task.status }}
+        · {{ item.task.business_domain or item.task.metadata.business_domain or '-' }}
+      </summary>
+      <pre style="white-space:pre-wrap">{{ item.task|tojson(indent=2) }}</pre>
+      {% if item.error %}<pre style="white-space:pre-wrap">{{ item.error|tojson(indent=2) }}</pre>{% endif %}
+      {% for run in item.runs %}
+      <div class="card">
+        <b>Run {{ run.run.run_id }}</b> · {{ run.run.status }}
+        {% for step in run.steps %}
+        <div class="card">
+          <b>Step {{ step.step.step_id }}</b> · {{ step.step.status }} · attempts={{ step.attempts|length }}
+          {% for attempt in step.attempts %}
+          <pre style="white-space:pre-wrap">{{ attempt|tojson(indent=2) }}</pre>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </details>
+    {% endfor %}
+  {% else %}
+    <div class="empty">暂无可投影 Runtime Trace。</div>
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="card">
+  <h2>Knowledge Production Failure Step</h2>
+  <div class="muted">只筛选 Knowledge Production 未完成 Runtime Task；错误、Step、Attempt 仍来自 Existing Runtime Store。</div>
+  {% if knowledge_failures['items'] %}
+    {% for item in knowledge_failures['items'] %}
+    <details class="card" style="margin-top:10px">
+      <summary><b>{{ item.store }}</b> · {{ item.task.request_id }} · {{ item.task.status }}</summary>
+      <pre style="white-space:pre-wrap">{{ item|tojson(indent=2) }}</pre>
+    </details>
+    {% endfor %}
+  {% else %}
+    <div class="empty">当前没有 Knowledge Production Runtime Failure。</div>
+  {% endif %}
+</section>
+{% endblock %}

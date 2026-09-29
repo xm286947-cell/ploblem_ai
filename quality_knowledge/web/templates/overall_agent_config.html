@@ -1,0 +1,147 @@
+{% extends "p0_base.html" %}
+{% block title %}Agent 配置{% endblock %}
+{% block shell_product %}质量产品总体{% endblock %}
+{% block breadcrumb %}系统设置 / Agent 配置{% endblock %}
+{% block body %}
+<section class="card">
+  <div class="pagehead">
+    <div>
+      <div class="kicker">AGENT-CONFIG-001</div>
+      <h1>Agent 配置</h1>
+      <div class="muted">公共控制面只管理 Model / Provider / SecretRef / Formal Agent Binding；Provider 调用、Retry、Secret 注入继续由 Unified Runtime 持有。</div>
+    </div>
+    <div class="row">
+      <a class="secondary" href="/p0/system/runtime-diagnostics">Runtime Diagnostics</a>
+      <a class="secondary" href="/p0/overall/areas/management">返回管理与配置</a>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Effective Config</h2>
+  <div class="grid4">
+    <div><b>Active Revision</b><div>{{ config.active_revision }}</div></div>
+    <div><b>Active Model</b><div>{{ config.active_model }}</div></div>
+    <div><b>Config Hash</b><div><code>{{ config.model_config_hash[:16] }}</code></div></div>
+    <div><b>Secret Policy</b><div>{{ config.secret_policy }}</div></div>
+  </div>
+  <p class="muted"><code>{{ config.model_config_path }}</code></p>
+</section>
+
+<section class="card">
+  <div class="pagehead">
+    <div><h2>Model / Provider Profiles</h2><div class="muted">页面只展示 SecretRef 与“是否存在”，不返回密钥值。</div></div>
+    <button class="primary" onclick="runConnectivity()">Connectivity Test</button>
+  </div>
+  <div id="connectivityResult" class="evidence">尚未执行。</div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Endpoint</th><th>SecretRef</th><th>Secret</th></tr></thead>
+      <tbody>
+      {% for ref, model in config.models.items() %}
+      <tr>
+        <td><code>{{ ref }}</code>{% if ref == config.active_model %} · ACTIVE{% endif %}</td>
+        <td>{{ model.provider }}</td>
+        <td>{{ model.model }}</td>
+        <td>{{ model.base_url_env or model.base_url or '-' }}</td>
+        <td><code>{{ model.api_key_env or '-' }}</code></td>
+        <td>{{ 'PRESENT' if model.api_key_present else ('DIRECT_TEST_ONLY' if model.direct_secret_configured else 'NOT_REQUIRED / MISSING') }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Formal Agent Bindings</h2>
+  <div class="muted">这里只认 <code>contracts/runtime_binding/v1</code> 的 BOUND 集合；正式 Agent 不允许 silent legacy fallback。</div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Owner</th><th>Agent</th><th>Config</th><th>Status</th><th>Smoke</th></tr></thead>
+      <tbody>
+      {% for item in config.formal_bindings['items'] %}
+      <tr>
+        <td>{{ item.owner_id }}</td>
+        <td><code>{{ item.agent_id }}</code></td>
+        <td><code>{{ item.config_path }}</code></td>
+        <td>{{ item.status }}</td>
+        <td><button class="secondary" onclick="runSmoke('{{ item.agent_id }}', this)">Agent Smoke</button></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="smokeResult" class="evidence">尚未执行。</div>
+</section>
+
+<section class="card">
+  <h2>Revision / Audit / Rollback</h2>
+  <div class="muted">Revision 只允许 SecretRef；激活后用于后续 Runtime Build / Restart，不覆盖操作员显式环境变量。</div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Revision</th><th>Created</th><th>Actor</th><th>Note</th><th>Hash</th><th>Action</th></tr></thead>
+      <tbody>
+      <tr>
+        <td><code>CANONICAL</code>{% if revisions.active_revision == 'CANONICAL' %} · ACTIVE{% endif %}</td>
+        <td>-</td><td>REPOSITORY</td><td>config/runtime/model.yaml</td><td>-</td>
+        <td><button class="secondary" onclick="rollbackTo('CANONICAL')">Rollback</button></td>
+      </tr>
+      {% for item in revisions['items'] %}
+      <tr>
+        <td><code>{{ item.revision_id }}</code>{% if revisions.active_revision == item.revision_id %} · ACTIVE{% endif %}</td>
+        <td>{{ item.created_at }}</td>
+        <td>{{ item.actor }}</td>
+        <td>{{ item.note }}</td>
+        <td><code>{{ item.config_hash[:12] }}</code></td>
+        <td>
+          <button class="secondary" onclick="activateRevision('{{ item.revision_id }}')">Activate</button>
+          <button class="secondary" onclick="rollbackTo('{{ item.revision_id }}')">Rollback</button>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <details style="margin-top:12px">
+    <summary><b>Create Revision</b> · 高级配置</summary>
+    <p class="muted">提交格式：<code>{"active_model":"...","models":{...},"note":"..."}</code>。禁止 <code>api_key</code> / password / token 等明文 Secret 字段。</p>
+    <textarea id="revisionJson" style="width:100%;min-height:180px" placeholder='{"active_model":"qwen_prod","models":{...},"note":"..."}'></textarea>
+    <div class="row"><button class="primary" onclick="createRevision()">Create Revision</button></div>
+    <div id="revisionResult" class="evidence"></div>
+  </details>
+</section>
+
+<script>
+async function jsonCall(url,opt={}) {
+  const r=await fetch(url,{headers:{'Content-Type':'application/json','X-Actor':'OVERALL_UI'},...opt});
+  const t=await r.text(); let j; try{j=JSON.parse(t)}catch{j={detail:t}}
+  if(!r.ok) throw Error(j.detail||r.status); return j;
+}
+async function runConnectivity(){
+  const el=document.getElementById('connectivityResult'); el.textContent='RUNNING...';
+  try{el.textContent=JSON.stringify(await jsonCall('/api/v2/system/agent-config/connectivity-test',{method:'POST'}),null,2)}
+  catch(e){el.textContent=e.message}
+}
+async function runSmoke(agentId){
+  const el=document.getElementById('smokeResult'); el.textContent='RUNNING '+agentId+'...';
+  try{el.textContent=JSON.stringify(await jsonCall('/api/v2/system/agent-config/agent-smoke/'+encodeURIComponent(agentId),{method:'POST'}),null,2)}
+  catch(e){el.textContent=e.message}
+}
+async function activateRevision(id){
+  try{await jsonCall('/api/v2/system/agent-config/revisions/'+encodeURIComponent(id)+'/activate',{method:'POST'}); location.reload()}
+  catch(e){document.getElementById('revisionResult').textContent=e.message}
+}
+async function rollbackTo(id){
+  try{await jsonCall('/api/v2/system/agent-config/rollback/'+encodeURIComponent(id),{method:'POST'}); location.reload()}
+  catch(e){document.getElementById('revisionResult').textContent=e.message}
+}
+async function createRevision(){
+  const el=document.getElementById('revisionResult');
+  try{
+    const body=JSON.parse(document.getElementById('revisionJson').value);
+    el.textContent=JSON.stringify(await jsonCall('/api/v2/system/agent-config/revisions',{method:'POST',body:JSON.stringify(body)}),null,2);
+  }catch(e){el.textContent=e.message}
+}
+</script>
+{% endblock %}

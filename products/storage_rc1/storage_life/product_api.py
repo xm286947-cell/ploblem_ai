@@ -728,13 +728,13 @@ def provider_operability() -> dict[str, Any]:
         },
         "management_deep_links": {
             "agent_config": {
-                "status": "DEPENDENCY_PENDING",
-                "href": None,
+                "status": "READY",
+                "href": "/p0/system/agent-config",
                 "owner": "OVERALL_COMMON_CAPABILITY",
             },
             "runtime_diagnostics": {
-                "status": "DEPENDENCY_PENDING",
-                "href": None,
+                "status": "READY",
+                "href": "/p0/system/runtime-diagnostics",
                 "owner": "OVERALL_COMMON_CAPABILITY",
             },
         },

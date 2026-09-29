@@ -105,6 +105,72 @@ def create_p0_app(
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
+    app.state.overall_runtime_control = None
+    if app.state.overall_shell_enabled:
+        from quality_knowledge.web.overall_runtime_control import (
+            OverallRuntimeControlPlane,
+        )
+
+        control_root = Path(
+            os.getenv(
+                "OVERALL_RUNTIME_CONTROL_ROOT",
+                str(primary_db.parent / "overall_runtime_control"),
+            )
+        )
+        runtime_control = OverallRuntimeControlPlane(
+            project_root=root,
+            state_root=control_root,
+        )
+        runtime_control.register_runtime_db(
+            "QUALITY_ISSUE",
+            primary_db.with_name(primary_db.name + ".runtime.db"),
+        )
+        runtime_control.register_runtime_db(
+            "HARDWARE_CASE",
+            Path(
+                os.getenv(
+                    "HARDWARE_CASE_RUNTIME_DB",
+                    str(root / "data/runtime/hardware_case_runtime.db"),
+                )
+            ),
+        )
+        runtime_control.register_runtime_db(
+            "STORAGE",
+            Path(
+                os.getenv(
+                    "STORAGE_LIFE_RUNTIME_DB",
+                    str(
+                        root
+                        / "products/storage_rc1/data/runtime_tasks.sqlite3"
+                    ),
+                )
+            ),
+        )
+        runtime_control.register_runtime_db(
+            "KNOWLEDGE",
+            Path(
+                os.getenv(
+                    "KNOWLEDGE_PRODUCTION_RUNTIME_DB",
+                    str(root / "data/knowledge_production_runtime.sqlite3"),
+                )
+            ),
+        )
+        active_runtime_model_config = (
+            runtime_control.effective_model_config_path()
+        )
+        app.state.overall_runtime_config_environment = {
+            "apply_mode": "EXPLICIT_BINDING_OR_PROCESS_LAUNCH",
+            "active_model_config": str(active_runtime_model_config),
+            "operator_overrides": dict(
+                runtime_control.operator_model_config_overrides
+            ),
+        }
+        if (
+            runtime_model_config is None
+            and not os.getenv("MAJOR_MODEL_CONFIG", "").strip()
+        ):
+            runtime_model_config = active_runtime_model_config
+        app.state.overall_runtime_control = runtime_control
     hardware_role_raw = (
         hardware_case_host_role
         if hardware_case_host_role is not None
@@ -297,6 +363,11 @@ def create_p0_app(
             else major_db.with_name(major_db.stem + "_attachments")
         )
         major_runtime_db = major_db.with_name(major_db.name + ".runtime.db")
+        if app.state.overall_runtime_control is not None:
+            app.state.overall_runtime_control.register_runtime_db(
+                "MAJOR_ISSUE",
+                major_runtime_db,
+            )
         testability_mutable_paths.extend([major_db, major_runtime_db, attachment_root])
         artifact_root = Path(major_artifact_root) if major_artifact_root is not None else root
         artifacts = JsonArtifactRepository(artifact_root)
@@ -373,8 +444,22 @@ def create_p0_app(
         def intake_structurer() -> Any:
             if hardware_case_structurer is not None:
                 return hardware_case_structurer
-            from services.hardware_case_runtime_adapter import build_hardware_case_structurer
-            return build_hardware_case_structurer()
+            from services.hardware_case_runtime_adapter import (
+                HardwareCaseRuntimeStructurer,
+            )
+
+            runtime_environ = dict(os.environ)
+            if (
+                app.state.overall_runtime_control is not None
+                and not runtime_environ.get("HARDWARE_CASE_MODEL_CONFIG", "").strip()
+            ):
+                runtime_environ["HARDWARE_CASE_MODEL_CONFIG"] = str(
+                    app.state.overall_runtime_control.effective_model_config_path()
+                )
+            return HardwareCaseRuntimeStructurer(
+                root=root,
+                environ=runtime_environ,
+            )
 
         hardware_case_intake_service = HardwareCaseIntakeService(
             hardware_db,
@@ -416,8 +501,16 @@ def create_p0_app(
         from quality_knowledge.web.p1_pages import create_p1_router
 
         if app.state.overall_shell_enabled:
+            from quality_knowledge.web.overall_runtime_control import (
+                create_overall_runtime_control_router,
+            )
             from quality_knowledge.web.overall_shell import create_overall_shell_router
 
+            app.include_router(
+                create_overall_runtime_control_router(
+                    app.state.overall_runtime_control,
+                )
+            )
             app.include_router(
                 create_overall_shell_router(
                     task_provider=overall_task_provider,

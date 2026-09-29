@@ -93,6 +93,10 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
         os.environ.get("STORAGE_KNOWLEDGE_RELEASE_DIR")
         or (data_root / "knowledge_release" / "current")
     ).expanduser().resolve()
+    runtime_control_root = Path(
+        os.environ.get("OVERALL_RUNTIME_CONTROL_ROOT")
+        or (data_root / "overall_runtime_control")
+    ).expanduser().resolve()
     legacy_raw = os.environ.get("LEGACY_QUALITY_ISSUE_DB_PATH", "").strip()
     if not legacy_raw:
         raise RuntimeError("LEGACY_DB_PATH_NOT_CONFIGURED")
@@ -121,6 +125,7 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
     storage_runtime_db.parent.mkdir(parents=True, exist_ok=True)
     knowledge_repository.mkdir(parents=True, exist_ok=True)
     knowledge_release.parent.mkdir(parents=True, exist_ok=True)
+    runtime_control_root.mkdir(parents=True, exist_ok=True)
     return {
         "data_root": data_root,
         "p1_db": p1_db,
@@ -128,8 +133,35 @@ def resolve_bindings(package_root: Path) -> dict[str, Path]:
         "storage_runtime_db": storage_runtime_db,
         "knowledge_repository": knowledge_repository,
         "knowledge_release": knowledge_release,
+        "runtime_control_root": runtime_control_root,
         "legacy_db": legacy_db,
     }
+
+
+def _active_runtime_model_config(
+    package_root: Path,
+    control_root: Path,
+) -> Path:
+    canonical = (
+        package_root / "config" / "runtime" / "model.yaml"
+    ).resolve()
+    active = control_root / "active.json"
+    if not active.is_file():
+        return canonical
+    try:
+        pointer = json.loads(active.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("OVERALL_RUNTIME_ACTIVE_POINTER_INVALID") from exc
+    if str(pointer.get("revision_id") or "") == "CANONICAL":
+        return canonical
+    path = Path(str(pointer.get("path") or "")).expanduser().resolve()
+    revision_root = (control_root / "revisions").resolve()
+    if (
+        not path.is_file()
+        or revision_root not in path.parents
+    ):
+        raise RuntimeError("OVERALL_RUNTIME_ACTIVE_REVISION_INVALID")
+    return path
 
 
 def _pid_file(data_root: Path) -> Path:
@@ -290,9 +322,39 @@ def build_process_env(
     env["STORAGE_LIFE_DATA_DIR"] = str(bindings["storage_data"])
     env["STORAGE_LIFE_EXECUTION_MODE"] = "runtime"
     env["UNIFIED_AGENT_RUNTIME_ROOT"] = str(package_root)
-    env["STORAGE_MODEL_CONFIG"] = str(
-        (package_root / "config" / "runtime" / "model.yaml").resolve()
+    control_root = Path(
+        bindings.get("runtime_control_root")
+        or (
+            Path(bindings["storage_data"]).resolve().parent
+            / "overall_runtime_control"
+        )
+    ).resolve()
+    control_root.mkdir(parents=True, exist_ok=True)
+    env["OVERALL_RUNTIME_CONTROL_ROOT"] = str(control_root)
+    active_model_config = _active_runtime_model_config(
+        package_root,
+        control_root,
     )
+    for name in (
+        "MAJOR_MODEL_CONFIG",
+        "HARDWARE_CASE_MODEL_CONFIG",
+        "STORAGE_MODEL_CONFIG",
+    ):
+        source_key = f"{name}_SOURCE"
+        source = os.environ.get(source_key, "").strip().upper()
+        raw_value = os.environ.get(name, "").strip()
+        explicit = (
+            raw_value
+            if raw_value and source != "OVERALL_AGENT_CONFIG"
+            else ""
+        )
+        env[name] = explicit or str(active_model_config)
+        env[source_key] = (
+            "OPERATOR_OVERRIDE"
+            if explicit
+            else "OVERALL_AGENT_CONFIG"
+        )
+    env["OVERALL_RUNTIME_MODEL_CONFIG"] = str(active_model_config)
     env["STORAGE_LIFE_RUNTIME_DB"] = str(bindings["storage_runtime_db"])
     env["STORAGE_KNOWLEDGE_REPOSITORY_DIR"] = str(
         bindings["knowledge_repository"]
@@ -345,6 +407,7 @@ def main() -> int:
     print(f"STORAGE_RUNTIME_DB={bindings['storage_runtime_db']}")
     print(f"KNOWLEDGE_REPOSITORY={bindings['knowledge_repository']}")
     print(f"KNOWLEDGE_RELEASE={bindings['knowledge_release']}")
+    print(f"RUNTIME_CONTROL_ROOT={bindings['runtime_control_root']}")
     if args.check_only:
         return 0
 
