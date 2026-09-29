@@ -1,0 +1,63 @@
+name: Overall R2 W4 Gate
+
+on:
+  push:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/web/overall_assembly.py"
+      - "quality_knowledge/web/overall_shell.py"
+      - "quality_knowledge/web/templates/overall_shell.html"
+      - "quality_knowledge/web/storage_workspace.py"
+      - "tests/test_r2_w4_*.py"
+      - "tests/test_overall_frontend_parent_integration.py"
+      - "tests/test_quality_scenario_workspace_binding.py"
+      - "tests/test_storage_workspace_binding.py"
+      - "tests/test_hardware_case_domain_boundary.py"
+      - ".github/workflows/overall-r2-w4-gate.yml"
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/web/overall_assembly.py"
+      - "quality_knowledge/web/overall_shell.py"
+      - "quality_knowledge/web/templates/overall_shell.html"
+      - "quality_knowledge/web/storage_workspace.py"
+      - "tests/test_r2_w4_*.py"
+
+permissions:
+  contents: read
+
+jobs:
+  w4-domain-assembly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Compile assembly boundary
+        run: |
+          python -m compileall -q quality_knowledge/web
+
+      - name: Run W4 assembly tests
+        run: |
+          pytest -q \
+            tests/test_r2_w4_*.py \
+            tests/test_overall_frontend_parent_integration.py \
+            tests/test_quality_scenario_workspace_binding.py \
+            tests/test_storage_workspace_binding.py \
+            tests/test_hardware_case_domain_boundary.py
+
+      - name: Regress W3 Evidence boundary
+        run: |
+          pytest -q tests/test_r2_w3_common_evidence.py
