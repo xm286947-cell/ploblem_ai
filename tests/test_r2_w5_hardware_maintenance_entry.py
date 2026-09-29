@@ -115,8 +115,11 @@ def test_overall_cases_area_marks_hardware_base_data_by_host_role(
     assert 'href="/p0/hardware-cases/base-data"' in maintainer_page.text
 
 
-def test_hardware_host_role_defaults_to_consumer(tmp_path: Path):
+def test_unbound_internal_composition_preserves_legacy_maintainer_fallback(
+    tmp_path: Path,
+):
     client = _client(tmp_path)
-    home = client.get("/p0/hardware-cases")
+    home = client.get("/p0/hardware-cases?role=maintainer")
     assert home.status_code == 200
-    assert 'data-role="CONSUMER"' in home.text
+    assert 'data-role="MAINTAINER"' in home.text
+    assert client.get("/p0/hardware-cases/base-data").status_code == 200
