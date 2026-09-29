@@ -133,9 +133,27 @@ def write_hash_manifest(package_root: Path) -> None:
 
 def build() -> tuple[Path, Path, Path]:
     commit = source_commit()
-    date = os.environ.get("STORAGE_R6_BUILD_DATE", "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d")
-    package_id = f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-{date}"
-    zip_name = f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_{date}.zip"
+    date = (
+        os.environ.get("STORAGE_BUILD_DATE", "").strip()
+        or os.environ.get("STORAGE_R6_BUILD_DATE", "").strip()
+        or datetime.now(timezone.utc).strftime("%Y%m%d")
+    )
+    package_id = (
+        os.environ.get("STORAGE_PACKAGE_ID", "").strip()
+        or f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-{date}"
+    )
+    zip_name = (
+        os.environ.get("STORAGE_ZIP_NAME", "").strip()
+        or f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_{date}.zip"
+    )
+    assembly_name = (
+        os.environ.get("STORAGE_ASSEMBLY_NAME", "").strip()
+        or "Golden A + Golden B + Golden C"
+    )
+    next_status = (
+        os.environ.get("STORAGE_NEXT_STATUS", "").strip()
+        or "READY_FOR_FULL_PRODUCT_RETEST"
+    )
 
     work = DIST / "_storage_r6_complete"
     if work.exists():
@@ -214,7 +232,7 @@ def build() -> tuple[Path, Path, Path]:
         "package_id": package_id,
         "package_type": "PRODUCT_TEST_CANDIDATE",
         "product": "Storage RC1",
-        "assembly": "Golden A + Golden B + Golden C",
+        "assembly": assembly_name,
         "source_commit": commit,
         "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
         "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
@@ -260,7 +278,7 @@ def build() -> tuple[Path, Path, Path]:
                 "package_sha256": digest,
                 "package_size": zip_path.stat().st_size,
                 "fresh_extract_required": True,
-                "next_status": "READY_FOR_FULL_PRODUCT_RETEST",
+                "next_status": next_status,
             },
             ensure_ascii=False,
             indent=2,
