@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -19,6 +20,28 @@ from scripts.overall_r2_windows_start import _active_runtime_model_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+_RUNTIME_CONFIG_ENV_KEYS = (
+    "MAJOR_MODEL_CONFIG",
+    "HARDWARE_CASE_MODEL_CONFIG",
+    "STORAGE_MODEL_CONFIG",
+    "OVERALL_RUNTIME_MODEL_CONFIG",
+    "STORAGE_MODEL_CONFIG_SOURCE",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_w5_runtime_config_environment():
+    snapshot = {
+        name: os.environ.get(name)
+        for name in _RUNTIME_CONFIG_ENV_KEYS
+    }
+    yield
+    for name, value in snapshot.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 class FakeResponse:
