@@ -7,7 +7,9 @@ on:
     paths:
       - "quality_knowledge/major_cases/import_governance.py"
       - "quality_knowledge/major_cases/restore.py"
+      - "quality_knowledge/major_cases/repository.py"
       - "quality_knowledge/major_cases/schema.sql"
+      - "services/major_case_production.py"
       - "quality_knowledge/web/major_production_api.py"
       - "tests/test_r2_w2_major_governed_production.py"
       - ".github/workflows/overall-r2-w2-major-gate.yml"
@@ -17,7 +19,9 @@ on:
     paths:
       - "quality_knowledge/major_cases/import_governance.py"
       - "quality_knowledge/major_cases/restore.py"
+      - "quality_knowledge/major_cases/repository.py"
       - "quality_knowledge/major_cases/schema.sql"
+      - "services/major_case_production.py"
       - "quality_knowledge/web/major_production_api.py"
       - "tests/test_r2_w2_major_governed_production.py"
       - ".github/workflows/overall-r2-w2-major-gate.yml"
@@ -42,7 +46,7 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
       - name: Compile governed intake
         run: |
-          python -m compileall -q quality_knowledge/major_cases quality_knowledge/web
+          python -m compileall -q quality_knowledge/major_cases quality_knowledge/web services
       - name: Run W2 focused regression
         run: |
           pytest -q             tests/test_r2_w2_major_governed_production.py             tests/test_r2_w5_major_excel_import_restore.py             tests/test_major_repeat_gp01_browser_production.py             tests/test_case_publish_service.py             tests/test_repeat_web_mvp.py
