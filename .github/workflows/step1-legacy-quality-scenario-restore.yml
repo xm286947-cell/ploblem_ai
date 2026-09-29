@@ -114,12 +114,21 @@ jobs:
           $ErrorActionPreference = "Stop"
           $sha = (git rev-parse HEAD).Trim()
           $short = $sha.Substring(0,12)
-          $name = "LEGACY_QUALITY_SCENARIO_PORTRAIT_RESTORE_${short}"
+          $name = "LEGACY_QUALITY_SCENARIO_PORTRAIT_RESTORE_$short"
+          $stageRoot = Join-Path $env:RUNNER_TEMP "step1-package-stage"
+          $sourceZip = Join-Path $env:RUNNER_TEMP "step1-source.zip"
           $zip = Join-Path $env:RUNNER_TEMP ($name + ".zip")
-          git archive --format=zip --prefix="$name/" --output="$zip" HEAD
-          if ($LASTEXITCODE -ne 0) { throw "GIT_ARCHIVE_FAILED" }
 
-          $note = Join-Path $env:RUNNER_TEMP "STEP1_MANUAL_VALIDATION.txt"
+          if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
+          if (Test-Path $sourceZip) { Remove-Item -Force $sourceZip }
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+          git archive --format=zip --prefix="$name/" --output="$sourceZip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw "GIT_ARCHIVE_FAILED" }
+          Expand-Archive -Path $sourceZip -DestinationPath $stageRoot -Force
+
+          $note = Join-Path $stageRoot "$name\STEP1_MANUAL_VALIDATION.txt"
           @(
             "CANDIDATE_CLASS=STEP1_MANUAL_VALIDATION",
             "SOURCE_SHA=$sha",
@@ -129,20 +138,13 @@ jobs:
             "TARGET_2=/quality-scenario-assets",
             "TARGET_3=/quality-scenario-assets/portrait",
             "DATA_POLICY=NO_REAL_INTERNAL_DB_IN_PACKAGE",
-            "MANUAL_DATA_BINDING=retain/copy approved existing knowledge\quality_issue_v1.db into extracted package before validation",
+            "MANUAL_DATA_BINDING=use approved existing knowledge\quality_issue_v1.db on target",
             "ACCEPTANCE=real browser page/data/filter/drill-down; route 200 alone is not acceptance"
           ) | Set-Content -Encoding utf8 $note
 
-          @"
-import zipfile
-from pathlib import Path
-zip_path=Path(r'$zip')
-note=Path(r'$note')
-with zipfile.ZipFile(zip_path,'a',compression=zipfile.ZIP_DEFLATED) as z:
-    z.write(note, arcname='$name/STEP1_MANUAL_VALIDATION.txt')
-"@ | python -
-
+          Compress-Archive -Path (Join-Path $stageRoot $name) -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+
           "PACKAGE_ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PACKAGE_SHA256=$hash" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "SOURCE_SHA=$sha" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
