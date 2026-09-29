@@ -2,7 +2,34 @@
 import json
 import re
 from collections import defaultdict
-from quality_knowledge.materials import normalize_itr, year_from_itr, effective_reporting_year
+from quality_knowledge.materials import normalize_itr
+
+# RC1 compatibility helpers. These were part of the mature Quality Scenario
+# dependency surface but were later removed from materials.py. Keep them local
+# to the restored scenario domain so the current problem/import platform is not
+# modified just to satisfy STEP1.
+def year_from_itr(value):
+    match = re.match(r"^ITR(20\\d{2})", normalize_itr(value))
+    return match.group(1) if match else ""
+
+def effective_reporting_year(raw, business_key, reporting_year="", year_source=""):
+    """Mature RC1 reporting-year precedence without changing materials.py."""
+    stored = str(reporting_year or "").strip()
+    source = str(year_source or "").strip()
+    if stored and source in {"BATCH_MANUAL", "IMPORT_MANUAL"}:
+        return stored
+    kpi_month = first(raw, "数据运营_KPI计入月份", "KPI计入月份")
+    dated = re.search(r"(20\\d{2})\\s*(?:年|[-/.])", kpi_month)
+    if dated:
+        return dated.group(1)
+    file_year = first(
+        raw,
+        "数据运营_KPI计入年份",
+        "数据运营_KPI计入年度",
+        "KPI计入年份",
+        "考核年份",
+    )
+    return file_year or stored or year_from_itr(business_key)
 
 LABELS = {'LEAKAGE':'有漏测分析', 'PARTIAL':'漏测分析不完整，已补充彻底解决单',
           'CS_ONLY':'无漏测分析，基于彻底解决单', 'ITR_ONLY':'仅有ITR现场信息，根因待确认',
