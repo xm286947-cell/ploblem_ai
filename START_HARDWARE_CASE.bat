@@ -6,12 +6,25 @@ if not exist "data" mkdir data
 if not exist "data\runtime" mkdir data\runtime
 
 set HARDWARE_CASE_NO_PAUSE=1
+set HARDWARE_CASE_HOST_ROLE=MAINTAINER
+if "%HARDWARE_CASE_HOST_ACTOR%"=="" set HARDWARE_CASE_HOST_ACTOR=windows:hardware-maintainer
+
 call CHECK_ENV.bat web
 if errorlevel 1 (
   echo.
   echo [BLOCKED] Web precheck failed.
-  pause
+  if not "%HARDWARE_CASE_NO_PAUSE%"=="1" pause
   exit /b 2
+)
+
+if "%HARDWARE_CASE_SMOKE_ONLY%"=="1" (
+  where python >nul 2>nul
+  if %errorlevel%==0 (
+    python scripts\hardware_case_web_start.py --check --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources"
+  ) else (
+    py scripts\hardware_case_web_start.py --check --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources"
+  )
+  exit /b %errorlevel%
 )
 
 echo.
@@ -22,13 +35,13 @@ echo.
 echo Starting browser and unified product Web...
 start "" "http://127.0.0.1:8080/p0/hardware-cases"
 
-where py >nul 2>nul
+where python >nul 2>nul
 if %errorlevel%==0 (
-  py scripts\hardware_case_web_start.py --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources" --host 127.0.0.1 --port 8080
+  python scripts\hardware_case_web_start.py --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources" --host 127.0.0.1 --port 8080
 ) else (
-  python scripts\hardware_case_web_start.py --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --host 127.0.0.1 --port 8080
+  py scripts\hardware_case_web_start.py --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources" --host 127.0.0.1 --port 8080
 )
 set EXIT_CODE=%errorlevel%
 echo.
-pause
+if not "%HARDWARE_CASE_NO_PAUSE%"=="1" pause
 endlocal & exit /b %EXIT_CODE%
