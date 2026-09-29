@@ -71,6 +71,8 @@ def test_r2_w2_current_problem_has_four_business_workbenches_and_common_problem_
     assert 'href="/p0/batch-analysis"' in page.text
     assert 'href="/analysis"' in page.text
     assert "支撑能力" in page.text
+    assert 'href="/p0/issues">问题工作台</a>' not in page.text
+    assert '<a class="brand" href="/p0/overall">' in page.text
 
 
 def test_r2_w2_old_scenario_and_portraits_bind_only_when_legacy_scenario_tables_exist():
