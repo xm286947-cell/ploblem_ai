@@ -13,7 +13,7 @@ if exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" main.py knowledge-web --db "%QUALITY_DB%" %*
 ) else (
   where py >nul 2>nul
-  if %errorlevel%==0 (
+  if not errorlevel 1 (
     py main.py knowledge-web --db "%QUALITY_DB%" %*
   ) else (
     python main.py knowledge-web --db "%QUALITY_DB%" %*
