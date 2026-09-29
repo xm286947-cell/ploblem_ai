@@ -287,6 +287,17 @@ class AgentConfigLoader:
         if not env_name:
             return None
         value = self.environ.get(env_name)
+        if (value is None or value == "") and os.name == "nt":
+            # Windows environment-variable names are case-insensitive, but a
+            # copied/custom Mapping can become a plain case-sensitive dict.
+            # Resolve SecretRef/base-url refs with Windows semantics instead
+            # of falsely reporting a configured ref such as "acca1" missing
+            # when the inherited process environment exposes "ACCA1".
+            wanted = env_name.casefold()
+            for key, candidate in self.environ.items():
+                if str(key).casefold() == wanted:
+                    value = candidate
+                    break
         if value is None or value == "":
             raise SecretEnvNotFoundError(env_name)
         return value
