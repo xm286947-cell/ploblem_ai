@@ -7,17 +7,44 @@ company-local staging directory and server paths are never returned.
 from __future__ import annotations
 
 from hashlib import sha256
+import os
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
-from quality_knowledge.web.hardware_auth import trusted_hardware_auth_context
 from repositories.hardware_maintenance_audit_repository import HardwareMaintenanceAuditRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_tree_excel import HardwareTreeImportAnalyzer
 from services.hardware_tree_import_contract import HardwareTreeImportContractError
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
+
+
+def _configured_host_role(host_role: str | None) -> str:
+    role = str(host_role or "CONSUMER").strip().upper()
+    if role not in {"CONSUMER", "MAINTAINER"}:
+        raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
+    return role
+
+
+def _require_maintainer(value: str | None, *, host_role: str | None = None) -> None:
+    if _configured_host_role(host_role) != "MAINTAINER":
+        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
+    if value is not None and str(value).strip():
+        claim = str(value).strip().upper()
+        if claim not in {"CONSUMER", "MAINTAINER"}:
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+
+
+def _trusted_actor(host_role: str | None) -> str:
+    actor = os.getenv("HARDWARE_CASE_HOST_ACTOR", "").strip()
+    if actor:
+        return actor
+    return (
+        "server:hardware-maintainer"
+        if _configured_host_role(host_role) == "MAINTAINER"
+        else "server:hardware-consumer"
+    )
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -55,11 +82,11 @@ def create_hardware_tree_import_router(
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-tree-import"])
     analyzer = HardwareTreeImportAnalyzer(repository)
-    auth = trusted_hardware_auth_context(host_role)
     audit = HardwareMaintenanceAuditRepository(repository.db_path)
+    trusted_actor = _trusted_actor(host_role)
 
     def require_maintainer(value: str | None) -> None:
-        auth.require_maintainer(value)
+        _require_maintainer(value, host_role=host_role)
 
     @router.post("", status_code=201)
     async def upload_excel(
@@ -75,7 +102,7 @@ def create_hardware_tree_import_router(
         require_maintainer(x_hardware_case_role)
         # Operator identity is trusted server context.  The legacy client
         # header remains accepted for compatibility but never becomes authority.
-        operator = auth.actor
+        operator = trusted_actor
         filename = str(file.filename or "").strip()
         payload = await file.read()
         job_id = "HTI-" + uuid4().hex.upper()
@@ -259,7 +286,7 @@ def create_hardware_tree_import_router(
             changes = repository.list_changes(job_id)
             result = repository.apply_job(job_id)
             audit.record(
-                actor=auth.actor,
+                actor=trusted_actor,
                 action="TREE_APPLY",
                 target_type="HARDWARE_TREE_IMPORT",
                 target_id=job_id,
@@ -276,7 +303,7 @@ def create_hardware_tree_import_router(
                     and change.get("decision") != "EXCLUDED"
                 ):
                     audit.record(
-                        actor=auth.actor,
+                        actor=trusted_actor,
                         action="TREE_DEPRECATE",
                         target_type="HARDWARE_TREE_NODE",
                         target_id=str(change.get("node_id") or change.get("change_id")),
