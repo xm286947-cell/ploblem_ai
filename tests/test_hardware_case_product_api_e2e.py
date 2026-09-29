@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from quality_knowledge.p0.initializer import P0Initializer
@@ -29,17 +28,6 @@ def _field(candidate: str):
     }
 
 
-def _storage_stub() -> FastAPI:
-    """Keep the Hardware E2E independent from Storage-only PDF dependencies."""
-    app = FastAPI()
-
-    @app.get("/api/health")
-    def health():
-        return {"status": "ok", "service": "storage-stub"}
-
-    return app
-
-
 def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
     p0_db = tmp_path / "quality_capability_p0.db"
     hardware_db = tmp_path / "hardware_case_mvp.db"
@@ -50,17 +38,16 @@ def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
             p0_db,
             stage_runner=object(),
             hardware_case_db_path=hardware_db,
-            storage_app=_storage_stub(),
+            enabled_domains={"HARDWARE_CASE"},
+            hardware_case_host_role="MAINTAINER",
         )
     )
 
-    # Existing platform entrypoints stay alive. Overall R2 freezes /p0/issues
-    # as the shared Common Problem View root; Hardware must not revert it.
-    init = client.get("/api/v2/initialization/status")
-    assert init.status_code == 200
-    assert init.json()["initialization_state"] == "READY"
-    assert client.get("/api/v2/products").status_code == 200
-    assert client.get("/", follow_redirects=False).headers["location"] == "/p0/issues"
+    # Hardware product test uses the same create_p0_app host and /api/v2
+    # surface, but explicitly disables unrelated domains and their dependencies.
+    root = client.get("/", follow_redirects=False)
+    assert root.status_code in {302, 307}
+    assert root.headers["location"] == "/p0/hardware-cases"
 
     # Hardware Case starts on the same /api/v2 surface.
     case_payload = {
