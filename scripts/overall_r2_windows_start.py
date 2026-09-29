@@ -224,13 +224,18 @@ def main() -> int:
     package_root = args.package_root.expanduser().resolve()
     try:
         binding = verify_package_binding(package_root)
-        bindings = resolve_bindings(package_root)
     except Exception as exc:
         print(f"PREFLIGHT=FAIL:{exc}", file=sys.stderr)
         return 6
 
     if args.stop:
-        return stop_running(bindings["data_root"])
+        return stop_running(_local_root())
+
+    try:
+        bindings = resolve_bindings(package_root)
+    except Exception as exc:
+        print(f"PREFLIGHT=FAIL:{exc}", file=sys.stderr)
+        return 6
 
     print("PREFLIGHT=PASS")
     print(f"SOURCE_COMMIT={binding['source_commit']}")
