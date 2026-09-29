@@ -160,7 +160,7 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     parser.feed(response.text)
     detail_links = [
         href for href in parser.hrefs
-        if href.startswith(f"/p0/issues/{ids['ITR-R2-MISS-1']}?")
+        if href.startswith(f"/issues/{ids['ITR-R2-MISS-1']}?")
     ]
     assert len(detail_links) == 1
     assert (
@@ -170,7 +170,7 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     assert detail_links[0].endswith("#analysis")
 
     detail = client.get(
-        f"/p0/issues/{ids['ITR-R2-MISS-1']}",
+        f"/issues/{ids['ITR-R2-MISS-1']}",
         params={
             "return_to": (
                 "/p0/missed-test-analysis?"
@@ -181,10 +181,10 @@ def test_p0_missed_test_workbench_reuses_legacy_sot_and_preserves_return(tmp_pat
     assert detail.status_code == 200
     assert "返回漏测分析" in detail.text
     assert "/p0/missed-test-analysis?q=MISS-1" in detail.text
-    assert "r2-w1-current-problem-return-v3" in detail.text
+    assert 'data-problem-association="MISSED_TEST"' in detail.text
 
     rejected = client.get(
-        f"/p0/issues/{ids['ITR-R2-MISS-1']}",
+        f"/issues/{ids['ITR-R2-MISS-1']}",
         params={"return_to": "https://example.invalid/escape"},
     )
     assert rejected.status_code == 400
