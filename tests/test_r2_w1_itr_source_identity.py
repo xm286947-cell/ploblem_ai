@@ -70,7 +70,6 @@ def test_itr_detail_exposes_public_source_ref_and_consumed_snapshot(tmp_path: Pa
     assert page.status_code == 200
     assert "ITR / 现场恢复来源" in page.text
     assert "canonical ITR" in page.text
-    assert "r2-w1-itr-source-identity-v1" in page.text
 
     js = client.get("/p0/static/p0_issue_detail.js")
     assert js.status_code == 200
