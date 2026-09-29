@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
@@ -14,12 +13,16 @@ from services.hardware_case_runtime_adapter import (
     HARDWARE_CASE_STRUCTURE_SCHEMA,
     resolve_runtime_paths,
 )
+from services.hardware_data_reliability import (
+    HardwareDataReliabilityManager,
+    SCHEMA_VERSION_NAME,
+)
 from services.hardware_public_consumer import PUBLIC_CONTRACT_VERSION
 
 
 PRODUCT_VERSION = "MVP_V0.1"
 PUBLIC_API_VERSION = "v1"
-SCHEMA_BASELINE = "PRE_W3_2_LEGACY_SCHEMA"
+SCHEMA_BASELINE = SCHEMA_VERSION_NAME
 COMPATIBILITY_MATRIX = {
     "v1": {
         "contract_version": PUBLIC_CONTRACT_VERSION,
@@ -70,12 +73,20 @@ def health_status() -> dict[str, Any]:
 
 
 def _db_ready(db_path: Path) -> dict[str, Any]:
-    try:
-        with sqlite3.connect(db_path) as connection:
-            connection.execute("SELECT 1").fetchone()
-        return {"status": "READY"}
-    except Exception:
-        return {"status": "UNREADY", "error_code": "HARDWARE_DB_UNAVAILABLE"}
+    status = HardwareDataReliabilityManager(db_path).inspect_status()
+    if status.get("status") != "READY":
+        return {
+            "status": "UNREADY",
+            "error_code": str(status.get("error_code") or "HARDWARE_DB_UNREADY"),
+            "schema_version": status.get("schema_version"),
+            "schema_name": status.get("schema_name"),
+        }
+    return {
+        "status": "READY",
+        "schema_version": status.get("schema_version"),
+        "schema_name": status.get("schema_name"),
+        "fingerprint": status.get("fingerprint"),
+    }
 
 
 def _contract_ready(root: Path) -> dict[str, Any]:

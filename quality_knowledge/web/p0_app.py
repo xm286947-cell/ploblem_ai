@@ -34,6 +34,10 @@ from repositories.hardware_tree_import_repository import HardwareTreeImportRepos
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_source_store import HardwareCaseSourceStore
+from services.hardware_data_reliability import (
+    HardwareDataReliabilityError,
+    HardwareDataReliabilityManager,
+)
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
@@ -317,68 +321,104 @@ def create_p0_app(
             else Path(db_path).with_name("hardware_case_mvp.db")
         )
         testability_mutable_paths.append(hardware_db)
-        hardware_case_repository = HardwareCaseRepository(hardware_db)
-        hardware_case_service = HardwareCaseBackendService(hardware_case_repository)
-        app.state.hardware_case_repository = hardware_case_repository
-        app.state.hardware_case_service = hardware_case_service
+        hardware_data = HardwareDataReliabilityManager(hardware_db)
+        app.state.hardware_data_reliability = hardware_data
 
-        hardware_source_root = (
-            Path(hardware_case_source_root)
-            if hardware_case_source_root is not None
-            else hardware_db.with_name(hardware_db.stem + "_sources")
-        )
-        testability_mutable_paths.append(hardware_source_root)
-        hardware_case_source_store = HardwareCaseSourceStore(
-            hardware_db,
-            hardware_source_root,
-        )
-        app.state.hardware_case_source_store = hardware_case_source_store
+        try:
+            hardware_data_status = hardware_data.ensure_ready()
+            hardware_data_ready = True
+        except HardwareDataReliabilityError as error:
+            hardware_data_status = {
+                **hardware_data.inspect_status(),
+                "startup_error": error.code,
+                "backup_id": error.backup_id,
+            }
+            hardware_data_ready = False
+        app.state.hardware_data_status = hardware_data_status
 
-        def intake_structurer() -> Any:
-            if hardware_case_structurer is not None:
-                return hardware_case_structurer
-            from services.hardware_case_runtime_adapter import build_hardware_case_structurer
-            return build_hardware_case_structurer()
-
-        hardware_case_intake_service = HardwareCaseIntakeService(
-            hardware_db,
-            hardware_case_source_store,
-            hardware_case_service,
-            intake_structurer,
-        )
-        app.state.hardware_case_intake_service = hardware_case_intake_service
-
-        hardware_tree_import_repository = HardwareTreeImportRepository(hardware_db)
-        hardware_tree_root = (
-            Path(hardware_tree_upload_dir)
-            if hardware_tree_upload_dir is not None
-            else hardware_db.with_name(hardware_db.stem + "_tree_uploads")
-        )
-        testability_mutable_paths.append(hardware_tree_root)
-        hardware_tree_file_store = HardwareTreeImportFileStore(hardware_tree_root)
-        app.state.hardware_tree_import_repository = hardware_tree_import_repository
-        app.state.hardware_tree_file_store = hardware_tree_file_store
-
-        app.include_router(
-            create_hardware_tree_import_router(
-                hardware_tree_import_repository,
-                hardware_tree_file_store,
-            )
-        )
-        app.include_router(
-            create_hardware_case_router(
-                hardware_case_service,
-                source_store=hardware_case_source_store,
-                intake_service=hardware_case_intake_service,
-            )
-        )
-        app.include_router(create_hardware_public_router(hardware_case_service))
+        # Health remains available even when Hardware data is blocked. Readiness
+        # reports the schema/recovery failure and Hardware business routes are
+        # not mounted until the DB reaches a verified READY state.
         app.include_router(
             create_hardware_operability_router(
                 project_root=root,
                 hardware_db_path=hardware_db,
             )
         )
+
+        if hardware_data_ready:
+            hardware_case_repository = HardwareCaseRepository(
+                hardware_db,
+                initialize_schema=False,
+            )
+            hardware_case_service = HardwareCaseBackendService(hardware_case_repository)
+            app.state.hardware_case_repository = hardware_case_repository
+            app.state.hardware_case_service = hardware_case_service
+
+            hardware_source_root = (
+                Path(hardware_case_source_root)
+                if hardware_case_source_root is not None
+                else hardware_db.with_name(hardware_db.stem + "_sources")
+            )
+            testability_mutable_paths.append(hardware_source_root)
+            hardware_case_source_store = HardwareCaseSourceStore(
+                hardware_db,
+                hardware_source_root,
+                initialize_schema=False,
+            )
+            app.state.hardware_case_source_store = hardware_case_source_store
+
+            def intake_structurer() -> Any:
+                if hardware_case_structurer is not None:
+                    return hardware_case_structurer
+                from services.hardware_case_runtime_adapter import build_hardware_case_structurer
+                return build_hardware_case_structurer()
+
+            hardware_case_intake_service = HardwareCaseIntakeService(
+                hardware_db,
+                hardware_case_source_store,
+                hardware_case_service,
+                intake_structurer,
+                initialize_schema=False,
+            )
+            app.state.hardware_case_intake_service = hardware_case_intake_service
+
+            hardware_tree_import_repository = HardwareTreeImportRepository(
+                hardware_db,
+                initialize_schema=False,
+            )
+            hardware_tree_root = (
+                Path(hardware_tree_upload_dir)
+                if hardware_tree_upload_dir is not None
+                else hardware_db.with_name(hardware_db.stem + "_tree_uploads")
+            )
+            testability_mutable_paths.append(hardware_tree_root)
+            hardware_tree_file_store = HardwareTreeImportFileStore(hardware_tree_root)
+            app.state.hardware_tree_import_repository = hardware_tree_import_repository
+            app.state.hardware_tree_file_store = hardware_tree_file_store
+
+            app.include_router(
+                create_hardware_tree_import_router(
+                    hardware_tree_import_repository,
+                    hardware_tree_file_store,
+                )
+            )
+            app.include_router(
+                create_hardware_case_router(
+                    hardware_case_service,
+                    source_store=hardware_case_source_store,
+                    intake_service=hardware_case_intake_service,
+                )
+            )
+            app.include_router(create_hardware_public_router(hardware_case_service))
+            testability_restore_hooks.append(hardware_data.ensure_ready)
+        else:
+            app.state.hardware_case_repository = None
+            app.state.hardware_case_service = None
+            app.state.hardware_case_source_store = None
+            app.state.hardware_case_intake_service = None
+            app.state.hardware_tree_import_repository = None
+            app.state.hardware_tree_file_store = None
 
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router

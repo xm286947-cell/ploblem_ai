@@ -135,13 +135,21 @@ def _load(value: str | None, default: Any) -> Any:
 class HardwareTreeImportRepository:
     """M1 durable import/version/change-set store and atomic Apply engine."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        initialize_schema: bool = True,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # Also initializes/migrates the existing current-tree tables.
-        self.case_repository = HardwareCaseRepository(self.db_path)
-        with self.connect() as connection:
-            connection.executescript(IMPORT_SCHEMA)
+        self.case_repository = HardwareCaseRepository(
+            self.db_path,
+            initialize_schema=initialize_schema,
+        )
+        if initialize_schema:
+            with self.connect() as connection:
+                connection.executescript(IMPORT_SCHEMA)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)

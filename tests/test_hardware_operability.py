@@ -121,7 +121,7 @@ def test_contract_version_visible_compatible_and_unknown_version_rejected(tmp_pa
     assert payload["public_contract_version"] == "hardware-public-consumer/v1"
     assert payload["public_api_version"] == "v1"
     assert payload["product_version"] == "MVP_V0.1"
-    assert payload["schema_version"] == "PRE_W3_2_LEGACY_SCHEMA"
+    assert payload["schema_version"] == "HARDWARE_SCHEMA_V1"
     assert payload["compatibility"]["v1"]["status"] == "ACTIVE"
     assert payload["compatibility"]["v1"]["deprecated"] is False
     assert payload["product_version"] != payload["public_contract_version"]
