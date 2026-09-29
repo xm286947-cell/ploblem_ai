@@ -55,6 +55,32 @@ def normalize_itr(value: Any) -> str:
     return text[:-2] if text.endswith("CS") else text
 
 
+def year_from_itr(value: Any) -> str:
+    match = re.match(r"^ITR(20\d{2})", normalize_itr(value))
+    return match.group(1) if match else ""
+
+
+def _first(raw: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = _clean(raw.get(name))
+        if value:
+            return value
+    return ""
+
+
+def effective_reporting_year(raw: dict[str, Any], business_key: Any, reporting_year: Any = "", year_source: Any = "") -> str:
+    """Software KPI year: manual override > KPI date > file year > ITR fallback."""
+    stored=_clean(reporting_year);source=_clean(year_source)
+    if stored and source in {"BATCH_MANUAL", "IMPORT_MANUAL"}:
+        return stored
+    kpi_month=_first(raw, "数据运营_KPI计入月份", "KPI计入月份")
+    dated=re.search(r"(20\d{2})\s*(?:年|[-/.])", kpi_month)
+    if dated:
+        return dated.group(1)
+    file_year=_first(raw, "数据运营_KPI计入年份", "数据运营_KPI计入年度", "KPI计入年份", "考核年份")
+    return file_year or stored or year_from_itr(business_key)
+
+
 def combine_headers(parent_row, child_row) -> list[str]:
     result, parent = [], ""
     width = max(len(parent_row or ()), len(child_row or ()))
