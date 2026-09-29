@@ -65,13 +65,16 @@ class HardwareCaseIntakeService:
         sources: HardwareCaseSourceStore,
         backend: HardwareCaseBackendService,
         structurer_factory: Callable[[], Callable[[dict[str, Any]], dict[str, Any]]],
+        *,
+        initialize_schema: bool = True,
     ):
         self.database = Path(database)
         self.sources = sources
         self.backend = backend
         self.structurer_factory = structurer_factory
-        with self._connect() as connection:
-            connection.executescript(SCHEMA)
+        if initialize_schema:
+            with self._connect() as connection:
+                connection.executescript(SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database)
