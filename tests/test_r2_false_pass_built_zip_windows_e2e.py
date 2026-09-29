@@ -230,6 +230,34 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
         child_env.pop("DASHSCOPE_BASE_URL", None)
         child_env.pop("DASHSCOPE_API_KEY", None)
 
+        preflight = subprocess.run(
+            [
+                str(package_python),
+                str(package_root / "scripts" / "overall_r2_windows_start.py"),
+                "--package-root",
+                str(package_root),
+                "--check-only",
+            ],
+            cwd=package_root,
+            env=child_env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+        preflight_text = preflight.stdout + preflight.stderr
+        print("=== BUILT_ZIP_PREFLIGHT ===")
+        print(preflight_text)
+        assert preflight.returncode == 0, preflight_text
+        assert f"ACTIVE_REVISION={revision_id}" in preflight_text
+        assert "MODEL_REF=qwen_prod" in preflight_text
+        assert "BASE_URL_ENV_REF=R2_E2E_PROVIDER_BASE_URL" in preflight_text
+        assert "BASE_URL_PRESENT=PRESENT" in preflight_text
+        assert "API_KEY_ENV_REF=acca1" in preflight_text
+        assert "API_KEY_PRESENT=PRESENT" in preflight_text
+        assert "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001" in preflight_text
+        assert SECRET not in preflight_text
+
         start_log = tmp_path / "start.log"
         with start_log.open("w", encoding="utf-8") as stream:
             start = subprocess.Popen(
@@ -248,15 +276,43 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
                 text=True,
             )
         try:
-            _wait_json(
-                "http://127.0.0.1:18088/storage-workspace/api/health",
-                timeout=180,
-            )
+            deadline = time.time() + 120
+            last_error: Exception | None = None
+            while time.time() < deadline:
+                if start.poll() is not None:
+                    break
+                try:
+                    _json(
+                        "http://127.0.0.1:18088/storage-workspace/api/health"
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    time.sleep(1)
+            else:
+                last_error = last_error or RuntimeError("startup timeout")
 
             start_text = start_log.read_text(
                 encoding="utf-8",
                 errors="replace",
             )
+            print("=== BUILT_ZIP_START ===")
+            print(start_text)
+            if start.poll() is not None:
+                raise AssertionError(
+                    "START exited before Web became ready; "
+                    f"exit={start.returncode}\n{start_text}"
+                )
+            try:
+                health = _json(
+                    "http://127.0.0.1:18088/storage-workspace/api/health"
+                )
+            except Exception as exc:
+                raise AssertionError(
+                    f"Web not ready after START: {exc}; "
+                    f"last={last_error}\n{start_text}"
+                ) from exc
+            assert health.get("status") == "ok", health
             assert f"ACTIVE_REVISION={revision_id}" in start_text
             assert "MODEL_REF=qwen_prod" in start_text
             assert "BASE_URL_ENV_REF=R2_E2E_PROVIDER_BASE_URL" in start_text
