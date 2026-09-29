@@ -48,6 +48,7 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
 
     required = (
         "runtime/__init__.py",
+        "INSTALL_OVERALL_R2_WINDOWS.bat",
         "START_OVERALL_R2_WINDOWS.bat",
         "STOP_OVERALL_R2_WINDOWS.bat",
         "CONFIG_OVERALL_R2_WINDOWS.cmd.template",
@@ -88,6 +89,7 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
             "duplicate_vendor_runtime": False,
         },
         "startup": {
+            "install": "INSTALL_OVERALL_R2_WINDOWS.bat",
             "entry": "START_OVERALL_R2_WINDOWS.bat",
             "stop": "STOP_OVERALL_R2_WINDOWS.bat",
             "command": "main.py knowledge-p1-start",
