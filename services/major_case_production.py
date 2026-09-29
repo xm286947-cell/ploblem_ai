@@ -112,34 +112,71 @@ class MajorCaseProductionService:
             "parse": {"fragment_count": len(fragments), "warnings": parsed.warnings},
         }
 
-    def analyze(self, case_id: str) -> dict[str, Any]:
+    def analyze(self, case_id: str, event_id: str = "") -> dict[str, Any]:
         if self.provider is None:
             raise MajorProductionError("MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED")
         detail = self.repository.case_detail(case_id)
         if not detail:
             raise MajorProductionError("MAJOR_CASE_NOT_FOUND")
         events = self.repository.events(case_id)
-        if len(events) != 1:
-            raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_ONE_EVENT")
-        event = events[0]
+        if event_id:
+            event = next((item for item in events if item["event_id"] == event_id), None)
+            if event is None:
+                raise MajorProductionError("MAJOR_EVENT_NOT_FOUND")
+        elif len(events) == 1:
+            event = events[0]
+        else:
+            raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_EVENT_SELECTION")
         links = [link for link in self.repository.source_links(case_id) if link.get("event_id") == event["event_id"]]
         if not links:
             raise MajorProductionError("MAJOR_SOURCE_NOT_FOUND")
-        link = links[0]
-        version_id = str(link.get("record_id") or "")
-        version = self.repository.version(version_id)
-        if not version:
-            raise MajorProductionError("MAJOR_SOURCE_VERSION_NOT_FOUND")
-        source = SourceRef(
-            source_id=version_id,
-            source_type="MAJOR_SOURCE_DOCUMENT",
-            revision=str(version.get("version_no") or "1"),
-            content_hash=str(version["content_hash"]),
-            fingerprint=str(version["content_hash"]),
-            uri=f"major-source://{version_id}",
+
+        # Prefer a parsed review/source document when present. Excel Source Fact
+        # is a first-class fallback and uses the same Runtime + review pipeline.
+        document_link = next(
+            (link for link in links if link.get("source_type") == "MAJOR_SOURCE_DOCUMENT"),
+            None,
         )
-        fragments = self.repository.fragments(version_id)
-        source_text = "\n".join(str(item.get("text_content") or "") for item in fragments[:20])
+        link = document_link or next(
+            (link for link in links if link.get("source_type") == "MAJOR_EXCEL_SOURCE_FACT"),
+            links[0],
+        )
+        record_id = str(link.get("record_id") or "")
+        version = self.repository.version(record_id)
+        if version:
+            source = SourceRef(
+                source_id=record_id,
+                source_type="MAJOR_SOURCE_DOCUMENT",
+                revision=str(version.get("version_no") or "1"),
+                content_hash=str(version["content_hash"]),
+                fingerprint=str(version["content_hash"]),
+                uri=f"major-source://{record_id}",
+            )
+            fragments = self.repository.fragments(record_id)
+            source_text = "\n".join(str(item.get("text_content") or "") for item in fragments[:20])
+            source_revision_id = record_id
+        else:
+            with self.repository.connect() as connection:
+                fact = connection.execute(
+                    "SELECT * FROM kb_source_fact_revision WHERE source_fact_revision_id=? AND case_id=?",
+                    (record_id, case_id),
+                ).fetchone()
+            if not fact:
+                raise MajorProductionError("MAJOR_SOURCE_VERSION_NOT_FOUND")
+            fact = dict(fact)
+            source_hash = str(fact.get("source_hash") or "")
+            source = SourceRef(
+                source_id=record_id,
+                source_type="MAJOR_EXCEL_SOURCE_FACT",
+                revision=str(fact.get("revision_no") or "1"),
+                content_hash=source_hash,
+                fingerprint=source_hash,
+                uri=f"major-excel://{record_id}",
+            )
+            normalized = str(fact.get("normalized_json") or "{}")
+            raw = str(fact.get("raw_json") or "{}")
+            source_text = normalized + "\n" + raw
+            source_revision_id = record_id
         specs = [
             MajorIssueObjectSpec(
                 object_id=f"{event['event_id']}:{entry_type}",
@@ -152,7 +189,7 @@ class MajorCaseProductionService:
         adapter = MajorIssueD01RuntimeAdapter(self.runtime, self.store, self.provider)
         outcome = adapter.execute_partition(
             case_id=case_id,
-            issue_version_id=version_id,
+            issue_version_id=source_revision_id,
             partition_key=event["event_id"],
             source=source,
             expected_objects=specs,
