@@ -12,8 +12,18 @@ call CHECK_ENV.bat web
 if errorlevel 1 (
   echo.
   echo [BLOCKED] Web precheck failed.
-  pause
+  if not "%HARDWARE_CASE_NO_PAUSE%"=="1" pause
   exit /b 2
+)
+
+if "%HARDWARE_CASE_SMOKE_ONLY%"=="1" (
+  where py >nul 2>nul
+  if %errorlevel%==0 (
+    py scripts\hardware_case_web_start.py --check --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources"
+  ) else (
+    python scripts\hardware_case_web_start.py --check --db "data\quality_capability_p1.db" --hardware-db "data\hardware_case_mvp.db" --tree-upload-dir "data\hardware_case_tree_uploads" --source-root "data\hardware_case_sources"
+  )
+  exit /b %errorlevel%
 )
 
 echo.
@@ -32,5 +42,5 @@ if %errorlevel%==0 (
 )
 set EXIT_CODE=%errorlevel%
 echo.
-pause
+if not "%HARDWARE_CASE_NO_PAUSE%"=="1" pause
 endlocal & exit /b %EXIT_CODE%
