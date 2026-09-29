@@ -109,9 +109,9 @@ jobs:
             if (-not $Text.Contains($Needle)) { throw "$Name missing marker: $Needle" }
           }
 
-          $overall = Dump-Dom "/p0/overall" "overall-home"
-          Require $overall "4 Workspaces" "Overall shell"
-
+          # Overall navigation contract is covered by the W2 Gate. Browser-focused
+          # validation starts from the Common Problem View and then opens the
+          # four mature Existing Capability pages directly.
           $common = Dump-Dom "/p0/issues" "common-problem"
           Require $common "/itr/recovery-workbench" "Common mature ITR"
           Require $common "/software-assessment" "Common mature Software Assessment"
