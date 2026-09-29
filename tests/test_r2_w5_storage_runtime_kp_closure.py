@@ -123,6 +123,13 @@ def test_overall_windows_launcher_binds_single_runtime_and_persistent_knowledge(
     }
 
     monkeypatch.delenv("HARDWARE_CASE_HOST_ROLE", raising=False)
+    for name in (
+        "MAJOR_MODEL_CONFIG",
+        "HARDWARE_CASE_MODEL_CONFIG",
+        "STORAGE_MODEL_CONFIG",
+        "OVERALL_RUNTIME_MODEL_CONFIG",
+    ):
+        monkeypatch.delenv(name, raising=False)
     env = launcher.build_process_env(package_root.resolve(), bindings)
 
     assert env["HARDWARE_CASE_HOST_ROLE"] == "CONSUMER"
