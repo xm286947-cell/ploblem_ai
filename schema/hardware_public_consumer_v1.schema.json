@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/hardware-public-consumer/v1",
+  "title": "Hardware Public Consumer Contract V1",
+  "description": "Stable cross-product read contract over existing Hardware Case consumer projections. No write/maintainer operations.",
+  "type": "object",
+  "$defs": {
+    "CaseProjection": {
+      "type": "object",
+      "required": ["contract_version","case_id","title","case_status","facts","mappings","mapping_paths","evidence_health"],
+      "properties": {
+        "contract_version":{"const":"hardware-case/v1"},
+        "case_id":{"type":"string","minLength":1},
+        "title":{"type":["string","null"]},
+        "case_status":{"enum":["PUBLISHED","DEPRECATED"]},
+        "processing_status":{"type":"string"},
+        "product_context":{"type":"object"},
+        "facts":{"type":"object"},
+        "mappings":{"type":"array"},
+        "mapping_paths":{"type":"object"},
+        "circuit_mapping_state":{"type":"string"},
+        "material_mapping_state":{"type":"string"},
+        "evidence_health":{"enum":["AVAILABLE","EVIDENCE_MISSING","SOURCE_UNAVAILABLE"]},
+        "evidence_warning":{"type":["string","null"]},
+        "created_at":{},
+        "updated_at":{},
+        "published_at":{}
+      },
+      "additionalProperties": true
+    }
+  },
+  "required":["public_contract_version","operation","payload"],
+  "properties":{
+    "public_contract_version":{"const":"hardware-public-consumer/v1"},
+    "operation":{"enum":["SEARCH","GET_CASE","GET_TREE","CASES_BY_TREE_NODE","GET_MAPPINGS","GET_EVIDENCE"]},
+    "payload":{"type":"object"}
+  },
+  "allOf":[
+    {"if":{"properties":{"operation":{"const":"GET_CASE"}}},"then":{"properties":{"payload":{"$ref":"#/$defs/CaseProjection"}}}},
+    {"if":{"properties":{"operation":{"const":"SEARCH"}}},"then":{"properties":{"payload":{"required":["contract_version","results"],"properties":{"contract_version":{"const":"hardware-case/v1"},"results":{"type":"array","items":{"$ref":"#/$defs/CaseProjection"}}}}}}},
+    {"if":{"properties":{"operation":{"const":"CASES_BY_TREE_NODE"}}},"then":{"properties":{"payload":{"required":["contract_version","node_id","case_count","results"],"properties":{"contract_version":{"const":"hardware-case/v1"},"node_id":{"type":"string"},"case_count":{"type":"integer","minimum":0},"results":{"type":"array","items":{"$ref":"#/$defs/CaseProjection"}}}}}}},
+    {"if":{"properties":{"operation":{"const":"GET_TREE"}}},"then":{"properties":{"payload":{"required":["contract_version","tree_type","nodes"],"properties":{"contract_version":{"const":"hardware-case/v1"},"tree_type":{"enum":["CIRCUIT_FEATURE","MATERIAL_DEVICE"]},"nodes":{"type":"array"}}}}}},
+    {"if":{"properties":{"operation":{"const":"GET_MAPPINGS"}}},"then":{"properties":{"payload":{"required":["contract_version","case_id","mappings"],"properties":{"contract_version":{"const":"hardware-case/v1"},"case_id":{"type":"string"},"mappings":{"type":"array","items":{"type":"object","properties":{"mapping_status":{"const":"CONFIRMED"}},"required":["mapping_status"]}}}}}}},
+    {"if":{"properties":{"operation":{"const":"GET_EVIDENCE"}}},"then":{"properties":{"payload":{"required":["contract_version","case_id","evidence"],"properties":{"contract_version":{"const":"hardware-case/v1"},"case_id":{"type":"string"},"evidence":{"type":"array"}}}}}}
+  ],
+  "additionalProperties": false
+}

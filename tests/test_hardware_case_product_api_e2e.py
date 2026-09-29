@@ -46,7 +46,7 @@ def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
     assert init.status_code == 200
     assert init.json()["initialization_state"] == "READY"
     assert client.get("/api/v2/products").status_code == 200
-    assert client.get("/", follow_redirects=False).headers["location"] == "/p0/insights"
+    assert client.get("/", follow_redirects=False).headers["location"] == "/p0/issues"
 
     # Hardware Case starts on the same /api/v2 surface.
     case_payload = {

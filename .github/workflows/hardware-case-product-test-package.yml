@@ -170,6 +170,9 @@ jobs:
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_evidence_source.py
 
+      - name: Run Hardware Public Consumer Contract regression
+        run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
+
       - name: Stage delivery files
         run: |
           mkdir -p dist/product-test-delivery
