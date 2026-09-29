@@ -47,6 +47,23 @@
 <section class="overall-card">
   <h2>Projection Parity 边界</h2>
   <p>旧质量场景与旧产品 / 客户 / 行业画像在权威 Route 完成绑定且新版达到 Projection Parity 前不得静默退役。</p>
+  <div class="overall-task-list" data-scenario-parity>
+    {% for item in scenario_parity.items %}
+    <div class="overall-task">
+      <div>
+        <strong>{{ item.legacy_title }} → {{ item.replacement_title }}</strong>
+        <small>{{ item.legacy_path }} → {{ item.replacement_path }}</small>
+      </div>
+      <span>{{ item.parity_status }}</span>
+      <div class="overall-actions">
+        {% if item.legacy_available %}<a href="{{ item.legacy_path }}">旧能力</a>{% endif %}
+        <a href="{{ item.replacement_path }}">新版入口</a>
+      </div>
+      <small>RETIREMENT_ALLOWED={{ 'YES' if item.retirement_allowed else 'NO' }} · {{ item.retirement_reason }}</small>
+    </div>
+    {% endfor %}
+  </div>
+  <p><strong>{{ scenario_parity.policy }}</strong></p>
 </section>
 {% endif %}
 
