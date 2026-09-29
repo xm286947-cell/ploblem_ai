@@ -1,0 +1,173 @@
+name: STEP1 Legacy Quality Scenario Browser Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/scenario*.py"
+      - "quality_knowledge/quality_models.py"
+      - "quality_knowledge/reverse_quality_scenario_adapter.py"
+      - "quality_knowledge/web/app.py"
+      - "quality_knowledge/web/scenario_asset_pages.py"
+      - "quality_knowledge/web/templates/quality_scenario*.html"
+      - "quality_knowledge/web/templates/scenario_*.html"
+      - "start_quality_capability_p1.bat"
+      - ".github/workflows/step1-legacy-quality-scenario-browser.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-real-browser:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: .
+      REPEAT_CASE_NO_PAUSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Seed browser-validation legacy DB
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force "knowledge" | Out-Null
+          if (Test-Path "knowledge\quality_issue_v1.db") { Remove-Item -Force "knowledge\quality_issue_v1.db" }
+          @'
+          from pathlib import Path
+          from quality_knowledge.web import create_app
+
+          db = Path("knowledge/quality_issue_v1.db")
+          app = create_app(db)
+          repo = app.state.scenario_repository
+          repo.save_scenario(
+              "STEP1-SCN-001",
+              {
+                  "scenario_code": "STEP1-SCN-001",
+                  "name": "STEP1 老质量场景浏览器验证",
+                  "product_code": "PLC",
+                  "lifecycle_code": "SOFTWARE_DEBUGGING",
+                  "activity_code": "ONLINE_MONITORING",
+                  "scenario_chain": "下载运行 → 在线监控 → 状态分析",
+                  "experience_requirement": "客户在线调试时状态反馈可信",
+                  "concern_points": "状态一致性",
+                  "quality_attribute": "可靠性",
+                  "failure_mode": "状态显示与实际不一致",
+                  "status": "PUBLISHED",
+              },
+              {
+                  "INDUSTRY": ["锂电"],
+                  "CUSTOMER_NAME": ["STEP1客户"],
+                  "PRODUCT_MODEL": ["PLC-STEP1"],
+              },
+          )
+          print("STEP1_SEED=PASS")
+          '@ | python -
+
+      - name: Start from legacy BAT entry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stdout = Join-Path $env:RUNNER_TEMP "step1-legacy.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "step1-legacy.stderr.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @(
+            "/c", "start_quality_capability_p1.bat --host 127.0.0.1 --port 8090"
+          ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          "STEP1_LAUNCHER_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $ready = $false
+          for ($i=0; $i -lt 90; $i++) {
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8090/quality-scenarios" -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { $ready = $true; break }
+            } catch {}
+            Start-Sleep -Seconds 1
+          }
+          if (-not $ready) {
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            throw "Legacy BAT entry did not become ready"
+          }
+          Write-Host "LEGACY_START_ENTRY=PASS"
+
+      - name: Validate mature pages in real Edge or Chrome
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $browserCandidates = @(
+            "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            "C:\Program Files\Google\Chrome\Application\chrome.exe",
+            "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+          )
+          $browser = $browserCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $browser) { throw "Edge/Chrome headless browser not found" }
+
+          function Dump-Dom([string]$Path, [string]$Name) {
+            $out = Join-Path $env:RUNNER_TEMP ($Name + ".html")
+            & $browser --headless --disable-gpu --no-first-run --dump-dom ("http://127.0.0.1:8090" + $Path) 2>$null | Set-Content -Encoding utf8 $out
+            if (!(Test-Path $out)) { throw "DOM dump missing: $Path" }
+            return (Get-Content -Raw $out)
+          }
+          function Require([string]$Text, [string]$Needle, [string]$Name) {
+            if (-not $Text.Contains($Needle)) { throw "$Name missing marker: $Needle" }
+          }
+
+          $scenario = Dump-Dom "/quality-scenarios?product_code=PLC&industry=%E9%94%82%E7%94%B5&q=STEP1" "quality-scenarios"
+          Require $scenario "STEP1 老质量场景浏览器验证" "Quality Scenario data"
+          Require $scenario 'name="industry"' "Quality Scenario industry filter"
+          Require $scenario 'name="q"' "Quality Scenario keyword filter"
+          Require $scenario "/quality-scenarios/STEP1-SCN-001" "Quality Scenario detail drill-down"
+
+          $detail = Dump-Dom "/quality-scenarios/STEP1-SCN-001" "quality-scenario-detail"
+          Require $detail "STEP1 老质量场景浏览器验证" "Quality Scenario detail"
+          Require $detail "状态一致性" "Quality Scenario mature detail data"
+
+          $assets = Dump-Dom "/quality-scenario-assets?industry=%E9%94%82%E7%94%B5" "scenario-assets"
+          Require $assets "STEP1 老质量场景浏览器验证" "Product portrait asset data"
+          Require $assets "/quality-scenario-assets/STEP1-SCN-001" "Asset detail drill-down"
+
+          $assetDetail = Dump-Dom "/quality-scenario-assets/STEP1-SCN-001" "scenario-asset-detail"
+          Require $assetDetail "STEP1 老质量场景浏览器验证" "Asset detail"
+
+          $portrait = Dump-Dom "/quality-scenario-assets/portrait?industry=%E9%94%82%E7%94%B5" "scenario-portrait"
+          Require $portrait "客户 / 行业质量场景画像" "Customer/Industry portrait page"
+          Require $portrait 'name="industry"' "Portrait industry filter"
+          Require $portrait 'name="customer"' "Portrait customer filter"
+          Require $portrait 'name="product_group"' "Portrait product group filter"
+          Require $portrait 'name="product"' "Portrait product model filter"
+
+          foreach ($path in @("/issues", "/analysis", "/import")) {
+            try {
+              $probe = Invoke-WebRequest -Uri ("http://127.0.0.1:8090" + $path) -UseBasicParsing -TimeoutSec 10
+              if ($probe.StatusCode -ne 200) { throw "$path status $($probe.StatusCode)" }
+            } catch {
+              throw "Old problem platform regression at $path : $($_.Exception.Message)"
+            }
+          }
+
+          Write-Host "LEGACY_QUALITY_SCENARIO=PASS"
+          Write-Host "LEGACY_PRODUCT_PORTRAIT=PASS"
+          Write-Host "LEGACY_CUSTOMER_PORTRAIT=PASS"
+          Write-Host "LEGACY_INDUSTRY_PORTRAIT=PASS"
+          Write-Host "LEGACY_FILTERS_ACTIONS=PASS"
+          Write-Host "LEGACY_DATA_VISIBLE=PASS"
+          Write-Host "OLD_PROBLEM_PLATFORM_REGRESSION=PASS"
+          Write-Host "NEW_R2_SCENARIO_SUBSTITUTION=NO"
+
+      - name: Stop legacy Web
+        if: always()
+        shell: pwsh
+        run: |
+          Get-NetTCPConnection -LocalPort 8090 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
