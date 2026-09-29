@@ -187,6 +187,7 @@ def build() -> tuple[Path, Path, Path]:
             f"--prefix={runtime_source.name}/",
             runtime_commit,
             "runtime",
+            "contracts",
             "config/runtime/model.yaml",
             "tools/openai_mock/server.py",
             "requirements-runtime-p0-test.txt",
@@ -200,6 +201,9 @@ def build() -> tuple[Path, Path, Path]:
         check=True,
     )
     copy_tree(runtime_source / "runtime", runtime_root / "runtime")
+    # Runtime binding imports the public contract package directly. Keep the
+    # contract snapshot aligned with the selected Unified Runtime commit.
+    copy_tree(runtime_source / "contracts", package_root / "contracts")
     copy_file(runtime_source / "config/runtime/model.yaml", runtime_root / "config/runtime/model.yaml")
     copy_file(runtime_source / "tools/openai_mock/server.py", runtime_root / "tools/openai_mock/server.py")
     copy_file(runtime_source / "requirements-runtime-p0-test.txt", runtime_root / "requirements-runtime-p0-test.txt")
