@@ -189,6 +189,7 @@ def create_p0_insights_router(
     static_dir: str | Path | None = None,
     api_prefix: str = "/api/v2",
     scenario_detail_service: Any | None = None,
+    hardware_case_host_role: str = "CONSUMER",
 ) -> APIRouter:
     """Return an isolated router for ``/p0/insights``.
 
@@ -199,6 +200,16 @@ def create_p0_insights_router(
     templates = Jinja2Templates(directory=str(template_dir or (_HERE / "templates")))
     assets = Path(static_dir or (_HERE / "static"))
     templates.env.globals["overall_navigation_asset_version"] = overall_navigation_asset_version(assets)
+    hardware_role = str(hardware_case_host_role or "CONSUMER").strip().upper()
+    if hardware_role not in {"CONSUMER", "MAINTAINER"}:
+        raise ValueError("HARDWARE_CASE_HOST_ROLE_INVALID")
+
+    def require_hardware_maintainer() -> None:
+        if hardware_role != "MAINTAINER":
+            raise HTTPException(
+                status_code=403,
+                detail="HARDWARE_CASE_MAINTAINER_REQUIRED",
+            )
 
     def p04_js_asset_version() -> str:
         asset = assets / "p04_insights.js"
@@ -557,55 +568,53 @@ def create_p0_insights_router(
 
     @router.get("/p0/hardware-cases", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_home(request: Request) -> HTMLResponse:
-        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
         return templates.TemplateResponse(
             request,
             "hardware_case_home.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "硬件案例库",
-                "hardware_role": role,
+                "hardware_role": hardware_role,
                 "hardware_active": "home",
             },
         )
 
     @router.get("/p0/hardware-cases/tree", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_tree(request: Request) -> HTMLResponse:
-        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
         return templates.TemplateResponse(
             request,
             "hardware_case_tree.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "双树导航 · 硬件案例库",
-                "hardware_role": role,
+                "hardware_role": hardware_role,
                 "hardware_active": "tree",
             },
         )
 
     @router.get("/p0/hardware-cases/search", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_search(request: Request) -> HTMLResponse:
-        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
         return templates.TemplateResponse(
             request,
             "hardware_case_search.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例搜索 · 硬件案例库",
-                "hardware_role": role,
+                "hardware_role": hardware_role,
                 "hardware_active": "search",
             },
         )
 
     @router.get("/p0/hardware-cases/review", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_review_queue(request: Request) -> HTMLResponse:
+        require_hardware_maintainer()
         return templates.TemplateResponse(
             request,
             "hardware_case_review.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例确认 · 硬件案例库",
-                "hardware_role": "MAINTAINER",
+                "hardware_role": hardware_role,
                 "hardware_active": "review",
                 "case_id": "",
             },
@@ -613,13 +622,14 @@ def create_p0_insights_router(
 
     @router.get("/p0/hardware-cases/{case_id}/review", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_review(request: Request, case_id: str) -> HTMLResponse:
+        require_hardware_maintainer()
         return templates.TemplateResponse(
             request,
             "hardware_case_review.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例确认 · 硬件案例库",
-                "hardware_role": "MAINTAINER",
+                "hardware_role": hardware_role,
                 "hardware_active": "review",
                 "case_id": case_id,
             },
@@ -627,6 +637,7 @@ def create_p0_insights_router(
 
     @router.get("/p0/hardware-cases/base-data", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_base_data(request: Request) -> HTMLResponse:
+        require_hardware_maintainer()
         return templates.TemplateResponse(
             request,
             "hardware_tree_import.html",
@@ -634,34 +645,34 @@ def create_p0_insights_router(
                 "import_api_prefix": "/api/v2/hardware-cases/tree-imports",
                 "tree_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "基础数据管理 · 硬件案例库",
-                "hardware_role": "MAINTAINER",
+                "hardware_role": hardware_role,
                 "hardware_active": "base-data",
             },
         )
 
     @router.get("/p0/hardware-cases/intake", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_intake(request: Request) -> HTMLResponse:
+        require_hardware_maintainer()
         return templates.TemplateResponse(
             request,
             "hardware_case_intake.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "知识导入 · 硬件案例库",
-                "hardware_role": "MAINTAINER",
+                "hardware_role": hardware_role,
                 "hardware_active": "intake",
             },
         )
 
     @router.get("/p0/hardware-cases/{case_id}", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_detail(request: Request, case_id: str) -> HTMLResponse:
-        role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
         return templates.TemplateResponse(
             request,
             "hardware_case_detail.html",
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例详情 · 硬件案例库",
-                "hardware_role": role,
+                "hardware_role": hardware_role,
                 "hardware_active": "",
                 "case_id": case_id,
             },
@@ -711,6 +722,7 @@ def create_hardware_case_pages_router(
     *,
     template_dir: str | Path | None = None,
     static_dir: str | Path | None = None,
+    hardware_case_host_role: str = "CONSUMER",
 ) -> APIRouter:
     """Return only Hardware Case P01-P07 pages plus their shared static route.
 
@@ -721,6 +733,7 @@ def create_hardware_case_pages_router(
     full = create_p0_insights_router(
         template_dir=template_dir,
         static_dir=static_dir,
+        hardware_case_host_role=hardware_case_host_role,
     )
     router = APIRouter()
     router.routes.extend(
