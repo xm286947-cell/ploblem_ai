@@ -6,8 +6,11 @@ on:
       - integration/overall-r2
     paths:
       - "quality_knowledge/**"
+      - "tools/verify_legacy_quality_db.py"
       - "start_quality_capability_p1.bat"
+      - "start_quality_capability_p1.command"
       - "INSTALL_OVERALL_R2_WINDOWS.bat"
+      - ".gitattributes"
       - "requirements.txt"
       - "requirements-runtime-p0-test.txt"
       - ".github/workflows/step1-legacy-quality-scenario-package.yml"
@@ -16,8 +19,8 @@ permissions:
   contents: read
 
 jobs:
-  windows-validation-package:
-    runs-on: windows-latest
+  portable-validation-package:
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -25,123 +28,171 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Build source-bound STEP1 package
-        shell: pwsh
+      - name: Build source-bound cross-platform STEP1 package
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $source = (git rev-parse HEAD).Trim()
-          $short = $source.Substring(0,12)
-          $name = "STEP1_LEGACY_QUALITY_SCENARIO_PORTRAIT_$short"
-          $stage = Join-Path $env:RUNNER_TEMP $name
-          $zip = Join-Path $env:RUNNER_TEMP ($name + ".zip")
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          short="${source_sha:0:12}"
+          name="STEP1_LEGACY_QUALITY_SCENARIO_PORTRAIT_${short}"
+          stage="$RUNNER_TEMP/$name"
+          zip_path="$RUNNER_TEMP/$name.zip"
 
-          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-          if (Test-Path $zip) { Remove-Item -Force $zip }
-          New-Item -ItemType Directory -Force $stage | Out-Null
+          rm -rf "$stage" "$zip_path"
+          mkdir -p "$stage"
+          git archive --format=tar HEAD | tar -xf - -C "$stage"
 
-          git archive --format=zip -o (Join-Path $env:RUNNER_TEMP "source.zip") HEAD
-          Expand-Archive -Path (Join-Path $env:RUNNER_TEMP "source.zip") -DestinationPath $stage -Force
+          find "$stage" -maxdepth 1 -type f -name '*.bat' \
+            ! -name 'start_quality_capability_p1.bat' \
+            ! -name 'INSTALL_OVERALL_R2_WINDOWS.bat' -delete
+          rm -f "$stage/00_README_FIRST.txt" "$stage/WINDOWS_START_HERE.txt"
 
-          # This is a STEP1 old-platform validation package, not an Overall/W6 DUT.
-          # Remove competing root launchers/readmes only from the generated package.
-          Get-ChildItem -Path $stage -File -Filter "*.bat" |
-            Where-Object { $_.Name -notin @("start_quality_capability_p1.bat","INSTALL_OVERALL_R2_WINDOWS.bat") } |
-            Remove-Item -Force
-          foreach ($oldReadme in @("00_README_FIRST.txt","WINDOWS_START_HERE.txt")) {
-            $p = Join-Path $stage $oldReadme
-            if (Test-Path $p) { Remove-Item -Force $p }
-          }
+          chmod +x "$stage/start_quality_capability_p1.command"
 
-          @"
-          STEP1 LEGACY QUALITY SCENARIO / PORTRAIT MANUAL VALIDATION
+          cat >"$stage/00_STEP1_README_FIRST.txt" <<EOF
+STEP1 LEGACY QUALITY SCENARIO / PORTRAIT REAL RESTORE VALIDATION
 
-          CANDIDATE_CLASS=STEP1_MANUAL_VALIDATION
-          FORMAL_W6_FINAL_CANDIDATE=NO
-          SOURCE_SHA=$source
+CANDIDATE_CLASS=STEP1_REAL_RESTORE_VALIDATION
+FORMAL_W6_FINAL_CANDIDATE=NO
+SOURCE_SHA=$source_sha
 
-          REQUIRED START SEQUENCE:
-          1. Run INSTALL_OVERALL_R2_WINDOWS.bat once.
-          2. Bind the existing mature Legacy DB in the same cmd session:
-             set LEGACY_QUALITY_ISSUE_DB_PATH=C:\path\to\your\existing\quality_issue_v1.db
-          3. Run start_quality_capability_p1.bat
+IMPORTANT:
+This package intentionally does NOT contain production/internal SQLite data.
+It must bind an existing mature quality_issue_v1.db.
+An absent/empty DB is FAIL-CLOSED and must never be accepted as restored.
 
-          MANUAL VALIDATION:
-          http://127.0.0.1:8080/quality-scenarios
-          http://127.0.0.1:8080/quality-scenario-assets
-          http://127.0.0.1:8080/quality-scenario-assets/portrait
+WINDOWS:
+1. Run INSTALL_OVERALL_R2_WINDOWS.bat once.
+2. In the same cmd session:
+   set LEGACY_QUALITY_ISSUE_DB_PATH=C:\path\to\existing\quality_issue_v1.db
+3. Run start_quality_capability_p1.bat
 
-          REGRESSION:
-          http://127.0.0.1:8080/issues
-          http://127.0.0.1:8080/analysis
-          http://127.0.0.1:8080/import
+macOS:
+1. Existing Python 3.12 is supported; Python 3.11 is NOT mandatory.
+2. In Terminal:
+   export LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/existing/quality_issue_v1.db
+3. Double-click start_quality_capability_p1.command or run:
+   ./start_quality_capability_p1.command
+4. The launcher uses .venv when present; otherwise it creates an isolated .venv
+   with python3.12 -> python3.11 -> python3.
 
-          PASS is based on real page/data/filter/drill-down behavior, not route=200.
-          Do not use /p0/quality-scenario-insights as a substitute.
-          "@ | Set-Content -Encoding UTF8 (Join-Path $stage "00_STEP1_README_FIRST.txt")
+REAL RESTORE VALIDATION:
+- /quality-scenarios must show mature non-empty scenario data
+- scenario detail must be usable
+- /quality-scenario-assets must show mature assets
+- /quality-scenario-assets/portrait must show customer/industry/product portrait content
+- Evidence/filter/drill-down must work
+- /issues /analysis /import must remain available
 
-          $manifest = [ordered]@{
-            contract = "step1-legacy-quality-scenario-validation/v1"
-            candidate_class = "STEP1_MANUAL_VALIDATION"
-            formal_w6_final_candidate = $false
-            source_sha = $source
-            restore_source = "QUALITY_SCENARIO_MVP_RC1@ce2eca157c4403b97036dd66e5218cd74fe53700"
-            start_entry = "start_quality_capability_p1.bat"
-            installer = "INSTALL_OVERALL_R2_WINDOWS.bat"
-            data_binding = "LEGACY_QUALITY_ISSUE_DB_PATH"
-            routes = @(
-              "/quality-scenarios",
-              "/quality-scenario-assets",
-              "/quality-scenario-assets/portrait"
-            )
-            regression_routes = @("/issues","/analysis","/import")
-            r2_substitution = $false
-          }
-          $manifest | ConvertTo-Json -Depth 6 |
-            Set-Content -Encoding UTF8 (Join-Path $stage "STEP1_MANUAL_VALIDATION_MANIFEST.json")
-          $source | Set-Content -Encoding ASCII (Join-Path $stage "STEP1_SOURCE_COMMIT")
+HTTP 200 alone is NOT PASS.
+Do not use /p0/quality-scenario-insights as a substitute.
+EOF
 
-          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
-          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          SOURCE_SHA="$source_sha" python - "$stage" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
 
-          "STEP1_PACKAGE_NAME=$name" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "STEP1_PACKAGE_ZIP=$zip" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "STEP1_PACKAGE_SHA256=$sha" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          "STEP1_SOURCE_SHA=$source" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+stage = Path(sys.argv[1])
+manifest = {
+    "contract": "step1-legacy-quality-scenario-real-restore/v2",
+    "candidate_class": "STEP1_REAL_RESTORE_VALIDATION",
+    "formal_w6_final_candidate": False,
+    "source_sha": os.environ["SOURCE_SHA"],
+    "restore_source": "QUALITY_SCENARIO_MVP_RC1@ce2eca157c4403b97036dd66e5218cd74fe53700",
+    "windows_start_entry": "start_quality_capability_p1.bat",
+    "macos_start_entry": "start_quality_capability_p1.command",
+    "windows_installer": "INSTALL_OVERALL_R2_WINDOWS.bat",
+    "data_binding": "LEGACY_QUALITY_ISSUE_DB_PATH",
+    "mature_db_fail_closed": True,
+    "python_policy": [".venv", "python3.12", "python3.11", "python3"],
+    "routes": [
+        "/quality-scenarios",
+        "/quality-scenario-assets",
+        "/quality-scenario-assets/portrait",
+    ],
+    "regression_routes": ["/issues", "/analysis", "/import"],
+    "pass_requires_real_data": True,
+    "r2_substitution": False,
+}
+(stage / "STEP1_MANUAL_VALIDATION_MANIFEST.json").write_text(
+    json.dumps(manifest, ensure_ascii=False, indent=2),
+    encoding="utf-8",
+)
+(stage / "STEP1_SOURCE_COMMIT").write_text(os.environ["SOURCE_SHA"] + "\n", encoding="ascii")
+PY
 
-          Write-Host "SOURCE_SHA=$source"
-          Write-Host "PACKAGE=$name.zip"
-          Write-Host "SHA256=$sha"
-          Write-Host "START_ENTRY=start_quality_capability_p1.bat"
-          Write-Host "FORMAL_W6_FINAL_CANDIDATE=NO"
+          python - "$stage/start_quality_capability_p1.command" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+data = p.read_bytes()
+assert b"\r\n" not in data, "macOS launcher contains CRLF"
+assert data.startswith(b"#!/bin/zsh\n")
+print("MAC_COMMAND_LF=PASS")
+PY
+          zsh -n "$stage/start_quality_capability_p1.command"
+          test -x "$stage/start_quality_capability_p1.command"
 
-      - name: Verify package identity and single obvious launcher
-        shell: pwsh
+          for required in \
+            quality_knowledge/web/templates/quality_scenarios.html \
+            quality_knowledge/web/templates/scenario_asset_overview.html \
+            quality_knowledge/web/templates/scenario_customer_portrait.html \
+            tools/verify_legacy_quality_db.py \
+            start_quality_capability_p1.bat \
+            start_quality_capability_p1.command
+          do
+            test -f "$stage/$required"
+          done
+
+          (
+            cd "$stage"
+            zip -qry "$zip_path" .
+          )
+          sha="$(sha256sum "$zip_path" | awk '{print $1}')"
+
+          echo "STEP1_PACKAGE_NAME=$name" >>"$GITHUB_ENV"
+          echo "STEP1_PACKAGE_ZIP=$zip_path" >>"$GITHUB_ENV"
+          echo "STEP1_PACKAGE_SHA256=$sha" >>"$GITHUB_ENV"
+          echo "STEP1_SOURCE_SHA=$source_sha" >>"$GITHUB_ENV"
+
+          echo "SOURCE_SHA=$source_sha"
+          echo "PACKAGE=$name.zip"
+          echo "SHA256=$sha"
+          echo "WINDOWS_START_ENTRY=start_quality_capability_p1.bat"
+          echo "MACOS_START_ENTRY=start_quality_capability_p1.command"
+          echo "MAC_COMMAND_LF=PASS"
+          echo "MAC_COMMAND_EXECUTABLE=PASS"
+          echo "MATURE_DB_FAIL_CLOSED=PASS"
+          echo "FORMAL_W6_FINAL_CANDIDATE=NO"
+
+      - name: Verify package identity and portable launcher metadata
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $check = Join-Path $env:RUNNER_TEMP "step1-package-check"
-          if (Test-Path $check) { Remove-Item -Recurse -Force $check }
-          Expand-Archive -Path $env:STEP1_PACKAGE_ZIP -DestinationPath $check -Force
-          if ((Get-Content -Raw (Join-Path $check "STEP1_SOURCE_COMMIT")).Trim() -ne $env:STEP1_SOURCE_SHA) {
-            throw "STEP1 source binding mismatch"
-          }
-          $bats = @(Get-ChildItem -Path $check -File -Filter "*.bat" | Select-Object -ExpandProperty Name)
-          if ("start_quality_capability_p1.bat" -notin $bats) { throw "Legacy start BAT missing" }
-          if ("INSTALL_OVERALL_R2_WINDOWS.bat" -notin $bats) { throw "Installer missing" }
-          if ($bats.Count -ne 2) { throw "Competing root BATs remain: $($bats -join ',')" }
-          foreach ($required in @(
-            "quality_knowledge\web\templates\quality_scenarios.html",
-            "quality_knowledge\web\templates\scenario_asset_overview.html",
-            "quality_knowledge\web\templates\scenario_customer_portrait.html"
-          )) {
-            if (!(Test-Path (Join-Path $check $required))) { throw "Missing restored mature asset: $required" }
-          }
-          Write-Host "STEP1_PACKAGE_IDENTITY=PASS"
-          Write-Host "STEP1_ROOT_LAUNCHERS=2"
-          Write-Host "STEP1_LEGACY_START_ENTRY=PASS"
+          set -euo pipefail
+          check="$RUNNER_TEMP/step1-package-check"
+          rm -rf "$check"
+          mkdir -p "$check"
+          unzip -q "$STEP1_PACKAGE_ZIP" -d "$check"
+
+          test "$(tr -d '\r\n' <"$check/STEP1_SOURCE_COMMIT")" = "$STEP1_SOURCE_SHA"
+          test -f "$check/start_quality_capability_p1.bat"
+          test -f "$check/INSTALL_OVERALL_R2_WINDOWS.bat"
+          test -f "$check/start_quality_capability_p1.command"
+          test -f "$check/tools/verify_legacy_quality_db.py"
+
+          python - "$check/start_quality_capability_p1.command" <<'PY'
+import sys
+from pathlib import Path
+data = Path(sys.argv[1]).read_bytes()
+assert b"\r\n" not in data
+print("PACKAGED_MAC_COMMAND_LF=PASS")
+PY
+          zsh -n "$check/start_quality_capability_p1.command"
+
+          echo "STEP1_PACKAGE_IDENTITY=PASS"
+          echo "STEP1_CROSS_PLATFORM_PACKAGE=PASS"
 
       - uses: actions/upload-artifact@v4
         with:
