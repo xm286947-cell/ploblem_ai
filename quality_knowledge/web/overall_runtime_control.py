@@ -261,6 +261,13 @@ class OverallRuntimeControlPlane:
                 "model": model.get("model"),
                 "base_url": model.get("base_url"),
                 "base_url_env": base_url_env,
+                "base_url_present": bool(
+                    model.get("base_url")
+                    or (
+                        base_url_env
+                        and os.environ.get(base_url_env, "").strip()
+                    )
+                ),
                 "api_key_env": api_key_env,
                 "api_key_present": bool(
                     api_key_env
@@ -270,8 +277,20 @@ class OverallRuntimeControlPlane:
                 "temperature": model.get("temperature"),
                 "metadata": _safe_value(model.get("metadata") or {}),
                 "direct_secret_configured": bool(model.get("api_key")),
+                "process_env_scope": "CURRENT_PROCESS_ENV",
             }
         active_model = raw.get("active_model")
+        process_model_config = str(
+            os.environ.get("OVERALL_RUNTIME_MODEL_CONFIG") or ""
+        ).strip()
+        restart_required = bool(
+            pointer.get("revision_id") != "CANONICAL"
+            and (
+                not process_model_config
+                or Path(process_model_config).expanduser().resolve()
+                != path.resolve()
+            )
+        )
         return {
             "contract": "AGENT-CONFIG-001",
             "active_revision": pointer.get(
@@ -290,6 +309,27 @@ class OverallRuntimeControlPlane:
                 self.operator_model_config_overrides
             ),
             "secret_policy": "SECRET_REF_ONLY_FOR_CONTROL_PLANE_WRITES",
+            "process_env_scope": "CURRENT_PROCESS_ENV",
+            "process_model_config": process_model_config or None,
+            "restart_required": restart_required,
+        }
+
+    def runtime_operability(self) -> dict[str, Any]:
+        effective = self.effective_config()
+        model_ref = str(effective.get("active_model") or "").strip()
+        model = (
+            effective.get("models") or {}
+        ).get(model_ref) or {}
+        return {
+            "active_revision": effective.get("active_revision"),
+            "model_ref": model_ref or None,
+            "provider": model.get("provider"),
+            "base_url_env_ref": model.get("base_url_env"),
+            "base_url_present": bool(model.get("base_url_present")),
+            "api_key_env_ref": model.get("api_key_env"),
+            "api_key_present": bool(model.get("api_key_present")),
+            "process_env_scope": effective.get("process_env_scope"),
+            "restart_required": bool(effective.get("restart_required")),
         }
 
     def _audit(
@@ -853,6 +893,7 @@ class OverallRuntimeControlPlane:
                 "overall-runtime-diagnostics/v1"
             ),
             "trace_owner": "UNIFIED_RUNTIME",
+            "runtime_operability": self.runtime_operability(),
             "stores_ready": ready,
             "stores_total": len(stores),
             "stores": stores,
