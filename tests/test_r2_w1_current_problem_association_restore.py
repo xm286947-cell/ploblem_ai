@@ -188,7 +188,7 @@ def test_current_problem_four_workbench_association_closure_is_read_only(tmp_pat
         },
     )
     assert detail.status_code == 200
-    assert "4/4 已关联" in detail.text
+    assert "4 / 4 已关联" in detail.text
     assert "/p0/itr-recovery?q=ITR-R2-ASSOC-1" in detail.text
     assert "/p0/itr-resolution?q=ITR-R2-ASSOC-1" in detail.text
     assert "/p0/software-assessment?q=ITR-R2-ASSOC-1" in detail.text
