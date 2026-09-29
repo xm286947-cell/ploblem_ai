@@ -47,6 +47,8 @@ INCLUDE_FILES = [
     "quality_knowledge/web/templates/hardware_tree_import.html",
     "quality_knowledge/web/static/app.css",
     "quality_knowledge/web/static/p0_ued_bridge.css",
+    "quality_knowledge/web/static/overall_navigation.css",
+    "quality_knowledge/web/static/overall_navigation.js",
     "quality_knowledge/web/static/hardware_tree_import.css",
     "quality_knowledge/web/static/hardware_tree_import.js",
     "repositories/__init__.py",
