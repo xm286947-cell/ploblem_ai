@@ -40,25 +40,37 @@ def test_r2_w2_four_product_areas_are_stable_shell_entries():
     assert client.get("/p0/overall/areas/not-real").status_code == 404
 
 
-def test_r2_w2_current_problem_uses_verified_w1_routes_and_does_not_fake_assessment():
+def test_r2_w2_current_problem_has_four_business_workbenches_and_common_problem_view():
     client = _client(legacy_ready=True)
     page = client.get("/p0/overall/areas/current-problem")
 
     assert page.status_code == 200
     for path in (
-        "/p0/issues",
         "/p0/itr-recovery",
         "/p0/itr-resolution",
+        "/p0/software-assessment",
         "/p0/missed-test-analysis",
-        "/p0/batch-analysis",
-        "/analysis",
     ):
         assert f'href="{path}"' in page.text
 
-    assert "软件问题考核" in page.text
-    assert "Protected Existing Capability" in page.text
-    assert "/analysis" in page.text
-    assert "不由 /analysis 或材料页替代" in page.text
+    for label in (
+        "ITR工作台",
+        "彻底解决工作台",
+        "软件考核工作台",
+        "漏测分析",
+    ):
+        assert label in page.text
+
+    assert "Common Problem View · 公共问题视图" in page.text
+    assert 'href="/p0/issues"' in page.text
+    assert "不是第五个业务工作台" in page.text
+    assert "Protected Existing Capability" not in page.text
+
+    # Supporting capabilities remain available but are explicitly separated
+    # from the four business workbenches.
+    assert 'href="/p0/batch-analysis"' in page.text
+    assert 'href="/analysis"' in page.text
+    assert "支撑能力" in page.text
 
 
 def test_r2_w2_old_scenario_and_portraits_bind_only_when_legacy_scenario_tables_exist():
@@ -112,16 +124,18 @@ def test_r2_w2_product_area_api_exposes_binding_status_without_domain_reads():
     assert old_portrait["path"] == "/quality-scenario-assets"
 
     current = by_id["current-problem"]
+    assert current["common_problem_path"] == "/p0/issues"
     assessment = next(
         item for item in current["capabilities"]
-        if item["title"] == "软件问题考核"
+        if item["title"] == "软件考核工作台"
     )
-    assert assessment["available"] is False
-    assert assessment["binding_pending"] is True
+    assert assessment["available"] is True
+    assert assessment["path"] == "/p0/software-assessment"
+    assert assessment.get("binding_pending") is None
 
     # Current verified R2 entries do not depend on Legacy DB readiness.
     recovery = next(
         item for item in current["capabilities"]
-        if item["title"] == "ITR / 现场恢复"
+        if item["title"] == "ITR工作台"
     )
     assert recovery["available"] is True
