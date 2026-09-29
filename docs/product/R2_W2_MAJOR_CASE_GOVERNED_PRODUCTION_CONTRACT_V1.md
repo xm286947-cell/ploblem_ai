@@ -78,3 +78,23 @@ Excel Source Fact
 
 W1 canonical-problem/v1, Common Evidence, Unified Runtime, Provider Stack and
 Agent Config are unchanged.
+
+
+## Single / Batch Source Fact convergence
+
+SINGLE_BATCH_CONVERGENCE=PASS_BY_DESIGN
+
+Both supported production inputs now persist through the same existing
+`kb_source_fact_revision` authority:
+
+- Excel Batch → source_type=EXCEL
+- Single Major Source Intake → source_type=DOCUMENT
+
+The repository owns the shared Source Fact revision API. Excel preserves its
+existing hash/idempotence semantics; document intake receives the same
+versioned Source Fact identity without introducing a second Source Fact, Case
+or Problem master.
+
+The downstream path remains unchanged:
+
+Source Fact → AI Analysis → Human Review → Publish → Historical Case → Repeat Risk.
