@@ -134,6 +134,11 @@ def write_hash_manifest(package_root: Path) -> None:
 def build() -> tuple[Path, Path, Path]:
     commit = source_commit()
     runtime_commit = os.environ.get("STORAGE_RUNTIME_COMMIT", "").strip() or RUNTIME_EXPECTED_COMMIT
+    if runtime_commit != RUNTIME_EXPECTED_COMMIT:
+        raise SystemExit(
+            "RUNTIME_PROVENANCE_BINDING_MISMATCH:"
+            f"expected={RUNTIME_EXPECTED_COMMIT},actual={runtime_commit}"
+        )
     date = (
         os.environ.get("STORAGE_BUILD_DATE", "").strip()
         or os.environ.get("STORAGE_R6_BUILD_DATE", "").strip()
