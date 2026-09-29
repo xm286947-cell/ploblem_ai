@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import subprocess
@@ -114,6 +115,8 @@ def main() -> int:
 
         secret = "FRESH_EXTRACT_SECRET_MUST_NOT_LEAK"
         old_env = dict(os.environ)
+        client = None
+        app = None
         try:
             os.environ["HARDWARE_CASE_MODEL_CONFIG"] = str(model_config)
             os.environ["HARDWARE_CASE_API_KEY"] = secret
@@ -173,10 +176,16 @@ def main() -> int:
             if dependency.json()["dependencies"]["UNIFIED_KNOWLEDGE"]["status"] != "UNREADY":
                 raise SystemExit("DEPENDENCY_UNREADY_NOT_EXPLICIT")
         finally:
+            if client is not None:
+                client.close()
+            app = None
+            client = None
+            gc.collect()
             server.shutdown()
             server.server_close()
             os.environ.clear()
             os.environ.update(old_env)
+            gc.collect()
 
     print("FRESH_EXTRACT_STARTUP=PASS")
     print("HEALTH=PASS")
