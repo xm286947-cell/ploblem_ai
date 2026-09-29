@@ -1,0 +1,172 @@
+name: STEP1 Legacy Quality Scenario macOS Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/**"
+      - "tools/verify_legacy_quality_db.py"
+      - "start_quality_capability_p1.command"
+      - ".gitattributes"
+      - "requirements.txt"
+      - "requirements-runtime-p0-test.txt"
+      - ".github/workflows/step1-legacy-quality-scenario-macos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  macos-python312-mature-data:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify launcher LF and executable contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          data = Path("start_quality_capability_p1.command").read_bytes()
+          assert b"\r\n" not in data, "macOS launcher contains CRLF"
+          assert data.startswith(b"#!/bin/zsh\n")
+          print("MAC_COMMAND_LF=PASS")
+          PY
+          zsh -n start_quality_capability_p1.command
+          test -x start_quality_capability_p1.command
+          echo "MAC_COMMAND_EXECUTABLE=PASS"
+
+      - name: Prepare isolated Python 3.12 environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+          .venv/bin/python - <<'PY'
+          import sys
+          assert sys.version_info[:2] == (3, 12), sys.version
+          print("MAC_PYTHON_312=PASS")
+          PY
+
+      - name: Seed mature-data validation DB
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p knowledge
+          rm -f knowledge/quality_issue_v1.db
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          from quality_knowledge.web import create_app
+
+          db = Path("knowledge/quality_issue_v1.db")
+          app = create_app(db)
+          repo = app.state.scenario_repository
+          repo.save_scenario(
+              "STEP1-MAC-SCN-001",
+              {
+                  "scenario_code": "STEP1-MAC-SCN-001",
+                  "name": "STEP1 Mac 成熟质量场景验证",
+                  "product_code": "PLC",
+                  "lifecycle_code": "SOFTWARE_DEBUGGING",
+                  "activity_code": "ONLINE_MONITORING",
+                  "scenario_chain": "下载运行 → 在线监控 → 状态分析",
+                  "experience_requirement": "客户在线调试时状态反馈可信",
+                  "concern_points": "状态一致性",
+                  "quality_attribute": "可靠性",
+                  "failure_mode": "状态显示与实际不一致",
+                  "status": "PUBLISHED",
+              },
+              {
+                  "INDUSTRY": ["锂电"],
+                  "CUSTOMER_NAME": ["STEP1-MAC客户"],
+                  "PRODUCT_MODEL": ["PLC-MAC-STEP1"],
+              },
+          )
+          with repo.connect() as connection:
+              connection.execute(
+                  "INSERT OR IGNORE INTO quality_scenario_evidence(scenario_id,knowledge_id,evidence_summary) VALUES(?,?,?)",
+                  ("STEP1-MAC-SCN-001","STEP1-MAC-ISSUE-001",json.dumps({"source":"STEP1_MAC_GATE"},ensure_ascii=False)),
+              )
+              connection.execute(
+                  "INSERT OR REPLACE INTO scenario_generation_source(generation_id,records_json) VALUES(?,?)",
+                  (
+                      "STEP1-MAC-GEN-001",
+                      json.dumps([{
+                          "knowledge_id":"STEP1-MAC-ISSUE-001",
+                          "business_issue_id":"ITR20260002",
+                          "description":"STEP1 Mac 客户在线监控状态不一致",
+                          "itr_cs_context":{
+                              "customer_industry":"锂电",
+                              "customer_name":"STEP1-MAC客户",
+                              "product_model":"PLC-MAC-STEP1"
+                          },
+                          "year":"2026",
+                          "month":"9",
+                          "source_workbench":"cs",
+                          "source_status":"LINKED"
+                      }],ensure_ascii=False),
+                  ),
+              )
+          print("MAC_MATURE_DB_SEED=PASS")
+          PY
+          .venv/bin/python tools/verify_legacy_quality_db.py knowledge/quality_issue_v1.db
+
+      - name: Start exact macOS launcher and validate real content
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LEGACY_QUALITY_ISSUE_DB_PATH="$PWD/knowledge/quality_issue_v1.db"
+          zsh ./start_quality_capability_p1.command --host 127.0.0.1 --port 8091 >"$RUNNER_TEMP/step1-mac.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/step1-mac.pid"
+
+          for i in {1..90}; do
+            if curl -fsS http://127.0.0.1:8091/quality-scenarios >/dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/step1-mac.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/step1-mac.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:8091/quality-scenarios?product_code=PLC&q=STEP1" |
+            grep -q "STEP1 Mac 成熟质量场景验证"
+          curl -fsS "http://127.0.0.1:8091/quality-scenarios/STEP1-MAC-SCN-001" |
+            grep -q "状态一致性"
+          curl -fsS "http://127.0.0.1:8091/quality-scenario-assets?industry=%E9%94%82%E7%94%B5" |
+            grep -q "STEP1 Mac 成熟质量场景验证"
+          curl -fsS "http://127.0.0.1:8091/quality-scenario-assets/portrait?industry=%E9%94%82%E7%94%B5" |
+            grep -q "客户 / 行业质量场景画像"
+
+          for path in issues analysis import; do
+            test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8091/$path")" = "200"
+          done
+
+          echo "MAC_STARTUP=PASS"
+          echo "MATURE_DB_BOUND=PASS"
+          echo "LEGACY_DATA_VISIBLE=PASS"
+          echo "QUALITY_SCENARIO_DETAIL=PASS"
+          echo "PRODUCT_CUSTOMER_INDUSTRY_PORTRAIT=PASS"
+          echo "OLD_PROBLEM_PLATFORM_REGRESSION=PASS"
+
+      - name: Stop macOS Web
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/step1-mac.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/step1-mac.pid")" 2>/dev/null || true
+          fi
