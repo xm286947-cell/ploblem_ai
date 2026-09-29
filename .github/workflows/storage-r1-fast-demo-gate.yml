@@ -91,7 +91,7 @@ jobs:
         run: |
           python tools/build_storage_r6_complete.py
           test -f dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
-          sha256sum -c dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256
+          (cd dist && sha256sum -c STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256)
           echo "COMPLETE_DEMO_CANDIDATE=BUILT"
 
       - name: Fresh extract demo smoke
