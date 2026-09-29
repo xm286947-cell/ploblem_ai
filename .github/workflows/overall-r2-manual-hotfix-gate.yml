@@ -60,6 +60,7 @@ jobs:
           $legacy = Join-Path $env:RUNNER_TEMP "hotfix-legacy.db"
           $p1 = Join-Path $env:RUNNER_TEMP "hotfix-p1.db"
           python -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
+          $env:LEGACY_QUALITY_ISSUE_DB_PATH = $legacy
           "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           $stdout = Join-Path $env:RUNNER_TEMP "hotfix-web.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "hotfix-web.stderr.log"
