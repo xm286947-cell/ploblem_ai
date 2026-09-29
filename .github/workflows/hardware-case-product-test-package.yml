@@ -94,7 +94,7 @@ jobs:
           assert manifest["package_revision"] == "FULL_V0.1_P01_P07"
           assert manifest["product_version"] == "MVP_V0.1"
           assert manifest["public_contract_version"] == "hardware-public-consumer/v1"
-          assert manifest["schema_version"] == "PRE_W3_2_LEGACY_SCHEMA"
+          assert manifest["schema_version"] == "HARDWARE_SCHEMA_V1"
           assert manifest["public_api_prefix"] == "/api/public/hardware/v1"
           assert manifest["system_endpoints"]["health"] == "/health"
           assert manifest["system_endpoints"]["readiness"] == "/ready"
@@ -146,6 +146,11 @@ jobs:
           assert "services/hardware_operability.py" in paths
           assert "schema/hardware_public_consumer_v1.schema.json" in paths
           assert "scripts/hardware_case_fresh_extract_gate.py" in paths
+          assert "scripts/hardware_case_data_reliability.py" in paths
+          assert "services/hardware_data_reliability.py" in paths
+          assert "services/hardware_migrations/v001_current_schema.py" in paths
+          assert manifest["data_reliability"]["backup_before_migration"] == "MANDATORY_FOR_EXISTING_DB"
+          assert manifest["data_reliability"]["unknown_schema"] == "FAIL_CLOSED"
           assert "RUN_REAL_AI_VALIDATION.bat" in paths
           assert "scripts/hardware_case_web_start.py" in paths
           assert "main.py" not in paths
@@ -197,6 +202,12 @@ jobs:
           python -m pytest -q --noconftest
           tests/test_hardware_public_consumer_http.py
           tests/test_hardware_operability.py
+
+      - name: Run W3.2 Data Reliability regression
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_data_reliability.py
+          tests/test_hardware_data_reliability_http.py
 
       - name: Stage delivery files
         run: |
