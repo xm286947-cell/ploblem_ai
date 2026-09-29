@@ -232,6 +232,20 @@ def _smoke(base_url: str) -> None:
         )
     print("DOMAIN_ASSEMBLY=4/4_READY")
 
+    if os.environ.get("HARDWARE_CASE_HOST_ROLE", "CONSUMER").strip().upper() == "MAINTAINER":
+        for path in (
+            "/p0/hardware-cases/base-data",
+            "/p0/hardware-cases/intake",
+            "/p0/hardware-cases/review",
+        ):
+            with urllib.request.urlopen(base_url + path, timeout=10) as response:
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"HARDWARE_MAINTENANCE_ROUTE_FAILED:{path}:{response.status}"
+                    )
+            print(f"HARDWARE_MAINTENANCE_ROUTE={path}=PASS")
+        print("HARDWARE_MAINTAINER_ENTRY=PASS")
+
     storage_runtime = _get_json(
         base_url + "/storage-workspace/api/v1/runtime/status"
     )
@@ -284,6 +298,13 @@ def build_process_env(
         bindings["knowledge_repository"]
     )
     env["STORAGE_KNOWLEDGE_RELEASE_DIR"] = str(bindings["knowledge_release"])
+    hardware_role = os.environ.get(
+        "HARDWARE_CASE_HOST_ROLE",
+        "CONSUMER",
+    ).strip().upper()
+    if hardware_role not in {"CONSUMER", "MAINTAINER"}:
+        raise RuntimeError("HARDWARE_CASE_HOST_ROLE_INVALID")
+    env["HARDWARE_CASE_HOST_ROLE"] = hardware_role
     env["REPEAT_CASE_NO_PAUSE"] = "1"
     return env
 
