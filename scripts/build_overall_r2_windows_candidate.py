@@ -82,6 +82,18 @@ def build(output_dir: Path) -> tuple[Path, Path, str]:
         "previous_formal_release": PREVIOUS_FORMAL_RELEASE,
         "product_test_gate": "NOT_RUN_FOR_THIS_CANDIDATE",
         "release_decision": "NOT_REQUESTED",
+        "development_gate": {
+            "w1": "PASS_WITH_EXTERNAL_BINDINGS",
+            "w2": "PASS",
+            "w3": "PASS",
+            "w4": "PASS",
+        },
+        "current_problem_workbenches": [
+            {"label": "ITR工作台", "route": "/p0/itr-recovery", "mode": "SOURCE_OWNED_READ_ONLY"},
+            {"label": "彻底解决工作台", "route": "/p0/itr-resolution", "mode": "SOURCE_ALIGNED_READ_ONLY"},
+            {"label": "软件考核工作台", "route": "/p0/software-assessment", "mode": "EXISTING_CAPABILITY_MOUNT"},
+            {"label": "漏测分析", "route": "/p0/missed-test-analysis", "mode": "EXISTING_FACT_ADAPTER"},
+        ],
         "runtime_binding": {
             "mode": "single_shared_package_root",
             "runtime_source": "runtime/__init__.py",
