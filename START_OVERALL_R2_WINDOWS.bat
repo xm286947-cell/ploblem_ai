@@ -20,6 +20,7 @@ if not exist "%PACKAGE_ROOT%\.venv\Scripts\python.exe" (
 
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
+set "PYTHONUNBUFFERED=1"
 set "PYTHONPATH=%PACKAGE_ROOT%"
 set "VENV_PYTHON=%PACKAGE_ROOT%\.venv\Scripts\python.exe"
 
