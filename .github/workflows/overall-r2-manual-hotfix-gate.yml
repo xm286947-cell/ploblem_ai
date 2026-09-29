@@ -113,9 +113,11 @@ jobs:
           # validation starts from the Common Problem View and then opens the
           # four mature Existing Capability pages directly.
           $common = Dump-Dom "/p0/issues" "common-problem"
-          Require $common "/itr/recovery-workbench" "Common mature ITR"
-          Require $common "/software-assessment" "Common mature Software Assessment"
+          Require $common "data-common-problem-view" "Common Problem View"
 
+          # Formal navigation hrefs are asserted by the W1/W2 focused gates.
+          # Browser validation proves each mature Existing Capability page itself
+          # can be opened and exposes its real filter/action surface.
           $itr = Dump-Dom "/itr/recovery-workbench" "mature-itr"
           Require $itr 'action="/itr/recovery-workbench"' "Mature ITR filter"
           $resolution = Dump-Dom "/itr/resolution-workbench" "mature-resolution"
