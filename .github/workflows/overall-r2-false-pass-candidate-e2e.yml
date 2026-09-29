@@ -220,7 +220,7 @@ jobs:
           }
           Write-Host "CANDIDATE_INSTALL=PASS"
 
-      - name: Start actual ZIP through unique Windows BAT
+      - name: Run actual ZIP startup and real product E2E in one Windows process scope
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -234,77 +234,76 @@ jobs:
           "CANDIDATE_START_STDOUT=$stdout" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "CANDIDATE_START_STDERR=$stderr" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-          for ($i=0; $i -lt 90; $i++) {
-            if ($proc.HasExited) { break }
-            try {
-              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/overall" -UseBasicParsing -TimeoutSec 3
-              if ($r.StatusCode -eq 200) { Write-Host "CANDIDATE_START=PASS"; exit 0 }
-            } catch {}
-            Start-Sleep -Seconds 1
-          }
-          if (Test-Path $stdout) { Get-Content $stdout }
-          if (Test-Path $stderr) { Get-Content $stderr }
-          throw "Actual ZIP candidate did not start"
-
-      - name: Validate startup preflight and packaged Knowledge Release
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          Start-Sleep -Seconds 2
-          $text = ""
-          if (Test-Path $env:CANDIDATE_START_STDOUT) {
-            $text += Get-Content -Raw $env:CANDIDATE_START_STDOUT
-          }
-          if (Test-Path $env:CANDIDATE_START_STDERR) {
-            $text += Get-Content -Raw $env:CANDIDATE_START_STDERR
-          }
-          foreach ($marker in @(
-            "ACTIVE_REVISION=CANDIDATE-E2E",
-            "MODEL_REF=qwen_prod",
-            "BASE_URL_ENV_REF=R2_E2E_PROVIDER_URL",
-            "BASE_URL_PRESENT=PRESENT",
-            "API_KEY_ENV_REF=acca1",
-            "API_KEY_PRESENT=PRESENT",
-            "PREFLIGHT=PASS",
-            "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE",
-            "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001"
-          )) {
-            if (-not $text.Contains($marker)) {
-              Write-Host $text
-              throw "Startup evidence missing: $marker"
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              if ($proc.HasExited) { break }
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8080/p0/overall" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Seconds 1
             }
-          }
-          if ($text.Contains($env:acca1)) {
-            throw "Secret value leaked into startup output"
-          }
-          Write-Host "SECRETREF_START_PROCESS_PREFLIGHT=PASS"
-          Write-Host "FORMAL_RELEASE_SEED_PREFLIGHT=PASS"
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Actual ZIP candidate did not start"
+            }
+            Write-Host "CANDIDATE_START=PASS"
 
-      - name: Run real PDF -> identify -> job -> Coverage -> Review through candidate APIs
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $validator = Join-Path $env:ACTUAL_PACKAGE_ROOT "scripts\r2_candidate_product_e2e.py"
-          python $validator --package-root $env:ACTUAL_PACKAGE_ROOT --provider-log $env:E2E_PROVIDER_LOG --base-url http://127.0.0.1:8080 --timeout-seconds 300
+            Start-Sleep -Seconds 1
+            $text = ""
+            if (Test-Path $stdout) { $text += Get-Content -Raw $stdout }
+            if (Test-Path $stderr) { $text += Get-Content -Raw $stderr }
+            foreach ($marker in @(
+              "ACTIVE_REVISION=CANDIDATE-E2E",
+              "MODEL_REF=qwen_prod",
+              "BASE_URL_ENV_REF=R2_E2E_PROVIDER_URL",
+              "BASE_URL_PRESENT=PRESENT",
+              "API_KEY_ENV_REF=acca1",
+              "API_KEY_PRESENT=PRESENT",
+              "PREFLIGHT=PASS",
+              "KNOWLEDGE_RELEASE_INIT_STATUS=SEEDED_FROM_PACKAGE",
+              "KNOWLEDGE_RELEASE_VERSION=KP-STORAGE-RC1-VALIDATION-001"
+            )) {
+              if (-not $text.Contains($marker)) {
+                Write-Host $text
+                throw "Startup evidence missing: $marker"
+              }
+            }
+            if ($text.Contains($env:acca1)) {
+              throw "Secret value leaked into startup output"
+            }
+            Write-Host "SECRETREF_START_PROCESS_PREFLIGHT=PASS"
+            Write-Host "FORMAL_RELEASE_SEED_PREFLIGHT=PASS"
 
-      - name: Validate external release persistence and package immutability
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $external = Join-Path $env:OVERALL_R2_DATA_DIR "knowledge_release\current\release_manifest.json"
-          $packaged = Join-Path $env:ACTUAL_PACKAGE_ROOT "products\storage_rc1\knowledge_release\current\release_manifest.json"
-          if (!(Test-Path $external)) { throw "External formal Knowledge Release was not initialized" }
-          if (!(Test-Path $packaged)) { throw "Packaged formal Knowledge Release disappeared" }
-          $externalJson = Get-Content -Raw $external | ConvertFrom-Json
-          $packagedJson = Get-Content -Raw $packaged | ConvertFrom-Json
-          if ($externalJson.knowledge_release_version -ne "KP-STORAGE-RC1-VALIDATION-001") {
-            throw "External release version mismatch"
+            $validator = Join-Path $package "scripts\r2_candidate_product_e2e.py"
+            python $validator --package-root $package --provider-log $env:E2E_PROVIDER_LOG --base-url http://127.0.0.1:8080 --timeout-seconds 300
+            if ($LASTEXITCODE -ne 0) {
+              throw "Candidate product E2E validator failed: $LASTEXITCODE"
+            }
+
+            $external = Join-Path $env:OVERALL_R2_DATA_DIR "knowledge_release\current\release_manifest.json"
+            $packaged = Join-Path $package "products\storage_rc1\knowledge_release\current\release_manifest.json"
+            if (!(Test-Path $external)) { throw "External formal Knowledge Release was not initialized" }
+            if (!(Test-Path $packaged)) { throw "Packaged formal Knowledge Release disappeared" }
+            $externalJson = Get-Content -Raw $external | ConvertFrom-Json
+            $packagedJson = Get-Content -Raw $packaged | ConvertFrom-Json
+            if ($externalJson.knowledge_release_version -ne "KP-STORAGE-RC1-VALIDATION-001") {
+              throw "External release version mismatch"
+            }
+            if ($externalJson.snapshot_hash -ne $packagedJson.snapshot_hash) {
+              throw "Seeded release snapshot mismatch"
+            }
+            Write-Host "FORMAL_KNOWLEDGE_RELEASE_LOADED_ON_CLEAN_START=PASS"
+            Write-Host "PACKAGE_RELEASE_IMMUTABLE=PASS"
+          } finally {
+            Push-Location $package
+            try { cmd /c "STOP_OVERALL_R2_WINDOWS.bat" } finally { Pop-Location }
           }
-          if ($externalJson.snapshot_hash -ne $packagedJson.snapshot_hash) {
-            throw "Seeded release snapshot mismatch"
-          }
-          Write-Host "FORMAL_KNOWLEDGE_RELEASE_LOADED_ON_CLEAN_START=PASS"
-          Write-Host "PACKAGE_RELEASE_IMMUTABLE=PASS"
 
       - name: Stop through unique candidate STOP entry
         if: always()
