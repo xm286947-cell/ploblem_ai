@@ -12,33 +12,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
+from quality_knowledge.web.hardware_auth import trusted_hardware_auth_context
+from repositories.hardware_maintenance_audit_repository import HardwareMaintenanceAuditRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_tree_excel import HardwareTreeImportAnalyzer
 from services.hardware_tree_import_contract import HardwareTreeImportContractError
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
-
-
-def _require_maintainer(
-    value: str | None,
-    *,
-    host_role: str | None = None,
-) -> None:
-    role = str(value or "CONSUMER").strip().upper()
-    if role != "MAINTAINER":
-        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-    if host_role is not None:
-        configured = str(host_role).strip().upper()
-        if configured not in {"CONSUMER", "MAINTAINER"}:
-            raise HTTPException(status_code=500, detail="HARDWARE_CASE_HOST_ROLE_INVALID")
-        if configured != "MAINTAINER":
-            raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-
-
-def _operator(value: str | None) -> str:
-    operator = str(value or "").strip()
-    if not operator:
-        raise HTTPException(status_code=400, detail="HARDWARE_TREE_OPERATOR_REQUIRED")
-    return operator
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -76,9 +55,11 @@ def create_hardware_tree_import_router(
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-tree-import"])
     analyzer = HardwareTreeImportAnalyzer(repository)
+    auth = trusted_hardware_auth_context(host_role)
+    audit = HardwareMaintenanceAuditRepository(repository.db_path)
 
     def require_maintainer(value: str | None) -> None:
-        _require_maintainer(value, host_role=host_role)
+        auth.require_maintainer(value)
 
     @router.post("", status_code=201)
     async def upload_excel(
@@ -92,7 +73,9 @@ def create_hardware_tree_import_router(
         ),
     ) -> dict[str, Any]:
         require_maintainer(x_hardware_case_role)
-        operator = _operator(x_hardware_case_operator)
+        # Operator identity is trusted server context.  The legacy client
+        # header remains accepted for compatibility but never becomes authority.
+        operator = auth.actor
         filename = str(file.filename or "").strip()
         payload = await file.read()
         job_id = "HTI-" + uuid4().hex.upper()
@@ -272,7 +255,39 @@ def create_hardware_tree_import_router(
     ) -> dict[str, Any]:
         require_maintainer(x_hardware_case_role)
         try:
-            return repository.apply_job(job_id)
+            before = repository.get_job(job_id)
+            changes = repository.list_changes(job_id)
+            result = repository.apply_job(job_id)
+            audit.record(
+                actor=auth.actor,
+                action="TREE_APPLY",
+                target_type="HARDWARE_TREE_IMPORT",
+                target_id=job_id,
+                details={
+                    "tree_type": before.get("tree_type"),
+                    "source_filename": before.get("source_filename"),
+                    "applied_version_id": result["job"].get("applied_version_id"),
+                    "status": result["job"].get("status"),
+                },
+            )
+            for change in changes:
+                if (
+                    change.get("change_type") == "DEPRECATE"
+                    and change.get("decision") != "EXCLUDED"
+                ):
+                    audit.record(
+                        actor=auth.actor,
+                        action="TREE_DEPRECATE",
+                        target_type="HARDWARE_TREE_NODE",
+                        target_id=str(change.get("node_id") or change.get("change_id")),
+                        details={
+                            "job_id": job_id,
+                            "tree_type": before.get("tree_type"),
+                            "change_id": change.get("change_id"),
+                            "applied_version_id": result["job"].get("applied_version_id"),
+                        },
+                    )
+            return result
         except HardwareTreeImportContractError as error:
             raise _http_error(error) from error
 
