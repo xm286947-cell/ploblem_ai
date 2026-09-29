@@ -6,6 +6,16 @@
   <header class="p0-page-head"><div>{% set missed_return = return_to and return_to.startswith('/p0/missed-test-analysis') %}{% set itr_recovery_return = return_to and return_to.startswith('/p0/itr-recovery') %}{% set itr_resolution_return = return_to and return_to.startswith('/p0/itr-resolution') %}<a class="p0-back" data-back href="{{ return_to or '/p0/issues' }}">← {{ '返回漏测分析' if missed_return else ('返回 ITR / 现场恢复' if itr_recovery_return else ('返回彻底解决单' if itr_resolution_return else ('返回质量场景工作区' if return_to else '返回问题工作台'))) }}</a>{% if return_to and not missed_return and not itr_recovery_return and not itr_resolution_return %}<a class="p0-qs-return" href="{{ return_to }}">返回质量场景工作区</a>{% endif %}<h1 data-title>正在加载问题…</h1><div class="p0-badges" data-badges></div></div><div class="p0-nav"><button type="button" data-previous disabled>← 上一条</button><span data-position></span><button type="button" data-next disabled>下一条 →</button></div></header>
   <nav class="p0-detail-tabs" aria-label="问题详情导航"><a href="#overview">概览</a><a href="#analysis">原因与防控</a><a href="#repeat-risk">Repeat Risk</a><a href="#gaps">能力缺口</a><a href="#human-analysis">人工分析</a><a href="#trace">原始与入库数据</a></nav>
   <section class="p0-card p0-scope-bar" data-scope-status>正在读取问题与分析状态…</section>
+  <section class="p0-card p0-source-context" data-itr-source hidden>
+    <div class="p0-card-head">
+      <div>
+        <span class="p0-kicker">SOURCE FACT</span>
+        <h2>ITR / 现场恢复来源</h2>
+        <p>展示当前平台消费的 canonical ITR 公共身份与快照版本；原现场业务事实仍由 Source Owner 持有，Overall 不静默写回。</p>
+      </div>
+    </div>
+    <div data-itr-source-body></div>
+  </section>
   <section class="p0-card p0-facts" id="overview" data-facts><div class="p0-loading">正在加载问题事实…</div></section>
   <section class="p0-card p0-analysis-diagnostic" id="analysis" data-analysis-diagnostic hidden></section>
   <section class="p0-columns" data-analysis-grid hidden><article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">OCCURRENCE / ESCAPE</span><h2>发生与流出 MRC</h2></div></div><div class="p0-analysis-block" data-mrc></div></article><article class="p0-card"><div class="p0-card-head"><div><span class="p0-kicker">RECURRENCE</span><h2>再发、防控与客户影响</h2></div></div><div class="p0-analysis-block" data-recurrence></div></article></section>
