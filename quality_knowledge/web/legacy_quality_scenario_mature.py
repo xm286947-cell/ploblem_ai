@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import html
 import json
+import sqlite3
 import threading
 import uuid
 from pathlib import Path
@@ -55,8 +56,26 @@ def _confidence(obj):
     return 0.0
 
 
+def _ensure_mature_material_compat(db_path):
+    """Restore only the RC1 auxiliary table consumed by mature scenario views."""
+    with sqlite3.connect(str(db_path)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS source_material_reporting_year(
+              material_id TEXT PRIMARY KEY REFERENCES source_material(material_id) ON DELETE CASCADE,
+              reporting_year TEXT NOT NULL,
+              year_source TEXT NOT NULL,
+              updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_source_material_reporting_year
+              ON source_material_reporting_year(reporting_year,material_id);
+            """
+        )
+
+
 def attach_mature_quality_scenario_routes(app, db_path):
     """Attach the original mature RC1 routes to standalone legacy Web only."""
+    _ensure_mature_material_compat(db_path)
     svc = app.state.knowledge_issue_service
     product_repo = app.state.product_config_repository
 
