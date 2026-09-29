@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi import FastAPI
@@ -178,3 +179,29 @@ def test_w3_invalid_evidence_and_presentation_fail_closed():
             "return_to": "//evil.test/",
         },
     ).status_code == 400
+
+
+def test_w3_drawer_runtime_is_same_origin_and_keeps_w2_return_contract():
+    root = Path(__file__).resolve().parents[1]
+    navigation = (
+        root / "quality_knowledge/web/static/overall_navigation.js"
+    ).read_text(encoding="utf-8")
+    shell = (
+        root / "quality_knowledge/web/templates/p0_base.html"
+    ).read_text(encoding="utf-8")
+    drawer = (
+        root / "quality_knowledge/web/templates/overall_evidence_drawer.html"
+    ).read_text(encoding="utf-8")
+
+    assert "url.origin !== window.location.origin" in navigation
+    assert "url.pathname !== '/p0/overall/evidence'" in navigation
+    assert "presentation', 'drawer'" in navigation
+    assert "return_state', JSON.stringify(capture())" in navigation
+    assert "overall:evidence:return" in navigation
+    assert "event.key === 'Escape'" in navigation
+    assert "window.OverallNavigation = {capture, restoreNow, closeDrawer}" in navigation
+
+    assert "overall_navigation.css?v=" in shell
+    assert "overall_navigation.js?v=" in shell
+    assert "data-overall-evidence-return" in drawer
+    assert "window.parent.postMessage" in drawer
