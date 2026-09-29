@@ -394,6 +394,8 @@ class HardwareDataReliabilityManager:
                 pass
             if isinstance(error, HardwareDataReliabilityError):
                 raise
+            if isinstance(error, PermissionError):
+                raise HardwareDataReliabilityError("RESTORE_TARGET_BUSY") from error
             raise HardwareDataReliabilityError("RESTORE_FAILED") from error
         return {
             "status": "RESTORED",
