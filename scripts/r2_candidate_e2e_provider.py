@@ -112,25 +112,52 @@ def _find_first(value: Any, key: str) -> Any:
     return None
 
 
-def _identity_response() -> dict[str, Any]:
+def _page_evidence(payload: Any, needle: str) -> tuple[int, str]:
+    pages = _find_first(payload, "pages")
+    if not isinstance(pages, list):
+        return 0, ""
+    wanted = needle.casefold()
+    for item in pages:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "")
+        if wanted not in text.casefold():
+            continue
+        for line in text.splitlines():
+            if wanted in line.casefold():
+                quote = line.strip()
+                if quote:
+                    return int(item.get("page") or 0), quote[:500]
+        index = text.casefold().find(wanted)
+        if index >= 0:
+            start = max(0, index - 80)
+            end = min(len(text), index + len(needle) + 80)
+            return int(item.get("page") or 0), text[start:end].strip()[:500]
+    return 0, ""
+
+
+def _identity_response(payload: Any) -> dict[str, Any]:
+    vendor_page, vendor_quote = _page_evidence(payload, "Demo Storage")
+    model_page, model_quote = _page_evidence(payload, "SYN-EMMC-1")
+    type_page, type_quote = _page_evidence(payload, "eMMC")
     return {
         "vendor": {
-            "value": "Demo Storage",
-            "page": 1,
-            "quote": "Vendor: Demo Storage",
-            "confidence": 0.99,
+            "value": "Demo Storage" if vendor_quote else "",
+            "page": vendor_page,
+            "quote": vendor_quote,
+            "confidence": 0.99 if vendor_quote else 0.0,
         },
         "model": {
-            "value": "SYN-EMMC-1",
-            "page": 1,
-            "quote": "Model: SYN-EMMC-1",
-            "confidence": 0.99,
+            "value": "SYN-EMMC-1" if model_quote else "",
+            "page": model_page,
+            "quote": model_quote,
+            "confidence": 0.99 if model_quote else 0.0,
         },
         "device_type": {
-            "value": "eMMC",
-            "page": 1,
-            "quote": "Interface: eMMC 5.1",
-            "confidence": 0.99,
+            "value": "eMMC" if type_quote else "",
+            "page": type_page,
+            "quote": type_quote,
+            "confidence": 0.99 if type_quote else 0.0,
         },
     }
 
@@ -233,10 +260,10 @@ def _parameter_response(payload: Any) -> dict[str, Any]:
     return {"fields": out}
 
 
-def response_for(payload: Any) -> dict[str, Any]:
-    text = _strings(payload).lower()
+def response_for(instructions: str, payload: Any) -> dict[str, Any]:
+    text = (instructions + "\n" + _strings(payload)).lower()
     if "identify basic device metadata" in text:
-        return _identity_response()
+        return _identity_response(payload)
     if "document version metadata" in text:
         return _document_identity_response()
     if "concrete manufacturer model numbers" in text:
@@ -329,12 +356,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": {"message": "auth required"}})
         try:
             messages = request.get("messages") or []
+            system = "\n".join(
+                str(m.get("content") or "")
+                for m in messages
+                if m.get("role") == "system"
+            )
             user = next(
                 (m.get("content") for m in messages if m.get("role") == "user"),
                 "{}",
             )
             payload = json.loads(user) if isinstance(user, str) else user
-            result = response_for(payload)
+            result = response_for(system, payload)
         except Exception as exc:
             return self._json(
                 422,
