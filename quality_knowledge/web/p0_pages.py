@@ -687,7 +687,7 @@ def create_p0_insights_router(
             {
                 "hardware_api_prefix": "/api/v2/hardware-cases",
                 "page_title": "案例详情 · 硬件案例库",
-                "hardware_role": "MAINTAINER",
+                "hardware_role": resolve_hardware_role(request),
                 "hardware_active": "",
                 "case_id": case_id,
             },
