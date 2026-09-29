@@ -79,7 +79,11 @@ def _multipart(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows candidate E2E")
-def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(tmp_path: Path):
+@pytest.mark.parametrize("phase", ["secretref", "pdf"])
+def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
+    tmp_path: Path,
+    phase: str,
+):
     dist = tmp_path / "dist"
     build = subprocess.run(
         [sys.executable, str(BUILDER), "--output-dir", str(dist)],
@@ -352,6 +356,34 @@ def test_false_pass_closure_runs_real_built_zip_pdf_and_secretref_child_process(
 
             assert isinstance(identify, dict), identify
             print("PDF_IDENTIFY=PASS")
+
+            status = _json(
+                "http://127.0.0.1:18088/storage-workspace/api/v1/runtime/status"
+            )
+            assert status["configured"] is True
+            assert status["profile"] == "qwen_prod"
+            assert status["api_key_env"] == "acca1"
+            assert status["api_key_present"] is True
+
+            assert provider_log.is_file(), "provider request log missing"
+            provider_events = [
+                json.loads(line)
+                for line in provider_log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            assert provider_events, provider_events
+            assert all(
+                item.get("authorization") == "PRESENT"
+                for item in provider_events
+            ), provider_events
+            assert not any(
+                item.get("contains_acca1_value")
+                for item in provider_events
+            ), provider_events
+            if phase == "secretref":
+                print("SECRETREF_CHILD_PROCESS_RUNTIME_PROVIDER_E2E=PASS")
+                print("SECRETREF_CHILD_PROCESS_E2E=PASS")
+                return
 
             document_identity = identify.get("document_identity") or {}
             models = identify.get("models") or []
