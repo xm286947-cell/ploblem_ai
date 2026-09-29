@@ -12,6 +12,8 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +164,110 @@ def _active_runtime_model_config(
     ):
         raise RuntimeError("OVERALL_RUNTIME_ACTIVE_REVISION_INVALID")
     return path
+
+
+def _runtime_provider_preflight(
+    package_root: Path,
+    control_root: Path,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    config_path = _active_runtime_model_config(
+        package_root,
+        control_root,
+    )
+    try:
+        raw = yaml.safe_load(
+            config_path.read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise RuntimeError(
+            "RUNTIME_MODEL_CONFIG_INVALID:"
+            + str(config_path)
+        ) from exc
+    active_model = str(raw.get("active_model") or "").strip()
+    models = raw.get("models") or {}
+    model = models.get(active_model) if active_model else None
+    if not active_model or not isinstance(model, dict):
+        raise RuntimeError(
+            "RUNTIME_ACTIVE_MODEL_NOT_RESOLVABLE:"
+            + (active_model or "EMPTY")
+        )
+
+    active_pointer = control_root / "active.json"
+    revision = "CANONICAL"
+    if active_pointer.is_file():
+        try:
+            pointer = json.loads(
+                active_pointer.read_text(encoding="utf-8")
+            )
+            revision = str(
+                pointer.get("revision_id") or "CANONICAL"
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "OVERALL_RUNTIME_ACTIVE_POINTER_INVALID"
+            ) from exc
+
+    base_url_ref = str(model.get("base_url_env") or "").strip()
+    api_key_ref = str(model.get("api_key_env") or "").strip()
+    base_url_present = bool(
+        str(model.get("base_url") or "").strip()
+        or (base_url_ref and env.get(base_url_ref, "").strip())
+    )
+    api_key_required = bool(api_key_ref)
+    api_key_present = bool(
+        not api_key_required
+        or env.get(api_key_ref, "").strip()
+        or str(model.get("api_key") or "").strip()
+    )
+
+    print(f"ACTIVE_REVISION={revision}")
+    print(f"MODEL_REF={active_model}")
+    print(f"PROCESS_ENV_SCOPE=START_PROCESS_INHERITED_ENV")
+    print(f"BASE_URL_ENV_REF={base_url_ref or 'DIRECT'}")
+    print(
+        "BASE_URL_PRESENT="
+        + ("PRESENT" if base_url_present else "ABSENT")
+    )
+    print(f"API_KEY_ENV_REF={api_key_ref or 'NOT_REQUIRED'}")
+    print(
+        "API_KEY_PRESENT="
+        + (
+            "PRESENT"
+            if api_key_present
+            else "ABSENT"
+        )
+    )
+    print("RESTART_REQUIRED=NO")
+
+    missing: list[str] = []
+    if not base_url_present:
+        missing.append(base_url_ref or "base_url")
+    if not api_key_present:
+        missing.append(api_key_ref)
+    if missing:
+        refs = ",".join(x for x in missing if x)
+        raise RuntimeError(
+            "PROVIDER_ENV_PREFLIGHT_FAILED:"
+            f"missing={refs};"
+            "The running START process cannot see the required "
+            "environment reference(s). Configure them in "
+            "CONFIG_OVERALL_R2_WINDOWS.cmd or Windows environment, "
+            "then close/reopen the terminal (or restart Overall R2) "
+            "before retrying. Secret values are never printed."
+        )
+
+    return {
+        "active_revision": revision,
+        "model_ref": active_model,
+        "base_url_env_ref": base_url_ref or None,
+        "base_url_present": base_url_present,
+        "api_key_env_ref": api_key_ref or None,
+        "api_key_present": api_key_present,
+        "process_env_scope": "START_PROCESS_INHERITED_ENV",
+        "restart_required": False,
+        "model_config_path": str(config_path),
+    }
 
 
 def _pid_file(data_root: Path) -> Path:
@@ -394,6 +500,12 @@ def main() -> int:
 
     try:
         bindings = resolve_bindings(package_root)
+        env = build_process_env(package_root, bindings)
+        _runtime_provider_preflight(
+            package_root,
+            bindings["runtime_control_root"],
+            env,
+        )
     except Exception as exc:
         print(f"PREFLIGHT=FAIL:{exc}", file=sys.stderr)
         return 6
@@ -410,8 +522,6 @@ def main() -> int:
     print(f"RUNTIME_CONTROL_ROOT={bindings['runtime_control_root']}")
     if args.check_only:
         return 0
-
-    env = build_process_env(package_root, bindings)
 
     log_dir = bindings["data_root"].parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)

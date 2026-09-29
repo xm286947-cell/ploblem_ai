@@ -199,10 +199,10 @@ def test_original_current_problem_entries_are_restored_in_p0_shell(tmp_path: Pat
     issues = client.get("/p0/issues")
     assert issues.status_code == 200
     expected = {
-        "/p0/itr-recovery": "ITR工作台",
-        "/p0/itr-resolution": "彻底解决工作台",
-        "/p0/software-assessment": "软件考核工作台",
-        "/p0/missed-test-analysis": "漏测分析",
+        "/itr/recovery-workbench": "ITR工作台",
+        "/itr/resolution-workbench": "彻底解决工作台",
+        "/software-assessment": "软件考核工作台",
+        "/missed-test-analysis": "漏测分析",
     }
     for href, label in expected.items():
         assert f'href="{href}"' in issues.text

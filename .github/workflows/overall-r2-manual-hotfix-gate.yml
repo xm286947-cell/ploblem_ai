@@ -1,0 +1,188 @@
+name: Overall R2 Manual Hotfix Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/**"
+      - "products/storage_rc1/**"
+      - "scripts/overall_r2_windows_start.py"
+      - "CONFIG_OVERALL_R2_WINDOWS.cmd.template"
+      - "tests/test_r2_manual_validation_hotfix.py"
+      - ".github/workflows/overall-r2-manual-hotfix-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run manual-validation blocker tests
+        run: |
+          pytest -q             tests/test_r2_manual_validation_hotfix.py             tests/test_r2_w1_original_workbench_entries.py             tests/test_r2_w2_overall_ia.py             tests/test_r2_w4_storage_direct_reuse.py             tests/test_r2_w5_agent_config_runtime_diagnostics.py
+
+  windows-browser-focused:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: .
+      DASHSCOPE_BASE_URL: https://provider-not-contacted.invalid/v1
+      DASHSCOPE_API_KEY: HOTFIX_BROWSER_DUMMY_NOT_REAL
+      HARDWARE_CASE_HOST_ROLE: MAINTAINER
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Prepare Legacy DB and start unified Web
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $legacy = Join-Path $env:RUNNER_TEMP "hotfix-legacy.db"
+          $p1 = Join-Path $env:RUNNER_TEMP "hotfix-p1.db"
+          python -c "from quality_knowledge.web import create_app; create_app(r'$legacy')"
+          $env:LEGACY_QUALITY_ISSUE_DB_PATH = $legacy
+          "LEGACY_QUALITY_ISSUE_DB_PATH=$legacy" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "HOTFIX_P1_DB=$p1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $stdout = Join-Path $env:RUNNER_TEMP "hotfix-web.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "hotfix-web.stderr.log"
+          $proc = Start-Process -FilePath "python" -ArgumentList @(
+            "main.py","knowledge-p1-start","--db",$p1,
+            "--host","127.0.0.1","--port","8088"
+          ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          "HOTFIX_WEB_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          for ($i=0; $i -lt 60; $i++) {
+            if ($proc.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/overall" -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { exit 0 }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (Test-Path $stdout) { Get-Content $stdout }
+          if (Test-Path $stderr) { Get-Content $stderr }
+          throw "Hotfix unified Web did not become ready"
+      - name: Validate real browser DOM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # GitHub Actions may clean child processes at a PowerShell step boundary.
+          # Confirm the web process is still reachable; if not, start it again in
+          # this same browser-validation step so Edge observes the real application.
+          $webReady = $false
+          try {
+            $probe = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/issues" -UseBasicParsing -TimeoutSec 3
+            if ($probe.StatusCode -eq 200) { $webReady = $true }
+          } catch {}
+          if (-not $webReady) {
+            $stdout = Join-Path $env:RUNNER_TEMP "hotfix-browser.stdout.log"
+            $stderr = Join-Path $env:RUNNER_TEMP "hotfix-browser.stderr.log"
+            $proc = Start-Process -FilePath "python" -ArgumentList @(
+              "main.py","knowledge-p1-start","--db",$env:HOTFIX_P1_DB,
+              "--host","127.0.0.1","--port","8088"
+            ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $env:HOTFIX_WEB_PID = [string]$proc.Id
+            "HOTFIX_WEB_PID=$($proc.Id)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            for ($i=0; $i -lt 60; $i++) {
+              if ($proc.HasExited) { break }
+              try {
+                $probe = Invoke-WebRequest -Uri "http://127.0.0.1:8088/p0/issues" -UseBasicParsing -TimeoutSec 3
+                if ($probe.StatusCode -eq 200) { $webReady = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $webReady) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Hotfix unified Web unavailable inside browser-validation step"
+            }
+          }
+
+          $browserCandidates = @(
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+          )
+          $browser = $browserCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $browser) {
+            $cmd = Get-Command msedge.exe,chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cmd) { $browser = $cmd.Source }
+          }
+          if (-not $browser) { throw "Edge/Chrome headless browser not found on windows-latest" }
+          Write-Host "HEADLESS_BROWSER=$browser"
+
+          function Dump-Dom([string]$Path, [string]$Name) {
+            $out = Join-Path $env:RUNNER_TEMP ($Name + ".html")
+            $url = "http://127.0.0.1:8088" + $Path
+            & $browser --headless --disable-gpu --no-first-run --dump-dom $url 2>$null | Set-Content -Encoding utf8 $out
+            if (!(Test-Path $out)) { throw "DOM dump missing: $Path" }
+            return (Get-Content -Raw $out)
+          }
+          function Require([string]$Text, [string]$Needle, [string]$Name) {
+            if (-not $Text.Contains($Needle)) { throw "$Name missing marker: $Needle" }
+          }
+
+          # Overall navigation contract is covered by the W2 Gate. Browser-focused
+          # validation starts from the Common Problem View and then opens the
+          # four mature Existing Capability pages directly.
+          $common = Dump-Dom "/p0/issues" "common-problem"
+          Require $common "data-common-problem-view" "Common Problem View"
+
+          # Formal navigation hrefs are asserted by the W1/W2 focused gates.
+          # Browser validation proves each mature Existing Capability page itself
+          # can be opened and exposes its real filter/action surface.
+          $itr = Dump-Dom "/itr/recovery-workbench" "mature-itr"
+          Require $itr 'action="/itr/recovery-workbench"' "Mature ITR filter"
+          $resolution = Dump-Dom "/itr/resolution-workbench" "mature-resolution"
+          Require $resolution 'href="/materials/cs"' "Mature Resolution import action"
+          $assessment = Dump-Dom "/software-assessment" "mature-assessment"
+          Require $assessment 'href="/materials/software-operations"' "Mature Assessment import action"
+          $missed = Dump-Dom "/missed-test-analysis" "mature-missed"
+          Require $missed 'name="analysis_status"' "Mature Missed Test filter"
+
+          $storage = Dump-Dom "/storage-workspace/" "storage-p08"
+          Require $storage 'id="goldenAAssembly"' "Storage Golden A"
+          Require $storage "goldenANextAction" "Storage next action"
+          Require $storage "Coverage" "Storage coverage feedback"
+          if ($storage.Contains("[object Object]")) { throw "Storage P08 renders [object Object]" }
+
+          $agent = Dump-Dom "/p0/system/agent-config" "agent-config"
+          Require $agent "Model Ref" "Agent model ref"
+          Require $agent "DASHSCOPE_API_KEY" "Agent SecretRef"
+          Require $agent "PRESENT" "Agent env presence"
+          Require $agent "Restart Required" "Agent restart signal"
+          if ($agent.Contains("HOTFIX_BROWSER_DUMMY_NOT_REAL")) { throw "Secret value leaked in Agent Config DOM" }
+
+          $diag = Dump-Dom "/p0/system/runtime-diagnostics" "runtime-diagnostics"
+          Require $diag "Effective Runtime Operability" "Runtime operability"
+          Require $diag "API Key Env Ref" "Runtime SecretRef"
+          if ($diag.Contains("HOTFIX_BROWSER_DUMMY_NOT_REAL")) { throw "Secret value leaked in Runtime Diagnostics DOM" }
+
+          Write-Host "FOCUSED_WINDOWS_BROWSER=PASS"
+      - name: Stop unified Web
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:HOTFIX_WEB_PID) {
+            Stop-Process -Id ([int]$env:HOTFIX_WEB_PID) -Force -ErrorAction SilentlyContinue
+          }

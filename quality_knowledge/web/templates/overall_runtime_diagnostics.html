@@ -21,6 +21,22 @@
     <div><b>Stores Ready</b><div>{{ diagnostics.stores_ready }}/{{ diagnostics.stores_total }}</div></div>
     <div><b>Knowledge Failures</b><div>{{ knowledge_failures['items']|length }}</div></div>
   </div>
+  {% set op = diagnostics.runtime_operability %}
+  <div class="card" style="margin-top:12px">
+    <b>Effective Runtime Operability</b>
+    <div class="grid4" style="margin-top:8px">
+      <div><b>Active Revision</b><div>{{ op.active_revision }}</div></div>
+      <div><b>Model Ref</b><div>{{ op.model_ref or '-' }}</div></div>
+      <div><b>Process Env Scope</b><div>{{ op.process_env_scope }}</div></div>
+      <div><b>Restart Required</b><div>{{ 'YES' if op.restart_required else 'NO' }}</div></div>
+    </div>
+    <div class="grid4" style="margin-top:8px">
+      <div><b>Base URL Env Ref</b><div><code>{{ op.base_url_env_ref or 'DIRECT' }}</code></div></div>
+      <div><b>Base URL Present</b><div>{{ 'PRESENT' if op.base_url_present else 'ABSENT' }}</div></div>
+      <div><b>API Key Env Ref</b><div><code>{{ op.api_key_env_ref or '-' }}</code></div></div>
+      <div><b>API Key Present</b><div>{{ 'PRESENT' if op.api_key_present else ('NOT_REQUIRED' if not op.api_key_env_ref else 'ABSENT') }}</div></div>
+    </div>
+  </div>
 </section>
 
 {% for store in diagnostics.stores %}

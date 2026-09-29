@@ -21,11 +21,12 @@
   <h2>Effective Config</h2>
   <div class="grid4">
     <div><b>Active Revision</b><div>{{ config.active_revision }}</div></div>
-    <div><b>Active Model</b><div>{{ config.active_model }}</div></div>
-    <div><b>Config Hash</b><div><code>{{ config.model_config_hash[:16] }}</code></div></div>
-    <div><b>Secret Policy</b><div>{{ config.secret_policy }}</div></div>
+    <div><b>Model Ref</b><div>{{ config.active_model }}</div></div>
+    <div><b>Process Env Scope</b><div>{{ config.process_env_scope }}</div></div>
+    <div><b>Restart Required</b><div>{{ 'YES' if config.restart_required else 'NO' }}</div></div>
   </div>
-  <p class="muted"><code>{{ config.model_config_path }}</code></p>
+  <p class="muted">Effective Config: <code>{{ config.model_config_path }}</code> · Hash <code>{{ config.model_config_hash[:16] }}</code></p>
+  {% if config.restart_required %}<div class="warning card"><b>配置已变更，必须重启 Overall R2。</b> 当前运行进程尚未使用 Active Revision；请停止后重新执行 START_OVERALL_R2_WINDOWS.bat。</div>{% endif %}
 </section>
 
 <section class="card">
@@ -36,16 +37,17 @@
   <div id="connectivityResult" class="evidence">尚未执行。</div>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Endpoint</th><th>SecretRef</th><th>Secret</th></tr></thead>
+      <thead><tr><th>Model Ref</th><th>Provider</th><th>Model</th><th>Base URL Ref</th><th>Base URL</th><th>SecretRef</th><th>Secret</th></tr></thead>
       <tbody>
       {% for ref, model in config.models.items() %}
       <tr>
         <td><code>{{ ref }}</code>{% if ref == config.active_model %} · ACTIVE{% endif %}</td>
         <td>{{ model.provider }}</td>
         <td>{{ model.model }}</td>
-        <td>{{ model.base_url_env or model.base_url or '-' }}</td>
+        <td><code>{{ model.base_url_env or 'DIRECT' }}</code></td>
+        <td>{{ 'PRESENT' if model.base_url_present else 'ABSENT' }}</td>
         <td><code>{{ model.api_key_env or '-' }}</code></td>
-        <td>{{ 'PRESENT' if model.api_key_present else ('DIRECT_TEST_ONLY' if model.direct_secret_configured else 'NOT_REQUIRED / MISSING') }}</td>
+        <td>{{ 'PRESENT' if model.api_key_present else ('DIRECT_TEST_ONLY' if model.direct_secret_configured else ('NOT_REQUIRED' if not model.api_key_env else 'ABSENT')) }}</td>
       </tr>
       {% endfor %}
       </tbody>
