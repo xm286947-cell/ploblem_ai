@@ -65,6 +65,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+          if (Get-Command py -ErrorAction SilentlyContinue) {
+            py -m pip install --disable-pip-version-check -r requirements.txt -r requirements-runtime-p0-test.txt
+          }
       - name: Start through the real legacy BAT and smoke restored pages
         shell: pwsh
         run: |
