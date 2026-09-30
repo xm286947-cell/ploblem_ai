@@ -44,10 +44,36 @@ PY
   echo "Creating isolated .venv..."
   "$BASE_PYTHON" -m venv .venv || exit 2
   PYTHON_CMD=".venv/bin/python"
+fi
+
+if ! "$PYTHON_CMD" - <<'PY' >/dev/null 2>&1
+import fastapi
+import jinja2
+import jsonschema
+import openpyxl
+import pdfplumber
+import pydantic
+import pypdf
+import uvicorn
+import yaml
+import multipart
+PY
+then
+  echo "Incomplete Python environment detected. Installing product dependencies..."
   "$PYTHON_CMD" -m pip install --upgrade pip || exit 2
   "$PYTHON_CMD" -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt || exit 2
 fi
 
+"$PYTHON_CMD" - <<'PY'
+import openpyxl
+print(f"OPENPYXL_READY={openpyxl.__version__}")
+PY
+if [[ $? -ne 0 ]]; then
+  echo "DEPENDENCY_PREFLIGHT=FAIL"
+  exit 2
+fi
+
+echo "DEPENDENCY_PREFLIGHT=PASS"
 "$PYTHON_CMD" main.py knowledge-web --db "$QUALITY_DB" "$@"
 EXIT_CODE=$?
 echo
