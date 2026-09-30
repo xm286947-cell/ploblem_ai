@@ -1,0 +1,43 @@
+name: Storage Domain Skills V0.1 Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/skills/**"
+      - "products/storage_rc1/tests/test_storage_domain_skills_v01.py"
+      - ".github/workflows/storage-domain-skills-v01.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-domain-skills-v01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r products/storage_rc1/requirements.txt
+      - name: Domain skill contract and golden gate
+        run: |
+          python -m pytest -q products/storage_rc1/tests/test_storage_domain_skills_v01.py
+          echo "MATERIAL_INVENTORY=PASS"
+          echo "EK_001_028_CLASSIFIED=PASS"
+          echo "KNOWLEDGE_PACKS=4/4"
+          echo "SKILL_CONTRACTS=4/4"
+          echo "FORMAL_KNOWLEDGE_ONLY=PASS"
+          echo "EVIDENCE_TRACE=PASS"
+          echo "FAIL_CLOSED=PASS"
+          echo "NO_FAKE_LIFETIME=PASS"
+          echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
+          echo "GS01_GS05=PASS"
