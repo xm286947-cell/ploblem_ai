@@ -83,9 +83,9 @@ jobs:
           #!/usr/bin/env bash
           set -eu
           cd "$(dirname "$0")"
-          export PYTHONPATH="$PWD:$PWD/vendor/unified_agent_runtime\${PYTHONPATH:+:$PYTHONPATH}"
-          export STORAGE_WEB_HOST="\${STORAGE_WEB_HOST:-127.0.0.1}"
-          export STORAGE_WEB_PORT="\${STORAGE_WEB_PORT:-8765}"
+          export PYTHONPATH="$PWD:$PWD/vendor/unified_agent_runtime"
+          export STORAGE_WEB_HOST="127.0.0.1"
+          export STORAGE_WEB_PORT="8765"
           echo "Storage Skill validation: http://127.0.0.1:8765"
           echo "Readiness: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/readiness"
           echo "Real Golden: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/real-golden"
