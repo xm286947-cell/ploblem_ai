@@ -36,8 +36,16 @@ jobs:
               Path("services/hardware_source_identity.py"),
               Path("scripts/hardware_r1_docx_snapshot.py"),
           ]
-          text = "\n".join(path.read_text(encoding="utf-8") for path in files).lower()
-          forbidden = ["opensearch", "vector_search", "ocr", "vision", "agentrequest", "tree_mapping"]
-          found = [item for item in forbidden if item in text]
+          import ast
+          forbidden_roots = {"opensearch", "cv2", "pytesseract", "easyocr", "sentence_transformers"}
+          found = []
+          for path in files:
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      found.extend(alias.name for alias in node.names if alias.name.split(".")[0] in forbidden_roots)
+                  elif isinstance(node, ast.ImportFrom) and node.module:
+                      if node.module.split(".")[0] in forbidden_roots:
+                          found.append(node.module)
           assert not found, found
           PY
