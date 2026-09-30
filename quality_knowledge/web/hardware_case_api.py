@@ -12,6 +12,7 @@ This module is deliberately thin:
 from __future__ import annotations
 
 from typing import Any
+import os
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -20,23 +21,41 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
+from services.hardware_iam import HardwareIAM, HardwareIAMError
+from services.hardware_observability import emit_event
 
 
 _ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
 
 
-def _role(value: str | None) -> str:
-    role = str(value or "CONSUMER").strip().upper()
-    if role not in _ALLOWED_ROLES:
-        raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
-    return role
+def _iam_http(error: HardwareIAMError) -> HTTPException:
+    status = 401 if error.code.startswith("AUTHENTICATION_") else 403
+    return HTTPException(status_code=status, detail=error.code)
 
 
-def _require_maintainer(value: str | None) -> str:
-    role = _role(value)
-    if role != "MAINTAINER":
-        raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
-    return role
+def _principal(
+    authorization: str | None,
+    legacy_role: str | None,
+    *,
+    required_role: str,
+) -> str:
+    mode = os.environ.get("HARDWARE_IAM_MODE", "ENFORCED").strip().upper()
+    if mode == "LEGACY_TEST":
+        role = str(legacy_role or "CONSUMER").strip().upper()
+        if role not in _ALLOWED_ROLES:
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_ROLE_INVALID")
+        if required_role == "MAINTAINER" and role != "MAINTAINER":
+            raise HTTPException(status_code=403, detail="HARDWARE_CASE_MAINTAINER_REQUIRED")
+        return role
+    iam = HardwareIAM.from_environment()
+    if not iam.configured:
+        raise HTTPException(status_code=503, detail="HARDWARE_IAM_NOT_CONFIGURED")
+    try:
+        principal = iam.authorize(authorization, required_role=required_role)
+    except HardwareIAMError as error:
+        emit_event("hardware_access_denied", error_code=error.code)
+        raise _iam_http(error) from error
+    return principal.role
 
 
 def _http_error(error: Exception) -> HTTPException:
@@ -71,8 +90,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
         try:
             return service.search_cases(
                 q,
@@ -96,8 +116,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         try:
             return service.save_tree_node(payload)
         except HardwareCaseContractError as error:
@@ -110,8 +131,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
         try:
             return service.list_cases_by_tree_node(
                 node_id,
@@ -126,8 +148,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         items = service.maintenance_anomalies()
         return {"items": items, "total": len(items)}
 
@@ -140,7 +163,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
             payload = await file.read()
             ref = str(source_ref or "").strip()
             if not ref:
@@ -174,29 +197,29 @@ def create_hardware_case_router(
             file: UploadFile = File(...),
             x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"),
         ) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+            _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
             try:
                 return intake_service.upload(str(file.filename or ""), await file.read())
             except (HardwareCaseIntakeError, HardwareCaseSourceError) as error:
                 raise _intake_error(error) from error
 
         @router.get("/intakes")
-        def list_intakes(x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+        def list_intakes(x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"), authorization: str | None = Header(default=None, alias="Authorization")) -> dict[str, Any]:
+            _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
             items = intake_service.list()
             return {"items": items, "total": len(items)}
 
         @router.get("/intakes/{intake_id}")
-        def get_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+        def get_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"), authorization: str | None = Header(default=None, alias="Authorization")) -> dict[str, Any]:
+            _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
             try:
                 return intake_service.detail(intake_id)
             except HardwareCaseIntakeError as error:
                 raise _intake_error(error) from error
 
         @router.post("/intakes/{intake_id}/process")
-        def process_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role")) -> dict[str, Any]:
-            _require_maintainer(x_hardware_case_role)
+        def process_intake(intake_id: str, x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"), authorization: str | None = Header(default=None, alias="Authorization")) -> dict[str, Any]:
+            _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
             try:
                 return intake_service.process(intake_id)
             except HardwareCaseIntakeError as error:
@@ -208,8 +231,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         try:
             return service.create_case(payload)
         except HardwareCaseContractError as error:
@@ -222,8 +246,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
         try:
             return service.get_case(
                 case_id,
@@ -240,8 +265,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
         try:
             return service.get_mappings(
                 case_id,
@@ -258,8 +284,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        role = _role(x_hardware_case_role)
+        role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
         try:
             return service.get_evidence(
                 case_id,
@@ -276,8 +303,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         try:
             return service.review_case(
                 case_id,
@@ -295,8 +323,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
@@ -311,8 +340,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         normalized = dict(payload)
         normalized["case_id"] = case_id
         try:
@@ -326,8 +356,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         try:
             return service.check_publish_gate(case_id)
         except HardwareCaseContractError as error:
@@ -339,8 +370,9 @@ def create_hardware_case_router(
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
+        authorization: str | None = Header(default=None, alias="Authorization"),
     ) -> dict[str, Any]:
-        _require_maintainer(x_hardware_case_role)
+        _principal(authorization, x_hardware_case_role, required_role="MAINTAINER")
         try:
             return service.publish_case(case_id)
         except HardwareCaseContractError as error:
@@ -383,7 +415,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            role = _role(x_hardware_case_role)
+            role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,
@@ -411,7 +443,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> dict[str, Any]:
-            role = _role(x_hardware_case_role)
+            role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,
@@ -443,7 +475,7 @@ def create_hardware_case_router(
                 default=None, alias="X-Hardware-Case-Role"
             ),
         ) -> FileResponse:
-            role = _role(x_hardware_case_role)
+            role = _principal(authorization, x_hardware_case_role, required_role="CONSUMER")
             evidence = _evidence_for_case(
                 case_id,
                 evidence_id,
