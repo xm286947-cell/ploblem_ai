@@ -56,6 +56,7 @@ INCLUDE_FILES = [
     "repositories/__init__.py",
     "services/__init__.py",
     "services/hardware_operability.py",
+    "services/hardware_source_identity.py",
     "config/runtime/model.local.hardware_case.example.yaml",
     "config/runtime/agents/hardware_case.structure.yaml",
     "config/hardware_case_real_validation.local.example.json",
@@ -67,6 +68,9 @@ INCLUDE_FILES = [
     "scripts/hardware_case_web_start.py",
     "scripts/hardware_case_fresh_extract_gate.py",
     "scripts/hardware_case_data_reliability.py",
+    "scripts/hardware_r1_docx_snapshot.py",
+    "RUN_HARDWARE_R1_6DOC_VALIDATION.bat",
+    "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
     "INIT_LOCAL_CONFIG.bat",
     "CHECK_ENV.bat",
     "START_HARDWARE_CASE.bat",
@@ -364,6 +368,7 @@ def main() -> int:
         "RUN_REAL_AI_VALIDATION.sh",
         "run_hardware_case_product_test.sh",
         "run_hardware_case_mvp_smoke.sh",
+        "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
     ):
         path = STAGE / relative
         path.chmod(path.stat().st_mode | 0o111)
@@ -379,6 +384,8 @@ def main() -> int:
         "data/runtime",
         "data/evidence_sources",
         "data/hardware_case_sources",
+        "data/r1_field_validation/input_word",
+        "data/r1_field_validation/output_snapshot",
     ):
         (STAGE / relative).mkdir(parents=True, exist_ok=True)
 
@@ -436,6 +443,8 @@ def main() -> int:
             "start_product_shell": "START_HARDWARE_CASE.sh",
             "start_product_macos": "START_HARDWARE_CASE.command",
             "real_ai_validation_shell": "RUN_REAL_AI_VALIDATION.sh",
+            "r1_6doc_validation_windows": "RUN_HARDWARE_R1_6DOC_VALIDATION.bat",
+            "r1_6doc_validation_shell": "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
         },
         "release_semantics": {
             "source_binding": "EXACT_SOURCE_COMMIT",
@@ -486,6 +495,7 @@ def main() -> int:
             "Company-local Real AI validation entry",
             "Company-only Real Validation Harness",
             "Synthetic package smoke",
+            "R1 Spike01/02 DOCX DocumentSnapshot + filename/basic identity field validation",
         ],
         "frozen_tree_change_types": [
             "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT",
