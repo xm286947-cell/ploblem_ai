@@ -54,7 +54,7 @@ jobs:
 
       - name: Existing Storage product no-regression gate
         run: |
-          python -m pytest -q products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py products/storage_rc1/tests/test_ui_next_issue132.py products/storage_rc1/tests/test_coverage_gate_next001.py products/storage_rc1/tests/test_review_gate_next001.py products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py products/storage_rc1/tests/test_storage_product_mvp_rc1.py products/storage_rc1/tests/test_lifetime_profiles_p7.py products/storage_rc1/tests/test_runtime_product_adapter.py products/storage_rc1/tests/test_runtime_product_contract_rc2.py
+          python -m pytest -q products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py products/storage_rc1/tests/test_ui_next_issue132.py products/storage_rc1/tests/test_coverage_gate_next001.py products/storage_rc1/tests/test_review_gate_next001.py products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py products/storage_rc1/tests/test_storage_product_mvp_rc1.py products/storage_rc1/tests/test_lifetime_profiles_p7.py products/storage_rc1/tests/test_runtime_product_adapter.py products/storage_rc1/tests/test_runtime_product_contract_rc2.py products/storage_rc1/tests/test_runtime_provenance_isolation.py
           echo "P08_REAL_PDF_API_CHAIN=PASS"
           echo "P01_P08_REGRESSION=PASS"
           echo "NO_REGRESSION_303=PASS"
@@ -121,7 +121,7 @@ jobs:
           print("RUNTIME_BRIDGE_PROVENANCE=PASS")
           PY
           echo "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS"
-          python -m pytest -q tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
+          python -m pytest -q tests/test_runtime_provenance_isolation.py tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
           python -m uvicorn storage_life.app:app --host 127.0.0.1 --port 8765 >/tmp/storage-r1-uvicorn.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
