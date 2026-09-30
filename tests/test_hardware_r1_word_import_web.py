@@ -52,7 +52,7 @@ def _client(tmp_path: Path) -> TestClient:
 
 def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     client = _client(tmp_path)
-    home = client.get("/p0/hardware-cases?role=maintainer")
+    home = client.get("/p0/hardware-cases")
     assert home.status_code == 200
     assert 'href="/p0/hardware-cases/word-import"' in home.text
     assert "案例 Word 导入" in home.text
