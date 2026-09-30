@@ -38,6 +38,7 @@ from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
 )
+from services.hardware_observability import HardwareCorrelationMiddleware
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
 
@@ -103,6 +104,7 @@ def create_p0_app(
     testability_mutable_paths: list[Path] = [primary_db]
     testability_restore_hooks: list[Any] = []
     app = FastAPI(title="Quality Capability P1", version="2.1.0")
+    app.add_middleware(HardwareCorrelationMiddleware)
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
     app.state.storage_workspace_binding = None
