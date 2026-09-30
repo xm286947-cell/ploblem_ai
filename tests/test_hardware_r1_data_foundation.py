@@ -103,3 +103,5 @@ def test_filename_identity_recognizes_supported_business_pattern(
 def test_source_identity_requires_real_sha256():
     with pytest.raises(ValueError, match="SOURCE_ID_SHA256_REQUIRED"):
         parse_source_identity("A1234-x.docx", "not-a-sha")
+
+# Package build trigger: validation package remains source-only; no real Word data.
