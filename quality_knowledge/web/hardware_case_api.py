@@ -11,6 +11,8 @@ This module is deliberately thin:
 """
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
@@ -20,6 +22,7 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
+from services.hardware_case_word import HardwareWordParseError, parse_docx
 
 
 _ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
@@ -62,6 +65,34 @@ def create_hardware_case_router(
     intake_service: HardwareCaseIntakeService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
+
+    @router.post("/r1/word-snapshot")
+    async def r1_word_snapshot(
+        file: UploadFile = File(...),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        """Parse one DOCX into the frozen R1 DocumentSnapshot for field validation.
+
+        This is intentionally parse-only: no Agent, tree mapping, search, publish,
+        or revision workflow is invoked.  It reuses parse_docx().to_snapshot().
+        """
+        _require_maintainer(x_hardware_case_role)
+        raw_name = str(file.filename or "").replace("\\", "/")
+        filename = Path(raw_name).name
+        if not filename or not filename.lower().endswith(".docx"):
+            raise HTTPException(status_code=400, detail="DOCX_REQUIRED")
+        payload = await file.read()
+        if not payload:
+            raise HTTPException(status_code=400, detail="DOCX_EMPTY")
+        with TemporaryDirectory(prefix="hardware-r1-word-") as temporary:
+            source = Path(temporary) / filename
+            source.write_bytes(payload)
+            try:
+                return parse_docx(source).to_snapshot()
+            except HardwareWordParseError as error:
+                raise HTTPException(status_code=400, detail=error.code) from error
 
     @router.get("")
     def search_cases(
