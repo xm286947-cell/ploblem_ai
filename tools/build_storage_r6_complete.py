@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
 PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
-RUNTIME_EXPECTED_COMMIT = "023dc785cb06187acd2509f2304dcc1c18f2be09"
+RUNTIME_EXPECTED_COMMIT = "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
 
 
 def sha256(path: Path) -> str:
