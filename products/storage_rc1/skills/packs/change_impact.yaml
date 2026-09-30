@@ -1,0 +1,24 @@
+pack_id: PACK_CHANGE_IMPACT
+version: "0.1"
+view_type: FORMAL_KNOWLEDGE_RELEASE_FILTER
+knowledge_release_dependency:
+  contract_version: "knowledge-query/v1"
+  current_release_version: "KP-STORAGE-RC1-VALIDATION-001"
+  binding: "products/storage_rc1/knowledge_release/current"
+included_k_domains: ["K1","K2","K3","K4","K5","K6","K7","K8"]
+allowed_object_types:
+  - KnowledgeFact
+  - TechnicalConcept
+  - TechnicalSolution
+  - DiagnosticMethod
+  - SoftwareRequirementKnowledge
+required_evidence:
+  formal_release_only: true
+  evidence_refs_required: true
+applicable_device_types: ["NOR", "NAND", "eMMC", "SSD", "NVMe SSD"]
+material_refs: ["EK-002","EK-004","EK-005","EK-007","EK-008","EK-010","EK-011","EK-012","EK-013","EK-014","EK-015","EK-016","EK-017","EK-018","EK-019","EK-020","EK-021","EK-022","EK-023","EK-024","EK-025","EK-026","EK-027","EK-028"]
+supported_questions:
+  - "What does a confirmed Device A/B parameter delta mean for lifetime, software, monitoring, and validation?"
+unsupported_questions:
+  - "Automatic approve/reject of a replacement"
+  - "Converting unknown impact to safe"
