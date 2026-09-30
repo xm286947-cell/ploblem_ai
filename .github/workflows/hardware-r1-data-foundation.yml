@@ -49,3 +49,94 @@ jobs:
                           found.append(node.module)
           assert not found, found
           PY
+
+  build-validation-package:
+    name: build-6-doc-validation-package
+    needs: spike01-02
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build field validation package
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=HARDWARE_R1_SPIKE01_02_6DOC_FIELD_VALIDATION
+          mkdir -p "$PKG/services" "$PKG/scripts" "$PKG/input_word" "$PKG/output_snapshot"
+          cp services/hardware_case_word.py "$PKG/services/"
+          cp services/hardware_source_identity.py "$PKG/services/"
+          cp scripts/hardware_r1_docx_snapshot.py "$PKG/scripts/"
+          touch "$PKG/services/__init__.py"
+          cat > "$PKG/run_validation.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd "$(dirname "$0")"
+          mkdir -p output_snapshot
+          found=0
+          for f in input_word/*.docx; do
+            [ -e "$f" ] || continue
+            found=1
+            name="$(basename "$f" .docx)"
+            python3 scripts/hardware_r1_docx_snapshot.py "$f" --output "output_snapshot/$name.json"
+          done
+          [ "$found" -eq 1 ] || { echo "NO_DOCX_IN_input_word"; exit 2; }
+          SH
+          chmod +x "$PKG/run_validation.sh"
+          cat > "$PKG/run_validation.bat" <<'BAT'
+          @echo off
+          setlocal EnableDelayedExpansion
+          cd /d "%~dp0"
+          if not exist output_snapshot mkdir output_snapshot
+          set FOUND=0
+          for %%F in (input_word\*.docx) do (
+            set FOUND=1
+            python scripts\hardware_r1_docx_snapshot.py "%%F" --output "output_snapshot\%%~nF.json"
+            if errorlevel 1 exit /b !errorlevel!
+          )
+          if "%FOUND%"=="0" (
+            echo NO_DOCX_IN_input_word
+            exit /b 2
+          )
+          BAT
+          cat > "$PKG/README.txt" <<'TXT'
+          HARDWARE R1 SPIKE01/02 - 6 DOC FIELD VALIDATION
+
+          1. Put approximately 6 approved real DOCX files into input_word/.
+          2. Windows: double-click run_validation.bat or run it from cmd.
+             macOS/Linux: ./run_validation.sh
+          3. Review one JSON per Word file under output_snapshot/.
+          4. Validate: Heading/Section, Paragraph, Table rows/columns, Image locator,
+             Source Locator, business_case_id, raw_title, source_id(SHA256).
+          5. Abnormal filename must be fail-safe: business_case_id=null,
+             identity_status=NEEDS_REVIEW; do not invent an ID.
+          6. Do not commit real internal Word or generated real-data snapshots to Repo.
+
+          OUT OF SCOPE: Agent, Tree Mapping, OpenSearch, Vector Search,
+          OCR/Vision, Revision Management.
+          TXT
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          pkg=Path("HARDWARE_R1_SPIKE01_02_6DOC_FIELD_VALIDATION")
+          sha=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+          manifest={
+            "task":"HARDWARE-R1-SPIKE01-02-DEVELOPMENT-001",
+            "package_id":"HARDWARE-R1-SPIKE01-02-6DOC-FIELD-VALIDATION",
+            "source_commit":sha,
+            "target_status":"READY_FOR_6_DOC_FIELD_VALIDATION",
+            "contains_real_internal_data":False,
+            "agent":False,"tree_mapping":False,"opensearch":False,
+            "vector_search":False,"ocr_vision":False,"revision_management":False,
+            "snapshot_contract":"hardware-document-snapshot/v1"
+          }
+          (pkg/"MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+          zip -qr "$PKG.zip" "$PKG"
+          sha256sum "$PKG.zip" | tee "$PKG.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_SPIKE01_02_6DOC_FIELD_VALIDATION
+          path: |
+            HARDWARE_R1_SPIKE01_02_6DOC_FIELD_VALIDATION.zip
+            HARDWARE_R1_SPIKE01_02_6DOC_FIELD_VALIDATION.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
