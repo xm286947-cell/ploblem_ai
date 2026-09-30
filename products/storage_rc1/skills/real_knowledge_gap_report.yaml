@@ -1,0 +1,45 @@
+schema_version: "storage-real-knowledge-gap/v0.1"
+baseline: "8a82d3b6825b86dc22a64a0787722ada73b04dd0"
+knowledge_release_version: "KP-STORAGE-RC1-VALIDATION-001"
+formal_knowledge_objects: 1
+formal_evidence_count: 1
+formal_source_reference_count: 1
+release_trace_verified_count: 1
+catalog_verified_count: 0
+packs:
+  PACK_WRITE_GOVERNANCE:
+    status: BLOCKED
+    formal_objects: 0
+  PACK_LIFETIME_ENGINEERING:
+    status: PARTIAL
+    formal_objects: 1
+    supported: ["NVMe Percentage Used semantics"]
+  PACK_DIAGNOSTIC_VALIDATION:
+    status: PARTIAL
+    formal_objects: 1
+    supported: ["NVMe Percentage Used semantics"]
+  PACK_CHANGE_IMPACT:
+    status: PARTIAL
+    formal_objects: 1
+    supported: ["narrow NVMe health monitoring semantic only"]
+real_golden:
+  RG01: PARTIAL
+  RG02: PARTIAL
+  RG03: PARTIAL
+  RG04: PARTIAL
+  RG05: PARTIAL
+evidence_drilldown:
+  status: PASS
+  chain:
+    object_id: "KO-4ad47002b1ba4070fa499559"
+    evidence_id: "EVD-98019c742313d72837696c0b"
+    source_ref: "NVME@2.0d"
+    publisher: "NVM Express"
+    title: "NVM Express Base Specification"
+    version: "2.0d"
+    archive_ref: "seed/03_SSD_NVME/NVM-Express-Base-2.0d.pdf"
+    locator: "page:200 / SMART / Health"
+formula_gap: true
+formula_task_required: true
+unknown_not_safe: true
+auto_replacement_decision: false
