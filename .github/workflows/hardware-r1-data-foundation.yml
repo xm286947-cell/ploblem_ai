@@ -1,0 +1,41 @@
+name: Hardware R1 Data Foundation Spike01-02
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-r1-data-foundation.yml"
+      - "services/hardware_case_word.py"
+      - "services/hardware_source_identity.py"
+      - "scripts/hardware_r1_docx_snapshot.py"
+      - "tests/test_hardware_r1_data_foundation.py"
+  workflow_dispatch:
+
+jobs:
+  spike01-02:
+    name: spike01-02-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Spike01/02 frozen tests
+        run: python -m pytest -q --noconftest tests/test_hardware_r1_data_foundation.py
+      - name: Prove forbidden dependencies are absent
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          files = [
+              Path("services/hardware_source_identity.py"),
+              Path("scripts/hardware_r1_docx_snapshot.py"),
+          ]
+          text = "\n".join(path.read_text(encoding="utf-8") for path in files).lower()
+          forbidden = ["opensearch", "vector_search", "ocr", "vision", "agentrequest", "tree_mapping"]
+          found = [item for item in forbidden if item in text]
+          assert not found, found
+          PY
