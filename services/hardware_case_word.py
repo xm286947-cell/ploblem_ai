@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from services.hardware_source_identity import parse_source_identity
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
@@ -43,6 +44,36 @@ class ParsedWord:
             "source_ref": self.source_ref,
             "file_name": self.file_name,
             "blocks": self.blocks,
+        }
+
+    def to_snapshot(self) -> dict[str, Any]:
+        identity = parse_source_identity(self.file_name, self.source_id)
+        headings = [block for block in self.blocks if block["block_type"] == "HEADING"]
+        paragraphs = [block for block in self.blocks if block["block_type"] == "PARAGRAPH"]
+        tables = [block for block in self.blocks if block["block_type"] == "TABLE"]
+        images = [block for block in self.blocks if block["block_type"] == "IMAGE"]
+        return {
+            "snapshot_version": "hardware-document-snapshot/v1",
+            "source": {
+                "source_id": self.source_id,
+                "source_ref": self.source_ref,
+                "file_name": self.file_name,
+            },
+            "identity": identity.to_dict(),
+            "structure": {
+                "headings": headings,
+                "paragraphs": paragraphs,
+                "tables": tables,
+                "images": images,
+                "blocks": self.blocks,
+            },
+            "counts": {
+                "headings": len(headings),
+                "paragraphs": len(paragraphs),
+                "tables": len(tables),
+                "images": len(images),
+                "blocks": len(self.blocks),
+            },
         }
 
 
@@ -127,6 +158,7 @@ def parse_docx(path: str | Path) -> ParsedWord:
         locator: dict[str, Any],
         style: str | None = None,
         image_ref: str | None = None,
+        table_rows: list[list[str]] | None = None,
     ) -> None:
         block_id = f"B{len(blocks) + 1:04d}"
         location = dict(locator)
@@ -142,6 +174,7 @@ def parse_docx(path: str | Path) -> ParsedWord:
                 "section_path": list(section_path),
                 "source_locator": location,
                 "image_ref": image_ref,
+                "table_rows": table_rows,
             }
         )
 
@@ -190,6 +223,7 @@ def parse_docx(path: str | Path) -> ParsedWord:
                 "TABLE",
                 text=table_text,
                 locator={"table": table_index},
+                table_rows=rows,
             )
 
     if not blocks:
