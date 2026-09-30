@@ -59,6 +59,8 @@ on:
 jobs:
   product-test-package:
     runs-on: ubuntu-latest
+    env:
+      HARDWARE_RELEASE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
