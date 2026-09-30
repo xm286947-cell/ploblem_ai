@@ -85,7 +85,7 @@ jobs:
       - name: Build complete R1 demo candidate
         env:
           STORAGE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
-          STORAGE_RUNTIME_COMMIT: 023dc785cb06187acd2509f2304dcc1c18f2be09
+          STORAGE_RUNTIME_COMMIT: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
           STORAGE_PACKAGE_ID: STORAGE-R1-FAST-DEMO-CANDIDATE-${{ github.event.pull_request.head.sha }}
           STORAGE_ZIP_NAME: STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
           STORAGE_ASSEMBLY_NAME: Storage R1 Fast Demo - Device Lifetime Assessment
@@ -117,13 +117,13 @@ jobs:
           from pathlib import Path
           from storage_life.runtime_bridge import _verify_runtime_root
           value = _verify_runtime_root(Path(os.environ["UNIFIED_AGENT_RUNTIME_ROOT"]))
-          assert value.get("expected_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
-          assert value.get("snapshot_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
+          assert value.get("expected_commit") == "9e36eeb0237459b884ee0d3e663ccf5833bfc685", value
+          assert value.get("snapshot_commit") == "9e36eeb0237459b884ee0d3e663ccf5833bfc685", value
           assert value.get("pinned") is True, value
           print("RUNTIME_BRIDGE_PROVENANCE=PASS")
           PY
           echo "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS"
-          python -m pytest -q tests/test_runtime_provenance_isolation.py tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
+          python -m pytest -q tests/test_runtime_provenance_isolation.py tests/test_runtime_strict_json_recovery_storage_integration.py tests/test_runtime_semantic_handoff_storage_integration.py tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
           python -m uvicorn storage_life.app:app --host 127.0.0.1 --port 8765 >/tmp/storage-r1-uvicorn.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
