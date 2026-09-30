@@ -1,0 +1,26 @@
+pack_id: PACK_WRITE_GOVERNANCE
+version: "0.1"
+view_type: FORMAL_KNOWLEDGE_RELEASE_FILTER
+knowledge_release_dependency:
+  contract_version: "knowledge-query/v1"
+  current_release_version: "KP-STORAGE-RC1-VALIDATION-001"
+  binding: "products/storage_rc1/knowledge_release/current"
+included_k_domains: ["K5", "K6"]
+supporting_k_domains: ["K2", "K3", "K4"]
+allowed_object_types:
+  - KnowledgeFact
+  - TechnicalConcept
+  - TechnicalSolution
+  - DiagnosticMethod
+  - SoftwareRequirementKnowledge
+required_evidence:
+  formal_release_only: true
+  evidence_refs_required: true
+applicable_device_types: ["Generic", "NOR", "NAND", "eMMC", "SSD", "NVMe SSD"]
+material_refs: ["EK-004","EK-010","EK-014","EK-017","EK-020","EK-021","EK-022","EK-023","EK-024","EK-028"]
+supported_questions:
+  - "Which software write behaviors can increase write amplification or persistence cost?"
+  - "Which engineering controls and validation checks are supported by released knowledge?"
+unsupported_questions:
+  - "Exact lifetime loss without confirmed endurance/workload inputs"
+  - "Automatic safe/unsafe or replacement decision"
