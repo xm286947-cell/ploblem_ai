@@ -410,7 +410,7 @@ def main() -> int:
         or "LOCAL"
     )
     short = source_commit[:12] if source_commit != "LOCAL" else "LOCAL"
-    archive_name = f"{PACKAGE_NAME}_{PACKAGE_ARCHIVE_VARIANT}_{short}.zip"
+    archive_name = f"HARDWARE_CASE_PRODUCT_TEST_FULL_R1_{short}.zip"
 
     manifest = {
         "package": PACKAGE_NAME,
@@ -427,6 +427,7 @@ def main() -> int:
         "tree_import_contract_version": "hardware-tree-import/v1",
         "public_contract_version": "hardware-public-consumer/v1",
         "web_entry": "/p0/hardware-cases",
+        "r1_word_import_web_entry": "/p0/hardware-cases/word-import",
         "api_prefix": "/api/v2/hardware-cases",
         "public_api_prefix": "/api/public/hardware/v1",
         "system_endpoints": {
@@ -496,6 +497,7 @@ def main() -> int:
             "Company-only Real Validation Harness",
             "Synthetic package smoke",
             "R1 Spike01/02 DOCX DocumentSnapshot + filename/basic identity field validation",
+            "R1 browser Word Upload -> Parse -> DocumentSnapshot/Identity inspection",
         ],
         "frozen_tree_change_types": [
             "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT",
