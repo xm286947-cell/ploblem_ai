@@ -1,0 +1,49 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-word-v1">{% endblock %}
+{% block breadcrumb %}案例 Word 导入{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-word-import data-api="{{ hardware_api_prefix }}">
+  <section class="hc-hero">
+    <div>
+      <span class="hc-kicker">HARDWARE CASE · R1 FIELD VALIDATION</span>
+      <h1>案例 Word 导入</h1>
+      <p>上传 1 份 DOCX，直接执行 SPIKE01 DocumentSnapshot + SPIKE02 Identity，并在浏览器检查解析字段。本入口不调用 Agent、不要求基础树、不做挂接或发布。</p>
+    </div>
+  </section>
+
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>Upload → Parse → Inspect</h2><p>支持逐份切换约 6 份真实 Word。异常文件名必须 Fail-Safe，不伪造 business_case_id。</p></div></div>
+    <form data-word-upload>
+      <input type="file" accept=".docx" required data-word-file aria-label="选择 DOCX">
+      <button class="hc-button primary" type="submit">Upload / Parse</button>
+    </form>
+    <p role="status" data-word-message>请选择一份 DOCX。</p>
+  </section>
+
+  <section class="hc-card" data-word-result hidden>
+    <div class="hc-card-head"><div><h2>Identity / Source</h2><p data-word-file-name></p></div></div>
+    <div class="hc-case-meta">
+      <span>business_case_id: <strong data-business-case-id>—</strong></span>
+      <span>raw_title: <strong data-raw-title>—</strong></span>
+      <span>identity_status: <strong data-identity-status>—</strong></span>
+    </div>
+    <p><strong>source_id SHA256</strong><br><code data-source-id>—</code></p>
+    <p><strong>warnings / Fail-Safe</strong>：<span data-warnings>—</span></p>
+    <p><strong>计数</strong>：<span data-counts>—</span></p>
+  </section>
+
+  <section class="hc-card" data-word-structure hidden>
+    <div class="hc-card-head"><div><h2>DocumentSnapshot</h2><p>每条结构均保留 Source Locator，便于与原 Word 对照。</p></div></div>
+    <h3>Heading / Section</h3><div data-headings></div>
+    <h3>Paragraph</h3><div data-paragraphs></div>
+    <h3>Table 行列</h3><div data-tables></div>
+    <h3>Image Locator</h3><div data-images></div>
+    <details><summary>完整 Snapshot JSON</summary><pre data-raw-snapshot></pre></details>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-word-v1"></script>{% endblock %}
