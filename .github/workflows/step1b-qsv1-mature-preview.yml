@@ -1,0 +1,303 @@
+name: STEP1B QSV1 Mature Preview Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+    paths:
+      - "quality_knowledge/**"
+      - "tests/test_r2_w2_qsv1_production_chain.py"
+      - "tests/test_step1b_qsv1_mature_preview.py"
+      - "start_quality_capability_p1.bat"
+      - "start_quality_capability_p1.command"
+      - ".gitattributes"
+      - ".github/workflows/step1b-qsv1-mature-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run QSV1 production and mature-host preview tests
+        run: |
+          python -m pytest -q             tests/test_r2_w2_qsv1_production_chain.py             tests/test_step1b_qsv1_mature_preview.py
+
+  windows-startup:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      REPEAT_CASE_NO_PAUSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare isolated environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install --upgrade pip
+          .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Start mature Windows entry and validate preview
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $legacyDb = Join-Path $env:RUNNER_TEMP "step1b-legacy.db"
+          $qsv1Db = Join-Path $env:RUNNER_TEMP "step1b-qsv1.db"
+          $env:LEGACY_QUALITY_ISSUE_DB_PATH = $legacyDb
+          $env:QUALITY_SCENARIO_V1_DB_PATH = $qsv1Db
+          $root = (Get-Location).Path
+          $job = Start-Job -ScriptBlock {
+            param($root, $legacyDb, $qsv1Db)
+            Set-Location $root
+            $env:REPEAT_CASE_NO_PAUSE = "1"
+            $env:LEGACY_QUALITY_ISSUE_DB_PATH = $legacyDb
+            $env:QUALITY_SCENARIO_V1_DB_PATH = $qsv1Db
+            cmd.exe /d /s /c "start_quality_capability_p1.bat --host 127.0.0.1 --port 8092"
+          } -ArgumentList $root, $legacyDb, $qsv1Db
+
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:8092/issues" -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              if ((Get-Job -Id $job.Id).State -in @("Completed","Failed","Stopped")) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) {
+              Receive-Job -Id $job.Id -Keep -ErrorAction SilentlyContinue | Write-Host
+              throw "WINDOWS_START_FAILED"
+            }
+
+            foreach ($path in @(
+              "/issues",
+              "/analysis",
+              "/import",
+              "/p0/quality-scenarios/workbench",
+              "/p0/quality-scenarios",
+              "/p0/quality-scenario-insights"
+            )) {
+              $probe = Invoke-WebRequest -Uri ("http://127.0.0.1:8092" + $path) -UseBasicParsing -TimeoutSec 10
+              if ($probe.StatusCode -ne 200) { throw "$path => $($probe.StatusCode)" }
+            }
+
+            $status = Invoke-RestMethod -Uri "http://127.0.0.1:8092/api/v2/quality-scenario-preview/status"
+            if ($status.V1_CANDIDATE_COUNT -ne 0) { throw "Candidate count must be 0 in clean gate" }
+            if ($status.V1_PUBLISHED_COUNT -ne 0) { throw "Published count must be 0 in clean gate" }
+            if ($status.P04_PROVIDER_TYPE -ne "QualityScenarioV1P04Provider") { throw "Unexpected provider" }
+            if ($status.P04_PUBLISHED_COUNT -ne 0) { throw "P04 published count must be 0" }
+            if ($status.SYNTHETIC_FIXTURE_USED -ne "NO") { throw "Fixture is forbidden" }
+
+            Write-Host "WINDOWS_START=PASS"
+            Write-Host "MATURE_PLATFORM_BASE=PASS"
+            Write-Host "NEW_QS_WORKBENCH_VISIBLE=PASS"
+            Write-Host "NEW_QS_LIBRARY_VISIBLE=PASS"
+            Write-Host "P04_REAL_PROVIDER_BINDING=PASS"
+            Write-Host "SYNTHETIC_FIXTURE_USED=NO"
+          }
+          finally {
+            Get-NetTCPConnection -LocalPort 8092 -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique |
+              ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            Stop-Job -Id $job.Id -ErrorAction SilentlyContinue
+            Receive-Job -Id $job.Id -ErrorAction SilentlyContinue | Write-Host
+            Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+          }
+
+  macos-startup:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify launcher packaging contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          data = Path("start_quality_capability_p1.command").read_bytes()
+          assert b"\r\n" not in data
+          assert data.startswith(b"#!/bin/zsh\n")
+          print("MAC_COMMAND_LF=PASS")
+          PY
+          test -x start_quality_capability_p1.command
+          zsh -n start_quality_capability_p1.command
+          echo "MAC_COMMAND_EXECUTABLE=PASS"
+      - name: Prepare isolated environment
+        shell: bash
+        run: |
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Start mature macOS entry and validate preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LEGACY_QUALITY_ISSUE_DB_PATH="$RUNNER_TEMP/step1b-legacy.db"
+          export QUALITY_SCENARIO_V1_DB_PATH="$RUNNER_TEMP/step1b-qsv1.db"
+          ./start_quality_capability_p1.command --host 127.0.0.1 --port 8093 >"$RUNNER_TEMP/step1b-mac.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in {1..90}; do
+            if curl -fsS http://127.0.0.1:8093/issues >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/step1b-mac.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          for path in             /issues             /analysis             /import             /p0/quality-scenarios/workbench             /p0/quality-scenarios             /p0/quality-scenario-insights
+          do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8093$path")"
+            test "$code" = "200"
+          done
+
+          curl -fsS http://127.0.0.1:8093/api/v2/quality-scenario-preview/status >"$RUNNER_TEMP/status.json"
+          python - "$RUNNER_TEMP/status.json" <<'PY'
+          import json
+          import sys
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert payload["V1_CANDIDATE_COUNT"] == 0
+          assert payload["V1_PUBLISHED_COUNT"] == 0
+          assert payload["P04_PROVIDER_TYPE"] == "QualityScenarioV1P04Provider"
+          assert payload["P04_PUBLISHED_COUNT"] == 0
+          assert payload["SYNTHETIC_FIXTURE_USED"] == "NO"
+          print("MACOS_START=PASS")
+          print("P04_REAL_PROVIDER_BINDING=PASS")
+          print("SYNTHETIC_FIXTURE_USED=NO")
+          PY
+
+  preview-package:
+    needs: [focused-regression, windows-startup, macos-startup]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build source-bound preview package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          short="${source_sha:0:12}"
+          name="STEP1B_QSV1_MATURE_PREVIEW_${short}"
+          stage="$RUNNER_TEMP/$name"
+          zip_path="$RUNNER_TEMP/$name.zip"
+
+          mkdir -p "$stage"
+          git archive --format=tar HEAD | tar -xf - -C "$stage"
+
+          find "$stage" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -delete
+          chmod +x "$stage/start_quality_capability_p1.command"
+
+          cat >"$stage/00_STEP1B_README_FIRST.txt" <<EOF
+STEP1B NEW QUALITYSCENARIO V1 IN MATURE PLATFORM PREVIEW
+
+SOURCE_SHA=$source_sha
+CANDIDATE_CLASS=USER_PREVIEW
+PRODUCT_COMPLETION=NO
+
+WINDOWS:
+1. Run INSTALL_OVERALL_R2_WINDOWS.bat once if needed.
+2. Optional real V1 DB binding:
+   set QUALITY_SCENARIO_V1_DB_PATH=C:\\path\\to\\existing-qsv1.db
+3. Run start_quality_capability_p1.bat
+
+macOS:
+1. Optional real V1 DB binding:
+   export QUALITY_SCENARIO_V1_DB_PATH=/path/to/existing-qsv1.db
+2. Run ./start_quality_capability_p1.command
+   Python 3.12 is supported.
+
+PREVIEW:
+- Mature base: /issues /analysis /import
+- New workbench: /p0/quality-scenarios/workbench
+- New library: /p0/quality-scenarios
+- Detail/source/evidence/history: from the V1 library
+- Product/customer/industry insight: /p0/quality-scenario-insights
+- Data truth: /api/v2/quality-scenario-preview/status
+
+DATA POLICY:
+- No SQLite production/internal data is packaged.
+- No fixture/synthetic scenario is created.
+- If no real V1 data is bound, counts are 0 and P04 is EMPTY.
+- Old /quality-scenarios namespace is not overwritten by STEP1B.
+EOF
+
+          SOURCE_SHA="$source_sha" python - "$stage" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          stage = Path(sys.argv[1])
+          manifest = {
+              "contract": "step1b-qsv1-mature-preview/v1",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "candidate_class": "USER_PREVIEW",
+              "formal_release_candidate": False,
+              "windows_entry": "start_quality_capability_p1.bat",
+              "macos_entry": "start_quality_capability_p1.command",
+              "qsv1_db_env": "QUALITY_SCENARIO_V1_DB_PATH",
+              "synthetic_fixture_used": False,
+              "routes": [
+                  "/p0/quality-scenarios/workbench",
+                  "/p0/quality-scenarios",
+                  "/p0/quality-scenario-insights",
+              ],
+              "legacy_routes_untouched": True,
+          }
+          (stage / "STEP1B_PREVIEW_MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          (stage / "STEP1B_SOURCE_COMMIT").write_text(
+              os.environ["SOURCE_SHA"] + "\n",
+              encoding="ascii",
+          )
+          PY
+
+          (
+            cd "$stage"
+            zip -qry "$zip_path" .
+          )
+          sha="$(sha256sum "$zip_path" | awk '{print $1}')"
+
+          echo "STEP1B_PACKAGE_NAME=$name" >>"$GITHUB_ENV"
+          echo "STEP1B_PACKAGE_ZIP=$zip_path" >>"$GITHUB_ENV"
+          echo "STEP1B_PACKAGE_SHA256=$sha" >>"$GITHUB_ENV"
+          echo "STEP1B_SOURCE_SHA=$source_sha" >>"$GITHUB_ENV"
+
+          echo "SOURCE_SHA=$source_sha"
+          echo "PACKAGE=$name.zip"
+          echo "SHA256=$sha"
+          echo "USER_PREVIEW_PACKAGE=READY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STEP1B_QSV1_MATURE_PREVIEW
+          path: ${{ env.STEP1B_PACKAGE_ZIP }}
+          if-no-files-found: error
+          retention-days: 30
