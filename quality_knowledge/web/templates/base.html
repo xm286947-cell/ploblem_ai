@@ -16,6 +16,7 @@
   <nav class="main-nav">
     <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
+    <a class="nav-item {% if request.url.path.startswith('/p0/quality-scenarios') or request.url.path.startswith('/p0/quality-scenario-insights') %}active{% endif %}" href="/p0/quality-scenarios/workbench">新质量场景（预览）</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
     <a class="nav-item {% if request.url.path.startswith('/itr/recovery-workbench') %}active{% endif %}" href="/itr/recovery-workbench">ITR工作台</a>
