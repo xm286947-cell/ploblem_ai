@@ -57,7 +57,11 @@ def test_step1b_preview_does_not_create_second_host_or_overwrite_legacy_route(tm
     monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
     db = tmp_path / "quality_issue_v1.db"
     app = create_app(db)
-    paths = {route.path for route in app.routes}
+    paths = {
+        route.path
+        for route in app.routes
+        if hasattr(route, "path")
+    }
 
     assert "/" in paths
     assert "/issues" in paths
