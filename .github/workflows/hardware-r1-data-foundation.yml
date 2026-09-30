@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install test dependency
+        run: python -m pip install pytest
       - name: Run Spike01/02 frozen tests
         run: python -m pytest -q --noconftest tests/test_hardware_r1_data_foundation.py
       - name: Prove forbidden dependencies are absent
