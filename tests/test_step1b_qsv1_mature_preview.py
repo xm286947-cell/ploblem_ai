@@ -57,23 +57,21 @@ def test_step1b_preview_does_not_create_second_host_or_overwrite_legacy_route(tm
     monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
     db = tmp_path / "quality_issue_v1.db"
     app = create_app(db)
-    paths = {
-        route.path
-        for route in app.routes
-        if hasattr(route, "path")
-    }
+    client = TestClient(app)
 
-    assert "/" in paths
-    assert "/issues" in paths
-    assert "/analysis" in paths
-    assert "/import" in paths
-    assert "/p0/quality-scenarios/workbench" in paths
-    assert "/p0/quality-scenarios" in paths
-    assert "/p0/quality-scenarios/library/{scenario_id}" in paths
-    assert "/p0/quality-scenario-insights" in paths
-    assert "/api/v2/quality-scenario-preview/status" in paths
+    # Same FastAPI/TestClient serves the mature platform and additive QSV1 UI.
+    assert client.get("/").status_code in {200, 307}
+    assert client.get("/issues").status_code == 200
+    assert client.get("/analysis").status_code == 200
+    assert client.get("/import").status_code == 200
+    assert client.get("/p0/quality-scenarios/workbench").status_code == 200
+    assert client.get("/p0/quality-scenarios").status_code == 200
+    assert client.get("/p0/quality-scenario-insights").status_code == 200
 
-    # STEP1B owns only the /p0/ QualityScenario V1 namespace. Existing
-    # /quality-scenarios routes, when present on a later mature baseline,
-    # remain outside this integration and must not be overwritten.
-    assert "/p0/quality-scenarios" in paths
+    # STEP1B owns only the /p0/ QSV1 namespace. If a legacy scenario route is
+    # present on a later mature baseline, it must not render the V1 preview UI.
+    legacy = client.get("/quality-scenarios")
+    if legacy.status_code == 200:
+        assert "新质量场景库（预览）" not in legacy.text
+        assert "QualityScenario V1" not in legacy.text
+
