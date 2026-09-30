@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,6 +22,8 @@ def get(url: str, *, timeout: float = 5.0) -> tuple[int, bytes]:
             return int(response.status), response.read()
     except urllib.error.HTTPError as exc:
         return int(exc.code), exc.read()
+    except (urllib.error.URLError, TimeoutError, socket.timeout):
+        return 0, b""
 
 
 def wait_ready(base: str, process: subprocess.Popen, seconds: int = 90) -> None:
@@ -85,11 +88,13 @@ def main() -> int:
         command = [str(launcher), "--host", "127.0.0.1", "--port", str(args.port)]
         creationflags = 0
 
+    log_path = temp_root / "launcher.log"
+    log_handle = log_path.open("w+", encoding="utf-8", errors="replace")
     process = subprocess.Popen(
         command,
         cwd=ROOT,
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=log_handle,
         stderr=subprocess.STDOUT,
         text=True,
         creationflags=creationflags,
@@ -141,10 +146,12 @@ def main() -> int:
         return 0
     finally:
         stop_process(process)
-        if process.stdout is not None and process.returncode not in (None, 0):
-            tail = process.stdout.read()
-            if tail:
-                print(tail[-12000:], file=sys.stderr)
+        log_handle.flush()
+        log_handle.seek(0)
+        tail = log_handle.read()
+        log_handle.close()
+        if process.returncode not in (None, 0) and tail:
+            print(tail[-12000:], file=sys.stderr)
 
 
 if __name__ == "__main__":
