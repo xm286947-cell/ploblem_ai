@@ -443,6 +443,19 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/p0/hardware-cases/word-import", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_word_import(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_word_import.html",
+            {
+                "hardware_api_prefix": "/api/v2/hardware-cases",
+                "page_title": "案例 Word 导入 · 硬件案例库",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "word-import",
+            },
+        )
+
     @router.get("/p0/hardware-cases/intake", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_intake(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
