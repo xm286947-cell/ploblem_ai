@@ -1,0 +1,142 @@
+{
+  "contract_version": "storage-domain-skill/v0.1",
+  "skill_id": "storage-lifetime-budget",
+  "pack_id": "PACK_LIFETIME_ENGINEERING",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "device_type": {
+        "type": "string"
+      },
+      "confirmed_endurance_facts": {
+        "type": "array"
+      },
+      "target_service_life": {
+        "type": "object"
+      },
+      "runtime_workload_facts": {
+        "type": "array"
+      },
+      "requested_metric": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "device_type",
+      "confirmed_endurance_facts",
+      "target_service_life",
+      "requested_metric"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "skill_id": {
+        "type": "string",
+        "const": "storage-lifetime-budget"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "ANSWERED",
+          "PARTIAL",
+          "INSUFFICIENT_KNOWLEDGE",
+          "INSUFFICIENT_DATA",
+          "INVALID_INPUT",
+          "UNSUPPORTED"
+        ]
+      },
+      "direct_answer": {
+        "type": "string"
+      },
+      "structured_result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "applicable_formula": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "endurance_basis": {
+            "type": "array"
+          },
+          "write_budget": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "measured_vs_budget": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "margin_status": {
+            "type": "string"
+          },
+          "assumptions": {
+            "type": "array"
+          },
+          "missing_information": {
+            "type": "array"
+          },
+          "evidence_refs": {
+            "type": "array"
+          },
+          "formula_replay_refs": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "applicable_formula",
+          "endurance_basis",
+          "write_budget",
+          "measured_vs_budget",
+          "margin_status",
+          "assumptions",
+          "missing_information",
+          "evidence_refs",
+          "formula_replay_refs"
+        ]
+      },
+      "fact_derived_hypothesis_separation": {
+        "type": "object"
+      },
+      "knowledge_refs": {
+        "type": "array"
+      },
+      "evidence_refs": {
+        "type": "array"
+      },
+      "missing_information": {
+        "type": "array"
+      },
+      "decision_boundary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "skill_id",
+      "status",
+      "direct_answer",
+      "structured_result",
+      "fact_derived_hypothesis_separation",
+      "knowledge_refs",
+      "evidence_refs",
+      "missing_information",
+      "decision_boundary"
+    ]
+  },
+  "rules": [
+    "DETERMINISTIC_FORMULA_FIRST",
+    "EXISTING_LIFETIME_ENGINE_ONLY",
+    "NO_FAKE_REMAINING_YEARS",
+    "ASSUMPTIONS_EXPLICIT",
+    "UNSUPPORTED_MODEL_FAIL_CLOSED"
+  ]
+}
