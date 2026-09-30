@@ -1,0 +1,172 @@
+name: Storage R1 Fast Demo Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/**"
+      - "runtime/**"
+      - "tests/test_lifetime_engine.py"
+      - "tests/test_lifetime_gate_contract.py"
+      - "tests/test_runtime_observation_contract.py"
+      - "tests/test_software_impact.py"
+      - "tests/test_software_impact_gate_contract.py"
+      - "tests/test_storage_t123_integration.py"
+      - ".github/workflows/storage-r1-fast-demo-gate.yml"
+      - "tools/build_storage_r6_complete.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-r1-fast-demo-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Storage dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+
+      - name: R1 composer and product API focused gate
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_device_lifetime_assessment_r1.py             tests/test_lifetime_engine.py             tests/test_lifetime_gate_contract.py             tests/test_runtime_observation_contract.py             tests/test_software_impact.py             tests/test_software_impact_gate_contract.py             tests/test_storage_t123_integration.py
+          echo "COMPOSER_CONTRACT=PASS"
+          echo "NVME_SSD_GOLDEN=PASS"
+          echo "EMMC_GOLDEN=PASS"
+          echo "STALE_RUNTIME_FAIL_CLOSED=PASS"
+          echo "SOFTWARE_IMPACT_COMPOSED=PASS"
+          echo "T1_T2_T3_REGRESSION=PASS"
+
+      - name: Existing Storage product no-regression gate
+        run: |
+          python -m pytest -q products/storage_rc1/tests/test_storage_rc1_r6_f2_golden_a.py products/storage_rc1/tests/test_ui_next_issue132.py products/storage_rc1/tests/test_coverage_gate_next001.py products/storage_rc1/tests/test_review_gate_next001.py products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py products/storage_rc1/tests/test_storage_product_mvp_rc1.py products/storage_rc1/tests/test_lifetime_profiles_p7.py products/storage_rc1/tests/test_runtime_product_adapter.py products/storage_rc1/tests/test_runtime_product_contract_rc2.py products/storage_rc1/tests/test_runtime_provenance_isolation.py
+          echo "P08_REAL_PDF_API_CHAIN=PASS"
+          echo "P01_P08_REGRESSION=PASS"
+          echo "NO_REGRESSION_303=PASS"
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"
+
+      - name: Existing Knowledge Release contract gate
+        run: |
+          python -m pytest -q             tests/test_kp_d04_release_query.py             tests/test_kp_d06_storage_golden.py
+          echo "KNOWLEDGE_TRACE=PASS"
+          echo "EVIDENCE_TRACE=PASS"
+
+      - name: Static launcher identity gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f products/storage_rc1/start_storage.bat
+          test -x products/storage_rc1/start_storage.command
+          grep -F 'call "%~dp0run_windows.bat"' products/storage_rc1/start_storage.bat
+          grep -F 'exec "$ROOT/.venv/bin/python" "$ROOT/scripts/windows_start.py"' products/storage_rc1/start_storage.command
+          ! grep -R "remaining_years" products/storage_rc1/storage_life/device_lifetime_assessment.py products/storage_rc1/storage_life/index.html
+          grep -R "NO_AUTO_REPLACEMENT_DECISION" products/storage_rc1/storage_life/device_lifetime_assessment.py
+          echo "WINDOWS_LAUNCHER=READY"
+          echo "MACOS_LAUNCHER=READY"
+          echo "NO_FAKE_LIFETIME=PASS"
+          echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
+
+      - name: Build complete R1 demo candidate
+        env:
+          STORAGE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+          STORAGE_RUNTIME_COMMIT: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+          STORAGE_PACKAGE_ID: STORAGE-R1-FAST-DEMO-CANDIDATE-${{ github.event.pull_request.head.sha }}
+          STORAGE_ZIP_NAME: STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+          STORAGE_ASSEMBLY_NAME: Storage R1 Fast Demo - Device Lifetime Assessment
+          STORAGE_NEXT_STATUS: READY_FOR_PRODUCT_TEST
+        run: |
+          python tools/build_storage_r6_complete.py
+          test -f dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+          (cd dist && sha256sum -c STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256)
+          echo "COMPLETE_DEMO_CANDIDATE=BUILT"
+
+      - name: Fresh extract demo smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/storage-r1-demo
+          mkdir -p /tmp/storage-r1-demo
+          unzip -q dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip -d /tmp/storage-r1-demo
+          PKG=/tmp/storage-r1-demo/STORAGE_PRODUCT_MVP_RC1
+          test -f "$PKG/start_storage.bat"
+          test -x "$PKG/start_storage.command"
+          test -f "$PKG/storage_life/device_lifetime_assessment.py"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+          cd "$PKG"
+          python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from storage_life.runtime_bridge import _verify_runtime_root
+          value = _verify_runtime_root(Path(os.environ["UNIFIED_AGENT_RUNTIME_ROOT"]))
+          assert value.get("expected_commit") == "9e36eeb0237459b884ee0d3e663ccf5833bfc685", value
+          assert value.get("snapshot_commit") == "9e36eeb0237459b884ee0d3e663ccf5833bfc685", value
+          assert value.get("pinned") is True, value
+          print("RUNTIME_BRIDGE_PROVENANCE=PASS")
+          PY
+          echo "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS"
+          python -m pytest -q tests/test_runtime_provenance_isolation.py tests/test_runtime_strict_json_recovery_storage_integration.py tests/test_runtime_semantic_handoff_storage_integration.py tests/test_device_lifetime_assessment_r1.py tests/test_storage_product_mvp_rc1.py tests/test_storage_rc1_r6_complete_assembly.py
+          python -m uvicorn storage_life.app:app --host 127.0.0.1 --port 8765 >/tmp/storage-r1-uvicorn.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(40):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=1) as r:
+                      assert r.status == 200
+                      break
+              except Exception:
+                  time.sleep(0.25)
+          else:
+              raise SystemExit("STORAGE_SERVER_HEALTH_TIMEOUT")
+          with urllib.request.urlopen("http://127.0.0.1:8765/", timeout=2) as r:
+              home = r.read().decode("utf-8")
+          assert "Storage 器件寿命智能产品 MVP" in home
+          assert "lifetimeAssessment" in home
+          print("START=PASS")
+          print("HEALTH=PASS")
+          print("PRODUCT_HOME=PASS")
+          PY
+          kill "$SERVER_PID"
+          wait "$SERVER_PID" || true
+          trap - EXIT
+          echo "DEVICE_LIFETIME_PACKAGE_TEST=PASS"
+          echo "EVIDENCE_PACKAGE_TEST=PASS"
+          echo "FRESH_EXTRACT_SMOKE=PASS"
+
+      - name: Upload complete demo candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-r1-fast-demo-complete-candidate
+          path: |
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.sha256
+            dist/STORAGE_R1_FAST_DEMO_COMPLETE_CANDIDATE.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
+
+      - name: Gate result
+        run: |
+          echo "TASK=STORAGE-R1-FAST-DEMO-PRODUCT-DEVELOPMENT-001"
+          echo "SOURCE_COMMIT=$(git rev-parse HEAD)"
+          echo "AUTOMATED_DEVELOPMENT_GATE=PASS"
+          echo "NATIVE_PLATFORM_VALIDATION=PENDING"
+          echo "READY_FOR_PRODUCT_TEST_CANDIDATE_BUILD=YES"

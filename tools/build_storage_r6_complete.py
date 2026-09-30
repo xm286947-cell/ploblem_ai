@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
 PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
-RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+RUNTIME_EXPECTED_COMMIT = "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
 
 
 def sha256(path: Path) -> str:
@@ -59,7 +59,7 @@ def copy_file(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
-def runtime_vendor_closure_gate(runtime_root: Path) -> None:
+def runtime_vendor_closure_gate(runtime_root: Path, expected_commit: str = RUNTIME_EXPECTED_COMMIT) -> None:
     required = [
         "RUNTIME_COMMIT",
         "requirements-runtime-p0-test.txt",
@@ -67,19 +67,69 @@ def runtime_vendor_closure_gate(runtime_root: Path) -> None:
         "tools/openai_mock/server.py",
         "runtime/__init__.py",
         "runtime/providers/openai_compatible.py",
+        "runtime/observation.py",
+        "runtime/store/observation.py",
+        "runtime/adapters/observation.py",
     ]
     missing = [rel for rel in required if not (runtime_root / rel).is_file()]
     if missing:
         raise SystemExit("RUNTIME_VENDOR_CLOSURE_FAILED:MISSING:" + ",".join(missing))
     actual = (runtime_root / "RUNTIME_COMMIT").read_text(encoding="utf-8").strip()
-    if actual != RUNTIME_EXPECTED_COMMIT:
+    if actual != expected_commit:
         raise SystemExit(
             f"RUNTIME_VENDOR_CLOSURE_FAILED:COMMIT:"
-            f"expected={RUNTIME_EXPECTED_COMMIT},actual={actual}"
+            f"expected={expected_commit},actual={actual}"
         )
     print("RUNTIME_VENDOR_CLOSURE=PASS")
-    print(f"RUNTIME_EXPECTED_COMMIT={RUNTIME_EXPECTED_COMMIT}")
+    print(f"RUNTIME_EXPECTED_COMMIT={expected_commit}")
     print(f"RUNTIME_SNAPSHOT_COMMIT={actual}")
+
+
+def runtime_provenance_consistency_gate(package_root: Path, expected_commit: str) -> None:
+    checks = {
+        "storage_life/runtime_bridge.py": (
+            f'RUNTIME_EXPECTED_COMMIT = "{expected_commit}"'
+        ),
+        "scripts/preflight.py": (
+            f'EXPECTED = "{expected_commit}"'
+        ),
+        "scripts/setup_runtime.sh": (
+            f'EXPECTED="{expected_commit}"'
+        ),
+        "scripts/setup_runtime.bat": (
+            f"set EXPECTED={expected_commit}"
+        ),
+        "scripts/windows_e2e.py": (
+            f'EXPECTED_RUNTIME = "{expected_commit}"'
+        ),
+    }
+    mismatches: list[str] = []
+    for rel, expected_line in checks.items():
+        path = package_root / rel
+        if not path.is_file():
+            mismatches.append(f"{rel}=MISSING")
+            continue
+        text = path.read_text(encoding="utf-8")
+        if expected_line not in text:
+            mismatches.append(f"{rel}=BASELINE_MISMATCH")
+    runtime_marker = (
+        package_root / "vendor" / "unified_agent_runtime" / "RUNTIME_COMMIT"
+    )
+    if not runtime_marker.is_file():
+        mismatches.append("vendor/unified_agent_runtime/RUNTIME_COMMIT=MISSING")
+    else:
+        actual = runtime_marker.read_text(encoding="utf-8").strip()
+        if actual != expected_commit:
+            mismatches.append(
+                "vendor/unified_agent_runtime/RUNTIME_COMMIT=" + actual
+            )
+    if mismatches:
+        raise SystemExit(
+            "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY_FAILED:"
+            + ";".join(mismatches)
+        )
+    print("PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS")
+    print(f"PACKAGE_RUNTIME_BASELINE={expected_commit}")
 
 
 def verify_release(package_root: Path) -> dict:
@@ -133,9 +183,33 @@ def write_hash_manifest(package_root: Path) -> None:
 
 def build() -> tuple[Path, Path, Path]:
     commit = source_commit()
-    date = os.environ.get("STORAGE_R6_BUILD_DATE", "").strip() or datetime.now(timezone.utc).strftime("%Y%m%d")
-    package_id = f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-{date}"
-    zip_name = f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_{date}.zip"
+    runtime_commit = os.environ.get("STORAGE_RUNTIME_COMMIT", "").strip() or RUNTIME_EXPECTED_COMMIT
+    if runtime_commit != RUNTIME_EXPECTED_COMMIT:
+        raise SystemExit(
+            "RUNTIME_PROVENANCE_BINDING_MISMATCH:"
+            f"expected={RUNTIME_EXPECTED_COMMIT},actual={runtime_commit}"
+        )
+    date = (
+        os.environ.get("STORAGE_BUILD_DATE", "").strip()
+        or os.environ.get("STORAGE_R6_BUILD_DATE", "").strip()
+        or datetime.now(timezone.utc).strftime("%Y%m%d")
+    )
+    package_id = (
+        os.environ.get("STORAGE_PACKAGE_ID", "").strip()
+        or f"STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-R1-{date}"
+    )
+    zip_name = (
+        os.environ.get("STORAGE_ZIP_NAME", "").strip()
+        or f"STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_{date}.zip"
+    )
+    assembly_name = (
+        os.environ.get("STORAGE_ASSEMBLY_NAME", "").strip()
+        or "Golden A + Golden B + Golden C"
+    )
+    next_status = (
+        os.environ.get("STORAGE_NEXT_STATUS", "").strip()
+        or "READY_FOR_FULL_PRODUCT_RETEST"
+    )
 
     work = DIST / "_storage_r6_complete"
     if work.exists():
@@ -148,6 +222,13 @@ def build() -> tuple[Path, Path, Path]:
     copy_tree(ROOT / "knowledge_production", package_root / "knowledge_production")
     copy_tree(ROOT / "repositories", package_root / "repositories")
     copy_tree(ROOT / "parser", package_root / "parser")
+    # Unified Knowledge public adapters import shared public contracts and
+    # evidence compatibility code at package import time.  A fresh-extracted
+    # standalone Storage candidate must carry that shared dependency closure
+    # rather than accidentally resolving it from the source checkout.
+    copy_tree(ROOT / "services", package_root / "services")
+    copy_tree(ROOT / "quality_knowledge", package_root / "quality_knowledge")
+    copy_tree(ROOT / "compatibility", package_root / "compatibility")
 
     # Preserve the existing launcher contract and provenance: the bundled Runtime
     # must be the exact pinned public Runtime snapshot, not the current assembly HEAD.
@@ -159,8 +240,9 @@ def build() -> tuple[Path, Path, Path]:
         [
             "git", "archive", "--format=tar",
             f"--prefix={runtime_source.name}/",
-            RUNTIME_EXPECTED_COMMIT,
+            runtime_commit,
             "runtime",
+            "contracts",
             "config/runtime/model.yaml",
             "tools/openai_mock/server.py",
             "requirements-runtime-p0-test.txt",
@@ -174,6 +256,9 @@ def build() -> tuple[Path, Path, Path]:
         check=True,
     )
     copy_tree(runtime_source / "runtime", runtime_root / "runtime")
+    # Runtime binding imports the public contract package directly. Keep the
+    # contract snapshot aligned with the selected Unified Runtime commit.
+    copy_tree(runtime_source / "contracts", package_root / "contracts")
     copy_file(runtime_source / "config/runtime/model.yaml", runtime_root / "config/runtime/model.yaml")
     copy_file(runtime_source / "tools/openai_mock/server.py", runtime_root / "tools/openai_mock/server.py")
     copy_file(runtime_source / "requirements-runtime-p0-test.txt", runtime_root / "requirements-runtime-p0-test.txt")
@@ -195,9 +280,10 @@ def build() -> tuple[Path, Path, Path]:
     )
     # The marker describes the bundled Runtime snapshot, never the Storage assembly HEAD.
     (runtime_root / "RUNTIME_COMMIT").write_text(
-        RUNTIME_EXPECTED_COMMIT + "\n", encoding="utf-8"
+        runtime_commit + "\n", encoding="utf-8"
     )
-    runtime_vendor_closure_gate(runtime_root)
+    runtime_vendor_closure_gate(runtime_root, runtime_commit)
+    runtime_provenance_consistency_gate(package_root, runtime_commit)
 
     # Keep the root run-log contract valid on a clean extraction before any
     # platform launcher overwrites it with the concrete session log.
@@ -214,11 +300,11 @@ def build() -> tuple[Path, Path, Path]:
         "package_id": package_id,
         "package_type": "PRODUCT_TEST_CANDIDATE",
         "product": "Storage RC1",
-        "assembly": "Golden A + Golden B + Golden C",
+        "assembly": assembly_name,
         "source_commit": commit,
         "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
-        "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
-        "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
+        "runtime_expected_commit": runtime_commit,
+        "runtime_snapshot_commit": runtime_commit,
         "runtime_provenance_source": "RUNTIME_COMMIT",
         "runtime_vendor_closure": "PASS",
         "supersedes": "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925",
@@ -260,7 +346,7 @@ def build() -> tuple[Path, Path, Path]:
                 "package_sha256": digest,
                 "package_size": zip_path.stat().st_size,
                 "fresh_extract_required": True,
-                "next_status": "READY_FOR_FULL_PRODUCT_RETEST",
+                "next_status": next_status,
             },
             ensure_ascii=False,
             indent=2,

@@ -22,6 +22,7 @@ from runtime.contracts import RuntimeObservation
 
 from . import core, product_api
 from .knowledge_release import KnowledgeReleaseConsumer, KnowledgeReleaseError
+from .device_lifetime_assessment import DeviceLifetimeAssessmentComposer
 from .lifetime_engine import (
     ConfirmedFact as LifetimeFact,
     FormalKnowledgeReference,
@@ -216,6 +217,64 @@ class StorageEngineeringInsightService:
             connection.execute("INSERT OR REPLACE INTO lifetime_assessment(assessment_id,device_id,record_json) VALUES (?,?,?)", (result.assessment_id, result.device_id, json.dumps(record, ensure_ascii=False)))
         return record
 
+    @staticmethod
+    def _default_device_metrics(device_type: str) -> list[str]:
+        normalized = device_type.strip().lower().replace("-", "").replace("_", "")
+        if "nvme" in normalized or "ssd" in normalized:
+            return ["ssd.tbw", "nvme.percentage_used"]
+        if "emmc" in normalized:
+            return ["emmc.device_life_time_a", "emmc.device_life_time_b", "emmc.pre_eol_info"]
+        if "nand" in normalized:
+            return ["nand.pe_margin", "nand.erase_count_margin", "nand.wear_distribution"]
+        return ["generic.waf", "generic.endurance_margin"]
+
+    def assess_device_lifetime(
+        self,
+        device_id: str,
+        *,
+        requested_metrics: list[str] | None = None,
+        requested_topics: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Compose the existing T1/T2/T3 capabilities into one device result.
+
+        The composer never estimates calendar lifetime and never makes a
+        replacement decision.  Each metric still passes through LifetimeEngine,
+        so stale/non-consumable runtime observations and missing protocol
+        knowledge fail closed at the existing domain boundary.
+        """
+        detail = product_api.confirmed_device_facts(device_id)
+        device = detail.get("device") or {}
+        device_type = str(device.get("device_type") or "")
+        metrics = list(requested_metrics or self._default_device_metrics(device_type))
+        metric_results = []
+        for metric in metrics:
+            record = self.assess_lifetime({
+                "device_id": device_id,
+                "device_type": device_type,
+                "metric": metric,
+            })
+            metric_results.append(record)
+
+        topics = list(requested_topics or ["lifetime", "endurance", "write amplification"])
+        impact_record = self.analyze_impact({
+            "request_id": f"DEVICE-LIFETIME:{device_id}",
+            "device_id": device_id,
+            "device_type": device_type,
+            "requested_topics": topics,
+        })
+
+        from .lifetime_engine import LifetimeAssessmentResult
+        from .software_impact import SoftwareImpactAnalysisResult
+
+        result = DeviceLifetimeAssessmentComposer.compose(
+            device_id=device_id,
+            device_type=device_type,
+            requested_metrics=metrics,
+            metric_results=[LifetimeAssessmentResult(**item) for item in metric_results],
+            software_impact=SoftwareImpactAnalysisResult(**impact_record),
+        )
+        return result.model_dump(mode="json")
+
     def get_lifetime(self, assessment_id: str) -> dict[str, Any] | None:
         with core.connect() as connection:
             row = connection.execute("SELECT record_json FROM lifetime_assessment WHERE assessment_id=?", (assessment_id,)).fetchone()
@@ -266,6 +325,25 @@ def create_engineering_insight_router(service: StorageEngineeringInsightService 
     def assess_lifetime(payload: dict[str, Any]):
         try: return service.assess_lifetime(payload)
         except (KeyError, ValueError) as error: raise HTTPException(422, str(error)) from error
+
+    @router.get("/storage/devices/{device_id}/lifetime-assessment")
+    def assess_device_lifetime(
+        device_id: str,
+        metrics: str = "",
+        topics: str = "",
+    ):
+        try:
+            requested_metrics = [item.strip() for item in metrics.split(",") if item.strip()] or None
+            requested_topics = [item.strip() for item in topics.split(",") if item.strip()] or None
+            return service.assess_device_lifetime(
+                device_id,
+                requested_metrics=requested_metrics,
+                requested_topics=requested_topics,
+            )
+        except KeyError as error:
+            raise HTTPException(404, "STORAGE_DEVICE_NOT_FOUND") from error
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @router.get("/storage/lifetime/assessments/{assessment_id}")
     def get_lifetime(assessment_id: str):

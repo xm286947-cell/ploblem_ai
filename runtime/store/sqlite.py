@@ -24,6 +24,7 @@ from runtime.contracts import (
     ProjectionOutboxEvent,
     RuntimeErrorInfo,
     RuntimeStatus,
+    SemanticFailureHandoff,
     StepRunRecord,
     TaskProgress,
     TaskRecord,
@@ -176,6 +177,25 @@ class SqliteTaskStore:
                     snapshot_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS runtime_semantic_handoff (
+                    content_ref TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    step_run_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    execution_key TEXT NOT NULL,
+                    provider_call_seq INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    content_length INTEGER NOT NULL,
+                    media_type TEXT NOT NULL,
+                    content_text TEXT NOT NULL,
+                    record_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(task_id) REFERENCES runtime_task(task_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_runtime_semantic_handoff_task_step
+                    ON runtime_semantic_handoff(task_id, step_run_id, provider_call_seq);
 
                 CREATE TABLE IF NOT EXISTS runtime_projection_outbox (
                     event_id TEXT PRIMARY KEY,
@@ -1314,6 +1334,133 @@ class SqliteTaskStore:
                 (run_id,),
             ).fetchall()
         return [StepRunRecord.model_validate_json(row["record_json"]) for row in rows]
+
+    def save_semantic_handoff(
+        self,
+        record: SemanticFailureHandoff,
+        *,
+        content: str,
+    ) -> None:
+        if not isinstance(content, str):
+            raise TypeError("semantic handoff content must be text")
+        if len(content) != record.content_length:
+            raise ValueError("semantic handoff content length mismatch")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO runtime_semantic_handoff(
+                    content_ref, task_id, run_id, step_run_id, attempt_id,
+                    execution_key, provider_call_seq, content_hash,
+                    content_length, media_type, content_text, record_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(content_ref) DO NOTHING
+                """,
+                (
+                    record.content_ref,
+                    record.task_id,
+                    record.run_id,
+                    record.step_run_id,
+                    record.attempt_id,
+                    record.execution_key,
+                    record.provider_call_seq,
+                    record.content_hash,
+                    record.content_length,
+                    record.media_type,
+                    content,
+                    record.model_dump_json(),
+                    record.created_at.isoformat(),
+                ),
+            )
+
+    def get_semantic_handoff(
+        self,
+        content_ref: str,
+        *,
+        task_id: str,
+    ) -> SemanticFailureHandoff | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT record_json
+                FROM runtime_semantic_handoff
+                WHERE content_ref=? AND task_id=?
+                """,
+                (content_ref, task_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return SemanticFailureHandoff.model_validate_json(row["record_json"])
+
+    def get_first_semantic_handoff(
+        self,
+        *,
+        task_id: str,
+        step_run_id: str,
+    ) -> SemanticFailureHandoff | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT record_json
+                FROM runtime_semantic_handoff
+                WHERE task_id=? AND step_run_id=?
+                ORDER BY provider_call_seq ASC, rowid ASC
+                LIMIT 1
+                """,
+                (task_id, step_run_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return SemanticFailureHandoff.model_validate_json(row["record_json"])
+
+    def read_semantic_handoff_content(
+        self,
+        content_ref: str,
+        *,
+        task_id: str,
+    ) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT content_text
+                FROM runtime_semantic_handoff
+                WHERE content_ref=? AND task_id=?
+                """,
+                (content_ref, task_id),
+            ).fetchone()
+        return str(row["content_text"]) if row is not None else None
+
+    def list_semantic_handoffs(
+        self,
+        *,
+        task_id: str,
+        step_run_id: str | None = None,
+    ) -> list[SemanticFailureHandoff]:
+        with self._connect() as conn:
+            if step_run_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT record_json
+                    FROM runtime_semantic_handoff
+                    WHERE task_id=?
+                    ORDER BY rowid
+                    """,
+                    (task_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT record_json
+                    FROM runtime_semantic_handoff
+                    WHERE task_id=? AND step_run_id=?
+                    ORDER BY provider_call_seq ASC, rowid ASC
+                    """,
+                    (task_id, step_run_id),
+                ).fetchall()
+        return [
+            SemanticFailureHandoff.model_validate_json(row["record_json"])
+            for row in rows
+        ]
 
     def list_attempts(self, step_run_id: str) -> list[AttemptRecord]:
         with self._connect() as conn:

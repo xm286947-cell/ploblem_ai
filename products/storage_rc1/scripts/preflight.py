@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-EXPECTED = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+EXPECTED = "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
 MODEL_REF = "qwen_prod"
 PLACEHOLDER_TOKENS = {
     "__SET_YOUR_DASHSCOPE_API_KEY__",
@@ -101,6 +101,9 @@ def main() -> None:
             "config/runtime/model.yaml",
             "tools/openai_mock/server.py",
             "runtime/providers/openai_compatible.py",
+            "runtime/observation.py",
+            "runtime/store/observation.py",
+            "runtime/adapters/observation.py",
         ]:
             if not (root / rel).exists():
                 errors.append(f"Runtime 缺少 {rel}")
