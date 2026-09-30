@@ -1,0 +1,24 @@
+pack_id: PACK_LIFETIME_ENGINEERING
+version: "0.1"
+view_type: FORMAL_KNOWLEDGE_RELEASE_FILTER
+knowledge_release_dependency:
+  contract_version: "knowledge-query/v1"
+  current_release_version: "KP-STORAGE-RC1-VALIDATION-001"
+  binding: "products/storage_rc1/knowledge_release/current"
+included_k_domains: ["K8"]
+supporting_k_domains: ["K1", "K2", "K3", "K4"]
+allowed_object_types:
+  - KnowledgeFact
+  - TechnicalConcept
+  - DiagnosticMethod
+required_evidence:
+  formal_release_only: true
+  evidence_refs_required: true
+applicable_device_types: ["NOR", "NAND", "eMMC", "SSD", "NVMe SSD"]
+material_refs: ["EK-001","EK-002","EK-006","EK-007","EK-008","EK-009","EK-011","EK-012","EK-013","EK-015","EK-016","EK-017","EK-018","EK-025","EK-026","EK-027"]
+supported_questions:
+  - "What deterministic lifetime/endurance formula is applicable?"
+  - "How does measured workload compare with a confirmed endurance/write budget?"
+unsupported_questions:
+  - "Fabricated remaining lifetime years"
+  - "Lifetime calculation without required confirmed facts or released protocol semantics"
