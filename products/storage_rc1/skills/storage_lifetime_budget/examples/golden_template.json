@@ -1,0 +1,24 @@
+{
+  "skill_id": "storage-lifetime-budget",
+  "example_id": "GOLDEN_TEMPLATE",
+  "input": {
+    "device_type": "",
+    "confirmed_endurance_facts": [],
+    "target_service_life": {},
+    "runtime_workload_facts": [],
+    "requested_metric": ""
+  },
+  "expected": {
+    "status": "PARTIAL_OR_ANSWERED",
+    "must_include": [
+      "direct_answer",
+      "structured_result",
+      "evidence_refs",
+      "missing_information"
+    ],
+    "must_not_include": [
+      "opaque_risk_score",
+      "automatic_replacement_decision"
+    ]
+  }
+}
