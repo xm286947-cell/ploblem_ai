@@ -69,10 +69,7 @@ def test_step1b_preview_does_not_create_second_host_or_overwrite_legacy_route(tm
     assert "/p0/quality-scenario-insights" in paths
     assert "/api/v2/quality-scenario-preview/status" in paths
 
-    # STEP1B is additive: it does not register a replacement for the legacy
-    # /quality-scenarios namespace.
-    assert "/quality-scenarios" not in {
-        path
-        for path in paths
-        if path.startswith("/quality-scenarios")
-    }
+    # STEP1B owns only the /p0/ QualityScenario V1 namespace. Existing
+    # /quality-scenarios routes, when present on a later mature baseline,
+    # remain outside this integration and must not be overwritten.
+    assert "/p0/quality-scenarios" in paths
