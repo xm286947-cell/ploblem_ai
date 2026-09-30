@@ -14,6 +14,9 @@ def _write_runtime(root: Path, *, marker: bool = True) -> None:
     for rel in [
         "runtime/__init__.py",
         "runtime/providers/openai_compatible.py",
+        "runtime/observation.py",
+        "runtime/store/observation.py",
+        "runtime/adapters/observation.py",
         "tools/openai_mock/server.py",
         "config/runtime/model.yaml",
     ]:
