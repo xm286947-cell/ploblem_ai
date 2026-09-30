@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import logging
+import os
 import tempfile
 from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
@@ -1359,13 +1360,58 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
 
 
 def create_app(db_path):
-    """Standalone legacy application retained for existing local tools/tests."""
+    """Mature Quality Issue host with additive QualityScenario V1 preview.
+
+    Existing legacy routes remain authoritative and unchanged. STEP1B mounts
+    the already-developed QSV1 workflow/library/P04 routes into this same
+    FastAPI host and port; it does not create a second product shell.
+    """
     router, state = create_legacy_quality_issue_router(db_path, initialize_schema=True)
     standalone = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
     standalone.include_router(router)
+
+    for name, value in vars(state).items():
+        setattr(standalone.state, name, value)
+    standalone.state.legacy_quality_issue_services = state
+    standalone.state.legacy_quality_issue_status = {
+        "ready": True,
+        "code": "READY",
+        "database_path": str(Path(db_path).resolve()),
+    }
+
+    # QSV1 may use an already-existing independent database. If no explicit
+    # binding is supplied, coexistence in the mature DB is safe because the
+    # V1 repository owns only quality_scenario_v1* tables.
+    qsv1_db = Path(os.getenv("QUALITY_SCENARIO_V1_DB_PATH") or db_path).resolve()
+
+    from quality_knowledge.p04.api import create_p04_router, create_public_scenario_router
+    from quality_knowledge.p04.qsv1_provider import QualityScenarioV1P04Provider
+    from quality_knowledge.p04.service import P04InsightService
+    from quality_knowledge.web.p0_pages import create_p0_insights_router
+    from quality_knowledge.web.quality_scenario_v1_api import create_quality_scenario_v1_router
+
+    qsv1_provider = QualityScenarioV1P04Provider(qsv1_db)
+    p04_service = P04InsightService(qsv1_provider)
+    standalone.state.p04_provider = qsv1_provider
+    standalone.state.p04_service = p04_service
+    standalone.state.quality_scenario_v1_db_path = str(qsv1_db)
+
+    standalone.include_router(create_quality_scenario_v1_router(str(qsv1_db)))
+    standalone.include_router(create_p04_router(p04_service))
+    standalone.include_router(create_public_scenario_router(p04_service))
+    standalone.include_router(
+        create_p0_insights_router(
+            scenario_detail_service=p04_service,
+            hardware_case_host_role="CONSUMER",
+        )
+    )
+
+    @standalone.get('/api/v2/quality-scenario-preview/status')
+    def quality_scenario_preview_status():
+        return qsv1_provider.diagnostic()
+
     @standalone.get('/', include_in_schema=False)
     def root():
         return RedirectResponse('/issues')
-    for name, value in vars(state).items():
-        setattr(standalone.state, name, value)
+
     return standalone
