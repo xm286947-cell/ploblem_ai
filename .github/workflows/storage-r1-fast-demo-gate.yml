@@ -112,13 +112,14 @@ jobs:
           export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
           cd "$PKG"
           python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock
-          STORAGE_LIFE_EXECUTION_MODE=runtime python - <<'PY'
-          from storage_life.runtime_bridge import status
-          value = status()
-          assert value.get("configured") is True, value
-          assert value.get("runtime_expected_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
-          runtime = value.get("runtime") or {}
-          assert runtime.get("snapshot_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from storage_life.runtime_bridge import _verify_runtime_root
+          value = _verify_runtime_root(Path(os.environ["UNIFIED_AGENT_RUNTIME_ROOT"]))
+          assert value.get("expected_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
+          assert value.get("snapshot_commit") == "023dc785cb06187acd2509f2304dcc1c18f2be09", value
+          assert value.get("pinned") is True, value
           print("RUNTIME_BRIDGE_PROVENANCE=PASS")
           PY
           echo "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS"
