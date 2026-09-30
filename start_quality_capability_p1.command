@@ -6,19 +6,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
 echo "Starting Quality Issue Analysis Engine with QualityScenario V1 preview..."
+echo "PACKAGE_ROOT=$SCRIPT_DIR"
 echo "Open http://127.0.0.1:8080/issues after startup."
 
-QUALITY_DB="${LEGACY_QUALITY_ISSUE_DB_PATH:-knowledge/quality_issue_v1.db}"
-echo "Mature host DB: $QUALITY_DB"
+QUALITY_DB="${LEGACY_QUALITY_ISSUE_DB_PATH:-$SCRIPT_DIR/knowledge/quality_issue_v1.db}"
 if [[ -n "${QUALITY_SCENARIO_V1_DB_PATH:-}" ]]; then
   echo "QualityScenario V1 DB: $QUALITY_SCENARIO_V1_DB_PATH"
 else
   echo "QualityScenario V1 DB: same as mature host DB"
 fi
 
-if [[ -x ".venv/bin/python" ]]; then
-  PYTHON_CMD=".venv/bin/python"
-else
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
+
+if [[ ! -x "$VENV_PYTHON" ]]; then
+  echo "Package-local .venv not found. Creating it now..."
   BASE_PYTHON=""
   for candidate in python3.12 python3.11 python3; do
     if (( $+commands[$candidate] )); then
@@ -30,51 +31,42 @@ else
     echo "Python >= 3.11 was not found."
     exit 2
   fi
-
   "$BASE_PYTHON" - <<'PY'
 import sys
 if sys.version_info < (3, 11):
     raise SystemExit(f"Python >= 3.11 required, found {sys.version.split()[0]}")
-print(f"BOOTSTRAP_PYTHON={sys.version.split()[0]}")
 PY
-  if [[ $? -ne 0 ]]; then
-    exit 2
-  fi
-
-  echo "Creating isolated .venv..."
-  "$BASE_PYTHON" -m venv .venv || exit 2
-  PYTHON_CMD=".venv/bin/python"
+  [[ $? -eq 0 ]] || exit 2
+  "$BASE_PYTHON" -m venv "$SCRIPT_DIR/.venv" || exit 2
 fi
 
-if ! "$PYTHON_CMD" - <<'PY' >/dev/null 2>&1
-import fastapi
-import jinja2
-import jsonschema
+echo "VENV_PYTHON=$VENV_PYTHON"
+"$VENV_PYTHON" - <<'PY'
+import sys
+print(f"PYTHON_EXECUTABLE={sys.executable}")
+print(f"PYTHON_PREFIX={sys.prefix}")
+PY
+[[ $? -eq 0 ]] || exit 2
+
+if ! "$VENV_PYTHON" - <<'PY'
 import openpyxl
-import pdfplumber
-import pydantic
-import pypdf
-import uvicorn
-import yaml
-import multipart
+print(f"OPENPYXL_VERSION={openpyxl.__version__}")
+print(f"OPENPYXL_FILE={openpyxl.__file__}")
 PY
 then
-  echo "Incomplete Python environment detected. Installing product dependencies..."
-  "$PYTHON_CMD" -m pip install --upgrade pip || exit 2
-  "$PYTHON_CMD" -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt || exit 2
-fi
-
-"$PYTHON_CMD" - <<'PY'
+  echo "OPENPYXL_IMPORT=FAIL"
+  echo "The package-local venv is incomplete. Installing declared product dependencies..."
+  "$VENV_PYTHON" -m pip install --disable-pip-version-check -r "$SCRIPT_DIR/requirements.txt" -r "$SCRIPT_DIR/requirements-runtime-p0-test.txt" || exit 2
+  "$VENV_PYTHON" - <<'PY'
 import openpyxl
-print(f"OPENPYXL_READY={openpyxl.__version__}")
+print(f"OPENPYXL_VERSION={openpyxl.__version__}")
+print(f"OPENPYXL_FILE={openpyxl.__file__}")
 PY
-if [[ $? -ne 0 ]]; then
-  echo "DEPENDENCY_PREFLIGHT=FAIL"
-  exit 2
+  [[ $? -eq 0 ]] || exit 2
 fi
 
 echo "DEPENDENCY_PREFLIGHT=PASS"
-"$PYTHON_CMD" main.py knowledge-web --db "$QUALITY_DB" "$@"
+"$VENV_PYTHON" "$SCRIPT_DIR/main.py" knowledge-web --db "$QUALITY_DB" "$@"
 EXIT_CODE=$?
 echo
 if [[ -t 0 ]]; then
