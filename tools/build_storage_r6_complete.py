@@ -85,6 +85,56 @@ def runtime_vendor_closure_gate(runtime_root: Path, expected_commit: str = RUNTI
     print(f"RUNTIME_SNAPSHOT_COMMIT={actual}")
 
 
+def runtime_provenance_consistency_gate(package_root: Path, expected_commit: str) -> None:
+    checks = {
+        "storage_life/runtime_bridge.py": (
+            r'RUNTIME_EXPECTED_COMMIT\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+        ),
+        "scripts/preflight.py": (
+            r'EXPECTED\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+        ),
+        "scripts/setup_runtime.sh": (
+            r'EXPECTED=["\\\']([0-9a-f]{40})["\\\']'
+        ),
+        "scripts/windows_e2e.py": (
+            r'EXPECTED_RUNTIME\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+        ),
+    }
+    import re
+    mismatches: list[str] = []
+    for rel, pattern in checks.items():
+        path = package_root / rel
+        if not path.is_file():
+            mismatches.append(f"{rel}=MISSING")
+            continue
+        text = path.read_text(encoding="utf-8")
+        match = re.search(pattern, text)
+        if not match:
+            mismatches.append(f"{rel}=UNPARSEABLE")
+            continue
+        actual = match.group(1)
+        if actual != expected_commit:
+            mismatches.append(f"{rel}={actual}")
+    runtime_marker = (
+        package_root / "vendor" / "unified_agent_runtime" / "RUNTIME_COMMIT"
+    )
+    if not runtime_marker.is_file():
+        mismatches.append("vendor/unified_agent_runtime/RUNTIME_COMMIT=MISSING")
+    else:
+        actual = runtime_marker.read_text(encoding="utf-8").strip()
+        if actual != expected_commit:
+            mismatches.append(
+                "vendor/unified_agent_runtime/RUNTIME_COMMIT=" + actual
+            )
+    if mismatches:
+        raise SystemExit(
+            "PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY_FAILED:"
+            + ";".join(mismatches)
+        )
+    print("PACKAGE_RUNTIME_PROVENANCE_CONSISTENCY=PASS")
+    print(f"PACKAGE_RUNTIME_BASELINE={expected_commit}")
+
+
 def verify_release(package_root: Path) -> dict:
     release = package_root / "knowledge_release" / "current"
     manifest_path = release / "release_manifest.json"
@@ -236,6 +286,7 @@ def build() -> tuple[Path, Path, Path]:
         runtime_commit + "\n", encoding="utf-8"
     )
     runtime_vendor_closure_gate(runtime_root, runtime_commit)
+    runtime_provenance_consistency_gate(package_root, runtime_commit)
 
     # Keep the root run-log contract valid on a clean extraction before any
     # platform launcher overwrites it with the concrete session log.
