@@ -34,7 +34,10 @@ def package_archive(explicit: str | None) -> Path:
         archive = Path(explicit)
     else:
         candidates = sorted(
-            Path("dist").glob("HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip"),
+            [
+                *Path("dist").glob("HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip"),
+                *Path("dist").glob("HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip"),
+            ],
             key=lambda item: item.stat().st_mtime,
         )
         if not candidates:
