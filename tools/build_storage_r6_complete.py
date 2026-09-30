@@ -88,36 +88,30 @@ def runtime_vendor_closure_gate(runtime_root: Path, expected_commit: str = RUNTI
 def runtime_provenance_consistency_gate(package_root: Path, expected_commit: str) -> None:
     checks = {
         "storage_life/runtime_bridge.py": (
-            r'RUNTIME_EXPECTED_COMMIT\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+            f'RUNTIME_EXPECTED_COMMIT = "{expected_commit}"'
         ),
         "scripts/preflight.py": (
-            r'EXPECTED\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+            f'EXPECTED = "{expected_commit}"'
         ),
         "scripts/setup_runtime.sh": (
-            r'EXPECTED=["\\\']([0-9a-f]{40})["\\\']'
+            f'EXPECTED="{expected_commit}"'
         ),
         "scripts/setup_runtime.bat": (
-            r'set EXPECTED=([0-9a-f]{40})'
+            f"set EXPECTED={expected_commit}"
         ),
         "scripts/windows_e2e.py": (
-            r'EXPECTED_RUNTIME\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
+            f'EXPECTED_RUNTIME = "{expected_commit}"'
         ),
     }
-    import re
     mismatches: list[str] = []
-    for rel, pattern in checks.items():
+    for rel, expected_line in checks.items():
         path = package_root / rel
         if not path.is_file():
             mismatches.append(f"{rel}=MISSING")
             continue
         text = path.read_text(encoding="utf-8")
-        match = re.search(pattern, text)
-        if not match:
-            mismatches.append(f"{rel}=UNPARSEABLE")
-            continue
-        actual = match.group(1)
-        if actual != expected_commit:
-            mismatches.append(f"{rel}={actual}")
+        if expected_line not in text:
+            mismatches.append(f"{rel}=BASELINE_MISMATCH")
     runtime_marker = (
         package_root / "vendor" / "unified_agent_runtime" / "RUNTIME_COMMIT"
     )
