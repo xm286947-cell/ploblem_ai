@@ -14,6 +14,7 @@ on:
       - "tests/test_software_impact_gate_contract.py"
       - "tests/test_storage_t123_integration.py"
       - ".github/workflows/storage-r1-fast-demo-gate.yml"
+      - "tools/build_storage_r6_complete.py"
   workflow_dispatch:
 
 permissions:
