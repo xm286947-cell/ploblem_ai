@@ -96,6 +96,9 @@ def runtime_provenance_consistency_gate(package_root: Path, expected_commit: str
         "scripts/setup_runtime.sh": (
             r'EXPECTED=["\\\']([0-9a-f]{40})["\\\']'
         ),
+        "scripts/setup_runtime.bat": (
+            r'set EXPECTED=([0-9a-f]{40})'
+        ),
         "scripts/windows_e2e.py": (
             r'EXPECTED_RUNTIME\\s*=\\s*["\\\']([0-9a-f]{40})["\\\']'
         ),
