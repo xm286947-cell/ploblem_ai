@@ -41,3 +41,14 @@ jobs:
           echo "NO_FAKE_LIFETIME=PASS"
           echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
           echo "GS01_GS05=PASS"
+
+      - name: Existing Storage no-regression gate
+        run: |
+          python -m pytest -q \
+            products/storage_rc1/tests/test_storage_product_mvp_rc1.py \
+            products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py \
+            tests/test_lifetime_engine.py \
+            tests/test_runtime_observation_contract.py \
+            tests/test_software_impact.py
+          echo "R1_REGRESSION=PASS"
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"
