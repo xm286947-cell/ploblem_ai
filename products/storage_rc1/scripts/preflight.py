@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-EXPECTED = "023dc785cb06187acd2509f2304dcc1c18f2be09"
+EXPECTED = "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
 MODEL_REF = "qwen_prod"
 PLACEHOLDER_TOKENS = {
     "__SET_YOUR_DASHSCOPE_API_KEY__",
