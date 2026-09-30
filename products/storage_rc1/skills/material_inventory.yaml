@@ -1,0 +1,697 @@
+schema_version: "storage-material-inventory/v0.1"
+source_catalog:
+  title: "External Knowledge Catalog_存储器件寿命智能产品_V0.1"
+  drive_id: "1U87rrLWmEnAXvOWsTjVwrBroLLZZztckB2iaz9ERHe8"
+  sheet: "01_CATALOG"
+  snapshot_scope: "EK-001..EK-028"
+classification:
+  source_axis:
+    A1_DEVICE_SPEC_OR_STANDARD: "Datasheet / JEDEC / NVMe / industry standard / protocol specification"
+    A2_VENDOR_ENGINEERING_GUIDE: "Vendor application / reliability / health / usage engineering guide"
+    A3_OS_AND_OPEN_SOURCE_ENGINEERING: "Linux / open-source / system interface / official tool engineering documentation"
+    A4_INDUSTRY_METHOD: "Industry endurance / workload / test methodology"
+  consumption_axis:
+    G1_DEVICE_MECHANISM_AND_SPEC: "K1/K2/K3/K4 mechanism and specification"
+    G2_SOFTWARE_WRITE_GOVERNANCE: "K5/K6 software write behavior and controls"
+    G3_LIFETIME_BUDGET_AND_MODEL: "K8 plus applicable K1/K3/K4 lifetime and endurance model"
+    G4_DIAGNOSTIC_AND_VALIDATION: "K7 plus applicable K2/K3/K4 diagnostics and validation"
+    G5_CHANGE_IMPACT_SUPPORT: "Cross-domain view for parameter delta to software/test/monitoring impact"
+object_type_mapping:
+  Fact: KnowledgeFact
+  Concept: TechnicalConcept
+  Solution: TechnicalSolution
+  Diagnostic: DiagnosticMethod
+  Requirement: SoftwareRequirementKnowledge
+materials:
+  - material_id: "EK-001"
+    title: "NOR Flash Guide / 基础机理"
+    publisher: "Micron"
+    source_type: "原厂技术指南"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K1"]
+    scenarios: ["S1", "S2", "S4"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept"]
+    knowledge_focus: "NOR 架构、Program/Erase 粒度、P/E、Retention、可靠性边界"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D1", "D2", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "核实精确文档名、版本与可引用页码"
+  - material_id: "EK-002"
+    title: "NAND Flash Guide / 基础机理"
+    publisher: "Micron"
+    source_type: "原厂技术指南"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K1", "K2"]
+    scenarios: ["S1", "S2", "S3", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "Page/Block/PEB、P/E、ECC、Bad Block、Wear、Retention"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D1", "D2", "D3", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "核实精确文档名、版本与寿命相关章节"
+  - material_id: "EK-003"
+    title: "UBI Documentation"
+    publisher: "Linux Kernel"
+    source_type: "官方开源文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "kernel.org docs（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K2"]
+    scenarios: ["S1", "S3", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution", "DiagnosticMethod"]
+    knowledge_focus: "PEB/LEB、Wear Leveling、Volume、EC header、可靠性管理"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D1", "D3", "D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "固定官方文档入口并验证版本策略"
+  - material_id: "EK-004"
+    title: "UBIFS Documentation"
+    publisher: "Linux Kernel"
+    source_type: "官方开源文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "kernel.org docs（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K2", "K5"]
+    scenarios: ["S3", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G2_SOFTWARE_WRITE_GOVERNANCE", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution", "DiagnosticMethod"]
+    knowledge_focus: "UBIFS 写入、日志/提交、与 UBI 的关系、写放大相关行为"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D3", "D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "确认与写入寿命直接相关的章节范围"
+  - material_id: "EK-005"
+    title: "NAND / MTD Driver Documentation"
+    publisher: "Linux Kernel"
+    source_type: "官方开源文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "kernel.org docs（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K2", "K7"]
+    scenarios: ["S1", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "DiagnosticMethod"]
+    knowledge_focus: "NAND 驱动、ECC、Bad Block、erase/write 统计可观测性"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D1", "D3", "D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "确定可用于诊断方法的接口/统计证据"
+  - material_id: "EK-006"
+    title: "eMMC Overview"
+    publisher: "Samsung"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3"]
+    scenarios: ["S1", "S2", "S4"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept"]
+    knowledge_focus: "eMMC 架构、Controller、NAND、寿命与健康度能力概览"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D2", "D4", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "核实资料是否仍可公开获取"
+  - material_id: "EK-007"
+    title: "eMMC Device Health"
+    publisher: "Micron"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3", "K7"]
+    scenarios: ["S1", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "DiagnosticMethod"]
+    knowledge_focus: "DEVICE_LIFE_TIME_EST_TYP_A/B、PRE_EOL_INFO、健康度解释"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D4", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "形成 Health 字段→解释→诊断对象"
+  - material_id: "EK-008"
+    title: "eMMC Usage Model"
+    publisher: "Micron"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3", "K8"]
+    scenarios: ["S4", "S5", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept", "DiagnosticMethod"]
+    knowledge_focus: "Usage Model、写入负载、寿命估算/测试条件"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D4", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "提取 workload/usage 假设与适用边界"
+  - material_id: "EK-009"
+    title: "eMMC Refresh"
+    publisher: "Micron"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3", "K7", "K8"]
+    scenarios: ["S3", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalSolution", "DiagnosticMethod"]
+    knowledge_focus: "Refresh、Data Retention、寿命阶段维护机制"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D4", "D6"]
+    target_version: "V0.1"
+    priority: "P1"
+    current_gap: "确认 Refresh 的触发条件与限制"
+  - material_id: "EK-010"
+    title: "eMMC Robustness / Reliable Operation"
+    publisher: "Micron"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3", "K5"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalSolution", "SoftwareRequirementKnowledge"]
+    knowledge_focus: "Reliable Write、Cache、BKOPS、掉电/写入鲁棒性"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D4", "D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "拆分厂家事实与软件要求推导"
+  - material_id: "EK-011"
+    title: "Wear Leveling"
+    publisher: "KIOXIA"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K2", "K8"]
+    scenarios: ["S3", "S4"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "Static/Dynamic Wear Leveling、均衡目标、适用边界"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D3", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "提取成熟方案、条件、限制"
+  - material_id: "EK-012"
+    title: "Data Retention"
+    publisher: "KIOXIA"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K1", "K8"]
+    scenarios: ["S1", "S4", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept"]
+    knowledge_focus: "Retention 与 P/E、温度、寿命阶段的关系"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D1", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "明确条件化事实表达"
+  - material_id: "EK-013"
+    title: "Lifetime Reliability"
+    publisher: "KIOXIA"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K1", "K8"]
+    scenarios: ["S1", "S4", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept"]
+    knowledge_focus: "寿命可靠性、Endurance、使用条件与 Margin"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D2", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "补齐寿命模型与边界条件"
+  - material_id: "EK-014"
+    title: "Garbage Collection"
+    publisher: "KIOXIA"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K2", "K6"]
+    scenarios: ["S3", "S4"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "GC 与写放大、空闲空间、性能/寿命权衡"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D3", "D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "映射 Solution 与 WAF 机制"
+  - material_id: "EK-015"
+    title: "SSD Endurance"
+    publisher: "SNIA"
+    source_type: "行业组织资料"
+    source_class: "A4_INDUSTRY_METHOD"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A2"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K8"]
+    scenarios: ["S1", "S2", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept", "DiagnosticMethod"]
+    knowledge_focus: "SSD Endurance、Workload、TBW/DWPD、耐久度评价"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D2", "D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "核实当前推荐的 SNIA 资料版本"
+  - material_id: "EK-016"
+    title: "SSD Endurance"
+    publisher: "Western Digital"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K8"]
+    scenarios: ["S2", "S4", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept"]
+    knowledge_focus: "TBW/DWPD、WAF、OP、寿命与 workload 的关系"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D2", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "提取可复用寿命事实与条件"
+  - material_id: "EK-017"
+    title: "SSD Workload / Endurance Usage"
+    publisher: "Western Digital"
+    source_type: "原厂技术资料"
+    source_class: "A2_VENDOR_ENGINEERING_GUIDE"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K6", "K8"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G2_SOFTWARE_WRITE_GOVERNANCE", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution", "DiagnosticMethod"]
+    knowledge_focus: "Workload 类型、随机/顺序、小写、WAF 与寿命"
+    evidence_expectation: "页码/章节/原文"
+    golden_questions: ["D2", "D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "与 Application→Host→Media 模型对齐"
+  - material_id: "EK-018"
+    title: "NVM Express Base Specification"
+    publisher: "NVM Express"
+    source_type: "行业规范"
+    source_class: "A1_DEVICE_SPEC_OR_STANDARD"
+    version: "待核采用版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K7"]
+    scenarios: ["S1", "S2", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "TechnicalConcept", "DiagnosticMethod"]
+    knowledge_focus: "SMART/Health、Percentage Used、Data Units Written、Critical Warning"
+    evidence_expectation: "章节/字段定义/原文"
+    golden_questions: ["D2", "D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "固定版本并建立字段级 Fact"
+  - material_id: "EK-019"
+    title: "NVMe CLI Documentation"
+    publisher: "nvme-cli / Linux Foundation ecosystem"
+    source_type: "官方工具文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核采用版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A2"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K7"]
+    scenarios: ["S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["DiagnosticMethod"]
+    knowledge_focus: "SMART/Health 日志读取、命令、数据获取方式"
+    evidence_expectation: "命令/字段/官方URL"
+    golden_questions: ["D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "形成可执行 Diagnostic Method"
+  - material_id: "EK-020"
+    title: "ext4 Journaling Documentation"
+    publisher: "Linux Kernel"
+    source_type: "官方开源文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "kernel.org docs（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K5"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "Journal、Commit、data mode、持久化行为与写入开销"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "补齐软件持久化行为权威证据"
+  - material_id: "EK-021"
+    title: "Linux Writeback / Dirty Page Documentation"
+    publisher: "Linux Kernel"
+    source_type: "官方开源文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "kernel.org docs（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K5", "K6"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution", "DiagnosticMethod"]
+    knowledge_focus: "Writeback、dirty ratio/bytes、flush、Host Write 形成机制"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "补齐 Application→Host 侧观测方法"
+  - material_id: "EK-022"
+    title: "Write-Ahead Logging (WAL)"
+    publisher: "SQLite"
+    source_type: "官方技术文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核当前文档版本"
+    official_url: "sqlite.org（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K5", "K6"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "WAL、Checkpoint、同步、写合并/持久化行为"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "映射高频小写控制手段与限制"
+  - material_id: "EK-023"
+    title: "littlefs Design"
+    publisher: "littlefs project"
+    source_type: "官方开源设计文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核采用版本"
+    official_url: "官方仓库（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A2"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K5", "K6"]
+    scenarios: ["S3", "S4"]
+    consumption_domains: ["G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "Copy-on-write、metadata pairs、wear-aware 设计、掉电鲁棒性"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D3", "D5"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "确认可迁移的设计模式与适用范围"
+  - material_id: "EK-024"
+    title: "Flexible Data Placement (FDP)"
+    publisher: "SNIA / NVM Express ecosystem"
+    source_type: "行业资料"
+    source_class: "A4_INDUSTRY_METHOD"
+    version: "待核精确标题/版本"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A2"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "SEED_CONFIRMED"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K6"]
+    scenarios: ["S3", "S4"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G2_SOFTWARE_WRITE_GOVERNANCE", "G3_LIFETIME_BUDGET_AND_MODEL", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "TechnicalSolution"]
+    knowledge_focus: "数据放置、GC/WAF 优化、前瞻寿命优化能力"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D5", "D6"]
+    target_version: "V0.3"
+    priority: "P1"
+    current_gap: "作为前瞻资料，不阻塞 V0.1"
+  - material_id: "EK-025"
+    title: "eMMC Standard (JESD84 family)"
+    publisher: "JEDEC"
+    source_type: "行业标准"
+    source_class: "A1_DEVICE_SPEC_OR_STANDARD"
+    version: "具体修订版待核"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "CANDIDATE_ADD"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K3", "K7"]
+    scenarios: ["S1", "S2", "S4", "S5", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "DiagnosticMethod"]
+    knowledge_focus: "EXT_CSD、Life Time A/B、PRE_EOL、BKOPS、Reliable Write 等标准定义"
+    evidence_expectation: "条款/字段定义/版本"
+    golden_questions: ["D2", "D4", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "补入正式标准作为 eMMC 权威锚点"
+  - material_id: "EK-026"
+    title: "SSD Requirements and Endurance Test Method (JESD218 family)"
+    publisher: "JEDEC"
+    source_type: "行业标准"
+    source_class: "A1_DEVICE_SPEC_OR_STANDARD"
+    version: "具体修订版待核"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "CANDIDATE_ADD"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K8"]
+    scenarios: ["S2", "S4", "S5", "S6"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "DiagnosticMethod"]
+    knowledge_focus: "SSD endurance 要求、测试方法、workload/使用条件"
+    evidence_expectation: "条款/表格/版本"
+    golden_questions: ["D2", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "核实与 SNIA/厂商资料的互补关系"
+  - material_id: "EK-027"
+    title: "SSD Endurance Workloads (JESD219 family)"
+    publisher: "JEDEC"
+    source_type: "行业标准"
+    source_class: "A1_DEVICE_SPEC_OR_STANDARD"
+    version: "具体修订版待核"
+    official_url: "待核官方URL"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "CANDIDATE_ADD"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K4", "K8"]
+    scenarios: ["S2", "S4", "S5"]
+    consumption_domains: ["G1_DEVICE_MECHANISM_AND_SPEC", "G3_LIFETIME_BUDGET_AND_MODEL", "G4_DIAGNOSTIC_AND_VALIDATION", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["KnowledgeFact", "DiagnosticMethod"]
+    knowledge_focus: "耐久度 workload 定义、测试输入与适用范围"
+    evidence_expectation: "条款/表格/版本"
+    golden_questions: ["D2", "D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "建立 workload 统一口径"
+  - material_id: "EK-028"
+    title: "fsync(2) / Persistence Semantics"
+    publisher: "Linux man-pages"
+    source_type: "官方系统接口文档"
+    source_class: "A3_OS_AND_OPEN_SOURCE_ENGINEERING"
+    version: "待核采用版本"
+    official_url: "官方 man-pages（待核具体URL）"
+    local_archive_ref: null
+    sha256: null
+    authority_level: "A1"
+    verify_status: "TITLE_VERSION_PENDING"
+    catalog_status: "CANDIDATE_ADD"
+    acquisition_status: "NOT_IMPORTED"
+    parse_status: "NOT_STARTED"
+    k_domains: ["K5"]
+    scenarios: ["S3", "S4", "S5"]
+    consumption_domains: ["G2_SOFTWARE_WRITE_GOVERNANCE", "G5_CHANGE_IMPACT_SUPPORT"]
+    target_knowledge_object_types: ["TechnicalConcept", "SoftwareRequirementKnowledge"]
+    knowledge_focus: "fsync/fdatasync 持久化语义、文件/目录同步边界"
+    evidence_expectation: "章节/原文/官方URL"
+    golden_questions: ["D5", "D6"]
+    target_version: "V0.1"
+    priority: "P0"
+    current_gap: "补齐应用持久化语义的权威证据"
