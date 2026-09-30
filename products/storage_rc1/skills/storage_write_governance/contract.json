@@ -1,0 +1,131 @@
+{
+  "contract_version": "storage-domain-skill/v0.1",
+  "skill_id": "storage-write-governance",
+  "pack_id": "PACK_WRITE_GOVERNANCE",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "device_type": {
+        "type": "string"
+      },
+      "confirmed_device_facts": {
+        "type": "array"
+      },
+      "workload_software_facts": {
+        "type": "array"
+      },
+      "user_context": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "device_type",
+      "user_context"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "skill_id": {
+        "type": "string",
+        "const": "storage-write-governance"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "ANSWERED",
+          "PARTIAL",
+          "INSUFFICIENT_KNOWLEDGE",
+          "INSUFFICIENT_DATA",
+          "INVALID_INPUT",
+          "UNSUPPORTED"
+        ]
+      },
+      "direct_answer": {
+        "type": "string"
+      },
+      "structured_result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observed_or_declared_behavior": {
+            "type": "array"
+          },
+          "potential_mechanism": {
+            "type": "array"
+          },
+          "potential_risk": {
+            "type": "array"
+          },
+          "engineering_control_options": {
+            "type": "array"
+          },
+          "conditions_and_limits": {
+            "type": "array"
+          },
+          "missing_information": {
+            "type": "array"
+          },
+          "suggested_validation": {
+            "type": "array"
+          },
+          "evidence_refs": {
+            "type": "array"
+          },
+          "confidence_basis": {
+            "type": "array"
+          },
+          "review_roles": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "observed_or_declared_behavior",
+          "potential_mechanism",
+          "potential_risk",
+          "engineering_control_options",
+          "conditions_and_limits",
+          "missing_information",
+          "suggested_validation",
+          "evidence_refs",
+          "confidence_basis",
+          "review_roles"
+        ]
+      },
+      "fact_derived_hypothesis_separation": {
+        "type": "object"
+      },
+      "knowledge_refs": {
+        "type": "array"
+      },
+      "evidence_refs": {
+        "type": "array"
+      },
+      "missing_information": {
+        "type": "array"
+      },
+      "decision_boundary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "skill_id",
+      "status",
+      "direct_answer",
+      "structured_result",
+      "fact_derived_hypothesis_separation",
+      "knowledge_refs",
+      "evidence_refs",
+      "missing_information",
+      "decision_boundary"
+    ]
+  },
+  "rules": [
+    "FORMAL_KNOWLEDGE_ONLY",
+    "NO_OPAQUE_RISK_SCORE",
+    "NO_SPECIFIC_LIFETIME_LOSS_WITHOUT_SUPPORTED_MODEL",
+    "UNKNOWN_IS_NOT_SAFE"
+  ]
+}
