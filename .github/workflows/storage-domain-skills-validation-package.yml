@@ -17,7 +17,7 @@ jobs:
     env:
       PRODUCT_SOURCE_COMMIT: 771ebba32992d0bb93446a794ad6c487635a2fb7
       RUNTIME_SNAPSHOT_COMMIT: 023dc785cb06187acd2509f2304dcc1c18f2be09
-      PYTHONPATH: \${{ github.workspace }}:\${{ github.workspace }}/products/storage_rc1
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
 
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +86,7 @@ jobs:
           export PYTHONPATH="$PWD:$PWD/vendor/unified_agent_runtime\${PYTHONPATH:+:$PYTHONPATH}"
           export STORAGE_WEB_HOST="\${STORAGE_WEB_HOST:-127.0.0.1}"
           export STORAGE_WEB_PORT="\${STORAGE_WEB_PORT:-8765}"
-          echo "Storage Skill validation: http://127.0.0.1:$STORAGE_WEB_PORT"
+          echo "Storage Skill validation: http://127.0.0.1:8765"
           echo "Readiness: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/readiness"
           echo "Real Golden: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/real-golden"
           exec python -m uvicorn storage_life.app:app --host "$STORAGE_WEB_HOST" --port "$STORAGE_WEB_PORT"
@@ -225,6 +225,11 @@ jobs:
             curl -fsS http://127.0.0.1:8765/api/health >/tmp/health.json && break
             sleep 1
           done
+          if ! curl -fsS http://127.0.0.1:8765/api/health >/tmp/health.json; then
+            echo "SERVER_START_FAILED"
+            cat /tmp/storage320.log || true
+            exit 1
+          fi
           curl -fsS http://127.0.0.1:8765/ >/tmp/home.html
           curl -fsS http://127.0.0.1:8765/api/product/skills/readiness >/tmp/readiness.json
           curl -fsS http://127.0.0.1:8765/api/product/skills/real-golden >/tmp/golden.json
