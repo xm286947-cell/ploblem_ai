@@ -1,0 +1,127 @@
+{
+  "contract_version": "storage-domain-skill/v0.1",
+  "skill_id": "storage-diagnostic-validation",
+  "pack_id": "PACK_DIAGNOSTIC_VALIDATION",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "device_type": {
+        "type": "string"
+      },
+      "diagnostic_capabilities": {
+        "type": "array"
+      },
+      "runtime_observations": {
+        "type": "array"
+      },
+      "target_question": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "device_type",
+      "target_question"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "skill_id": {
+        "type": "string",
+        "const": "storage-diagnostic-validation"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "ANSWERED",
+          "PARTIAL",
+          "INSUFFICIENT_KNOWLEDGE",
+          "INSUFFICIENT_DATA",
+          "INVALID_INPUT",
+          "UNSUPPORTED"
+        ]
+      },
+      "direct_answer": {
+        "type": "string"
+      },
+      "structured_result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "supported_metrics": {
+            "type": "array"
+          },
+          "acquisition_method": {
+            "type": "array"
+          },
+          "data_source": {
+            "type": "array"
+          },
+          "current_observation": {
+            "type": "array"
+          },
+          "interpretation_boundary": {
+            "type": "array"
+          },
+          "abnormality_signal": {
+            "type": "array"
+          },
+          "validation_method": {
+            "type": "array"
+          },
+          "missing_information": {
+            "type": "array"
+          },
+          "evidence_refs": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "supported_metrics",
+          "acquisition_method",
+          "data_source",
+          "current_observation",
+          "interpretation_boundary",
+          "abnormality_signal",
+          "validation_method",
+          "missing_information",
+          "evidence_refs"
+        ]
+      },
+      "fact_derived_hypothesis_separation": {
+        "type": "object"
+      },
+      "knowledge_refs": {
+        "type": "array"
+      },
+      "evidence_refs": {
+        "type": "array"
+      },
+      "missing_information": {
+        "type": "array"
+      },
+      "decision_boundary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "skill_id",
+      "status",
+      "direct_answer",
+      "structured_result",
+      "fact_derived_hypothesis_separation",
+      "knowledge_refs",
+      "evidence_refs",
+      "missing_information",
+      "decision_boundary"
+    ]
+  },
+  "rules": [
+    "CAPABILITY_IS_NOT_RUNTIME_VALUE",
+    "STALE_OBSERVATION_NOT_CURRENT_EVIDENCE",
+    "FORMAL_SEMANTICS_REQUIRED",
+    "FAIL_CLOSED"
+  ]
+}

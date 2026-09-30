@@ -1,0 +1,141 @@
+{
+  "contract_version": "storage-domain-skill/v0.1",
+  "skill_id": "storage-change-impact",
+  "pack_id": "PACK_CHANGE_IMPACT",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "confirmed_facts_a": {
+        "type": "array"
+      },
+      "confirmed_facts_b": {
+        "type": "array"
+      },
+      "parameter_delta": {
+        "type": "array"
+      },
+      "application_workload_context": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "confirmed_facts_a",
+      "confirmed_facts_b",
+      "parameter_delta"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "skill_id": {
+        "type": "string",
+        "const": "storage-change-impact"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "ANSWERED",
+          "PARTIAL",
+          "INSUFFICIENT_KNOWLEDGE",
+          "INSUFFICIENT_DATA",
+          "INVALID_INPUT",
+          "UNSUPPORTED"
+        ]
+      },
+      "direct_answer": {
+        "type": "string"
+      },
+      "structured_result": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parameter_changes": {
+            "type": "array"
+          },
+          "technical_meaning": {
+            "type": "array"
+          },
+          "lifetime_impact": {
+            "type": "array"
+          },
+          "software_impact": {
+            "type": "array"
+          },
+          "diagnostic_monitoring_impact": {
+            "type": "array"
+          },
+          "validation_requirements": {
+            "type": "array"
+          },
+          "evidence_refs": {
+            "type": "array"
+          },
+          "unknowns": {
+            "type": "array"
+          },
+          "review_roles": {
+            "type": "array"
+          },
+          "impact_classification": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "KNOWLEDGE_BACKED",
+                "DERIVED",
+                "AI_HYPOTHESIS",
+                "UNKNOWN"
+              ]
+            }
+          }
+        },
+        "required": [
+          "parameter_changes",
+          "technical_meaning",
+          "lifetime_impact",
+          "software_impact",
+          "diagnostic_monitoring_impact",
+          "validation_requirements",
+          "evidence_refs",
+          "unknowns",
+          "review_roles",
+          "impact_classification"
+        ]
+      },
+      "fact_derived_hypothesis_separation": {
+        "type": "object"
+      },
+      "knowledge_refs": {
+        "type": "array"
+      },
+      "evidence_refs": {
+        "type": "array"
+      },
+      "missing_information": {
+        "type": "array"
+      },
+      "decision_boundary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "skill_id",
+      "status",
+      "direct_answer",
+      "structured_result",
+      "fact_derived_hypothesis_separation",
+      "knowledge_refs",
+      "evidence_refs",
+      "missing_information",
+      "decision_boundary"
+    ]
+  },
+  "rules": [
+    "NO_AUTO_APPROVE_REJECT",
+    "UNKNOWN_IS_NOT_SAFE",
+    "CLASSIFICATION_ENUM_ONLY",
+    "FORMAL_KNOWLEDGE_ONLY"
+  ]
+}

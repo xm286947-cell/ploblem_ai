@@ -1,0 +1,24 @@
+pack_id: PACK_DIAGNOSTIC_VALIDATION
+version: "0.1"
+view_type: FORMAL_KNOWLEDGE_RELEASE_FILTER
+knowledge_release_dependency:
+  contract_version: "knowledge-query/v1"
+  current_release_version: "KP-STORAGE-RC1-VALIDATION-001"
+  binding: "products/storage_rc1/knowledge_release/current"
+included_k_domains: ["K7"]
+supporting_k_domains: ["K2", "K3", "K4"]
+allowed_object_types:
+  - KnowledgeFact
+  - TechnicalConcept
+  - DiagnosticMethod
+required_evidence:
+  formal_release_only: true
+  evidence_refs_required: true
+applicable_device_types: ["NAND", "eMMC", "SSD", "NVMe SSD"]
+material_refs: ["EK-003","EK-005","EK-007","EK-008","EK-009","EK-015","EK-017","EK-018","EK-019","EK-021","EK-025","EK-026","EK-027"]
+supported_questions:
+  - "Which health/wear metrics can be collected and from where?"
+  - "How should current observations be interpreted within released semantic boundaries?"
+unsupported_questions:
+  - "Treating capability as a current runtime value"
+  - "Using stale observations as current evidence"

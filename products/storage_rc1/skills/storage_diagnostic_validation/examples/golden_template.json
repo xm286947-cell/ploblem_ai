@@ -1,0 +1,23 @@
+{
+  "skill_id": "storage-diagnostic-validation",
+  "example_id": "GOLDEN_TEMPLATE",
+  "input": {
+    "device_type": "",
+    "diagnostic_capabilities": [],
+    "runtime_observations": [],
+    "target_question": ""
+  },
+  "expected": {
+    "status": "PARTIAL_OR_ANSWERED",
+    "must_include": [
+      "direct_answer",
+      "structured_result",
+      "evidence_refs",
+      "missing_information"
+    ],
+    "must_not_include": [
+      "opaque_risk_score",
+      "automatic_replacement_decision"
+    ]
+  }
+}
