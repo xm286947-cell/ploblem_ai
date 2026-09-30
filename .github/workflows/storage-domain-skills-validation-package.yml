@@ -58,6 +58,9 @@ jobs:
           cp -a parser "$PKG/"
           cp -a contracts "$PKG/"
           cp -a compatibility "$PKG/"
+          for d in services quality_knowledge common models schema analysis builder knowledge parsing retriever config prompts; do
+            if [ -d "$d" ]; then cp -a "$d" "$PKG/"; fi
+          done
 
           rm -rf /tmp/runtime320
           mkdir -p /tmp/runtime320
