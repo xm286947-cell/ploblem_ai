@@ -56,6 +56,8 @@ jobs:
           cp -a knowledge_production "$PKG/"
           cp -a repositories "$PKG/"
           cp -a parser "$PKG/"
+          cp -a contracts "$PKG/"
+          cp -a compatibility "$PKG/"
 
           rm -rf /tmp/runtime320
           mkdir -p /tmp/runtime320
