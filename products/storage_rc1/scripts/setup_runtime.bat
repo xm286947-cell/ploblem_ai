@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-set EXPECTED=f9ca45f82960b3ce380273cf26868bc842a72b7f
+set EXPECTED=023dc785cb06187acd2509f2304dcc1c18f2be09
 set PROJECT=%~dp0..
 set BUNDLED=%PROJECT%\vendor\unified_agent_runtime
 if not "%UNIFIED_AGENT_RUNTIME_ROOT%"=="" set CANDIDATE=%UNIFIED_AGENT_RUNTIME_ROOT%
