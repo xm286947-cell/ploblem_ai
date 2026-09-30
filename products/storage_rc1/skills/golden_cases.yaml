@@ -1,0 +1,32 @@
+schema_version: "storage-domain-skill-golden/v0.1"
+cases:
+  - id: GS01
+    skill: storage-write-governance
+    question: "Why can high-frequency small writes reduce lifetime and what controls should be considered?"
+    expected:
+      evidence_required: true
+      no_specific_lifetime_loss_without_model: true
+  - id: GS02
+    skill: storage-lifetime-budget
+    question: "Given confirmed SSD TBW + target service life + measured daily host writes, compare actual writes against the write budget."
+    expected:
+      deterministic_engine_only: true
+      target_service_budget_without_registered_formula: "PARTIAL_FAIL_CLOSED"
+  - id: GS03
+    skill: storage-diagnostic-validation
+    question: "How should eMMC DEVICE_LIFE_TIME_EST_TYP_A/B and PRE_EOL be collected and interpreted?"
+    expected:
+      formal_protocol_semantics_required: true
+  - id: GS04
+    skill: storage-diagnostic-validation
+    question: "Raw NAND: explain P/E + erase block / wear distribution relationship and identify required test observations."
+    expected:
+      evidence_required: true
+      stale_observation_rejected: true
+  - id: GS05
+    skill: storage-change-impact
+    question: "Device A vs B: Page/Erase Block/P-E/TBW/Health capability changes -> potential software/test impact."
+    expected:
+      classifications: ["KNOWLEDGE_BACKED", "DERIVED", "AI_HYPOTHESIS", "UNKNOWN"]
+      unknown_is_not_safe: true
+      automatic_approval: false
