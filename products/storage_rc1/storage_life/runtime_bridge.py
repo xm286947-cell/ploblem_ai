@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+RUNTIME_EXPECTED_COMMIT = "023dc785cb06187acd2509f2304dcc1c18f2be09"
 GENERIC_AGENT_ID = "storage.ai.json_call"
 EMMC_PARAMETER_AGENT_ID = "storage.emmc.parameter_extract"
 
