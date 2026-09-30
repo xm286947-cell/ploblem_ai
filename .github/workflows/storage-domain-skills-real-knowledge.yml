@@ -1,0 +1,63 @@
+name: Storage Domain Skills Real Knowledge Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/skills/**"
+      - "products/storage_rc1/storage_life/skill_api.py"
+      - "products/storage_rc1/storage_life/app.py"
+      - "products/storage_rc1/tests/test_storage_domain_skills_real_knowledge.py"
+      - ".github/workflows/storage-domain-skills-real-knowledge.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-domain-skills-real-knowledge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r products/storage_rc1/requirements.txt
+
+      - name: Real knowledge readiness and Golden gate
+        run: |
+          python -m pytest -q products/storage_rc1/tests/test_storage_domain_skills_real_knowledge.py
+          echo "REAL_KNOWLEDGE_PACKS=4/4_ASSESSED"
+          echo "REAL_GOLDEN_RG01_RG05=PARTIAL_WITH_EXPLICIT_REASONS"
+          echo "FORMAL_KNOWLEDGE_ONLY=PASS"
+          echo "EVIDENCE_DRILLDOWN=PASS"
+          echo "FACT_DERIVED_HYPOTHESIS_SEPARATION=PASS"
+          echo "UNKNOWN_NOT_SAFE=PASS"
+          echo "NO_FAKE_LIFETIME=PASS"
+          echo "NO_AUTO_REPLACEMENT_DECISION=PASS"
+          echo "FORMULA_GAP=YES"
+          echo "FORMULA_TASK_REQUIRED=YES"
+
+      - name: Skill foundation regression
+        run: |
+          python -m pytest -q products/storage_rc1/tests/test_storage_domain_skills_v01.py
+          echo "SKILL_GATE_REGRESSION=PASS"
+
+      - name: Existing Storage no-regression gate
+        run: |
+          python -m pytest -q \
+            products/storage_rc1/tests/test_storage_product_mvp_rc1.py \
+            products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py \
+            tests/test_lifetime_engine.py \
+            tests/test_runtime_observation_contract.py \
+            tests/test_software_impact.py
+          echo "R1_REGRESSION=PASS"
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"
