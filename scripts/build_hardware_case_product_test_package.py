@@ -483,6 +483,9 @@ def main() -> int:
             "r1_extraction_contract": "hardware-r1-extraction/v2",
             "r1_knowledge_object_contract": "hardware-case-knowledge-object/v1",
             "formal_knowledge_write": False,
+            "r1_preview_persistence": "LOCAL_SEPARATE_SQLITE",
+            "r1_preview_store": "services.hardware_case_r1_preview_store:HardwareR1PreviewStore",
+            "r1_agent_payload": "SINGLE_MARKDOWN_PLUS_MINIMAL_EVIDENCE_BLOCKS",
         },
         "test_scope": [
             "P01 Hardware Case homepage",
@@ -510,6 +513,8 @@ def main() -> int:
             "R1 extraction/v2 Engineering Context + explicit Source Conflict detection",
             "R1 Reusable Knowledge Candidate -> Case Fact Evidence traceability",
             "R1 hardware-case-knowledge-object/v1 Golden Knowledge Preview",
+            "R1 Preview persistence + refresh restore/history",
+            "R1 Agent payload compaction: one Markdown + minimal evidence blocks",
         ],
         "frozen_tree_change_types": [
             "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT",
