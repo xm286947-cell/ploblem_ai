@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from services.hardware_case_markdown_agent import (
     build_markdown_view,
+    normalize_extraction_v2,
     run_r1_agent_extraction,
     validate_agent_result,
 )
@@ -123,7 +124,7 @@ def test_markdown_view_preserves_plain_paragraphs_order_table_and_locators():
 
 
 def test_evidence_gate_passes_grounded_result():
-    validation = validate_agent_result(snapshot(), good_agent_result())
+    validation = validate_agent_result(snapshot(), normalize_extraction_v2(good_agent_result()))
     assert validation["status"] == "PASS"
     assert validation["fabricated_fact_count"] == 0
     assert {item["block_id"] for item in validation["evidence"]} == {
@@ -146,7 +147,7 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
     result["circuit_feature_links"] = [
         {"node_id": "FAKE", "confidence": 1.0, "evidence_block_ids": ["B0002"]}
     ]
-    validation = validate_agent_result(snapshot(), result)
+    validation = validate_agent_result(snapshot(), normalize_extraction_v2(result))
 
     assert validation["status"] == "FAIL"
     assert "EVIDENCE_BLOCK_NOT_FOUND:root_cause:B9999" in validation["errors"]
@@ -165,11 +166,9 @@ def test_r1_agent_runtime_input_uses_markdown_view_and_no_tree_candidates():
 
     result = run_r1_agent_extraction(snapshot(), structurer)
 
-    assert captured["input_contract"] == "hardware-case-r1-agent-input/v1"
+    assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
     assert captured["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
-    assert captured["tree_candidates"] == {
-        "circuit_feature": [],
-        "material_device": [],
-    }
+    assert "tree_candidates" not in captured
+    assert captured["valid_block_ids"] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
     assert result["status"] == "PASS"
     assert result["evidence_validation"]["fabricated_fact_count"] == 0
