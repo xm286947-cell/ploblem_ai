@@ -59,10 +59,10 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
 
     page = client.get("/p0/hardware-cases/word-import")
     assert page.status_code == 200
-    assert "HARDWARE CASE · R1 AGENT POC" in page.text
+    assert "HARDWARE CASE · R1 GOLDEN KNOWLEDGE" in page.text
     assert "Upload → Parse → Inspect" in page.text
     assert "Markdown Agent View" in page.text
-    assert "Run Agent Extraction" in page.text
+    assert "Run Agent Extraction" in page.text\n    assert "Golden Knowledge Preview" in page.text
 
     asset = client.get("/p0/static/hardware_case_word_import.js")
     assert asset.status_code == 200
@@ -153,7 +153,7 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
             hardware_case_db_path=tmp_path / "hardware.db",
             hardware_tree_upload_dir=tmp_path / "tree_uploads",
             hardware_case_source_root=tmp_path / "sources",
-            hardware_case_structurer=structurer,
+            hardware_case_r1_structurer=structurer,
             enabled_domains={"HARDWARE_CASE"},
         )
     )
@@ -179,12 +179,9 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
     )
     assert response.status_code == 200
     payload = response.json()
-    assert captured["input_contract"] == "hardware-case-r1-agent-input/v1"
+    assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
     assert captured["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
-    assert captured["tree_candidates"] == {
-        "circuit_feature": [],
-        "material_device": [],
-    }
+    assert "tree_candidates" not in captured
     assert payload["status"] == "PASS"
     assert payload["evidence_validation"]["status"] == "PASS"
-    assert payload["evidence_validation"]["fabricated_fact_count"] == 0
+    assert payload["evidence_validation"]["fabricated_fact_count"] == 0\n    assert payload["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"\n    assert payload["knowledge_object"]["review"]["object_status"] == "CANDIDATE"
