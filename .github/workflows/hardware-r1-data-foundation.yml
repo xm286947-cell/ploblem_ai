@@ -6,9 +6,14 @@ on:
       - ".github/workflows/hardware-r1-data-foundation.yml"
       - "services/hardware_case_word.py"
       - "services/hardware_source_identity.py"
+      - "services/hardware_case_markdown_agent.py"
+      - "services/hardware_case_runtime_adapter.py"
+      - "config/runtime/agents/hardware_case.structure.yaml"
+      - "prompts/runtime/hardware_case/structure_v1.md"
       - "scripts/hardware_r1_docx_snapshot.py"
       - "tests/test_hardware_r1_data_foundation.py"
       - "tests/test_hardware_r1_word_import_web.py"
+      - "tests/test_hardware_r1_markdown_agent.py"
       - "quality_knowledge/web/hardware_case_api.py"
       - "quality_knowledge/web/p0_pages.py"
       - "quality_knowledge/web/templates/hardware_case_word_import.html"
@@ -76,6 +81,8 @@ jobs:
           python -m pytest -q --noconftest
           tests/test_hardware_r1_data_foundation.py
           tests/test_hardware_r1_word_import_web.py
+          tests/test_hardware_r1_markdown_agent.py
+          tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_m3_frontend.py
 
