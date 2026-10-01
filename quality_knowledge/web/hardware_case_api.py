@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -22,6 +22,11 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
+from services.hardware_case_markdown_agent import (
+    HardwareCaseMarkdownError,
+    build_markdown_view,
+    run_r1_agent_extraction,
+)
 from services.hardware_case_word import HardwareWordParseError, parse_docx
 
 
@@ -63,6 +68,7 @@ def create_hardware_case_router(
     prefix: str = "/api/v2/hardware-cases",
     source_store: HardwareCaseSourceStore | None = None,
     intake_service: HardwareCaseIntakeService | None = None,
+    r1_structurer_factory: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -90,9 +96,39 @@ def create_hardware_case_router(
             source = Path(temporary) / filename
             source.write_bytes(payload)
             try:
-                return parse_docx(source).to_snapshot()
-            except HardwareWordParseError as error:
+                snapshot = parse_docx(source).to_snapshot()
+                snapshot["markdown_view"] = build_markdown_view(snapshot)
+                return snapshot
+            except (HardwareWordParseError, HardwareCaseMarkdownError) as error:
                 raise HTTPException(status_code=400, detail=error.code) from error
+
+    @router.post("/r1/agent-extract")
+    def r1_agent_extract(
+        payload: dict[str, Any],
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        """Run the R1 Markdown Agent POC without mutating Hardware Case data."""
+        _require_maintainer(x_hardware_case_role)
+        factory = r1_structurer_factory
+        if factory is None:
+            from services.hardware_case_runtime_adapter import build_hardware_case_structurer
+            factory = build_hardware_case_structurer
+        try:
+            structurer = factory()
+            return run_r1_agent_extraction(payload, structurer)
+        except HardwareCaseMarkdownError as error:
+            raise HTTPException(status_code=400, detail=error.code) from error
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "RUNTIME_EXECUTION_FAILED")
+            config_codes = {
+                "MODEL_LOCAL_CONFIG_REQUIRED",
+                "AGENT_CONFIG_REQUIRED",
+                "AGENT_ID_MISMATCH",
+            }
+            status = 503 if code in config_codes or "CONFIG" in code or "REQUIRED" in code else 502
+            raise HTTPException(status_code=status, detail=code) from error
 
     @router.get("")
     def search_cases(
