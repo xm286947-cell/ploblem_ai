@@ -155,7 +155,7 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
     assert validation["fabricated_fact_count"] == 1
 
 
-def test_r1_agent_runtime_input_uses_markdown_view_and_no_tree_candidates():
+def test_r1_agent_runtime_input_is_compact_and_keeps_evidence_blocks():
     captured = {}
 
     def structurer(document):
