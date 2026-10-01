@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PACKAGE_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          PACKAGE_TAG="${PACKAGE_SOURCE_COMMIT:0:12}"
+          echo "PACKAGE_SOURCE_COMMIT=$PACKAGE_SOURCE_COMMIT" >> "$GITHUB_ENV"
+          echo "PACKAGE_TAG=$PACKAGE_TAG" >> "$GITHUB_ENV"
           rm -rf dist/_storage320
           mkdir -p dist/_storage320/STORAGE_PRODUCT_MVP_RC1
           PKG=dist/_storage320/STORAGE_PRODUCT_MVP_RC1
@@ -118,7 +122,7 @@ jobs:
           cat > "$PKG/VALIDATION_README.txt" <<EOF
           Storage Domain Skills / Real Knowledge Manual Validation Candidate
 
-          PACKAGE_ID=STORAGE-DOMAIN-SKILLS-VALIDATION-771ebba32992
+          PACKAGE_ID=STORAGE-DOMAIN-SKILLS-VALIDATION-320-$PACKAGE_TAG
           PRODUCT_SOURCE_COMMIT=$PRODUCT_SOURCE_COMMIT
           RUNTIME_SNAPSHOT_COMMIT=$RUNTIME_SNAPSHOT_COMMIT
           TEST_SCOPE=#318/#320
@@ -156,7 +160,7 @@ jobs:
 
           cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
           {
-            "package_id": "STORAGE-DOMAIN-SKILLS-VALIDATION-771ebba32992",
+            "package_id": "$PACKAGE_ID",
             "package_type": "MANUAL_VALIDATION_CANDIDATE",
             "issue": 320,
             "product_source_commit": "$PRODUCT_SOURCE_COMMIT",
@@ -176,7 +180,7 @@ jobs:
               | xargs -0 sha256sum > FILE_SHA256SUMS.txt
           )
 
-          ZIP=dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_771ebba32992.zip
+          ZIP=dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_${PACKAGE_TAG}.zip
           rm -f "$ZIP" "$ZIP.sha256" "$ZIP.DELIVERY_MANIFEST.json"
           (
             cd dist/_storage320
@@ -187,7 +191,7 @@ jobs:
           printf '%s  %s\n' "$SHA" "$(basename "$ZIP")" > "$ZIP.sha256"
           cat > "$ZIP.DELIVERY_MANIFEST.json" <<EOF
           {
-            "package_id": "STORAGE-DOMAIN-SKILLS-VALIDATION-771ebba32992",
+            "package_id": "$PACKAGE_ID",
             "package": "$(basename "$ZIP")",
             "product_source_commit": "$PRODUCT_SOURCE_COMMIT",
             "runtime_snapshot_commit": "$RUNTIME_SNAPSHOT_COMMIT",
@@ -203,6 +207,7 @@ jobs:
           echo "PACKAGE=$ZIP"
           echo "SHA256=$SHA"
           echo "SIZE=$SIZE"
+          echo "SOURCE_COMMIT=$PACKAGE_SOURCE_COMMIT"
 
       - name: Fresh extract smoke
         shell: bash
@@ -210,7 +215,7 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/storage320
           mkdir -p /tmp/storage320
-          unzip -q dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_771ebba32992.zip -d /tmp/storage320
+          unzip -q "dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_${PACKAGE_TAG}.zip" -d /tmp/storage320
           PKG=/tmp/storage320/STORAGE_PRODUCT_MVP_RC1
 
           test -f "$PKG/start_skill_validation.bat"
@@ -312,8 +317,8 @@ jobs:
         with:
           name: storage-domain-skills-real-knowledge-validation
           path: |
-            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_771ebba32992.zip
-            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_771ebba32992.zip.sha256
-            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_771ebba32992.zip.DELIVERY_MANIFEST.json
+            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_${{ env.PACKAGE_TAG }}.zip
+            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_${{ env.PACKAGE_TAG }}.zip.sha256
+            dist/STORAGE_DOMAIN_SKILLS_REAL_KNOWLEDGE_VALIDATION_${{ env.PACKAGE_TAG }}.zip.DELIVERY_MANIFEST.json
           if-no-files-found: error
           retention-days: 90
