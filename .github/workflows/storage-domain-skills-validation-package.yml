@@ -287,6 +287,8 @@ jobs:
           exit 0
           EOF
           chmod +x /tmp/storage320-launcher-resolution/fake-python
+          printf '#!/bin/bash\nprintf "%s\\n" .\n' > /tmp/storage320-launcher-resolution/bin/dirname
+          chmod +x /tmp/storage320-launcher-resolution/bin/dirname
 
           # python3 has priority when it is the only available interpreter.
           cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python3
