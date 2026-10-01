@@ -16,9 +16,11 @@ on:
       - "START_HARDWARE_CASE.command"
       - "RUN_REAL_AI_VALIDATION.sh"
       - "config/runtime/agents/hardware_case.structure.yaml"
+      - "config/runtime/agents/hardware_case.r1_extract.yaml"
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
+      - "prompts/runtime/hardware_case/r1_extract_v2.md"
       - "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
@@ -107,6 +109,10 @@ jobs:
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
+          assert manifest["runtime"]["r1_preview_agent_id"] == "hardware_case.r1_extract"
+          assert manifest["runtime"]["r1_extraction_contract"] == "hardware-r1-extraction/v2"
+          assert manifest["runtime"]["r1_knowledge_object_contract"] == "hardware-case-knowledge-object/v1"
+          assert manifest["runtime"]["formal_knowledge_write"] is False
           assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
           assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is False
@@ -140,10 +146,13 @@ jobs:
           assert "quality_knowledge/web/static/hardware_tree_import.js" in paths
           assert "quality_knowledge/web/static/hardware_tree_import.css" in paths
           assert "config/runtime/agents/hardware_case.structure.yaml" in paths
+          assert "config/runtime/agents/hardware_case.r1_extract.yaml" in paths
           assert "config/runtime/model.local.hardware_case.example.yaml" in paths
           assert "prompts/runtime/hardware_case/structure_v1.md" in paths
+          assert "prompts/runtime/hardware_case/r1_extract_v2.md" in paths
           assert "services/hardware_case_runtime_adapter.py" in paths
           assert "services/hardware_case_markdown_agent.py" in paths
+          assert "services/hardware_case_r1_runtime.py" in paths
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "START_HARDWARE_CASE.sh" in paths
@@ -202,6 +211,8 @@ jobs:
           tests/test_hardware_case_evidence_source.py
           tests/test_hardware_r1_word_import_web.py
           tests/test_hardware_r1_markdown_agent.py
+          tests/test_hardware_r1_golden_knowledge.py
+          tests/test_hardware_r1_runtime_v2.py
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
