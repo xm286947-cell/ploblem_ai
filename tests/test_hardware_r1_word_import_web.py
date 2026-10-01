@@ -62,7 +62,8 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     assert "HARDWARE CASE · R1 GOLDEN KNOWLEDGE" in page.text
     assert "Upload → Parse → Inspect" in page.text
     assert "Markdown Agent View" in page.text
-    assert "Run Agent Extraction" in page.text\n    assert "Golden Knowledge Preview" in page.text
+    assert "Run Agent Extraction" in page.text
+    assert "Golden Knowledge Preview" in page.text
 
     asset = client.get("/p0/static/hardware_case_word_import.js")
     assert asset.status_code == 200
@@ -184,4 +185,6 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
     assert "tree_candidates" not in captured
     assert payload["status"] == "PASS"
     assert payload["evidence_validation"]["status"] == "PASS"
-    assert payload["evidence_validation"]["fabricated_fact_count"] == 0\n    assert payload["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"\n    assert payload["knowledge_object"]["review"]["object_status"] == "CANDIDATE"
+    assert payload["evidence_validation"]["fabricated_fact_count"] == 0
+    assert payload["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"
+    assert payload["knowledge_object"]["review"]["object_status"] == "CANDIDATE"
