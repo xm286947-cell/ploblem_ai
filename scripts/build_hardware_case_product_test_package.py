@@ -498,6 +498,7 @@ def main() -> int:
             "Synthetic package smoke",
             "R1 Spike01/02 DOCX DocumentSnapshot + filename/basic identity field validation",
             "R1 browser Word Upload -> Parse -> DocumentSnapshot/Identity inspection",
+            "R1 Markdown Agent View -> Unified Runtime Extraction -> Evidence block validation",
         ],
         "frozen_tree_change_types": [
             "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT",
@@ -509,6 +510,7 @@ def main() -> int:
             "AI_INTEGRATION_GATE_PASS",
             "20_TO_30_REAL_CASE_MVP_INTEGRATION_GATE_PASS",
             "HC_TREE_IMPORT_PRODUCT_GATE",
+            "A0152_R1_AGENT_POC",
         ],
         "domain_boundary": {
             "composition_profile": ["HARDWARE_CASE"],
