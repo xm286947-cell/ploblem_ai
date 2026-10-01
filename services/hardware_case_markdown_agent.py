@@ -592,26 +592,40 @@ def build_golden_knowledge_object(
     }
 
 
-def run_r1_agent_extraction(
+def _compact_runtime_input(
     snapshot: dict[str, Any],
-    structurer: Callable[[dict[str, Any]], dict[str, Any]],
+    markdown_view: dict[str, Any],
 ) -> dict[str, Any]:
-    markdown_view = build_markdown_view(snapshot)
+    """Build the minimal Agent payload without duplicating Markdown/block views."""
     source_blocks = _snapshot_blocks(snapshot)
-    runtime_input = {
+    evidence_blocks = [
+        {
+            "block_id": str(block["block_id"]),
+            "block_type": str(block.get("block_type") or "UNKNOWN"),
+            "text": str(block.get("text") or ""),
+            "source_locator": dict(block.get("source_locator") or {}),
+        }
+        for block in source_blocks
+    ]
+    return {
         "input_contract": R1_AGENT_INPUT_VERSION,
-        "source": dict(snapshot.get("source") or {}),
-        "identity": dict(snapshot.get("identity") or {}),
         "source_fact": {
             "source_id": (snapshot.get("source") or {}).get("source_id"),
             "business_case_id": (snapshot.get("identity") or {}).get("business_case_id"),
             "raw_title": (snapshot.get("identity") or {}).get("raw_title"),
         },
-        "markdown_view": markdown_view,
-        "markdown_text": markdown_view.get("markdown"),
-        "blocks": source_blocks,
-        "valid_block_ids": [str(block["block_id"]) for block in source_blocks],
+        "markdown": markdown_view.get("markdown") or "",
+        "evidence_blocks": evidence_blocks,
     }
+
+
+def run_r1_agent_extraction(
+    snapshot: dict[str, Any],
+    structurer: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    markdown_view = build_markdown_view(snapshot)
+    runtime_input = _compact_runtime_input(snapshot, markdown_view)
+    raw_result = structurer(runtime_input)
     raw_result = structurer(runtime_input)
     if not isinstance(raw_result, dict):
         raise HardwareCaseMarkdownError("AGENT_RESULT_OBJECT_REQUIRED")
@@ -655,6 +669,7 @@ __all__ = [
     "KNOWLEDGE_OBJECT_VERSION",
     "HardwareCaseMarkdownError",
     "build_markdown_view",
+    "_compact_runtime_input",
     "normalize_extraction_v2",
     "detect_title_content_subject_conflict",
     "validate_agent_result",
