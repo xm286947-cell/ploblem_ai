@@ -1,0 +1,30 @@
+agent_id: hardware_case.r1_extract
+version: v2
+label: Hardware R1 Golden Knowledge Extraction
+
+prompt:
+  ref: prompts/runtime/hardware_case/r1_extract_v2.md
+  version: HC-R1-GOLDEN-PROMPT-V2
+
+output_schema:
+  ref: HardwareCaseR1ExtractionV2
+  version: v2
+
+execution:
+  timeout_seconds: 180
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 8192
+
+metadata:
+  business_domain: HARDWARE_CASE
+  provider_response_shape: json_object
+  what_how_boundary: RUNTIME_EXECUTION_ONLY
+  preview_only: true
+  formal_knowledge_write: false
