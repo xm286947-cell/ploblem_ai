@@ -1,0 +1,174 @@
+"""Local persistence for Hardware R1 Golden Preview results.
+
+This store is deliberately separate from mature Hardware Case and formal
+Knowledge persistence. It exists only to make preview results reloadable after
+browser refresh and to support source_id/run_id lookup during R1 validation.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+PREVIEW_STORE_VERSION = "hardware-r1-preview-store/v1"
+
+
+class HardwareR1PreviewStore:
+    def __init__(self, db_path: str | Path):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _init_schema(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hardware_r1_preview_result (
+                    preview_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id TEXT NOT NULL,
+                    runtime_run_id TEXT,
+                    business_case_id TEXT,
+                    raw_title TEXT,
+                    created_at TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_hardware_r1_preview_source
+                ON hardware_r1_preview_result(source_id, preview_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_hardware_r1_preview_run
+                ON hardware_r1_preview_result(runtime_run_id)
+                """
+            )
+
+    @staticmethod
+    def _metadata(snapshot: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        source = snapshot.get("source") if isinstance(snapshot.get("source"), dict) else {}
+        identity = snapshot.get("identity") if isinstance(snapshot.get("identity"), dict) else {}
+        runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
+        source_id = str(source.get("source_id") or identity.get("source_id") or "").strip()
+        if not source_id:
+            raise ValueError("R1_PREVIEW_SOURCE_ID_REQUIRED")
+        return {
+            "source_id": source_id,
+            "runtime_run_id": str(runtime.get("run_id") or "").strip() or None,
+            "business_case_id": str(identity.get("business_case_id") or "").strip() or None,
+            "raw_title": str(identity.get("raw_title") or "").strip() or None,
+        }
+
+    def save(self, snapshot: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        meta = self._metadata(snapshot, result)
+        created_at = datetime.now(timezone.utc).isoformat()
+        snapshot_json = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+        result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO hardware_r1_preview_result(
+                    source_id, runtime_run_id, business_case_id, raw_title,
+                    created_at, snapshot_json, result_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    meta["source_id"],
+                    meta["runtime_run_id"],
+                    meta["business_case_id"],
+                    meta["raw_title"],
+                    created_at,
+                    snapshot_json,
+                    result_json,
+                ),
+            )
+            preview_id = int(cursor.lastrowid)
+        return {
+            "preview_id": preview_id,
+            "store_version": PREVIEW_STORE_VERSION,
+            "created_at": created_at,
+            **meta,
+        }
+
+    @staticmethod
+    def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {
+            "preview_id": int(row["preview_id"]),
+            "store_version": PREVIEW_STORE_VERSION,
+            "source_id": row["source_id"],
+            "runtime_run_id": row["runtime_run_id"],
+            "business_case_id": row["business_case_id"],
+            "raw_title": row["raw_title"],
+            "created_at": row["created_at"],
+            "snapshot": json.loads(row["snapshot_json"]),
+            "result": json.loads(row["result_json"]),
+        }
+
+    def latest(self, *, source_id: str | None = None) -> dict[str, Any] | None:
+        query = """
+            SELECT * FROM hardware_r1_preview_result
+        """
+        params: tuple[Any, ...] = ()
+        if source_id:
+            query += " WHERE source_id = ?"
+            params = (str(source_id),)
+        query += " ORDER BY preview_id DESC LIMIT 1"
+        with self._connect() as connection:
+            return self._row(connection.execute(query, params).fetchone())
+
+    def by_run_id(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            return self._row(
+                connection.execute(
+                    """
+                    SELECT * FROM hardware_r1_preview_result
+                    WHERE runtime_run_id = ?
+                    ORDER BY preview_id DESC LIMIT 1
+                    """,
+                    (str(run_id),),
+                ).fetchone()
+            )
+
+    def list(self, *, source_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        query = """
+            SELECT preview_id, source_id, runtime_run_id, business_case_id,
+                   raw_title, created_at
+            FROM hardware_r1_preview_result
+        """
+        params: list[Any] = []
+        if source_id:
+            query += " WHERE source_id = ?"
+            params.append(str(source_id))
+        query += " ORDER BY preview_id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as connection:
+            return [
+                {
+                    "preview_id": int(row["preview_id"]),
+                    "store_version": PREVIEW_STORE_VERSION,
+                    "source_id": row["source_id"],
+                    "runtime_run_id": row["runtime_run_id"],
+                    "business_case_id": row["business_case_id"],
+                    "raw_title": row["raw_title"],
+                    "created_at": row["created_at"],
+                }
+                for row in connection.execute(query, tuple(params)).fetchall()
+            ]
+
+
+__all__ = ["PREVIEW_STORE_VERSION", "HardwareR1PreviewStore"]
