@@ -626,7 +626,6 @@ def run_r1_agent_extraction(
     markdown_view = build_markdown_view(snapshot)
     runtime_input = _compact_runtime_input(snapshot, markdown_view)
     raw_result = structurer(runtime_input)
-    raw_result = structurer(runtime_input)
     if not isinstance(raw_result, dict):
         raise HardwareCaseMarkdownError("AGENT_RESULT_OBJECT_REQUIRED")
     runtime_meta = dict(raw_result.get("__runtime_meta__") or {})
