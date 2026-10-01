@@ -408,6 +408,7 @@ def create_p0_app(
                     hardware_case_service,
                     source_store=hardware_case_source_store,
                     intake_service=hardware_case_intake_service,
+                    r1_structurer_factory=intake_structurer,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
