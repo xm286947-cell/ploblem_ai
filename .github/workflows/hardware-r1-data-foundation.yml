@@ -8,12 +8,17 @@ on:
       - "services/hardware_source_identity.py"
       - "services/hardware_case_markdown_agent.py"
       - "services/hardware_case_runtime_adapter.py"
+      - "services/hardware_case_r1_runtime.py"
       - "config/runtime/agents/hardware_case.structure.yaml"
+      - "config/runtime/agents/hardware_case.r1_extract.yaml"
       - "prompts/runtime/hardware_case/structure_v1.md"
+      - "prompts/runtime/hardware_case/r1_extract_v2.md"
       - "scripts/hardware_r1_docx_snapshot.py"
       - "tests/test_hardware_r1_data_foundation.py"
       - "tests/test_hardware_r1_word_import_web.py"
       - "tests/test_hardware_r1_markdown_agent.py"
+      - "tests/test_hardware_r1_golden_knowledge.py"
+      - "tests/test_hardware_r1_runtime_v2.py"
       - "quality_knowledge/web/hardware_case_api.py"
       - "quality_knowledge/web/p0_pages.py"
       - "quality_knowledge/web/templates/hardware_case_word_import.html"
@@ -82,6 +87,8 @@ jobs:
           tests/test_hardware_r1_data_foundation.py
           tests/test_hardware_r1_word_import_web.py
           tests/test_hardware_r1_markdown_agent.py
+          tests/test_hardware_r1_golden_knowledge.py
+          tests/test_hardware_r1_runtime_v2.py
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_m3_frontend.py
