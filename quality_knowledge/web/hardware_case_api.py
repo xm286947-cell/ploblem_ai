@@ -164,6 +164,21 @@ def create_hardware_case_router(
             raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
         return item
 
+    @router.get("/r1/previews/{preview_id}")
+    def r1_preview_by_id(
+        preview_id: int,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.by_id(preview_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
+
     @router.get("/r1/previews/by-run/{run_id}")
     def r1_preview_by_run(
         run_id: str,
