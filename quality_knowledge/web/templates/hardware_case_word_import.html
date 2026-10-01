@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-golden-v2">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-preview-p2">{% endblock %}
 {% block breadcrumb %}案例 Word 导入{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
@@ -22,6 +22,19 @@
       <button class="hc-button primary" type="submit">Upload / Parse</button>
     </form>
     <p role="status" data-word-message>请选择一份 DOCX。</p>
+  </section>
+
+
+  <section class="hc-card">
+    <div class="hc-card-head">
+      <div>
+        <h2>最近 Golden Preview</h2>
+        <p>Preview 结果保存在本地独立存储中；刷新页面后可恢复，不写入 Formal Knowledge。</p>
+      </div>
+      <button class="hc-button" type="button" data-refresh-previews>刷新结果</button>
+    </div>
+    <p role="status" data-preview-message>正在检查已有 Preview…</p>
+    <div data-preview-history></div>
   </section>
 
   <section class="hc-card" data-word-result hidden>
@@ -81,4 +94,4 @@
 
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-agent-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-preview-p2"></script>{% endblock %}
