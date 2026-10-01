@@ -59,13 +59,15 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
 
     page = client.get("/p0/hardware-cases/word-import")
     assert page.status_code == 200
-    assert "HARDWARE CASE · R1 FIELD VALIDATION" in page.text
+    assert "HARDWARE CASE · R1 AGENT POC" in page.text
     assert "Upload → Parse → Inspect" in page.text
-    assert "不调用 Agent" in page.text
+    assert "Markdown Agent View" in page.text
+    assert "Run Agent Extraction" in page.text
 
     asset = client.get("/p0/static/hardware_case_word_import.js")
     assert asset.status_code == 200
     assert "/r1/word-snapshot" in asset.text
+    assert "/r1/agent-extract" in asset.text
 
 
 def test_docx_upload_renders_frozen_snapshot_contract(tmp_path: Path):
@@ -96,6 +98,9 @@ def test_docx_upload_renders_frozen_snapshot_contract(tmp_path: Path):
     assert payload["structure"]["tables"][0]["table_rows"] == [["器件", "结果"], ["Flash", "Fail"]]
     assert payload["structure"]["images"][0]["image_ref"] == "media/image1.png"
     assert payload["structure"]["images"][0]["source_locator"]["image"] == 1
+    assert payload["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
+    assert "HC_BLOCK" in payload["markdown_view"]["markdown"]
+    assert "| 器件 | 结果 |" in payload["markdown_view"]["markdown"]
 
 
 def test_abnormal_filename_is_fail_safe_and_non_docx_is_rejected(tmp_path: Path):
@@ -121,3 +126,65 @@ def test_abnormal_filename_is_fail_safe_and_non_docx_is_rejected(tmp_path: Path)
     )
     assert rejected.status_code == 400
     assert rejected.json()["detail"] == "DOCX_REQUIRED"
+
+
+def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: Path):
+    captured = {}
+
+    def structurer(document):
+        captured.update(document)
+        blocks = {item.get("text"): item["block_id"] for item in document["blocks"] if item.get("text")}
+        return {
+            "title": "Flash启动异常",
+            "product_context": {},
+            "facts": {
+                "symptom": {
+                    "value": "设备启动异常",
+                    "evidence_block_ids": [blocks["设备启动异常"]],
+                }
+            },
+            "circuit_feature_links": [],
+            "material_links": [],
+        }
+
+    client = TestClient(
+        create_p0_app(
+            tmp_path / "quality.db",
+            hardware_case_db_path=tmp_path / "hardware.db",
+            hardware_tree_upload_dir=tmp_path / "tree_uploads",
+            hardware_case_source_root=tmp_path / "sources",
+            hardware_case_structurer=structurer,
+            enabled_domains={"HARDWARE_CASE"},
+        )
+    )
+    source = tmp_path / "A12345-Flash启动异常.docx"
+    raw = _docx(source)
+    parsed = client.post(
+        "/api/v2/hardware-cases/r1/word-snapshot",
+        files={"file": (source.name, raw, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        headers=MAINTAINER,
+    )
+    assert parsed.status_code == 200
+
+    blocked = client.post(
+        "/api/v2/hardware-cases/r1/agent-extract",
+        json=parsed.json(),
+    )
+    assert blocked.status_code == 403
+
+    response = client.post(
+        "/api/v2/hardware-cases/r1/agent-extract",
+        json=parsed.json(),
+        headers=MAINTAINER,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured["input_contract"] == "hardware-case-r1-agent-input/v1"
+    assert captured["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
+    assert captured["tree_candidates"] == {
+        "circuit_feature": [],
+        "material_device": [],
+    }
+    assert payload["status"] == "PASS"
+    assert payload["evidence_validation"]["status"] == "PASS"
+    assert payload["evidence_validation"]["fabricated_fact_count"] == 0
