@@ -165,8 +165,13 @@ def test_r1_agent_runtime_input_is_compact_and_keeps_evidence_blocks():
     result = run_r1_agent_extraction(snapshot(), structurer)
 
     assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
-    assert captured["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
+    assert "markdown_view" not in captured
+    assert "markdown_text" not in captured
+    assert "blocks" not in captured
+    assert "valid_block_ids" not in captured
+    assert "HC_BLOCK B0001" in captured["markdown"]
     assert "tree_candidates" not in captured
-    assert captured["valid_block_ids"] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
+    assert [item["block_id"] for item in captured["evidence_blocks"]] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
+    assert set(captured["evidence_blocks"][0]) == {"block_id", "block_type", "text", "source_locator"}
     assert result["status"] == "PASS"
     assert result["evidence_validation"]["fabricated_fact_count"] == 0
