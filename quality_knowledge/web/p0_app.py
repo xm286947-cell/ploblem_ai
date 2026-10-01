@@ -73,6 +73,7 @@ def create_p0_app(
     hardware_tree_upload_dir: str | Path | None = None,
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
+    hardware_case_r1_structurer: Any | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -374,6 +375,12 @@ def create_p0_app(
                 from services.hardware_case_runtime_adapter import build_hardware_case_structurer
                 return build_hardware_case_structurer()
 
+            def r1_structurer() -> Any:
+                if hardware_case_r1_structurer is not None:
+                    return hardware_case_r1_structurer
+                from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer
+                return build_hardware_case_r1_structurer()
+
             hardware_case_intake_service = HardwareCaseIntakeService(
                 hardware_db,
                 hardware_case_source_store,
@@ -408,7 +415,7 @@ def create_p0_app(
                     hardware_case_service,
                     source_store=hardware_case_source_store,
                     intake_service=hardware_case_intake_service,
-                    r1_structurer_factory=intake_structurer,
+                    r1_structurer_factory=r1_structurer,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
