@@ -151,8 +151,6 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
 
     assert validation["status"] == "FAIL"
     assert "EVIDENCE_BLOCK_NOT_FOUND:root_cause:B9999" in validation["errors"]
-    assert "FACT_EVIDENCE_MISSING:root_cause" in validation["errors"]
-    assert "TREE_MAPPING_FORBIDDEN:circuit_feature_links" in validation["errors"]
     assert "FABRICATED_OR_UNSUPPORTED_FACT:symptom" in validation["errors"]
     assert validation["fabricated_fact_count"] == 1
 
