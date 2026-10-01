@@ -27,6 +27,7 @@ from services.hardware_case_markdown_agent import (
     build_markdown_view,
     run_r1_agent_extraction,
 )
+from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_word import HardwareWordParseError, parse_docx
 
 
@@ -69,6 +70,7 @@ def create_hardware_case_router(
     source_store: HardwareCaseSourceStore | None = None,
     intake_service: HardwareCaseIntakeService | None = None,
     r1_structurer_factory: Callable[[], Any] | None = None,
+    r1_preview_store: HardwareR1PreviewStore | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -117,7 +119,10 @@ def create_hardware_case_router(
             factory = build_hardware_case_structurer
         try:
             structurer = factory()
-            return run_r1_agent_extraction(payload, structurer)
+            result = run_r1_agent_extraction(payload, structurer)
+            if r1_preview_store is not None:
+                result["preview"] = r1_preview_store.save(payload, result)
+            return result
         except HardwareCaseMarkdownError as error:
             raise HTTPException(status_code=400, detail=error.code) from error
         except Exception as error:
@@ -129,6 +134,50 @@ def create_hardware_case_router(
             }
             status = 503 if code in config_codes or "CONFIG" in code or "REQUIRED" in code else 502
             raise HTTPException(status_code=status, detail=code) from error
+
+    @router.get("/r1/previews")
+    def r1_list_previews(
+        source_id: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=100),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        items = r1_preview_store.list(source_id=source_id, limit=limit)
+        return {"items": items, "total": len(items)}
+
+    @router.get("/r1/previews/latest")
+    def r1_latest_preview(
+        source_id: str | None = Query(default=None),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.latest(source_id=source_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
+
+    @router.get("/r1/previews/by-run/{run_id}")
+    def r1_preview_by_run(
+        run_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.by_run_id(run_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
 
     @router.get("")
     def search_cases(
