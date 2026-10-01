@@ -2,21 +2,21 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-word-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-agent-v1">{% endblock %}
 {% block breadcrumb %}案例 Word 导入{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page" data-hc-word-import data-api="{{ hardware_api_prefix }}">
   <section class="hc-hero">
     <div>
-      <span class="hc-kicker">HARDWARE CASE · R1 FIELD VALIDATION</span>
+      <span class="hc-kicker">HARDWARE CASE · R1 AGENT POC</span>
       <h1>案例 Word 导入</h1>
-      <p>上传 1 份 DOCX，直接执行 SPIKE01 DocumentSnapshot + SPIKE02 Identity，并在浏览器检查解析字段。本入口不调用 Agent、不要求基础树、不做挂接或发布。</p>
+      <p>上传 DOCX 先执行确定性 DocumentSnapshot + Identity，再生成 Markdown Agent View。Agent 仅在手动点击后通过 Unified Runtime 执行；本入口不做 Tree Mapping、Knowledge Lookup、Publish 或 OCR/Vision。</p>
     </div>
   </section>
 
   <section class="hc-card">
-    <div class="hc-card-head"><div><h2>Upload → Parse → Inspect</h2><p>支持逐份切换约 6 份真实 Word。异常文件名必须 Fail-Safe，不伪造 business_case_id。</p></div></div>
+    <div class="hc-card-head"><div><h2>Upload → Parse → Inspect</h2><p>真实 Word 不要求标准 Heading。Parser 负责内容保真、Block 顺序与 Source Locator。</p></div></div>
     <form data-word-upload>
       <input type="file" accept=".docx" required data-word-file aria-label="选择 DOCX">
       <button class="hc-button primary" type="submit">Upload / Parse</button>
@@ -37,13 +37,33 @@
   </section>
 
   <section class="hc-card" data-word-structure hidden>
-    <div class="hc-card-head"><div><h2>DocumentSnapshot</h2><p>每条结构均保留 Source Locator，便于与原 Word 对照。</p></div></div>
+    <div class="hc-card-head"><div><h2>DocumentSnapshot</h2><p>结构块保留 Source Locator；Heading=0 本身不代表失败。</p></div></div>
     <h3>Heading / Section</h3><div data-headings></div>
     <h3>Paragraph</h3><div data-paragraphs></div>
     <h3>Table 行列</h3><div data-tables></div>
     <h3>Image Locator</h3><div data-images></div>
     <details><summary>完整 Snapshot JSON</summary><pre data-raw-snapshot></pre></details>
   </section>
+
+  <section class="hc-card" data-markdown-view hidden>
+    <div class="hc-card-head"><div><h2>Markdown Agent View</h2><p>hardware-markdown-view/v1；Paragraph 原样保留、Table 转 Markdown、每个 Block 带 Source Locator Marker。</p></div></div>
+    <pre data-markdown-preview></pre>
+    <button class="hc-button primary" type="button" data-run-agent>Run Agent Extraction</button>
+    <p role="status" data-agent-message>尚未执行 Agent。</p>
+  </section>
+
+  <section class="hc-card" data-agent-result hidden>
+    <div class="hc-card-head"><div><h2>Agent Structured Result</h2><p>只做候选抽取与证据校验，不落业务表、不自动发布。</p></div></div>
+    <div class="hc-case-meta">
+      <span>Agent Status: <strong data-agent-status>—</strong></span>
+      <span>Evidence Gate: <strong data-evidence-status>—</strong></span>
+      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span>
+    </div>
+    <h3>Structured Facts</h3><div data-agent-facts></div>
+    <h3>Evidence Blocks</h3><div data-agent-evidence></div>
+    <p><strong>Validation Errors</strong>：<span data-agent-errors>—</span></p>
+    <details><summary>完整 Agent Result JSON</summary><pre data-raw-agent-result></pre></details>
+  </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-word-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-agent-v1"></script>{% endblock %}
