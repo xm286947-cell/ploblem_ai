@@ -143,6 +143,7 @@ jobs:
           assert "config/runtime/model.local.hardware_case.example.yaml" in paths
           assert "prompts/runtime/hardware_case/structure_v1.md" in paths
           assert "services/hardware_case_runtime_adapter.py" in paths
+          assert "services/hardware_case_markdown_agent.py" in paths
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "START_HARDWARE_CASE.sh" in paths
@@ -200,6 +201,7 @@ jobs:
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_evidence_source.py
           tests/test_hardware_r1_word_import_web.py
+          tests/test_hardware_r1_markdown_agent.py
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
