@@ -28,6 +28,7 @@ on:
       - "quality_knowledge/web/templates/_hardware_case_nav.html"
       - "quality_knowledge/web/static/hardware_case_word_import.js"
       - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/build_hardware_r1_preview_patch.py"
   workflow_dispatch:
 
 jobs:
@@ -95,6 +96,50 @@ jobs:
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_m3_frontend.py
+
+
+  build-preview-patch:
+    name: build-r1-preview-persistence-perf-patch
+    needs: [word-import-web-closure]
+    runs-on: ubuntu-latest
+    env:
+      HARDWARE_RELEASE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build preview persistence/performance patch
+        run: python scripts/build_hardware_r1_preview_patch.py
+      - name: Verify patch manifest
+        run: |
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          patches=list(Path("dist").glob("HARDWARE_R1_PREVIEW_PERSISTENCE_PERF_PATCH_*.zip"))
+          assert len(patches)==1, patches
+          with zipfile.ZipFile(patches[0]) as z:
+              names=set(z.namelist())
+              assert "PATCH_MANIFEST.json" in names
+              assert "PATCH_README.txt" in names
+              assert "services/hardware_case_r1_preview_store.py" in names
+              assert "services/hardware_case_markdown_agent.py" in names
+              assert "quality_knowledge/web/hardware_case_api.py" in names
+              manifest=json.loads(z.read("PATCH_MANIFEST.json"))
+              assert manifest["base_source_commit"]=="9203beda90135882181819312a72c3a6c7f092dd"
+              assert manifest["formal_knowledge_write"] is False
+              assert "R1_PREVIEW_RESULT_PERSISTENCE" in manifest["changes"]
+              assert "R1_AGENT_PAYLOAD_COMPACTION" in manifest["changes"]
+          print("PATCH_MANIFEST=PASS")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_PREVIEW_PERSISTENCE_PERF_PATCH
+          path: |
+            dist/HARDWARE_R1_PREVIEW_PERSISTENCE_PERF_PATCH_*.zip
+            dist/HARDWARE_R1_PREVIEW_PERSISTENCE_PERF_PATCH_*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
 
 
   build-validation-package:
