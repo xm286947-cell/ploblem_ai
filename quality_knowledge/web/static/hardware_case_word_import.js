@@ -11,7 +11,7 @@
     currentSnapshot=snapshot;
     const identity=snapshot.identity||{}, source=snapshot.source||{}, structure=snapshot.structure||{}, counts=snapshot.counts||{};
     $('[data-word-result]').hidden=false;$('[data-word-structure]').hidden=false;$('[data-markdown-view]').hidden=false;
-    $('[data-agent-result]').hidden=true;
+    $('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
     $('[data-word-file-name]').textContent=source.file_name||'—';
     $('[data-business-case-id]').textContent=identity.business_case_id||'未识别（Fail-Safe）';
     $('[data-raw-title]').textContent=identity.raw_title||'—';
@@ -34,10 +34,31 @@
     $('[data-agent-status]').textContent=payload.status||'—';
     $('[data-evidence-status]').textContent=validation.status||'—';
     $('[data-fabricated-count]').textContent=String(validation.fabricated_fact_count??'—');
+    $('[data-fabricated-block-count]').textContent=String(validation.fabricated_block_id_count??'—');
     $('[data-agent-errors]').textContent=(validation.errors||[]).length?(validation.errors||[]).join('；'):'无';
     $('[data-agent-facts]').innerHTML=rows(Object.entries(facts),([name,item])=>'<article class="hc-case-item"><div><h3>'+esc(name)+'</h3><p>'+esc(JSON.stringify((item||{}).value??null))+'</p><p><code>Evidence '+esc(((item||{}).evidence_block_ids||[]).join(', ')||'—')+'</code></p></div></article>');
     $('[data-agent-evidence]').innerHTML=rows(validation.evidence,x=>'<article class="hc-case-item"><div><h3>'+esc(x.block_id||'—')+' · '+esc(x.block_type||'—')+'</h3><p>'+esc(x.text||x.image_ref||'—')+'</p><p><code>Source Locator '+locator(x.source_locator)+'</code></p></div></article>');
     $('[data-raw-agent-result]').textContent=JSON.stringify(payload,null,2);
+    renderGolden(payload.knowledge_object||{});
+  }
+  function candidateCard(name,item){
+    item=item||{};
+    return '<article class="hc-case-item"><div><h3>'+esc(name)+'</h3><p>'+esc(JSON.stringify(item.value??null))+'</p><p>Status: '+esc(item.extraction_status||'—')+' · Review: '+esc(item.review_status||'—')+'</p><p><code>Evidence '+esc((item.evidence_block_ids||[]).join(', ')||'—')+'</code></p></div></article>';
+  }
+  function renderGolden(ko){
+    $('[data-golden-knowledge]').hidden=false;
+    const review=ko.review||{}, prov=ko.provenance||{}, ctx=ko.engineering_context||{}, conflicts=ko.conflicts||[], reusable=ko.reusable_knowledge||{};
+    $('[data-golden-status]').textContent=review.object_status||'—';
+    $('[data-extraction-contract]').textContent=prov.extraction_contract_version||'—';
+    $('[data-runtime-run]').textContent=prov.runtime_run_id||'—';
+    $('[data-golden-context]').innerHTML=rows(Object.entries(ctx).filter(([k])=>k!=='key_parameters'),([name,item])=>candidateCard(name,item))+
+      rows(ctx.key_parameters||[],item=>candidateCard('key_parameter: '+(item.name||'—'),item));
+    $('[data-golden-conflicts]').innerHTML=rows(conflicts,item=>'<article class="hc-case-item"><div><h3>'+esc(item.type||'—')+'</h3><p>'+esc(JSON.stringify(item.source_values||[]))+'</p><p>Status: '+esc(item.status||'—')+' / '+esc(item.resolution_status||'—')+'</p><p><code>Evidence '+esc((item.evidence_block_ids||[]).join(', ')||'—')+'</code></p></div></article>');
+    const layers=[['Observed Problem',ko.observed_problem||{}],['Engineering Analysis',ko.engineering_analysis||{}],['Engineering Resolution',ko.engineering_resolution||{}]];
+    $('[data-golden-case-layers]').innerHTML=layers.map(([title,obj])=>'<h4>'+esc(title)+'</h4>'+rows(Object.entries(obj),([name,item])=>candidateCard(name,item))).join('');
+    $('[data-golden-reusable]').innerHTML=rows(Object.entries(reusable),([name,item])=>candidateCard(name,item).replace('</div></article>','<p>Derived: '+esc((item.derived_from_fields||[]).join(', ')||'—')+'</p></div></article>'));
+    $('[data-golden-evidence]').innerHTML=rows(ko.evidence||[],x=>'<article class="hc-case-item"><div><h3>'+esc(x.block_id||'—')+' · '+esc(x.block_type||'—')+'</h3><p>'+esc(x.text||x.image_ref||'—')+'</p><p><code>Source Locator '+locator(x.source_locator)+'</code></p></div></article>');
+    $('[data-raw-golden]').textContent=JSON.stringify(ko,null,2);
   }
   $('[data-word-upload]').addEventListener('submit',async event=>{
     event.preventDefault();
@@ -51,7 +72,7 @@
       if(!response.ok)throw new Error(String(body.detail||'WORD_PARSE_FAILED'));
       render(body);$('[data-word-message]').textContent='PASS：Upload → Parse → Markdown View 已完成。';
     }catch(error){
-      $('[data-word-result]').hidden=true;$('[data-word-structure]').hidden=true;$('[data-markdown-view]').hidden=true;$('[data-agent-result]').hidden=true;
+      $('[data-word-result]').hidden=true;$('[data-word-structure]').hidden=true;$('[data-markdown-view]').hidden=true;$('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
       $('[data-word-message]').textContent='解析失败：'+error.message;
     }
   });
@@ -65,7 +86,7 @@
       renderAgent(body);
       $('[data-agent-message]').textContent=body.status==='PASS'?'PASS：Agent Extraction + Evidence Gate 已通过。':'NEEDS_REVIEW：请检查 Evidence Gate。';
     }catch(error){
-      $('[data-agent-result]').hidden=true;
+      $('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
       $('[data-agent-message]').textContent='Agent 未执行：'+error.message+'。请检查本地 Runtime / Model 配置。';
     }
   });
