@@ -115,8 +115,8 @@ def create_hardware_case_router(
         _require_maintainer(x_hardware_case_role)
         factory = r1_structurer_factory
         if factory is None:
-            from services.hardware_case_runtime_adapter import build_hardware_case_structurer
-            factory = build_hardware_case_structurer
+            from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer
+            factory = build_hardware_case_r1_structurer
         try:
             structurer = factory()
             result = run_r1_agent_extraction(payload, structurer)
