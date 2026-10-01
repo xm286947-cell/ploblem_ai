@@ -60,6 +60,35 @@
     $('[data-golden-evidence]').innerHTML=rows(ko.evidence||[],x=>'<article class="hc-case-item"><div><h3>'+esc(x.block_id||'—')+' · '+esc(x.block_type||'—')+'</h3><p>'+esc(x.text||x.image_ref||'—')+'</p><p><code>Source Locator '+locator(x.source_locator)+'</code></p></div></article>');
     $('[data-raw-golden]').textContent=JSON.stringify(ko,null,2);
   }
+  async function loadPreview(previewId){
+    $('[data-preview-message]').textContent='加载 Preview #'+previewId+'…';
+    try{
+      const response=await fetch(api+'/r1/previews/'+encodeURIComponent(previewId),{headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
+      let body={};try{body=await response.json()}catch(_){}
+      if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_LOAD_FAILED'));
+      currentSnapshot=body.snapshot||null;
+      if(currentSnapshot)render(currentSnapshot);
+      renderAgent(body.result||{});
+      $('[data-preview-message]').textContent='已恢复 Preview #'+previewId+' · '+(body.raw_title||'—');
+    }catch(error){
+      $('[data-preview-message]').textContent='Preview 加载失败：'+error.message;
+    }
+  }
+  async function refreshPreviewHistory({autoRestore=false}={}){
+    try{
+      const response=await fetch(api+'/r1/previews?limit=10',{headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
+      let body={};try{body=await response.json()}catch(_){}
+      if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_LIST_FAILED'));
+      const items=body.items||[];
+      $('[data-preview-history]').innerHTML=rows(items,item=>'<article class="hc-case-item"><div><h3>'+esc(item.business_case_id||'未识别')+' · '+esc(item.raw_title||'—')+'</h3><p>Preview #'+esc(item.preview_id)+' · Run '+esc(item.runtime_run_id||'—')+' · '+esc(item.created_at||'—')+'</p><p><code>'+esc(item.source_id||'—')+'</code></p><button class="hc-button" type="button" data-preview-id="'+esc(item.preview_id)+'">打开结果</button></div></article>');
+      $('[data-preview-message]').textContent=items.length?'已有 '+items.length+' 条最近 Preview；刷新页面不会丢失。':'暂无已保存 Preview。';
+      root.querySelectorAll('[data-preview-id]').forEach(button=>button.addEventListener('click',()=>loadPreview(button.dataset.previewId)));
+      if(autoRestore&&items.length)await loadPreview(items[0].preview_id);
+    }catch(error){
+      $('[data-preview-history]').innerHTML=empty;
+      $('[data-preview-message]').textContent='Preview 历史不可用：'+error.message;
+    }
+  }
   $('[data-word-upload]').addEventListener('submit',async event=>{
     event.preventDefault();
     const file=$('[data-word-file]').files&&$('[data-word-file]').files[0];
@@ -85,9 +114,12 @@
       if(!response.ok)throw new Error(String(body.detail||'RUNTIME_EXECUTION_FAILED'));
       renderAgent(body);
       $('[data-agent-message]').textContent=body.status==='PASS'?'PASS：Agent Extraction + Evidence Gate 已通过。':'NEEDS_REVIEW：请检查 Evidence Gate。';
+      await refreshPreviewHistory();
     }catch(error){
       $('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
       $('[data-agent-message]').textContent='Agent 未执行：'+error.message+'。请检查本地 Runtime / Model 配置。';
     }
   });
+  $('[data-refresh-previews]').addEventListener('click',()=>refreshPreviewHistory());
+  refreshPreviewHistory({autoRestore:true});
 })();
