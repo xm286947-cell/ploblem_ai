@@ -50,6 +50,7 @@ jobs:
           set -euo pipefail
           PACKAGE_SOURCE_COMMIT="$(git rev-parse HEAD)"
           PACKAGE_TAG="${PACKAGE_SOURCE_COMMIT:0:12}"
+          PACKAGE_ID="STORAGE-DOMAIN-SKILLS-VALIDATION-320-$PACKAGE_TAG"
           echo "PACKAGE_SOURCE_COMMIT=$PACKAGE_SOURCE_COMMIT" >> "$GITHUB_ENV"
           echo "PACKAGE_TAG=$PACKAGE_TAG" >> "$GITHUB_ENV"
           rm -rf dist/_storage320
@@ -122,7 +123,7 @@ jobs:
           cat > "$PKG/VALIDATION_README.txt" <<EOF
           Storage Domain Skills / Real Knowledge Manual Validation Candidate
 
-          PACKAGE_ID=STORAGE-DOMAIN-SKILLS-VALIDATION-320-$PACKAGE_TAG
+          PACKAGE_ID=$PACKAGE_ID
           PRODUCT_SOURCE_COMMIT=$PRODUCT_SOURCE_COMMIT
           RUNTIME_SNAPSHOT_COMMIT=$RUNTIME_SNAPSHOT_COMMIT
           TEST_SCOPE=#318/#320
@@ -281,7 +282,7 @@ jobs:
           cp dist/_storage320/STORAGE_PRODUCT_MVP_RC1/start_skill_validation.sh "$PKG/"
 
           cat > /tmp/storage320-launcher-resolution/fake-python <<'EOF'
-          #!/usr/bin/env bash
+          #!/bin/bash
           printf '%s\n' "$0 $*" >> /tmp/storage320-launcher-resolution/invocations.log
           exit 0
           EOF
@@ -289,7 +290,7 @@ jobs:
 
           # python3 has priority when it is the only available interpreter.
           cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python3
-          PATH="/tmp/storage320-launcher-resolution/bin:/usr/bin:/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python3.log
+          PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python3.log
           grep -q '/python3 -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
           echo "MACOS_PYTHON3_RESOLUTION=PASS"
 
@@ -297,14 +298,14 @@ jobs:
           rm /tmp/storage320-launcher-resolution/bin/python3
           cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python
           : > /tmp/storage320-launcher-resolution/invocations.log
-          PATH="/tmp/storage320-launcher-resolution/bin:/usr/bin:/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python.log
+          PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python.log
           grep -q '/python -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
           echo "PYTHON_FALLBACK=PASS"
 
           # No interpreter must fail before attempting to launch uvicorn.
           rm /tmp/storage320-launcher-resolution/bin/python
           : > /tmp/storage320-launcher-resolution/invocations.log
-          if PATH="/tmp/storage320-launcher-resolution/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/none.log 2>&1; then
+          if PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/none.log 2>&1; then
             echo "NO_PYTHON_FAIL_FAST=FAIL"
             exit 1
           fi
