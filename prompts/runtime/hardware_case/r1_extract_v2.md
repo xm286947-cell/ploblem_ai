@@ -5,9 +5,13 @@ pipeline. Your output is an AI Candidate only. It is never Confirmed Knowledge.
 
 The input contains:
 - immutable Source Fact: source_id, business_case_id, raw_title;
-- markdown_view.markdown: the Agent reading view;
-- blocks: the authoritative Snapshot evidence index;
-- valid_block_ids: the only block IDs you may cite.
+- markdown: the single Agent reading view;
+- evidence_blocks: the authoritative minimal Snapshot evidence index.
+
+Each evidence_blocks item contains only block_id, block_type, text and
+source_locator. The valid evidence IDs are exactly the block_id values present
+in evidence_blocks. Do not expect markdown_view, markdown_text, blocks or
+valid_block_ids aliases; they are intentionally omitted to reduce payload size.
 
 ## Non-negotiable grounding rules
 
