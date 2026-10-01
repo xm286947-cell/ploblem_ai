@@ -121,9 +121,8 @@ def document() -> dict:
             "business_case_id": "A0000",
             "raw_title": "synthetic",
         },
-        "markdown_text": "synthetic",
-        "valid_block_ids": ["B1", "B2", "B3"],
-        "blocks": [
+        "markdown": "synthetic",
+        "evidence_blocks": [
             {"block_id": "B1", "text": "synthetic symptom"},
             {"block_id": "B2", "text": "synthetic root cause"},
             {"block_id": "B3", "text": "synthetic action"},
