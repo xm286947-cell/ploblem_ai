@@ -139,6 +139,10 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
         "value": "电池热失控导致系统烧毁。",
         "evidence_block_ids": ["B9999"],
     }
+    result["facts"]["symptom"] = {
+        "value": "电池热失控导致系统烧毁。",
+        "evidence_block_ids": ["B0002"],
+    }
     result["circuit_feature_links"] = [
         {"node_id": "FAKE", "confidence": 1.0, "evidence_block_ids": ["B0002"]}
     ]
@@ -148,6 +152,8 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
     assert "EVIDENCE_BLOCK_NOT_FOUND:root_cause:B9999" in validation["errors"]
     assert "FACT_EVIDENCE_MISSING:root_cause" in validation["errors"]
     assert "TREE_MAPPING_FORBIDDEN:circuit_feature_links" in validation["errors"]
+    assert "FABRICATED_OR_UNSUPPORTED_FACT:symptom" in validation["errors"]
+    assert validation["fabricated_fact_count"] == 1
 
 
 def test_r1_agent_runtime_input_uses_markdown_view_and_no_tree_candidates():
