@@ -83,13 +83,21 @@ jobs:
           #!/usr/bin/env bash
           set -eu
           cd "$(dirname "$0")"
+          if command -v python3 >/dev/null 2>&1; then
+            PYTHON_BIN=python3
+          elif command -v python >/dev/null 2>&1; then
+            PYTHON_BIN=python
+          else
+            echo "ERROR: Python 3 is required but neither python3 nor python was found." >&2
+            exit 1
+          fi
           export PYTHONPATH="$PWD:$PWD/vendor/unified_agent_runtime"
           export STORAGE_WEB_HOST="127.0.0.1"
           export STORAGE_WEB_PORT="8765"
           echo "Storage Skill validation: http://127.0.0.1:8765"
           echo "Readiness: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/readiness"
           echo "Real Golden: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/real-golden"
-          exec python -m uvicorn storage_life.app:app --host "$STORAGE_WEB_HOST" --port "$STORAGE_WEB_PORT"
+          exec "$PYTHON_BIN" -m uvicorn storage_life.app:app --host "$STORAGE_WEB_HOST" --port "$STORAGE_WEB_PORT"
           EOF
           sed -i 's/^          //' "$PKG/start_skill_validation.sh"
           chmod +x "$PKG/start_skill_validation.sh"
@@ -256,6 +264,48 @@ jobs:
           echo "SKILL_READINESS_API=PASS"
           echo "REAL_GOLDEN_API=PASS"
           echo "EVIDENCE_DRILLDOWN=PASS"
+
+      - name: Launcher interpreter resolution smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/storage320-launcher-resolution
+          mkdir -p /tmp/storage320-launcher-resolution/bin
+          PKG=/tmp/storage320-launcher-resolution/package
+          mkdir -p "$PKG/vendor/unified_agent_runtime"
+          cp dist/_storage320/STORAGE_PRODUCT_MVP_RC1/start_skill_validation.sh "$PKG/"
+
+          cat > /tmp/storage320-launcher-resolution/fake-python <<'EOF'
+          #!/usr/bin/env bash
+          printf '%s\n' "$0 $*" >> /tmp/storage320-launcher-resolution/invocations.log
+          exit 0
+          EOF
+          chmod +x /tmp/storage320-launcher-resolution/fake-python
+
+          # python3 has priority when it is the only available interpreter.
+          cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python3
+          PATH="/tmp/storage320-launcher-resolution/bin:/usr/bin:/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python3.log
+          grep -q '/python3 -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
+          echo "MACOS_PYTHON3_RESOLUTION=PASS"
+
+          # python is accepted as the fallback when python3 is unavailable.
+          rm /tmp/storage320-launcher-resolution/bin/python3
+          cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python
+          : > /tmp/storage320-launcher-resolution/invocations.log
+          PATH="/tmp/storage320-launcher-resolution/bin:/usr/bin:/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python.log
+          grep -q '/python -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
+          echo "PYTHON_FALLBACK=PASS"
+
+          # No interpreter must fail before attempting to launch uvicorn.
+          rm /tmp/storage320-launcher-resolution/bin/python
+          : > /tmp/storage320-launcher-resolution/invocations.log
+          if PATH="/tmp/storage320-launcher-resolution/bin" "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/none.log 2>&1; then
+            echo "NO_PYTHON_FAIL_FAST=FAIL"
+            exit 1
+          fi
+          grep -q 'neither python3 nor python was found' /tmp/storage320-launcher-resolution/none.log
+          test ! -s /tmp/storage320-launcher-resolution/invocations.log
+          echo "NO_PYTHON_FAIL_FAST=PASS"
 
       - name: Upload candidate
         uses: actions/upload-artifact@v4
