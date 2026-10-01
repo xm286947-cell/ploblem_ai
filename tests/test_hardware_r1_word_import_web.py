@@ -69,6 +69,8 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     assert asset.status_code == 200
     assert "/r1/word-snapshot" in asset.text
     assert "/r1/agent-extract" in asset.text
+    assert "/r1/previews?limit=10" in asset.text
+    assert "autoRestore:true" in asset.text
 
 
 def test_docx_upload_renders_frozen_snapshot_contract(tmp_path: Path):
@@ -134,7 +136,7 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
 
     def structurer(document):
         captured.update(document)
-        blocks = {item.get("text"): item["block_id"] for item in document["blocks"] if item.get("text")}
+        blocks = {item.get("text"): item["block_id"] for item in document["evidence_blocks"] if item.get("text")}
         return {
             "title": "Flash启动异常",
             "product_context": {},
@@ -181,10 +183,30 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
     assert response.status_code == 200
     payload = response.json()
     assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
-    assert captured["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
+    assert "markdown_view" not in captured
+    assert "markdown_text" not in captured
+    assert "blocks" not in captured
+    assert "valid_block_ids" not in captured
+    assert "HC_BLOCK" in captured["markdown"]
     assert "tree_candidates" not in captured
+    assert captured["evidence_blocks"]
     assert payload["status"] == "PASS"
     assert payload["evidence_validation"]["status"] == "PASS"
     assert payload["evidence_validation"]["fabricated_fact_count"] == 0
     assert payload["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"
     assert payload["knowledge_object"]["review"]["object_status"] == "CANDIDATE"
+    assert payload["preview"]["preview_id"] == 1
+
+    history = client.get("/api/v2/hardware-cases/r1/previews?limit=10", headers=MAINTAINER)
+    assert history.status_code == 200
+    assert history.json()["total"] == 1
+    assert history.json()["items"][0]["source_id"] == parsed.json()["source"]["source_id"]
+
+    latest = client.get("/api/v2/hardware-cases/r1/previews/latest", headers=MAINTAINER)
+    assert latest.status_code == 200
+    assert latest.json()["result"]["knowledge_object"]["review"]["object_status"] == "CANDIDATE"
+    assert latest.json()["snapshot"]["source"]["source_id"] == parsed.json()["source"]["source_id"]
+
+    reopened = client.get("/api/v2/hardware-cases/r1/previews/1", headers=MAINTAINER)
+    assert reopened.status_code == 200
+    assert reopened.json()["preview_id"] == 1
