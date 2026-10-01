@@ -130,6 +130,15 @@ class HardwareR1PreviewStore:
         with self._connect() as connection:
             return self._row(connection.execute(query, params).fetchone())
 
+    def by_id(self, preview_id: int) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            return self._row(
+                connection.execute(
+                    "SELECT * FROM hardware_r1_preview_result WHERE preview_id = ?",
+                    (int(preview_id),),
+                ).fetchone()
+            )
+
     def by_run_id(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:
             return self._row(
