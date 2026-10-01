@@ -2,14 +2,14 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-agent-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-golden-v2">{% endblock %}
 {% block breadcrumb %}案例 Word 导入{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page" data-hc-word-import data-api="{{ hardware_api_prefix }}">
   <section class="hc-hero">
     <div>
-      <span class="hc-kicker">HARDWARE CASE · R1 AGENT POC</span>
+      <span class="hc-kicker">HARDWARE CASE · R1 GOLDEN KNOWLEDGE</span>
       <h1>案例 Word 导入</h1>
       <p>上传 DOCX 先执行确定性 DocumentSnapshot + Identity，再生成 Markdown Agent View。Agent 仅在手动点击后通过 Unified Runtime 执行；本入口不做 Tree Mapping、Knowledge Lookup、Publish 或 OCR/Vision。</p>
     </div>
@@ -53,17 +53,32 @@
   </section>
 
   <section class="hc-card" data-agent-result hidden>
-    <div class="hc-card-head"><div><h2>Agent Structured Result</h2><p>只做候选抽取与证据校验，不落业务表、不自动发布。</p></div></div>
+    <div class="hc-card-head"><div><h2>Agent Structured Result</h2><p>hardware-r1-extraction/v2 候选抽取与 Evidence 校验；不落业务表、不自动发布。</p></div></div>
     <div class="hc-case-meta">
       <span>Agent Status: <strong data-agent-status>—</strong></span>
       <span>Evidence Gate: <strong data-evidence-status>—</strong></span>
-      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span>
+      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span><span>Fabricated Block: <strong data-fabricated-block-count>—</strong></span>
     </div>
     <h3>Structured Facts</h3><div data-agent-facts></div>
     <h3>Evidence Blocks</h3><div data-agent-evidence></div>
     <p><strong>Validation Errors</strong>：<span data-agent-errors>—</span></p>
     <details><summary>完整 Agent Result JSON</summary><pre data-raw-agent-result></pre></details>
   </section>
+  <section class="hc-card" data-golden-knowledge hidden>
+    <div class="hc-card-head"><div><h2>Golden Knowledge Preview</h2><p>hardware-case-knowledge-object/v1 · Candidate only · Source Fact immutable</p></div></div>
+    <div class="hc-case-meta">
+      <span>Object Status: <strong data-golden-status>—</strong></span>
+      <span>Extraction Contract: <strong data-extraction-contract>—</strong></span>
+      <span>Runtime Run: <strong data-runtime-run>—</strong></span>
+    </div>
+    <h3>L1 Engineering Context</h3><div data-golden-context></div>
+    <h3>Source Conflict</h3><div data-golden-conflicts></div>
+    <h3>L2-L4 Problem / Analysis / Resolution</h3><div data-golden-case-layers></div>
+    <h3>L5 Reusable Knowledge</h3><div data-golden-reusable></div>
+    <h3>Evidence</h3><div data-golden-evidence></div>
+    <details><summary>完整 Golden Knowledge Object JSON</summary><pre data-raw-golden></pre></details>
+  </section>
+
 </main>
 {% endblock %}
 {% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-agent-v1"></script>{% endblock %}
