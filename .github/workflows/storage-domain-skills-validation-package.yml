@@ -124,6 +124,7 @@ jobs:
           Storage Domain Skills / Real Knowledge Manual Validation Candidate
 
           PACKAGE_ID=$PACKAGE_ID
+          PACKAGE_SOURCE_COMMIT=$PACKAGE_SOURCE_COMMIT
           PRODUCT_SOURCE_COMMIT=$PRODUCT_SOURCE_COMMIT
           RUNTIME_SNAPSHOT_COMMIT=$RUNTIME_SNAPSHOT_COMMIT
           TEST_SCOPE=#318/#320
@@ -164,6 +165,7 @@ jobs:
             "package_id": "$PACKAGE_ID",
             "package_type": "MANUAL_VALIDATION_CANDIDATE",
             "issue": 320,
+            "package_source_commit": "$PACKAGE_SOURCE_COMMIT",
             "product_source_commit": "$PRODUCT_SOURCE_COMMIT",
             "runtime_snapshot_commit": "$RUNTIME_SNAPSHOT_COMMIT",
             "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
