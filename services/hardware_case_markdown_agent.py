@@ -382,12 +382,17 @@ def _candidate_evidence_map(extraction: dict[str, Any]) -> dict[str, set[str]]:
         refs = set(payload.get("evidence_block_ids") or [])
         mapping[f"engineering_context.{name}"] = refs
         mapping[name] = mapping.get(name, set()) | refs
+    aggregate_key_parameter_refs: set[str] = set()
     for item in context.get("key_parameters") or []:
+        refs = set(item.get("evidence_block_ids") or [])
+        aggregate_key_parameter_refs.update(refs)
         name = str(item.get("name") or "").strip()
         if name:
-            mapping[f"engineering_context.key_parameters.{name}"] = set(
-                item.get("evidence_block_ids") or []
-            )
+            mapping[f"engineering_context.key_parameters.{name}"] = refs
+    # V1.3.1 correctness closure: Stage B may derive from the canonical
+    # aggregate key-parameter path. Its traceability evidence is the union of
+    # every validated key_parameters[*].evidence_block_ids.
+    mapping["engineering_context.key_parameters"] = aggregate_key_parameter_refs
     return mapping
 
 
@@ -684,7 +689,7 @@ __all__ = [
 import time as _time
 
 _V12_RUN_R1_AGENT_EXTRACTION = run_r1_agent_extraction
-R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3"
+R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.1"
 R1_PIPELINE_RESULT_VERSION = "hardware-case-r1-agent-result/v3"
 R1_STAGE_A_AGENT_ID = "hardware_case.r1_case_extract"
 R1_STAGE_B_AGENT_ID = "hardware_case.r1_reuse_derive"
