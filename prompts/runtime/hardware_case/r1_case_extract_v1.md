@@ -37,6 +37,7 @@ Semantic boundaries:
   functional loss, quantified production/yield consequence, customer/business
   consequence, system-level consequence, or other downstream effect. Never
   paraphrase or copy symptom into impact.
+- Never paraphrase or copy symptom into impact.
 - Problem handling/process status is NOT impact. Phrases such as "反馈多次仍未解决",
   "多次反馈均得不到解决", "issue remained unresolved", or similar support/escalation
   status must not be used as impact by themselves.
