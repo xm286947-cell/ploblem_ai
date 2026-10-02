@@ -1,0 +1,30 @@
+agent_id: hardware_case.r1_reuse_derive
+version: v1
+label: Hardware R1 Stage B Reusable Knowledge
+
+prompt:
+  ref: prompts/runtime/hardware_case/r1_reuse_derive_v1.md
+  version: HC-R1-REUSE-DERIVE-V1
+
+output_schema:
+  ref: HardwareCaseR1ReusableKnowledgeV13
+  version: v1
+
+execution:
+  timeout_seconds: 90
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 3072
+
+metadata:
+  business_domain: HARDWARE_CASE
+  provider_response_shape: json_object
+  pipeline_stage: STAGE_B_REUSABLE_KNOWLEDGE
+  preview_only: true
+  formal_knowledge_write: false
