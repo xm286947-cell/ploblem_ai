@@ -178,7 +178,7 @@ def test_r1_agent_runtime_input_v3_deduplicates_text_and_keeps_evidence_index():
     assert [item["block_id"] for item in captured["evidence_index"]] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
     assert set(captured["evidence_index"][0]) == {"block_id", "block_type", "source_locator"}
     assert all("text" not in item for item in captured["evidence_index"])
-    assert captured["markdown"].count("设备启动异常") == 1
+    assert captured["markdown"].count("MCU 给串口屏发送数据时经常出现乱码。") == 1
     assert result["status"] == "PASS"
     assert result["evidence_validation"]["fabricated_fact_count"] == 0
 
