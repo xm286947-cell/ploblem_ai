@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from services.hardware_case_markdown_agent import (
+    _compact_runtime_input,
     build_markdown_view,
     normalize_extraction_v2,
     run_r1_agent_extraction,
