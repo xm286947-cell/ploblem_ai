@@ -118,19 +118,32 @@ def create_hardware_case_router(
     def r1_agent_extract(
         payload: dict[str, Any],
         force_retry: bool = Query(default=False),
+        force_full_run: bool = Query(default=False),
+        retry_failed_stage: str | None = Query(default=None),
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
     ) -> dict[str, Any]:
-        """Run the R1 Markdown Agent POC without mutating Hardware Case data."""
+        """Run/Resume, selectively retry one failed stage, or force a full R1 run."""
         _require_maintainer(x_hardware_case_role)
+        retry_stage = str(retry_failed_stage or "").strip().upper() or None
+        if retry_stage not in {None, "STAGE_A", "STAGE_B"}:
+            raise HTTPException(status_code=400, detail="RETRY_FAILED_STAGE_INVALID")
+        full_run = bool(force_full_run or force_retry)
+        if full_run and retry_stage is not None:
+            raise HTTPException(status_code=400, detail="EXECUTION_MODE_CONFLICT")
         factory = r1_structurer_factory
         if factory is None:
             from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer
             factory = build_hardware_case_r1_structurer
         try:
             structurer = factory()
-            result = run_r1_agent_extraction(payload, structurer, force_retry=force_retry)
+            result = run_r1_agent_extraction(
+                payload,
+                structurer,
+                force_retry=full_run,
+                retry_failed_stage=retry_stage,
+            )
             if r1_preview_store is not None:
                 result["preview"] = r1_preview_store.save(payload, result)
             return result
