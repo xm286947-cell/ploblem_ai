@@ -40,6 +40,12 @@
     const tokenText='prompt='+esc(runtime.prompt_tokens??trace[prefix+'_PROMPT_TOKENS']??'UNKNOWN')+
       ' / completion='+esc(runtime.completion_tokens??trace[prefix+'_COMPLETION_TOKENS']??'UNKNOWN');
     const cacheText=runtime.cache_hit?'HIT':(runtime.cache_rejected_by_validator?'REJECTED':'MISS/NO');
+    const attempts=runtime.provider_attempts??trace[prefix+'_PROVIDER_ATTEMPTS']??[];
+    const attemptText=attempts.length?attempts.map((item,index)=>
+      '#'+esc(item.provider_call_seq??(index+1))+':'+esc(item.result_class||'UNKNOWN')+
+      '@'+esc(item.duration_ms??'—')+'ms/t'+esc(item.transport_attempt_no??'—')+
+      (item.raw_error_code?' ['+esc(item.raw_error_code)+']':'')
+    ).join(' · '):'—';
     return '<p><strong>Mode</strong>: '+esc(runtime.execution_mode||trace[prefix+'_EXECUTION_MODE']||'—')+'</p>'+
       '<p><strong>Cache</strong>: '+esc(cacheText)+' · Recovery Calls: '+esc(runtime.cache_recovery_call_count??trace[prefix+'_CACHE_RECOVERY_CALL_COUNT']??0)+'</p>'+
       '<p><strong>Calls</strong>: '+esc(runtime.provider_call_count??trace[prefix+'_PROVIDER_CALL_COUNT']??0)+
@@ -47,6 +53,9 @@
       ' · Transport Retry: '+esc(runtime.transport_retry_count??trace[prefix+'_TRANSPORT_RETRY_COUNT']??0)+
       ' · Validation Retry: '+esc(runtime.validation_retry_count??trace[prefix+'_VALIDATION_RETRY_COUNT']??0)+'</p>'+
       '<p><strong>Time</strong>: '+esc(trace[prefix+'_TOTAL_MS']??0)+' ms · Provider ms: '+esc(JSON.stringify(runtime.provider_call_ms??trace[prefix+'_PROVIDER_CALL_MS']??[]))+'</p>'+
+      '<p><strong>Input Size</strong>: '+esc(runtime.input_chars??trace[prefix+'_INPUT_CHARS']??0)+' chars / '+esc(runtime.input_bytes??trace[prefix+'_INPUT_BYTES']??0)+' bytes</p>'+
+      '<p><strong>Output Size</strong>: '+esc(runtime.output_chars??trace[prefix+'_OUTPUT_CHARS']??0)+' chars / '+esc(runtime.output_bytes??trace[prefix+'_OUTPUT_BYTES']??0)+' bytes</p>'+
+      '<p><strong>Attempt</strong>: '+attemptText+'</p>'+
       '<p><strong>Tokens</strong>: '+tokenText+'</p>';
   }
   function renderAgent(payload){
