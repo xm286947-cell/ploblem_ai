@@ -12,8 +12,12 @@ on:
       - "services/hardware_case_r1_preview_store.py"
       - "config/runtime/agents/hardware_case.structure.yaml"
       - "config/runtime/agents/hardware_case.r1_extract.yaml"
+      - "config/runtime/agents/hardware_case.r1_case_extract.yaml"
+      - "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
       - "prompts/runtime/hardware_case/structure_v1.md"
       - "prompts/runtime/hardware_case/r1_extract_v2.md"
+      - "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+      - "prompts/runtime/hardware_case/r1_reuse_derive_v1.md"
       - "scripts/hardware_r1_docx_snapshot.py"
       - "tests/test_hardware_r1_data_foundation.py"
       - "tests/test_hardware_r1_word_import_web.py"
@@ -21,6 +25,7 @@ on:
       - "tests/test_hardware_r1_golden_knowledge.py"
       - "tests/test_hardware_r1_runtime_v2.py"
       - "tests/test_hardware_r1_preview_store.py"
+      - "tests/test_hardware_r1_pipeline_v13.py"
       - "quality_knowledge/web/hardware_case_api.py"
       - "quality_knowledge/web/p0_pages.py"
       - "quality_knowledge/web/templates/hardware_case_word_import.html"
@@ -93,6 +98,7 @@ jobs:
           tests/test_hardware_r1_golden_knowledge.py
           tests/test_hardware_r1_runtime_v2.py
           tests/test_hardware_r1_preview_store.py
+          tests/test_hardware_r1_pipeline_v13.py
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_m3_frontend.py
