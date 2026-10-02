@@ -129,9 +129,22 @@ jobs:
           assert manifest["runtime"]["r1_stage_a_payload"] == "SINGLE_MARKDOWN_PLUS_MINIMAL_EVIDENCE_BLOCKS"
           assert manifest["runtime"]["r1_stage_b_payload"] == "VALIDATED_CASE_FACTS_PLUS_NECESSARY_EVIDENCE_ONLY"
           assert manifest["runtime"]["r1_partial_failure_preservation"] is True
+          assert manifest["runtime"]["r1_execution_trace_version"] == "hardware-r1-execution-trace/v1.4"
           assert manifest["runtime"]["r1_force_retry_new_run"] is True
-          assert manifest["runtime"]["r1_success_cache_key"] == [
-              "source_id", "markdown_hash", "agent_config_hash", "prompt_version"
+          assert manifest["runtime"]["r1_selective_retry_failed_stage"] is True
+          assert manifest["runtime"]["r1_stage_a_cache_key_v2"] == [
+              "source_id", "markdown_hash", "agent_config_hash", "prompt_version",
+              "pipeline_version", "validator_version", "schema_version"
+          ]
+          assert manifest["runtime"]["r1_stage_b_cache_key_v2"] == [
+              "source_id", "stage_b_input_hash", "agent_config_hash", "prompt_version",
+              "pipeline_version", "validator_version", "schema_version"
+          ]
+          assert manifest["runtime"]["r1_stage_execution_attribution"] == [
+              "execution_mode", "provider_call_count", "initial_call_count",
+              "transport_retry_count", "validation_retry_count",
+              "cache_recovery_call_count", "force_retry_call_count",
+              "provider_call_ms", "prompt_tokens", "completion_tokens"
           ]
           assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
