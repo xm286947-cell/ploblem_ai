@@ -788,8 +788,55 @@ def _stage_cache_key_v2(
     }
     return _canonical_payload_hash(material)
 
+def _payload_size(value: Any) -> tuple[int, int]:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return len(encoded), len(encoded.encode("utf-8"))
+
+
+def _attempt_result_class(record: dict[str, Any]) -> tuple[str, str | None, Any]:
+    status = str(record.get("status") or "").upper()
+    error = record.get("error")
+    error = error if isinstance(error, dict) else {}
+    raw_error_code = str(error.get("code") or "").strip() or None
+    category = str(error.get("category") or "").upper()
+    details = error.get("details")
+    details = details if isinstance(details, dict) else {}
+    message = str(error.get("message") or "")
+    timeout_material = " ".join(
+        [
+            str(raw_error_code or ""),
+            message,
+            str(details.get("exception_type") or ""),
+            str(details.get("exception") or ""),
+        ]
+    ).casefold()
+    http_status = (
+        details.get("http_status")
+        if details.get("http_status") is not None
+        else details.get("status_code")
+        if details.get("status_code") is not None
+        else details.get("http_status_code")
+    )
+    if status == "COMPLETED":
+        return "SUCCESS", raw_error_code, http_status
+    if category == "VALIDATION":
+        return "VALIDATION_ERROR", raw_error_code, http_status
+    if category == "TRANSPORT":
+        if "timeout" in timeout_material or "timed out" in timeout_material:
+            return "TIMEOUT", raw_error_code, http_status
+        return "TRANSPORT_ERROR", raw_error_code, http_status
+    return "UNKNOWN", raw_error_code, http_status
+
+
 def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
     call_ms: list[int] = []
+    provider_attempts: list[dict[str, Any]] = []
     validation_cycles: dict[int, int] = {}
     prompt_tokens: list[int] = []
     completion_tokens: list[int] = []
@@ -818,13 +865,18 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
         except Exception:
             continue
         observed_provider_calls += 1
+        duration_ms: int | None = None
         started = record.get("started_at")
         completed = record.get("completed_at")
         if started and completed:
             try:
                 start_dt = _datetime.fromisoformat(str(started).replace("Z", "+00:00"))
                 end_dt = _datetime.fromisoformat(str(completed).replace("Z", "+00:00"))
-                call_ms.append(max(0, int((end_dt - start_dt).total_seconds() * 1000)))
+                duration_ms = max(
+                    0,
+                    int((end_dt - start_dt).total_seconds() * 1000),
+                )
+                call_ms.append(duration_ms)
             except Exception:
                 pass
         step_attempt = int(record.get("step_attempt_no") or 1)
@@ -837,8 +889,26 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
         if transport_attempt > 1:
             transport_retry_count += 1
         elif cycle == 1:
-            # First provider request for each Runtime step attempt.
             initial_call_count += 1
+
+        result_class, raw_error_code, http_status = _attempt_result_class(record)
+        provider_attempts.append(
+            {
+                "provider_call_seq": int(
+                    record.get("provider_call_seq")
+                    or record.get("attempt_no")
+                    or observed_provider_calls
+                ),
+                "result_class": result_class,
+                "duration_ms": duration_ms,
+                "step_attempt_no": step_attempt,
+                "validation_cycle_no": cycle,
+                "transport_attempt_no": transport_attempt,
+                "raw_error_code": raw_error_code,
+                "http_status": http_status,
+            }
+        )
+
         metrics = record.get("execution_metrics") or {}
         if isinstance(metrics.get("prompt_tokens"), int):
             prompt_tokens.append(int(metrics["prompt_tokens"]))
@@ -847,6 +917,7 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
 
     return {
         "provider_call_ms": call_ms,
+        "provider_attempts": provider_attempts,
         "observed_provider_call_count": observed_provider_calls,
         "initial_call_count": initial_call_count,
         "transport_retry_count": transport_retry_count,
@@ -928,8 +999,16 @@ class _R1StageRunner:
             and cached.get("validation_status") == "PASS"
         )
 
-    def _runtime_meta(self, result: Any) -> dict[str, Any]:
+    def _runtime_meta(
+        self,
+        result: Any,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         attempts = _attempt_metrics(self.paths["runtime_db"], result.task_id)
+        input_chars, input_bytes = _payload_size(payload)
+        output_chars, output_bytes = _payload_size(
+            result.data if isinstance(result.data, dict) else {}
+        )
         error = getattr(result, "error", None)
         execution = getattr(result, "execution", None)
         return {
@@ -944,6 +1023,11 @@ class _R1StageRunner:
             "initial_call_count": attempts["initial_call_count"],
             "transport_retry_count": attempts["transport_retry_count"],
             "provider_call_ms": attempts["provider_call_ms"],
+            "provider_attempts": attempts["provider_attempts"],
+            "input_chars": input_chars,
+            "input_bytes": input_bytes,
+            "output_chars": output_chars,
+            "output_bytes": output_bytes,
             "prompt_tokens": attempts["prompt_tokens"],
             "completion_tokens": attempts["completion_tokens"],
             "validation_retry_count": attempts["validation_retry_count"],
@@ -966,6 +1050,7 @@ class _R1StageRunner:
         execution_mode: str | None = None,
     ) -> dict[str, Any]:
         cache_key = self._cache_key(source_id=source_id, input_hash=input_hash)
+        input_chars, input_bytes = _payload_size(payload)
         rejected = bool(cache_rejected_by_validator)
         rejection_reason: str | None = (
             "CACHE_REJECTED_BY_VALIDATOR" if rejected else None
@@ -996,6 +1081,11 @@ class _R1StageRunner:
                             "initial_call_count": 0,
                             "transport_retry_count": 0,
                             "provider_call_ms": [],
+                            "provider_attempts": [],
+                            "input_chars": input_chars,
+                            "input_bytes": input_bytes,
+                            "output_chars": _payload_size(cached["data"])[0],
+                            "output_bytes": _payload_size(cached["data"])[1],
                             "validation_retry_count": 0,
                             "cache_recovery_call_count": 0,
                             "force_retry_call_count": 0,
@@ -1034,6 +1124,11 @@ class _R1StageRunner:
                     "cache_recovery_call_count": 0,
                     "force_retry_call_count": 0,
                     "provider_call_ms": [],
+                    "provider_attempts": [],
+                    "input_chars": input_chars,
+                    "input_bytes": input_bytes,
+                    "output_chars": 0,
+                    "output_bytes": 0,
                     "prompt_tokens": "UNKNOWN",
                     "completion_tokens": "UNKNOWN",
                     "cache_hit": False,
@@ -1068,6 +1163,7 @@ class _R1StageRunner:
                         self.input_hash_name: input_hash,
                         "force_retry": bool(force_retry),
                         "cache_recovery": bool(bypass_cache or rejected),
+                        "input_contract": payload.get("input_contract"),
                     },
                 )
             )
@@ -1077,7 +1173,7 @@ class _R1StageRunner:
         except _ExistingTaskNotCompleteError:
             result = invoke(f"{base_request_id}:retry:{_uuid4().hex[:12]}")
 
-        runtime_meta = self._runtime_meta(result)
+        runtime_meta = self._runtime_meta(result, payload)
         effective_mode = str(
             execution_mode
             or (
