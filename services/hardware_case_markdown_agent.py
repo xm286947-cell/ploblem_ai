@@ -712,6 +712,7 @@ R1_PIPELINE_RESULT_VERSION = "hardware-case-r1-agent-result/v3"
 R1_STAGE_A_AGENT_ID = "hardware_case.r1_case_extract"
 R1_STAGE_B_AGENT_ID = "hardware_case.r1_reuse_derive"
 R1_REUSE_INPUT_VERSION = "hardware-case-r1-reuse-input/v1"
+R1_EXECUTION_TRACE_VERSION = "hardware-r1-execution-trace/v1.4"
 
 
 def _ms(start: float) -> int:
@@ -950,26 +951,38 @@ def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
     seed = metadata.get("r1_latency_trace")
     seed = seed if isinstance(seed, dict) else {}
     return {
+        "EXECUTION_TRACE_VERSION": R1_EXECUTION_TRACE_VERSION,
+        "EXECUTION_MODE": "RUN_RESUME",
         "PARSE_MS": int(seed.get("PARSE_MS") or 0),
         "MARKDOWN_MS": int(seed.get("MARKDOWN_MS") or 0),
         "CACHE_KEY_VERSION": "v2",
+        "STAGE_A_EXECUTION_MODE": "NOT_RUN",
         "STAGE_A_TOTAL_MS": 0,
         "STAGE_A_PROVIDER_CALL_COUNT": 0,
+        "STAGE_A_INITIAL_CALL_COUNT": 0,
+        "STAGE_A_TRANSPORT_RETRY_COUNT": 0,
         "STAGE_A_PROVIDER_CALL_MS": [],
         "STAGE_A_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_A_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_A_VALIDATION_RETRY_COUNT": 0,
+        "STAGE_A_CACHE_RECOVERY_CALL_COUNT": 0,
+        "STAGE_A_FORCE_RETRY_CALL_COUNT": 0,
         "STAGE_A_CACHE_HIT": False,
         "STAGE_A_CACHE_REJECTED_BY_VALIDATOR": False,
         "STAGE_A_CACHED_FROM_RUN_ID": None,
         "CASE_VALIDATION_MS": 0,
         "CONFLICT_MS": 0,
+        "STAGE_B_EXECUTION_MODE": "NOT_RUN",
         "STAGE_B_TOTAL_MS": 0,
         "STAGE_B_PROVIDER_CALL_COUNT": 0,
+        "STAGE_B_INITIAL_CALL_COUNT": 0,
+        "STAGE_B_TRANSPORT_RETRY_COUNT": 0,
         "STAGE_B_PROVIDER_CALL_MS": [],
         "STAGE_B_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_B_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_B_VALIDATION_RETRY_COUNT": 0,
+        "STAGE_B_CACHE_RECOVERY_CALL_COUNT": 0,
+        "STAGE_B_FORCE_RETRY_CALL_COUNT": 0,
         "STAGE_B_CACHE_HIT": False,
         "STAGE_B_CACHE_REJECTED_BY_VALIDATOR": False,
         "STAGE_B_CACHED_FROM_RUN_ID": None,
@@ -988,10 +1001,21 @@ def _apply_stage_trace(
     runtime_meta: dict[str, Any],
 ) -> None:
     prefix = "STAGE_A" if stage == "A" else "STAGE_B"
+    if runtime_meta.get("execution_mode"):
+        trace[f"{prefix}_EXECUTION_MODE"] = runtime_meta.get("execution_mode")
     trace[f"{prefix}_TOTAL_MS"] = int(trace.get(f"{prefix}_TOTAL_MS") or 0) + int(total_ms)
-    trace[f"{prefix}_PROVIDER_CALL_COUNT"] = int(
-        trace.get(f"{prefix}_PROVIDER_CALL_COUNT") or 0
-    ) + int(runtime_meta.get("provider_call_count") or 0)
+    for key in (
+        "PROVIDER_CALL_COUNT",
+        "INITIAL_CALL_COUNT",
+        "TRANSPORT_RETRY_COUNT",
+        "VALIDATION_RETRY_COUNT",
+        "CACHE_RECOVERY_CALL_COUNT",
+        "FORCE_RETRY_CALL_COUNT",
+    ):
+        runtime_key = key.lower()
+        trace[f"{prefix}_{key}"] = int(
+            trace.get(f"{prefix}_{key}") or 0
+        ) + int(runtime_meta.get(runtime_key) or 0)
     trace[f"{prefix}_PROVIDER_CALL_MS"] = [
         *list(trace.get(f"{prefix}_PROVIDER_CALL_MS") or []),
         *list(runtime_meta.get("provider_call_ms") or []),
@@ -1012,9 +1036,6 @@ def _apply_stage_trace(
             if previous == "UNKNOWN"
             else int(previous) + int(completion_tokens)
         )
-    trace[f"{prefix}_VALIDATION_RETRY_COUNT"] = int(
-        trace.get(f"{prefix}_VALIDATION_RETRY_COUNT") or 0
-    ) + int(runtime_meta.get("validation_retry_count") or 0)
     trace[f"{prefix}_CACHE_HIT"] = bool(
         trace.get(f"{prefix}_CACHE_HIT")
         or runtime_meta.get("cache_hit")
@@ -1083,12 +1104,14 @@ def _pipeline_failure(
         "raw_error_code": (failed or {}).get("raw_error_code"),
         "run_id": failed_meta.get("run_id"),
         "task_id": failed_meta.get("task_id"),
+        "execution_trace_version": R1_EXECUTION_TRACE_VERSION,
+        "execution_mode": trace.get("EXECUTION_MODE"),
         "provider_call_count": int(
-            failed_meta.get("provider_call_count") or 0
-        ),
+            trace.get("STAGE_A_PROVIDER_CALL_COUNT") or 0
+        ) + int(trace.get("STAGE_B_PROVIDER_CALL_COUNT") or 0),
         "validation_retry_count": int(
-            failed_meta.get("validation_retry_count") or 0
-        ),
+            trace.get("STAGE_A_VALIDATION_RETRY_COUNT") or 0
+        ) + int(trace.get("STAGE_B_VALIDATION_RETRY_COUNT") or 0),
         "runtime": runtime,
         "markdown_view": markdown_view,
         "stage_a_result": extraction,
@@ -1113,6 +1136,7 @@ def run_r1_agent_extraction(
     structurer: Callable[[dict[str, Any]], dict[str, Any]] | Any,
     *,
     force_retry: bool = False,
+    retry_failed_stage: str | None = None,
 ) -> dict[str, Any]:
     # Frozen V1.2 injected-callable seam remains for existing regressions.
     if not (
@@ -1120,6 +1144,12 @@ def run_r1_agent_extraction(
         and hasattr(structurer, "run_stage_b")
     ):
         return _V12_RUN_R1_AGENT_EXTRACTION(snapshot, structurer)
+
+    retry_stage = str(retry_failed_stage or "").strip().upper() or None
+    if retry_stage not in {None, "STAGE_A", "STAGE_B"}:
+        raise HardwareCaseMarkdownError("RETRY_FAILED_STAGE_INVALID")
+    if force_retry and retry_stage is not None:
+        raise HardwareCaseMarkdownError("EXECUTION_MODE_CONFLICT")
 
     markdown_view = build_markdown_view(snapshot)
     runtime_input = _compact_runtime_input(snapshot, markdown_view)
@@ -1132,6 +1162,13 @@ def run_r1_agent_extraction(
         str(markdown_view.get("markdown") or "").encode("utf-8")
     ).hexdigest()
     trace = _trace_base(snapshot)
+    trace["EXECUTION_MODE"] = (
+        "FORCE_FULL_RUN"
+        if force_retry
+        else "RETRY_FAILED_STAGE"
+        if retry_stage
+        else "RUN_RESUME"
+    )
 
     def commit_stage(stage: str, result: dict[str, Any]) -> None:
         commit = getattr(structurer, "commit_stage_success", None)
@@ -1147,22 +1184,36 @@ def run_r1_agent_extraction(
 
     def stage_a_call(*, recovery: bool = False) -> dict[str, Any]:
         started = _time.perf_counter()
+        kwargs: dict[str, Any] = {
+            "source_id": source_id,
+            "markdown_hash": markdown_hash,
+        }
         if recovery:
-            result = structurer.run_stage_a(
-                runtime_input,
-                source_id=source_id,
-                markdown_hash=markdown_hash,
+            kwargs.update(
                 force_retry=False,
                 bypass_cache=True,
                 cache_rejected_by_validator=True,
+                execution_mode="CACHE_RECOVERY",
+            )
+        elif retry_stage == "STAGE_B":
+            kwargs.update(
+                force_retry=False,
+                require_cache_hit=True,
+                execution_mode="CACHE_HIT",
+            )
+        elif retry_stage == "STAGE_A":
+            kwargs.update(
+                force_retry=True,
+                execution_mode="RETRY_FAILED_STAGE",
+            )
+        elif force_retry:
+            kwargs.update(
+                force_retry=True,
+                execution_mode="FORCE_FULL_RUN",
             )
         else:
-            result = structurer.run_stage_a(
-                runtime_input,
-                source_id=source_id,
-                markdown_hash=markdown_hash,
-                force_retry=force_retry,
-            )
+            kwargs.update(force_retry=False)
+        result = structurer.run_stage_a(runtime_input, **kwargs)
         _apply_stage_trace(
             trace,
             stage="A",
@@ -1173,14 +1224,17 @@ def run_r1_agent_extraction(
 
     stage_a = stage_a_call()
     if not stage_a.get("ok"):
+        error_code = str(
+            stage_a.get("error_code") or "RUNTIME_EXECUTION_FAILED"
+        )
+        if retry_stage == "STAGE_B" and error_code == "STAGE_LAST_GOOD_CACHE_REQUIRED":
+            error_code = "STAGE_A_LAST_GOOD_REQUIRED_FOR_STAGE_B_RETRY"
         return _pipeline_failure(
             snapshot=snapshot,
             markdown_view=markdown_view,
             trace=trace,
             failed_stage="STAGE_A",
-            error_code=str(
-                stage_a.get("error_code") or "RUNTIME_EXECUTION_FAILED"
-            ),
+            error_code=error_code,
             stage_a=stage_a,
             stage_b=None,
         )
@@ -1195,6 +1249,18 @@ def run_r1_agent_extraction(
             (stage_a.get("runtime") or {}).get("cache_hit")
         )
         if stage_a_cache_hit and reject_stage("STAGE_A", stage_a):
+            if retry_stage == "STAGE_B":
+                return _pipeline_failure(
+                    snapshot=snapshot,
+                    markdown_view=markdown_view,
+                    trace=trace,
+                    failed_stage="STAGE_A",
+                    error_code="STAGE_A_LAST_GOOD_INVALID_FOR_STAGE_B_RETRY",
+                    stage_a=stage_a,
+                    stage_b=None,
+                    extraction=extraction,
+                    validation=stage_a_validation,
+                )
             stage_a = stage_a_call(recovery=True)
             if not stage_a.get("ok"):
                 return _pipeline_failure(
@@ -1241,22 +1307,30 @@ def run_r1_agent_extraction(
 
     def stage_b_call(*, recovery: bool = False) -> dict[str, Any]:
         started = _time.perf_counter()
+        kwargs: dict[str, Any] = {
+            "source_id": source_id,
+            "markdown_hash": markdown_hash,
+        }
         if recovery:
-            result = structurer.run_stage_b(
-                reuse_input,
-                source_id=source_id,
-                markdown_hash=markdown_hash,
+            kwargs.update(
                 force_retry=False,
                 bypass_cache=True,
                 cache_rejected_by_validator=True,
+                execution_mode="CACHE_RECOVERY",
+            )
+        elif retry_stage == "STAGE_B":
+            kwargs.update(
+                force_retry=True,
+                execution_mode="RETRY_FAILED_STAGE",
+            )
+        elif force_retry:
+            kwargs.update(
+                force_retry=True,
+                execution_mode="FORCE_FULL_RUN",
             )
         else:
-            result = structurer.run_stage_b(
-                reuse_input,
-                source_id=source_id,
-                markdown_hash=markdown_hash,
-                force_retry=force_retry,
-            )
+            kwargs.update(force_retry=False)
+        result = structurer.run_stage_b(reuse_input, **kwargs)
         _apply_stage_trace(
             trace,
             stage="B",
@@ -1362,6 +1436,8 @@ def run_r1_agent_extraction(
     return {
         "result_version": R1_PIPELINE_RESULT_VERSION,
         "pipeline_version": R1_PIPELINE_VERSION,
+        "execution_trace_version": R1_EXECUTION_TRACE_VERSION,
+        "execution_mode": trace.get("EXECUTION_MODE"),
         "extraction_contract_version": R1_EXTRACTION_CONTRACT_VERSION,
         "knowledge_object_contract_version": KNOWLEDGE_OBJECT_VERSION,
         "pipeline_status": "GOLDEN_PREVIEW_READY",
@@ -1372,14 +1448,12 @@ def run_r1_agent_extraction(
         "error_code": None,
         "run_id": (stage_b.get("runtime") or {}).get("run_id"),
         "task_id": (stage_b.get("runtime") or {}).get("task_id"),
-        "provider_call_count": (
-            int((stage_a.get("runtime") or {}).get("provider_call_count") or 0)
-            + int((stage_b.get("runtime") or {}).get("provider_call_count") or 0)
-        ),
-        "validation_retry_count": (
-            int((stage_a.get("runtime") or {}).get("validation_retry_count") or 0)
-            + int((stage_b.get("runtime") or {}).get("validation_retry_count") or 0)
-        ),
+        "provider_call_count": int(
+            trace.get("STAGE_A_PROVIDER_CALL_COUNT") or 0
+        ) + int(trace.get("STAGE_B_PROVIDER_CALL_COUNT") or 0),
+        "validation_retry_count": int(
+            trace.get("STAGE_A_VALIDATION_RETRY_COUNT") or 0
+        ) + int(trace.get("STAGE_B_VALIDATION_RETRY_COUNT") or 0),
         "runtime": runtime,
         "markdown_view": markdown_view,
         "stage_a_result": extraction,
@@ -1398,6 +1472,7 @@ __all__ = list(dict.fromkeys([
     "R1_STAGE_A_AGENT_ID",
     "R1_STAGE_B_AGENT_ID",
     "R1_REUSE_INPUT_VERSION",
+    "R1_EXECUTION_TRACE_VERSION",
     "normalize_stage_a_v13",
     "normalize_stage_b_v13",
     "run_r1_agent_extraction",
