@@ -86,23 +86,68 @@ jobs:
 
           cat > "$PKG/start_skill_validation.sh" <<'EOF'
           #!/usr/bin/env bash
-          set -eu
+          set -u
           cd "$(dirname "$0")"
-          if command -v python3 >/dev/null 2>&1; then
-            PYTHON_BIN=python3
-          elif command -v python >/dev/null 2>&1; then
-            PYTHON_BIN=python
-          else
-            echo "ERROR: Python 3 is required but neither python3 nor python was found." >&2
-            exit 1
-          fi
+
           export PYTHONPATH="$PWD:$PWD/vendor/unified_agent_runtime"
           export STORAGE_WEB_HOST="127.0.0.1"
           export STORAGE_WEB_PORT="8765"
-          echo "Storage Skill validation: http://127.0.0.1:8765"
+
+          echo "Storage Skill validation: http://127.0.0.1:$STORAGE_WEB_PORT"
           echo "Readiness: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/readiness"
           echo "Real Golden: http://127.0.0.1:$STORAGE_WEB_PORT/api/product/skills/real-golden"
-          exec "$PYTHON_BIN" -m uvicorn storage_life.app:app --host "$STORAGE_WEB_HOST" --port "$STORAGE_WEB_PORT"
+
+          PYTHON_BIN=""
+          if ! PYTHON_BIN="$(bash ./scripts/select_python.sh)"; then
+            status=$?
+            echo "ERROR: unable to prepare a package-local Python environment." >&2
+            exit "$status"
+          fi
+
+          child_pid=""
+
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [ -n "${child_pid:-}" ] && kill -0 "$child_pid" 2>/dev/null; then
+              kill -TERM "$child_pid" 2>/dev/null || true
+              wait "$child_pid" 2>/dev/null || true
+            fi
+            exit "$status"
+          }
+
+          handle_int() {
+            trap - INT
+            if [ -n "${child_pid:-}" ] && kill -0 "$child_pid" 2>/dev/null; then
+              kill -INT "$child_pid" 2>/dev/null || true
+              wait "$child_pid" 2>/dev/null || true
+            fi
+            child_pid=""
+            exit 130
+          }
+
+          handle_term() {
+            trap - TERM
+            if [ -n "${child_pid:-}" ] && kill -0 "$child_pid" 2>/dev/null; then
+              kill -TERM "$child_pid" 2>/dev/null || true
+              wait "$child_pid" 2>/dev/null || true
+            fi
+            child_pid=""
+            exit 143
+          }
+
+          trap cleanup EXIT
+          trap handle_int INT
+          trap handle_term TERM
+
+          "$PYTHON_BIN" -m uvicorn storage_life.app:app --host "$STORAGE_WEB_HOST" --port "$STORAGE_WEB_PORT" &
+          child_pid=$!
+          wait "$child_pid"
+          status=$?
+          child_pid=""
+
+          trap - EXIT INT TERM
+          exit "$status"
           EOF
           sed -i 's/^          //' "$PKG/start_skill_validation.sh"
           chmod +x "$PKG/start_skill_validation.sh"
@@ -273,49 +318,117 @@ jobs:
           echo "REAL_GOLDEN_API=PASS"
           echo "EVIDENCE_DRILLDOWN=PASS"
 
-      - name: Launcher interpreter resolution smoke
+      - name: Launcher safety and local venv smoke
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf /tmp/storage320-launcher-resolution
-          mkdir -p /tmp/storage320-launcher-resolution/bin
-          PKG=/tmp/storage320-launcher-resolution/package
-          mkdir -p "$PKG/vendor/unified_agent_runtime"
-          cp dist/_storage320/STORAGE_PRODUCT_MVP_RC1/start_skill_validation.sh "$PKG/"
+          PKG=/tmp/storage320/STORAGE_PRODUCT_MVP_RC1
+          test -f "$PKG/start_skill_validation.sh"
+          test -f "$PKG/scripts/select_python.sh"
 
-          cat > /tmp/storage320-launcher-resolution/fake-python <<'EOF'
-          #!/bin/bash
-          printf '%s\n' "$0 $*" >> /tmp/storage320-launcher-resolution/invocations.log
-          exit 0
-          EOF
-          chmod +x /tmp/storage320-launcher-resolution/fake-python
-          printf '#!/bin/bash\nprintf "%s\\n" .\n' > /tmp/storage320-launcher-resolution/bin/dirname
-          chmod +x /tmp/storage320-launcher-resolution/bin/dirname
-
-          # python3 has priority when it is the only available interpreter.
-          cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python3
-          PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python3.log
-          grep -q '/python3 -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
-          echo "MACOS_PYTHON3_RESOLUTION=PASS"
-
-          # python is accepted as the fallback when python3 is unavailable.
-          rm /tmp/storage320-launcher-resolution/bin/python3
-          cp /tmp/storage320-launcher-resolution/fake-python /tmp/storage320-launcher-resolution/bin/python
-          : > /tmp/storage320-launcher-resolution/invocations.log
-          PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/python.log
-          grep -q '/python -m uvicorn storage_life.app:app' /tmp/storage320-launcher-resolution/invocations.log
-          echo "PYTHON_FALLBACK=PASS"
-
-          # No interpreter must fail before attempting to launch uvicorn.
-          rm /tmp/storage320-launcher-resolution/bin/python
-          : > /tmp/storage320-launcher-resolution/invocations.log
-          if PATH="/tmp/storage320-launcher-resolution/bin" /bin/bash "$PKG/start_skill_validation.sh" >/tmp/storage320-launcher-resolution/none.log 2>&1; then
-            echo "NO_PYTHON_FAIL_FAST=FAIL"
+          if grep -Eq '^[[:space:]]*exec[[:space:]].*uvicorn' "$PKG/start_skill_validation.sh"; then
+            echo "NO_EXEC_SHELL_REPLACEMENT=FAIL"
             exit 1
           fi
-          grep -q 'neither python3 nor python was found' /tmp/storage320-launcher-resolution/none.log
-          test ! -s /tmp/storage320-launcher-resolution/invocations.log
-          echo "NO_PYTHON_FAIL_FAST=PASS"
+          echo "NO_EXEC_SHELL_REPLACEMENT=PASS"
+
+          rm -rf "$PKG/.venv" /tmp/storage320-system-python
+          python -m venv /tmp/storage320-system-python
+          SYSTEM_PY=/tmp/storage320-system-python/bin/python3
+
+          if "$SYSTEM_PY" - <<'PY' >/dev/null 2>&1
+          import uvicorn
+          PY
+          then
+            echo "MACOS_SYSTEM_PYTHON_NO_UVICORN=FAIL"
+            exit 1
+          fi
+          echo "MACOS_SYSTEM_PYTHON_NO_UVICORN=PASS"
+
+          "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage320-system-before.txt
+
+          export PATH="/tmp/storage320-system-python/bin:/usr/bin:/bin"
+          export PYTHONPATH=""
+          cd "$PKG"
+
+          setsid bash ./start_skill_validation.sh >/tmp/storage320-safety.log 2>&1 &
+          LAUNCH_PID=$!
+
+          safety_cleanup() {
+            if kill -0 "$LAUNCH_PID" 2>/dev/null; then
+              kill -TERM -- "-$LAUNCH_PID" 2>/dev/null || kill -TERM "$LAUNCH_PID" 2>/dev/null || true
+              wait "$LAUNCH_PID" 2>/dev/null || true
+            fi
+          }
+          trap safety_cleanup EXIT
+
+          for i in $(seq 1 180); do
+            if /usr/bin/curl -fsS http://127.0.0.1:8765/api/health >/tmp/storage320-safety-health.json 2>/dev/null; then
+              break
+            fi
+            if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
+              echo "LOCAL_VENV_BOOTSTRAP_OR_START=FAIL"
+              cat /tmp/storage320-safety.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          test -x "$PKG/.venv/bin/python"
+          "$PKG/.venv/bin/python" - <<'PY'
+          import fastapi, uvicorn
+          PY
+          echo "LOCAL_VENV_BOOTSTRAP=PASS"
+
+          "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage320-system-after.txt
+          cmp /tmp/storage320-system-before.txt /tmp/storage320-system-after.txt
+          echo "SYSTEM_PYTHON_UNCHANGED=PASS"
+          echo "NO_GLOBAL_PIP_INSTALL=PASS"
+
+          /usr/bin/curl -fsS http://127.0.0.1:8765/api/health >/tmp/storage320-safety-health.json
+          /usr/bin/curl -fsS http://127.0.0.1:8765/ >/tmp/storage320-safety-home.html
+          /usr/bin/curl -fsS http://127.0.0.1:8765/api/product/skills/readiness >/tmp/storage320-safety-readiness.json
+          /usr/bin/curl -fsS http://127.0.0.1:8765/api/product/skills/real-golden >/tmp/storage320-safety-golden.json
+          echo "HEALTH=PASS"
+          echo "PRODUCT_HOME=PASS"
+          echo "SKILL_READINESS_API=PASS"
+          echo "REAL_GOLDEN_API=PASS"
+
+          "$PKG/.venv/bin/python" - <<'PY'
+          import json
+          from pathlib import Path
+          ready=json.loads(Path("/tmp/storage320-safety-readiness.json").read_text())
+          golden=json.loads(Path("/tmp/storage320-safety-golden.json").read_text())
+          assert ready["formal_knowledge_object_count"] == 1
+          assert ready["evidence_drilldown"]["status"] == "PASS"
+          assert golden["overall_status"] == "PARTIAL"
+          assert golden["cases"]["RG02"]["evidence_refs"] == ["EVD-98019c742313d72837696c0b"]
+          PY
+          echo "EVIDENCE_DRILLDOWN=PASS"
+
+          kill -INT -- "-$LAUNCH_PID"
+          set +e
+          wait "$LAUNCH_PID"
+          launch_status=$?
+          set -e
+          trap - EXIT
+
+          if [ "$launch_status" -ne 130 ] && [ "$launch_status" -ne 0 ]; then
+            echo "CTRL_C_RETURNS_PROMPT=FAIL status=$launch_status"
+            cat /tmp/storage320-safety.log || true
+            exit 1
+          fi
+          echo "CTRL_C_RETURNS_PROMPT=PASS"
+
+          sleep 1
+          if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
+            echo "NO_ORPHAN_PROCESS=FAIL"
+            exit 1
+          fi
+          echo "NO_ORPHAN_PROCESS=PASS"
+
+          grep -q 'python -m uvicorn storage_life.app:app' "$PKG/start_skill_validation.bat"
+          echo "WINDOWS_LAUNCHER_REGRESSION=PASS"
 
       - name: Upload candidate
         uses: actions/upload-artifact@v4
