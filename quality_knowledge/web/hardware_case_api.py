@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import perf_counter
 from typing import Any, Callable
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
@@ -98,8 +99,17 @@ def create_hardware_case_router(
             source = Path(temporary) / filename
             source.write_bytes(payload)
             try:
+                parse_started = perf_counter()
                 snapshot = parse_docx(source).to_snapshot()
+                parse_ms = max(0, int((perf_counter() - parse_started) * 1000))
+                markdown_started = perf_counter()
                 snapshot["markdown_view"] = build_markdown_view(snapshot)
+                markdown_ms = max(0, int((perf_counter() - markdown_started) * 1000))
+                metadata = snapshot.setdefault("metadata", {})
+                metadata["r1_latency_trace"] = {
+                    "PARSE_MS": parse_ms,
+                    "MARKDOWN_MS": markdown_ms,
+                }
                 return snapshot
             except (HardwareWordParseError, HardwareCaseMarkdownError) as error:
                 raise HTTPException(status_code=400, detail=error.code) from error
@@ -107,6 +117,7 @@ def create_hardware_case_router(
     @router.post("/r1/agent-extract")
     def r1_agent_extract(
         payload: dict[str, Any],
+        force_retry: bool = Query(default=False),
         x_hardware_case_role: str | None = Header(
             default=None, alias="X-Hardware-Case-Role"
         ),
@@ -119,7 +130,7 @@ def create_hardware_case_router(
             factory = build_hardware_case_r1_structurer
         try:
             structurer = factory()
-            result = run_r1_agent_extraction(payload, structurer)
+            result = run_r1_agent_extraction(payload, structurer, force_retry=force_retry)
             if r1_preview_store is not None:
                 result["preview"] = r1_preview_store.save(payload, result)
             return result
@@ -127,13 +138,22 @@ def create_hardware_case_router(
             raise HTTPException(status_code=400, detail=error.code) from error
         except Exception as error:
             code = str(getattr(error, "code", None) or "RUNTIME_EXECUTION_FAILED")
-            config_codes = {
-                "MODEL_LOCAL_CONFIG_REQUIRED",
-                "AGENT_CONFIG_REQUIRED",
-                "AGENT_ID_MISMATCH",
-            }
-            status = 503 if code in config_codes or "CONFIG" in code or "REQUIRED" in code else 502
-            raise HTTPException(status_code=status, detail=code) from error
+            from services.hardware_case_r1_runtime import map_r1_runtime_error
+            mapped = map_r1_runtime_error(code)
+            status = 503 if mapped == "RUNTIME_CONFIG_MISSING" else 502
+            raise HTTPException(
+                status_code=status,
+                detail={
+                    "pipeline_status": "CASE_EXTRACTION_FAILED",
+                    "failed_stage": "STAGE_A",
+                    "error_code": mapped,
+                    "raw_error_code": code,
+                    "run_id": None,
+                    "task_id": None,
+                    "provider_call_count": 0,
+                    "validation_retry_count": 0,
+                },
+            ) from error
 
     @router.get("/r1/previews")
     def r1_list_previews(
