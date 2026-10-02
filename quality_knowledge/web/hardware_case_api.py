@@ -214,6 +214,41 @@ def create_hardware_case_router(
             raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
         return item
 
+    @router.delete("/r1/previews/{preview_id}")
+    def r1_delete_preview(
+        preview_id: int,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        if not r1_preview_store.delete(preview_id):
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return {
+            "status": "PASS",
+            "preview_id": int(preview_id),
+            "deleted": True,
+            "scope": "LOCAL_GOLDEN_PREVIEW_ONLY",
+        }
+
+    @router.delete("/r1/previews")
+    def r1_clear_previews(
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        deleted_count = r1_preview_store.clear()
+        return {
+            "status": "PASS",
+            "deleted_count": deleted_count,
+            "scope": "LOCAL_GOLDEN_PREVIEW_ONLY",
+        }
+
     @router.get("")
     def search_cases(
         q: str = "",
