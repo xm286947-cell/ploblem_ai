@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-preview-p2">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-pipeline-v13">{% endblock %}
 {% block breadcrumb %}案例 Word 导入{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
@@ -11,7 +11,7 @@
     <div>
       <span class="hc-kicker">HARDWARE CASE · R1 GOLDEN KNOWLEDGE</span>
       <h1>案例 Word 导入</h1>
-      <p>上传 DOCX 先执行确定性 DocumentSnapshot + Identity，再生成 Markdown Agent View。Agent 仅在手动点击后通过 Unified Runtime 执行；本入口不做 Tree Mapping、Knowledge Lookup、Publish 或 OCR/Vision。</p>
+      <p>上传 DOCX 先执行确定性 DocumentSnapshot + Identity，再生成 Markdown Agent View。V1.3 使用独立 Stage A Case Extraction 与 Stage B Reusable Knowledge Runtime Run；Conflict / Review / Provenance / 默认状态全部本地确定。本入口不做 Tree Mapping、Knowledge Lookup、Publish 或 OCR/Vision。</p>
     </div>
   </section>
 
@@ -61,20 +61,30 @@
   <section class="hc-card" data-markdown-view hidden>
     <div class="hc-card-head"><div><h2>Markdown Agent View</h2><p>hardware-markdown-view/v1；Paragraph 原样保留、Table 转 Markdown、每个 Block 带 Source Locator Marker。</p></div></div>
     <pre data-markdown-preview></pre>
-    <button class="hc-button primary" type="button" data-run-agent>Run Agent Extraction</button>
-    <p role="status" data-agent-message>尚未执行 Agent。</p>
+    <button class="hc-button primary" type="button" data-run-agent>Run V1.3 Pipeline</button>
+    <button class="hc-button" type="button" data-force-retry>Force Retry（新 Run）</button>
+    <p role="status" data-agent-message>尚未执行 Agent Pipeline。</p>
   </section>
 
   <section class="hc-card" data-agent-result hidden>
-    <div class="hc-card-head"><div><h2>Agent Structured Result</h2><p>hardware-r1-extraction/v2 候选抽取与 Evidence 校验；不落业务表、不自动发布。</p></div></div>
+    <div class="hc-card-head"><div><h2>V1.3 Pipeline Result</h2><p>Stage A / Local Validation + Conflict / Stage B / Local Reusable Validation；Candidate only。</p></div></div>
     <div class="hc-case-meta">
+      <span>Pipeline: <strong data-pipeline-status>—</strong></span>
       <span>Agent Status: <strong data-agent-status>—</strong></span>
+      <span>Failed Stage: <strong data-failed-stage>—</strong></span>
+      <span>Error Code: <strong data-error-code>—</strong></span>
+      <span>Run ID: <strong data-run-id>—</strong></span>
+      <span>Task ID: <strong data-task-id>—</strong></span>
+      <span>Provider Calls: <strong data-provider-calls>—</strong></span>
+      <span>Validation Retry: <strong data-validation-retries>—</strong></span>
       <span>Evidence Gate: <strong data-evidence-status>—</strong></span>
-      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span><span>Fabricated Block: <strong data-fabricated-block-count>—</strong></span>
+      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span>
+      <span>Fabricated Block: <strong data-fabricated-block-count>—</strong></span>
     </div>
     <h3>Structured Facts</h3><div data-agent-facts></div>
     <h3>Evidence Blocks</h3><div data-agent-evidence></div>
     <p><strong>Validation Errors</strong>：<span data-agent-errors>—</span></p>
+    <details><summary>Latency Trace</summary><pre data-latency-trace></pre></details>
     <details><summary>完整 Agent Result JSON</summary><pre data-raw-agent-result></pre></details>
   </section>
   <section class="hc-card" data-golden-knowledge hidden>
