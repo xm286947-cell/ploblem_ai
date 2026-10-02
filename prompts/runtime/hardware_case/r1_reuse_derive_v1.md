@@ -41,9 +41,22 @@ Rules:
    aggregate path when a reusable rule depends on the parameter set as a whole;
    do not invent array-index paths.
 6. If support is insufficient use MISSING / AMBIGUOUS / UNSUPPORTED.
-7. Do not output Conflict, Review, Provenance, confidence, warnings, publish
+7. SOURCE-GROUNDED TOPOLOGY:
+   Reusable Knowledge may generalize engineering principles, but MUST NOT
+   introduce circuit topology, connection nodes, pin relationships, component
+   placement, or wiring details that are not explicitly supported by source
+   evidence.
+   Engineering plausibility is NOT source evidence.
+   If topology is unavailable because an image is absent, redacted, or only
+   represented by a placeholder/caption:
+   - do not reconstruct it;
+   - do not infer it from engineering convention;
+   - use the least-specific source-supported wording.
+   When evidence cannot support a specific topology, prefer omission or generic
+   wording over inference.
+8. Do not output Conflict, Review, Provenance, confidence, warnings, publish
    state, or Source Fact.
-8. Return strict JSON only.
+9. Return strict JSON only.
 
 Reusable field shape:
 {

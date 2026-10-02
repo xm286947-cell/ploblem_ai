@@ -6,20 +6,28 @@ import hashlib
 import json
 import sqlite3
 
-from services.hardware_case_markdown_agent import run_r1_agent_extraction
+from services.hardware_case_markdown_agent import (
+    KNOWLEDGE_OBJECT_VERSION,
+    run_r1_agent_extraction,
+)
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_runtime import (
     R1_CACHE_KEY_VERSION,
     R1_PIPELINE_VERSION,
+    R1_STAGE_A_CONFIG,
     R1_STAGE_A_SCHEMA_VERSION,
     R1_STAGE_A_VALIDATOR_VERSION,
+    R1_STAGE_B_CONFIG,
     R1_STAGE_B_SCHEMA_VERSION,
     R1_STAGE_B_VALIDATOR_VERSION,
+    HARDWARE_R1_STAGE_A_SCHEMA,
+    HARDWARE_R1_STAGE_B_SCHEMA,
     _R1StageCache,
     _attempt_metrics,
     _stage_cache_key_v2,
     map_r1_runtime_error,
 )
+from runtime.config import AgentConfigLoader
 
 
 FACT_FIELDS = (
@@ -1058,6 +1066,110 @@ def test_v133_stage_b_prompt_freezes_canonical_derived_field_paths():
     assert "engineering_context.component_or_device" in prompt
     assert "Never append .value" in prompt
 
+
+def test_v15_source_grounded_topology_contract_and_cache_identity():
+    root = Path(__file__).resolve().parents[1]
+    prompt = (
+        root / "prompts/runtime/hardware_case/r1_reuse_derive_v1.md"
+    ).read_text(encoding="utf-8")
+    config_text = (
+        root / "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
+    ).read_text(encoding="utf-8")
+
+    required_contract = (
+        "Reusable Knowledge may generalize engineering principles",
+        "MUST NOT introduce circuit topology, connection nodes, pin relationships",
+        "component placement, or wiring details that are not explicitly supported by source",
+        "Engineering plausibility is NOT source evidence.",
+        "If topology is unavailable because an image is absent, redacted, or only",
+        "represented by a placeholder/caption",
+        "do not reconstruct it",
+        "do not infer it from engineering convention",
+        "use the least-specific source-supported wording",
+        "prefer omission or generic wording over inference",
+    )
+    normalized_prompt = " ".join(prompt.split())
+    assert all(statement in normalized_prompt for statement in required_contract)
+
+    source = "增加一个并联的 0.1uF 电容，吸收部分干扰脉冲。"
+    allowed = "增加并联 0.1uF 电容吸收部分干扰脉冲。"
+    assert "并联的 0.1uF 电容" in source
+    assert allowed == "增加并联 0.1uF 电容吸收部分干扰脉冲。"
+    assert "基极" not in allowed
+    assert "B-E" not in allowed
+
+    model_profiles = {
+        "active_model": "test",
+        "models": {
+            "test": {
+                "provider": "openai_compatible",
+                "base_url": "https://example.invalid/v1",
+                "model": "test-model",
+                "temperature": 0,
+                "max_tokens": 64,
+            }
+        },
+    }
+    loader = AgentConfigLoader(
+        root=root,
+        model_profiles=model_profiles,
+        schemas={
+            "HardwareCaseR1CaseExtractionV13": HARDWARE_R1_STAGE_A_SCHEMA,
+            "HardwareCaseR1ReusableKnowledgeV13": HARDWARE_R1_STAGE_B_SCHEMA,
+        },
+        environ={},
+    )
+    stage_a = loader.load(R1_STAGE_A_CONFIG)
+    stage_b = loader.load(R1_STAGE_B_CONFIG)
+
+    assert stage_a.definition.version == "v1.5.0"
+    assert stage_a.prompt.version == "HC-R1-CASE-EXTRACT-V1.5.0"
+    assert stage_a.output_schema.version == "v1"
+    assert stage_a.config_hash == (
+        "453ef92d14b9bf4d946dbd08e71e646a4467e944cea56ef36381137c62299ca6"
+    )
+
+    assert stage_b.definition.version == "v1.5.1"
+    assert stage_b.prompt.version == "HC-R1-REUSE-DERIVE-V1.3.3.2"
+    assert stage_b.output_schema.version == "v1"
+    assert stage_b.config_hash != (
+        "2a83976ff1d258483b9c849bc6e98c5465b2532068a8a66a6e27de6b8933ab39"
+    )
+    assert "timeout_seconds: 120" in config_text
+    assert "transport_attempts: 2" in config_text
+    assert "max_provider_calls_per_step: 2" in config_text
+
+    cache_material = {
+        "stage": "STAGE_B",
+        "source_id": "a0162-source",
+        "input_hash_name": "stage_b_input_hash",
+        "input_hash": "same-stage-b-input",
+        "pipeline_version": R1_PIPELINE_VERSION,
+        "validator_version": R1_STAGE_B_VALIDATOR_VERSION,
+        "schema_version": R1_STAGE_B_SCHEMA_VERSION,
+    }
+    old_stage_b_key = _stage_cache_key_v2(
+        **cache_material,
+        agent_config_hash=(
+            "2a83976ff1d258483b9c849bc6e98c5465b2532068a8a66a6e27de6b8933ab39"
+        ),
+        prompt_version="HC-R1-REUSE-DERIVE-V1.3.3.1",
+    )
+    new_stage_b_key = _stage_cache_key_v2(
+        **cache_material,
+        agent_config_hash=stage_b.config_hash,
+        prompt_version=stage_b.prompt.version,
+    )
+    assert old_stage_b_key != new_stage_b_key
+
+    assert R1_STAGE_A_SCHEMA_VERSION == "HardwareCaseR1CaseExtractionV13/v1"
+    assert R1_STAGE_A_VALIDATOR_VERSION == "hardware-r1-stage-a-validator/v1"
+    assert R1_STAGE_B_SCHEMA_VERSION == "HardwareCaseR1ReusableKnowledgeV13/v1"
+    assert R1_STAGE_B_VALIDATOR_VERSION == "hardware-r1-stage-b-validator/v2"
+    assert R1_CACHE_KEY_VERSION == "v2"
+    assert KNOWLEDGE_OBJECT_VERSION == "hardware-case-knowledge-object/v1"
+
+
 def test_v14_attempt_metrics_separates_transport_and_validation_retries(tmp_path):
     db = tmp_path / "runtime_metrics.db"
     with sqlite3.connect(db) as connection:
@@ -1321,4 +1433,3 @@ def test_v15_knowledge_object_contract_remains_v1():
     assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
     assert result["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"
     assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
-
