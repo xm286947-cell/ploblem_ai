@@ -375,7 +375,7 @@ R1_STAGE_A_CONFIG = "config/runtime/agents/hardware_case.r1_case_extract.yaml"
 R1_STAGE_B_CONFIG = "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
 R1_STAGE_A_SCHEMA_REF = "HardwareCaseR1CaseExtractionV13"
 R1_STAGE_B_SCHEMA_REF = "HardwareCaseR1ReusableKnowledgeV13"
-R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3"
+R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.1"
 
 _V13_STATUS_ENUM = ["EXTRACTED", "MISSING", "AMBIGUOUS", "UNSUPPORTED"]
 _V13_MODEL_FIELD_SCHEMA: dict[str, Any] = {
