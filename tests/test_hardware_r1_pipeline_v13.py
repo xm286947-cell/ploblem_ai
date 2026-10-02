@@ -16,6 +16,7 @@ from services.hardware_case_r1_runtime import (
     R1_STAGE_B_SCHEMA_VERSION,
     R1_STAGE_B_VALIDATOR_VERSION,
     _R1StageCache,
+    _attempt_metrics,
     _stage_cache_key_v2,
     map_r1_runtime_error,
 )
@@ -223,7 +224,7 @@ class FakePipeline:
         self.stage_b_input = None
         self.force_flags = []
 
-    def run_stage_a(self, payload, *, source_id, markdown_hash, force_retry=False):
+    def run_stage_a(self, payload, *, source_id, markdown_hash, force_retry=False, **kwargs):
         self.force_flags.append(("A", force_retry))
         if self.fail_a:
             return {
@@ -246,7 +247,7 @@ class FakePipeline:
             "runtime": runtime_meta("hardware_case.r1_case_extract", "run-a"),
         }
 
-    def run_stage_b(self, payload, *, source_id, markdown_hash, force_retry=False):
+    def run_stage_b(self, payload, *, source_id, markdown_hash, force_retry=False, **kwargs):
         self.force_flags.append(("B", force_retry))
         self.stage_b_input = payload
         if self.fail_b:
@@ -543,11 +544,31 @@ class FoundationCachePipeline:
         self.stage_b_input = None
 
     @staticmethod
-    def _meta(agent, run, *, cache_hit=False, rejected=False, calls=1, stage_b_input_hash=None):
+    def _meta(
+        agent,
+        run,
+        *,
+        cache_hit=False,
+        rejected=False,
+        calls=1,
+        stage_b_input_hash=None,
+        execution_mode=None,
+    ):
         meta = runtime_meta(agent, run)
         meta.update(
             {
+                "execution_mode": execution_mode or (
+                    "CACHE_HIT" if cache_hit else "PROVIDER_RUN"
+                ),
                 "provider_call_count": calls,
+                "initial_call_count": 0 if calls == 0 else 1,
+                "transport_retry_count": 0,
+                "cache_recovery_call_count": (
+                    calls if execution_mode == "CACHE_RECOVERY" else 0
+                ),
+                "force_retry_call_count": (
+                    calls if execution_mode == "FORCE_FULL_RUN" else 0
+                ),
                 "cache_hit": cache_hit,
                 "cache_rejected_by_validator": rejected,
                 "cached_from_run_id": run if cache_hit else None,
@@ -567,6 +588,8 @@ class FoundationCachePipeline:
         force_retry=False,
         bypass_cache=False,
         cache_rejected_by_validator=False,
+        require_cache_hit=False,
+        execution_mode=None,
     ):
         if self.cache_a is not None and not force_retry and not bypass_cache:
             return {
@@ -577,6 +600,21 @@ class FoundationCachePipeline:
                     "run-a-cache",
                     cache_hit=True,
                     calls=0,
+                    execution_mode="CACHE_HIT",
+                ),
+                "cache_key": "cache-a",
+                "cache_write_pending": False,
+            }
+        if require_cache_hit:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "STAGE_LAST_GOOD_CACHE_REQUIRED",
+                "runtime": self._meta(
+                    "hardware_case.r1_case_extract",
+                    "run-a-cache-miss",
+                    calls=0,
+                    execution_mode="CACHE_REQUIRED_MISS",
                 ),
                 "cache_key": "cache-a",
                 "cache_write_pending": False,
@@ -592,6 +630,7 @@ class FoundationCachePipeline:
                     "run-a-failed",
                     rejected=cache_rejected_by_validator,
                     calls=1,
+                    execution_mode=execution_mode,
                 ),
                 "cache_key": "cache-a",
                 "cache_write_pending": False,
@@ -608,6 +647,7 @@ class FoundationCachePipeline:
                 "run-a-provider",
                 rejected=cache_rejected_by_validator,
                 calls=1,
+                execution_mode=execution_mode,
             ),
             "cache_key": "cache-a",
             "cache_write_pending": True,
@@ -622,6 +662,8 @@ class FoundationCachePipeline:
         force_retry=False,
         bypass_cache=False,
         cache_rejected_by_validator=False,
+        require_cache_hit=False,
+        execution_mode=None,
     ):
         self.stage_b_input = deepcopy(payload)
         input_hash = hashlib.sha256(
@@ -642,6 +684,22 @@ class FoundationCachePipeline:
                     cache_hit=True,
                     calls=0,
                     stage_b_input_hash=input_hash,
+                    execution_mode="CACHE_HIT",
+                ),
+                "cache_key": "cache-b",
+                "cache_write_pending": False,
+            }
+        if require_cache_hit:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "STAGE_LAST_GOOD_CACHE_REQUIRED",
+                "runtime": self._meta(
+                    "hardware_case.r1_reuse_derive",
+                    "run-b-cache-miss",
+                    calls=0,
+                    stage_b_input_hash=input_hash,
+                    execution_mode="CACHE_REQUIRED_MISS",
                 ),
                 "cache_key": "cache-b",
                 "cache_write_pending": False,
@@ -658,6 +716,7 @@ class FoundationCachePipeline:
                     rejected=cache_rejected_by_validator,
                     calls=1,
                     stage_b_input_hash=input_hash,
+                    execution_mode=execution_mode,
                 ),
                 "cache_key": "cache-b",
                 "cache_write_pending": False,
@@ -675,6 +734,7 @@ class FoundationCachePipeline:
                 rejected=cache_rejected_by_validator,
                 calls=1,
                 stage_b_input_hash=input_hash,
+                execution_mode=execution_mode,
             ),
             "cache_key": "cache-b",
             "cache_write_pending": True,
@@ -702,7 +762,6 @@ class FoundationCachePipeline:
         else:
             raise AssertionError(stage)
         return True
-
 
 def _translated_invalid_stage_a():
     payload = stage_a_payload()
@@ -998,4 +1057,149 @@ def test_v133_stage_b_prompt_freezes_canonical_derived_field_paths():
     assert "facts.root_cause" in prompt
     assert "engineering_context.component_or_device" in prompt
     assert "Never append .value" in prompt
+
+def test_v14_attempt_metrics_separates_transport_and_validation_retries(tmp_path):
+    db = tmp_path / "runtime_metrics.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TABLE runtime_run (run_id TEXT PRIMARY KEY, task_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE runtime_step_run (step_run_id TEXT PRIMARY KEY, run_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE runtime_attempt (record_json TEXT, step_run_id TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO runtime_run(run_id, task_id) VALUES ('run-1', 'task-1')"
+        )
+        connection.execute(
+            "INSERT INTO runtime_step_run(step_run_id, run_id) VALUES ('step-1', 'run-1')"
+        )
+        rows = [
+            {
+                "started_at": "2026-10-02T00:00:00+00:00",
+                "completed_at": "2026-10-02T00:00:01+00:00",
+                "step_attempt_no": 1,
+                "validation_cycle_no": 1,
+                "transport_attempt_no": 1,
+                "execution_metrics": {"prompt_tokens": 100, "completion_tokens": 20},
+            },
+            {
+                "started_at": "2026-10-02T00:00:01+00:00",
+                "completed_at": "2026-10-02T00:00:02+00:00",
+                "step_attempt_no": 1,
+                "validation_cycle_no": 1,
+                "transport_attempt_no": 2,
+                "execution_metrics": {"prompt_tokens": 100, "completion_tokens": 0},
+            },
+            {
+                "started_at": "2026-10-02T00:00:02+00:00",
+                "completed_at": "2026-10-02T00:00:03+00:00",
+                "step_attempt_no": 1,
+                "validation_cycle_no": 2,
+                "transport_attempt_no": 1,
+                "execution_metrics": {"prompt_tokens": 110, "completion_tokens": 25},
+            },
+        ]
+        for record in rows:
+            connection.execute(
+                "INSERT INTO runtime_attempt(record_json, step_run_id) VALUES (?, 'step-1')",
+                (json.dumps(record),),
+            )
+
+    metrics = _attempt_metrics(db, "task-1")
+    assert metrics["observed_provider_call_count"] == 3
+    assert metrics["initial_call_count"] == 1
+    assert metrics["transport_retry_count"] == 1
+    assert metrics["validation_retry_count"] == 1
+    assert metrics["provider_call_ms"] == [1000, 1000, 1000]
+    assert metrics["prompt_tokens"] == 310
+    assert metrics["completion_tokens"] == 45
+
+
+def test_v14_retry_failed_stage_b_reuses_stage_a_last_good_and_only_calls_b():
+    pipeline = FoundationCachePipeline(fail_b=True)
+
+    first = run_r1_agent_extraction(snapshot(), pipeline)
+    assert first["failed_stage"] == "STAGE_B"
+    assert pipeline.cache_a is not None
+    assert pipeline.cache_b is None
+    assert pipeline.provider_calls == {"A": 1, "B": 1}
+
+    pipeline.fail_b = False
+    pipeline.provider_calls = {"A": 0, "B": 0}
+    retried = run_r1_agent_extraction(
+        snapshot(),
+        pipeline,
+        retry_failed_stage="STAGE_B",
+    )
+
+    assert retried["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert retried["execution_mode"] == "RETRY_FAILED_STAGE"
+    assert pipeline.provider_calls == {"A": 0, "B": 1}
+    assert retried["latency_trace"]["STAGE_A_EXECUTION_MODE"] == "CACHE_HIT"
+    assert retried["latency_trace"]["STAGE_B_EXECUTION_MODE"] == "RETRY_FAILED_STAGE"
+    assert retried["latency_trace"]["STAGE_A_PROVIDER_CALL_COUNT"] == 0
+    assert retried["latency_trace"]["STAGE_B_PROVIDER_CALL_COUNT"] == 1
+
+
+def test_v14_retry_stage_b_fails_closed_without_stage_a_last_good():
+    pipeline = FoundationCachePipeline()
+    result = run_r1_agent_extraction(
+        snapshot(),
+        pipeline,
+        retry_failed_stage="STAGE_B",
+    )
+
+    assert result["pipeline_status"] == "CASE_EXTRACTION_FAILED"
+    assert result["error_code"] == "STAGE_A_LAST_GOOD_REQUIRED_FOR_STAGE_B_RETRY"
+    assert pipeline.provider_calls == {"A": 0, "B": 0}
+
+
+def test_v14_force_full_run_explicitly_bypasses_both_stage_caches():
+    pipeline = FoundationCachePipeline(
+        cache_a=stage_a_payload(),
+        cache_b=stage_b_payload(),
+    )
+    result = run_r1_agent_extraction(snapshot(), pipeline, force_retry=True)
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert result["execution_mode"] == "FORCE_FULL_RUN"
+    assert pipeline.provider_calls == {"A": 1, "B": 1}
+    assert result["latency_trace"]["STAGE_A_EXECUTION_MODE"] == "FORCE_FULL_RUN"
+    assert result["latency_trace"]["STAGE_B_EXECUTION_MODE"] == "FORCE_FULL_RUN"
+
+
+def test_v14_stage_trace_exposes_provider_attribution_fields():
+    pipeline = FoundationCachePipeline()
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+    trace = result["latency_trace"]
+
+    required = {
+        "EXECUTION_TRACE_VERSION",
+        "EXECUTION_MODE",
+        "STAGE_A_EXECUTION_MODE",
+        "STAGE_A_PROVIDER_CALL_COUNT",
+        "STAGE_A_INITIAL_CALL_COUNT",
+        "STAGE_A_TRANSPORT_RETRY_COUNT",
+        "STAGE_A_VALIDATION_RETRY_COUNT",
+        "STAGE_A_CACHE_RECOVERY_CALL_COUNT",
+        "STAGE_A_FORCE_RETRY_CALL_COUNT",
+        "STAGE_A_TOTAL_MS",
+        "STAGE_A_PROMPT_TOKENS",
+        "STAGE_A_COMPLETION_TOKENS",
+        "STAGE_B_EXECUTION_MODE",
+        "STAGE_B_PROVIDER_CALL_COUNT",
+        "STAGE_B_INITIAL_CALL_COUNT",
+        "STAGE_B_TRANSPORT_RETRY_COUNT",
+        "STAGE_B_VALIDATION_RETRY_COUNT",
+        "STAGE_B_CACHE_RECOVERY_CALL_COUNT",
+        "STAGE_B_FORCE_RETRY_CALL_COUNT",
+        "STAGE_B_TOTAL_MS",
+        "STAGE_B_PROMPT_TOKENS",
+        "STAGE_B_COMPLETION_TOKENS",
+    }
+    assert required.issubset(trace)
+    assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.4"
 
