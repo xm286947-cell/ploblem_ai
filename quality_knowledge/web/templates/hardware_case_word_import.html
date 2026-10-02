@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-preview-v132">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-execution-v14">{% endblock %}
 {% block breadcrumb %}案例 Word 导入{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
@@ -64,13 +64,14 @@
   <section class="hc-card" data-markdown-view hidden>
     <div class="hc-card-head"><div><h2>Markdown Agent View</h2><p>hardware-markdown-view/v1；Paragraph 原样保留、Table 转 Markdown、每个 Block 带 Source Locator Marker。</p></div></div>
     <pre data-markdown-preview></pre>
-    <button class="hc-button primary" type="button" data-run-agent>Run Agent Extraction · V1.3 Pipeline</button>
-    <button class="hc-button" type="button" data-force-retry>Force Retry（新 Run）</button>
+    <button class="hc-button primary" type="button" data-run-agent>Run / Resume Agent</button>
+    <button class="hc-button" type="button" data-retry-failed-stage>Retry Failed Stage</button>
+    <button class="hc-button" type="button" data-force-full-run>Force Full Run</button>
     <p role="status" data-agent-message>尚未执行 Agent Pipeline。</p>
   </section>
 
   <section class="hc-card" data-agent-result hidden>
-    <div class="hc-card-head"><div><h2>V1.3 Pipeline Result</h2><p>Stage A / Local Validation + Conflict / Stage B / Local Reusable Validation；Candidate only。</p></div></div>
+    <div class="hc-card-head"><div><h2>V1.4 Pipeline Result</h2><p>Stage-level execution attribution + selective retry；Knowledge Contract unchanged；Candidate only。</p></div></div>
     <div class="hc-case-meta">
       <span>Pipeline: <strong data-pipeline-status>—</strong></span>
       <span>Agent Status: <strong data-agent-status>—</strong></span>
@@ -78,11 +79,18 @@
       <span>Error Code: <strong data-error-code>—</strong></span>
       <span>Run ID: <strong data-run-id>—</strong></span>
       <span>Task ID: <strong data-task-id>—</strong></span>
+      <span>Execution Mode: <strong data-execution-mode>—</strong></span>
       <span>Provider Calls: <strong data-provider-calls>—</strong></span>
       <span>Validation Retry: <strong data-validation-retries>—</strong></span>
       <span>Evidence Gate: <strong data-evidence-status>—</strong></span>
       <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span>
       <span>Fabricated Block: <strong data-fabricated-block-count>—</strong></span>
+    </div>
+    <h3>Stage Execution Summary</h3>
+    <div class="hc-case-grid">
+      <article class="hc-case-item"><div><h3>Stage A · Case Extraction</h3><div data-stage-a-summary>—</div></div></article>
+      <article class="hc-case-item"><div><h3>Stage B · Reusable Knowledge</h3><div data-stage-b-summary>—</div></div></article>
+      <article class="hc-case-item"><div><h3>Total</h3><div data-execution-total-summary>—</div></div></article>
     </div>
     <h3>Structured Facts</h3><div data-agent-facts></div>
     <h3>Evidence Blocks</h3><div data-agent-evidence></div>
@@ -107,4 +115,4 @@
 
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-preview-v132"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-execution-v14"></script>{% endblock %}
