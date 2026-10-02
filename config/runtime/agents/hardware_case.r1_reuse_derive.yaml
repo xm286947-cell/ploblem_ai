@@ -1,5 +1,5 @@
 agent_id: hardware_case.r1_reuse_derive
-version: v1.3.3.1
+version: v1.5.0
 label: Hardware R1 Stage B Reusable Knowledge
 
 prompt:
@@ -11,7 +11,7 @@ output_schema:
   version: v1
 
 execution:
-  timeout_seconds: 90
+  timeout_seconds: 120
   retry:
     transport_attempts: 2
     validation_attempts: 2
