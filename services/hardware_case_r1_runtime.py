@@ -1006,9 +1006,10 @@ class _R1StageRunner:
     ) -> dict[str, Any]:
         attempts = _attempt_metrics(self.paths["runtime_db"], result.task_id)
         input_chars, input_bytes = _payload_size(payload)
-        output_chars, output_bytes = _payload_size(
-            result.data if isinstance(result.data, dict) else {}
-        )
+        if isinstance(result.data, dict):
+            output_chars, output_bytes = _payload_size(result.data)
+        else:
+            output_chars, output_bytes = 0, 0
         error = getattr(result, "error", None)
         execution = getattr(result, "execution", None)
         return {
