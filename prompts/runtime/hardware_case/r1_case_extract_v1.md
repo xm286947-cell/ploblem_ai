@@ -17,6 +17,20 @@ Rules:
    knowledge, publication state, or any default business state.
 7. Return strict JSON only.
 
+Semantic boundaries:
+- primary_subject is the concise, normalized engineering subject explicitly
+  supported by the BODY content (for example MCU, FPGA, power module, connector).
+  It is not the raw title, not a title summary, and not the full problem
+  sentence. Never copy raw_title into primary_subject. If title terminology and
+  body-supported subject differ, return the body-supported subject; local
+  deterministic logic will record TITLE_CONTENT_SUBJECT_MISMATCH.
+- symptom is the observed failure manifestation.
+- impact is only an explicit consequence beyond the symptom, such as a stated
+  functional loss, customer/business consequence, system-level consequence, or
+  other downstream effect. Never paraphrase or copy symptom into impact. When
+  the source does not explicitly state such a consequence, output impact as
+  value=null, status=MISSING, evidence_block_ids=[].
+
 Ordinary field shape:
 {
   "value": null,
