@@ -215,3 +215,69 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
     reopened = client.get("/api/v2/hardware-cases/r1/previews/1", headers=MAINTAINER)
     assert reopened.status_code == 200
     assert reopened.json()["preview_id"] == 1
+
+def test_r1_preview_cleanup_api_is_local_only_and_empty_clear_is_idempotent(tmp_path: Path):
+    client = _client(tmp_path)
+    store = client.app.state.hardware_r1_preview_store
+
+    source_root = tmp_path / "sources"
+    source_root.mkdir(parents=True, exist_ok=True)
+    preserved_word = source_root / "A0152-preserved.docx"
+    preserved_word.write_bytes(b"word-source-sentinel")
+
+    hardware_db = tmp_path / "hardware.db"
+    hardware_before = hardware_db.read_bytes()
+
+    preview_snapshot = {
+        "snapshot_version": "hardware-document-snapshot/v1",
+        "source": {"source_id": "a" * 64, "file_name": "A0152-preserved.docx"},
+        "identity": {
+            "source_id": "a" * 64,
+            "business_case_id": "A0152",
+            "raw_title": "CPU_串口输出配置",
+            "identity_status": "PARSED",
+            "warnings": [],
+        },
+        "structure": {
+            "blocks": [
+                {"block_id": "B1", "block_type": "PARAGRAPH", "text": "MCU"}
+            ]
+        },
+    }
+    saved1 = store.save(preview_snapshot, {"status": "PASS", "runtime": {"run_id": "run-1"}})
+    saved2 = store.save(preview_snapshot, {"status": "PASS", "runtime": {"run_id": "run-2"}})
+
+    blocked = client.delete(
+        f"/api/v2/hardware-cases/r1/previews/{saved1['preview_id']}"
+    )
+    assert blocked.status_code == 403
+
+    deleted = client.delete(
+        f"/api/v2/hardware-cases/r1/previews/{saved1['preview_id']}",
+        headers=MAINTAINER,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["scope"] == "LOCAL_GOLDEN_PREVIEW_ONLY"
+    assert store.by_id(saved1["preview_id"]) is None
+    assert store.by_id(saved2["preview_id"]) is not None
+
+    cleared = client.delete(
+        "/api/v2/hardware-cases/r1/previews",
+        headers=MAINTAINER,
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted_count"] == 1
+    assert store.list(limit=10) == []
+
+    empty = client.delete(
+        "/api/v2/hardware-cases/r1/previews",
+        headers=MAINTAINER,
+    )
+    assert empty.status_code == 200
+    assert empty.json()["deleted_count"] == 0
+
+    assert preserved_word.read_bytes() == b"word-source-sentinel"
+    assert hardware_db.read_bytes() == hardware_before
+    assert preview_snapshot["source"]["source_id"] == "a" * 64
+    assert preview_snapshot["identity"]["raw_title"] == "CPU_串口输出配置"
+
