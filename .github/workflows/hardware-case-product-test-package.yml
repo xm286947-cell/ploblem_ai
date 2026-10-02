@@ -117,7 +117,7 @@ jobs:
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
-          assert manifest["runtime"]["r1_pipeline_version"] == "hardware-r1-agent-pipeline/v1.3"
+          assert manifest["runtime"]["r1_pipeline_version"] == "hardware-r1-agent-pipeline/v1.3.1"
           assert manifest["runtime"]["r1_stage_a_agent_id"] == "hardware_case.r1_case_extract"
           assert manifest["runtime"]["r1_stage_a_schema"] == "HardwareCaseR1CaseExtractionV13"
           assert manifest["runtime"]["r1_stage_b_agent_id"] == "hardware_case.r1_reuse_derive"
