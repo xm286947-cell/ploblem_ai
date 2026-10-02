@@ -62,13 +62,23 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     assert "HARDWARE CASE · R1 GOLDEN KNOWLEDGE" in page.text
     assert "Upload → Parse → Inspect" in page.text
     assert "Markdown Agent View" in page.text
-    assert "Run Agent Extraction" in page.text
+    assert "Run / Resume Agent" in page.text
+    assert "Retry Failed Stage" in page.text
+    assert "Force Full Run" in page.text
+    assert "Stage Execution Summary" in page.text
     assert "Golden Knowledge Preview" in page.text
 
     asset = client.get("/p0/static/hardware_case_word_import.js")
     assert asset.status_code == 200
     assert "/r1/word-snapshot" in asset.text
     assert "/r1/agent-extract" in asset.text
+    assert "force_full_run=true" in asset.text
+    assert "retry_failed_stage=" in asset.text
+    assert "Transport Retry" in asset.text
+    assert "Validation Retry" in asset.text
+    assert "Recovery Calls" in asset.text
+    assert "data-stage-a-summary" in page.text
+    assert "data-stage-b-summary" in page.text
     assert "/r1/previews?limit=10" in asset.text
     assert "autoRestore:true" in asset.text
     assert "data-delete-preview-id" in asset.text
@@ -280,4 +290,23 @@ def test_r1_preview_cleanup_api_is_local_only_and_empty_clear_is_idempotent(tmp_
     assert hardware_db.read_bytes() == hardware_before
     assert preview_snapshot["source"]["source_id"] == "a" * 64
     assert preview_snapshot["identity"]["raw_title"] == "CPU_串口输出配置"
+
+def test_v14_agent_execution_mode_query_contract_is_fail_closed(tmp_path: Path):
+    client = _client(tmp_path)
+
+    conflict = client.post(
+        "/api/v2/hardware-cases/r1/agent-extract?force_full_run=true&retry_failed_stage=STAGE_B",
+        headers=MAINTAINER,
+        json={},
+    )
+    assert conflict.status_code == 400
+    assert conflict.json()["detail"] == "EXECUTION_MODE_CONFLICT"
+
+    invalid = client.post(
+        "/api/v2/hardware-cases/r1/agent-extract?retry_failed_stage=UNKNOWN",
+        headers=MAINTAINER,
+        json={},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "RETRY_FAILED_STAGE_INVALID"
 
