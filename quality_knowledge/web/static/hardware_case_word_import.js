@@ -6,6 +6,8 @@
   const locator=value=>esc(JSON.stringify(value||{}));
   const empty='<div class="hc-empty">无</div>';
   let currentSnapshot=null;
+  let currentPreviewId=null;
+  const cleanupConfirm='仅删除本地 Golden Preview 测试记录，不删除原始 Word、Source Fact 或正式知识。';
   function rows(items,renderer){return items&&items.length?items.map(renderer).join(''):empty}
   function render(snapshot){
     currentSnapshot=snapshot;
@@ -79,6 +81,7 @@
       const response=await fetch(api+'/r1/previews/'+encodeURIComponent(previewId),{headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
       let body={};try{body=await response.json()}catch(_){}
       if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_LOAD_FAILED'));
+      currentPreviewId=String(body.preview_id??previewId);
       currentSnapshot=body.snapshot||null;
       if(currentSnapshot)render(currentSnapshot);
       renderAgent(body.result||{});
@@ -87,15 +90,50 @@
       $('[data-preview-message]').textContent='Preview 加载失败：'+error.message;
     }
   }
+  async function deletePreview(previewId){
+    if(!window.confirm(cleanupConfirm))return;
+    $('[data-preview-message]').textContent='正在删除 Preview #'+previewId+'…';
+    try{
+      const response=await fetch(api+'/r1/previews/'+encodeURIComponent(previewId),{method:'DELETE',headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
+      let body={};try{body=await response.json()}catch(_){}
+      if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_DELETE_FAILED'));
+      if(currentPreviewId===String(previewId)){
+        currentPreviewId=null;
+        $('[data-agent-result]').hidden=true;
+        $('[data-golden-knowledge]').hidden=true;
+      }
+      await refreshPreviewHistory();
+      $('[data-preview-message]').textContent='已删除 Preview #'+previewId+'；仅清理本地 Golden Preview 测试记录。';
+    }catch(error){
+      $('[data-preview-message]').textContent='Preview 删除失败：'+error.message;
+    }
+  }
+  async function clearPreviewHistory(){
+    if(!window.confirm(cleanupConfirm))return;
+    $('[data-preview-message]').textContent='正在清空 Golden Preview 历史…';
+    try{
+      const response=await fetch(api+'/r1/previews',{method:'DELETE',headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
+      let body={};try{body=await response.json()}catch(_){}
+      if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_CLEAR_FAILED'));
+      currentPreviewId=null;
+      $('[data-agent-result]').hidden=true;
+      $('[data-golden-knowledge]').hidden=true;
+      await refreshPreviewHistory();
+      $('[data-preview-message]').textContent='已清空 '+Number(body.deleted_count||0)+' 条 Preview；原始 Word、Source Fact、DocumentSnapshot、正式知识与 Runtime 审计未删除。';
+    }catch(error){
+      $('[data-preview-message]').textContent='Preview 清空失败：'+error.message;
+    }
+  }
   async function refreshPreviewHistory({autoRestore=false}={}){
     try{
       const response=await fetch(api+'/r1/previews?limit=10',{headers:{'X-Hardware-Case-Role':'MAINTAINER'}});
       let body={};try{body=await response.json()}catch(_){}
       if(!response.ok)throw new Error(String(body.detail||'R1_PREVIEW_LIST_FAILED'));
       const items=body.items||[];
-      $('[data-preview-history]').innerHTML=rows(items,item=>'<article class="hc-case-item"><div><h3>'+esc(item.business_case_id||'未识别')+' · '+esc(item.raw_title||'—')+'</h3><p>Preview #'+esc(item.preview_id)+' · Run '+esc(item.runtime_run_id||'—')+' · '+esc(item.created_at||'—')+'</p><p><code>'+esc(item.source_id||'—')+'</code></p><button class="hc-button" type="button" data-preview-id="'+esc(item.preview_id)+'">打开结果</button></div></article>');
+      $('[data-preview-history]').innerHTML=rows(items,item=>'<article class="hc-case-item"><div><h3>'+esc(item.business_case_id||'未识别')+' · '+esc(item.raw_title||'—')+'</h3><p>Preview #'+esc(item.preview_id)+' · Run '+esc(item.runtime_run_id||'—')+' · '+esc(item.created_at||'—')+'</p><p><code>'+esc(item.source_id||'—')+'</code></p><button class="hc-button" type="button" data-preview-id="'+esc(item.preview_id)+'">打开结果</button> <button class="hc-button" type="button" data-delete-preview-id="'+esc(item.preview_id)+'">删除</button></div></article>');
       $('[data-preview-message]').textContent=items.length?'已有 '+items.length+' 条最近 Preview；刷新页面不会丢失。':'暂无已保存 Preview。';
       root.querySelectorAll('[data-preview-id]').forEach(button=>button.addEventListener('click',()=>loadPreview(button.dataset.previewId)));
+      root.querySelectorAll('[data-delete-preview-id]').forEach(button=>button.addEventListener('click',()=>deletePreview(button.dataset.deletePreviewId)));
       if(autoRestore&&items.length)await loadPreview(items[0].preview_id);
     }catch(error){
       $('[data-preview-history]').innerHTML=empty;
@@ -146,5 +184,6 @@
   $('[data-run-agent]').addEventListener('click',()=>runPipeline(false));
   $('[data-force-retry]').addEventListener('click',()=>runPipeline(true));
   $('[data-refresh-previews]').addEventListener('click',()=>refreshPreviewHistory());
+  $('[data-clear-previews]').addEventListener('click',()=>clearPreviewHistory());
   refreshPreviewHistory({autoRestore:true});
 })();
