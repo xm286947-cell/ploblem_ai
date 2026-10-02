@@ -460,3 +460,48 @@ def test_v131_a0152_impact_boundary_requires_missing_without_explicit_consequenc
     assert "Never paraphrase or copy symptom into impact" in prompt
     assert "status=MISSING" in prompt
 
+def test_v1321_a0152_translated_hard_grounded_facts_fail_as_language_mismatch_not_fabrication():
+    payload = stage_a_payload()
+    payload["facts"]["symptom"] = field(
+        "When the MCU sent data to the serial screen, garbled characters often appeared.",
+        ["B1"],
+    )
+    payload["facts"]["root_cause"] = field(
+        "The MCU TX port was configured in weak pull-up mode with insufficient drive capability.",
+        ["B3"],
+    )
+    payload["facts"]["actions"] = field(
+        "Change the MCU output mode from weak pull-up to push-pull.",
+        ["B4"],
+    )
+    payload["facts"]["verification_result"] = field(
+        "The issue did not recur after long-term reliability testing.",
+        ["B5"],
+    )
+
+    result = run_r1_agent_extraction(
+        snapshot(),
+        FakePipeline(stage_a_data=payload),
+    )
+
+    assert result["pipeline_status"] == "CASE_EXTRACTION_FAILED"
+    assert result["error_code"] == "EVIDENCE_VALIDATION_FAILED"
+    errors = result["evidence_validation"]["errors"]
+    assert "HARD_GROUNDED_LANGUAGE_MISMATCH:symptom" in errors
+    assert "HARD_GROUNDED_LANGUAGE_MISMATCH:root_cause" in errors
+    assert "HARD_GROUNDED_LANGUAGE_MISMATCH:actions" in errors
+    assert "HARD_GROUNDED_LANGUAGE_MISMATCH:verification_result" in errors
+    assert result["evidence_validation"]["fabricated_fact_count"] == 0
+
+
+def test_v1321_stage_a_prompt_requires_source_language_for_hard_grounded_fields():
+    prompt = (
+        Path(__file__).resolve().parents[1]
+        / "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Preserve the source document language" in prompt
+    assert "output Chinese rather than translating it to" in prompt
+    assert "symptom, root_cause, actions, and" in prompt
+    assert "verification_result" in prompt
+
