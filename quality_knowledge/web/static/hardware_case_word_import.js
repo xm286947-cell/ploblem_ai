@@ -7,10 +7,13 @@
   const empty='<div class="hc-empty">无</div>';
   let currentSnapshot=null;
   let currentPreviewId=null;
+  let currentAgentResult=null;
   const cleanupConfirm='仅删除本地 Golden Preview 测试记录，不删除原始 Word、Source Fact 或正式知识。';
   function rows(items,renderer){return items&&items.length?items.map(renderer).join(''):empty}
   function render(snapshot){
     currentSnapshot=snapshot;
+    currentAgentResult=null;
+    const retryButton=$('[data-retry-failed-stage]');if(retryButton)retryButton.disabled=true;
     const identity=snapshot.identity||{}, source=snapshot.source||{}, structure=snapshot.structure||{}, counts=snapshot.counts||{};
     $('[data-word-result]').hidden=false;$('[data-word-structure]').hidden=false;$('[data-markdown-view]').hidden=false;
     $('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
@@ -30,8 +33,25 @@
     $('[data-markdown-preview]').textContent=markdown.markdown||'';
     $('[data-agent-message]').textContent='Markdown 已生成。需要 Runtime/Model 配置时再点击 Run Agent Extraction。';
   }
+  function stageSummary(payload,stage){
+    const runtime=((payload.runtime||{})[stage]||{});
+    const trace=payload.latency_trace||{};
+    const prefix=stage==='stage_a'?'STAGE_A':'STAGE_B';
+    const tokenText='prompt='+esc(runtime.prompt_tokens??trace[prefix+'_PROMPT_TOKENS']??'UNKNOWN')+
+      ' / completion='+esc(runtime.completion_tokens??trace[prefix+'_COMPLETION_TOKENS']??'UNKNOWN');
+    const cacheText=runtime.cache_hit?'HIT':(runtime.cache_rejected_by_validator?'REJECTED':'MISS/NO');
+    return '<p><strong>Mode</strong>: '+esc(runtime.execution_mode||trace[prefix+'_EXECUTION_MODE']||'—')+'</p>'+
+      '<p><strong>Cache</strong>: '+esc(cacheText)+' · Recovery Calls: '+esc(runtime.cache_recovery_call_count??trace[prefix+'_CACHE_RECOVERY_CALL_COUNT']??0)+'</p>'+
+      '<p><strong>Calls</strong>: '+esc(runtime.provider_call_count??trace[prefix+'_PROVIDER_CALL_COUNT']??0)+
+      ' · Initial: '+esc(runtime.initial_call_count??trace[prefix+'_INITIAL_CALL_COUNT']??0)+
+      ' · Transport Retry: '+esc(runtime.transport_retry_count??trace[prefix+'_TRANSPORT_RETRY_COUNT']??0)+
+      ' · Validation Retry: '+esc(runtime.validation_retry_count??trace[prefix+'_VALIDATION_RETRY_COUNT']??0)+'</p>'+
+      '<p><strong>Time</strong>: '+esc(trace[prefix+'_TOTAL_MS']??0)+' ms · Provider ms: '+esc(JSON.stringify(runtime.provider_call_ms??trace[prefix+'_PROVIDER_CALL_MS']??[]))+'</p>'+
+      '<p><strong>Tokens</strong>: '+tokenText+'</p>';
+  }
   function renderAgent(payload){
     payload=payload||{};
+    currentAgentResult=payload;
     const result=payload.structured_result||payload.stage_a_result||{}, validation=payload.evidence_validation||{}, facts=result.facts||{};
     $('[data-agent-result]').hidden=false;
     $('[data-pipeline-status]').textContent=payload.pipeline_status||'—';
@@ -40,11 +60,19 @@
     $('[data-error-code]').textContent=payload.error_code||'—';
     $('[data-run-id]').textContent=payload.run_id||'—';
     $('[data-task-id]').textContent=payload.task_id||'—';
+    $('[data-execution-mode]').textContent=payload.execution_mode||((payload.latency_trace||{}).EXECUTION_MODE)||'—';
     $('[data-provider-calls]').textContent=String(payload.provider_call_count??'—');
     $('[data-validation-retries]').textContent=String(payload.validation_retry_count??'—');
     $('[data-evidence-status]').textContent=validation.status||'—';
     $('[data-fabricated-count]').textContent=String(validation.fabricated_fact_count??'—');
     $('[data-fabricated-block-count]').textContent=String(validation.fabricated_block_id_count??'—');
+    $('[data-stage-a-summary]').innerHTML=stageSummary(payload,'stage_a');
+    $('[data-stage-b-summary]').innerHTML=stageSummary(payload,'stage_b');
+    const trace=payload.latency_trace||{};
+    $('[data-execution-total-summary]').innerHTML='<p><strong>Mode</strong>: '+esc(payload.execution_mode||trace.EXECUTION_MODE||'—')+'</p>'+
+      '<p><strong>Provider Calls</strong>: '+esc(payload.provider_call_count??0)+' · <strong>Total Time</strong>: '+esc(trace.TOTAL_MS??0)+' ms</p>'+
+      '<p><strong>Trace</strong>: '+esc(payload.execution_trace_version||trace.EXECUTION_TRACE_VERSION||'—')+'</p>';
+    const retryButton=$('[data-retry-failed-stage]');if(retryButton)retryButton.disabled=!payload.failed_stage;
     $('[data-agent-errors]').textContent=(validation.errors||[]).length?(validation.errors||[]).join('；'):'无';
     $('[data-agent-facts]').innerHTML=rows(Object.entries(facts),([name,item])=>'<article class="hc-case-item"><div><h3>'+esc(name)+'</h3><p>'+esc(JSON.stringify((item||{}).value??null))+'</p><p><code>Evidence '+esc(((item||{}).evidence_block_ids||[]).join(', ')||'—')+'</code></p></div></article>');
     $('[data-agent-evidence]').innerHTML=rows(validation.evidence,x=>'<article class="hc-case-item"><div><h3>'+esc(x.block_id||'—')+' · '+esc(x.block_type||'—')+'</h3><p>'+esc(x.text||x.image_ref||'—')+'</p><p><code>Source Locator '+locator(x.source_locator)+'</code></p></div></article>');
@@ -156,11 +184,24 @@
       $('[data-word-message]').textContent='解析失败：'+error.message;
     }
   });
-  async function runPipeline(forceRetry=false){
+  async function runPipeline(mode='resume'){
     if(!currentSnapshot)return;
-    $('[data-agent-message]').textContent=forceRetry?'Force Retry：创建新的可追踪 Runtime Run…':'V1.3 Pipeline 执行中…';
+    let suffix='';
+    if(mode==='force'){
+      suffix='?force_full_run=true';
+      $('[data-agent-message]').textContent='Force Full Run：显式绕过 Stage A/B Cache，创建新的 Runtime Run…';
+    }else if(mode==='retry'){
+      const failed=String((currentAgentResult||{}).failed_stage||'').toUpperCase();
+      if(!['STAGE_A','STAGE_B'].includes(failed)){
+        $('[data-agent-message]').textContent='当前没有可选择性重跑的 Failed Stage。';
+        return;
+      }
+      suffix='?retry_failed_stage='+encodeURIComponent(failed);
+      $('[data-agent-message]').textContent='Retry Failed Stage：'+failed+'；复用可用 Last Good，仅重跑失败 Stage。';
+    }else{
+      $('[data-agent-message]').textContent='Run / Resume：优先复用已通过当前 Validator 的 Stage Cache…';
+    }
     try{
-      const suffix=forceRetry?'?force_retry=true':'';
       const response=await fetch(api+'/r1/agent-extract'+suffix,{method:'POST',headers:{'Content-Type':'application/json','X-Hardware-Case-Role':'MAINTAINER'},body:JSON.stringify(currentSnapshot)});
       let body={};try{body=await response.json()}catch(_){}
       if(!response.ok){
@@ -170,7 +211,7 @@
       }
       renderAgent(body);
       if(body.pipeline_status==='GOLDEN_PREVIEW_READY'){
-        $('[data-agent-message]').textContent=body.status==='NEEDS_REVIEW'?'GOLDEN_PREVIEW_READY：存在本地 Conflict，需要人工 Review。':'PASS：V1.3 Stage A + Stage B + Local Validation 已完成。';
+        $('[data-agent-message]').textContent=body.status==='NEEDS_REVIEW'?'GOLDEN_PREVIEW_READY：存在本地 Conflict，需要人工 Review。':'PASS：Stage A + Stage B + Local Validation 已完成。';
       }else if(body.pipeline_status==='PARTIAL_REUSABLE_KNOWLEDGE_FAILED'){
         $('[data-agent-message]').textContent='PARTIAL：Stage A 已保留；Stage B 失败，错误='+String(body.error_code||'RUNTIME_EXECUTION_FAILED');
       }else{
@@ -181,8 +222,9 @@
       $('[data-agent-message]').textContent='Pipeline 执行失败：'+error.message;
     }
   }
-  $('[data-run-agent]').addEventListener('click',()=>runPipeline(false));
-  $('[data-force-retry]').addEventListener('click',()=>runPipeline(true));
+  $('[data-run-agent]').addEventListener('click',()=>runPipeline('resume'));
+  $('[data-retry-failed-stage]').addEventListener('click',()=>runPipeline('retry'));
+  $('[data-force-full-run]').addEventListener('click',()=>runPipeline('force'));
   $('[data-refresh-previews]').addEventListener('click',()=>refreshPreviewHistory());
   $('[data-clear-previews]').addEventListener('click',()=>clearPreviewHistory());
   refreshPreviewHistory({autoRestore:true});
