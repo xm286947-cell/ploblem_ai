@@ -1,10 +1,10 @@
 agent_id: hardware_case.r1_case_extract
-version: v1.3.1
+version: v1.3.2.1
 label: Hardware R1 Stage A Case Extraction
 
 prompt:
   ref: prompts/runtime/hardware_case/r1_case_extract_v1.md
-  version: HC-R1-CASE-EXTRACT-V1.3.1
+  version: HC-R1-CASE-EXTRACT-V1.3.2.1
 
 output_schema:
   ref: HardwareCaseR1CaseExtractionV13
