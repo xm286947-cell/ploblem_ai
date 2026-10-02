@@ -126,10 +126,11 @@ jobs:
           assert manifest["runtime"]["r1_knowledge_object_contract"] == "hardware-case-knowledge-object/v1"
           assert manifest["runtime"]["formal_knowledge_write"] is False
           assert manifest["runtime"]["r1_preview_persistence"] == "LOCAL_SEPARATE_SQLITE"
-          assert manifest["runtime"]["r1_stage_a_payload"] == "SINGLE_MARKDOWN_PLUS_MINIMAL_EVIDENCE_BLOCKS"
+          assert manifest["runtime"]["r1_stage_a_input_contract"] == "hardware-case-r1-agent-input/v3"
+          assert manifest["runtime"]["r1_stage_a_payload"] == "SINGLE_MARKDOWN_PLUS_EVIDENCE_INDEX_NO_DUPLICATE_TEXT"
           assert manifest["runtime"]["r1_stage_b_payload"] == "VALIDATED_CASE_FACTS_PLUS_NECESSARY_EVIDENCE_ONLY"
           assert manifest["runtime"]["r1_partial_failure_preservation"] is True
-          assert manifest["runtime"]["r1_execution_trace_version"] == "hardware-r1-execution-trace/v1.4"
+          assert manifest["runtime"]["r1_execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
           assert manifest["runtime"]["r1_force_retry_new_run"] is True
           assert manifest["runtime"]["r1_selective_retry_failed_stage"] is True
           assert manifest["runtime"]["r1_stage_a_cache_key_v2"] == [
@@ -144,7 +145,8 @@ jobs:
               "execution_mode", "provider_call_count", "initial_call_count",
               "transport_retry_count", "validation_retry_count",
               "cache_recovery_call_count", "force_retry_call_count",
-              "provider_call_ms", "prompt_tokens", "completion_tokens"
+              "provider_call_ms", "provider_attempts", "input_chars", "input_bytes",
+              "output_chars", "output_bytes", "prompt_tokens", "completion_tokens"
           ]
           assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
