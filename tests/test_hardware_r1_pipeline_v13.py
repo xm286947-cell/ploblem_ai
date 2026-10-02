@@ -1201,7 +1201,7 @@ def test_v14_stage_trace_exposes_provider_attribution_fields():
         "STAGE_B_COMPLETION_TOKENS",
     }
     assert required.issubset(trace)
-    assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.4"
+    assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
 
 def test_v15_provider_attempt_trace_distinguishes_timeout_transport_validation_success(tmp_path):
     db = tmp_path / "attempt_reason.db"
