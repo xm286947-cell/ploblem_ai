@@ -375,7 +375,12 @@ R1_STAGE_A_CONFIG = "config/runtime/agents/hardware_case.r1_case_extract.yaml"
 R1_STAGE_B_CONFIG = "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
 R1_STAGE_A_SCHEMA_REF = "HardwareCaseR1CaseExtractionV13"
 R1_STAGE_B_SCHEMA_REF = "HardwareCaseR1ReusableKnowledgeV13"
-R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.1"
+R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.3"
+R1_CACHE_KEY_VERSION = "v2"
+R1_STAGE_A_VALIDATOR_VERSION = "hardware-r1-stage-a-validator/v1"
+R1_STAGE_B_VALIDATOR_VERSION = "hardware-r1-stage-b-validator/v1"
+R1_STAGE_A_SCHEMA_VERSION = "HardwareCaseR1CaseExtractionV13/v1"
+R1_STAGE_B_SCHEMA_VERSION = "HardwareCaseR1ReusableKnowledgeV13/v1"
 
 _V13_STATUS_ENUM = ["EXTRACTED", "MISSING", "AMBIGUOUS", "UNSUPPORTED"]
 _V13_MODEL_FIELD_SCHEMA: dict[str, Any] = {
@@ -576,42 +581,108 @@ def _v13_paths(
 
 
 class _R1StageCache:
-    """Successful-stage cache only. Failed runs are never cached."""
+    """V2 cache for locally validated successful stage results only."""
+
+    TABLE = "hardware_r1_stage_cache_v2"
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with _sqlite3.connect(self.db_path) as connection:
             connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS hardware_r1_stage_cache (
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.TABLE} (
                     stage TEXT NOT NULL,
                     cache_key TEXT NOT NULL,
                     result_json TEXT NOT NULL,
+                    result_hash TEXT NOT NULL,
                     runtime_json TEXT NOT NULL,
+                    validation_status TEXT NOT NULL,
+                    validator_version TEXT NOT NULL,
+                    pipeline_version TEXT NOT NULL,
+                    schema_version TEXT NOT NULL,
+                    agent_config_hash TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    source_run_id TEXT,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(stage, cache_key)
                 )
                 """
             )
 
+    @staticmethod
+    def _result_json(data: dict[str, Any]) -> str:
+        return json.dumps(
+            data,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @classmethod
+    def _result_hash(cls, data: dict[str, Any]) -> str:
+        return hashlib.sha256(cls._result_json(data).encode("utf-8")).hexdigest()
+
     def get(self, stage: str, cache_key: str) -> dict[str, Any] | None:
         with _sqlite3.connect(self.db_path) as connection:
             row = connection.execute(
-                """
-                SELECT result_json, runtime_json, created_at
-                FROM hardware_r1_stage_cache
+                f"""
+                SELECT result_json, result_hash, runtime_json,
+                       validation_status, validator_version, pipeline_version,
+                       schema_version, agent_config_hash, prompt_version,
+                       source_run_id, created_at
+                FROM {self.TABLE}
                 WHERE stage=? AND cache_key=?
                 """,
                 (stage, cache_key),
             ).fetchone()
         if row is None:
             return None
+        try:
+            data = json.loads(row[0])
+            runtime = json.loads(row[2])
+            if not isinstance(data, dict) or not isinstance(runtime, dict):
+                raise ValueError("CACHE_JSON_OBJECT_REQUIRED")
+        except Exception:
+            return {
+                "invalid": True,
+                "reason": "CACHE_JSON_CORRUPTED",
+                "created_at": row[10],
+            }
+        if str(row[3]) != "PASS":
+            return {
+                "invalid": True,
+                "reason": "CACHE_VALIDATION_STATUS_INVALID",
+                "created_at": row[10],
+            }
+        if self._result_hash(data) != str(row[1]):
+            return {
+                "invalid": True,
+                "reason": "CACHE_RESULT_HASH_MISMATCH",
+                "created_at": row[10],
+            }
         return {
-            "data": json.loads(row[0]),
-            "runtime": json.loads(row[1]),
-            "created_at": row[2],
+            "invalid": False,
+            "data": data,
+            "runtime": runtime,
+            "result_hash": row[1],
+            "validation_status": row[3],
+            "validator_version": row[4],
+            "pipeline_version": row[5],
+            "schema_version": row[6],
+            "agent_config_hash": row[7],
+            "prompt_version": row[8],
+            "source_run_id": row[9],
+            "created_at": row[10],
         }
+
+    def delete(self, stage: str, cache_key: str) -> bool:
+        with _sqlite3.connect(self.db_path) as connection:
+            cursor = connection.execute(
+                f"DELETE FROM {self.TABLE} WHERE stage=? AND cache_key=?",
+                (stage, cache_key),
+            )
+            return int(cursor.rowcount or 0) > 0
 
     def put(
         self,
@@ -619,27 +690,103 @@ class _R1StageCache:
         cache_key: str,
         data: dict[str, Any],
         runtime_meta: dict[str, Any],
+        *,
+        validator_version: str,
+        pipeline_version: str,
+        schema_version: str,
+        agent_config_hash: str,
+        prompt_version: str,
     ) -> None:
+        result_json = self._result_json(data)
+        result_hash = hashlib.sha256(result_json.encode("utf-8")).hexdigest()
         with _sqlite3.connect(self.db_path) as connection:
             connection.execute(
-                """
-                INSERT INTO hardware_r1_stage_cache(
-                    stage, cache_key, result_json, runtime_json, created_at
-                ) VALUES (?, ?, ?, ?, ?)
+                f"""
+                INSERT INTO {self.TABLE}(
+                    stage, cache_key, result_json, result_hash, runtime_json,
+                    validation_status, validator_version, pipeline_version,
+                    schema_version, agent_config_hash, prompt_version,
+                    source_run_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'PASS', ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stage, cache_key) DO UPDATE SET
                     result_json=excluded.result_json,
+                    result_hash=excluded.result_hash,
                     runtime_json=excluded.runtime_json,
+                    validation_status=excluded.validation_status,
+                    validator_version=excluded.validator_version,
+                    pipeline_version=excluded.pipeline_version,
+                    schema_version=excluded.schema_version,
+                    agent_config_hash=excluded.agent_config_hash,
+                    prompt_version=excluded.prompt_version,
+                    source_run_id=excluded.source_run_id,
                     created_at=excluded.created_at
                 """,
                 (
                     stage,
                     cache_key,
-                    json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-                    json.dumps(runtime_meta, ensure_ascii=False, separators=(",", ":")),
+                    result_json,
+                    result_hash,
+                    json.dumps(
+                        runtime_meta,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    validator_version,
+                    pipeline_version,
+                    schema_version,
+                    agent_config_hash,
+                    prompt_version,
+                    str(runtime_meta.get("run_id") or "") or None,
                     _datetime.now(_timezone.utc).isoformat(),
                 ),
             )
 
+    def count(self, stage: str | None = None) -> int:
+        query = f"SELECT COUNT(*) FROM {self.TABLE}"
+        params: tuple[Any, ...] = ()
+        if stage is not None:
+            query += " WHERE stage=?"
+            params = (stage,)
+        with _sqlite3.connect(self.db_path) as connection:
+            row = connection.execute(query, params).fetchone()
+        return int((row or [0])[0] or 0)
+
+
+def _canonical_payload_hash(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _stage_cache_key_v2(
+    *,
+    stage: str,
+    source_id: str,
+    input_hash_name: str,
+    input_hash: str,
+    agent_config_hash: str,
+    prompt_version: str,
+    pipeline_version: str,
+    validator_version: str,
+    schema_version: str,
+) -> str:
+    material = {
+        "cache_key_version": R1_CACHE_KEY_VERSION,
+        "stage": str(stage),
+        "source_id": str(source_id),
+        str(input_hash_name): str(input_hash),
+        "agent_config_hash": str(agent_config_hash),
+        "prompt_version": str(prompt_version),
+        "pipeline_version": str(pipeline_version),
+        "validator_version": str(validator_version),
+        "schema_version": str(schema_version),
+    }
+    return _canonical_payload_hash(material)
 
 def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
     call_ms: list[int] = []
@@ -708,6 +855,9 @@ class _R1StageRunner:
         config_key: str,
         expected_agent_id: str,
         schema_ref: str,
+        schema_version: str,
+        validator_version: str,
+        input_hash_name: str,
         cache: _R1StageCache,
         stage_name: str,
         environ: Mapping[str, str],
@@ -715,6 +865,9 @@ class _R1StageRunner:
         self.paths = paths
         self.stage_name = stage_name
         self.expected_agent_id = expected_agent_id
+        self.schema_version = schema_version
+        self.validator_version = validator_version
+        self.input_hash_name = input_hash_name
         self.cache = cache
         loader = AgentConfigLoader(
             root=paths["root"],
@@ -733,24 +886,36 @@ class _R1StageRunner:
         if self.resolved.output_schema.ref != schema_ref:
             raise HardwareCaseRuntimeConfigError("R1_OUTPUT_SCHEMA_MISMATCH")
 
-    def _cache_key(self, *, source_id: str, markdown_hash: str) -> str:
-        material = {
-            "source_id": str(source_id),
-            "markdown_hash": str(markdown_hash),
-            "agent_config_hash": self.resolved.config_hash,
-            "prompt_version": (
-                self.resolved.prompt.version or self.resolved.prompt.content_hash
-            ),
-        }
-        encoded = json.dumps(
-            material,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+    @property
+    def prompt_version(self) -> str:
+        return str(
+            self.resolved.prompt.version or self.resolved.prompt.content_hash
+        )
 
-    def _runtime_meta(self, result: Any, *, cache_hit: bool = False) -> dict[str, Any]:
+    def _cache_key(self, *, source_id: str, input_hash: str) -> str:
+        return _stage_cache_key_v2(
+            stage=self.stage_name,
+            source_id=source_id,
+            input_hash_name=self.input_hash_name,
+            input_hash=input_hash,
+            agent_config_hash=self.resolved.config_hash,
+            prompt_version=self.prompt_version,
+            pipeline_version=R1_PIPELINE_VERSION,
+            validator_version=self.validator_version,
+            schema_version=self.schema_version,
+        )
+
+    def _cache_identity_matches(self, cached: dict[str, Any]) -> bool:
+        return (
+            cached.get("validator_version") == self.validator_version
+            and cached.get("pipeline_version") == R1_PIPELINE_VERSION
+            and cached.get("schema_version") == self.schema_version
+            and cached.get("agent_config_hash") == self.resolved.config_hash
+            and cached.get("prompt_version") == self.prompt_version
+            and cached.get("validation_status") == "PASS"
+        )
+
+    def _runtime_meta(self, result: Any) -> dict[str, Any]:
         attempts = _attempt_metrics(self.paths["runtime_db"], result.task_id)
         error = getattr(result, "error", None)
         execution = getattr(result, "execution", None)
@@ -760,9 +925,7 @@ class _R1StageRunner:
             "agent_id": result.agent_id,
             "agent_config_version": self.resolved.definition.version,
             "agent_config_hash": self.resolved.config_hash,
-            "prompt_version": (
-                self.resolved.prompt.version or self.resolved.prompt.content_hash
-            ),
+            "prompt_version": self.prompt_version,
             "provider_call_count": int(getattr(execution, "provider_calls", 0) or 0),
             "provider_call_ms": attempts["provider_call_ms"],
             "prompt_tokens": attempts["prompt_tokens"],
@@ -771,10 +934,7 @@ class _R1StageRunner:
             "retry_budget_exhausted": bool(
                 getattr(execution, "retry_budget_exhausted", False)
             ),
-            "raw_error_code": (
-                str(getattr(error, "code", "") or "") or None
-            ),
-            "cache_hit": cache_hit,
+            "raw_error_code": str(getattr(error, "code", "") or "") or None,
         }
 
     def run(
@@ -782,43 +942,59 @@ class _R1StageRunner:
         payload: dict[str, Any],
         *,
         source_id: str,
-        markdown_hash: str,
+        input_hash: str,
         force_retry: bool = False,
+        bypass_cache: bool = False,
+        cache_rejected_by_validator: bool = False,
     ) -> dict[str, Any]:
-        cache_key = self._cache_key(
-            source_id=source_id,
-            markdown_hash=markdown_hash,
+        cache_key = self._cache_key(source_id=source_id, input_hash=input_hash)
+        rejected = bool(cache_rejected_by_validator)
+        rejection_reason: str | None = (
+            "CACHE_REJECTED_BY_VALIDATOR" if rejected else None
         )
-        if not force_retry:
+
+        if not force_retry and not bypass_cache:
             cached = self.cache.get(self.stage_name, cache_key)
             if cached is not None:
-                runtime_meta = dict(cached["runtime"])
-                runtime_meta.update(
-                    {
-                        "cache_hit": True,
-                        "cached_from_run_id": runtime_meta.get("run_id"),
-                        "provider_call_count": 0,
-                        "provider_call_ms": [],
-                        "validation_retry_count": 0,
-                        "prompt_tokens": "UNKNOWN",
-                        "completion_tokens": "UNKNOWN",
+                if cached.get("invalid") or not self._cache_identity_matches(cached):
+                    self.cache.delete(self.stage_name, cache_key)
+                    rejected = True
+                    rejection_reason = str(
+                        cached.get("reason") or "CACHE_IDENTITY_INVALID"
+                    )
+                else:
+                    runtime_meta = dict(cached["runtime"])
+                    runtime_meta.update(
+                        {
+                            "cache_hit": True,
+                            "cache_rejected_by_validator": False,
+                            "cache_rejection_reason": None,
+                            "cached_from_run_id": (
+                                cached.get("source_run_id")
+                                or runtime_meta.get("run_id")
+                            ),
+                            "provider_call_count": 0,
+                            "provider_call_ms": [],
+                            "validation_retry_count": 0,
+                            "prompt_tokens": "UNKNOWN",
+                            "completion_tokens": "UNKNOWN",
+                            "cache_key_version": R1_CACHE_KEY_VERSION,
+                            self.input_hash_name: input_hash,
+                        }
+                    )
+                    return {
+                        "ok": True,
+                        "data": cached["data"],
+                        "runtime": runtime_meta,
+                        "cache_key": cache_key,
+                        "cache_write_pending": False,
                     }
-                )
-                return {
-                    "ok": True,
-                    "data": cached["data"],
-                    "runtime": runtime_meta,
-                    "cache_key": cache_key,
-                }
 
+        mode = "force" if force_retry else ("recover" if bypass_cache or rejected else "run")
         base_request_id = (
-            f"hardware-r1-v13:{self.stage_name.lower()}:{cache_key[:32]}"
+            f"hardware-r1-v133:{self.stage_name.lower()}:{cache_key[:24]}"
         )
-        request_id = (
-            f"{base_request_id}:force:{_uuid4().hex[:12]}"
-            if force_retry
-            else base_request_id
-        )
+        request_id = f"{base_request_id}:{mode}:{_uuid4().hex[:12]}"
 
         def invoke(one_request_id: str):
             return self.runtime.invoke(
@@ -831,7 +1007,10 @@ class _R1StageRunner:
                         "preview_only": True,
                         "pipeline_stage": self.stage_name,
                         "cache_key": cache_key,
+                        "cache_key_version": R1_CACHE_KEY_VERSION,
+                        self.input_hash_name: input_hash,
                         "force_retry": bool(force_retry),
+                        "cache_recovery": bool(bypass_cache or rejected),
                     },
                 )
             )
@@ -839,23 +1018,28 @@ class _R1StageRunner:
         try:
             result = invoke(request_id)
         except _ExistingTaskNotCompleteError:
-            # Canonical request IDs deliberately keep the failed Runtime task as
-            # immutable evidence. Retry receives a fresh task/run identity.
             result = invoke(f"{base_request_id}:retry:{_uuid4().hex[:12]}")
 
         runtime_meta = self._runtime_meta(result)
+        runtime_meta.update(
+            {
+                "cache_hit": False,
+                "cache_rejected_by_validator": rejected,
+                "cache_rejection_reason": rejection_reason,
+                "cached_from_run_id": None,
+                "cache_key_version": R1_CACHE_KEY_VERSION,
+                self.input_hash_name: input_hash,
+            }
+        )
         if result.status == RuntimeStatus.COMPLETED and isinstance(result.data, dict):
-            self.cache.put(
-                self.stage_name,
-                cache_key,
-                result.data,
-                runtime_meta,
-            )
+            # Runtime/schema completion is only a cache candidate. The Pipeline
+            # commits it after the current local stage validator passes.
             return {
                 "ok": True,
                 "data": result.data,
                 "runtime": runtime_meta,
                 "cache_key": cache_key,
+                "cache_write_pending": True,
             }
 
         error = getattr(result, "error", None)
@@ -875,11 +1059,40 @@ class _R1StageRunner:
             "raw_error_code": runtime_meta.get("raw_error_code"),
             "runtime": runtime_meta,
             "cache_key": cache_key,
+            "cache_write_pending": False,
         }
 
+    def commit_success(self, stage_result: dict[str, Any]) -> bool:
+        if not stage_result.get("ok") or not stage_result.get("cache_write_pending"):
+            return False
+        data = stage_result.get("data")
+        runtime_meta = dict(stage_result.get("runtime") or {})
+        cache_key = str(stage_result.get("cache_key") or "")
+        if not isinstance(data, dict) or not cache_key:
+            return False
+        self.cache.put(
+            self.stage_name,
+            cache_key,
+            data,
+            runtime_meta,
+            validator_version=self.validator_version,
+            pipeline_version=R1_PIPELINE_VERSION,
+            schema_version=self.schema_version,
+            agent_config_hash=self.resolved.config_hash,
+            prompt_version=self.prompt_version,
+        )
+        stage_result["cache_write_pending"] = False
+        stage_result["cache_committed"] = True
+        return True
+
+    def reject_cache(self, stage_result: dict[str, Any]) -> bool:
+        cache_key = str(stage_result.get("cache_key") or "")
+        if not cache_key:
+            return False
+        return self.cache.delete(self.stage_name, cache_key)
 
 class HardwareCaseR1PipelineRuntime:
-    """V1.3 two-stage Runtime facade with independent Runs and success cache."""
+    """V1.3 two-stage Runtime with V2 validation-gated stage cache."""
 
     def __init__(
         self,
@@ -890,13 +1103,16 @@ class HardwareCaseR1PipelineRuntime:
         env = os.environ if environ is None else environ
         self.paths = _v13_paths(root=root, environ=env)
         self.paths["runtime_db"].parent.mkdir(parents=True, exist_ok=True)
-        cache = _R1StageCache(self.paths["runtime_db"])
+        self.cache = _R1StageCache(self.paths["runtime_db"])
         self.stage_a = _R1StageRunner(
             paths=self.paths,
             config_key="stage_a_config",
             expected_agent_id=R1_STAGE_A_AGENT_ID,
             schema_ref=R1_STAGE_A_SCHEMA_REF,
-            cache=cache,
+            schema_version=R1_STAGE_A_SCHEMA_VERSION,
+            validator_version=R1_STAGE_A_VALIDATOR_VERSION,
+            input_hash_name="markdown_hash",
+            cache=self.cache,
             stage_name="STAGE_A",
             environ=env,
         )
@@ -905,7 +1121,10 @@ class HardwareCaseR1PipelineRuntime:
             config_key="stage_b_config",
             expected_agent_id=R1_STAGE_B_AGENT_ID,
             schema_ref=R1_STAGE_B_SCHEMA_REF,
-            cache=cache,
+            schema_version=R1_STAGE_B_SCHEMA_VERSION,
+            validator_version=R1_STAGE_B_VALIDATOR_VERSION,
+            input_hash_name="stage_b_input_hash",
+            cache=self.cache,
             stage_name="STAGE_B",
             environ=env,
         )
@@ -917,12 +1136,16 @@ class HardwareCaseR1PipelineRuntime:
         source_id: str,
         markdown_hash: str,
         force_retry: bool = False,
+        bypass_cache: bool = False,
+        cache_rejected_by_validator: bool = False,
     ) -> dict[str, Any]:
         return self.stage_a.run(
             payload,
             source_id=source_id,
-            markdown_hash=markdown_hash,
+            input_hash=markdown_hash,
             force_retry=force_retry,
+            bypass_cache=bypass_cache,
+            cache_rejected_by_validator=cache_rejected_by_validator,
         )
 
     def run_stage_b(
@@ -930,16 +1153,42 @@ class HardwareCaseR1PipelineRuntime:
         payload: dict[str, Any],
         *,
         source_id: str,
-        markdown_hash: str,
+        markdown_hash: str | None = None,
         force_retry: bool = False,
+        bypass_cache: bool = False,
+        cache_rejected_by_validator: bool = False,
     ) -> dict[str, Any]:
+        stage_b_input_hash = _canonical_payload_hash(payload)
         return self.stage_b.run(
             payload,
             source_id=source_id,
-            markdown_hash=markdown_hash,
+            input_hash=stage_b_input_hash,
             force_retry=force_retry,
+            bypass_cache=bypass_cache,
+            cache_rejected_by_validator=cache_rejected_by_validator,
         )
 
+    def commit_stage_success(
+        self,
+        stage: str,
+        stage_result: dict[str, Any],
+    ) -> bool:
+        if stage == "STAGE_A":
+            return self.stage_a.commit_success(stage_result)
+        if stage == "STAGE_B":
+            return self.stage_b.commit_success(stage_result)
+        raise ValueError("R1_STAGE_INVALID")
+
+    def reject_stage_cache(
+        self,
+        stage: str,
+        stage_result: dict[str, Any],
+    ) -> bool:
+        if stage == "STAGE_A":
+            return self.stage_a.reject_cache(stage_result)
+        if stage == "STAGE_B":
+            return self.stage_b.reject_cache(stage_result)
+        raise ValueError("R1_STAGE_INVALID")
 
 def build_hardware_case_r1_structurer() -> HardwareCaseR1PipelineRuntime:
     return HardwareCaseR1PipelineRuntime()
@@ -955,6 +1204,11 @@ __all__ = [
     "R1_STAGE_A_AGENT_ID",
     "R1_STAGE_B_AGENT_ID",
     "R1_PIPELINE_VERSION",
+    "R1_CACHE_KEY_VERSION",
+    "R1_STAGE_A_VALIDATOR_VERSION",
+    "R1_STAGE_B_VALIDATOR_VERSION",
+    "R1_STAGE_A_SCHEMA_VERSION",
+    "R1_STAGE_B_SCHEMA_VERSION",
     "HARDWARE_R1_STAGE_A_SCHEMA",
     "HARDWARE_R1_STAGE_B_SCHEMA",
     "HardwareCaseR1PipelineRuntime",
