@@ -707,7 +707,7 @@ __all__ = [
 import time as _time
 
 _V12_RUN_R1_AGENT_EXTRACTION = run_r1_agent_extraction
-R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.1"
+R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.3"
 R1_PIPELINE_RESULT_VERSION = "hardware-case-r1-agent-result/v3"
 R1_STAGE_A_AGENT_ID = "hardware_case.r1_case_extract"
 R1_STAGE_B_AGENT_ID = "hardware_case.r1_reuse_derive"
@@ -919,12 +919,16 @@ def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
         "PARSE_MS": int(seed.get("PARSE_MS") or 0),
         "MARKDOWN_MS": int(seed.get("MARKDOWN_MS") or 0),
+        "CACHE_KEY_VERSION": "v2",
         "STAGE_A_TOTAL_MS": 0,
         "STAGE_A_PROVIDER_CALL_COUNT": 0,
         "STAGE_A_PROVIDER_CALL_MS": [],
         "STAGE_A_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_A_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_A_VALIDATION_RETRY_COUNT": 0,
+        "STAGE_A_CACHE_HIT": False,
+        "STAGE_A_CACHE_REJECTED_BY_VALIDATOR": False,
+        "STAGE_A_CACHED_FROM_RUN_ID": None,
         "CASE_VALIDATION_MS": 0,
         "CONFLICT_MS": 0,
         "STAGE_B_TOTAL_MS": 0,
@@ -933,12 +937,15 @@ def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
         "STAGE_B_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_B_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_B_VALIDATION_RETRY_COUNT": 0,
+        "STAGE_B_CACHE_HIT": False,
+        "STAGE_B_CACHE_REJECTED_BY_VALIDATOR": False,
+        "STAGE_B_CACHED_FROM_RUN_ID": None,
+        "STAGE_B_INPUT_HASH": None,
         "REUSABLE_VALIDATION_MS": 0,
         "GOLDEN_BUILD_MS": 0,
         "PREVIEW_SAVE_MS": None,
         "TOTAL_MS": 0,
     }
-
 
 def _apply_stage_trace(
     trace: dict[str, Any],
@@ -948,23 +955,49 @@ def _apply_stage_trace(
     runtime_meta: dict[str, Any],
 ) -> None:
     prefix = "STAGE_A" if stage == "A" else "STAGE_B"
-    trace[f"{prefix}_TOTAL_MS"] = int(total_ms)
+    trace[f"{prefix}_TOTAL_MS"] = int(trace.get(f"{prefix}_TOTAL_MS") or 0) + int(total_ms)
     trace[f"{prefix}_PROVIDER_CALL_COUNT"] = int(
-        runtime_meta.get("provider_call_count") or 0
-    )
-    trace[f"{prefix}_PROVIDER_CALL_MS"] = list(
-        runtime_meta.get("provider_call_ms") or []
-    )
-    trace[f"{prefix}_PROMPT_TOKENS"] = runtime_meta.get(
-        "prompt_tokens", "UNKNOWN"
-    )
-    trace[f"{prefix}_COMPLETION_TOKENS"] = runtime_meta.get(
-        "completion_tokens", "UNKNOWN"
-    )
+        trace.get(f"{prefix}_PROVIDER_CALL_COUNT") or 0
+    ) + int(runtime_meta.get("provider_call_count") or 0)
+    trace[f"{prefix}_PROVIDER_CALL_MS"] = [
+        *list(trace.get(f"{prefix}_PROVIDER_CALL_MS") or []),
+        *list(runtime_meta.get("provider_call_ms") or []),
+    ]
+    prompt_tokens = runtime_meta.get("prompt_tokens", "UNKNOWN")
+    completion_tokens = runtime_meta.get("completion_tokens", "UNKNOWN")
+    if prompt_tokens != "UNKNOWN":
+        previous = trace.get(f"{prefix}_PROMPT_TOKENS", "UNKNOWN")
+        trace[f"{prefix}_PROMPT_TOKENS"] = (
+            int(prompt_tokens)
+            if previous == "UNKNOWN"
+            else int(previous) + int(prompt_tokens)
+        )
+    if completion_tokens != "UNKNOWN":
+        previous = trace.get(f"{prefix}_COMPLETION_TOKENS", "UNKNOWN")
+        trace[f"{prefix}_COMPLETION_TOKENS"] = (
+            int(completion_tokens)
+            if previous == "UNKNOWN"
+            else int(previous) + int(completion_tokens)
+        )
     trace[f"{prefix}_VALIDATION_RETRY_COUNT"] = int(
-        runtime_meta.get("validation_retry_count") or 0
+        trace.get(f"{prefix}_VALIDATION_RETRY_COUNT") or 0
+    ) + int(runtime_meta.get("validation_retry_count") or 0)
+    trace[f"{prefix}_CACHE_HIT"] = bool(
+        trace.get(f"{prefix}_CACHE_HIT")
+        or runtime_meta.get("cache_hit")
     )
-
+    trace[f"{prefix}_CACHE_REJECTED_BY_VALIDATOR"] = bool(
+        trace.get(f"{prefix}_CACHE_REJECTED_BY_VALIDATOR")
+        or runtime_meta.get("cache_rejected_by_validator")
+    )
+    if not trace.get(f"{prefix}_CACHED_FROM_RUN_ID"):
+        trace[f"{prefix}_CACHED_FROM_RUN_ID"] = runtime_meta.get(
+            "cached_from_run_id"
+        )
+    if runtime_meta.get("cache_key_version"):
+        trace["CACHE_KEY_VERSION"] = runtime_meta.get("cache_key_version")
+    if stage == "B" and runtime_meta.get("stage_b_input_hash"):
+        trace["STAGE_B_INPUT_HASH"] = runtime_meta.get("stage_b_input_hash")
 
 def _finish_trace(trace: dict[str, Any]) -> dict[str, Any]:
     additive = (
@@ -1067,19 +1100,45 @@ def run_r1_agent_extraction(
     ).hexdigest()
     trace = _trace_base(snapshot)
 
-    stage_a_started = _time.perf_counter()
-    stage_a = structurer.run_stage_a(
-        runtime_input,
-        source_id=source_id,
-        markdown_hash=markdown_hash,
-        force_retry=force_retry,
-    )
-    _apply_stage_trace(
-        trace,
-        stage="A",
-        total_ms=_ms(stage_a_started),
-        runtime_meta=dict(stage_a.get("runtime") or {}),
-    )
+    def commit_stage(stage: str, result: dict[str, Any]) -> None:
+        commit = getattr(structurer, "commit_stage_success", None)
+        if callable(commit):
+            commit(stage, result)
+
+    def reject_stage(stage: str, result: dict[str, Any]) -> bool:
+        reject = getattr(structurer, "reject_stage_cache", None)
+        if not callable(reject):
+            return False
+        reject(stage, result)
+        return True
+
+    def stage_a_call(*, recovery: bool = False) -> dict[str, Any]:
+        started = _time.perf_counter()
+        if recovery:
+            result = structurer.run_stage_a(
+                runtime_input,
+                source_id=source_id,
+                markdown_hash=markdown_hash,
+                force_retry=False,
+                bypass_cache=True,
+                cache_rejected_by_validator=True,
+            )
+        else:
+            result = structurer.run_stage_a(
+                runtime_input,
+                source_id=source_id,
+                markdown_hash=markdown_hash,
+                force_retry=force_retry,
+            )
+        _apply_stage_trace(
+            trace,
+            stage="A",
+            total_ms=_ms(started),
+            runtime_meta=dict(result.get("runtime") or {}),
+        )
+        return result
+
+    stage_a = stage_a_call()
     if not stage_a.get("ok"):
         return _pipeline_failure(
             snapshot=snapshot,
@@ -1094,10 +1153,34 @@ def run_r1_agent_extraction(
         )
 
     extraction = normalize_stage_a_v13(stage_a["data"])
-
     validation_started = _time.perf_counter()
     stage_a_validation = validate_agent_result(snapshot, extraction)
     trace["CASE_VALIDATION_MS"] = _ms(validation_started)
+
+    if stage_a_validation["status"] != "PASS":
+        stage_a_cache_hit = bool(
+            (stage_a.get("runtime") or {}).get("cache_hit")
+        )
+        if stage_a_cache_hit and reject_stage("STAGE_A", stage_a):
+            stage_a = stage_a_call(recovery=True)
+            if not stage_a.get("ok"):
+                return _pipeline_failure(
+                    snapshot=snapshot,
+                    markdown_view=markdown_view,
+                    trace=trace,
+                    failed_stage="STAGE_A",
+                    error_code=str(
+                        stage_a.get("error_code")
+                        or "RUNTIME_EXECUTION_FAILED"
+                    ),
+                    stage_a=stage_a,
+                    stage_b=None,
+                )
+            extraction = normalize_stage_a_v13(stage_a["data"])
+            validation_started = _time.perf_counter()
+            stage_a_validation = validate_agent_result(snapshot, extraction)
+            trace["CASE_VALIDATION_MS"] += _ms(validation_started)
+
     if stage_a_validation["status"] != "PASS":
         return _pipeline_failure(
             snapshot=snapshot,
@@ -1111,6 +1194,9 @@ def run_r1_agent_extraction(
             validation=stage_a_validation,
         )
 
+    # Runtime/schema completion becomes Stage Success only here.
+    commit_stage("STAGE_A", stage_a)
+
     conflict_started = _time.perf_counter()
     extraction["conflicts"] = detect_title_content_subject_conflict(
         snapshot,
@@ -1119,19 +1205,34 @@ def run_r1_agent_extraction(
     trace["CONFLICT_MS"] = _ms(conflict_started)
 
     reuse_input = _stage_b_input(snapshot, extraction)
-    stage_b_started = _time.perf_counter()
-    stage_b = structurer.run_stage_b(
-        reuse_input,
-        source_id=source_id,
-        markdown_hash=markdown_hash,
-        force_retry=force_retry,
-    )
-    _apply_stage_trace(
-        trace,
-        stage="B",
-        total_ms=_ms(stage_b_started),
-        runtime_meta=dict(stage_b.get("runtime") or {}),
-    )
+
+    def stage_b_call(*, recovery: bool = False) -> dict[str, Any]:
+        started = _time.perf_counter()
+        if recovery:
+            result = structurer.run_stage_b(
+                reuse_input,
+                source_id=source_id,
+                markdown_hash=markdown_hash,
+                force_retry=False,
+                bypass_cache=True,
+                cache_rejected_by_validator=True,
+            )
+        else:
+            result = structurer.run_stage_b(
+                reuse_input,
+                source_id=source_id,
+                markdown_hash=markdown_hash,
+                force_retry=force_retry,
+            )
+        _apply_stage_trace(
+            trace,
+            stage="B",
+            total_ms=_ms(started),
+            runtime_meta=dict(result.get("runtime") or {}),
+        )
+        return result
+
+    stage_b = stage_b_call()
     if not stage_b.get("ok"):
         return _pipeline_failure(
             snapshot=snapshot,
@@ -1154,6 +1255,38 @@ def run_r1_agent_extraction(
     reusable_validation_started = _time.perf_counter()
     final_validation = validate_agent_result(snapshot, extraction)
     trace["REUSABLE_VALIDATION_MS"] = _ms(reusable_validation_started)
+
+    if final_validation["status"] != "PASS":
+        stage_b_cache_hit = bool(
+            (stage_b.get("runtime") or {}).get("cache_hit")
+        )
+        if stage_b_cache_hit and reject_stage("STAGE_B", stage_b):
+            stage_b = stage_b_call(recovery=True)
+            if not stage_b.get("ok"):
+                return _pipeline_failure(
+                    snapshot=snapshot,
+                    markdown_view=markdown_view,
+                    trace=trace,
+                    failed_stage="STAGE_B",
+                    error_code=str(
+                        stage_b.get("error_code")
+                        or "RUNTIME_EXECUTION_FAILED"
+                    ),
+                    stage_a=stage_a,
+                    stage_b=stage_b,
+                    extraction=extraction,
+                    validation=stage_a_validation,
+                    partial=True,
+                )
+            extraction["reusable_knowledge_candidate"] = normalize_stage_b_v13(
+                stage_b["data"]
+            )
+            reusable_validation_started = _time.perf_counter()
+            final_validation = validate_agent_result(snapshot, extraction)
+            trace["REUSABLE_VALIDATION_MS"] += _ms(
+                reusable_validation_started
+            )
+
     if final_validation["status"] != "PASS":
         return _pipeline_failure(
             snapshot=snapshot,
@@ -1167,6 +1300,9 @@ def run_r1_agent_extraction(
             validation=final_validation,
             partial=True,
         )
+
+    # Stage B becomes cache-eligible only after reusable traceability passes.
+    commit_stage("STAGE_B", stage_b)
 
     runtime = _runtime_summary(stage_a, stage_b)
     golden_started = _time.perf_counter()
