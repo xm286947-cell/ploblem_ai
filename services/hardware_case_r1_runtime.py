@@ -793,6 +793,9 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
     validation_cycles: dict[int, int] = {}
     prompt_tokens: list[int] = []
     completion_tokens: list[int] = []
+    initial_call_count = 0
+    transport_retry_count = 0
+    observed_provider_calls = 0
     try:
         with _sqlite3.connect(runtime_db) as connection:
             rows = connection.execute(
@@ -814,6 +817,7 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
             record = json.loads(row[0])
         except Exception:
             continue
+        observed_provider_calls += 1
         started = record.get("started_at")
         completed = record.get("completed_at")
         if started and completed:
@@ -825,10 +829,16 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
                 pass
         step_attempt = int(record.get("step_attempt_no") or 1)
         cycle = int(record.get("validation_cycle_no") or 1)
+        transport_attempt = int(record.get("transport_attempt_no") or 1)
         validation_cycles[step_attempt] = max(
             validation_cycles.get(step_attempt, 1),
             cycle,
         )
+        if transport_attempt > 1:
+            transport_retry_count += 1
+        elif cycle == 1:
+            # First provider request for each Runtime step attempt.
+            initial_call_count += 1
         metrics = record.get("execution_metrics") or {}
         if isinstance(metrics.get("prompt_tokens"), int):
             prompt_tokens.append(int(metrics["prompt_tokens"]))
@@ -837,6 +847,9 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
 
     return {
         "provider_call_ms": call_ms,
+        "observed_provider_call_count": observed_provider_calls,
+        "initial_call_count": initial_call_count,
+        "transport_retry_count": transport_retry_count,
         "validation_retry_count": sum(
             max(0, cycle - 1) for cycle in validation_cycles.values()
         ),
@@ -927,6 +940,9 @@ class _R1StageRunner:
             "agent_config_hash": self.resolved.config_hash,
             "prompt_version": self.prompt_version,
             "provider_call_count": int(getattr(execution, "provider_calls", 0) or 0),
+            "observed_provider_call_count": attempts["observed_provider_call_count"],
+            "initial_call_count": attempts["initial_call_count"],
+            "transport_retry_count": attempts["transport_retry_count"],
             "provider_call_ms": attempts["provider_call_ms"],
             "prompt_tokens": attempts["prompt_tokens"],
             "completion_tokens": attempts["completion_tokens"],
@@ -946,6 +962,8 @@ class _R1StageRunner:
         force_retry: bool = False,
         bypass_cache: bool = False,
         cache_rejected_by_validator: bool = False,
+        require_cache_hit: bool = False,
+        execution_mode: str | None = None,
     ) -> dict[str, Any]:
         cache_key = self._cache_key(source_id=source_id, input_hash=input_hash)
         rejected = bool(cache_rejected_by_validator)
@@ -973,9 +991,14 @@ class _R1StageRunner:
                                 cached.get("source_run_id")
                                 or runtime_meta.get("run_id")
                             ),
+                            "execution_mode": "CACHE_HIT",
                             "provider_call_count": 0,
+                            "initial_call_count": 0,
+                            "transport_retry_count": 0,
                             "provider_call_ms": [],
                             "validation_retry_count": 0,
+                            "cache_recovery_call_count": 0,
+                            "force_retry_call_count": 0,
                             "prompt_tokens": "UNKNOWN",
                             "completion_tokens": "UNKNOWN",
                             "cache_key_version": R1_CACHE_KEY_VERSION,
@@ -989,6 +1012,40 @@ class _R1StageRunner:
                         "cache_key": cache_key,
                         "cache_write_pending": False,
                     }
+
+        if require_cache_hit:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "STAGE_LAST_GOOD_CACHE_REQUIRED",
+                "raw_error_code": None,
+                "runtime": {
+                    "run_id": None,
+                    "task_id": None,
+                    "agent_id": self.expected_agent_id,
+                    "agent_config_version": self.resolved.definition.version,
+                    "agent_config_hash": self.resolved.config_hash,
+                    "prompt_version": self.prompt_version,
+                    "execution_mode": "CACHE_REQUIRED_MISS",
+                    "provider_call_count": 0,
+                    "initial_call_count": 0,
+                    "transport_retry_count": 0,
+                    "validation_retry_count": 0,
+                    "cache_recovery_call_count": 0,
+                    "force_retry_call_count": 0,
+                    "provider_call_ms": [],
+                    "prompt_tokens": "UNKNOWN",
+                    "completion_tokens": "UNKNOWN",
+                    "cache_hit": False,
+                    "cache_rejected_by_validator": rejected,
+                    "cache_rejection_reason": rejection_reason,
+                    "cached_from_run_id": None,
+                    "cache_key_version": R1_CACHE_KEY_VERSION,
+                    self.input_hash_name: input_hash,
+                },
+                "cache_key": cache_key,
+                "cache_write_pending": False,
+            }
 
         mode = "force" if force_retry else ("recover" if bypass_cache or rejected else "run")
         base_request_id = (
@@ -1021,8 +1078,26 @@ class _R1StageRunner:
             result = invoke(f"{base_request_id}:retry:{_uuid4().hex[:12]}")
 
         runtime_meta = self._runtime_meta(result)
+        effective_mode = str(
+            execution_mode
+            or (
+                "FORCE_FULL_RUN"
+                if force_retry
+                else "CACHE_RECOVERY"
+                if bypass_cache or rejected
+                else "PROVIDER_RUN"
+            )
+        )
+        provider_calls = int(runtime_meta.get("provider_call_count") or 0)
         runtime_meta.update(
             {
+                "execution_mode": effective_mode,
+                "cache_recovery_call_count": (
+                    provider_calls if effective_mode == "CACHE_RECOVERY" else 0
+                ),
+                "force_retry_call_count": (
+                    provider_calls if effective_mode == "FORCE_FULL_RUN" else 0
+                ),
                 "cache_hit": False,
                 "cache_rejected_by_validator": rejected,
                 "cache_rejection_reason": rejection_reason,
@@ -1138,6 +1213,8 @@ class HardwareCaseR1PipelineRuntime:
         force_retry: bool = False,
         bypass_cache: bool = False,
         cache_rejected_by_validator: bool = False,
+        require_cache_hit: bool = False,
+        execution_mode: str | None = None,
     ) -> dict[str, Any]:
         return self.stage_a.run(
             payload,
@@ -1146,6 +1223,8 @@ class HardwareCaseR1PipelineRuntime:
             force_retry=force_retry,
             bypass_cache=bypass_cache,
             cache_rejected_by_validator=cache_rejected_by_validator,
+            require_cache_hit=require_cache_hit,
+            execution_mode=execution_mode,
         )
 
     def run_stage_b(
@@ -1157,6 +1236,8 @@ class HardwareCaseR1PipelineRuntime:
         force_retry: bool = False,
         bypass_cache: bool = False,
         cache_rejected_by_validator: bool = False,
+        require_cache_hit: bool = False,
+        execution_mode: str | None = None,
     ) -> dict[str, Any]:
         stage_b_input_hash = _canonical_payload_hash(payload)
         return self.stage_b.run(
@@ -1166,6 +1247,8 @@ class HardwareCaseR1PipelineRuntime:
             force_retry=force_retry,
             bypass_cache=bypass_cache,
             cache_rejected_by_validator=cache_rejected_by_validator,
+            require_cache_hit=require_cache_hit,
+            execution_mode=execution_mode,
         )
 
     def commit_stage_success(
