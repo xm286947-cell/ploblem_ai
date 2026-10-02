@@ -902,3 +902,100 @@ def test_v133_preview_clear_does_not_clear_stage_cache_or_runtime_audit(tmp_path
         ).fetchone()
     assert row == ("run-audit-keep",)
 
+def test_v133_stage_b_json_leaf_paths_normalize_to_canonical_traceability_fields():
+    payload = stage_b_payload()
+    reusable = payload["reusable_knowledge_candidate"]
+    reusable["engineering_rule"] = {
+        "value": "驱动配置和根因必须联合约束。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "facts.root_cause.value",
+            "facts.actions.value",
+        ],
+        "evidence_block_ids": ["B3", "B4"],
+    }
+    reusable["design_constraint"] = {
+        "value": "器件输出配置必须满足负载要求。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "engineering_context.component_or_device.value",
+            "facts.actions.value",
+        ],
+        "evidence_block_ids": ["B1", "B4"],
+    }
+    reusable["diagnostic_clue"] = {
+        "value": "结合症状、带载波形和根因进行诊断。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "facts.symptom.value",
+            "facts.analysis_process.value",
+            "facts.root_cause.value",
+        ],
+        "evidence_block_ids": ["B1", "B2", "B3"],
+    }
+    reusable["verification_method"] = {
+        "value": "修改输出模式后执行长期可靠性测试。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "facts.actions.value",
+            "facts.verification_result.value",
+        ],
+        "evidence_block_ids": ["B4", "B5"],
+    }
+    reusable["applicability"] = {
+        "value": "适用于 MCU UART TX 驱动外部负载场景。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "engineering_context.primary_subject.value",
+            "engineering_context.component_or_device.value",
+        ],
+        "evidence_block_ids": ["B1"],
+    }
+    reusable["conclusion"] = {
+        "value": "弱驱动配置应通过整改和验证闭环。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "facts.root_cause.value",
+            "facts.actions.value",
+        ],
+        "evidence_block_ids": ["B3", "B4"],
+    }
+
+    result = run_r1_agent_extraction(
+        snapshot(),
+        FakePipeline(stage_b_data=payload),
+    )
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert result["evidence_validation"]["status"] == "PASS"
+    errors = result["evidence_validation"]["errors"]
+    assert not any(item.startswith("REUSABLE_DERIVED_FIELD_UNKNOWN:") for item in errors)
+    assert not any(item.startswith("REUSABLE_EVIDENCE_NOT_TRACEABLE:") for item in errors)
+
+    normalized = result["structured_result"]["reusable_knowledge_candidate"]
+    assert normalized["engineering_rule"]["derived_from_fields"] == [
+        "facts.root_cause",
+        "facts.actions",
+    ]
+    assert normalized["design_constraint"]["derived_from_fields"] == [
+        "engineering_context.component_or_device",
+        "facts.actions",
+    ]
+    assert all(
+        not field.endswith(".value")
+        for item in normalized.values()
+        for field in item["derived_from_fields"]
+    )
+
+
+def test_v133_stage_b_prompt_freezes_canonical_derived_field_paths():
+    prompt = (
+        Path(__file__).resolve().parents[1]
+        / "prompts/runtime/hardware_case/r1_reuse_derive_v1.md"
+    ).read_text(encoding="utf-8")
+
+    assert "derived_from_fields is a field-level traceability contract" in prompt
+    assert "facts.root_cause" in prompt
+    assert "engineering_context.component_or_device" in prompt
+    assert "Never append .value" in prompt
+
