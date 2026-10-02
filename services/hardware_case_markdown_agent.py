@@ -876,11 +876,13 @@ def _runtime_summary(
     a = dict((stage_a or {}).get("runtime") or {})
     b = dict((stage_b or {}).get("runtime") or {})
     return {
-        "run_id": a.get("run_id"),
-        "task_id": a.get("task_id"),
-        "agent_id": a.get("agent_id") or R1_STAGE_A_AGENT_ID,
-        "agent_config_version": a.get("agent_config_version"),
-        "agent_config_hash": a.get("agent_config_hash"),
+        # Top-level Runtime identity follows the latest executed stage, while
+        # each stage retains its own independent Run/Task identity below.
+        "run_id": b.get("run_id") or a.get("run_id"),
+        "task_id": b.get("task_id") or a.get("task_id"),
+        "agent_id": b.get("agent_id") or a.get("agent_id") or R1_STAGE_A_AGENT_ID,
+        "agent_config_version": b.get("agent_config_version") or a.get("agent_config_version"),
+        "agent_config_hash": b.get("agent_config_hash") or a.get("agent_config_hash"),
         "stage_a": a,
         "stage_b": b,
     }
