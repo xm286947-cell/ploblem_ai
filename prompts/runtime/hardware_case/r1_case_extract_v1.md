@@ -15,7 +15,13 @@ Rules:
 5. Never invent block IDs.
 6. Do not output Conflict, Review, Provenance, confidence, warnings, reusable
    knowledge, publication state, or any default business state.
-7. Return strict JSON only.
+7. Preserve the source document language in extracted factual values. When the
+   supporting Evidence is Chinese, output Chinese rather than translating it to
+   English. This is mandatory for symptom, root_cause, actions, and
+   verification_result because local hard-grounding validation is intentionally
+   lexical/fail-closed. Keep those four fields concise and close to the source
+   wording while preserving the engineering meaning and distinctive terms.
+8. Return strict JSON only.
 
 Semantic boundaries:
 - primary_subject is the concise, normalized engineering subject explicitly
