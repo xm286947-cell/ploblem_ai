@@ -51,7 +51,7 @@ REUSABLE_FIELDS = (
 )
 EXTRACTION_STATUSES = frozenset({"EXTRACTED", "MISSING", "AMBIGUOUS", "UNSUPPORTED"})
 REUSABLE_REVIEW_STATUSES = frozenset({"UNREVIEWED", "CONFIRMED", "REJECTED", "EDITED"})
-HARD_GROUNDED_FACT_FIELDS = frozenset({"symptom", "root_cause", "actions", "verification_result"})
+HARD_GROUNDED_FACT_FIELDS = frozenset({"symptom", "impact", "root_cause", "actions", "verification_result"})
 
 
 class HardwareCaseMarkdownError(RuntimeError):
