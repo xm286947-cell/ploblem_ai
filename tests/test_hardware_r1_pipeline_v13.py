@@ -2,10 +2,23 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import hashlib
+import json
+import sqlite3
 
 from services.hardware_case_markdown_agent import run_r1_agent_extraction
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
-from services.hardware_case_r1_runtime import map_r1_runtime_error
+from services.hardware_case_r1_runtime import (
+    R1_CACHE_KEY_VERSION,
+    R1_PIPELINE_VERSION,
+    R1_STAGE_A_SCHEMA_VERSION,
+    R1_STAGE_A_VALIDATOR_VERSION,
+    R1_STAGE_B_SCHEMA_VERSION,
+    R1_STAGE_B_VALIDATOR_VERSION,
+    _R1StageCache,
+    _stage_cache_key_v2,
+    map_r1_runtime_error,
+)
 
 
 FACT_FIELDS = (
@@ -504,4 +517,388 @@ def test_v1321_stage_a_prompt_requires_source_language_for_hard_grounded_fields(
     assert "output Chinese rather than translating it to" in prompt
     assert "symptom, root_cause, actions, and" in prompt
     assert "verification_result" in prompt
+
+class FoundationCachePipeline:
+    """Small cache-aware fake that exercises Pipeline cache lifecycle semantics."""
+
+    def __init__(
+        self,
+        *,
+        cache_a=None,
+        cache_b=None,
+        provider_a=None,
+        provider_b=None,
+        fail_a=False,
+        fail_b=False,
+    ):
+        self.cache_a = deepcopy(cache_a)
+        self.cache_b = deepcopy(cache_b)
+        self.provider_a = deepcopy(provider_a)
+        self.provider_b = deepcopy(provider_b)
+        self.fail_a = fail_a
+        self.fail_b = fail_b
+        self.provider_calls = {"A": 0, "B": 0}
+        self.commits = []
+        self.rejects = []
+        self.stage_b_input = None
+
+    @staticmethod
+    def _meta(agent, run, *, cache_hit=False, rejected=False, calls=1, stage_b_input_hash=None):
+        meta = runtime_meta(agent, run)
+        meta.update(
+            {
+                "provider_call_count": calls,
+                "cache_hit": cache_hit,
+                "cache_rejected_by_validator": rejected,
+                "cached_from_run_id": run if cache_hit else None,
+                "cache_key_version": "v2",
+            }
+        )
+        if stage_b_input_hash is not None:
+            meta["stage_b_input_hash"] = stage_b_input_hash
+        return meta
+
+    def run_stage_a(
+        self,
+        payload,
+        *,
+        source_id,
+        markdown_hash,
+        force_retry=False,
+        bypass_cache=False,
+        cache_rejected_by_validator=False,
+    ):
+        if self.cache_a is not None and not force_retry and not bypass_cache:
+            return {
+                "ok": True,
+                "data": deepcopy(self.cache_a),
+                "runtime": self._meta(
+                    "hardware_case.r1_case_extract",
+                    "run-a-cache",
+                    cache_hit=True,
+                    calls=0,
+                ),
+                "cache_key": "cache-a",
+                "cache_write_pending": False,
+            }
+        self.provider_calls["A"] += 1
+        if self.fail_a:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "PROVIDER_TIMEOUT",
+                "runtime": self._meta(
+                    "hardware_case.r1_case_extract",
+                    "run-a-failed",
+                    rejected=cache_rejected_by_validator,
+                    calls=1,
+                ),
+                "cache_key": "cache-a",
+                "cache_write_pending": False,
+            }
+        return {
+            "ok": True,
+            "data": deepcopy(
+                self.provider_a
+                if self.provider_a is not None
+                else stage_a_payload()
+            ),
+            "runtime": self._meta(
+                "hardware_case.r1_case_extract",
+                "run-a-provider",
+                rejected=cache_rejected_by_validator,
+                calls=1,
+            ),
+            "cache_key": "cache-a",
+            "cache_write_pending": True,
+        }
+
+    def run_stage_b(
+        self,
+        payload,
+        *,
+        source_id,
+        markdown_hash=None,
+        force_retry=False,
+        bypass_cache=False,
+        cache_rejected_by_validator=False,
+    ):
+        self.stage_b_input = deepcopy(payload)
+        input_hash = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if self.cache_b is not None and not force_retry and not bypass_cache:
+            return {
+                "ok": True,
+                "data": deepcopy(self.cache_b),
+                "runtime": self._meta(
+                    "hardware_case.r1_reuse_derive",
+                    "run-b-cache",
+                    cache_hit=True,
+                    calls=0,
+                    stage_b_input_hash=input_hash,
+                ),
+                "cache_key": "cache-b",
+                "cache_write_pending": False,
+            }
+        self.provider_calls["B"] += 1
+        if self.fail_b:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "PROVIDER_TIMEOUT",
+                "runtime": self._meta(
+                    "hardware_case.r1_reuse_derive",
+                    "run-b-failed",
+                    rejected=cache_rejected_by_validator,
+                    calls=1,
+                    stage_b_input_hash=input_hash,
+                ),
+                "cache_key": "cache-b",
+                "cache_write_pending": False,
+            }
+        return {
+            "ok": True,
+            "data": deepcopy(
+                self.provider_b
+                if self.provider_b is not None
+                else stage_b_payload()
+            ),
+            "runtime": self._meta(
+                "hardware_case.r1_reuse_derive",
+                "run-b-provider",
+                rejected=cache_rejected_by_validator,
+                calls=1,
+                stage_b_input_hash=input_hash,
+            ),
+            "cache_key": "cache-b",
+            "cache_write_pending": True,
+        }
+
+    def commit_stage_success(self, stage, stage_result):
+        if not stage_result.get("cache_write_pending"):
+            return False
+        if stage == "STAGE_A":
+            self.cache_a = deepcopy(stage_result["data"])
+        elif stage == "STAGE_B":
+            self.cache_b = deepcopy(stage_result["data"])
+        else:
+            raise AssertionError(stage)
+        self.commits.append(stage)
+        stage_result["cache_write_pending"] = False
+        return True
+
+    def reject_stage_cache(self, stage, stage_result):
+        self.rejects.append(stage)
+        if stage == "STAGE_A":
+            self.cache_a = None
+        elif stage == "STAGE_B":
+            self.cache_b = None
+        else:
+            raise AssertionError(stage)
+        return True
+
+
+def _translated_invalid_stage_a():
+    payload = stage_a_payload()
+    payload["facts"]["symptom"] = field(
+        "When the MCU sent data to the serial screen, garbled characters often appeared.",
+        ["B1"],
+    )
+    return payload
+
+
+def _invalid_stage_b():
+    payload = stage_b_payload()
+    payload["reusable_knowledge_candidate"]["engineering_rule"] = {
+        "value": "无效派生",
+        "status": "EXTRACTED",
+        "derived_from_fields": ["unknown.field"],
+        "evidence_block_ids": ["B3"],
+    }
+    return payload
+
+
+def test_v133_invalid_stage_a_is_never_cached():
+    pipeline = FoundationCachePipeline(provider_a=_translated_invalid_stage_a())
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "CASE_EXTRACTION_FAILED"
+    assert result["error_code"] == "EVIDENCE_VALIDATION_FAILED"
+    assert "STAGE_A" not in pipeline.commits
+    assert pipeline.cache_a is None
+
+
+def test_v133_invalid_stage_b_is_never_cached():
+    pipeline = FoundationCachePipeline(provider_b=_invalid_stage_b())
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "PARTIAL_REUSABLE_KNOWLEDGE_FAILED"
+    assert result["error_code"] == "REUSABLE_TRACEABILITY_INVALID"
+    assert "STAGE_A" in pipeline.commits
+    assert "STAGE_B" not in pipeline.commits
+    assert pipeline.cache_b is None
+
+
+def test_v133_valid_cache_hits_are_revalidated_and_use_zero_provider_calls():
+    pipeline = FoundationCachePipeline(
+        cache_a=stage_a_payload(),
+        cache_b=stage_b_payload(),
+    )
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert pipeline.provider_calls == {"A": 0, "B": 0}
+    assert result["latency_trace"]["STAGE_A_CACHE_HIT"] is True
+    assert result["latency_trace"]["STAGE_B_CACHE_HIT"] is True
+    assert result["provider_call_count"] == 0
+
+
+def test_v133_bad_stage_a_cache_is_evicted_then_provider_recovers():
+    pipeline = FoundationCachePipeline(
+        cache_a=_translated_invalid_stage_a(),
+        provider_a=stage_a_payload(),
+    )
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert pipeline.rejects == ["STAGE_A"]
+    assert pipeline.provider_calls["A"] == 1
+    assert result["latency_trace"]["STAGE_A_CACHE_HIT"] is True
+    assert result["latency_trace"]["STAGE_A_CACHE_REJECTED_BY_VALIDATOR"] is True
+    assert result["latency_trace"]["STAGE_A_PROVIDER_CALL_COUNT"] == 1
+
+
+def test_v133_bad_stage_b_cache_is_evicted_then_provider_recovers():
+    pipeline = FoundationCachePipeline(
+        cache_a=stage_a_payload(),
+        cache_b=_invalid_stage_b(),
+        provider_b=stage_b_payload(),
+    )
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert pipeline.rejects == ["STAGE_B"]
+    assert pipeline.provider_calls["B"] == 1
+    assert result["latency_trace"]["STAGE_B_CACHE_HIT"] is True
+    assert result["latency_trace"]["STAGE_B_CACHE_REJECTED_BY_VALIDATOR"] is True
+    assert result["latency_trace"]["STAGE_B_PROVIDER_CALL_COUNT"] == 1
+    assert result["error_code"] is None
+
+
+def test_v133_force_retry_failure_preserves_last_good_stage_b_cache():
+    last_good = stage_b_payload()
+    pipeline = FoundationCachePipeline(
+        cache_a=stage_a_payload(),
+        cache_b=last_good,
+        fail_b=True,
+    )
+    result = run_r1_agent_extraction(snapshot(), pipeline, force_retry=True)
+
+    assert result["pipeline_status"] == "PARTIAL_REUSABLE_KNOWLEDGE_FAILED"
+    assert pipeline.cache_b == last_good
+    assert "STAGE_B" not in pipeline.commits
+
+
+def test_v133_cache_key_v2_invalidates_on_stage_b_input_validator_and_pipeline_change():
+    common = {
+        "stage": "STAGE_B",
+        "source_id": "source-1",
+        "input_hash_name": "stage_b_input_hash",
+        "agent_config_hash": "agent-cfg",
+        "prompt_version": "prompt-v1",
+        "schema_version": R1_STAGE_B_SCHEMA_VERSION,
+    }
+    base = _stage_cache_key_v2(
+        **common,
+        input_hash="input-a",
+        pipeline_version=R1_PIPELINE_VERSION,
+        validator_version=R1_STAGE_B_VALIDATOR_VERSION,
+    )
+    changed_input = _stage_cache_key_v2(
+        **common,
+        input_hash="input-b",
+        pipeline_version=R1_PIPELINE_VERSION,
+        validator_version=R1_STAGE_B_VALIDATOR_VERSION,
+    )
+    changed_validator = _stage_cache_key_v2(
+        **common,
+        input_hash="input-a",
+        pipeline_version=R1_PIPELINE_VERSION,
+        validator_version=R1_STAGE_B_VALIDATOR_VERSION + ".next",
+    )
+    changed_pipeline = _stage_cache_key_v2(
+        **common,
+        input_hash="input-a",
+        pipeline_version=R1_PIPELINE_VERSION + ".next",
+        validator_version=R1_STAGE_B_VALIDATOR_VERSION,
+    )
+
+    assert R1_CACHE_KEY_VERSION == "v2"
+    assert len({base, changed_input, changed_validator, changed_pipeline}) == 4
+
+
+def test_v133_stage_a_cache_key_contains_markdown_and_version_boundaries():
+    base = _stage_cache_key_v2(
+        stage="STAGE_A",
+        source_id="source-1",
+        input_hash_name="markdown_hash",
+        input_hash="markdown-a",
+        agent_config_hash="agent-cfg",
+        prompt_version="prompt-v1",
+        pipeline_version=R1_PIPELINE_VERSION,
+        validator_version=R1_STAGE_A_VALIDATOR_VERSION,
+        schema_version=R1_STAGE_A_SCHEMA_VERSION,
+    )
+    changed = _stage_cache_key_v2(
+        stage="STAGE_A",
+        source_id="source-1",
+        input_hash_name="markdown_hash",
+        input_hash="markdown-b",
+        agent_config_hash="agent-cfg",
+        prompt_version="prompt-v1",
+        pipeline_version=R1_PIPELINE_VERSION,
+        validator_version=R1_STAGE_A_VALIDATOR_VERSION,
+        schema_version=R1_STAGE_A_SCHEMA_VERSION,
+    )
+    assert base != changed
+
+
+def test_v133_preview_clear_does_not_clear_stage_cache_or_runtime_audit(tmp_path):
+    runtime_db = tmp_path / "runtime.db"
+    stage_cache = _R1StageCache(runtime_db)
+    stage_cache.put(
+        "STAGE_A",
+        "cache-key-a",
+        stage_a_payload(),
+        {"run_id": "run-good-a"},
+        validator_version=R1_STAGE_A_VALIDATOR_VERSION,
+        pipeline_version=R1_PIPELINE_VERSION,
+        schema_version=R1_STAGE_A_SCHEMA_VERSION,
+        agent_config_hash="cfg-a",
+        prompt_version="prompt-a",
+    )
+    with sqlite3.connect(runtime_db) as connection:
+        connection.execute(
+            "CREATE TABLE runtime_audit_sentinel (run_id TEXT PRIMARY KEY)"
+        )
+        connection.execute(
+            "INSERT INTO runtime_audit_sentinel(run_id) VALUES ('run-audit-keep')"
+        )
+
+    preview_store = HardwareR1PreviewStore(tmp_path / "preview.db")
+    preview_store.save(snapshot(), {"status": "PASS", "runtime": {"run_id": "preview-run"}})
+    assert preview_store.clear() == 1
+
+    assert stage_cache.get("STAGE_A", "cache-key-a") is not None
+    with sqlite3.connect(runtime_db) as connection:
+        row = connection.execute(
+            "SELECT run_id FROM runtime_audit_sentinel"
+        ).fetchone()
+    assert row == ("run-audit-keep",)
 
