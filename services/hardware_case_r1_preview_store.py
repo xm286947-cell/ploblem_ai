@@ -10,6 +10,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 
@@ -72,6 +73,7 @@ class HardwareR1PreviewStore:
         }
 
     def save(self, snapshot: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        started = perf_counter()
         meta = self._metadata(snapshot, result)
         created_at = datetime.now(timezone.utc).isoformat()
         snapshot_json = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
@@ -95,12 +97,51 @@ class HardwareR1PreviewStore:
                 ),
             )
             preview_id = int(cursor.lastrowid)
+
+            # V1.3 trace includes Preview persistence itself. Update the same
+            # immutable history row after measuring the insert; no older row is
+            # overwritten and failed/partial runs remain independently visible.
+            preview_save_ms = max(0, int((perf_counter() - started) * 1000))
+            trace = result.setdefault("latency_trace", {})
+            previous_save = trace.get("PREVIEW_SAVE_MS")
+            trace["PREVIEW_SAVE_MS"] = preview_save_ms
+            if previous_save is None:
+                trace["TOTAL_MS"] = int(trace.get("TOTAL_MS") or 0) + preview_save_ms
+            required = {
+                "PARSE_MS", "MARKDOWN_MS",
+                "STAGE_A_TOTAL_MS", "STAGE_A_PROVIDER_CALL_COUNT",
+                "STAGE_A_PROVIDER_CALL_MS", "STAGE_A_PROMPT_TOKENS",
+                "STAGE_A_COMPLETION_TOKENS", "STAGE_A_VALIDATION_RETRY_COUNT",
+                "CASE_VALIDATION_MS", "CONFLICT_MS",
+                "STAGE_B_TOTAL_MS", "STAGE_B_PROVIDER_CALL_COUNT",
+                "STAGE_B_PROVIDER_CALL_MS", "STAGE_B_PROMPT_TOKENS",
+                "STAGE_B_COMPLETION_TOKENS", "STAGE_B_VALIDATION_RETRY_COUNT",
+                "REUSABLE_VALIDATION_MS", "GOLDEN_BUILD_MS",
+                "PREVIEW_SAVE_MS", "TOTAL_MS",
+            }
+            result["latency_trace_complete"] = (
+                required.issubset(trace)
+                and trace.get("PREVIEW_SAVE_MS") is not None
+            )
+            connection.execute(
+                """
+                UPDATE hardware_r1_preview_result
+                SET result_json=?
+                WHERE preview_id=?
+                """,
+                (
+                    json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+                    preview_id,
+                ),
+            )
         return {
             "preview_id": preview_id,
             "store_version": PREVIEW_STORE_VERSION,
             "created_at": created_at,
+            "pipeline_status": result.get("pipeline_status"),
             **meta,
         }
+
 
     @staticmethod
     def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
