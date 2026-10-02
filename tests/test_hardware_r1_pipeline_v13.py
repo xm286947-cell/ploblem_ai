@@ -1203,3 +1203,122 @@ def test_v14_stage_trace_exposes_provider_attribution_fields():
     assert required.issubset(trace)
     assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.4"
 
+def test_v15_provider_attempt_trace_distinguishes_timeout_transport_validation_success(tmp_path):
+    db = tmp_path / "attempt_reason.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TABLE runtime_run (run_id TEXT PRIMARY KEY, task_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE runtime_step_run (step_run_id TEXT PRIMARY KEY, run_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE runtime_attempt (record_json TEXT, step_run_id TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO runtime_run(run_id, task_id) VALUES ('run-v15', 'task-v15')"
+        )
+        connection.execute(
+            "INSERT INTO runtime_step_run(step_run_id, run_id) VALUES ('step-v15', 'run-v15')"
+        )
+        records = [
+            {
+                "status": "FAILED",
+                "started_at": "2026-10-02T00:00:00+00:00",
+                "completed_at": "2026-10-02T00:02:30+00:00",
+                "provider_call_seq": 1,
+                "step_attempt_no": 1,
+                "validation_cycle_no": 1,
+                "transport_attempt_no": 1,
+                "error": {
+                    "code": "PROVIDER_TRANSPORT",
+                    "category": "TRANSPORT",
+                    "message": "ReadTimeout",
+                    "retryable": True,
+                    "details": {"exception_type": "ReadTimeout"},
+                },
+            },
+            {
+                "status": "FAILED",
+                "started_at": "2026-10-02T00:02:30+00:00",
+                "completed_at": "2026-10-02T00:02:31+00:00",
+                "provider_call_seq": 2,
+                "step_attempt_no": 1,
+                "validation_cycle_no": 1,
+                "transport_attempt_no": 2,
+                "error": {
+                    "code": "PROVIDER_CONNECTION",
+                    "category": "TRANSPORT",
+                    "message": "connection reset",
+                    "retryable": True,
+                    "details": {"http_status": 502},
+                },
+            },
+            {
+                "status": "FAILED",
+                "started_at": "2026-10-02T00:02:31+00:00",
+                "completed_at": "2026-10-02T00:02:32+00:00",
+                "provider_call_seq": 3,
+                "step_attempt_no": 1,
+                "validation_cycle_no": 2,
+                "transport_attempt_no": 1,
+                "error": {
+                    "code": "PROVIDER_SCHEMA_INVALID",
+                    "category": "VALIDATION",
+                    "message": "schema invalid",
+                    "retryable": True,
+                    "details": {},
+                },
+            },
+            {
+                "status": "COMPLETED",
+                "started_at": "2026-10-02T00:02:32+00:00",
+                "completed_at": "2026-10-02T00:02:33+00:00",
+                "provider_call_seq": 4,
+                "step_attempt_no": 1,
+                "validation_cycle_no": 2,
+                "transport_attempt_no": 2,
+                "execution_metrics": {"prompt_tokens": 20, "completion_tokens": 10},
+            },
+        ]
+        for record in records:
+            connection.execute(
+                "INSERT INTO runtime_attempt(record_json, step_run_id) VALUES (?, 'step-v15')",
+                (json.dumps(record),),
+            )
+
+    metrics = _attempt_metrics(db, "task-v15")
+    assert [item["result_class"] for item in metrics["provider_attempts"]] == [
+        "TIMEOUT",
+        "TRANSPORT_ERROR",
+        "VALIDATION_ERROR",
+        "SUCCESS",
+    ]
+    assert metrics["provider_attempts"][0]["duration_ms"] == 150000
+    assert metrics["provider_attempts"][1]["http_status"] == 502
+    assert metrics["provider_attempts"][0]["raw_error_code"] == "PROVIDER_TRANSPORT"
+
+
+def test_v15_timeout_headroom_and_call_caps_are_frozen():
+    root = Path(__file__).resolve().parents[1]
+    stage_a = (
+        root / "config/runtime/agents/hardware_case.r1_case_extract.yaml"
+    ).read_text(encoding="utf-8")
+    stage_b = (
+        root / "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "timeout_seconds: 150" in stage_a
+    assert "timeout_seconds: 120" in stage_b
+    assert stage_a.count("max_provider_calls_per_step: 2") == 1
+    assert stage_b.count("max_provider_calls_per_step: 2") == 1
+    assert stage_a.count("transport_attempts: 2") == 1
+    assert stage_b.count("transport_attempts: 2") == 1
+
+
+def test_v15_knowledge_object_contract_remains_v1():
+    result = run_r1_agent_extraction(snapshot(), FakePipeline())
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert result["knowledge_object"]["contract_version"] == "hardware-case-knowledge-object/v1"
+    assert result["execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
+
