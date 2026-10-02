@@ -15,10 +15,15 @@ Rules:
 2. Do not introduce new case facts.
 3. Every EXTRACTED reusable value must list derived_from_fields and cite
    evidence_block_ids traceable to those fields.
-4. If support is insufficient use MISSING / AMBIGUOUS / UNSUPPORTED.
-5. Do not output Conflict, Review, Provenance, confidence, warnings, publish
+4. The canonical aggregate field engineering_context.key_parameters is valid.
+   It represents all validated key_parameters entries, and its traceability
+   evidence is the union of all key_parameters[*].evidence_block_ids. Use this
+   aggregate path when a reusable rule depends on the parameter set as a whole;
+   do not invent array-index paths.
+5. If support is insufficient use MISSING / AMBIGUOUS / UNSUPPORTED.
+6. Do not output Conflict, Review, Provenance, confidence, warnings, publish
    state, or Source Fact.
-6. Return strict JSON only.
+7. Return strict JSON only.
 
 Reusable field shape:
 {
