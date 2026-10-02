@@ -481,7 +481,7 @@ def main() -> int:
             "runtime_adapter": "services.hardware_case_runtime_adapter:build_hardware_case_structurer",
             "provider_ownership": "UNIFIED_RUNTIME",
             "secret_policy": "ENV_REFERENCE_RECOMMENDED",
-            "r1_pipeline_version": "hardware-r1-agent-pipeline/v1.3.1",
+            "r1_pipeline_version": "hardware-r1-agent-pipeline/v1.3.3",
             "r1_stage_a_agent_id": "hardware_case.r1_case_extract",
             "r1_stage_a_agent_config": "config/runtime/agents/hardware_case.r1_case_extract.yaml",
             "r1_stage_a_schema": "HardwareCaseR1CaseExtractionV13",
