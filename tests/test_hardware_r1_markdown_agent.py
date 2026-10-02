@@ -155,7 +155,7 @@ def test_evidence_gate_fails_closed_on_fake_block_unsupported_fact_and_mapping()
     assert validation["fabricated_fact_count"] == 1
 
 
-def test_r1_agent_runtime_input_is_compact_and_keeps_evidence_blocks():
+def test_r1_agent_runtime_input_v3_deduplicates_text_and_keeps_evidence_index():
     captured = {}
 
     def structurer(document):
@@ -164,14 +164,60 @@ def test_r1_agent_runtime_input_is_compact_and_keeps_evidence_blocks():
 
     result = run_r1_agent_extraction(snapshot(), structurer)
 
-    assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
+    assert captured["input_contract"] == "hardware-case-r1-agent-input/v3"
     assert "markdown_view" not in captured
     assert "markdown_text" not in captured
     assert "blocks" not in captured
     assert "valid_block_ids" not in captured
     assert "HC_BLOCK B0001" in captured["markdown"]
     assert "tree_candidates" not in captured
-    assert [item["block_id"] for item in captured["evidence_blocks"]] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
-    assert set(captured["evidence_blocks"][0]) == {"block_id", "block_type", "text", "source_locator"}
+    assert "evidence_blocks" not in captured
+    assert [item["block_id"] for item in captured["evidence_index"]] == ["B0001", "B0002", "B0003", "B0004", "B0005"]
+    assert set(captured["evidence_index"][0]) == {"block_id", "block_type", "source_locator"}
+    assert all("text" not in item for item in captured["evidence_index"])
+    assert captured["markdown"].count("设备启动异常") == 1
     assert result["status"] == "PASS"
     assert result["evidence_validation"]["fabricated_fact_count"] == 0
+
+def test_v15_stage_a_input_v3_is_smaller_than_v2_duplicate_text_shape():
+    markdown = build_markdown_view(snapshot())
+    compact = _compact_runtime_input(snapshot(), markdown)
+    duplicated = {
+        **compact,
+        "input_contract": "hardware-case-r1-agent-input/v2",
+        "evidence_blocks": [
+            {
+                "block_id": block["block_id"],
+                "block_type": block.get("block_type"),
+                "text": block.get("text") or "",
+                "source_locator": block.get("source_locator") or {},
+            }
+            for block in snapshot()["structure"]["blocks"]
+        ],
+    }
+    duplicated.pop("evidence_index", None)
+
+    compact_json = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+    duplicated_json = json.dumps(duplicated, ensure_ascii=False, sort_keys=True)
+
+    assert compact["input_contract"] == "hardware-case-r1-agent-input/v3"
+    assert "evidence_index" in compact
+    assert "evidence_blocks" not in compact
+    assert len(compact_json.encode("utf-8")) < len(duplicated_json.encode("utf-8"))
+
+
+def test_v15_impact_process_status_guardrail_rejects_unresolved_feedback_status():
+    result = normalize_extraction_v2(good_agent_result())
+    result["facts"]["impact"] = {
+        "value": "反馈多次均得不到解决",
+        "extraction_status": "EXTRACTED",
+        "evidence_block_ids": ["B0002"],
+        "confidence": None,
+        "warnings": [],
+    }
+
+    validation = validate_agent_result(snapshot(), result)
+
+    assert validation["status"] == "FAIL"
+    assert "IMPACT_PROCESS_STATUS_NOT_CONSEQUENCE" in validation["errors"]
+
