@@ -284,6 +284,22 @@ def _normalized_subject(value: Any) -> str:
     return re.sub(r"[^a-z0-9\u3400-\u9fff]+", "", str(value or "").casefold())
 
 
+def _cjk_count(value: Any) -> int:
+    return len(re.findall(r"[\u3400-\u9fff]", str(value or "")))
+
+
+def _hard_grounding_language_mismatch(value: Any, evidence_text: Any) -> bool:
+    """Fail closed when Chinese Evidence was translated into non-Chinese prose.
+
+    The local hard-grounding check is deliberately deterministic/lexical, not
+    a multilingual semantic model. Treat translation as a contract mismatch
+    rather than a fabricated fact so the caller gets an actionable error.
+    """
+    evidence = str(evidence_text or "")
+    candidate = str(value or "")
+    return _cjk_count(evidence) >= 4 and _cjk_count(candidate) == 0
+
+
 def _title_subject(raw_title: Any) -> str | None:
     match = _TITLE_PREFIX.match(str(raw_title or ""))
     return match.group(1) if match else None
@@ -438,7 +454,9 @@ def validate_agent_result(
             text = "\n".join(
                 str(block_index[ref].get("text") or "") for ref in valid_refs
             )
-            if text and not evidence_supports_fact(value, text):
+            if text and _hard_grounding_language_mismatch(value, text):
+                errors.append(f"HARD_GROUNDED_LANGUAGE_MISMATCH:{field_path}")
+            elif text and not evidence_supports_fact(value, text):
                 fabricated_fact_count += 1
                 errors.append(f"FABRICATED_OR_UNSUPPORTED_FACT:{field_path}")
 
