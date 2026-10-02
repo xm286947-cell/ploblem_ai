@@ -71,6 +71,11 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     assert "/r1/agent-extract" in asset.text
     assert "/r1/previews?limit=10" in asset.text
     assert "autoRestore:true" in asset.text
+    assert "data-delete-preview-id" in asset.text
+    assert "method:'DELETE'" in asset.text
+    assert "仅删除本地 Golden Preview 测试记录，不删除原始 Word、Source Fact 或正式知识。" in asset.text
+    assert "data-clear-previews" in page.text
+    assert "清空历史" in page.text
 
 
 def test_docx_upload_renders_frozen_snapshot_contract(tmp_path: Path):
