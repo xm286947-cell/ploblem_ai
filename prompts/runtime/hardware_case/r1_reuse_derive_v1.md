@@ -15,15 +15,35 @@ Rules:
 2. Do not introduce new case facts.
 3. Every EXTRACTED reusable value must list derived_from_fields and cite
    evidence_block_ids traceable to those fields.
-4. The canonical aggregate field engineering_context.key_parameters is valid.
+4. derived_from_fields is a field-level traceability contract, not an
+   arbitrary JSON path. Use ONLY these canonical paths:
+   - facts.background
+   - facts.symptom
+   - facts.impact
+   - facts.occurrence_condition
+   - facts.analysis_process
+   - facts.failure_mode
+   - facts.root_cause
+   - facts.failure_mechanism
+   - facts.actions
+   - facts.verification_result
+   - facts.conclusion
+   - engineering_context.primary_subject
+   - engineering_context.component_or_device
+   - engineering_context.interface
+   - engineering_context.signal
+   - engineering_context.peer_device_or_load
+   - engineering_context.key_parameters
+   Never append .value, .status, .evidence_block_ids, or array indexes.
+5. The canonical aggregate field engineering_context.key_parameters is valid.
    It represents all validated key_parameters entries, and its traceability
    evidence is the union of all key_parameters[*].evidence_block_ids. Use this
    aggregate path when a reusable rule depends on the parameter set as a whole;
    do not invent array-index paths.
-5. If support is insufficient use MISSING / AMBIGUOUS / UNSUPPORTED.
-6. Do not output Conflict, Review, Provenance, confidence, warnings, publish
+6. If support is insufficient use MISSING / AMBIGUOUS / UNSUPPORTED.
+7. Do not output Conflict, Review, Provenance, confidence, warnings, publish
    state, or Source Fact.
-7. Return strict JSON only.
+8. Return strict JSON only.
 
 Reusable field shape:
 {
