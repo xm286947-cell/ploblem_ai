@@ -220,5 +220,25 @@ class HardwareR1PreviewStore:
                 for row in connection.execute(query, tuple(params)).fetchall()
             ]
 
+    def delete(self, preview_id: int) -> bool:
+        """Delete exactly one local Golden Preview row.
+
+        This store owns only the dedicated *_r1_preview.db history table. It
+        never deletes source files, DocumentSnapshot persistence, formal case /
+        Knowledge data, Tree mappings, or Unified Runtime audit records.
+        """
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM hardware_r1_preview_result WHERE preview_id = ?",
+                (int(preview_id),),
+            )
+            return int(cursor.rowcount or 0) == 1
+
+    def clear(self) -> int:
+        """Delete all local Golden Preview rows; repeated calls are idempotent."""
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM hardware_r1_preview_result")
+            return max(0, int(cursor.rowcount or 0))
+
 
 __all__ = ["PREVIEW_STORE_VERSION", "HardwareR1PreviewStore"]
