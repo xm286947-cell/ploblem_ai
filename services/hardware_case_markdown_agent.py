@@ -15,7 +15,7 @@ from services.hardware_case_contract import evidence_supports_fact
 
 
 MARKDOWN_VIEW_VERSION = "hardware-markdown-view/v1"
-R1_AGENT_INPUT_VERSION = "hardware-case-r1-agent-input/v2"
+R1_AGENT_INPUT_VERSION = "hardware-case-r1-agent-input/v3"
 R1_EXTRACTION_CONTRACT_VERSION = "hardware-r1-extraction/v2"
 R1_AGENT_RESULT_VERSION = "hardware-case-r1-agent-result/v2"
 KNOWLEDGE_OBJECT_VERSION = "hardware-case-knowledge-object/v1"
@@ -300,6 +300,61 @@ def _hard_grounding_language_mismatch(value: Any, evidence_text: Any) -> bool:
     return _cjk_count(evidence) >= 4 and _cjk_count(candidate) == 0
 
 
+def _impact_is_resolution_status(value: Any) -> bool:
+    """Reject process/handling status that is not a downstream consequence.
+
+    Keep this conservative: only classify short status-like phrases that
+    describe repeated feedback / unresolved handling and do not state a
+    measurable product, production, customer, business, or system consequence.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = re.sub(r"\s+", "", text)
+    process_markers = (
+        "反馈多次",
+        "多次反馈",
+        "得不到解决",
+        "未得到解决",
+        "一直未解决",
+        "尚未解决",
+        "仍未解决",
+        "反复反馈",
+        "问题未解决",
+        "issue remained unresolved",
+        "reported multiple times",
+        "multiple reports",
+    )
+    consequence_markers = (
+        "不良",
+        "报废",
+        "停机",
+        "停产",
+        "损坏",
+        "失效",
+        "无法",
+        "不能",
+        "客户",
+        "产线",
+        "生产",
+        "良率",
+        "数量",
+        "pcs",
+        "%",
+        "system",
+        "customer",
+        "production",
+        "yield",
+        "failure",
+        "loss",
+    )
+    lowered = compact.casefold()
+    return (
+        any(marker.casefold() in lowered for marker in process_markers)
+        and not any(marker.casefold() in lowered for marker in consequence_markers)
+    )
+
+
 def _title_subject(raw_title: Any) -> str | None:
     match = _TITLE_PREFIX.match(str(raw_title or ""))
     return match.group(1) if match else None
@@ -477,6 +532,13 @@ def validate_agent_result(
             hard_semantic_check=name in HARD_GROUNDED_FACT_FIELDS,
         )
 
+    impact = facts.get("impact") or {}
+    if (
+        impact.get("extraction_status") == "EXTRACTED"
+        and _impact_is_resolution_status(impact.get("value"))
+    ):
+        errors.append("IMPACT_PROCESS_STATUS_NOT_CONSEQUENCE")
+
     for index, conflict in enumerate(result.get("conflicts") or [], start=1):
         for ref in conflict.get("evidence_block_ids") or []:
             ref = str(ref)
@@ -619,13 +681,17 @@ def _compact_runtime_input(
     snapshot: dict[str, Any],
     markdown_view: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the minimal Agent payload without duplicating Markdown/block views."""
+    """Build Stage A Input V3 without duplicating document text.
+
+    Markdown is the single full-text reading view. Evidence index carries only
+    stable identifiers/types/locators for citation; block text is intentionally
+    omitted because it is already represented in Markdown.
+    """
     source_blocks = _snapshot_blocks(snapshot)
-    evidence_blocks = [
+    evidence_index = [
         {
             "block_id": str(block["block_id"]),
             "block_type": str(block.get("block_type") or "UNKNOWN"),
-            "text": str(block.get("text") or ""),
             "source_locator": dict(block.get("source_locator") or {}),
         }
         for block in source_blocks
@@ -638,7 +704,7 @@ def _compact_runtime_input(
             "raw_title": (snapshot.get("identity") or {}).get("raw_title"),
         },
         "markdown": markdown_view.get("markdown") or "",
-        "evidence_blocks": evidence_blocks,
+        "evidence_index": evidence_index,
     }
 
 
@@ -695,6 +761,7 @@ __all__ = [
     "normalize_extraction_v2",
     "detect_title_content_subject_conflict",
     "validate_agent_result",
+    "_impact_is_resolution_status",
     "build_golden_knowledge_object",
     "run_r1_agent_extraction",
 ]
@@ -712,7 +779,7 @@ R1_PIPELINE_RESULT_VERSION = "hardware-case-r1-agent-result/v3"
 R1_STAGE_A_AGENT_ID = "hardware_case.r1_case_extract"
 R1_STAGE_B_AGENT_ID = "hardware_case.r1_reuse_derive"
 R1_REUSE_INPUT_VERSION = "hardware-case-r1-reuse-input/v1"
-R1_EXECUTION_TRACE_VERSION = "hardware-r1-execution-trace/v1.4"
+R1_EXECUTION_TRACE_VERSION = "hardware-r1-execution-trace/v1.5"
 
 
 def _ms(start: float) -> int:
@@ -962,6 +1029,11 @@ def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
         "STAGE_A_INITIAL_CALL_COUNT": 0,
         "STAGE_A_TRANSPORT_RETRY_COUNT": 0,
         "STAGE_A_PROVIDER_CALL_MS": [],
+        "STAGE_A_PROVIDER_ATTEMPTS": [],
+        "STAGE_A_INPUT_CHARS": 0,
+        "STAGE_A_INPUT_BYTES": 0,
+        "STAGE_A_OUTPUT_CHARS": 0,
+        "STAGE_A_OUTPUT_BYTES": 0,
         "STAGE_A_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_A_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_A_VALIDATION_RETRY_COUNT": 0,
@@ -978,6 +1050,11 @@ def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
         "STAGE_B_INITIAL_CALL_COUNT": 0,
         "STAGE_B_TRANSPORT_RETRY_COUNT": 0,
         "STAGE_B_PROVIDER_CALL_MS": [],
+        "STAGE_B_PROVIDER_ATTEMPTS": [],
+        "STAGE_B_INPUT_CHARS": 0,
+        "STAGE_B_INPUT_BYTES": 0,
+        "STAGE_B_OUTPUT_CHARS": 0,
+        "STAGE_B_OUTPUT_BYTES": 0,
         "STAGE_B_PROMPT_TOKENS": "UNKNOWN",
         "STAGE_B_COMPLETION_TOKENS": "UNKNOWN",
         "STAGE_B_VALIDATION_RETRY_COUNT": 0,
@@ -1020,6 +1097,15 @@ def _apply_stage_trace(
         *list(trace.get(f"{prefix}_PROVIDER_CALL_MS") or []),
         *list(runtime_meta.get("provider_call_ms") or []),
     ]
+    trace[f"{prefix}_PROVIDER_ATTEMPTS"] = [
+        *list(trace.get(f"{prefix}_PROVIDER_ATTEMPTS") or []),
+        *list(runtime_meta.get("provider_attempts") or []),
+    ]
+    for size_key in ("INPUT_CHARS", "INPUT_BYTES", "OUTPUT_CHARS", "OUTPUT_BYTES"):
+        runtime_key = size_key.lower()
+        value = runtime_meta.get(runtime_key)
+        if isinstance(value, int):
+            trace[f"{prefix}_{size_key}"] = value
     prompt_tokens = runtime_meta.get("prompt_tokens", "UNKNOWN")
     completion_tokens = runtime_meta.get("completion_tokens", "UNKNOWN")
     if prompt_tokens != "UNKNOWN":
