@@ -759,16 +759,49 @@ def _v13_key_parameter(payload: Any) -> dict[str, Any] | None:
     }
 
 
+def _canonical_derived_field_path(value: Any) -> str:
+    """Normalize model JSON leaf paths to the Stage B field contract.
+
+    Stage B sees nested JSON and may naturally emit paths such as
+    facts.root_cause.value. Traceability is field-level, not JSON-leaf-level,
+    so deterministic normalization removes only the model-owned '.value'
+    suffix and maps supported aliases to one canonical field path. Unknown or
+    indexed paths remain unchanged and therefore still fail closed.
+    """
+    field = str(value or "").strip()
+    if not field:
+        return ""
+    if field.endswith(".value"):
+        field = field[:-6]
+
+    if field in R1_FACT_FIELDS:
+        return f"facts.{field}"
+    if field.startswith("facts."):
+        name = field[len("facts."):]
+        if name in R1_FACT_FIELDS:
+            return f"facts.{name}"
+
+    if field in CONTEXT_FIELDS:
+        return f"engineering_context.{field}"
+    if field.startswith("engineering_context."):
+        name = field[len("engineering_context."):]
+        if name in CONTEXT_FIELDS or name == "key_parameters":
+            return f"engineering_context.{name}"
+
+    return field
+
+
 def _v13_reusable(payload: Any) -> dict[str, Any]:
     source = payload if isinstance(payload, dict) else {}
     base = _v13_candidate(source)
+    normalized_derived: list[str] = []
+    for item in source.get("derived_from_fields") or []:
+        field = _canonical_derived_field_path(item)
+        if field and field not in normalized_derived:
+            normalized_derived.append(field)
     return {
         **base,
-        "derived_from_fields": [
-            str(item).strip()
-            for item in source.get("derived_from_fields") or []
-            if str(item).strip()
-        ],
+        "derived_from_fields": normalized_derived,
         # V1.3: review state is always local.
         "review_status": "UNREVIEWED",
     }
