@@ -77,6 +77,8 @@ def test_word_import_page_is_in_existing_hardware_case_shell(tmp_path: Path):
     assert "Transport Retry" in asset.text
     assert "Validation Retry" in asset.text
     assert "Recovery Calls" in asset.text
+    assert "Input Size" in asset.text
+    assert "Attempt" in asset.text
     assert "data-stage-a-summary" in page.text
     assert "data-stage-b-summary" in page.text
     assert "/r1/previews?limit=10" in asset.text
@@ -151,14 +153,19 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
 
     def structurer(document):
         captured.update(document)
-        blocks = {item.get("text"): item["block_id"] for item in document["evidence_blocks"] if item.get("text")}
+        paragraph_ids = [
+            item["block_id"]
+            for item in document["evidence_index"]
+            if item.get("block_type") == "PARAGRAPH"
+        ]
+        evidence_id = paragraph_ids[0]
         return {
             "title": "Flash启动异常",
             "product_context": {},
             "facts": {
                 "symptom": {
                     "value": "设备启动异常",
-                    "evidence_block_ids": [blocks["设备启动异常"]],
+                    "evidence_block_ids": [evidence_id],
                 }
             },
             "circuit_feature_links": [],
@@ -197,14 +204,16 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
     )
     assert response.status_code == 200
     payload = response.json()
-    assert captured["input_contract"] == "hardware-case-r1-agent-input/v2"
+    assert captured["input_contract"] == "hardware-case-r1-agent-input/v3"
     assert "markdown_view" not in captured
     assert "markdown_text" not in captured
     assert "blocks" not in captured
     assert "valid_block_ids" not in captured
     assert "HC_BLOCK" in captured["markdown"]
     assert "tree_candidates" not in captured
-    assert captured["evidence_blocks"]
+    assert captured["evidence_index"]
+    assert "evidence_blocks" not in captured
+    assert all("text" not in item for item in captured["evidence_index"])
     assert payload["status"] == "PASS"
     assert payload["evidence_validation"]["status"] == "PASS"
     assert payload["evidence_validation"]["fabricated_fact_count"] == 0
