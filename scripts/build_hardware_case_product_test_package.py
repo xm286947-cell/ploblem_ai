@@ -481,7 +481,7 @@ def main() -> int:
             "runtime_adapter": "services.hardware_case_runtime_adapter:build_hardware_case_structurer",
             "provider_ownership": "UNIFIED_RUNTIME",
             "secret_policy": "ENV_REFERENCE_RECOMMENDED",
-            "r1_pipeline_version": "hardware-r1-agent-pipeline/v1.3",
+            "r1_pipeline_version": "hardware-r1-agent-pipeline/v1.3.1",
             "r1_stage_a_agent_id": "hardware_case.r1_case_extract",
             "r1_stage_a_agent_config": "config/runtime/agents/hardware_case.r1_case_extract.yaml",
             "r1_stage_a_schema": "HardwareCaseR1CaseExtractionV13",
@@ -537,6 +537,9 @@ def main() -> int:
             "R1 V1.3 Stage B Reusable Knowledge from validated Case Facts only",
             "R1 V1.3 partial failure preservation + structured error contract",
             "R1 V1.3 latency trace + successful-stage cache + Force Retry new Run",
+            "R1 V1.3.1 aggregate key_parameters traceability correctness closure",
+            "R1 V1.3.1 primary_subject body-semantic boundary + local title conflict",
+            "R1 V1.3.1 symptom/impact semantic boundary",
         ],
         "frozen_tree_change_types": [
             "ADD", "UPDATE", "RENAME", "MOVE", "DEPRECATE", "NO_CHANGE", "CONFLICT",
@@ -549,7 +552,7 @@ def main() -> int:
             "20_TO_30_REAL_CASE_MVP_INTEGRATION_GATE_PASS",
             "HC_TREE_IMPORT_PRODUCT_GATE",
             "A0152_GOLDEN_KNOWLEDGE_VALIDATION",
-            "A0152_V1_3_GOLDEN_VALIDATION",
+            "A0152_V1_3_1_GOLDEN_VALIDATION",
         ],
         "domain_boundary": {
             "composition_profile": ["HARDWARE_CASE"],
