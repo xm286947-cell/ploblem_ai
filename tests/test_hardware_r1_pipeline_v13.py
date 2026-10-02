@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 
 from services.hardware_case_markdown_agent import run_r1_agent_extraction
+from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
+from services.hardware_case_r1_runtime import map_r1_runtime_error
 
 
 FACT_FIELDS = (
@@ -192,13 +194,25 @@ def runtime_meta(agent, run):
 
 
 class FakePipeline:
-    def __init__(self, *, fail_b=False):
+    def __init__(self, *, fail_a=False, fail_b=False):
+        self.fail_a = fail_a
         self.fail_b = fail_b
         self.stage_b_input = None
         self.force_flags = []
 
     def run_stage_a(self, payload, *, source_id, markdown_hash, force_retry=False):
         self.force_flags.append(("A", force_retry))
+        if self.fail_a:
+            return {
+                "ok": False,
+                "data": None,
+                "error_code": "OUTPUT_SCHEMA_INVALID",
+                "raw_error_code": "PROVIDER_SCHEMA_INVALID",
+                "runtime": runtime_meta(
+                    "hardware_case.r1_case_extract",
+                    "run-a-failed",
+                ),
+            }
         return {
             "ok": True,
             "data": stage_a_payload(),
@@ -276,3 +290,66 @@ def test_v13_force_retry_is_forwarded_to_both_runtime_stages():
 
     assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
     assert pipeline.force_flags == [("A", True), ("B", True)]
+
+
+
+def test_v13_stage_a_failure_isolated_and_stage_b_not_run():
+    pipeline = FakePipeline(fail_a=True)
+    result = run_r1_agent_extraction(snapshot(), pipeline)
+
+    assert result["pipeline_status"] == "CASE_EXTRACTION_FAILED"
+    assert result["case_extraction"] == "FAILED"
+    assert result["reusable_knowledge"] == "NOT_RUN"
+    assert result["failed_stage"] == "STAGE_A"
+    assert result["error_code"] == "OUTPUT_SCHEMA_INVALID"
+    assert result["markdown_view"]["view_version"] == "hardware-markdown-view/v1"
+    assert pipeline.stage_b_input is None
+    assert pipeline.force_flags == [("A", False)]
+
+
+def test_v13_latency_trace_becomes_complete_when_preview_is_saved(tmp_path):
+    result = run_r1_agent_extraction(snapshot(), FakePipeline())
+    required = {
+        "PARSE_MS", "MARKDOWN_MS",
+        "STAGE_A_TOTAL_MS", "STAGE_A_PROVIDER_CALL_COUNT",
+        "STAGE_A_PROVIDER_CALL_MS", "STAGE_A_PROMPT_TOKENS",
+        "STAGE_A_COMPLETION_TOKENS", "STAGE_A_VALIDATION_RETRY_COUNT",
+        "CASE_VALIDATION_MS", "CONFLICT_MS",
+        "STAGE_B_TOTAL_MS", "STAGE_B_PROVIDER_CALL_COUNT",
+        "STAGE_B_PROVIDER_CALL_MS", "STAGE_B_PROMPT_TOKENS",
+        "STAGE_B_COMPLETION_TOKENS", "STAGE_B_VALIDATION_RETRY_COUNT",
+        "REUSABLE_VALIDATION_MS", "GOLDEN_BUILD_MS",
+        "PREVIEW_SAVE_MS", "TOTAL_MS",
+    }
+    assert required.issubset(result["latency_trace"])
+    assert result["latency_trace"]["STAGE_A_PROMPT_TOKENS"] == "UNKNOWN"
+    assert result["latency_trace"]["STAGE_B_COMPLETION_TOKENS"] == "UNKNOWN"
+    assert result["latency_trace_complete"] is False
+
+    store = HardwareR1PreviewStore(tmp_path / "preview.db")
+    saved = store.save(snapshot(), result)
+    persisted = store.by_id(saved["preview_id"])["result"]
+    assert persisted["latency_trace_complete"] is True
+    assert isinstance(persisted["latency_trace"]["PREVIEW_SAVE_MS"], int)
+    assert persisted["latency_trace"]["TOTAL_MS"] >= 0
+
+
+def test_v13_error_contract_mapping_is_specific():
+    assert map_r1_runtime_error("MODEL_LOCAL_CONFIG_REQUIRED") == "RUNTIME_CONFIG_MISSING"
+    assert map_r1_runtime_error(
+        "PROVIDER_TRANSPORT",
+        details={"exception_type": "TimeoutError"},
+    ) == "PROVIDER_TIMEOUT"
+    assert map_r1_runtime_error("PROVIDER_TRANSPORT") == "PROVIDER_TRANSPORT_FAILED"
+    assert map_r1_runtime_error(
+        "PROVIDER_SCHEMA_INVALID",
+        category="VALIDATION",
+        validation_retry_count=0,
+    ) == "OUTPUT_SCHEMA_INVALID"
+    assert map_r1_runtime_error(
+        "PROVIDER_SCHEMA_INVALID",
+        category="VALIDATION",
+        validation_retry_count=1,
+    ) == "VALIDATION_RETRY_EXHAUSTED"
+    assert map_r1_runtime_error("RETRY_BUDGET_EXHAUSTED") == "PROVIDER_CALL_BUDGET_EXHAUSTED"
+    assert map_r1_runtime_error("SOMETHING_ELSE") == "RUNTIME_EXECUTION_FAILED"
