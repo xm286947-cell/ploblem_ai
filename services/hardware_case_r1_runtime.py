@@ -378,7 +378,7 @@ R1_STAGE_B_SCHEMA_REF = "HardwareCaseR1ReusableKnowledgeV13"
 R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3.3"
 R1_CACHE_KEY_VERSION = "v2"
 R1_STAGE_A_VALIDATOR_VERSION = "hardware-r1-stage-a-validator/v1"
-R1_STAGE_B_VALIDATOR_VERSION = "hardware-r1-stage-b-validator/v1"
+R1_STAGE_B_VALIDATOR_VERSION = "hardware-r1-stage-b-validator/v2"
 R1_STAGE_A_SCHEMA_VERSION = "HardwareCaseR1CaseExtractionV13/v1"
 R1_STAGE_B_SCHEMA_VERSION = "HardwareCaseR1ReusableKnowledgeV13/v1"
 
