@@ -675,3 +675,536 @@ __all__ = [
     "build_golden_knowledge_object",
     "run_r1_agent_extraction",
 ]
+
+
+# === V1.3 TWO-STAGE PIPELINE ===
+# Keep the frozen V1.2 function above for injected legacy regressions. The
+# public name is rebound below and dispatches to V1.3 whenever the production
+# Runtime facade exposes independent Stage A / Stage B entrypoints.
+import time as _time
+
+_V12_RUN_R1_AGENT_EXTRACTION = run_r1_agent_extraction
+R1_PIPELINE_VERSION = "hardware-r1-agent-pipeline/v1.3"
+R1_PIPELINE_RESULT_VERSION = "hardware-case-r1-agent-result/v3"
+R1_STAGE_A_AGENT_ID = "hardware_case.r1_case_extract"
+R1_STAGE_B_AGENT_ID = "hardware_case.r1_reuse_derive"
+R1_REUSE_INPUT_VERSION = "hardware-case-r1-reuse-input/v1"
+
+
+def _ms(start: float) -> int:
+    return max(0, int((_time.perf_counter() - start) * 1000))
+
+
+def _v13_candidate(payload: Any) -> dict[str, Any]:
+    source = payload if isinstance(payload, dict) else {}
+    value = source.get("value")
+    status = str(
+        source.get("status")
+        or source.get("extraction_status")
+        or ("EXTRACTED" if not _is_empty(value) else "MISSING")
+    ).strip().upper()
+    if status not in EXTRACTION_STATUSES:
+        status = "EXTRACTED" if not _is_empty(value) else "MISSING"
+    return {
+        "value": value,
+        "extraction_status": status,
+        "evidence_block_ids": [
+            str(item).strip()
+            for item in source.get("evidence_block_ids") or []
+            if str(item).strip()
+        ],
+        # V1.3: these are local deterministic defaults, never model-owned.
+        "confidence": None,
+        "warnings": [],
+    }
+
+
+def _v13_key_parameter(payload: Any) -> dict[str, Any] | None:
+    source = payload if isinstance(payload, dict) else {}
+    name = str(source.get("name") or "").strip()
+    if not name:
+        return None
+    base = _v13_candidate(source)
+    return {
+        "name": name,
+        "value": base["value"],
+        "unit": source.get("unit"),
+        "extraction_status": base["extraction_status"],
+        "evidence_block_ids": base["evidence_block_ids"],
+        "confidence": None,
+        "warnings": [],
+    }
+
+
+def _v13_reusable(payload: Any) -> dict[str, Any]:
+    source = payload if isinstance(payload, dict) else {}
+    base = _v13_candidate(source)
+    return {
+        **base,
+        "derived_from_fields": [
+            str(item).strip()
+            for item in source.get("derived_from_fields") or []
+            if str(item).strip()
+        ],
+        # V1.3: review state is always local.
+        "review_status": "UNREVIEWED",
+    }
+
+
+def normalize_stage_a_v13(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise HardwareCaseMarkdownError("AGENT_RESULT_OBJECT_REQUIRED")
+    context = result.get("engineering_context")
+    context = context if isinstance(context, dict) else {}
+    facts = result.get("facts")
+    facts = facts if isinstance(facts, dict) else {}
+    return {
+        "contract_version": R1_EXTRACTION_CONTRACT_VERSION,
+        "engineering_context": {
+            **{
+                name: _v13_candidate(context.get(name))
+                for name in CONTEXT_FIELDS
+            },
+            "key_parameters": [
+                item
+                for item in (
+                    _v13_key_parameter(value)
+                    for value in context.get("key_parameters") or []
+                )
+                if item is not None
+            ],
+        },
+        "facts": {
+            name: _v13_candidate(facts.get(name))
+            for name in R1_FACT_FIELDS
+        },
+        "conflicts": [],
+        "reusable_knowledge_candidate": {
+            name: _v13_reusable(None)
+            for name in REUSABLE_FIELDS
+        },
+    }
+
+
+def normalize_stage_b_v13(result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise HardwareCaseMarkdownError("AGENT_RESULT_OBJECT_REQUIRED")
+    reusable = result.get("reusable_knowledge_candidate")
+    reusable = reusable if isinstance(reusable, dict) else {}
+    return {
+        name: _v13_reusable(reusable.get(name))
+        for name in REUSABLE_FIELDS
+    }
+
+
+def _stage_a_reuse_projection(extraction: dict[str, Any]) -> dict[str, Any]:
+    def compact(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "value": item.get("value"),
+            "extraction_status": item.get("extraction_status"),
+            "evidence_block_ids": list(item.get("evidence_block_ids") or []),
+        }
+
+    context = extraction.get("engineering_context") or {}
+    return {
+        "engineering_context": {
+            **{
+                name: compact(context.get(name) or {})
+                for name in CONTEXT_FIELDS
+            },
+            "key_parameters": [
+                {
+                    "name": item.get("name"),
+                    "value": item.get("value"),
+                    "unit": item.get("unit"),
+                    "extraction_status": item.get("extraction_status"),
+                    "evidence_block_ids": list(
+                        item.get("evidence_block_ids") or []
+                    ),
+                }
+                for item in context.get("key_parameters") or []
+            ],
+        },
+        "facts": {
+            name: compact((extraction.get("facts") or {}).get(name) or {})
+            for name in R1_FACT_FIELDS
+        },
+    }
+
+
+def _stage_b_input(
+    snapshot: dict[str, Any],
+    extraction: dict[str, Any],
+) -> dict[str, Any]:
+    refs: set[str] = set()
+    context = extraction.get("engineering_context") or {}
+    for name in CONTEXT_FIELDS:
+        refs.update((context.get(name) or {}).get("evidence_block_ids") or [])
+    for item in context.get("key_parameters") or []:
+        refs.update(item.get("evidence_block_ids") or [])
+    for name in R1_FACT_FIELDS:
+        refs.update(
+            ((extraction.get("facts") or {}).get(name) or {}).get(
+                "evidence_block_ids"
+            )
+            or []
+        )
+    evidence_blocks = []
+    for block in _snapshot_blocks(snapshot):
+        block_id = str(block["block_id"])
+        if block_id not in refs:
+            continue
+        evidence_blocks.append(
+            {
+                "block_id": block_id,
+                "block_type": str(block.get("block_type") or "UNKNOWN"),
+                "text": str(block.get("text") or ""),
+                "source_locator": dict(block.get("source_locator") or {}),
+            }
+        )
+    return {
+        "input_contract": R1_REUSE_INPUT_VERSION,
+        **_stage_a_reuse_projection(extraction),
+        "evidence_blocks": evidence_blocks,
+    }
+
+
+def _runtime_summary(
+    stage_a: dict[str, Any] | None,
+    stage_b: dict[str, Any] | None,
+) -> dict[str, Any]:
+    a = dict((stage_a or {}).get("runtime") or {})
+    b = dict((stage_b or {}).get("runtime") or {})
+    return {
+        "run_id": a.get("run_id"),
+        "task_id": a.get("task_id"),
+        "agent_id": a.get("agent_id") or R1_STAGE_A_AGENT_ID,
+        "agent_config_version": a.get("agent_config_version"),
+        "agent_config_hash": a.get("agent_config_hash"),
+        "stage_a": a,
+        "stage_b": b,
+    }
+
+
+def _trace_base(snapshot: dict[str, Any]) -> dict[str, Any]:
+    metadata = snapshot.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    seed = metadata.get("r1_latency_trace")
+    seed = seed if isinstance(seed, dict) else {}
+    return {
+        "PARSE_MS": int(seed.get("PARSE_MS") or 0),
+        "MARKDOWN_MS": int(seed.get("MARKDOWN_MS") or 0),
+        "STAGE_A_TOTAL_MS": 0,
+        "STAGE_A_PROVIDER_CALL_COUNT": 0,
+        "STAGE_A_PROVIDER_CALL_MS": [],
+        "STAGE_A_PROMPT_TOKENS": "UNKNOWN",
+        "STAGE_A_COMPLETION_TOKENS": "UNKNOWN",
+        "STAGE_A_VALIDATION_RETRY_COUNT": 0,
+        "CASE_VALIDATION_MS": 0,
+        "CONFLICT_MS": 0,
+        "STAGE_B_TOTAL_MS": 0,
+        "STAGE_B_PROVIDER_CALL_COUNT": 0,
+        "STAGE_B_PROVIDER_CALL_MS": [],
+        "STAGE_B_PROMPT_TOKENS": "UNKNOWN",
+        "STAGE_B_COMPLETION_TOKENS": "UNKNOWN",
+        "STAGE_B_VALIDATION_RETRY_COUNT": 0,
+        "REUSABLE_VALIDATION_MS": 0,
+        "GOLDEN_BUILD_MS": 0,
+        "PREVIEW_SAVE_MS": None,
+        "TOTAL_MS": 0,
+    }
+
+
+def _apply_stage_trace(
+    trace: dict[str, Any],
+    *,
+    stage: str,
+    total_ms: int,
+    runtime_meta: dict[str, Any],
+) -> None:
+    prefix = "STAGE_A" if stage == "A" else "STAGE_B"
+    trace[f"{prefix}_TOTAL_MS"] = int(total_ms)
+    trace[f"{prefix}_PROVIDER_CALL_COUNT"] = int(
+        runtime_meta.get("provider_call_count") or 0
+    )
+    trace[f"{prefix}_PROVIDER_CALL_MS"] = list(
+        runtime_meta.get("provider_call_ms") or []
+    )
+    trace[f"{prefix}_PROMPT_TOKENS"] = runtime_meta.get(
+        "prompt_tokens", "UNKNOWN"
+    )
+    trace[f"{prefix}_COMPLETION_TOKENS"] = runtime_meta.get(
+        "completion_tokens", "UNKNOWN"
+    )
+    trace[f"{prefix}_VALIDATION_RETRY_COUNT"] = int(
+        runtime_meta.get("validation_retry_count") or 0
+    )
+
+
+def _finish_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    additive = (
+        "PARSE_MS",
+        "MARKDOWN_MS",
+        "STAGE_A_TOTAL_MS",
+        "CASE_VALIDATION_MS",
+        "CONFLICT_MS",
+        "STAGE_B_TOTAL_MS",
+        "REUSABLE_VALIDATION_MS",
+        "GOLDEN_BUILD_MS",
+    )
+    trace["TOTAL_MS"] = sum(
+        int(trace.get(key) or 0) for key in additive
+    ) + int(trace.get("PREVIEW_SAVE_MS") or 0)
+    return trace
+
+
+def _pipeline_failure(
+    *,
+    snapshot: dict[str, Any],
+    markdown_view: dict[str, Any],
+    trace: dict[str, Any],
+    failed_stage: str,
+    error_code: str,
+    stage_a: dict[str, Any] | None,
+    stage_b: dict[str, Any] | None,
+    extraction: dict[str, Any] | None = None,
+    validation: dict[str, Any] | None = None,
+    partial: bool = False,
+) -> dict[str, Any]:
+    runtime = _runtime_summary(stage_a, stage_b)
+    failed = stage_a if failed_stage == "STAGE_A" else stage_b
+    failed_meta = dict((failed or {}).get("runtime") or {})
+    return {
+        "result_version": R1_PIPELINE_RESULT_VERSION,
+        "pipeline_version": R1_PIPELINE_VERSION,
+        "extraction_contract_version": R1_EXTRACTION_CONTRACT_VERSION,
+        "knowledge_object_contract_version": KNOWLEDGE_OBJECT_VERSION,
+        "pipeline_status": (
+            "PARTIAL_REUSABLE_KNOWLEDGE_FAILED"
+            if partial
+            else "CASE_EXTRACTION_FAILED"
+        ),
+        "status": "PARTIAL" if partial else "FAILED",
+        "case_extraction": "PASS" if partial else "FAILED",
+        "reusable_knowledge": "FAILED" if partial else "NOT_RUN",
+        "failed_stage": failed_stage,
+        "error_code": error_code,
+        "raw_error_code": (failed or {}).get("raw_error_code"),
+        "run_id": failed_meta.get("run_id"),
+        "task_id": failed_meta.get("task_id"),
+        "provider_call_count": int(
+            failed_meta.get("provider_call_count") or 0
+        ),
+        "validation_retry_count": int(
+            failed_meta.get("validation_retry_count") or 0
+        ),
+        "runtime": runtime,
+        "markdown_view": markdown_view,
+        "stage_a_result": extraction,
+        "structured_result": extraction,
+        "evidence_validation": validation or {
+            "status": "NOT_RUN",
+            "errors": [],
+            "warnings": [],
+            "fabricated_fact_count": 0,
+            "fabricated_block_id_count": 0,
+            "fabricated_block_ids": [],
+            "evidence": [],
+        },
+        "knowledge_object": None,
+        "latency_trace": _finish_trace(trace),
+        "latency_trace_complete": False,
+    }
+
+
+def run_r1_agent_extraction(
+    snapshot: dict[str, Any],
+    structurer: Callable[[dict[str, Any]], dict[str, Any]] | Any,
+    *,
+    force_retry: bool = False,
+) -> dict[str, Any]:
+    # Frozen V1.2 injected-callable seam remains for existing regressions.
+    if not (
+        hasattr(structurer, "run_stage_a")
+        and hasattr(structurer, "run_stage_b")
+    ):
+        return _V12_RUN_R1_AGENT_EXTRACTION(snapshot, structurer)
+
+    markdown_view = build_markdown_view(snapshot)
+    runtime_input = _compact_runtime_input(snapshot, markdown_view)
+    source_id = str(
+        ((snapshot.get("source") or {}).get("source_id"))
+        or ((snapshot.get("identity") or {}).get("source_id"))
+        or ""
+    )
+    markdown_hash = hashlib.sha256(
+        str(markdown_view.get("markdown") or "").encode("utf-8")
+    ).hexdigest()
+    trace = _trace_base(snapshot)
+
+    stage_a_started = _time.perf_counter()
+    stage_a = structurer.run_stage_a(
+        runtime_input,
+        source_id=source_id,
+        markdown_hash=markdown_hash,
+        force_retry=force_retry,
+    )
+    _apply_stage_trace(
+        trace,
+        stage="A",
+        total_ms=_ms(stage_a_started),
+        runtime_meta=dict(stage_a.get("runtime") or {}),
+    )
+    if not stage_a.get("ok"):
+        return _pipeline_failure(
+            snapshot=snapshot,
+            markdown_view=markdown_view,
+            trace=trace,
+            failed_stage="STAGE_A",
+            error_code=str(
+                stage_a.get("error_code") or "RUNTIME_EXECUTION_FAILED"
+            ),
+            stage_a=stage_a,
+            stage_b=None,
+        )
+
+    extraction = normalize_stage_a_v13(stage_a["data"])
+
+    validation_started = _time.perf_counter()
+    stage_a_validation = validate_agent_result(snapshot, extraction)
+    trace["CASE_VALIDATION_MS"] = _ms(validation_started)
+    if stage_a_validation["status"] != "PASS":
+        return _pipeline_failure(
+            snapshot=snapshot,
+            markdown_view=markdown_view,
+            trace=trace,
+            failed_stage="STAGE_A",
+            error_code="EVIDENCE_VALIDATION_FAILED",
+            stage_a=stage_a,
+            stage_b=None,
+            extraction=extraction,
+            validation=stage_a_validation,
+        )
+
+    conflict_started = _time.perf_counter()
+    extraction["conflicts"] = detect_title_content_subject_conflict(
+        snapshot,
+        extraction,
+    )
+    trace["CONFLICT_MS"] = _ms(conflict_started)
+
+    reuse_input = _stage_b_input(snapshot, extraction)
+    stage_b_started = _time.perf_counter()
+    stage_b = structurer.run_stage_b(
+        reuse_input,
+        source_id=source_id,
+        markdown_hash=markdown_hash,
+        force_retry=force_retry,
+    )
+    _apply_stage_trace(
+        trace,
+        stage="B",
+        total_ms=_ms(stage_b_started),
+        runtime_meta=dict(stage_b.get("runtime") or {}),
+    )
+    if not stage_b.get("ok"):
+        return _pipeline_failure(
+            snapshot=snapshot,
+            markdown_view=markdown_view,
+            trace=trace,
+            failed_stage="STAGE_B",
+            error_code=str(
+                stage_b.get("error_code") or "RUNTIME_EXECUTION_FAILED"
+            ),
+            stage_a=stage_a,
+            stage_b=stage_b,
+            extraction=extraction,
+            validation=stage_a_validation,
+            partial=True,
+        )
+
+    extraction["reusable_knowledge_candidate"] = normalize_stage_b_v13(
+        stage_b["data"]
+    )
+    reusable_validation_started = _time.perf_counter()
+    final_validation = validate_agent_result(snapshot, extraction)
+    trace["REUSABLE_VALIDATION_MS"] = _ms(reusable_validation_started)
+    if final_validation["status"] != "PASS":
+        return _pipeline_failure(
+            snapshot=snapshot,
+            markdown_view=markdown_view,
+            trace=trace,
+            failed_stage="STAGE_B",
+            error_code="REUSABLE_TRACEABILITY_INVALID",
+            stage_a=stage_a,
+            stage_b=stage_b,
+            extraction=extraction,
+            validation=final_validation,
+            partial=True,
+        )
+
+    runtime = _runtime_summary(stage_a, stage_b)
+    golden_started = _time.perf_counter()
+    knowledge_object = build_golden_knowledge_object(
+        snapshot,
+        markdown_view,
+        extraction,
+        final_validation,
+        runtime_meta=dict(stage_a.get("runtime") or {}),
+    )
+    trace["GOLDEN_BUILD_MS"] = _ms(golden_started)
+    knowledge_object["provenance"]["case_extraction_run_id"] = (
+        (stage_a.get("runtime") or {}).get("run_id")
+    )
+    knowledge_object["provenance"]["reusable_derivation_run_id"] = (
+        (stage_b.get("runtime") or {}).get("run_id")
+    )
+
+    has_review_conflict = any(
+        item.get("resolution_status") == "NEEDS_REVIEW"
+        for item in extraction.get("conflicts") or []
+    )
+    trace = _finish_trace(trace)
+    return {
+        "result_version": R1_PIPELINE_RESULT_VERSION,
+        "pipeline_version": R1_PIPELINE_VERSION,
+        "extraction_contract_version": R1_EXTRACTION_CONTRACT_VERSION,
+        "knowledge_object_contract_version": KNOWLEDGE_OBJECT_VERSION,
+        "pipeline_status": "GOLDEN_PREVIEW_READY",
+        "status": "NEEDS_REVIEW" if has_review_conflict else "PASS",
+        "case_extraction": "PASS",
+        "reusable_knowledge": "PASS",
+        "failed_stage": None,
+        "error_code": None,
+        "run_id": (stage_b.get("runtime") or {}).get("run_id"),
+        "task_id": (stage_b.get("runtime") or {}).get("task_id"),
+        "provider_call_count": (
+            int((stage_a.get("runtime") or {}).get("provider_call_count") or 0)
+            + int((stage_b.get("runtime") or {}).get("provider_call_count") or 0)
+        ),
+        "validation_retry_count": (
+            int((stage_a.get("runtime") or {}).get("validation_retry_count") or 0)
+            + int((stage_b.get("runtime") or {}).get("validation_retry_count") or 0)
+        ),
+        "runtime": runtime,
+        "markdown_view": markdown_view,
+        "stage_a_result": extraction,
+        "structured_result": extraction,
+        "evidence_validation": final_validation,
+        "knowledge_object": knowledge_object,
+        "latency_trace": trace,
+        "latency_trace_complete": False,
+    }
+
+
+__all__ = list(dict.fromkeys([
+    *globals().get("__all__", []),
+    "R1_PIPELINE_VERSION",
+    "R1_PIPELINE_RESULT_VERSION",
+    "R1_STAGE_A_AGENT_ID",
+    "R1_STAGE_B_AGENT_ID",
+    "R1_REUSE_INPUT_VERSION",
+    "normalize_stage_a_v13",
+    "normalize_stage_b_v13",
+    "run_r1_agent_extraction",
+]))
