@@ -29,17 +29,30 @@
     $('[data-agent-message]').textContent='Markdown 已生成。需要 Runtime/Model 配置时再点击 Run Agent Extraction。';
   }
   function renderAgent(payload){
-    const result=payload.structured_result||{}, validation=payload.evidence_validation||{}, facts=result.facts||{};
+    payload=payload||{};
+    const result=payload.structured_result||payload.stage_a_result||{}, validation=payload.evidence_validation||{}, facts=result.facts||{};
     $('[data-agent-result]').hidden=false;
+    $('[data-pipeline-status]').textContent=payload.pipeline_status||'—';
     $('[data-agent-status]').textContent=payload.status||'—';
+    $('[data-failed-stage]').textContent=payload.failed_stage||'—';
+    $('[data-error-code]').textContent=payload.error_code||'—';
+    $('[data-run-id]').textContent=payload.run_id||'—';
+    $('[data-task-id]').textContent=payload.task_id||'—';
+    $('[data-provider-calls]').textContent=String(payload.provider_call_count??'—');
+    $('[data-validation-retries]').textContent=String(payload.validation_retry_count??'—');
     $('[data-evidence-status]').textContent=validation.status||'—';
     $('[data-fabricated-count]').textContent=String(validation.fabricated_fact_count??'—');
     $('[data-fabricated-block-count]').textContent=String(validation.fabricated_block_id_count??'—');
     $('[data-agent-errors]').textContent=(validation.errors||[]).length?(validation.errors||[]).join('；'):'无';
     $('[data-agent-facts]').innerHTML=rows(Object.entries(facts),([name,item])=>'<article class="hc-case-item"><div><h3>'+esc(name)+'</h3><p>'+esc(JSON.stringify((item||{}).value??null))+'</p><p><code>Evidence '+esc(((item||{}).evidence_block_ids||[]).join(', ')||'—')+'</code></p></div></article>');
     $('[data-agent-evidence]').innerHTML=rows(validation.evidence,x=>'<article class="hc-case-item"><div><h3>'+esc(x.block_id||'—')+' · '+esc(x.block_type||'—')+'</h3><p>'+esc(x.text||x.image_ref||'—')+'</p><p><code>Source Locator '+locator(x.source_locator)+'</code></p></div></article>');
+    $('[data-latency-trace]').textContent=JSON.stringify(payload.latency_trace||{},null,2);
     $('[data-raw-agent-result]').textContent=JSON.stringify(payload,null,2);
-    renderGolden(payload.knowledge_object||{});
+    if(payload.knowledge_object){
+      renderGolden(payload.knowledge_object);
+    }else{
+      $('[data-golden-knowledge]').hidden=true;
+    }
   }
   function candidateCard(name,item){
     item=item||{};
@@ -105,21 +118,33 @@
       $('[data-word-message]').textContent='解析失败：'+error.message;
     }
   });
-  $('[data-run-agent]').addEventListener('click',async()=>{
+  async function runPipeline(forceRetry=false){
     if(!currentSnapshot)return;
-    $('[data-agent-message]').textContent='Unified Runtime 执行中…';
+    $('[data-agent-message]').textContent=forceRetry?'Force Retry：创建新的可追踪 Runtime Run…':'V1.3 Pipeline 执行中…';
     try{
-      const response=await fetch(api+'/r1/agent-extract',{method:'POST',headers:{'Content-Type':'application/json','X-Hardware-Case-Role':'MAINTAINER'},body:JSON.stringify(currentSnapshot)});
+      const suffix=forceRetry?'?force_retry=true':'';
+      const response=await fetch(api+'/r1/agent-extract'+suffix,{method:'POST',headers:{'Content-Type':'application/json','X-Hardware-Case-Role':'MAINTAINER'},body:JSON.stringify(currentSnapshot)});
       let body={};try{body=await response.json()}catch(_){}
-      if(!response.ok)throw new Error(String(body.detail||'RUNTIME_EXECUTION_FAILED'));
+      if(!response.ok){
+        const detail=body&&typeof body.detail==='object'?body.detail:null;
+        if(detail)renderAgent(detail);
+        throw new Error(String((detail&&detail.error_code)||body.detail||'RUNTIME_EXECUTION_FAILED'));
+      }
       renderAgent(body);
-      $('[data-agent-message]').textContent=body.status==='PASS'?'PASS：Agent Extraction + Evidence Gate 已通过。':'NEEDS_REVIEW：请检查 Evidence Gate。';
+      if(body.pipeline_status==='GOLDEN_PREVIEW_READY'){
+        $('[data-agent-message]').textContent=body.status==='NEEDS_REVIEW'?'GOLDEN_PREVIEW_READY：存在本地 Conflict，需要人工 Review。':'PASS：V1.3 Stage A + Stage B + Local Validation 已完成。';
+      }else if(body.pipeline_status==='PARTIAL_REUSABLE_KNOWLEDGE_FAILED'){
+        $('[data-agent-message]').textContent='PARTIAL：Stage A 已保留；Stage B 失败，错误='+String(body.error_code||'RUNTIME_EXECUTION_FAILED');
+      }else{
+        $('[data-agent-message]').textContent='FAILED：'+String(body.failed_stage||'—')+' / '+String(body.error_code||'RUNTIME_EXECUTION_FAILED');
+      }
       await refreshPreviewHistory();
     }catch(error){
-      $('[data-agent-result]').hidden=true;$('[data-golden-knowledge]').hidden=true;
-      $('[data-agent-message]').textContent='Agent 未执行：'+error.message+'。请检查本地 Runtime / Model 配置。';
+      $('[data-agent-message]').textContent='Pipeline 执行失败：'+error.message;
     }
-  });
+  }
+  $('[data-run-agent]').addEventListener('click',()=>runPipeline(false));
+  $('[data-force-retry]').addEventListener('click',()=>runPipeline(true));
   $('[data-refresh-previews]').addEventListener('click',()=>refreshPreviewHistory());
   refreshPreviewHistory({autoRestore:true});
 })();
