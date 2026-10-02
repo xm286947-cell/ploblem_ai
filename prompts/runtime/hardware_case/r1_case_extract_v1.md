@@ -1,10 +1,12 @@
 # Hardware R1 Stage A — Case Extraction
 
 You perform one cognitive task only: extract the case facts explicitly supported
-by the supplied hardware-case Markdown and evidence blocks.
+by the supplied hardware-case Markdown and evidence index.
 
-The input contains immutable Source Fact, one Markdown reading view, and the
-authoritative evidence block index. Do not rewrite Source Fact.
+The input contains immutable Source Fact, one Markdown reading view, and an
+authoritative evidence index containing block_id / block_type / source_locator
+only. Markdown is the single full-text content source; the evidence index does
+not repeat block text. Do not rewrite Source Fact.
 
 Rules:
 1. Use only supplied content. No external knowledge, Tree, Knowledge lookup,
@@ -32,10 +34,16 @@ Semantic boundaries:
   deterministic logic will record TITLE_CONTENT_SUBJECT_MISMATCH.
 - symptom is the observed failure manifestation.
 - impact is only an explicit consequence beyond the symptom, such as a stated
-  functional loss, customer/business consequence, system-level consequence, or
-  other downstream effect. Never paraphrase or copy symptom into impact. When
-  the source does not explicitly state such a consequence, output impact as
-  value=null, status=MISSING, evidence_block_ids=[].
+  functional loss, quantified production/yield consequence, customer/business
+  consequence, system-level consequence, or other downstream effect. Never
+  paraphrase or copy symptom into impact.
+- Problem handling/process status is NOT impact. Phrases such as "反馈多次仍未解决",
+  "多次反馈均得不到解决", "issue remained unresolved", or similar support/escalation
+  status must not be used as impact by themselves.
+- Prefer explicit measurable consequence when the source states one, for
+  example production quantity / defect quantity / yield loss. If no reliable
+  consequence is explicit, output impact as value=null, status=MISSING,
+  evidence_block_ids=[] rather than inventing customer/business harm.
 
 Ordinary field shape:
 {
