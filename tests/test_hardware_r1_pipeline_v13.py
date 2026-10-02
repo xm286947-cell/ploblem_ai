@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 from services.hardware_case_markdown_agent import run_r1_agent_extraction
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
@@ -194,9 +195,18 @@ def runtime_meta(agent, run):
 
 
 class FakePipeline:
-    def __init__(self, *, fail_a=False, fail_b=False):
+    def __init__(
+        self,
+        *,
+        fail_a=False,
+        fail_b=False,
+        stage_a_data=None,
+        stage_b_data=None,
+    ):
         self.fail_a = fail_a
         self.fail_b = fail_b
+        self.stage_a_data = deepcopy(stage_a_data)
+        self.stage_b_data = deepcopy(stage_b_data)
         self.stage_b_input = None
         self.force_flags = []
 
@@ -215,7 +225,11 @@ class FakePipeline:
             }
         return {
             "ok": True,
-            "data": stage_a_payload(),
+            "data": (
+                deepcopy(self.stage_a_data)
+                if self.stage_a_data is not None
+                else stage_a_payload()
+            ),
             "runtime": runtime_meta("hardware_case.r1_case_extract", "run-a"),
         }
 
@@ -235,7 +249,11 @@ class FakePipeline:
             }
         return {
             "ok": True,
-            "data": stage_b_payload(),
+            "data": (
+                deepcopy(self.stage_b_data)
+                if self.stage_b_data is not None
+                else stage_b_payload()
+            ),
             "runtime": runtime_meta("hardware_case.r1_reuse_derive", "run-b"),
         }
 
@@ -353,3 +371,92 @@ def test_v13_error_contract_mapping_is_specific():
     ) == "VALIDATION_RETRY_EXHAUSTED"
     assert map_r1_runtime_error("RETRY_BUDGET_EXHAUSTED") == "PROVIDER_CALL_BUDGET_EXHAUSTED"
     assert map_r1_runtime_error("SOMETHING_ELSE") == "RUNTIME_EXECUTION_FAILED"
+
+def test_v131_key_parameters_aggregate_traceability_for_design_constraint():
+    payload = stage_b_payload()
+    payload["reusable_knowledge_candidate"]["design_constraint"] = {
+        "value": "UART TX 带载电平设计必须满足外部负载所需驱动能力。",
+        "status": "EXTRACTED",
+        "derived_from_fields": ["engineering_context.key_parameters"],
+        "evidence_block_ids": ["B2"],
+    }
+
+    result = run_r1_agent_extraction(
+        snapshot(),
+        FakePipeline(stage_b_data=payload),
+    )
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert result["evidence_validation"]["status"] == "PASS"
+    assert not any(
+        item.startswith("REUSABLE_DERIVED_FIELD_UNKNOWN:design_constraint")
+        for item in result["evidence_validation"]["errors"]
+    )
+    assert not any(
+        item == "REUSABLE_EVIDENCE_NOT_TRACEABLE:design_constraint"
+        for item in result["evidence_validation"]["errors"]
+    )
+
+
+def test_v131_key_parameters_aggregate_traceability_for_verification_method():
+    payload = stage_b_payload()
+    payload["reusable_knowledge_candidate"]["verification_method"] = {
+        "value": "修改输出模式后验证带载电平并执行长期可靠性测试。",
+        "status": "EXTRACTED",
+        "derived_from_fields": [
+            "engineering_context.key_parameters",
+            "verification_result",
+        ],
+        "evidence_block_ids": ["B2", "B5"],
+    }
+
+    result = run_r1_agent_extraction(
+        snapshot(),
+        FakePipeline(stage_b_data=payload),
+    )
+
+    assert result["pipeline_status"] == "GOLDEN_PREVIEW_READY"
+    assert result["evidence_validation"]["status"] == "PASS"
+    assert "REUSABLE_EVIDENCE_NOT_TRACEABLE:verification_method" not in (
+        result["evidence_validation"]["errors"]
+    )
+
+
+def test_v131_a0152_primary_subject_is_body_semantic_and_title_conflict_is_local():
+    result = run_r1_agent_extraction(snapshot(), FakePipeline())
+
+    assert (
+        result["structured_result"]["engineering_context"]["primary_subject"]["value"]
+        == "MCU"
+    )
+    assert result["knowledge_object"]["identity"]["raw_title"].startswith("CPU_")
+    conflicts = result["structured_result"]["conflicts"]
+    assert any(
+        item["type"] == "TITLE_CONTENT_SUBJECT_MISMATCH"
+        and item["resolution_status"] == "NEEDS_REVIEW"
+        for item in conflicts
+    )
+
+    prompt = (
+        Path(__file__).resolve().parents[1]
+        / "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+    ).read_text(encoding="utf-8")
+    assert "Never copy raw_title into primary_subject" in prompt
+    assert "body-supported subject" in prompt
+
+
+def test_v131_a0152_impact_boundary_requires_missing_without_explicit_consequence():
+    result = run_r1_agent_extraction(snapshot(), FakePipeline())
+    impact = result["structured_result"]["facts"]["impact"]
+
+    assert impact["value"] is None
+    assert impact["extraction_status"] == "MISSING"
+    assert impact["evidence_block_ids"] == []
+
+    prompt = (
+        Path(__file__).resolve().parents[1]
+        / "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+    ).read_text(encoding="utf-8")
+    assert "Never paraphrase or copy symptom into impact" in prompt
+    assert "status=MISSING" in prompt
+
