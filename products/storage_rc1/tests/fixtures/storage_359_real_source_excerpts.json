@@ -1,0 +1,146 @@
+{
+  "schema_version": "storage-359-real-source-excerpts/v0.1",
+  "sources": {
+    "timar_97": {
+      "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a",
+      "drive_id": "1vI0QRmrbooYAN0mFvZSvQA6_Idt-o4mP",
+      "file_name": "STDL-PM-010_timar_97_series.pdf",
+      "device_type": "SSD",
+      "vendor": "TIMAR",
+      "product_family": "97 Series / K97M8-Y",
+      "pages": [
+        {
+          "page": 2,
+          "method": "real_source_excerpt",
+          "text": "Capacity 256GB/512GB/1TB/2TB. PCIe Gen 4 16Gb/s interface with up to 4 lanes. Compliant with NVMe Revision 2.0. Supporting host memory buffer. Supporting PLP (Optional). TBW: 256GB 768TB; 512GB 1500TB; 1TB 3000TB; 2TB 6000TB. WAF=1. Operating: A97M8-Y/A97M8-PY -40°C~+85°C; K97M8-Y/K97M8-PY -25°C~+85°C; S97M8-Y/S97M8-PY -10°C~+70°C."
+        },
+        {
+          "page": 5,
+          "method": "real_source_excerpt",
+          "text": "Industrial SSDs use NAND Flash Memory. It supports the PCIe 4.0 interface standard with up to four lanes."
+        }
+      ],
+      "golden": {
+        "must_find": [
+          "capacity",
+          "interface",
+          "protocol",
+          "host_memory_buffer",
+          "operating_temperature",
+          "tbw",
+          "plp",
+          "nand_type"
+        ],
+        "must_not_find": [
+          "cell_type"
+        ],
+        "required_terms": {
+          "interface": [
+            "PCIe",
+            "4"
+          ],
+          "protocol": [
+            "NVMe",
+            "2.0"
+          ],
+          "host_memory_buffer": [
+            "host",
+            "memory"
+          ],
+          "tbw": [
+            "768",
+            "1500",
+            "3000",
+            "6000"
+          ],
+          "operating_temperature": [
+            "-40",
+            "-25",
+            "-10",
+            "+85",
+            "+70"
+          ],
+          "plp": [
+            "optional"
+          ],
+          "nand_type": [
+            "NAND"
+          ]
+        },
+        "required_condition_terms": {
+          "tbw": [
+            "WAF",
+            "1"
+          ]
+        }
+      }
+    },
+    "gd5f1gq5": {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "drive_id": "1vjSqdrafib7z6Wl2bIKnQZ7lzRIHayKz",
+      "file_name": "STDL-PM-009_gd5f1gq5.pdf",
+      "device_type": "NAND Flash",
+      "vendor": "GigaDevice",
+      "product_family": "GD5F1GQ5UExxG",
+      "pages": [
+        {
+          "page": 10,
+          "method": "real_source_excerpt",
+          "text": "ARRAY ORGANIZATION. 1 block = (2K + 128) bytes x 64 pages. 1G: 1024 blocks."
+        },
+        {
+          "page": 44,
+          "method": "real_source_excerpt",
+          "text": "Status C0H includes ECCS1 ECCS0 P_FAIL E_FAIL WEL OIP. P_FAIL Program Fail indicates a program failure has occurred. E_FAIL Erase Fail indicates an erase failure has occurred. ECCS/ECCSE provide ECC status after a valid READ."
+        },
+        {
+          "page": 48,
+          "method": "real_source_excerpt",
+          "text": "BAD BLOCK MANAGEMENT. The factory identifies invalid blocks using a Bad Block Mark. System software can create a bad-block table from the mark."
+        },
+        {
+          "page": 54,
+          "method": "real_source_excerpt",
+          "text": "Ambient Operating Temperature: -40 to 85°C / -40 to 105°C."
+        }
+      ],
+      "golden": {
+        "must_find": [
+          "pages_per_block",
+          "operating_temperature",
+          "status_register",
+          "program_fail",
+          "erase_fail",
+          "ecc_status"
+        ],
+        "must_not_promote_to_observability": [
+          "runtime_bad_block"
+        ],
+        "required_terms": {
+          "pages_per_block": [
+            "64"
+          ],
+          "operating_temperature": [
+            "-40",
+            "85",
+            "105"
+          ],
+          "status_register": [
+            "C0"
+          ],
+          "program_fail": [
+            "program",
+            "fail"
+          ],
+          "erase_fail": [
+            "erase",
+            "fail"
+          ],
+          "ecc_status": [
+            "ECC"
+          ]
+        }
+      }
+    }
+  }
+}
