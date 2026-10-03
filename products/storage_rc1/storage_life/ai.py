@@ -1271,7 +1271,9 @@ def _semantic_rules(device_type: str) -> str:
         ),
         "SSD": (
             "SSD rules: TBW/DWPD are endurance specifications; do not duplicate TBW into a generic endurance field; preserve capacity scope and WAF/other conditions; "
-            "PLP may differ by part-number variant; SMART/Health support is distinct from individual health attributes."
+            "PLP may differ by part-number variant; SMART/Health support is distinct from individual health attributes; "
+            "nand_type may preserve explicit generic NAND Flash wording, but cell_type requires explicit SLC/MLC/TLC/QLC wording in the same source; "
+            "never infer TLC/QLC from product family, vendor website knowledge, or outside context when the imported datasheet does not state it."
         ),
     }
     return rules.get(templates.normalize_device_type(device_type), "")
