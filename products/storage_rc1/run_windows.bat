@@ -7,7 +7,6 @@ rem P3: normal launcher is STARTUP ONLY. It must never run product E2E / mock / 
 chcp 65001 >nul 2>&1
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
-set "STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME=1"
 
 set "PACKAGE_VERSION=STORAGE_PRODUCT_MVP_RC1"
 set "ROOT_LOG=%PACKAGE_ROOT%\RUN_LOG.txt"
