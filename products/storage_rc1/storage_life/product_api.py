@@ -970,6 +970,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
         "skill_id": "storage-diagnostic-validation",
         "skill_result": skill_result,
+        "engineering_result": _engineering_result_view(skill_result) if skill_result else None,
     }
 
 
@@ -1046,6 +1047,7 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         "unknowns": list(dict.fromkeys(unknowns)),
         "skill_id": "storage-change-impact",
         "skill_result": skill_result,
+        "engineering_result": _engineering_result_view(skill_result),
     }
 
 
