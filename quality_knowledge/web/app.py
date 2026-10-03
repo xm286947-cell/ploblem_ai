@@ -1620,6 +1620,9 @@ def create_app(db_path):
     for name, value in vars(state).items():
         setattr(standalone.state, name, value)
     standalone.state.legacy_quality_issue_services = state
+    # QSV1 templates use p0_base.html; in this host its navigation must return
+    # to the existing mature routes instead of the condensed P0 duplicates.
+    standalone.state.mature_quality_host = True
     standalone.state.legacy_quality_issue_status = {
         "ready": True,
         "code": "READY",

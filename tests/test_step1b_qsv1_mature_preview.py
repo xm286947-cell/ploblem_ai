@@ -75,3 +75,49 @@ def test_step1b_preview_does_not_create_second_host_or_overwrite_legacy_route(tm
         assert "新质量场景库（预览）" not in legacy.text
         assert "QualityScenario V1" not in legacy.text
 
+
+def test_mature_qsv1_shell_returns_to_mature_routes_without_p0_duplicates(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
+    client = TestClient(create_app(tmp_path / "quality_issue_v1.db"))
+
+    for path in (
+        "/p0/quality-scenarios/workbench",
+        "/p0/quality-scenarios",
+        "/p0/quality-scenario-insights",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        for mature_path in (
+            "/issues",
+            "/analysis",
+            "/itr/recovery-workbench",
+            "/itr/resolution-workbench",
+            "/software-assessment",
+            "/missed-test-analysis",
+            "/product-reports",
+            "/import",
+            "/quality-scenarios",
+            "/quality-scenario-assets",
+            "/quality-scenarios/insights",
+            "/settings/scenario-taxonomy",
+        ):
+            assert f'href="{mature_path}"' in response.text
+        for duplicate_path in (
+            "/p0/itr-recovery",
+            "/p0/itr-resolution",
+            "/p0/software-assessment",
+            "/p0/missed-test-analysis",
+        ):
+            assert f'href="{duplicate_path}"' not in response.text
+
+    for path in (
+        "/issues",
+        "/analysis",
+        "/import",
+        "/quality-scenarios",
+        "/quality-scenario-assets",
+        "/quality-scenario-assets/portrait",
+        "/quality-scenarios/insights",
+        "/settings/scenario-taxonomy",
+    ):
+        assert client.get(path).status_code == 200, path
