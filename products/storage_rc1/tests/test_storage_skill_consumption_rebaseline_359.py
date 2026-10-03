@@ -238,3 +238,43 @@ def test_359_change_impact_reuses_existing_domain_skill(monkeypatch):
     assert result["skill_result"]["status"] == "INSUFFICIENT_KNOWLEDGE"
     assert service.calls[0][0] == "storage-change-impact"
     assert service.calls[0][1]["parameter_delta"][0]["canonical_name"] == "tbw"
+
+
+def test_359_ssd_semantic_rule_forbids_cell_type_inference_from_generic_nand():
+    rules = ai._semantic_rules("SSD")
+    assert "cell_type requires explicit SLC/MLC/TLC/QLC" in rules
+    assert "never infer TLC/QLC" in rules
+
+
+def test_359_product_knowledge_gap_is_explicit_partial(monkeypatch):
+    service = _FakeSkillService()
+    monkeypatch.setattr(
+        real_knowledge.RealKnowledgeAssessmentService,
+        "current",
+        classmethod(lambda cls: service),
+    )
+    monkeypatch.setattr(product_api, "device_slots", lambda device_id: {
+        "device": {"id": device_id, "device_type": "SSD"},
+        "lifecycle": {"formal_ready": True, "status": "FORMAL_READY"},
+        "slots": [{
+            "canonical_name": "percentage_used",
+            "parameter_name": "Percentage Used",
+            "group": parameter_baseline.KEY_DIAGNOSTIC,
+            "review_status": "NOT_REVIEWED",
+            "status": "NOT_FOUND",
+            "diagnostic_status": "KNOWLEDGE_GAP",
+            "diagnostic_label": "知识缺口",
+            "value": None,
+            "evidence": [],
+            "formal_knowledge": {
+                "status": "UNKNOWN",
+                "code": "KNOWLEDGE_RELEASE_NOT_READY",
+                "results": [],
+                "evidence_refs": [],
+            },
+        }],
+    })
+    result = product_api.diagnostics(device_id="ssd-gap")
+    assert result["result_status"] == "PARTIAL"
+    assert result["knowledge_gap"] is True
+    assert result["skill_result"]["status"] == "INSUFFICIENT_KNOWLEDGE"
