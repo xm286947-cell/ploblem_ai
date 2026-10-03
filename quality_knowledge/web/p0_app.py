@@ -307,9 +307,17 @@ def create_p0_app(
         "code": "DOMAIN_DISABLED" if "QUALITY_ISSUE" not in domains else "LEGACY_DB_PATH_NOT_CONFIGURED",
         "mode": "READ_ONLY",
     }
-    # P04 is intentionally provider-injected.  The default is explicit
-    # DATA_UNAVAILABLE until the approved public JSON providers are wired.
-    app.state.p04_provider = p04_provider or UnavailableP04Provider()
+    # STEP1B preview binds P04 to the real QualityScenario V1 published
+    # projection in the mature full-platform host. No fixture/synthetic provider
+    # is introduced; zero published records are represented as EMPTY.
+    if p04_provider is not None:
+        app.state.p04_provider = p04_provider
+    elif "QUALITY_ISSUE" in domains and app.state.overall_shell_enabled:
+        from quality_knowledge.p04.qsv1_provider import QualityScenarioV1P04Provider
+
+        app.state.p04_provider = QualityScenarioV1P04Provider(primary_db)
+    else:
+        app.state.p04_provider = UnavailableP04Provider()
     app.state.p04_service = P04InsightService(app.state.p04_provider)
     app.state.portrait_provider = portrait_provider or UnavailablePortraitProvider()
     portrait_db = (
@@ -499,6 +507,9 @@ def create_p0_app(
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.web.api_v2 import create_v2_router
         from quality_knowledge.web.p1_pages import create_p1_router
+        from quality_knowledge.web.quality_scenario_v1_api import (
+            create_quality_scenario_v1_router,
+        )
 
         if app.state.overall_shell_enabled:
             from quality_knowledge.web.overall_runtime_control import (
@@ -527,6 +538,25 @@ def create_p0_app(
                 repeat_web=repeat_web,
             )
         )
+        app.include_router(create_quality_scenario_v1_router(str(primary_db)))
+
+        @app.get("/api/v2/quality-scenario-preview/status")
+        def quality_scenario_preview_status() -> dict[str, Any]:
+            provider = app.state.p04_provider
+            diagnostic = getattr(provider, "diagnostic", None)
+            if callable(diagnostic):
+                return diagnostic()
+            snapshot = provider.snapshot()
+            provider_type = type(provider).__name__
+            return {
+                "V1_DB_ABSOLUTE_PATH": str(primary_db.resolve()),
+                "V1_CANDIDATE_COUNT": None,
+                "V1_PUBLISHED_COUNT": None,
+                "P04_PROVIDER_TYPE": provider_type,
+                "P04_PUBLISHED_COUNT": len(snapshot.scenarios),
+                "SYNTHETIC_FIXTURE_USED": "YES" if "Fixture" in provider_type else "NO",
+            }
+
         app.include_router(create_p04_router(app.state.p04_service))
         app.include_router(create_public_scenario_router(app.state.p04_service))
         app.include_router(create_portrait_router(app.state.portrait_service))

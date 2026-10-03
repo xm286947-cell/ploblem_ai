@@ -16,6 +16,10 @@
   <nav class="main-nav">
     <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
+    <a class="nav-item {% if request.url.path.startswith('/p0/quality-scenarios') or request.url.path.startswith('/p0/quality-scenario-insights') %}active{% endif %}" href="/p0/quality-scenarios/workbench">新质量场景（预览）</a>
+    <a class="nav-item {% if request.url.path == '/quality-scenarios' or (request.url.path.startswith('/quality-scenarios/') and not request.url.path.startswith('/quality-scenarios/insights')) %}active{% endif %}" href="/quality-scenarios">原质量场景库</a>
+    <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets') %}active{% endif %}" href="/quality-scenario-assets">场景资产与画像</a>
+    <a class="nav-item {% if request.url.path.startswith('/quality-scenarios/insights') %}active{% endif %}" href="/quality-scenarios/insights">场景业务洞察</a>
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
     <a class="nav-item {% if request.url.path.startswith('/itr/recovery-workbench') %}active{% endif %}" href="/itr/recovery-workbench">ITR工作台</a>
@@ -28,6 +32,7 @@
     <a class="nav-item {% if request.url.path.startswith('/settings/associations') %}active{% endif %}" href="/settings/associations">数据关联配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/scenario-taxonomy') %}active{% endif %}" href="/settings/scenario-taxonomy">场景词典与分类配置</a>
   </nav>
   <div class="side-foot"><a href="/analysis">批量 AI 分析</a><a href="/export">数据导出</a></div>
 </aside>
