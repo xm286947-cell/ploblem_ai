@@ -248,6 +248,13 @@
 
     tbody.innerHTML = items.map((item) => {
       const result = displayResult(item);
+      const conflicts = openReviewConflicts(item);
+      const reviewInline = result === 'REVIEW' && conflicts.length
+        ? '<div class="hc-review-inline">需确认：' +
+          escapeHtml(reviewConflictSummary(conflicts[0])) +
+          (conflicts.length > 1 ? ' +' + (conflicts.length - 1) : '') +
+          '</div>'
+        : '';
       return `
         <tr>
           <td>
@@ -258,7 +265,7 @@
           <td>${statusPill(item.stage_a)}</td>
           <td>${statusPill(item.stage_b)}</td>
           <td>${statusPill(item.gate)}</td>
-          <td>${statusPill(result)}</td>
+          <td>${statusPill(result)}${reviewInline}</td>
           <td><small class="${item.error_code ? 'hc-error' : ''}">${escapeHtml(item.error_code || '—')}</small></td>
           <td>${Number(item.provider_calls || 0)}</td>
           <td>${Number(item.duration_ms || 0).toLocaleString()} ms</td>
