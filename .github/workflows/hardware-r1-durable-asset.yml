@@ -87,6 +87,11 @@ jobs:
           tests/test_hardware_data_reliability_http.py
           tests/test_hardware_operability.py
           tests/test_hardware_r1_workbench.py
+
+      - name: Run existing synthetic product API regression outside Windows
+        if: runner.os != 'Windows'
+        run: >
+          python -m pytest -q --noconftest
           tests/test_hardware_case_product_api_e2e.py
 
       - name: Packaged launcher startup gate
