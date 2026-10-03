@@ -692,8 +692,16 @@ def maintenance() -> dict[str, Any]:
     import_review = []
     for d in devices:
         detail = device_slots(d["id"])
-        if detail["counts"]["UNREVIEWED"] or detail["counts"]["AMBIGUOUS"] or detail["counts"]["NOT_CHECKED"]:
-            import_review.append({"device_id": d["id"], "model": d["model"], "device_type": d["device_type"], "counts": detail["counts"]})
+        review = review_workbench(d["id"])
+        ux = review["ux_summary"]
+        if ux["trusted"] or ux["needs_attention"] or ux["unknown"]:
+            import_review.append({
+                "device_id": d["id"],
+                "model": d["model"],
+                "device_type": d["device_type"],
+                "counts": detail["counts"],
+                "ux_summary": ux,
+            })
     from . import knowledge as knowledge_store
     sources = knowledge_store.list_sources()
     return {
