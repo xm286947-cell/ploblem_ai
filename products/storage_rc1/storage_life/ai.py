@@ -1375,6 +1375,12 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
                                     "match_score": round(match_score, 4)}
                     else:
                         unresolved.append(key)
+        semantic_rejection = None
+        if status == "found" and resolved and dtype == "SSD" and key == "cell_type":
+            if not re.search(r"\b(?:SLC|MLC|TLC|QLC)\b", str(resolved.get("quote") or ""), re.I):
+                status = "missing"
+                semantic_rejection = "CELL_TYPE_REQUIRES_EXPLICIT_SLC_MLC_TLC_QLC_EVIDENCE"
+
         resolved_conflicts = []
         if status == "conflict":
             for alt in item.get("conflict_evidence") or []:
@@ -1404,6 +1410,7 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             "knowledge_type": str(item.get("knowledge_type") or (emmc_knowledge_type(key) if dtype == "eMMC" else "specification")),
             "evidence": ([resolved] if resolved else []),
             "declared_evidence": evidence, "resolved_evidence": resolved, "resolved_conflict_evidence": resolved_conflicts,
+            "semantic_rejection": semantic_rejection,
         }
         facts.append(fact)
 
@@ -1451,6 +1458,12 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             if fact["status"] == "conflict":
                 entry["evidence"] = fact.get("resolved_conflict_evidence") or []
             review_queue.append(entry)
+        elif fact.get("semantic_rejection"):
+            review_queue.append({
+                "type": "semantic_validation_failed",
+                "field_key": fact["field_key"],
+                "code": fact["semantic_rejection"],
+            })
         elif fact["status"] == "missing" and fact["field_key"] in critical and fact["field_key"] in covered_fields:
             review_queue.append({"type": "critical_missing", "field_key": fact["field_key"], "source_coverage": True})
     for key in dict.fromkeys(unresolved):
