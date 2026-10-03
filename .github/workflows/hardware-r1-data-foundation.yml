@@ -26,6 +26,9 @@ on:
       - "tests/test_hardware_r1_runtime_v2.py"
       - "tests/test_hardware_r1_preview_store.py"
       - "tests/test_hardware_r1_pipeline_v13.py"
+      - "tests/test_hardware_r1_source_binding.py"
+      - "services/hardware_case_source_store.py"
+      - "services/hardware_migrations/v002_r1_source_binding.py"
       - "quality_knowledge/web/hardware_case_api.py"
       - "quality_knowledge/web/p0_pages.py"
       - "quality_knowledge/web/templates/hardware_case_word_import.html"
@@ -99,6 +102,7 @@ jobs:
           tests/test_hardware_r1_runtime_v2.py
           tests/test_hardware_r1_preview_store.py
           tests/test_hardware_r1_pipeline_v13.py
+          tests/test_hardware_r1_source_binding.py
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_m3_frontend.py
