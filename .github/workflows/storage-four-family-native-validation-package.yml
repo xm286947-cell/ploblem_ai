@@ -1,0 +1,422 @@
+name: Storage Four-Family Native Validation Package
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - ".github/workflows/storage-four-family-native-validation-package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PRODUCT_SOURCE_COMMIT: 98fa39ef345f2d5da9c1f65d9788cf4ea4ccd3cf
+      RUNTIME_SNAPSHOT_COMMIT: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install source dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r products/storage_rc1/requirements.txt
+          if [ -f requirements-runtime-p0-test.txt ]; then
+            python -m pip install -r requirements-runtime-p0-test.txt
+          fi
+
+      - name: Source gates
+        env:
+          STORAGE_LIFE_EXECUTION_MODE: runtime
+          STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME: "1"
+          UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}
+          STORAGE_MODEL_CONFIG: ${{ github.workspace }}/products/storage_rc1/config/model.local.yaml
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_four_family_agent_routing_closure.py             products/storage_rc1/tests/test_runtime_product_adapter.py             products/storage_rc1/tests/test_runtime_product_contract_rc2.py             products/storage_rc1/tests/test_rcfg01_product_config_entry.py
+          python -m pytest -q             tests/test_storage_rc1_mock_assets.py             tests/test_storage_rc1_scenario_catalog.py
+          python -m pytest -q             products/storage_rc1/tests/test_storage_domain_skills_real_knowledge.py             products/storage_rc1/tests/test_storage_domain_skills_v01.py             products/storage_rc1/tests/test_storage_product_mvp_rc1.py             products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py
+          echo "SOURCE_FOUR_FAMILY_GATE=PASS"
+          echo "SOURCE_HISTORICAL_GOLDEN=PASS"
+          echo "SOURCE_STORAGE_REGRESSION=PASS"
+
+      - name: Assemble candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACTUAL_PRODUCT_SOURCE="$(git merge-base HEAD "$PRODUCT_SOURCE_COMMIT")"
+          if [ "$ACTUAL_PRODUCT_SOURCE" != "$PRODUCT_SOURCE_COMMIT" ]; then
+            echo "PRODUCT_SOURCE_COMMIT_NOT_ANCESTOR"
+            exit 1
+          fi
+
+          PACKAGING_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          PRODUCT_TAG="${PRODUCT_SOURCE_COMMIT:0:12}"
+          PACKAGE_ID="STORAGE-FOUR-FAMILY-NATIVE-VALIDATION-329-$PRODUCT_TAG"
+          echo "PACKAGING_SOURCE_COMMIT=$PACKAGING_SOURCE_COMMIT" >> "$GITHUB_ENV"
+          echo "PRODUCT_TAG=$PRODUCT_TAG" >> "$GITHUB_ENV"
+          echo "PACKAGE_ID=$PACKAGE_ID" >> "$GITHUB_ENV"
+
+          rm -rf dist/_storage329 /tmp/runtime329
+          mkdir -p dist/_storage329/STORAGE_PRODUCT_MVP_RC1 /tmp/runtime329
+          PKG=dist/_storage329/STORAGE_PRODUCT_MVP_RC1
+
+          # Storage product is authoritative for its own config/runtime/agents and model.local.yaml.
+          cp -a products/storage_rc1/. "$PKG/"
+
+          # Shared application code required by the complete Storage product.
+          for d in knowledge_production repositories parser contracts compatibility services quality_knowledge common models schema analysis builder knowledge parsing retriever; do
+            if [ -d "$d" ]; then cp -a "$d" "$PKG/"; fi
+          done
+
+          # Knowledge Production stays shared-owned. Stage only its canonical Agent/prompt.
+          mkdir -p "$PKG/config/runtime/agents"
+          mkdir -p "$PKG/prompts/runtime/knowledge_production"
+          cp config/runtime/agents/knowledge.production.extract.yaml             "$PKG/config/runtime/agents/knowledge.production.extract.yaml"
+          cp prompts/runtime/knowledge_production/knowledge_extract.md             "$PKG/prompts/runtime/knowledge_production/knowledge_extract.md"
+
+          # Historical four-family Golden assets are included only for validation evidence.
+          mkdir -p "$PKG/test_assets" "$PKG/tests" "$PKG/tools"
+          cp -a test_assets/storage_rc1 "$PKG/test_assets/"
+          cp tests/test_storage_rc1_mock_assets.py "$PKG/tests/"
+          cp tests/test_storage_rc1_scenario_catalog.py "$PKG/tests/"
+          cp -a tools/openai_mock "$PKG/tools/"
+
+          # Pin the public Runtime snapshot to the exact commit expected by runtime_bridge.
+          git archive "$RUNTIME_SNAPSHOT_COMMIT"             runtime             config/runtime/model.yaml             tools/openai_mock/server.py             requirements-runtime-p0-test.txt             | tar -x -C /tmp/runtime329
+
+          mkdir -p "$PKG/vendor/unified_agent_runtime/config/runtime"
+          mkdir -p "$PKG/vendor/unified_agent_runtime/tools/openai_mock"
+          cp -a /tmp/runtime329/runtime "$PKG/vendor/unified_agent_runtime/"
+          cp /tmp/runtime329/config/runtime/model.yaml             "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
+          cp /tmp/runtime329/tools/openai_mock/server.py             "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          cp /tmp/runtime329/requirements-runtime-p0-test.txt             "$PKG/vendor/unified_agent_runtime/"
+          echo "$RUNTIME_SNAPSHOT_COMMIT" > "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+
+          cat > "$PKG/start_four_family_validation.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -u
+          cd "$(dirname "$0")"
+          export STORAGE_LIFE_EXECUTION_MODE=runtime
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PWD/vendor/unified_agent_runtime"
+          if [ -z "${STORAGE_MODEL_CONFIG:-}" ]; then
+            export STORAGE_MODEL_CONFIG="$PWD/config/model.local.yaml"
+            export STORAGE_MODEL_CONFIG_SOURCE=package-default
+          else
+            export STORAGE_MODEL_CONFIG_SOURCE=user
+          fi
+          export PYTHONPATH="$PWD:$UNIFIED_AGENT_RUNTIME_ROOT"
+          echo "Storage four-family validation: http://127.0.0.1:8765"
+          echo "Runtime status: http://127.0.0.1:8765/api/v1/runtime/status"
+          echo "SSD route: http://127.0.0.1:8765/api/v1/runtime/route?device_type=SSD"
+          echo "eMMC route: http://127.0.0.1:8765/api/v1/runtime/route?device_type=eMMC"
+          bash ./run_local.sh
+          exit $?
+          EOF
+          sed -i 's/^          //' "$PKG/start_four_family_validation.sh"
+          chmod +x "$PKG/start_four_family_validation.sh"
+
+          cat > "$PKG/start_four_family_validation.bat" <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          set "STORAGE_LIFE_EXECUTION_MODE=runtime"
+          set "UNIFIED_AGENT_RUNTIME_ROOT=%CD%\vendor\unified_agent_runtime"
+          if "%STORAGE_MODEL_CONFIG%"=="" (
+            set "STORAGE_MODEL_CONFIG=%CD%\config\model.local.yaml"
+            set "STORAGE_MODEL_CONFIG_SOURCE=package-default"
+          ) else (
+            set "STORAGE_MODEL_CONFIG_SOURCE=user"
+          )
+          call run_windows.bat
+          exit /b %ERRORLEVEL%
+          EOF
+          sed -i 's/^          //' "$PKG/start_four_family_validation.bat"
+
+          cat > "$PKG/VALIDATION_README.txt" <<EOF
+          Storage Four-Family Agent / Config / Routing Native Validation
+
+          TASK=STORAGE-FOUR-FAMILY-AGENT-CONFIG-AND-ROUTING-CLOSURE-001
+          ISSUE=#329
+          PACKAGE_ID=$PACKAGE_ID
+          PRODUCT_SOURCE_COMMIT=$PRODUCT_SOURCE_COMMIT
+          PACKAGING_SOURCE_COMMIT=$PACKAGING_SOURCE_COMMIT
+          RUNTIME_SNAPSHOT_COMMIT=$RUNTIME_SNAPSHOT_COMMIT
+
+          macOS/Linux:
+            bash start_four_family_validation.sh
+
+          Windows:
+            start_four_family_validation.bat
+
+          Runtime:
+            http://127.0.0.1:8765/api/v1/runtime/status
+            http://127.0.0.1:8765/api/v1/runtime/route?device_type=NOR%20Flash
+            http://127.0.0.1:8765/api/v1/runtime/route?device_type=NAND%20Flash
+            http://127.0.0.1:8765/api/v1/runtime/route?device_type=eMMC
+            http://127.0.0.1:8765/api/v1/runtime/route?device_type=SSD
+
+          Expected routing:
+            NOR Flash -> storage.ai.json_call
+            NAND Flash -> storage.ai.json_call
+            eMMC -> storage.emmc.parameter_extract
+            SSD -> storage.ai.json_call
+
+          Expected effective model:
+            model_ref=qwen_prod
+            model=qwen3.8-max
+            model_config=config/model.local.yaml
+
+          Knowledge Production:
+            agent=knowledge.production.extract
+            generic contract, not eMMC-only
+
+          PRODUCT_GATE=NOT_CLAIMED
+          RC_PASS=NOT_CLAIMED
+          EOF
+          sed -i 's/^          //' "$PKG/VALIDATION_README.txt"
+
+          cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "task": "STORAGE-FOUR-FAMILY-AGENT-CONFIG-AND-ROUTING-CLOSURE-001",
+            "issue": 329,
+            "product_source_commit": "$PRODUCT_SOURCE_COMMIT",
+            "packaging_source_commit": "$PACKAGING_SOURCE_COMMIT",
+            "runtime_snapshot_commit": "$RUNTIME_SNAPSHOT_COMMIT",
+            "execution_mode": "runtime",
+            "default_model_config": "config/model.local.yaml",
+            "four_family_routing": {
+              "NOR Flash": "storage.ai.json_call",
+              "NAND Flash": "storage.ai.json_call",
+              "eMMC": "storage.emmc.parameter_extract",
+              "SSD": "storage.ai.json_call"
+            },
+            "product_gate_pass": "NOT_CLAIMED",
+            "rc_pass": "NOT_CLAIMED"
+          }
+          EOF
+          sed -i 's/^          //' "$PKG/PACKAGE_MANIFEST.json"
+
+          (
+            cd "$PKG"
+            find . -type f ! -name FILE_SHA256SUMS.txt -print0               | sort -z               | xargs -0 sha256sum > FILE_SHA256SUMS.txt
+          )
+
+          ZIP="dist/STORAGE_FOUR_FAMILY_AGENT_NATIVE_VALIDATION_${PRODUCT_TAG}.zip"
+          (
+            cd dist/_storage329
+            zip -qr "../$(basename "$ZIP")" STORAGE_PRODUCT_MVP_RC1
+          )
+          SHA="$(sha256sum "$ZIP" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$ZIP")"
+          echo "$SHA  $(basename "$ZIP")" > "$ZIP.sha256"
+          cat > "$ZIP.DELIVERY_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "package": "$(basename "$ZIP")",
+            "product_source_commit": "$PRODUCT_SOURCE_COMMIT",
+            "packaging_source_commit": "$PACKAGING_SOURCE_COMMIT",
+            "runtime_snapshot_commit": "$RUNTIME_SNAPSHOT_COMMIT",
+            "package_sha256": "$SHA",
+            "package_size": $SIZE,
+            "fresh_extract_required": true,
+            "native_macos": "PENDING_RETEST",
+            "native_windows": "PENDING_RETEST",
+            "product_gate_pass": "NOT_CLAIMED",
+            "rc_pass": "NOT_CLAIMED"
+          }
+          EOF
+          sed -i 's/^          //' "$ZIP.DELIVERY_MANIFEST.json"
+          echo "PACKAGE=$ZIP"
+          echo "SHA256=$SHA"
+          echo "SIZE=$SIZE"
+
+      - name: Fresh extract functional gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/storage329
+          mkdir -p /tmp/storage329
+          unzip -q "dist/STORAGE_FOUR_FAMILY_AGENT_NATIVE_VALIDATION_${PRODUCT_TAG}.zip" -d /tmp/storage329
+          PKG=/tmp/storage329/STORAGE_PRODUCT_MVP_RC1
+
+          test -f "$PKG/config/runtime/agents/storage.ai.json_call.yaml"
+          test -f "$PKG/config/runtime/agents/storage.emmc.parameter_extract.yaml"
+          test -f "$PKG/config/runtime/agents/knowledge.production.extract.yaml"
+          test ! -f "$PKG/config/runtime/storage.ai.json_call.yaml"
+          test ! -f "$PKG/config/runtime/storage.emmc.parameter_extract.yaml"
+          test -f "$PKG/config/model.local.yaml"
+          test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          test "$(cat "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "$RUNTIME_SNAPSHOT_COMMIT"
+
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_LIFE_EXECUTION_MODE=runtime
+          export UNIFIED_AGENT_RUNTIME_ROOT="$PKG/vendor/unified_agent_runtime"
+          export STORAGE_MODEL_CONFIG="$PKG/config/model.local.yaml"
+          cd "$PKG"
+
+          python -m pytest -q             tests/test_four_family_agent_routing_closure.py             tests/test_storage_domain_skills_real_knowledge.py             tests/test_storage_domain_skills_v01.py             tests/test_storage_product_mvp_rc1.py             tests/test_storage_rc1_r6_complete_assembly.py
+          python -m pytest -q             tests/test_storage_rc1_mock_assets.py             tests/test_storage_rc1_scenario_catalog.py
+
+          echo "FRESH_EXTRACT_TESTS=PASS"
+          echo "FOUR_FAMILY_GOLDEN=PASS"
+          echo "CONFIG_SINGLE_SOURCE=PASS"
+
+      - name: Runtime effective-config and launcher safety gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=/tmp/storage329/STORAGE_PRODUCT_MVP_RC1
+          rm -rf "$PKG/.venv" /tmp/storage329-system-python
+
+          python -m venv /tmp/storage329-system-python
+          SYSTEM_PY=/tmp/storage329-system-python/bin/python3
+          if "$SYSTEM_PY" - <<'PY' >/dev/null 2>&1
+          import uvicorn
+          PY
+          then
+            echo "SYSTEM_PYTHON_NO_UVICORN=FAIL"
+            exit 1
+          fi
+          "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage329-system-before.txt
+
+          export PATH="/tmp/storage329-system-python/bin:/usr/bin:/bin"
+          export PYTHONPATH=""
+          cd "$PKG"
+
+          setsid bash ./start_four_family_validation.sh >/tmp/storage329-launch.log 2>&1 &
+          LAUNCH_PID=$!
+
+          cleanup() {
+            if kill -0 "$LAUNCH_PID" 2>/dev/null; then
+              kill -TERM -- "-$LAUNCH_PID" 2>/dev/null || kill -TERM "$LAUNCH_PID" 2>/dev/null || true
+              wait "$LAUNCH_PID" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 180); do
+            if /usr/bin/curl -fsS http://127.0.0.1:8765/api/health >/tmp/storage329-health.json 2>/dev/null; then
+              break
+            fi
+            if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
+              echo "LAUNCHER_FAILED"
+              cat /tmp/storage329-launch.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          /usr/bin/curl -fsS http://127.0.0.1:8765/api/health >/tmp/storage329-health.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/status?device_type=SSD" >/tmp/storage329-ssd-status.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/status?device_type=eMMC" >/tmp/storage329-emmc-status.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/route?device_type=NOR%20Flash" >/tmp/storage329-nor.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/route?device_type=NAND%20Flash" >/tmp/storage329-nand.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/route?device_type=eMMC" >/tmp/storage329-emmc.json
+          /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/route?device_type=SSD" >/tmp/storage329-ssd.json
+          /usr/bin/curl -fsS http://127.0.0.1:8765/api/product/skills/readiness >/tmp/storage329-readiness.json
+
+          "$PKG/.venv/bin/python" - <<'PY'
+          import json
+          from pathlib import Path
+
+          health=json.loads(Path("/tmp/storage329-health.json").read_text())
+          ssd_status=json.loads(Path("/tmp/storage329-ssd-status.json").read_text())
+          emmc_status=json.loads(Path("/tmp/storage329-emmc-status.json").read_text())
+          routes={
+              "NOR Flash": json.loads(Path("/tmp/storage329-nor.json").read_text()),
+              "NAND Flash": json.loads(Path("/tmp/storage329-nand.json").read_text()),
+              "eMMC": json.loads(Path("/tmp/storage329-emmc.json").read_text()),
+              "SSD": json.loads(Path("/tmp/storage329-ssd.json").read_text()),
+          }
+          ready=json.loads(Path("/tmp/storage329-readiness.json").read_text())
+
+          assert health["status"] == "ok"
+          assert ssd_status["configured"] is True, ssd_status
+          assert ssd_status["execution_mode"] == "runtime"
+          assert ssd_status["runtime"]["pinned"] is True
+          assert ssd_status["runtime"]["snapshot_commit"] == "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
+          assert ssd_status["active_route"]["agent_id"] == "storage.ai.json_call"
+          assert ssd_status["active_route"]["model_ref"] == "qwen_prod"
+          assert ssd_status["active_route"]["model"] == "qwen3.8-max"
+          assert ssd_status["runtime"]["model_config"].endswith("/config/model.local.yaml")
+          assert emmc_status["active_route"]["agent_id"] == "storage.emmc.parameter_extract"
+          assert emmc_status["active_route"]["model_ref"] == "qwen_prod"
+          assert routes["NOR Flash"]["agent_id"] == "storage.ai.json_call"
+          assert routes["NAND Flash"]["agent_id"] == "storage.ai.json_call"
+          assert routes["eMMC"]["agent_id"] == "storage.emmc.parameter_extract"
+          assert routes["SSD"]["agent_id"] == "storage.ai.json_call"
+          assert ssd_status["knowledge_production"]["agent_id"] == "knowledge.production.extract"
+          assert ssd_status["knowledge_production"]["emmc_only"] is False
+          assert ready["evidence_drilldown"]["status"] == "PASS"
+          PY
+
+          test -x "$PKG/.venv/bin/python"
+          "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage329-system-after.txt
+          cmp /tmp/storage329-system-before.txt /tmp/storage329-system-after.txt
+
+          test -f "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+          grep -q '"execution_mode": "runtime"' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+          grep -q 'storage.emmc.parameter_extract' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+          grep -q 'storage.ai.json_call' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+          grep -q 'model.local.yaml' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+
+          kill -INT -- "-$LAUNCH_PID"
+          set +e
+          wait "$LAUNCH_PID"
+          launch_status=$?
+          set -e
+          trap - EXIT
+          if [ "$launch_status" -ne 130 ] && [ "$launch_status" -ne 0 ]; then
+            echo "CTRL_C_RETURNS_PROMPT=FAIL status=$launch_status"
+            cat /tmp/storage329-launch.log || true
+            exit 1
+          fi
+
+          sleep 1
+          if /usr/bin/curl -fsS --max-time 1 http://127.0.0.1:8765/api/health >/dev/null 2>&1; then
+            echo "NO_ORPHAN_PROCESS=FAIL"
+            exit 1
+          fi
+
+          if grep -q 'STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME=1' "$PKG/run_windows.bat"; then
+            echo "WINDOWS_RUNTIME_PIN_ENFORCEMENT=FAIL"
+            exit 1
+          fi
+
+          echo "PACKAGE_LOCAL_VENV_BOOTSTRAP=PASS"
+          echo "SYSTEM_PYTHON_UNCHANGED=PASS"
+          echo "RUNTIME_PINNED=PASS"
+          echo "RUNTIME_MODE_EXPLICIT=PASS"
+          echo "ACTIVE_AGENT_VISIBLE=PASS"
+          echo "ACTIVE_CONFIG_PATH_VISIBLE=PASS"
+          echo "MODEL_CONFIG_SINGLE_EFFECTIVE_SOURCE=PASS"
+          echo "FOUR_FAMILY_ROUTING=PASS"
+          echo "KNOWLEDGE_PRODUCTION_GENERIC_CONTRACT=PASS"
+          echo "CTRL_C_RETURNS_PROMPT=PASS"
+          echo "NO_ORPHAN_PROCESS=PASS"
+          echo "WINDOWS_RUNTIME_PIN_ENFORCEMENT=PASS"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-four-family-agent-native-validation
+          path: |
+            dist/STORAGE_FOUR_FAMILY_AGENT_NATIVE_VALIDATION_${{ env.PRODUCT_TAG }}.zip
+            dist/STORAGE_FOUR_FAMILY_AGENT_NATIVE_VALIDATION_${{ env.PRODUCT_TAG }}.zip.sha256
+            dist/STORAGE_FOUR_FAMILY_AGENT_NATIVE_VALIDATION_${{ env.PRODUCT_TAG }}.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
+          retention-days: 90
