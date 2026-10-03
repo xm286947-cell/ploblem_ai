@@ -1,0 +1,54 @@
+name: Storage Skill Consumption Rebaseline #359
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/config/spec_templates.yaml"
+      - "products/storage_rc1/storage_life/**"
+      - "products/storage_rc1/skills/**"
+      - "products/storage_rc1/tests/test_storage_skill_consumption_rebaseline_359.py"
+      - ".github/workflows/storage-skill-consumption-rebaseline-359.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-skill-consumption-rebaseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+      - name: "#359 focused semantic gate"
+        run: |
+          python -m pytest -q products/storage_rc1/tests/test_storage_skill_consumption_rebaseline_359.py
+          echo "HISTORICAL_ASSET_REUSE=PASS"
+          echo "DIRECT_FACT_CONTRACT=PASS"
+          echo "DIAGNOSTIC_STATUS_MODEL=PASS"
+          echo "OBSERVABILITY_EVIDENCE_RULE=PASS"
+          echo "SEARCH_COVERAGE_DISTINCT_FROM_FACT_COVERAGE=PASS"
+          echo "EXISTING_SKILL_REUSE=PASS"
+      - name: Existing Storage domain-skill regression
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_storage_domain_skills_v01.py             products/storage_rc1/tests/test_storage_domain_skills_real_knowledge.py
+          echo "SKILL_GATE_REGRESSION=PASS"
+      - name: Review UX and product regression
+        run: |
+          cd products/storage_rc1
+          python -m pytest -q             tests/test_parameter_review_ux_353.py             tests/test_storage_product_mvp_rc1.py             tests/test_storage_rc1_r6_complete_assembly.py
+          echo "REVIEW_UX_353_REGRESSION=PASS"
+          echo "R1_REGRESSION=PASS"
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"

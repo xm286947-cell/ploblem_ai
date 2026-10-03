@@ -26,6 +26,22 @@ UX_LABELS = {
     UX_NOT_APPLICABLE: "不适用",
 }
 
+DIAG_DATASHEET_EXPLICIT = "DATASHEET_EXPLICIT"
+DIAG_STANDARD_REQUIRES_VALIDATION = "STANDARD_APPLICABLE_REQUIRES_DEVICE_VALIDATION"
+DIAG_DATASHEET_NOT_DECLARED = "DATASHEET_NOT_DECLARED"
+DIAG_EXPLICITLY_NOT_SUPPORTED = "EXPLICITLY_NOT_SUPPORTED"
+DIAG_NOT_APPLICABLE = "NOT_APPLICABLE"
+DIAG_KNOWLEDGE_GAP = "KNOWLEDGE_GAP"
+
+DIAGNOSTIC_LABELS = {
+    DIAG_DATASHEET_EXPLICIT: "规格书明确",
+    DIAG_STANDARD_REQUIRES_VALIDATION: "标准知识适用，待实机验证",
+    DIAG_DATASHEET_NOT_DECLARED: "规格书未声明",
+    DIAG_EXPLICITLY_NOT_SUPPORTED: "明确不支持",
+    DIAG_NOT_APPLICABLE: "不适用",
+    DIAG_KNOWLEDGE_GAP: "知识缺口",
+}
+
 DIAGNOSTIC_METHODS = {
     "life_time_a": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_A", "按 JEDEC/厂商定义解释寿命区间"),
     "life_time_b": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_B", "结合对应存储区域解释寿命区间"),
@@ -95,6 +111,146 @@ def _slot_status(candidates: list[dict[str, Any]], coverage: dict[str, Any] | No
     if review in {"CONFIRMED", "UNREVIEWED", "REJECTED"}:
         return review
     return _coverage_status(coverage)
+
+
+def _explicitly_not_supported(value: Any) -> bool:
+    if value is False:
+        return True
+    marker = str(value or "").strip().casefold()
+    return marker in {
+        "unsupported", "not supported", "not-supported", "no support",
+        "false", "不支持", "明确不支持", "不具备",
+    }
+
+
+def _diagnostic_semantics(
+    *,
+    field: dict[str, Any],
+    coverage_status: str,
+    primary: dict[str, Any] | None,
+    evidence: list[dict[str, Any]],
+    formal_knowledge: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Classify diagnostic meaning without collapsing datasheet, knowledge and runtime layers."""
+    if field.get("group") != parameter_baseline.KEY_DIAGNOSTIC:
+        return None
+    if coverage_status == "NOT_APPLICABLE":
+        status = DIAG_NOT_APPLICABLE
+    else:
+        direct = bool(coverage_status == "FOUND" and primary and evidence)
+        candidate_value = (primary or {}).get("final_value")
+        if candidate_value is None:
+            candidate_value = (primary or {}).get("ai_value")
+        if direct and _explicitly_not_supported(candidate_value):
+            status = DIAG_EXPLICITLY_NOT_SUPPORTED
+        elif direct:
+            status = DIAG_DATASHEET_EXPLICIT
+        elif formal_knowledge.get("status") == "MATCHED":
+            status = DIAG_STANDARD_REQUIRES_VALIDATION
+        elif formal_knowledge.get("status") == "NO_MATCH" and coverage_status == "NOT_FOUND":
+            status = DIAG_DATASHEET_NOT_DECLARED
+        else:
+            status = DIAG_KNOWLEDGE_GAP
+    return {
+        "status": status,
+        "label": DIAGNOSTIC_LABELS[status],
+        "datasheet_layer": coverage_status,
+        "knowledge_layer": formal_knowledge.get("status"),
+        "runtime_layer": "REQUIRES_OBSERVATION"
+        if status == DIAG_STANDARD_REQUIRES_VALIDATION else "NOT_EVALUATED",
+    }
+
+
+def _coverage_metrics(slots: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(slots)
+    search_known = sum(
+        1 for x in slots
+        if x.get("coverage_status") in {"FOUND", "NOT_FOUND", "NOT_APPLICABLE"}
+    )
+    applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
+    confirmed = [
+        x for x in applicable
+        if x.get("review_status") == "CONFIRMED" and x.get("value") is not None
+    ]
+    return {
+        "search_coverage_ratio": round(search_known / total, 4) if total else 0,
+        "fact_coverage_ratio": round(len(confirmed) / len(applicable), 4) if applicable else 0,
+        "search_known_count": search_known,
+        "search_total_count": total,
+        "confirmed_fact_count": len(confirmed),
+        "applicable_fact_count": len(applicable),
+    }
+
+
+def _engineering_result_view(skill_result: dict[str, Any]) -> dict[str, Any]:
+    structured = dict(skill_result.get("structured_result") or {})
+    separation = dict(skill_result.get("fact_derived_hypothesis_separation") or {})
+    missing = list(skill_result.get("missing_information") or [])
+    validation = (
+        structured.get("validation_requirements")
+        or structured.get("validation_method")
+        or structured.get("suggested_validation")
+        or []
+    )
+    if not isinstance(validation, list):
+        validation = [validation]
+    return {
+        "source_skill_id": skill_result.get("skill_id"),
+        "status": skill_result.get("status"),
+        "direct_answer": skill_result.get("direct_answer"),
+        "facts": separation.get("facts") or [],
+        "formal_knowledge": skill_result.get("knowledge_refs") or [],
+        "derived_result": structured,
+        "hypotheses": separation.get("hypotheses") or [],
+        "unknowns": missing or separation.get("unknowns") or [],
+        "evidence_refs": skill_result.get("evidence_refs") or [],
+        "validation_requirements": validation,
+        "next_action": (
+            "补齐缺失的 Formal Knowledge / Runtime Observation / 证据后重新评估"
+            if missing
+            else "进入人工工程评审，不自动形成替代或寿命决策"
+        ),
+        "decision_boundary": skill_result.get("decision_boundary"),
+    }
+
+
+def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    mapping = {
+        ("SSD", "tbw"): "rated_tbw_bytes",
+        ("SSD", "capacity"): "capacity_bytes",
+        ("NAND Flash", "pe_cycles"): "rated_pe_cycles",
+        ("NOR Flash", "pe_cycles"): "rated_endurance_cycles",
+    }
+    result = []
+    for fact in detail.get("device_facts") or []:
+        metric_name = mapping.get((dtype, fact.get("canonical_name")))
+        if not metric_name:
+            continue
+        value = fact.get("value")
+        unit = str(fact.get("unit") or "").strip()
+        try:
+            float(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        evidence_refs = [
+            str(e.get("evidence_id") or e.get("source_id") or "").strip()
+            for e in fact.get("evidence") or []
+            if str(e.get("evidence_id") or e.get("source_id") or "").strip()
+        ]
+        if not unit or not evidence_refs:
+            continue
+        result.append({
+            "fact_id": f'{detail["device"]["id"]}:{fact.get("canonical_name")}',
+            "metric_name": metric_name,
+            "value": value,
+            "unit": unit,
+            "scope": fact.get("scope") or None,
+            "condition": fact.get("condition") or None,
+            "evidence_refs": evidence_refs,
+            "source_type": "CONFIRMED_DEVICE_FACT",
+        })
+    return result
 
 
 def _enrich_evidence(device: dict[str, Any], evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -212,6 +368,30 @@ def device_slots(device_id: str) -> dict[str, Any]:
                 "confidence": primary.get("confidence"),
             }]
         evidence = _enrich_evidence(device, evidence)
+        is_diagnostic = field.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+        formal_knowledge = (
+            _formal_knowledge(
+                key,
+                field.get("parameter_name") or key,
+                device["device_type"],
+                context="engineering meaning diagnostic lifetime",
+            )
+            if is_diagnostic or review_status == "CONFIRMED"
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": "DEVICE_FACT_NOT_CONFIRMED",
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
+        )
+        diagnostic_semantics = _diagnostic_semantics(
+            field=field,
+            coverage_status=coverage_status,
+            primary=primary,
+            evidence=evidence,
+            formal_knowledge=formal_knowledge,
+        )
         # ``value`` is the formal Device Fact surface: never expose an AI candidate here.
         formal_value = (confirmed or {}).get("final_value") if confirmed else None
         formal_unit = (confirmed or {}).get("final_unit") if confirmed else ""
@@ -241,26 +421,14 @@ def device_slots(device_id: str) -> dict[str, Any]:
             "role": field.get("role") or "",
             "evidence": evidence,
             "candidate_id": (primary or {}).get("id"),
-            "formal_knowledge": (
-                _formal_knowledge(
-                    key,
-                    field.get("parameter_name") or key,
-                    device["device_type"],
-                    context="engineering meaning diagnostic lifetime",
-                )
-                if review_status == "CONFIRMED"
-                else {
-                    "status": "NOT_APPLICABLE",
-                    "code": "DEVICE_FACT_NOT_CONFIRMED",
-                    "knowledge_release_version": None,
-                    "results": [],
-                    "evidence_refs": [],
-                }
-            ),
+            "formal_knowledge": formal_knowledge,
+            "diagnostic_semantics": diagnostic_semantics,
+            "diagnostic_status": (diagnostic_semantics or {}).get("status"),
+            "diagnostic_label": (diagnostic_semantics or {}).get("label"),
         })
     states = ("CONFIRMED", "UNREVIEWED", "REJECTED", "NOT_FOUND", "NOT_CHECKED", "AMBIGUOUS", "NOT_APPLICABLE")
     counts = {state: sum(1 for x in slots if x["status"] == state) for state in states}
-    coverage_known = sum(1 for x in slots if x["coverage_status"] in {"FOUND", "NOT_FOUND", "NOT_APPLICABLE"})
+    coverage_metrics = _coverage_metrics(slots)
     facts = [
         {k: slot.get(k) for k in ("canonical_name", "parameter_name", "value", "unit", "condition", "scope", "evidence", "verified_by", "verified_at")}
         for slot in slots if slot["review_status"] == "CONFIRMED"
@@ -270,7 +438,22 @@ def device_slots(device_id: str) -> dict[str, Any]:
         "slots": slots,
         "device_facts": facts,
         "counts": counts,
-        "coverage_ratio": round(coverage_known / len(slots), 4) if slots else 0,
+        # Backward-compatible alias: coverage_ratio remains SEARCH_COVERAGE.
+        "coverage_ratio": coverage_metrics["search_coverage_ratio"],
+        "search_coverage_ratio": coverage_metrics["search_coverage_ratio"],
+        "fact_coverage_ratio": coverage_metrics["fact_coverage_ratio"],
+        "coverage_model": {
+            "SEARCH_COVERAGE": {
+                "ratio": coverage_metrics["search_coverage_ratio"],
+                "known": coverage_metrics["search_known_count"],
+                "total": coverage_metrics["search_total_count"],
+            },
+            "FACT_COVERAGE": {
+                "ratio": coverage_metrics["fact_coverage_ratio"],
+                "confirmed": coverage_metrics["confirmed_fact_count"],
+                "applicable": coverage_metrics["applicable_fact_count"],
+            },
+        },
         "workflow": core.specification_workflow_status(device_id),
         "lifecycle": _device_lifecycle(device_id),
         "conclusion": core.get_device_conclusion(device_id),
@@ -285,6 +468,106 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
         "fact_count": len(detail["device_facts"]),
         "facts": detail["device_facts"],
         "gate": "CONFIRMED_ONLY",
+    }
+
+
+def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Bind one selected device to the existing four Storage Domain Skill contracts."""
+    allowed = {
+        "storage-write-governance",
+        "storage-lifetime-budget",
+        "storage-diagnostic-validation",
+        "storage-change-impact",
+    }
+    if skill_id not in allowed:
+        raise ValueError(f"UNKNOWN_STORAGE_SKILL:{skill_id}")
+
+    detail = device_slots(device_id)
+    request = dict(payload or {})
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    context = {
+        "device_id": device_id,
+        "device_type": dtype,
+        "confirmed_device_facts": detail.get("device_facts") or [],
+        "knowledge_release": KnowledgeReleaseConsumer.current().status(),
+        "runtime_observations": list(request.get("runtime_observations") or []),
+    }
+
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    service = RealKnowledgeAssessmentService.current()
+
+    if skill_id == "storage-write-governance":
+        user_context = dict(request.get("user_context") or {})
+        user_context.setdefault("question", f"{dtype} software write behavior lifetime governance")
+        user_context["device_context"] = context
+        skill_payload = {
+            "device_type": dtype,
+            "user_context": user_context,
+            "workload_software_facts": list(request.get("workload_software_facts") or []),
+        }
+    elif skill_id == "storage-diagnostic-validation":
+        capabilities = list(request.get("diagnostic_capabilities") or [])
+        if not capabilities:
+            capabilities = [
+                {
+                    "canonical_name": x["canonical_name"],
+                    "diagnostic_status": x.get("diagnostic_status"),
+                    "datasheet_fact": x.get("value"),
+                    "review_status": x.get("review_status"),
+                    "evidence_refs": [
+                        e.get("evidence_id") or e.get("source_id")
+                        for e in x.get("evidence") or []
+                        if e.get("evidence_id") or e.get("source_id")
+                    ],
+                }
+                for x in detail["slots"]
+                if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+            ]
+        skill_payload = {
+            "device_type": dtype,
+            "target_question": str(
+                request.get("target_question")
+                or f"{dtype} diagnostic capability validation and runtime observation requirements"
+            ),
+            "diagnostic_capabilities": capabilities,
+            "runtime_observations": list(request.get("runtime_observations") or []),
+        }
+    elif skill_id == "storage-change-impact":
+        skill_payload = {
+            "device_type": dtype,
+            "parameter_delta": list(request.get("parameter_delta") or []),
+            "question": str(request.get("question") or "device change impact"),
+        }
+    else:
+        requested_metric = str(request.get("requested_metric") or "").strip()
+        if not requested_metric:
+            raise ValueError("REQUESTED_METRIC_REQUIRED")
+        assessment = dict(request.get("assessment_request") or {})
+        assessment["device_id"] = device_id
+        existing = list(assessment.get("confirmed_facts") or [])
+        existing_names = {str(x.get("metric_name") or "") for x in existing if isinstance(x, dict)}
+        assessment["confirmed_facts"] = existing + [
+            x for x in _safe_lifetime_facts(detail)
+            if x["metric_name"] not in existing_names
+        ]
+        if "runtime_observations" not in assessment:
+            assessment["runtime_observations"] = list(request.get("runtime_observations") or [])
+        skill_payload = {
+            "assessment_request": assessment,
+            "requested_metric": requested_metric,
+            "target_service_life": dict(request.get("target_service_life") or {}),
+        }
+
+    result = service.execute_skill(skill_id, skill_payload)
+    return {
+        "device": detail["device"],
+        "context": context,
+        "skill_payload": skill_payload,
+        "skill_result": result,
+        "engineering_result": _engineering_result_view(result),
+        "adapter": "EXISTING_STORAGE_DOMAIN_SKILL_ADAPTER",
+        "second_skill_stack": False,
+        "second_knowledge_stack": False,
     }
 
 
@@ -532,6 +815,8 @@ def dashboard() -> dict[str, Any]:
             "model": d["model"],
             "device_type": d["device_type"],
             "coverage_ratio": detail["coverage_ratio"],
+            "search_coverage_ratio": detail["search_coverage_ratio"],
+            "fact_coverage_ratio": detail["fact_coverage_ratio"],
             "attention": attention,
             "counts": detail["counts"],
             "lifecycle": detail["lifecycle"],
@@ -594,6 +879,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
     dtype = templates.normalize_device_type(device_type) if device_type else ""
     evidence_by_field = {}
     lifecycle = None
+    detail = None
     if device_id:
         detail = device_slots(device_id)
         lifecycle = detail["lifecycle"]
@@ -609,7 +895,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         data_source, method, interpretation = DIAGNOSTIC_METHODS.get(key, ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"))
         slot = evidence_by_field.get(key) or {}
         formal = slot.get("review_status") == "CONFIRMED"
-        knowledge = _formal_knowledge(
+        knowledge = slot.get("formal_knowledge") or _formal_knowledge(
             key,
             field.get("parameter_name") or key,
             dtype,
@@ -624,6 +910,8 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "interpretation": interpretation,
             "fact_status": slot.get("status", "NOT_CHECKED") if device_id else "REFERENCE",
             "review_status": slot.get("review_status", "NOT_REVIEWED") if device_id else "REFERENCE",
+            "diagnostic_status": slot.get("diagnostic_status") if device_id else None,
+            "diagnostic_label": slot.get("diagnostic_label") if device_id else None,
             "evidence": slot.get("evidence", []) if formal else [],
             "runtime_observation": {
                 "status": "UNKNOWN",
@@ -633,15 +921,56 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 "source": None,
             },
             "formal_knowledge": knowledge,
-            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
+            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "KNOWLEDGE_GAP",
         })
+
+    skill_result = None
+    if detail is not None:
+        # Reuse the existing Storage Domain Skill adapter.  Product API composes context;
+        # it does not implement a second diagnostic skill or protocol knowledge stack.
+        from skills.real_knowledge import RealKnowledgeAssessmentService
+        capabilities = [
+            {
+                "canonical_name": x["canonical_name"],
+                "diagnostic_status": x.get("diagnostic_status"),
+                "datasheet_fact": x.get("value"),
+                "review_status": x.get("review_status"),
+                "evidence_refs": [
+                    e.get("evidence_id") or e.get("source_id")
+                    for e in x.get("evidence") or []
+                    if e.get("evidence_id") or e.get("source_id")
+                ],
+            }
+            for x in detail["slots"]
+            if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+        ]
+        skill_result = RealKnowledgeAssessmentService.current().execute_skill(
+            "storage-diagnostic-validation",
+            {
+                "device_type": dtype,
+                "target_question": f"{dtype} diagnostic capability validation and runtime observation requirements",
+                "diagnostic_capabilities": capabilities,
+                "runtime_observations": [],
+            },
+        )
+    knowledge_gap = any(x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP for x in rows)
+    if skill_result and skill_result.get("status") == "INSUFFICIENT_KNOWLEDGE":
+        knowledge_gap = True
     return {
         "device_type": dtype,
         "device_id": device_id or None,
         "items": rows,
+        # Keep the RC1 response contract stable for existing consumers.
         "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
+        # #359 makes the product semantics explicit without mutating the frozen key.
+        "semantic_layers": ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"],
+        "result_status": "PARTIAL" if knowledge_gap else "READY",
+        "knowledge_gap": knowledge_gap,
         "lifecycle_gate": lifecycle,
         "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
+        "skill_id": "storage-diagnostic-validation",
+        "skill_result": skill_result,
+        "engineering_result": _engineering_result_view(skill_result) if skill_result else None,
     }
 
 
@@ -684,7 +1013,42 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
             "formal_knowledge": knowledge,
             "knowledge_analysis_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
         })
-    return {"old_id": old_id, "new_id": new_id, "status": "DRAFT_FOR_ENGINEERING_REVIEW", "final_replacement_decision": None, "items": rows, "unknowns": list(dict.fromkeys(unknowns))}
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    skill_delta = [
+        {
+            "canonical_name": row["canonical_name"],
+            "old": row["old"].get("value"),
+            "new": row["new"].get("value"),
+            "old_status": row["old"].get("status"),
+            "new_status": row["new"].get("status"),
+            "evidence_refs": [
+                e.get("evidence_id") or e.get("source_id")
+                for cell in (row["old"], row["new"])
+                for e in cell.get("evidence") or []
+                if e.get("evidence_id") or e.get("source_id")
+            ],
+        }
+        for row in rows
+    ]
+    skill_result = RealKnowledgeAssessmentService.current().execute_skill(
+        "storage-change-impact",
+        {
+            "device_type": comparison["devices"][0]["device_type"],
+            "parameter_delta": skill_delta,
+            "question": "device parameter change lifetime software monitoring validation impact",
+        },
+    )
+    return {
+        "old_id": old_id,
+        "new_id": new_id,
+        "status": "DRAFT_FOR_ENGINEERING_REVIEW",
+        "final_replacement_decision": None,
+        "items": rows,
+        "unknowns": list(dict.fromkeys(unknowns)),
+        "skill_id": "storage-change-impact",
+        "skill_result": skill_result,
+        "engineering_result": _engineering_result_view(skill_result),
+    }
 
 
 def maintenance() -> dict[str, Any]:

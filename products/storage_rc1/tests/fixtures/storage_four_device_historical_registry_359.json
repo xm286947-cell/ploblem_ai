@@ -1,0 +1,88 @@
+{
+  "schema_version": "storage-historical-golden-registry/v0.1",
+  "task": "STORAGE-SKILL-CONSUMPTION-REBASELINE-001",
+  "issue": 359,
+  "baseline": "integration/storage@b0fa15633033ca2c8083b5df35568759082a7b61",
+  "rules": {
+    "do_not_reinvent_previously_frozen_profile_or_golden_assets": true,
+    "no_golden_rewrite_to_fit_current_code": true,
+    "delta_classification": [
+      "CURRENT_REGRESSION",
+      "INTENTIONAL_VERSION_CHANGE",
+      "HISTORICAL_ASSET_DRIFT"
+    ]
+  },
+  "sources": [
+    {
+      "golden_id": "G-S40FC016",
+      "device_type": "eMMC",
+      "vendor": "SkyHigh Memory",
+      "sample": "S40FC016",
+      "drive_id": "1jObAf9vbwsHzu9X-sLM5kW9Gz4L8jjId",
+      "file_name": "STDL-PM-001_skyhigh_s40fc016.pdf",
+      "size_bytes": 2159605,
+      "source_id_sha256": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "historical_baseline_drive_id": "12IeMoitFAaRfH8-bI1DHAhtISIw68sfuhXzWm04-jXk",
+      "historical_baseline": "eMMC Schema & GoldenSample V0.2 2026-09-18",
+      "regression_fixture": "test_assets/storage_rc1/fixtures/M03_PARAMETER_GOLDEN_EMMC.json",
+      "fixture_role": "TEST_ONLY"
+    },
+    {
+      "golden_id": "G-GD5F1GQ5",
+      "device_type": "NAND Flash",
+      "vendor": "GigaDevice",
+      "sample": "GD5F1GQ5UExxG",
+      "drive_id": "1vjSqdrafib7z6Wl2bIKnQZ7lzRIHayKz",
+      "file_name": "STDL-PM-009_gd5f1gq5.pdf",
+      "size_bytes": 1143359,
+      "source_id_sha256": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "historical_baseline_drive_id": "1G4PI2XlUntVTqtLmQ3ClMcccIUqK6ov6",
+      "historical_baseline": "NAND validation baseline V0.1 2026-09-18",
+      "regression_fixture": "test_assets/storage_rc1/fixtures/M24_PARAMETER_GOLDEN_RAW_NAND.json",
+      "fixture_role": "TEST_ONLY"
+    },
+    {
+      "golden_id": "G-GD25Q64E",
+      "device_type": "NOR Flash",
+      "vendor": "GigaDevice",
+      "sample": "GD25Q64E",
+      "drive_id": "1IEGloojrNGb247kqPri86KZt1VKUk1B2",
+      "file_name": "STDL-PM-008_gd25q64e.pdf",
+      "size_bytes": 1447813,
+      "source_id_sha256": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "historical_baseline_drive_id": "1mO1i5DrGrxiwT8_ZIbU3KP6eT864fUXBd7JLCzgbFsY",
+      "historical_baseline": "NOR Schema & GoldenSample V0.2 2026-09-18",
+      "repository_fixture": "products/storage_rc1/tests/fixtures/gd25q64e_rev16_excerpt.json",
+      "regression_fixture": "test_assets/storage_rc1/fixtures/M25_PARAMETER_GOLDEN_NOR.json",
+      "fixture_role": "TEST_ONLY"
+    },
+    {
+      "golden_id": "G-TIMAR-97",
+      "device_type": "SSD",
+      "vendor": "TIMAR",
+      "sample": "97 Series / K97M8-Y",
+      "drive_id": "1vI0QRmrbooYAN0mFvZSvQA6_Idt-o4mP",
+      "file_name": "STDL-PM-010_timar_97_series.pdf",
+      "size_bytes": 311877,
+      "source_id_sha256": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a",
+      "companion_snapshot": {
+        "drive_id": "19lCC_0eVfGDQ4quwYRl0xPpszrxB6d6l",
+        "file_name": "STDL-PM-011_timar_k97m8.html",
+        "size_bytes": 56318,
+        "source_id_sha256": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c"
+      },
+      "historical_baseline_drive_id": "1pU3Kx7fCqwhgFtJOo32mqL6ydBYpqJL0vMGttLal7xM",
+      "historical_baseline": "SSD Schema & GoldenSample V0.2 2026-09-18",
+      "regression_fixture": "test_assets/storage_rc1/fixtures/M23_PARAMETER_GOLDEN_SSD_NVME.json",
+      "fixture_role": "TEST_ONLY"
+    }
+  ],
+  "current_profile_equivalents": [
+    "products/storage_rc1/config/spec_templates.yaml",
+    "products/storage_rc1/storage_life/parameter_baseline.py"
+  ],
+  "current_skill_assets": [
+    "products/storage_rc1/skills/golden_cases.yaml",
+    "products/storage_rc1/skills/material_inventory.yaml"
+  ]
+}

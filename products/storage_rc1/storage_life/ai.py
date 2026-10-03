@@ -1259,6 +1259,7 @@ def _semantic_rules(device_type: str) -> str:
             "NAND rules: cell_type only from explicit SLC/MLC/TLC/QLC wording; keep ECC condition on P/E endurance; "
             "ecc_capability is correction strength, not status code/parity data; internal_ecc describes support/default/config; "
             "ecc_status describes no-error/corrected/uncorrectable diagnostic states; keep factory and runtime bad-block concepts separate; "
+            "descriptive bad-block existence or growth does not prove bad-block-count observability; observability requires an explicit field, register/bit, command, counter, API/interface, health log, or documented acquisition method; "
             "minimum_valid_blocks is not total block count; read_retry only when an explicit mechanism/command exists."
         ),
         "NOR Flash": (
@@ -1270,7 +1271,9 @@ def _semantic_rules(device_type: str) -> str:
         ),
         "SSD": (
             "SSD rules: TBW/DWPD are endurance specifications; do not duplicate TBW into a generic endurance field; preserve capacity scope and WAF/other conditions; "
-            "PLP may differ by part-number variant; SMART/Health support is distinct from individual health attributes."
+            "PLP may differ by part-number variant; SMART/Health support is distinct from individual health attributes; "
+            "nand_type may preserve explicit generic NAND Flash wording, but cell_type requires explicit SLC/MLC/TLC/QLC wording in the same source; "
+            "never infer TLC/QLC from product family, vendor website knowledge, or outside context when the imported datasheet does not state it."
         ),
     }
     return rules.get(templates.normalize_device_type(device_type), "")
@@ -1372,6 +1375,12 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
                                     "match_score": round(match_score, 4)}
                     else:
                         unresolved.append(key)
+        semantic_rejection = None
+        if status == "found" and resolved and dtype == "SSD" and key == "cell_type":
+            if not re.search(r"\b(?:SLC|MLC|TLC|QLC)\b", str(resolved.get("quote") or ""), re.I):
+                status = "missing"
+                semantic_rejection = "CELL_TYPE_REQUIRES_EXPLICIT_SLC_MLC_TLC_QLC_EVIDENCE"
+
         resolved_conflicts = []
         if status == "conflict":
             for alt in item.get("conflict_evidence") or []:
@@ -1401,6 +1410,7 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             "knowledge_type": str(item.get("knowledge_type") or (emmc_knowledge_type(key) if dtype == "eMMC" else "specification")),
             "evidence": ([resolved] if resolved else []),
             "declared_evidence": evidence, "resolved_evidence": resolved, "resolved_conflict_evidence": resolved_conflicts,
+            "semantic_rejection": semantic_rejection,
         }
         facts.append(fact)
 
@@ -1448,6 +1458,12 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             if fact["status"] == "conflict":
                 entry["evidence"] = fact.get("resolved_conflict_evidence") or []
             review_queue.append(entry)
+        elif fact.get("semantic_rejection"):
+            review_queue.append({
+                "type": "semantic_validation_failed",
+                "field_key": fact["field_key"],
+                "code": fact["semantic_rejection"],
+            })
         elif fact["status"] == "missing" and fact["field_key"] in critical and fact["field_key"] in covered_fields:
             review_queue.append({"type": "critical_missing", "field_key": fact["field_key"], "source_coverage": True})
     for key in dict.fromkeys(unresolved):
