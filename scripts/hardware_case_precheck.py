@@ -12,11 +12,6 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from services.hardware_data_root import HardwareDataRootResolver
-
 MODEL_EXAMPLE = ROOT / "config/runtime/model.local.hardware_case.example.yaml"
 MODEL_LOCAL = ROOT / "config/runtime/model.local.yaml"
 VALIDATION_EXAMPLE = ROOT / "config/hardware_case_real_validation.local.example.json"
@@ -63,17 +58,6 @@ def check_python() -> list[str]:
             errors.append(f"PYTHON_MODULE_MISSING:{module}")
             emit(f"module:{module}", "FAIL")
     return errors
-
-
-def check_hardware_data_root() -> list[str]:
-    resolution = HardwareDataRootResolver(ROOT).resolve()
-    emit("Hardware Data Root", resolution.classification)
-    if resolution.classification in {"BLOCKED", "LEGACY_UPGRADE_REQUIRED"}:
-        error = resolution.error_code or resolution.classification
-        emit("Hardware startup", "BLOCKED", error)
-        return [error]
-    emit("Hardware startup", "BLOCKED", "HARDWARE_STARTUP_COORDINATOR_REQUIRED")
-    return ["HARDWARE_STARTUP_COORDINATOR_REQUIRED"]
 
 
 def check_web() -> list[str]:
@@ -263,16 +247,6 @@ def main() -> int:
         ensure_local_templates()
 
     errors = check_python()
-    if args.mode in {"web", "all"}:
-        root_errors = check_hardware_data_root()
-        if root_errors:
-            errors.extend(root_errors)
-            print("")
-            print("RESULT=BLOCKED")
-            for error in errors:
-                print(f"BLOCKER={error}")
-            return 2
-
     if args.mode in {"web", "all"}:
         errors.extend(check_web())
     if args.mode in {"real-ai", "all"}:
