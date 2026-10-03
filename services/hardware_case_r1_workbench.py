@@ -7,6 +7,7 @@ publishes Formal Knowledge and never becomes a second Knowledge store.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -615,6 +616,153 @@ class HardwareR1WorkbenchService:
             "items": items,
             "total": len(items),
         }
+
+    def resolve_review_conflict(
+        self,
+        item_id: str,
+        *,
+        conflict_id: str,
+        decision_source: str,
+        reviewer: str,
+    ) -> dict[str, Any]:
+        item = self.store.get_item(item_id)
+        if item["result"] != "REVIEW":
+            raise HardwareR1WorkbenchError("REVIEW_NOT_REQUIRED")
+
+        result = deepcopy(item.get("pipeline_result") or {})
+        candidate = result.get("knowledge_object")
+        if not isinstance(candidate, dict):
+            raise HardwareR1WorkbenchError("REVIEW_CANDIDATE_REQUIRED")
+
+        conflicts = candidate.get("conflicts")
+        if not isinstance(conflicts, list):
+            raise HardwareR1WorkbenchError("REVIEW_CONFLICT_NOT_FOUND")
+
+        conflict = next(
+            (
+                value
+                for value in conflicts
+                if isinstance(value, dict)
+                and str(value.get("conflict_id") or "") == str(conflict_id)
+            ),
+            None,
+        )
+        if conflict is None:
+            raise HardwareR1WorkbenchError("REVIEW_CONFLICT_NOT_FOUND")
+        if (
+            str(conflict.get("status") or "").upper() != "OPEN"
+            and str(conflict.get("resolution_status") or "").upper()
+            != "NEEDS_REVIEW"
+        ):
+            raise HardwareR1WorkbenchError("REVIEW_CONFLICT_ALREADY_RESOLVED")
+
+        source_values = [
+            value
+            for value in conflict.get("source_values") or []
+            if isinstance(value, dict)
+        ]
+        selected = next(
+            (
+                value
+                for value in source_values
+                if str(value.get("source") or "") == str(decision_source)
+            ),
+            None,
+        )
+        if selected is None:
+            raise HardwareR1WorkbenchError("REVIEW_DECISION_SOURCE_INVALID")
+        chosen_value = selected.get("value")
+        field = str(conflict.get("field") or "")
+
+        # V1 closure only supports the frozen title/body subject conflict.
+        # Other review semantics must be versioned rather than guessed here.
+        if field != "primary_subject":
+            raise HardwareR1WorkbenchError("REVIEW_FIELD_NOT_SUPPORTED")
+        engineering = candidate.get("engineering_context")
+        if not isinstance(engineering, dict):
+            raise HardwareR1WorkbenchError("REVIEW_FIELD_NOT_SUPPORTED")
+        primary = engineering.get("primary_subject")
+        if not isinstance(primary, dict):
+            raise HardwareR1WorkbenchError("REVIEW_FIELD_NOT_SUPPORTED")
+        primary["value"] = chosen_value
+
+        reviewed_at = _utc_now()
+        conflict["status"] = "RESOLVED"
+        conflict["resolution_status"] = "CONFIRMED"
+        conflict["reviewer_note"] = (
+            f"Selected {decision_source}: {chosen_value}"
+        )
+        conflict["resolution"] = {
+            "decision_source": str(decision_source),
+            "selected_value": chosen_value,
+            "reviewer": str(reviewer or "MAINTAINER"),
+            "reviewed_at": reviewed_at,
+        }
+
+        structured = result.get("structured_result")
+        if isinstance(structured, dict):
+            for value in structured.get("conflicts") or []:
+                if (
+                    isinstance(value, dict)
+                    and str(value.get("conflict_id") or "") == str(conflict_id)
+                ):
+                    value.update(
+                        {
+                            "status": "RESOLVED",
+                            "resolution_status": "CONFIRMED",
+                            "reviewer_note": conflict["reviewer_note"],
+                            "resolution": dict(conflict["resolution"]),
+                        }
+                    )
+
+        review = candidate.setdefault("review", {})
+        decisions = review.setdefault("field_decisions", [])
+        if not isinstance(decisions, list):
+            decisions = []
+            review["field_decisions"] = decisions
+        decisions.append(
+            {
+                "conflict_id": str(conflict_id),
+                "field": field,
+                "decision_source": str(decision_source),
+                "selected_value": chosen_value,
+                "reviewer": str(reviewer or "MAINTAINER"),
+                "reviewed_at": reviewed_at,
+            }
+        )
+        review["reviewer"] = str(reviewer or "MAINTAINER")
+        review["reviewed_at"] = reviewed_at
+
+        remaining = [
+            value
+            for value in conflicts
+            if isinstance(value, dict)
+            and (
+                str(value.get("status") or "").upper() == "OPEN"
+                or str(value.get("resolution_status") or "").upper()
+                == "NEEDS_REVIEW"
+            )
+        ]
+        if not remaining:
+            # Human conflict resolution promotes the already-passed Candidate
+            # to CANDIDATE_READY without another Provider call.
+            result["status"] = "PASS"
+            orchestration_status = "CANDIDATE_READY"
+        else:
+            orchestration_status = "REVIEW"
+
+        provider_calls_before = int(result.get("provider_call_count") or 0)
+        self.store.update_item(
+            item_id,
+            orchestration_status=orchestration_status,
+            failed_stage=None,
+            error_code=None,
+            result=result,
+        )
+        resolved = self.get_item(item_id)
+        if int(resolved.get("provider_calls") or 0) != provider_calls_before:
+            raise HardwareR1WorkbenchError("REVIEW_PROVIDER_CALL_CHANGED")
+        return resolved
 
     def get_item(self, item_id: str) -> dict[str, Any]:
         item = self.store.get_item(item_id)

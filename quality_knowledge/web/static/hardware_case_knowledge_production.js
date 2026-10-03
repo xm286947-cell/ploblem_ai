@@ -406,7 +406,10 @@
         escapeHtml(reviewSourceLabel(entry?.source)) +
         '</b><span>' +
         escapeHtml(entry?.value ?? '—') +
-        '</span></div>'
+        '</span><button class="hc-button hc-review-confirm" type="button" ' +
+        'data-review-conflict="' + escapeHtml(conflict.conflict_id || '') + '" ' +
+        'data-review-source="' + escapeHtml(entry?.source || '') + '">' +
+        '确认采用</button></div>'
       ).join('');
       const blocks = Array.isArray(conflict.evidence_block_ids)
         ? conflict.evidence_block_ids.join(', ')
@@ -504,6 +507,49 @@
     }
   }
 
+  async function confirmReviewConflict(button) {
+    if (!state.item) return;
+    const conflictId = button.dataset.reviewConflict;
+    const decisionSource = button.dataset.reviewSource;
+    const candidate = candidateForItem(state.item);
+    const conflict = (candidate?.conflicts || []).find(
+      (value) => value?.conflict_id === conflictId
+    );
+    const selected = (conflict?.source_values || []).find(
+      (value) => value?.source === decisionSource
+    );
+    const label = reviewSourceLabel(decisionSource);
+    const value = selected?.value ?? '—';
+    if (!window.confirm('确认采用' + label + '「' + value + '」？确认后无需重跑 Stage A/B。')) {
+      return;
+    }
+
+    try {
+      setMessage('正在保存人工确认…');
+      const item = await request(
+        '/items/' + encodeURIComponent(state.item.item_id) +
+        '/review-conflicts/' + encodeURIComponent(conflictId) + '/resolve',
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            decision_source: decisionSource,
+            reviewer: 'MAINTAINER',
+          }),
+        }
+      );
+      syncItemIntoBatch(item);
+      renderDetail(item);
+      setMessage(
+        item.result === 'CANDIDATE_READY'
+          ? '人工确认已保存，Case 已转为 CANDIDATE_READY。'
+          : '人工确认已保存，仍有其他冲突待确认。'
+      );
+    } catch (error) {
+      setMessage('人工确认保存失败：' + error.message, true);
+    }
+  }
+
   async function openDebug() {
     if (!state.item) return;
     try {
@@ -546,6 +592,10 @@
     debugPanel.hidden = true;
     updateUrl({itemId: ''});
     window.scrollTo({top: state.scrollY, behavior: 'smooth'});
+  });
+  q('[data-review-conflicts]').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-review-conflict]');
+    if (button) confirmReviewConflict(button);
   });
   q('[data-item-run]').addEventListener('click', () => itemAction('run-resume'));
   q('[data-item-retry]').addEventListener('click', () => itemAction('retry-failed-stage'));

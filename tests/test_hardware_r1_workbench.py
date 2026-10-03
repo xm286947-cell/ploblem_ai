@@ -78,7 +78,19 @@ def _result(
         "knowledge_object": (
             {
                 "contract_version": "hardware-case-knowledge-object/v1",
-                "review": {"object_status": "CANDIDATE"},
+                "engineering_context": {
+                    "primary_subject": {
+                        "value": "MCU串口输出配置",
+                        "extraction_status": "EXTRACTED",
+                        "evidence_block_ids": ["B0007", "B0016", "B0019"],
+                    }
+                },
+                "review": {
+                    "object_status": "CANDIDATE",
+                    "reviewer": None,
+                    "reviewed_at": None,
+                    "field_decisions": [],
+                },
                 "conflicts": (
                     [
                         {
@@ -189,6 +201,77 @@ def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
         {"source": "AI_BODY_CANDIDATE", "value": "MCU串口输出配置"},
     ]
     assert conflict["evidence_block_ids"] == ["B0007", "B0016", "B0019"]
+
+
+def test_review_conflict_confirmation_persists_decision_without_provider_rerun(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        snapshot=_snapshot("A0152"),
+        result=_result(status="NEEDS_REVIEW"),
+        orchestration_status="REVIEW",
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+    )
+
+    before = service.get_item(item_id)
+    assert before["result"] == "REVIEW"
+    assert before["provider_calls"] == 0
+
+    after = service.resolve_review_conflict(
+        item_id,
+        conflict_id="CONFLICT-title-subject",
+        decision_source="AI_BODY_CANDIDATE",
+        reviewer="tester",
+    )
+    assert after["result"] == "CANDIDATE_READY"
+    assert after["provider_calls"] == 0
+    assert (
+        after["candidate"]["engineering_context"]["primary_subject"]["value"]
+        == "MCU串口输出配置"
+    )
+    conflict = after["candidate"]["conflicts"][0]
+    assert conflict["status"] == "RESOLVED"
+    assert conflict["resolution_status"] == "CONFIRMED"
+    assert conflict["resolution"]["decision_source"] == "AI_BODY_CANDIDATE"
+    decision = after["candidate"]["review"]["field_decisions"][0]
+    assert decision["field"] == "primary_subject"
+    assert decision["selected_value"] == "MCU串口输出配置"
+    assert after["candidate"]["review"]["reviewer"] == "tester"
+
+
+def test_review_conflict_can_choose_source_title_value(tmp_path: Path) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        snapshot=_snapshot("A0152"),
+        result=_result(status="NEEDS_REVIEW"),
+        orchestration_status="REVIEW",
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+    )
+    after = service.resolve_review_conflict(
+        item_id,
+        conflict_id="CONFLICT-title-subject",
+        decision_source="SOURCE_RAW_TITLE",
+        reviewer="tester",
+    )
+    assert after["result"] == "CANDIDATE_READY"
+    assert after["candidate"]["engineering_context"]["primary_subject"]["value"] == "CPU"
 
 
 def test_runtime_and_dependency_blocked_are_not_business_failed() -> None:
@@ -395,6 +478,9 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     assert "reviewConflictSummary" in asset.text
     assert "renderReviewRequired" in asset.text
     assert "只需要确认下面" in asset.text
+    assert "确认采用" in asset.text
+    assert "confirmReviewConflict" in asset.text
+    assert "review-conflicts/" in asset.text
 
     blocked = client.get(
         "/api/v2/hardware-cases/r1/workbench/batches"

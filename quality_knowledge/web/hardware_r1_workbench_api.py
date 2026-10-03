@@ -22,6 +22,11 @@ from services.hardware_r1_knowledge_promotion import (
 )
 
 
+class ReviewConflictDecisionRequest(BaseModel):
+    decision_source: str = Field(min_length=1)
+    reviewer: str = Field(default="MAINTAINER", min_length=1)
+
+
 class PromotionReviewRequest(BaseModel):
     reviewer: str = Field(min_length=1)
     confirmed_content: dict[str, Any]
@@ -42,11 +47,17 @@ def _require_maintainer(value: str | None) -> None:
 
 
 def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
-    if error.code in {"BATCH_NOT_FOUND", "BATCH_ITEM_NOT_FOUND"}:
+    if error.code in {
+        "BATCH_NOT_FOUND",
+        "BATCH_ITEM_NOT_FOUND",
+        "REVIEW_CONFLICT_NOT_FOUND",
+    }:
         return HTTPException(status_code=404, detail=error.code)
     if error.code in {
         "RETRY_NOT_ALLOWED",
         "RETRY_FAILED_STAGE_NOT_AVAILABLE",
+        "REVIEW_NOT_REQUIRED",
+        "REVIEW_CONFLICT_ALREADY_RESOLVED",
     }:
         return HTTPException(status_code=409, detail=error.code)
     return HTTPException(status_code=400, detail=error.code)
@@ -166,6 +177,29 @@ def create_hardware_r1_workbench_router(
         _require_maintainer(x_hardware_case_role)
         try:
             return service.get_item(item_id)
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
+    @router.post(
+        "/items/{item_id}/review-conflicts/{conflict_id}/resolve"
+    )
+    def resolve_review_conflict(
+        item_id: str,
+        conflict_id: str,
+        request: ReviewConflictDecisionRequest,
+        x_hardware_case_role: str | None = Header(
+            default=None,
+            alias="X-Hardware-Case-Role",
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.resolve_review_conflict(
+                item_id,
+                conflict_id=conflict_id,
+                decision_source=request.decision_source,
+                reviewer=request.reviewer,
+            )
         except HardwareR1WorkbenchError as error:
             raise _workbench_error(error) from error
 
