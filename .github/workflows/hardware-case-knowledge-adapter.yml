@@ -16,6 +16,8 @@ on:
       - main
     paths:
       - "services/hardware_case_knowledge_adapter.py"
+      - "services/hardware_r1_golden_knowledge_bridge.py"
+      - "tests/test_hardware_r1_golden_unified_bridge_spike.py"
       - "tests/test_hardware_case_knowledge_adapter.py"
       - "docs/product/HARDWARE_CASE_KNOWLEDGE_ADAPTER_001.md"
       - ".github/workflows/hardware-case-knowledge-adapter.yml"
