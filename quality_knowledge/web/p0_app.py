@@ -34,6 +34,10 @@ from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
+from services.hardware_case_knowledge_adapter import (
+    HardwareCaseKnowledgeAdapter,
+    KnowledgeHttpTransport,
+)
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_workbench import (
@@ -41,6 +45,11 @@ from services.hardware_case_r1_workbench import (
     HardwareR1WorkbenchStore,
 )
 from services.hardware_case_r1_runtime import invalidate_hardware_r1_stage_cache
+from services.hardware_r1_golden_knowledge_bridge import HardwareR1GoldenKnowledgeBridge
+from services.hardware_r1_knowledge_promotion import (
+    HardwareR1KnowledgePromotionService,
+    HardwareR1KnowledgePromotionStore,
+)
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
@@ -81,6 +90,9 @@ def create_p0_app(
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
     hardware_case_r1_structurer: Any | None = None,
+    hardware_knowledge_adapter: Any | None = None,
+    hardware_knowledge_base_url: str | None = None,
+    hardware_knowledge_release_version: str | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -420,6 +432,56 @@ def create_p0_app(
             app.state.hardware_r1_workbench_service = hardware_r1_workbench_service
             testability_mutable_paths.append(hardware_r1_workbench_db)
 
+            effective_knowledge_adapter = hardware_knowledge_adapter
+            knowledge_base_url = str(
+                hardware_knowledge_base_url
+                or os.getenv("HARDWARE_KNOWLEDGE_BASE_URL")
+                or ""
+            ).strip()
+            knowledge_release_version = str(
+                hardware_knowledge_release_version
+                or os.getenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION")
+                or ""
+            ).strip()
+            hardware_r1_promotion_service = None
+            if effective_knowledge_adapter is None and knowledge_base_url and knowledge_release_version:
+                effective_knowledge_adapter = HardwareCaseKnowledgeAdapter(
+                    KnowledgeHttpTransport(knowledge_base_url),
+                    knowledge_release_version=knowledge_release_version,
+                )
+            if effective_knowledge_adapter is not None:
+                hardware_r1_promotion_store = HardwareR1KnowledgePromotionStore(
+                    hardware_r1_workbench_db
+                )
+                hardware_r1_promotion_bridge = HardwareR1GoldenKnowledgeBridge(
+                    effective_knowledge_adapter,
+                    hardware_case_source_store,
+                )
+                hardware_r1_promotion_service = HardwareR1KnowledgePromotionService(
+                    hardware_r1_promotion_store,
+                    workbench_service=hardware_r1_workbench_service,
+                    bridge=hardware_r1_promotion_bridge,
+                )
+                app.state.hardware_r1_promotion_store = hardware_r1_promotion_store
+                app.state.hardware_r1_promotion_service = hardware_r1_promotion_service
+                app.state.hardware_r1_promotion_status = {
+                    "ready": True,
+                    "code": "READY",
+                    "auto_publish": False,
+                }
+            else:
+                app.state.hardware_r1_promotion_store = None
+                app.state.hardware_r1_promotion_service = None
+                app.state.hardware_r1_promotion_status = {
+                    "ready": False,
+                    "code": (
+                        "KNOWLEDGE_CONFIG_INCOMPLETE"
+                        if knowledge_base_url or knowledge_release_version
+                        else "KNOWLEDGE_PROMOTION_UNAVAILABLE"
+                    ),
+                    "auto_publish": False,
+                }
+
             hardware_tree_import_repository = HardwareTreeImportRepository(
                 hardware_db,
                 initialize_schema=False,
@@ -457,7 +519,8 @@ def create_p0_app(
             )
             app.include_router(
                 create_hardware_r1_workbench_router(
-                    hardware_r1_workbench_service
+                    hardware_r1_workbench_service,
+                    promotion_service=hardware_r1_promotion_service,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
@@ -470,6 +533,13 @@ def create_p0_app(
             app.state.hardware_r1_preview_store = None
             app.state.hardware_r1_workbench_store = None
             app.state.hardware_r1_workbench_service = None
+            app.state.hardware_r1_promotion_store = None
+            app.state.hardware_r1_promotion_service = None
+            app.state.hardware_r1_promotion_status = {
+                "ready": False,
+                "code": "HARDWARE_DATA_NOT_READY",
+                "auto_publish": False,
+            }
             app.state.hardware_tree_import_repository = None
             app.state.hardware_tree_file_store = None
 
