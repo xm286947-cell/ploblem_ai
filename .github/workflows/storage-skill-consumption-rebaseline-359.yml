@@ -97,3 +97,5 @@ jobs:
           echo "DIRECT_FACT_FALSE_NEGATIVE=0"
           echo "DIRECT_FACT_FALSE_POSITIVE=0"
           echo "OBSERVABILITY_EVIDENCE_RULE=PASS"
+
+# trigger: source-backed golden refresh
