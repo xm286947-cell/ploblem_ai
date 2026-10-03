@@ -171,6 +171,17 @@ class HardwareR1PreviewStore:
         with self._connect() as connection:
             return self._row(connection.execute(query, params).fetchone())
 
+    def delete_source(self, source_id: str) -> int:
+        value = str(source_id or "").strip()
+        if not value:
+            return 0
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM hardware_r1_preview_result WHERE source_id=?",
+                (value,),
+            )
+            return int(cursor.rowcount or 0)
+
     def by_id(self, preview_id: int) -> dict[str, Any] | None:
         with self._connect() as connection:
             return self._row(
