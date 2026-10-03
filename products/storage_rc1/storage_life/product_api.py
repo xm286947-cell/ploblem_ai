@@ -786,7 +786,10 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         "device_type": dtype,
         "device_id": device_id or None,
         "items": rows,
-        "layers": ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"],
+        # Keep the RC1 response contract stable for existing consumers.
+        "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
+        # #359 makes the product semantics explicit without mutating the frozen key.
+        "semantic_layers": ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"],
         "lifecycle_gate": lifecycle,
         "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
         "skill_id": "storage-diagnostic-validation",
