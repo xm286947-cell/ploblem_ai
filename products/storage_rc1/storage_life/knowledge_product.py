@@ -108,14 +108,17 @@ def extract_source(
     requested_topics: list[str] | None = None,
 ) -> dict:
     root = project_root()
-    model_config = Path(
-        os.environ.get(
-            "STORAGE_MODEL_CONFIG",
-            str(root / "config" / "model.windows.real.yaml"),
-        )
-    )
+    product_root = Path(__file__).resolve().parents[1]
+    configured_model = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
+    model_config = Path(configured_model) if configured_model else (product_root / "config" / "model.local.yaml")
     if not model_config.is_absolute():
-        model_config = (root / model_config).resolve()
+        model_config = (product_root / model_config).resolve()
+    else:
+        model_config = model_config.expanduser().resolve()
+    if not model_config.is_file():
+        raise StorageKnowledgeProductError(
+            f"STORAGE_MODEL_CONFIG_MISSING:{model_config}"
+        )
     bootstrap = KnowledgeExtractionService.from_project(
         root,
         model_config_path=model_config,
