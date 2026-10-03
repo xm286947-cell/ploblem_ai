@@ -52,6 +52,7 @@ BASELINES: dict[str, list[dict[str, Any]]] = {
     "SSD": [
         _f("capacity", "容量（Capacity）", KEY_SPEC),
         _f("interface_protocol", "接口 / 协议（Interface / Protocol）", KEY_SPEC, aliases=("interface", "protocol")),
+        _f("host_memory_buffer", "主机内存缓冲（Host Memory Buffer / HMB）", KEY_SPEC, "SHOULD", aliases=("hmb",)),
         _f("tbw", "总写入字节数寿命（Total Bytes Written / TBW）", KEY_SPEC),
         _f("dwpd", "每日全盘写入（Drive Writes Per Day / DWPD）", KEY_SPEC, "SHOULD"),
         _f("endurance_workload", "耐久度工作负载 / 保修条件（Endurance Workload / Warranty Condition）", KEY_SPEC, aliases=("endurance_class", "warranty_write_limit")),
