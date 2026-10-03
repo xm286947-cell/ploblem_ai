@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from storage_life import ai, parameter_baseline, templates, product_api
 from skills import real_knowledge
 
@@ -436,3 +437,116 @@ def test_359_selected_device_skill_route_is_exposed():
     from storage_life.app import app
     paths = {route.path for route in app.routes}
     assert "/api/product/devices/{device_id}/skills/{skill_id}/execute" in paths
+
+
+def _load_359_real_source(name):
+    path = Path(__file__).resolve().parent / "fixtures" / "storage_359_real_source_excerpts.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload["sources"][name]
+
+
+def test_359_timar_real_source_excerpt_resolves_direct_fact_candidates():
+    source = _load_359_real_source("timar_97")
+    pages = [(x["page"], x["text"], x["method"]) for x in source["pages"]]
+    result = {
+        "fields": [
+            {
+                "field_key": "capacity", "value": "256GB/512GB/1TB/2TB", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "Capacity 256GB/512GB/1TB/2TB"},
+            },
+            {
+                "field_key": "interface", "value": "PCIe Gen4x4", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "PCIe Gen 4 16Gb/s interface with up to 4 lanes"},
+            },
+            {
+                "field_key": "protocol", "value": "NVMe Revision 2.0", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "Compliant with NVMe Revision 2.0"},
+            },
+            {
+                "field_key": "host_memory_buffer", "value": "supported", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "Supporting host memory buffer"},
+            },
+            {
+                "field_key": "operating_temperature",
+                "value": "A97 -40~85C; K97 -25~85C; S97 -10~70C", "unit": "",
+                "status": "found", "condition": "family-specific", "scope_type": "product_family",
+                "scope_values": ["A97M8", "K97M8", "S97M8"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "Operating: A97M8-Y/A97M8-PY -40°C~+85°C; K97M8-Y/K97M8-PY -25°C~+85°C; S97M8-Y/S97M8-PY -10°C~+70°C"},
+            },
+            {
+                "field_key": "tbw", "value": "768/1500/3000/6000", "unit": "TB",
+                "status": "found", "condition": "WAF=1", "scope_type": "capacity",
+                "scope_values": ["256GB", "512GB", "1TB", "2TB"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "TBW: 256GB 768TB; 512GB 1500TB; 1TB 3000TB; 2TB 6000TB"},
+            },
+            {
+                "field_key": "plp", "value": "Optional", "unit": "",
+                "status": "found", "condition": "part-number dependent", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 2, "quote": "Supporting PLP (Optional)"},
+            },
+            {
+                "field_key": "nand_type", "value": "NAND Flash", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 5, "quote": "Industrial SSDs use NAND Flash Memory"},
+            },
+        ]
+    }
+    expected = [
+        "capacity", "interface", "protocol", "host_memory_buffer",
+        "operating_temperature", "tbw", "plp", "nand_type",
+    ]
+    adapted = ai._adapt_single_pass(
+        result, pages, "SSD", "TIMAR", "97 Series",
+        source["source_id"], expected_fields=expected,
+    )
+    candidates = {x["canonical_name"]: x for x in adapted["candidates"]}
+    assert set(candidates) == set(expected)
+    assert candidates["tbw"]["condition"] == "WAF=1"
+    assert "K97M8" in candidates["operating_temperature"]["scope"]
+    assert candidates["nand_type"]["ai_value"] == "NAND Flash"
+
+
+def test_359_timar_real_source_rejects_cell_type_without_explicit_cell_evidence():
+    source = _load_359_real_source("timar_97")
+    page5 = next(x for x in source["pages"] if x["page"] == 5)
+    pages = [(page5["page"], page5["text"], page5["method"])]
+    result = {
+        "fields": [
+            {
+                "field_key": "nand_type", "value": "NAND Flash", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 5, "quote": "Industrial SSDs use NAND Flash Memory"},
+            },
+            {
+                "field_key": "cell_type", "value": "TLC", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["97 Series"], "confidence": 0.99,
+                "evidence": {"page": 5, "quote": "Industrial SSDs use NAND Flash Memory"},
+            },
+        ]
+    }
+    adapted = ai._adapt_single_pass(
+        result, pages, "SSD", "TIMAR", "97 Series",
+        source["source_id"], expected_fields=["nand_type", "cell_type"],
+    )
+    candidates = {x["canonical_name"]: x for x in adapted["candidates"]}
+    facts = {x["field_key"]: x for x in adapted["facts"]}
+    assert "nand_type" in candidates
+    assert "cell_type" not in candidates
+    assert facts["cell_type"]["status"] == "missing"
+    assert facts["cell_type"]["semantic_rejection"] == "CELL_TYPE_REQUIRES_EXPLICIT_SLC_MLC_TLC_QLC_EVIDENCE"
+    assert any(
+        x.get("type") == "semantic_validation_failed" and x.get("field_key") == "cell_type"
+        for x in adapted["review_queue"]
+    )
