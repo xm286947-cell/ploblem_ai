@@ -782,6 +782,9 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 "runtime_observations": [],
             },
         )
+    knowledge_gap = any(x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP for x in rows)
+    if skill_result and skill_result.get("status") == "INSUFFICIENT_KNOWLEDGE":
+        knowledge_gap = True
     return {
         "device_type": dtype,
         "device_id": device_id or None,
@@ -790,6 +793,8 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
         # #359 makes the product semantics explicit without mutating the frozen key.
         "semantic_layers": ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"],
+        "result_status": "PARTIAL" if knowledge_gap else "READY",
+        "knowledge_gap": knowledge_gap,
         "lifecycle_gate": lifecycle,
         "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
         "skill_id": "storage-diagnostic-validation",
