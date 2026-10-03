@@ -182,6 +182,77 @@ def _coverage_metrics(slots: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _engineering_result_view(skill_result: dict[str, Any]) -> dict[str, Any]:
+    structured = dict(skill_result.get("structured_result") or {})
+    separation = dict(skill_result.get("fact_derived_hypothesis_separation") or {})
+    missing = list(skill_result.get("missing_information") or [])
+    validation = (
+        structured.get("validation_requirements")
+        or structured.get("validation_method")
+        or structured.get("suggested_validation")
+        or []
+    )
+    if not isinstance(validation, list):
+        validation = [validation]
+    return {
+        "source_skill_id": skill_result.get("skill_id"),
+        "status": skill_result.get("status"),
+        "direct_answer": skill_result.get("direct_answer"),
+        "facts": separation.get("facts") or [],
+        "formal_knowledge": skill_result.get("knowledge_refs") or [],
+        "derived_result": structured,
+        "hypotheses": separation.get("hypotheses") or [],
+        "unknowns": missing or separation.get("unknowns") or [],
+        "evidence_refs": skill_result.get("evidence_refs") or [],
+        "validation_requirements": validation,
+        "next_action": (
+            "补齐缺失的 Formal Knowledge / Runtime Observation / 证据后重新评估"
+            if missing
+            else "进入人工工程评审，不自动形成替代或寿命决策"
+        ),
+        "decision_boundary": skill_result.get("decision_boundary"),
+    }
+
+
+def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    mapping = {
+        ("SSD", "tbw"): "rated_tbw_bytes",
+        ("SSD", "capacity"): "capacity_bytes",
+        ("NAND Flash", "pe_cycles"): "rated_pe_cycles",
+        ("NOR Flash", "pe_cycles"): "rated_endurance_cycles",
+    }
+    result = []
+    for fact in detail.get("device_facts") or []:
+        metric_name = mapping.get((dtype, fact.get("canonical_name")))
+        if not metric_name:
+            continue
+        value = fact.get("value")
+        unit = str(fact.get("unit") or "").strip()
+        try:
+            float(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        evidence_refs = [
+            str(e.get("evidence_id") or e.get("source_id") or "").strip()
+            for e in fact.get("evidence") or []
+            if str(e.get("evidence_id") or e.get("source_id") or "").strip()
+        ]
+        if not unit or not evidence_refs:
+            continue
+        result.append({
+            "fact_id": f'{detail["device"]["id"]}:{fact.get("canonical_name")}',
+            "metric_name": metric_name,
+            "value": value,
+            "unit": unit,
+            "scope": fact.get("scope") or None,
+            "condition": fact.get("condition") or None,
+            "evidence_refs": evidence_refs,
+            "source_type": "CONFIRMED_DEVICE_FACT",
+        })
+    return result
+
+
 def _enrich_evidence(device: dict[str, Any], evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
     enriched = []
     for raw in evidence or []:
@@ -397,6 +468,106 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
         "fact_count": len(detail["device_facts"]),
         "facts": detail["device_facts"],
         "gate": "CONFIRMED_ONLY",
+    }
+
+
+def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Bind one selected device to the existing four Storage Domain Skill contracts."""
+    allowed = {
+        "storage-write-governance",
+        "storage-lifetime-budget",
+        "storage-diagnostic-validation",
+        "storage-change-impact",
+    }
+    if skill_id not in allowed:
+        raise ValueError(f"UNKNOWN_STORAGE_SKILL:{skill_id}")
+
+    detail = device_slots(device_id)
+    request = dict(payload or {})
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    context = {
+        "device_id": device_id,
+        "device_type": dtype,
+        "confirmed_device_facts": detail.get("device_facts") or [],
+        "knowledge_release": KnowledgeReleaseConsumer.current().status(),
+        "runtime_observations": list(request.get("runtime_observations") or []),
+    }
+
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    service = RealKnowledgeAssessmentService.current()
+
+    if skill_id == "storage-write-governance":
+        user_context = dict(request.get("user_context") or {})
+        user_context.setdefault("question", f"{dtype} software write behavior lifetime governance")
+        user_context["device_context"] = context
+        skill_payload = {
+            "device_type": dtype,
+            "user_context": user_context,
+            "workload_software_facts": list(request.get("workload_software_facts") or []),
+        }
+    elif skill_id == "storage-diagnostic-validation":
+        capabilities = list(request.get("diagnostic_capabilities") or [])
+        if not capabilities:
+            capabilities = [
+                {
+                    "canonical_name": x["canonical_name"],
+                    "diagnostic_status": x.get("diagnostic_status"),
+                    "datasheet_fact": x.get("value"),
+                    "review_status": x.get("review_status"),
+                    "evidence_refs": [
+                        e.get("evidence_id") or e.get("source_id")
+                        for e in x.get("evidence") or []
+                        if e.get("evidence_id") or e.get("source_id")
+                    ],
+                }
+                for x in detail["slots"]
+                if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+            ]
+        skill_payload = {
+            "device_type": dtype,
+            "target_question": str(
+                request.get("target_question")
+                or f"{dtype} diagnostic capability validation and runtime observation requirements"
+            ),
+            "diagnostic_capabilities": capabilities,
+            "runtime_observations": list(request.get("runtime_observations") or []),
+        }
+    elif skill_id == "storage-change-impact":
+        skill_payload = {
+            "device_type": dtype,
+            "parameter_delta": list(request.get("parameter_delta") or []),
+            "question": str(request.get("question") or "device change impact"),
+        }
+    else:
+        requested_metric = str(request.get("requested_metric") or "").strip()
+        if not requested_metric:
+            raise ValueError("REQUESTED_METRIC_REQUIRED")
+        assessment = dict(request.get("assessment_request") or {})
+        assessment["device_id"] = device_id
+        existing = list(assessment.get("confirmed_facts") or [])
+        existing_names = {str(x.get("metric_name") or "") for x in existing if isinstance(x, dict)}
+        assessment["confirmed_facts"] = existing + [
+            x for x in _safe_lifetime_facts(detail)
+            if x["metric_name"] not in existing_names
+        ]
+        if "runtime_observations" not in assessment:
+            assessment["runtime_observations"] = list(request.get("runtime_observations") or [])
+        skill_payload = {
+            "assessment_request": assessment,
+            "requested_metric": requested_metric,
+            "target_service_life": dict(request.get("target_service_life") or {}),
+        }
+
+    result = service.execute_skill(skill_id, skill_payload)
+    return {
+        "device": detail["device"],
+        "context": context,
+        "skill_payload": skill_payload,
+        "skill_result": result,
+        "engineering_result": _engineering_result_view(result),
+        "adapter": "EXISTING_STORAGE_DOMAIN_SKILL_ADAPTER",
+        "second_skill_stack": False,
+        "second_knowledge_stack": False,
     }
 
 
