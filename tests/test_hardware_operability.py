@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import services.hardware_operability as operability
+from services.hardware_operability import SCHEMA_BASELINE
 from quality_knowledge.web.p0_app import create_p0_app
 
 
@@ -121,7 +122,7 @@ def test_contract_version_visible_compatible_and_unknown_version_rejected(tmp_pa
     assert payload["public_contract_version"] == "hardware-public-consumer/v1"
     assert payload["public_api_version"] == "v1"
     assert payload["product_version"] == "MVP_V0.1"
-    assert payload["schema_version"] == "HARDWARE_SCHEMA_V1"
+    assert payload["schema_version"] == SCHEMA_BASELINE
     assert payload["compatibility"]["v1"]["status"] == "ACTIVE"
     assert payload["compatibility"]["v1"]["deprecated"] is False
     assert payload["product_version"] != payload["public_contract_version"]
