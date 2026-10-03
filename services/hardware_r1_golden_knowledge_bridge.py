@@ -191,6 +191,44 @@ class HardwareR1GoldenKnowledgeBridge:
         except HardwareKnowledgeAdapterError as error:
             raise HardwareR1GoldenBridgeError(error.code) from error
 
+    def publish(
+        self,
+        *,
+        business_case_id: str,
+        candidate_id: str,
+        evidence_refs: Sequence[str],
+        publisher: str,
+        published_at: datetime,
+    ) -> dict[str, Any]:
+        source = self.source_store.get_active_source(business_case_id)
+        try:
+            published = self.adapter.publish(
+                candidate_id=candidate_id,
+                hardware_publish_gate={
+                    "passed": True,
+                    "gate": "R1_GOLDEN_HUMAN_REVIEW",
+                },
+                evidence_refs=evidence_refs,
+                publisher=publisher,
+                published_at=published_at,
+                revision=FIXED_KNOWLEDGE_REVISION,
+            )
+        except HardwareKnowledgeAdapterError as error:
+            raise HardwareR1GoldenBridgeError(error.code) from error
+
+        obj = published.get("object")
+        if not isinstance(obj, Mapping):
+            raise HardwareR1GoldenBridgeError("KNOWLEDGE_RESPONSE_INVALID")
+        knowledge_id = str(obj.get("knowledge_id") or "").strip()
+        if not knowledge_id:
+            raise HardwareR1GoldenBridgeError("KNOWLEDGE_OBJECT_ID_MISSING")
+        lock = self.source_store.add_formal_knowledge_reference(
+            business_case_id,
+            knowledge_id,
+            source_id=str(source["source_id"]),
+        )
+        return {**published, "source_reference_lock": lock}
+
     @staticmethod
     def evidence_id(business_case_id: str, source_id: str, block_id: str) -> str:
         digest = hashlib.sha256(
