@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from services.hardware_migrations import v001_current_schema
+from services.hardware_migrations import v001_current_schema, v002_r1_source_binding
 
 
-CURRENT_SCHEMA_VERSION = 1
-SCHEMA_VERSION_NAME = "HARDWARE_SCHEMA_V1"
+CURRENT_SCHEMA_VERSION = 2
+SCHEMA_VERSION_NAME = "HARDWARE_SCHEMA_V2"
 VERSION_TABLE = "hardware_schema_version"
 MIGRATION_TABLE = "hardware_schema_migration"
 RECOVERY_SUFFIX = ".recovery.json"
@@ -44,6 +44,12 @@ MIGRATIONS = (
         v001_current_schema.SOURCE_VERSION,
         v001_current_schema.TARGET_VERSION,
         v001_current_schema.apply,
+    ),
+    Migration(
+        v002_r1_source_binding.MIGRATION_ID,
+        v002_r1_source_binding.SOURCE_VERSION,
+        v002_r1_source_binding.TARGET_VERSION,
+        v002_r1_source_binding.apply,
     ),
 )
 
@@ -180,7 +186,11 @@ class HardwareDataReliabilityManager:
 
     @staticmethod
     def _validate_required_schema(connection: sqlite3.Connection) -> None:
-        for table, required in v001_current_schema.REQUIRED_COLUMNS.items():
+        required_schema = {
+            **v001_current_schema.REQUIRED_COLUMNS,
+            **v002_r1_source_binding.REQUIRED_COLUMNS,
+        }
+        for table, required in required_schema.items():
             columns = {
                 str(row[1])
                 for row in connection.execute(
