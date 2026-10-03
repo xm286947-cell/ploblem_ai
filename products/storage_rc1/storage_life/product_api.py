@@ -26,6 +26,22 @@ UX_LABELS = {
     UX_NOT_APPLICABLE: "不适用",
 }
 
+DIAG_DATASHEET_EXPLICIT = "DATASHEET_EXPLICIT"
+DIAG_STANDARD_REQUIRES_VALIDATION = "STANDARD_APPLICABLE_REQUIRES_DEVICE_VALIDATION"
+DIAG_DATASHEET_NOT_DECLARED = "DATASHEET_NOT_DECLARED"
+DIAG_EXPLICITLY_NOT_SUPPORTED = "EXPLICITLY_NOT_SUPPORTED"
+DIAG_NOT_APPLICABLE = "NOT_APPLICABLE"
+DIAG_KNOWLEDGE_GAP = "KNOWLEDGE_GAP"
+
+DIAGNOSTIC_LABELS = {
+    DIAG_DATASHEET_EXPLICIT: "规格书明确",
+    DIAG_STANDARD_REQUIRES_VALIDATION: "标准知识适用，待实机验证",
+    DIAG_DATASHEET_NOT_DECLARED: "规格书未声明",
+    DIAG_EXPLICITLY_NOT_SUPPORTED: "明确不支持",
+    DIAG_NOT_APPLICABLE: "不适用",
+    DIAG_KNOWLEDGE_GAP: "知识缺口",
+}
+
 DIAGNOSTIC_METHODS = {
     "life_time_a": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_A", "按 JEDEC/厂商定义解释寿命区间"),
     "life_time_b": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_B", "结合对应存储区域解释寿命区间"),
@@ -95,6 +111,75 @@ def _slot_status(candidates: list[dict[str, Any]], coverage: dict[str, Any] | No
     if review in {"CONFIRMED", "UNREVIEWED", "REJECTED"}:
         return review
     return _coverage_status(coverage)
+
+
+def _explicitly_not_supported(value: Any) -> bool:
+    if value is False:
+        return True
+    marker = str(value or "").strip().casefold()
+    return marker in {
+        "unsupported", "not supported", "not-supported", "no support",
+        "false", "不支持", "明确不支持", "不具备",
+    }
+
+
+def _diagnostic_semantics(
+    *,
+    field: dict[str, Any],
+    coverage_status: str,
+    primary: dict[str, Any] | None,
+    evidence: list[dict[str, Any]],
+    formal_knowledge: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Classify diagnostic meaning without collapsing datasheet, knowledge and runtime layers."""
+    if field.get("group") != parameter_baseline.KEY_DIAGNOSTIC:
+        return None
+    if coverage_status == "NOT_APPLICABLE":
+        status = DIAG_NOT_APPLICABLE
+    else:
+        direct = bool(coverage_status == "FOUND" and primary and evidence)
+        candidate_value = (primary or {}).get("final_value")
+        if candidate_value is None:
+            candidate_value = (primary or {}).get("ai_value")
+        if direct and _explicitly_not_supported(candidate_value):
+            status = DIAG_EXPLICITLY_NOT_SUPPORTED
+        elif direct:
+            status = DIAG_DATASHEET_EXPLICIT
+        elif formal_knowledge.get("status") == "MATCHED":
+            status = DIAG_STANDARD_REQUIRES_VALIDATION
+        elif formal_knowledge.get("status") == "NO_MATCH" and coverage_status == "NOT_FOUND":
+            status = DIAG_DATASHEET_NOT_DECLARED
+        else:
+            status = DIAG_KNOWLEDGE_GAP
+    return {
+        "status": status,
+        "label": DIAGNOSTIC_LABELS[status],
+        "datasheet_layer": coverage_status,
+        "knowledge_layer": formal_knowledge.get("status"),
+        "runtime_layer": "REQUIRES_OBSERVATION"
+        if status == DIAG_STANDARD_REQUIRES_VALIDATION else "NOT_EVALUATED",
+    }
+
+
+def _coverage_metrics(slots: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(slots)
+    search_known = sum(
+        1 for x in slots
+        if x.get("coverage_status") in {"FOUND", "NOT_FOUND", "NOT_APPLICABLE"}
+    )
+    applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
+    confirmed = [
+        x for x in applicable
+        if x.get("review_status") == "CONFIRMED" and x.get("value") is not None
+    ]
+    return {
+        "search_coverage_ratio": round(search_known / total, 4) if total else 0,
+        "fact_coverage_ratio": round(len(confirmed) / len(applicable), 4) if applicable else 0,
+        "search_known_count": search_known,
+        "search_total_count": total,
+        "confirmed_fact_count": len(confirmed),
+        "applicable_fact_count": len(applicable),
+    }
 
 
 def _enrich_evidence(device: dict[str, Any], evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -212,6 +297,30 @@ def device_slots(device_id: str) -> dict[str, Any]:
                 "confidence": primary.get("confidence"),
             }]
         evidence = _enrich_evidence(device, evidence)
+        is_diagnostic = field.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+        formal_knowledge = (
+            _formal_knowledge(
+                key,
+                field.get("parameter_name") or key,
+                device["device_type"],
+                context="engineering meaning diagnostic lifetime",
+            )
+            if is_diagnostic or review_status == "CONFIRMED"
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": "DEVICE_FACT_NOT_CONFIRMED",
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
+        )
+        diagnostic_semantics = _diagnostic_semantics(
+            field=field,
+            coverage_status=coverage_status,
+            primary=primary,
+            evidence=evidence,
+            formal_knowledge=formal_knowledge,
+        )
         # ``value`` is the formal Device Fact surface: never expose an AI candidate here.
         formal_value = (confirmed or {}).get("final_value") if confirmed else None
         formal_unit = (confirmed or {}).get("final_unit") if confirmed else ""
@@ -241,26 +350,14 @@ def device_slots(device_id: str) -> dict[str, Any]:
             "role": field.get("role") or "",
             "evidence": evidence,
             "candidate_id": (primary or {}).get("id"),
-            "formal_knowledge": (
-                _formal_knowledge(
-                    key,
-                    field.get("parameter_name") or key,
-                    device["device_type"],
-                    context="engineering meaning diagnostic lifetime",
-                )
-                if review_status == "CONFIRMED"
-                else {
-                    "status": "NOT_APPLICABLE",
-                    "code": "DEVICE_FACT_NOT_CONFIRMED",
-                    "knowledge_release_version": None,
-                    "results": [],
-                    "evidence_refs": [],
-                }
-            ),
+            "formal_knowledge": formal_knowledge,
+            "diagnostic_semantics": diagnostic_semantics,
+            "diagnostic_status": (diagnostic_semantics or {}).get("status"),
+            "diagnostic_label": (diagnostic_semantics or {}).get("label"),
         })
     states = ("CONFIRMED", "UNREVIEWED", "REJECTED", "NOT_FOUND", "NOT_CHECKED", "AMBIGUOUS", "NOT_APPLICABLE")
     counts = {state: sum(1 for x in slots if x["status"] == state) for state in states}
-    coverage_known = sum(1 for x in slots if x["coverage_status"] in {"FOUND", "NOT_FOUND", "NOT_APPLICABLE"})
+    coverage_metrics = _coverage_metrics(slots)
     facts = [
         {k: slot.get(k) for k in ("canonical_name", "parameter_name", "value", "unit", "condition", "scope", "evidence", "verified_by", "verified_at")}
         for slot in slots if slot["review_status"] == "CONFIRMED"
@@ -270,7 +367,22 @@ def device_slots(device_id: str) -> dict[str, Any]:
         "slots": slots,
         "device_facts": facts,
         "counts": counts,
-        "coverage_ratio": round(coverage_known / len(slots), 4) if slots else 0,
+        # Backward-compatible alias: coverage_ratio remains SEARCH_COVERAGE.
+        "coverage_ratio": coverage_metrics["search_coverage_ratio"],
+        "search_coverage_ratio": coverage_metrics["search_coverage_ratio"],
+        "fact_coverage_ratio": coverage_metrics["fact_coverage_ratio"],
+        "coverage_model": {
+            "SEARCH_COVERAGE": {
+                "ratio": coverage_metrics["search_coverage_ratio"],
+                "known": coverage_metrics["search_known_count"],
+                "total": coverage_metrics["search_total_count"],
+            },
+            "FACT_COVERAGE": {
+                "ratio": coverage_metrics["fact_coverage_ratio"],
+                "confirmed": coverage_metrics["confirmed_fact_count"],
+                "applicable": coverage_metrics["applicable_fact_count"],
+            },
+        },
         "workflow": core.specification_workflow_status(device_id),
         "lifecycle": _device_lifecycle(device_id),
         "conclusion": core.get_device_conclusion(device_id),
@@ -532,6 +644,8 @@ def dashboard() -> dict[str, Any]:
             "model": d["model"],
             "device_type": d["device_type"],
             "coverage_ratio": detail["coverage_ratio"],
+            "search_coverage_ratio": detail["search_coverage_ratio"],
+            "fact_coverage_ratio": detail["fact_coverage_ratio"],
             "attention": attention,
             "counts": detail["counts"],
             "lifecycle": detail["lifecycle"],
