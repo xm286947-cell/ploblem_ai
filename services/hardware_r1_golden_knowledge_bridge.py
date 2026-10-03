@@ -229,9 +229,50 @@ class HardwareR1GoldenKnowledgeBridge:
         )
         return {**published, "source_reference_lock": lock}
 
+    def query_back(self, business_case_id: str) -> dict[str, Any]:
+        source = self.source_store.get_active_source(business_case_id)
+        public_ref = self.adapter.public_ref(
+            business_case_id,
+            FIXED_KNOWLEDGE_REVISION,
+        )
+        try:
+            obj = self.adapter.resolve_publication(
+                public_ref,
+                expected_revision=FIXED_KNOWLEDGE_REVISION,
+            )
+            evidences = [
+                self.adapter.resolve_evidence(str(evidence_id))
+                for evidence_id in obj.get("evidence_refs") or []
+            ]
+        except HardwareKnowledgeAdapterError as error:
+            raise HardwareR1GoldenBridgeError(error.code) from error
+
+        for item in evidences:
+            source_info = item.get("source")
+            if not isinstance(source_info, Mapping):
+                raise HardwareR1GoldenBridgeError(
+                    "KNOWLEDGE_EVIDENCE_SOURCE_INVALID"
+                )
+            if str(source_info.get("source_id") or "") != str(source["source_id"]):
+                raise HardwareR1GoldenBridgeError("QUERY_BACK_SOURCE_MISMATCH")
+        return {
+            "public_ref": public_ref,
+            "object": obj,
+            "evidences": evidences,
+            "source": source,
+        }
+
     @staticmethod
     def evidence_id(business_case_id: str, source_id: str, block_id: str) -> str:
         digest = hashlib.sha256(
             f"{business_case_id}|{source_id}|{block_id}".encode("utf-8")
         ).hexdigest()
         return "HCR1-EV-" + digest[:24]
+
+
+__all__ = [
+    "FIXED_KNOWLEDGE_REVISION",
+    "GOLDEN_KNOWLEDGE_CONTRACT",
+    "HardwareR1GoldenBridgeError",
+    "HardwareR1GoldenKnowledgeBridge",
+]
