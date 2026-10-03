@@ -17,6 +17,14 @@ def test_windows_launcher_is_rooted_to_its_own_package():
     assert 'product_e2e.py' not in text
 
 
+def test_windows_launcher_does_not_allow_unpinned_runtime_by_default():
+    root = Path(__file__).resolve().parents[1]
+    launcher = (root / "run_windows.bat").read_text(encoding="utf-8")
+    assert "STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME=1" not in launcher
+    assert 'set "STORAGE_LIFE_EXECUTION_MODE=runtime"' in launcher
+    assert 'set "UNIFIED_AGENT_RUNTIME_ROOT=%PACKAGE_ROOT%\\vendor\\unified_agent_runtime"' in launcher
+
+
 def test_windows_launcher_defaults_model_config_to_package_but_preserves_user_override():
     root = Path(__file__).resolve().parents[1]
     launcher = (root / "run_windows.bat").read_text(encoding="utf-8")
