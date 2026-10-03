@@ -3,6 +3,11 @@ name: Storage Four-Family Native Validation Package
 # #329 candidate build; packaging-only workflow.
 
 on:
+  push:
+    branches:
+      - integration/storage
+    paths:
+      - ".github/workflows/storage-four-family-native-validation-package.yml"
   pull_request:
     branches:
       - integration/storage
