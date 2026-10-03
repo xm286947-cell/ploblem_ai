@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from knowledge_production import KnowledgeReleaseService, create_knowledge_api_app
 from repositories import JsonArtifactRepository
+from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_knowledge_adapter import HardwareCaseKnowledgeAdapter
 from services.hardware_case_source_store import (
     HardwareCaseSourceError,
@@ -198,6 +199,7 @@ def setup_case(
     batch_id: str,
 ):
     payload = f"source-{case_id}".encode()
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
     source_store = HardwareCaseSourceStore(
         tmp_path / "hardware.db",
         tmp_path / "sources",
@@ -378,6 +380,7 @@ def test_publish_requires_explicit_human_review(tmp_path: Path) -> None:
 def test_batch_intake_isolates_not_ready_item(tmp_path: Path) -> None:
     payload_a = b"source-A0152"
     payload_b = b"source-A0207"
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
     source_store = HardwareCaseSourceStore(
         tmp_path / "hardware.db",
         tmp_path / "sources",

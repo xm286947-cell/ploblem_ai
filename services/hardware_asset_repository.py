@@ -20,15 +20,21 @@ from uuid import uuid4
 from services.hardware_asset_migrations import (
     v001_candidate_repository,
     v002_legacy_migration,
+    v003_source_operation_journal,
 )
 
 
-_ASSET_MIGRATIONS = (v001_candidate_repository, v002_legacy_migration)
+_ASSET_MIGRATIONS = (
+    v001_candidate_repository,
+    v002_legacy_migration,
+    v003_source_operation_journal,
+)
 _MIGRATIONS_BY_SOURCE = {item.SOURCE_VERSION: item for item in _ASSET_MIGRATIONS}
 ASSET_SCHEMA_VERSION = _ASSET_MIGRATIONS[-1].TARGET_VERSION
 _SCHEMA_NAMES = {
     v001_candidate_repository.TARGET_VERSION: v001_candidate_repository.SCHEMA_NAME,
     v002_legacy_migration.TARGET_VERSION: v002_legacy_migration.SCHEMA_NAME,
+    v003_source_operation_journal.TARGET_VERSION: v003_source_operation_journal.SCHEMA_NAME,
 }
 KNOWLEDGE_OBJECT_CONTRACT_VERSION = "hardware-case-knowledge-object/v1"
 ASSET_STATUSES = frozenset({"ACTIVE", "INVALIDATED"})
@@ -272,6 +278,8 @@ class CandidateAssetRepository:
         required_columns = dict(v001_candidate_repository.REQUIRED_COLUMNS)
         if ASSET_SCHEMA_VERSION >= v002_legacy_migration.TARGET_VERSION:
             required_columns.update(v002_legacy_migration.REQUIRED_COLUMNS)
+        if ASSET_SCHEMA_VERSION >= v003_source_operation_journal.TARGET_VERSION:
+            required_columns.update(v003_source_operation_journal.REQUIRED_COLUMNS)
         for table, required in required_columns.items():
             actual = CandidateAssetRepository._columns(connection, table)
             if not required.issubset(actual):
@@ -753,6 +761,75 @@ class CandidateAssetRepository:
             str(business_case_id or "").strip(),
             asset_status="ACTIVE",
         )
+
+    def invalidate_for_source(
+        self,
+        business_case_id: str,
+        source_id: str,
+        *,
+        source_ref: str | None = None,
+        actor: str = "HARDWARE_SOURCE_DELETE",
+        reason: str = "Source deleted before publication",
+    ) -> dict[str, Any] | None:
+        """Invalidate, but never delete, the candidate for a deleted Source."""
+        case_id = str(business_case_id or "").strip()
+        source_key = str(source_id or "").strip().lower()
+        if not case_id or not source_key:
+            raise CandidateAssetRepositoryError("CANDIDATE_INPUT_INVALID")
+        now = _utc_now()
+        try:
+            with self._write_transaction() as connection:
+                row = connection.execute(
+                    """
+                    SELECT * FROM hardware_candidate_asset
+                    WHERE business_case_id=? AND source_id=?
+                    """,
+                    (case_id, source_key),
+                ).fetchone()
+                if row is None:
+                    return None
+                if source_ref is not None and str(row["source_ref"]) != str(source_ref):
+                    raise CandidateAssetRepositoryError("CANDIDATE_SOURCE_INVALID")
+                if row["asset_status"] == "INVALIDATED":
+                    return self._public_candidate(connection, row)
+                if row["promotion_status"] != "NOT_STARTED":
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_LOCKED_BY_PROMOTION"
+                    )
+                connection.execute(
+                    """
+                    UPDATE hardware_candidate_asset
+                    SET asset_status='INVALIDATED',row_version=row_version+1,updated_at=?
+                    WHERE candidate_id=? AND row_version=? AND asset_status='ACTIVE'
+                    """,
+                    (now, row["candidate_id"], int(row["row_version"])),
+                )
+                if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_CONCURRENT_UPDATE"
+                    )
+                self._insert_event(
+                    connection,
+                    candidate_id=str(row["candidate_id"]),
+                    event_type="INVALIDATED",
+                    old_hash=str(row["candidate_hash"]),
+                    new_hash=str(row["candidate_hash"]),
+                    run_id=None,
+                    actor=str(actor or "HARDWARE_SOURCE_DELETE"),
+                    reason=str(reason or "Source deleted before publication"),
+                    created_at=now,
+                )
+                updated = connection.execute(
+                    "SELECT * FROM hardware_candidate_asset WHERE candidate_id=?",
+                    (row["candidate_id"],),
+                ).fetchone()
+                return self._public_candidate(connection, updated)
+        except CandidateAssetRepositoryError:
+            raise
+        except sqlite3.Error as error:
+            raise CandidateAssetRepositoryError(
+                "CANDIDATE_DATA_INTEGRITY_ERROR"
+            ) from error
 
     def _find(
         self,

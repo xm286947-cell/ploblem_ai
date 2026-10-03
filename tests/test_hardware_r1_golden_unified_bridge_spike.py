@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from knowledge_production import KnowledgeReleaseService, create_knowledge_api_app
 from repositories import JsonArtifactRepository
+from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_knowledge_adapter import HardwareCaseKnowledgeAdapter
 from services.hardware_case_source_store import (
     HardwareCaseSourceError,
@@ -170,6 +171,7 @@ def evidence_gate() -> dict[str, Any]:
 
 def setup_case(tmp_path: Path, case_id: str):
     payload = f"synthetic-{case_id}".encode()
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
     source_store = HardwareCaseSourceStore(
         tmp_path / f"{case_id}.db",
         tmp_path / f"{case_id}-sources",

@@ -99,10 +99,10 @@ def _query(db_path: Path, sql: str, params: tuple = ()):
         return connection.execute(sql, params).fetchall()
 
 
-def test_asset_schema_v2_initializes_idempotently_and_records_migration(tmp_path):
+def test_asset_schema_v3_initializes_idempotently_and_records_migration(tmp_path):
     repository, db_path = _ready_repo(tmp_path)
 
-    assert repository.schema_version() == ASSET_SCHEMA_VERSION == 2
+    assert repository.schema_version() == ASSET_SCHEMA_VERSION == 3
     assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION
     assert db_path.is_file() and db_path.stat().st_size > 0
     assert _query(
@@ -113,7 +113,7 @@ def test_asset_schema_v2_initializes_idempotently_and_records_migration(tmp_path
         db_path,
         "SELECT source_version,target_version FROM hardware_asset_schema_migration "
         "ORDER BY target_version",
-    ) == [(0, 1), (1, 2)]
+    ) == [(0, 1), (1, 2), (2, 3)]
     assert set(row[0] for row in _query(
         db_path,
         "SELECT name FROM sqlite_master WHERE type='table'",
@@ -125,6 +125,7 @@ def test_asset_schema_v2_initializes_idempotently_and_records_migration(tmp_path
         "hardware_asset_promotion",
         "hardware_candidate_legacy_origin",
         "hardware_asset_migration",
+        "hardware_asset_operation_journal",
     }
     review_columns = {
         row[1]: row
@@ -151,13 +152,13 @@ def test_v0_asset_schema_migrates_deterministically(tmp_path):
         )
 
     repository = CandidateAssetRepository(db_path)
-    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 2
+    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 3
     assert repository.schema_version() == ASSET_SCHEMA_VERSION
     assert _query(
         db_path,
         "SELECT source_version,target_version FROM hardware_asset_schema_migration "
         "ORDER BY target_version",
-    ) == [(0, 1), (1, 2)]
+    ) == [(0, 1), (1, 2), (2, 3)]
 
 
 def test_populated_v1_database_migrates_review_history_without_data_loss(tmp_path):
@@ -229,7 +230,7 @@ def test_populated_v1_database_migrates_review_history_without_data_loss(tmp_pat
         )
 
     repository = CandidateAssetRepository(db_path)
-    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 2
+    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 3
     assert _query(
         db_path,
         "SELECT before_candidate_hash,after_candidate_hash,review_record_json "
