@@ -179,6 +179,8 @@ def test_359_product_diagnostics_reuses_existing_domain_skill(monkeypatch):
         ],
     })
     result = product_api.diagnostics(device_id="ssd-1")
+    assert result["layers"] == ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"]
+    assert result["semantic_layers"] == ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"]
     assert result["skill_id"] == "storage-diagnostic-validation"
     assert result["skill_result"]["status"] == "INSUFFICIENT_KNOWLEDGE"
     assert service.calls
