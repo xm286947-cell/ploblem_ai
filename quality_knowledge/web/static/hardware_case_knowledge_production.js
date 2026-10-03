@@ -379,6 +379,51 @@
     }
   }
 
+  function renderReviewRequired(item) {
+    const panel = q('[data-review-required]');
+    const summary = q('[data-review-summary]');
+    const container = q('[data-review-conflicts]');
+    const conflicts = openReviewConflicts(item);
+    const show = displayResult(item) === 'REVIEW' && conflicts.length > 0;
+    panel.hidden = !show;
+    if (!show) {
+      summary.textContent = '';
+      container.innerHTML = '';
+      return;
+    }
+
+    summary.textContent =
+      'Stage A / Stage B / Gate 已通过；只需要确认下面 ' +
+      conflicts.length +
+      ' 个冲突项，不需要重跑。';
+
+    container.innerHTML = conflicts.map((conflict) => {
+      const values = Array.isArray(conflict.source_values)
+        ? conflict.source_values
+        : [];
+      const comparisons = values.map((entry) =>
+        '<div class="hc-review-value"><b>' +
+        escapeHtml(reviewSourceLabel(entry?.source)) +
+        '</b><span>' +
+        escapeHtml(entry?.value ?? '—') +
+        '</span></div>'
+      ).join('');
+      const blocks = Array.isArray(conflict.evidence_block_ids)
+        ? conflict.evidence_block_ids.join(', ')
+        : '—';
+      return '<div class="hc-review-conflict">' +
+        '<div class="hc-review-conflict-head"><strong>' +
+        escapeHtml(reviewFieldLabel(conflict.field)) +
+        '</strong><span>' +
+        escapeHtml(conflict.type || 'NEEDS_REVIEW') +
+        '</span></div>' +
+        '<div class="hc-review-compare">' + comparisons + '</div>' +
+        '<div class="hc-review-evidence-ref">Evidence: ' +
+        escapeHtml(blocks) +
+        '</div></div>';
+    }).join('');
+  }
+
   function renderDetail(item) {
     state.item = item;
     detail.hidden = false;
@@ -407,6 +452,7 @@
     ].map(([name, value]) =>
       '<span><b>' + escapeHtml(name) + '</b>' + statusPill(value) + '</span>'
     ).join('');
+    renderReviewRequired(item);
     q('[data-candidate-preview]').textContent =
       JSON.stringify(item.candidate || null, null, 2);
     q('[data-evidence-summary]').textContent =
