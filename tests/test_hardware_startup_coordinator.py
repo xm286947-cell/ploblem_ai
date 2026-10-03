@@ -4,7 +4,6 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
-import sys
 
 import pytest
 
@@ -40,12 +39,6 @@ def _paths(tmp_path: Path, *, legacy_roots: tuple[Path, ...] = ()):
 def _install(tmp_path: Path):
     app_root, data_root, bootstrap, resolver = _paths(tmp_path)
     result = HardwareStartupCoordinator(app_root, resolver=resolver).run()
-    if not result["ready"] and sys.platform == "win32":
-        diagnostic_root = tmp_path / "startup-diagnostic"
-        diagnostic_app, _diagnostic_data, _diagnostic_bootstrap, diagnostic_resolver = _paths(diagnostic_root)
-        HardwareStartupCoordinator(diagnostic_app, resolver=diagnostic_resolver)._first_install(
-            diagnostic_resolver.resolve()
-        )
     assert result["ready"] is True, (
         f"startup phase={result['phase']} error={result['error_code']} "
         f"mode={result['installation_mode']}"

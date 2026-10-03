@@ -7,6 +7,7 @@ and the final READY decision.
 from __future__ import annotations
 
 import hashlib
+import gc
 import json
 import os
 import shutil
@@ -416,6 +417,10 @@ class HardwareStartupCoordinator:
             self._write_marker(staging, operation_id=operation_id, operation="FIRST_INSTALL", state="VERIFIED")
             self._phase("ACTIVATE_DATA_ROOT")
             target.parent.mkdir(parents=True, exist_ok=True)
+            # SQLite connection finalizers can lag behind the end of their
+            # initializer scope on Windows; release unreferenced handles before
+            # atomically activating the directory tree.
+            gc.collect()
             if target.exists():
                 quarantine = target.with_name(target.name + ".empty-quarantine-" + operation_id)
                 os.replace(target, quarantine)
