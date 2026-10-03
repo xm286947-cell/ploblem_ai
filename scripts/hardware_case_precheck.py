@@ -259,16 +259,17 @@ def main() -> int:
     if args.init_local:
         ensure_local_templates()
 
+    errors = check_python()
     if args.mode in {"web", "all"}:
         root_errors = check_hardware_data_root()
         if root_errors:
+            errors.extend(root_errors)
             print("")
             print("RESULT=BLOCKED")
-            for error in root_errors:
+            for error in errors:
                 print(f"BLOCKER={error}")
             return 2
 
-    errors = check_python()
     if args.mode in {"web", "all"}:
         errors.extend(check_web())
     if args.mode in {"real-ai", "all"}:
