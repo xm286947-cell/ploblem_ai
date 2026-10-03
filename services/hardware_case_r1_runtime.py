@@ -354,6 +354,7 @@ __all__ = [
     "HARDWARE_R1_EXTRACTION_V2_SCHEMA",
     "HardwareCaseR1RuntimeStructurer",
     "build_hardware_case_r1_structurer",
+    "invalidate_hardware_r1_stage_cache",
     "resolve_r1_runtime_paths",
 ]
 
@@ -603,10 +604,27 @@ class _R1StageCache:
                     schema_version TEXT NOT NULL,
                     agent_config_hash TEXT NOT NULL,
                     prompt_version TEXT NOT NULL,
+                    source_id TEXT,
                     source_run_id TEXT,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(stage, cache_key)
                 )
+                """
+            )
+            columns = {
+                str(row[1])
+                for row in connection.execute(
+                    f"PRAGMA table_info({self.TABLE})"
+                ).fetchall()
+            }
+            if "source_id" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {self.TABLE} ADD COLUMN source_id TEXT"
+                )
+            connection.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_hardware_r1_stage_cache_source
+                ON {self.TABLE}(source_id)
                 """
             )
 
@@ -684,6 +702,17 @@ class _R1StageCache:
             )
             return int(cursor.rowcount or 0) > 0
 
+    def delete_source(self, source_id: str) -> int:
+        value = str(source_id or "").strip()
+        if not value:
+            return 0
+        with _sqlite3.connect(self.db_path) as connection:
+            cursor = connection.execute(
+                f"DELETE FROM {self.TABLE} WHERE source_id=?",
+                (value,),
+            )
+            return int(cursor.rowcount or 0)
+
     def put(
         self,
         stage: str,
@@ -691,6 +720,7 @@ class _R1StageCache:
         data: dict[str, Any],
         runtime_meta: dict[str, Any],
         *,
+        source_id: str,
         validator_version: str,
         pipeline_version: str,
         schema_version: str,
@@ -706,8 +736,8 @@ class _R1StageCache:
                     stage, cache_key, result_json, result_hash, runtime_json,
                     validation_status, validator_version, pipeline_version,
                     schema_version, agent_config_hash, prompt_version,
-                    source_run_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'PASS', ?, ?, ?, ?, ?, ?, ?)
+                    source_id, source_run_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'PASS', ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(stage, cache_key) DO UPDATE SET
                     result_json=excluded.result_json,
                     result_hash=excluded.result_hash,
@@ -718,6 +748,7 @@ class _R1StageCache:
                     schema_version=excluded.schema_version,
                     agent_config_hash=excluded.agent_config_hash,
                     prompt_version=excluded.prompt_version,
+                    source_id=excluded.source_id,
                     source_run_id=excluded.source_run_id,
                     created_at=excluded.created_at
                 """,
@@ -737,6 +768,7 @@ class _R1StageCache:
                     schema_version,
                     agent_config_hash,
                     prompt_version,
+                    str(source_id),
                     str(runtime_meta.get("run_id") or "") or None,
                     _datetime.now(_timezone.utc).isoformat(),
                 ),
@@ -1101,6 +1133,7 @@ class _R1StageRunner:
                         "data": cached["data"],
                         "runtime": runtime_meta,
                         "cache_key": cache_key,
+                        "source_id": source_id,
                         "cache_write_pending": False,
                     }
 
@@ -1140,6 +1173,7 @@ class _R1StageRunner:
                     self.input_hash_name: input_hash,
                 },
                 "cache_key": cache_key,
+                "source_id": source_id,
                 "cache_write_pending": False,
             }
 
@@ -1211,6 +1245,7 @@ class _R1StageRunner:
                 "data": result.data,
                 "runtime": runtime_meta,
                 "cache_key": cache_key,
+                "source_id": source_id,
                 "cache_write_pending": True,
             }
 
@@ -1231,6 +1266,7 @@ class _R1StageRunner:
             "raw_error_code": runtime_meta.get("raw_error_code"),
             "runtime": runtime_meta,
             "cache_key": cache_key,
+            "source_id": source_id,
             "cache_write_pending": False,
         }
 
@@ -1240,13 +1276,15 @@ class _R1StageRunner:
         data = stage_result.get("data")
         runtime_meta = dict(stage_result.get("runtime") or {})
         cache_key = str(stage_result.get("cache_key") or "")
-        if not isinstance(data, dict) or not cache_key:
+        source_id = str(stage_result.get("source_id") or "")
+        if not isinstance(data, dict) or not cache_key or not source_id:
             return False
         self.cache.put(
             self.stage_name,
             cache_key,
             data,
             runtime_meta,
+            source_id=source_id,
             validator_version=self.validator_version,
             pipeline_version=R1_PIPELINE_VERSION,
             schema_version=self.schema_version,
@@ -1359,6 +1397,9 @@ class HardwareCaseR1PipelineRuntime:
             return self.stage_b.commit_success(stage_result)
         raise ValueError("R1_STAGE_INVALID")
 
+    def invalidate_source_cache(self, source_id: str) -> int:
+        return self.cache.delete_source(source_id)
+
     def reject_stage_cache(
         self,
         stage: str,
@@ -1369,6 +1410,30 @@ class HardwareCaseR1PipelineRuntime:
         if stage == "STAGE_B":
             return self.stage_b.reject_cache(stage_result)
         raise ValueError("R1_STAGE_INVALID")
+
+def invalidate_hardware_r1_stage_cache(
+    source_id: str,
+    *,
+    root: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    """Invalidate only cache rows belonging to one R1 source.
+
+    This touches the stage cache only. Runtime Task/Run/Step/Attempt audit rows
+    are intentionally preserved.
+    """
+    env = os.environ if environ is None else environ
+    root_path = Path(root).resolve() if root is not None else package_root()
+    runtime_raw = str(env.get("HARDWARE_CASE_RUNTIME_DB") or "").strip()
+    runtime_db = (
+        _resolved_path(root_path, runtime_raw)
+        if runtime_raw
+        else (root_path / DEFAULT_RUNTIME_DB).resolve()
+    )
+    if not runtime_db.exists():
+        return 0
+    return _R1StageCache(runtime_db).delete_source(source_id)
+
 
 def build_hardware_case_r1_structurer() -> HardwareCaseR1PipelineRuntime:
     return HardwareCaseR1PipelineRuntime()
