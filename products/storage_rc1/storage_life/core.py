@@ -133,7 +133,10 @@ def connect():
     ):
         if column not in run_columns:
             con.execute(f"ALTER TABLE extraction_runs ADD COLUMN {column} {declaration}")
-    # Older V0.5.x databases allowed only SSD/eMMC/Raw NAND. Rebuild the three dependent
+    history_columns = {row[1] for row in con.execute("PRAGMA table_info(candidate_review_history)")}
+    if "confirm_mode" not in history_columns:
+        con.execute("ALTER TABLE candidate_review_history ADD COLUMN confirm_mode TEXT DEFAULT 'single'")
+        # Older V0.5.x databases allowed only SSD/eMMC/Raw NAND. Rebuild the three dependent
     # tables once so NOR Flash and the user-facing NAND Flash name can coexist with legacy data.
     device_sql = (con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='devices'").fetchone() or [""])[0] or ""
     if "NOR Flash" not in device_sql or "NAND Flash" not in device_sql:
@@ -1648,7 +1651,7 @@ def list_candidates(device_id):
         return out
 
 
-def verify(candidate_id, status, value, unit, by, condition=None, scope=None):
+def verify(candidate_id, status, value, unit, by, condition=None, scope=None, confirm_mode="single"):
     """Human review of one extracted candidate.
 
     The RC3 candidate remains the review source of truth.  AI extraction is immutable in
@@ -1658,6 +1661,8 @@ def verify(candidate_id, status, value, unit, by, condition=None, scope=None):
     import json
     if status not in {"confirmed", "rejected"} or not by.strip():
         raise ValueError("需选择确认或驳回，并填写核对人")
+    if confirm_mode not in {"single", "batch"}:
+        raise ValueError("confirm_mode 仅支持 single / batch")
     reviewed_at = now()
     with connect() as con:
         candidate = con.execute("SELECT * FROM candidates WHERE id=?", (candidate_id,)).fetchone()
@@ -1686,25 +1691,25 @@ def verify(candidate_id, status, value, unit, by, condition=None, scope=None):
         ])
         action = "reject" if status == "rejected" else ("edit_confirm" if changed else "confirm")
         version = int(con.execute("SELECT COUNT(*) FROM candidate_review_history WHERE candidate_id=?", (candidate_id,)).fetchone()[0]) + 1
-        evidence = rows(con, """SELECT p.source_id,e.source_page,e.source_section,e.source_text
+        evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,e.source_text
           FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
           WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (candidate_id,))
         if not evidence:
-            evidence = [{"source_id": None, "source_page": candidate["source_page"],
+            evidence = [{"evidence_id": None, "source_id": None, "source_page": candidate["source_page"],
                          "source_section": candidate["source_section"], "source_text": candidate["source_text"]}]
         con.execute("""INSERT INTO candidate_review_history
           (id,candidate_id,device_id,version,action,prior_status,new_status,ai_value,ai_unit,
            old_final_value,old_final_unit,old_condition,old_scope,new_final_value,new_final_unit,
-           new_condition,new_scope,evidence_refs_json,reviewed_by,reviewed_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           new_condition,new_scope,evidence_refs_json,confirm_mode,reviewed_by,reviewed_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
           (uuid4().hex, candidate_id, candidate["device_id"], version, action, candidate["verify_status"], status,
            candidate["ai_value"], candidate["ai_unit"], old_value, old_unit, candidate["condition"], candidate["scope"],
-           final_value, final_unit, final_condition, final_scope, json.dumps(evidence, ensure_ascii=False), by.strip(), reviewed_at))
+           final_value, final_unit, final_condition, final_scope, json.dumps(evidence, ensure_ascii=False), confirm_mode, by.strip(), reviewed_at))
         con.execute("""UPDATE candidates SET verify_status=?, final_value=?, final_unit=?,
         condition=?, scope=?, verified_by=?, verified_at=? WHERE id=?""",
         (status, final_value, final_unit, final_condition, final_scope, by.strip(), reviewed_at, candidate_id))
     rebuild_reviewed_specifications(candidate["device_id"])
-    return {"id": candidate_id, "verify_status": status, "review_action": action, "review_version": version}
+    return {"id": candidate_id, "verify_status": status, "review_action": action, "review_version": version, "confirm_mode": confirm_mode}
 
 
 def list_candidate_review_history(candidate_id):

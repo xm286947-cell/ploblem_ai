@@ -12,6 +12,20 @@ UI_STATUS = {
     "UNRESOLVED": "NOT_CHECKED",
 }
 
+UX_CONFIRMED = "CONFIRMED"
+UX_TRUSTED = "TRUSTED"
+UX_NEEDS_ATTENTION = "NEEDS_ATTENTION"
+UX_UNKNOWN = "UNKNOWN"
+UX_NOT_APPLICABLE = "NOT_APPLICABLE"
+
+UX_LABELS = {
+    UX_CONFIRMED: "已确认",
+    UX_TRUSTED: "可信，可批量确认",
+    UX_NEEDS_ATTENTION: "需要处理",
+    UX_UNKNOWN: "无法从规格书确定",
+    UX_NOT_APPLICABLE: "不适用",
+}
+
 DIAGNOSTIC_METHODS = {
     "life_time_a": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_A", "按 JEDEC/厂商定义解释寿命区间"),
     "life_time_b": ("EXT_CSD", "读取 DEVICE_LIFE_TIME_EST_TYP_B", "结合对应存储区域解释寿命区间"),
@@ -274,6 +288,71 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     }
 
 
+def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
+    """Compose coverage + review into one deterministic user-facing state.
+
+    Coverage and raw review state remain available as advanced diagnostics.  This
+    classifier is the single backend source for the normal Review UX so the browser
+    never re-implements eligibility rules.
+    """
+    coverage_status = str(row.get("coverage_status") or "NOT_CHECKED")
+    coverage_reason = str(row.get("coverage_reason") or "").lower()
+    review_status = str(row.get("review_status") or "NOT_REVIEWED")
+    requirement_level = str(row.get("requirement_level") or "FULL")
+    candidate_id = row.get("candidate_id")
+    ai_value = row.get("ai_value")
+    human_value = row.get("human_value")
+    value = human_value if review_status == "CONFIRMED" and human_value is not None else ai_value
+    has_value = bool(str(value or "").strip())
+    evidence_valid = bool(row.get("persistent_evidence"))
+    reasons: list[str] = []
+
+    if coverage_status == "NOT_APPLICABLE":
+        state = UX_NOT_APPLICABLE
+        reasons.append("outside_device_profile")
+    elif coverage_status == "NOT_FOUND":
+        state = UX_UNKNOWN
+        reasons.append("no_supported_value")
+    elif not candidate_id:
+        state = UX_NEEDS_ATTENTION
+        reasons.append("mandatory_missing" if requirement_level == "MUST" else "no_candidate")
+    elif review_status == "REJECTED":
+        state = UX_NEEDS_ATTENTION
+        reasons.append("rejected")
+    elif coverage_status == "AMBIGUOUS" or "ambiguous" in coverage_reason or "conflict" in coverage_reason:
+        state = UX_NEEDS_ATTENTION
+        reasons.append("ambiguity_or_conflict")
+    elif coverage_status != "FOUND":
+        state = UX_NEEDS_ATTENTION
+        reasons.append("unchecked")
+    elif "stale" in coverage_reason:
+        state = UX_NEEDS_ATTENTION
+        reasons.append("stale")
+    elif not has_value:
+        state = UX_NEEDS_ATTENTION
+        reasons.append("missing_value")
+    elif not evidence_valid:
+        state = UX_NEEDS_ATTENTION
+        reasons.append("no_evidence")
+    elif review_status == "CONFIRMED":
+        state = UX_CONFIRMED
+    else:
+        state = UX_TRUSTED
+
+    batch_confirmable = bool(state == UX_TRUSTED and candidate_id)
+    critical_visible = bool(
+        requirement_level == "MUST"
+        and row.get("group") in {parameter_baseline.KEY_SPEC, parameter_baseline.KEY_DIAGNOSTIC}
+    )
+    return {
+        "ux_state": state,
+        "ux_label": UX_LABELS[state],
+        "batch_confirmable": batch_confirmable,
+        "exception_reasons": reasons,
+        "critical_visible": critical_visible,
+    }
+
+
 def review_workbench(device_id: str) -> dict[str, Any]:
     devices = {x["id"]: x for x in core.list_devices()}
     if device_id not in devices:
@@ -289,46 +368,157 @@ def review_workbench(device_id: str) -> dict[str, Any]:
         items = [item for alias in aliases for item in candidates.get(alias, [])]
         coverage_item = next((coverage.get(alias) for alias in aliases if coverage.get(alias)), {}) or {}
         cov_status = _coverage_status(coverage_item)
+        base = {
+            "canonical_name": key,
+            "parameter_name": field.get("parameter_name") or key,
+            "group": field.get("group") or parameter_baseline.COMPREHENSIVE,
+            "group_label": field.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE],
+            "requirement_level": field.get("requirement_level") or "FULL",
+            "role": field.get("role") or "",
+            "coverage_status": cov_status,
+            "coverage_reason": coverage_item.get("reason") or "",
+        }
         if not items:
-            rows_out.append({
-                "canonical_name": key, "parameter_name": field.get("parameter_name") or key,
-                "group": field.get("group") or parameter_baseline.COMPREHENSIVE,
-                "group_label": field.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE],
-                "requirement_level": field.get("requirement_level") or "FULL",
-                "candidate_id": None, "ai_value": None, "ai_unit": "", "human_value": None, "human_unit": "",
-                "condition": "", "scope": "", "coverage_status": cov_status, "coverage_reason": coverage_item.get("reason") or "",
-                "review_status": "NOT_REVIEWED", "evidence": [], "verified_by": None, "verified_at": None, "history": [],
-            })
+            row = {
+                **base,
+                "candidate_id": None,
+                "ai_value": None,
+                "ai_unit": "",
+                "human_value": None,
+                "human_unit": "",
+                "condition": "",
+                "scope": "",
+                "review_status": "NOT_REVIEWED",
+                "evidence": [],
+                "persistent_evidence": False,
+                "verified_by": None,
+                "verified_at": None,
+                "history": [],
+            }
+            row.update(_review_ux_state(row))
+            rows_out.append(row)
             continue
+
         for item in items:
-            evidence = item.get("evidence") or [{
-                "source_page": item.get("source_page"), "source_section": item.get("source_section"),
-                "source_text": item.get("source_text"), "confidence": item.get("confidence"),
+            persistent_evidence = list(item.get("evidence") or [])
+            evidence = persistent_evidence or [{
+                "source_page": item.get("source_page"),
+                "source_section": item.get("source_section"),
+                "source_text": item.get("source_text"),
+                "confidence": item.get("confidence"),
             }]
             try:
                 history = core.list_candidate_review_history(item["id"])
             except KeyError:
                 history = []
-            rows_out.append({
-                "canonical_name": key, "parameter_name": field.get("parameter_name") or key,
-                "group": field.get("group") or parameter_baseline.COMPREHENSIVE,
-                "group_label": field.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE],
-                "requirement_level": field.get("requirement_level") or "FULL",
-                "candidate_id": item.get("id"), "ai_value": item.get("ai_value"), "ai_unit": item.get("ai_unit"),
-                "human_value": item.get("final_value"), "human_unit": item.get("final_unit"),
-                "condition": item.get("condition") or "", "scope": item.get("scope") or "",
-                "coverage_status": cov_status, "coverage_reason": coverage_item.get("reason") or "",
+            row = {
+                **base,
+                "candidate_id": item.get("id"),
+                "ai_value": item.get("ai_value"),
+                "ai_unit": item.get("ai_unit"),
+                "human_value": item.get("final_value"),
+                "human_unit": item.get("final_unit"),
+                "condition": item.get("condition") or "",
+                "scope": item.get("scope") or "",
                 "review_status": {"pending": "UNREVIEWED", "confirmed": "CONFIRMED", "rejected": "REJECTED"}.get(item.get("verify_status"), "UNREVIEWED"),
-                "evidence": _enrich_evidence(device, evidence), "verified_by": item.get("verified_by"),
-                "verified_at": item.get("verified_at"), "history": history,
-            })
+                "evidence": _enrich_evidence(device, evidence),
+                "persistent_evidence": bool(persistent_evidence),
+                "verified_by": item.get("verified_by"),
+                "verified_at": item.get("verified_at"),
+                "history": history,
+            }
+            row.update(_review_ux_state(row))
+            rows_out.append(row)
+
+    summary = {state: sum(1 for x in rows_out if x["ux_state"] == state) for state in (
+        UX_TRUSTED, UX_NEEDS_ATTENTION, UX_UNKNOWN, UX_NOT_APPLICABLE, UX_CONFIRMED
+    )}
+    exception_rows = [x for x in rows_out if x["ux_state"] in {UX_NEEDS_ATTENTION, UX_UNKNOWN}]
+    critical_rows = [x for x in rows_out if x.get("critical_visible")]
+    workflow = core.specification_workflow_status(device_id)
     return {
         "device": device,
-        "workflow": core.specification_workflow_status(device_id),
+        "workflow": workflow,
         "rows": rows_out,
+        "ux_summary": {
+            "identified": len(rows_out),
+            "trusted": summary[UX_TRUSTED],
+            "needs_attention": summary[UX_NEEDS_ATTENTION],
+            "unknown": summary[UX_UNKNOWN],
+            "not_applicable": summary[UX_NOT_APPLICABLE],
+            "confirmed": summary[UX_CONFIRMED],
+            "exception_count": len(exception_rows),
+            "batch_confirmable_count": sum(1 for x in rows_out if x["batch_confirmable"]),
+            "critical_visible_count": len(critical_rows),
+        },
+        "exception_candidate_ids": [x["candidate_id"] for x in exception_rows if x.get("candidate_id")],
+        "batch_candidate_ids": [x["candidate_id"] for x in rows_out if x["batch_confirmable"]],
+        "critical_fields": [
+            {"canonical_name": x["canonical_name"], "parameter_name": x["parameter_name"], "ux_state": x["ux_state"]}
+            for x in critical_rows
+        ],
         "counts": {state: sum(1 for x in rows_out if x["review_status"] == state) for state in ("UNREVIEWED", "CONFIRMED", "REJECTED", "NOT_REVIEWED")},
         "coverage_counts": {state: sum(1 for x in rows_out if x["coverage_status"] == state) for state in ("FOUND", "NOT_FOUND", "NOT_APPLICABLE", "NOT_CHECKED", "AMBIGUOUS")},
     }
+
+
+def batch_confirm_trusted(device_id: str, verified_by: str) -> dict[str, Any]:
+    reviewer = str(verified_by or "").strip()
+    if not reviewer:
+        raise ValueError("请填写核对人")
+    workbench = review_workbench(device_id)
+    targets = [x for x in workbench["rows"] if x.get("batch_confirmable")]
+    confirmed, failed = [], []
+    for row in targets:
+        try:
+            result = core.verify(
+                row["candidate_id"],
+                "confirmed",
+                row.get("ai_value"),
+                row.get("ai_unit"),
+                reviewer,
+                row.get("condition"),
+                row.get("scope"),
+                confirm_mode="batch",
+            )
+            confirmed.append(result)
+        except Exception as exc:
+            failed.append({"candidate_id": row.get("candidate_id"), "parameter_name": row.get("parameter_name"), "error": str(exc)})
+    refreshed = review_workbench(device_id)
+    return {
+        "device_id": device_id,
+        "requested_count": len(targets),
+        "confirmed_count": len(confirmed),
+        "failed_count": len(failed),
+        "confirmed": confirmed,
+        "failed": failed,
+        "workflow": refreshed["workflow"],
+        "ux_summary": refreshed["ux_summary"],
+    }
+
+
+def complete_parameter_review(device_id: str) -> dict[str, Any]:
+    workbench = review_workbench(device_id)
+    workflow = workbench["workflow"]
+    blockers = [
+        {
+            "canonical_name": x["canonical_name"],
+            "parameter_name": x["parameter_name"],
+            "ux_state": x["ux_state"],
+            "reasons": x.get("exception_reasons") or [],
+        }
+        for x in workbench["rows"]
+        if x["ux_state"] in {UX_NEEDS_ATTENTION, UX_UNKNOWN, UX_TRUSTED}
+        and x.get("requirement_level") in {"MUST", "SHOULD"}
+    ]
+    return {
+        "device_id": device_id,
+        "completed": bool(workflow.get("formal_ready")),
+        "workflow": workflow,
+        "blockers": blockers,
+        "gate": "CONFIRMED_DEVICE_FACT_GATE_UNCHANGED",
+    }
+
 
 def dashboard() -> dict[str, Any]:
     devices = core.list_devices()
@@ -502,8 +692,16 @@ def maintenance() -> dict[str, Any]:
     import_review = []
     for d in devices:
         detail = device_slots(d["id"])
-        if detail["counts"]["UNREVIEWED"] or detail["counts"]["AMBIGUOUS"] or detail["counts"]["NOT_CHECKED"]:
-            import_review.append({"device_id": d["id"], "model": d["model"], "device_type": d["device_type"], "counts": detail["counts"]})
+        review = review_workbench(d["id"])
+        ux = review["ux_summary"]
+        if ux["trusted"] or ux["needs_attention"] or ux["unknown"]:
+            import_review.append({
+                "device_id": d["id"],
+                "model": d["model"],
+                "device_type": d["device_type"],
+                "counts": detail["counts"],
+                "ux_summary": ux,
+            })
     from . import knowledge as knowledge_store
     sources = knowledge_store.list_sources()
     return {

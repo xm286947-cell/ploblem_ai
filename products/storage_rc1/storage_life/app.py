@@ -63,6 +63,10 @@ class ModelReview(BaseModel):
     verified_by: str
 
 
+class BatchReview(BaseModel):
+    verified_by: str
+
+
 class Comparison(BaseModel):
     device_ids: list[str]
 
@@ -123,6 +127,32 @@ def product_review_workbench(device_id: str):
         return product_api.review_workbench(device_id)
     except KeyError:
         raise HTTPException(404, "器件不存在")
+
+
+@app.post("/api/product/devices/{device_id}/review/batch-confirm", tags=["Storage Product MVP"])
+def product_batch_confirm_review(device_id: str, body: BatchReview):
+    try:
+        return product_api.batch_confirm_trusted(device_id, body.verified_by)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/devices/{device_id}/review/complete", tags=["Storage Product MVP"])
+def product_complete_review(device_id: str):
+    try:
+        result = product_api.complete_parameter_review(device_id)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    if not result["completed"]:
+        raise HTTPException(409, detail={
+            "code": "REVIEW_NOT_COMPLETE",
+            "message": "仍有必需/建议参数待处理，不能完成确认",
+            "blockers": result["blockers"],
+            "workflow": result["workflow"],
+        })
+    return result
 
 
 @app.post("/api/product/compare", tags=["Storage Product MVP"])
