@@ -10,6 +10,7 @@ on:
       - "quality_knowledge/web/templates/hardware_tree_import.html"
       - "quality_knowledge/web/static/hardware_case.css"
       - "quality_knowledge/web/static/hardware_case.js"
+      - "quality_knowledge/web/static/hardware_case_word_import.js"
       - "START_HARDWARE_CASE.bat"
       - "START_HARDWARE_CASE.sh"
       - "scripts/hardware_case_web_start.py"
@@ -26,6 +27,7 @@ on:
       - "quality_knowledge/web/templates/hardware_tree_import.html"
       - "quality_knowledge/web/static/hardware_case.css"
       - "quality_knowledge/web/static/hardware_case.js"
+      - "quality_knowledge/web/static/hardware_case_word_import.js"
       - "START_HARDWARE_CASE.bat"
       - "START_HARDWARE_CASE.sh"
       - "scripts/hardware_case_web_start.py"
@@ -49,6 +51,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check quality_knowledge/web/static/hardware_case.js
+          node --check quality_knowledge/web/static/hardware_case_word_import.js
           node --check quality_knowledge/web/static/hardware_tree_import.js
 
       - name: Compile frontend routes and startup
@@ -66,6 +69,7 @@ jobs:
           tests/test_hardware_case_web_api.py
           tests/test_hardware_case_evidence_source.py
           tests/test_hardware_case_product_api_e2e.py
+          tests/test_hardware_r1_word_import_web.py
 
       - name: Startup defaults to P01
         run: |

@@ -34,6 +34,7 @@ from repositories.hardware_tree_import_repository import HardwareTreeImportRepos
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_source_store import HardwareCaseSourceStore
+from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
@@ -73,6 +74,7 @@ def create_p0_app(
     hardware_tree_upload_dir: str | Path | None = None,
     hardware_case_source_root: str | Path | None = None,
     hardware_case_structurer: Any | None = None,
+    hardware_case_r1_structurer: Any | None = None,
     repeat_web: Any | None = None,
     p04_provider: P04Provider | None = None,
     portrait_provider: PortraitProvider | None = None,
@@ -374,6 +376,12 @@ def create_p0_app(
                 from services.hardware_case_runtime_adapter import build_hardware_case_structurer
                 return build_hardware_case_structurer()
 
+            def r1_structurer() -> Any:
+                if hardware_case_r1_structurer is not None:
+                    return hardware_case_r1_structurer
+                from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer
+                return build_hardware_case_r1_structurer()
+
             hardware_case_intake_service = HardwareCaseIntakeService(
                 hardware_db,
                 hardware_case_source_store,
@@ -382,6 +390,13 @@ def create_p0_app(
                 initialize_schema=False,
             )
             app.state.hardware_case_intake_service = hardware_case_intake_service
+
+            hardware_r1_preview_db = hardware_db.with_name(
+                hardware_db.stem + "_r1_preview.db"
+            )
+            hardware_r1_preview_store = HardwareR1PreviewStore(hardware_r1_preview_db)
+            app.state.hardware_r1_preview_store = hardware_r1_preview_store
+            testability_mutable_paths.append(hardware_r1_preview_db)
 
             hardware_tree_import_repository = HardwareTreeImportRepository(
                 hardware_db,
@@ -408,6 +423,8 @@ def create_p0_app(
                     hardware_case_service,
                     source_store=hardware_case_source_store,
                     intake_service=hardware_case_intake_service,
+                    r1_structurer_factory=r1_structurer,
+                    r1_preview_store=hardware_r1_preview_store,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
@@ -417,6 +434,7 @@ def create_p0_app(
             app.state.hardware_case_service = None
             app.state.hardware_case_source_store = None
             app.state.hardware_case_intake_service = None
+            app.state.hardware_r1_preview_store = None
             app.state.hardware_tree_import_repository = None
             app.state.hardware_tree_file_store = None
 

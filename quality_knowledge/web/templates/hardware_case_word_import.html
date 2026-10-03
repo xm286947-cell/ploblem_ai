@@ -1,0 +1,118 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-performance-v15">{% endblock %}
+{% block breadcrumb %}案例 Word 导入{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hc-word-import data-api="{{ hardware_api_prefix }}">
+  <section class="hc-hero">
+    <div>
+      <span class="hc-kicker">HARDWARE CASE · R1 GOLDEN KNOWLEDGE</span>
+      <h1>案例 Word 导入</h1>
+      <p>上传 DOCX 先执行确定性 DocumentSnapshot + Identity，再生成 Markdown Agent View。V1.3 使用独立 Stage A Case Extraction 与 Stage B Reusable Knowledge Runtime Run；Conflict / Review / Provenance / 默认状态全部本地确定。本入口不做 Tree Mapping、Knowledge Lookup、Publish 或 OCR/Vision。</p>
+    </div>
+  </section>
+
+  <section class="hc-card">
+    <div class="hc-card-head"><div><h2>Upload → Parse → Inspect</h2><p>真实 Word 不要求标准 Heading。Parser 负责内容保真、Block 顺序与 Source Locator。</p></div></div>
+    <form data-word-upload>
+      <input type="file" accept=".docx" required data-word-file aria-label="选择 DOCX">
+      <button class="hc-button primary" type="submit">Upload / Parse</button>
+    </form>
+    <p role="status" data-word-message>请选择一份 DOCX。</p>
+  </section>
+
+
+  <section class="hc-card">
+    <div class="hc-card-head">
+      <div>
+        <h2>最近 Golden Preview</h2>
+        <p>Preview 结果保存在本地独立存储中；刷新页面后可恢复，不写入 Formal Knowledge。</p>
+      </div>
+      <div>
+        <button class="hc-button" type="button" data-refresh-previews>刷新结果</button>
+        <button class="hc-button" type="button" data-clear-previews>清空历史</button>
+      </div>
+    </div>
+    <p role="status" data-preview-message>正在检查已有 Preview…</p>
+    <div data-preview-history></div>
+  </section>
+
+  <section class="hc-card" data-word-result hidden>
+    <div class="hc-card-head"><div><h2>Identity / Source</h2><p data-word-file-name></p></div></div>
+    <div class="hc-case-meta">
+      <span>business_case_id: <strong data-business-case-id>—</strong></span>
+      <span>raw_title: <strong data-raw-title>—</strong></span>
+      <span>identity_status: <strong data-identity-status>—</strong></span>
+    </div>
+    <p><strong>source_id SHA256</strong><br><code data-source-id>—</code></p>
+    <p><strong>warnings / Fail-Safe</strong>：<span data-warnings>—</span></p>
+    <p><strong>计数</strong>：<span data-counts>—</span></p>
+  </section>
+
+  <section class="hc-card" data-word-structure hidden>
+    <div class="hc-card-head"><div><h2>DocumentSnapshot</h2><p>结构块保留 Source Locator；Heading=0 本身不代表失败。</p></div></div>
+    <h3>Heading / Section</h3><div data-headings></div>
+    <h3>Paragraph</h3><div data-paragraphs></div>
+    <h3>Table 行列</h3><div data-tables></div>
+    <h3>Image Locator</h3><div data-images></div>
+    <details><summary>完整 Snapshot JSON</summary><pre data-raw-snapshot></pre></details>
+  </section>
+
+  <section class="hc-card" data-markdown-view hidden>
+    <div class="hc-card-head"><div><h2>Markdown Agent View</h2><p>hardware-markdown-view/v1；Paragraph 原样保留、Table 转 Markdown、每个 Block 带 Source Locator Marker。</p></div></div>
+    <pre data-markdown-preview></pre>
+    <button class="hc-button primary" type="button" data-run-agent>Run / Resume Agent</button>
+    <button class="hc-button" type="button" data-retry-failed-stage>Retry Failed Stage</button>
+    <button class="hc-button" type="button" data-force-full-run>Force Full Run</button>
+    <p role="status" data-agent-message>尚未执行 Agent Pipeline。</p>
+  </section>
+
+  <section class="hc-card" data-agent-result hidden>
+    <div class="hc-card-head"><div><h2>V1.5 Pipeline Result</h2><p>Performance Closure：Input V3 + Attempt Reason + Size Trace；Knowledge Contract unchanged；Candidate only。</p></div></div>
+    <div class="hc-case-meta">
+      <span>Pipeline: <strong data-pipeline-status>—</strong></span>
+      <span>Agent Status: <strong data-agent-status>—</strong></span>
+      <span>Failed Stage: <strong data-failed-stage>—</strong></span>
+      <span>Error Code: <strong data-error-code>—</strong></span>
+      <span>Run ID: <strong data-run-id>—</strong></span>
+      <span>Task ID: <strong data-task-id>—</strong></span>
+      <span>Execution Mode: <strong data-execution-mode>—</strong></span>
+      <span>Provider Calls: <strong data-provider-calls>—</strong></span>
+      <span>Validation Retry: <strong data-validation-retries>—</strong></span>
+      <span>Evidence Gate: <strong data-evidence-status>—</strong></span>
+      <span>Fabricated Fact: <strong data-fabricated-count>—</strong></span>
+      <span>Fabricated Block: <strong data-fabricated-block-count>—</strong></span>
+    </div>
+    <h3>Stage Execution Summary</h3>
+    <div class="hc-case-grid">
+      <article class="hc-case-item"><div><h3>Stage A · Case Extraction</h3><div data-stage-a-summary>—</div></div></article>
+      <article class="hc-case-item"><div><h3>Stage B · Reusable Knowledge</h3><div data-stage-b-summary>—</div></div></article>
+      <article class="hc-case-item"><div><h3>Total</h3><div data-execution-total-summary>—</div></div></article>
+    </div>
+    <h3>Structured Facts</h3><div data-agent-facts></div>
+    <h3>Evidence Blocks</h3><div data-agent-evidence></div>
+    <p><strong>Validation Errors</strong>：<span data-agent-errors>—</span></p>
+    <details><summary>Latency Trace</summary><pre data-latency-trace></pre></details>
+    <details><summary>完整 Agent Result JSON</summary><pre data-raw-agent-result></pre></details>
+  </section>
+  <section class="hc-card" data-golden-knowledge hidden>
+    <div class="hc-card-head"><div><h2>Golden Knowledge Preview</h2><p>hardware-case-knowledge-object/v1 · Candidate only · Source Fact immutable</p></div></div>
+    <div class="hc-case-meta">
+      <span>Object Status: <strong data-golden-status>—</strong></span>
+      <span>Extraction Contract: <strong data-extraction-contract>—</strong></span>
+      <span>Runtime Run: <strong data-runtime-run>—</strong></span>
+    </div>
+    <h3>L1 Engineering Context</h3><div data-golden-context></div>
+    <h3>Source Conflict</h3><div data-golden-conflicts></div>
+    <h3>L2-L4 Problem / Analysis / Resolution</h3><div data-golden-case-layers></div>
+    <h3>L5 Reusable Knowledge</h3><div data-golden-reusable></div>
+    <h3>Evidence</h3><div data-golden-evidence></div>
+    <details><summary>完整 Golden Knowledge Object JSON</summary><pre data-raw-golden></pre></details>
+  </section>
+
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_word_import.js?v=hc-r1-performance-v15"></script>{% endblock %}

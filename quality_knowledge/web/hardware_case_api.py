@@ -11,7 +11,10 @@ This module is deliberately thin:
 """
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from time import perf_counter
+from typing import Any, Callable
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -20,6 +23,13 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
+from services.hardware_case_markdown_agent import (
+    HardwareCaseMarkdownError,
+    build_markdown_view,
+    run_r1_agent_extraction,
+)
+from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
+from services.hardware_case_word import HardwareWordParseError, parse_docx
 
 
 _ALLOWED_ROLES = {"CONSUMER", "MAINTAINER"}
@@ -60,8 +70,197 @@ def create_hardware_case_router(
     prefix: str = "/api/v2/hardware-cases",
     source_store: HardwareCaseSourceStore | None = None,
     intake_service: HardwareCaseIntakeService | None = None,
+    r1_structurer_factory: Callable[[], Any] | None = None,
+    r1_preview_store: HardwareR1PreviewStore | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
+
+    @router.post("/r1/word-snapshot")
+    async def r1_word_snapshot(
+        file: UploadFile = File(...),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        """Parse one DOCX into the frozen R1 DocumentSnapshot for field validation.
+
+        This is intentionally parse-only: no Agent, tree mapping, search, publish,
+        or revision workflow is invoked.  It reuses parse_docx().to_snapshot().
+        """
+        _require_maintainer(x_hardware_case_role)
+        raw_name = str(file.filename or "").replace("\\", "/")
+        filename = Path(raw_name).name
+        if not filename or not filename.lower().endswith(".docx"):
+            raise HTTPException(status_code=400, detail="DOCX_REQUIRED")
+        payload = await file.read()
+        if not payload:
+            raise HTTPException(status_code=400, detail="DOCX_EMPTY")
+        with TemporaryDirectory(prefix="hardware-r1-word-") as temporary:
+            source = Path(temporary) / filename
+            source.write_bytes(payload)
+            try:
+                parse_started = perf_counter()
+                snapshot = parse_docx(source).to_snapshot()
+                parse_ms = max(0, int((perf_counter() - parse_started) * 1000))
+                markdown_started = perf_counter()
+                snapshot["markdown_view"] = build_markdown_view(snapshot)
+                markdown_ms = max(0, int((perf_counter() - markdown_started) * 1000))
+                metadata = snapshot.setdefault("metadata", {})
+                metadata["r1_latency_trace"] = {
+                    "PARSE_MS": parse_ms,
+                    "MARKDOWN_MS": markdown_ms,
+                }
+                return snapshot
+            except (HardwareWordParseError, HardwareCaseMarkdownError) as error:
+                raise HTTPException(status_code=400, detail=error.code) from error
+
+    @router.post("/r1/agent-extract")
+    def r1_agent_extract(
+        payload: dict[str, Any],
+        force_retry: bool = Query(default=False),
+        force_full_run: bool = Query(default=False),
+        retry_failed_stage: str | None = Query(default=None),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        """Run/Resume, selectively retry one failed stage, or force a full R1 run."""
+        _require_maintainer(x_hardware_case_role)
+        retry_stage = str(retry_failed_stage or "").strip().upper() or None
+        if retry_stage not in {None, "STAGE_A", "STAGE_B"}:
+            raise HTTPException(status_code=400, detail="RETRY_FAILED_STAGE_INVALID")
+        full_run = bool(force_full_run or force_retry)
+        if full_run and retry_stage is not None:
+            raise HTTPException(status_code=400, detail="EXECUTION_MODE_CONFLICT")
+        factory = r1_structurer_factory
+        if factory is None:
+            from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer
+            factory = build_hardware_case_r1_structurer
+        try:
+            structurer = factory()
+            result = run_r1_agent_extraction(
+                payload,
+                structurer,
+                force_retry=full_run,
+                retry_failed_stage=retry_stage,
+            )
+            if r1_preview_store is not None:
+                result["preview"] = r1_preview_store.save(payload, result)
+            return result
+        except HardwareCaseMarkdownError as error:
+            raise HTTPException(status_code=400, detail=error.code) from error
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "RUNTIME_EXECUTION_FAILED")
+            from services.hardware_case_r1_runtime import map_r1_runtime_error
+            mapped = map_r1_runtime_error(code)
+            status = 503 if mapped == "RUNTIME_CONFIG_MISSING" else 502
+            raise HTTPException(
+                status_code=status,
+                detail={
+                    "pipeline_status": "CASE_EXTRACTION_FAILED",
+                    "failed_stage": "STAGE_A",
+                    "error_code": mapped,
+                    "raw_error_code": code,
+                    "run_id": None,
+                    "task_id": None,
+                    "provider_call_count": 0,
+                    "validation_retry_count": 0,
+                },
+            ) from error
+
+    @router.get("/r1/previews")
+    def r1_list_previews(
+        source_id: str | None = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=100),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        items = r1_preview_store.list(source_id=source_id, limit=limit)
+        return {"items": items, "total": len(items)}
+
+    @router.get("/r1/previews/latest")
+    def r1_latest_preview(
+        source_id: str | None = Query(default=None),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.latest(source_id=source_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
+
+    @router.get("/r1/previews/by-run/{run_id}")
+    def r1_preview_by_run(
+        run_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.by_run_id(run_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
+
+    @router.get("/r1/previews/{preview_id}")
+    def r1_preview_by_id(
+        preview_id: int,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        item = r1_preview_store.by_id(preview_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return item
+
+    @router.delete("/r1/previews/{preview_id}")
+    def r1_delete_preview(
+        preview_id: int,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        if not r1_preview_store.delete(preview_id):
+            raise HTTPException(status_code=404, detail="R1_PREVIEW_NOT_FOUND")
+        return {
+            "status": "PASS",
+            "preview_id": int(preview_id),
+            "deleted": True,
+            "scope": "LOCAL_GOLDEN_PREVIEW_ONLY",
+        }
+
+    @router.delete("/r1/previews")
+    def r1_clear_previews(
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if r1_preview_store is None:
+            raise HTTPException(status_code=503, detail="R1_PREVIEW_STORE_UNAVAILABLE")
+        deleted_count = r1_preview_store.clear()
+        return {
+            "status": "PASS",
+            "deleted_count": deleted_count,
+            "scope": "LOCAL_GOLDEN_PREVIEW_ONLY",
+        }
 
     @router.get("")
     def search_cases(

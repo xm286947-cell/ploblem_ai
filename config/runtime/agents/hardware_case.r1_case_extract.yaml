@@ -1,0 +1,30 @@
+agent_id: hardware_case.r1_case_extract
+version: v1.5.0
+label: Hardware R1 Stage A Case Extraction
+
+prompt:
+  ref: prompts/runtime/hardware_case/r1_case_extract_v1.md
+  version: HC-R1-CASE-EXTRACT-V1.5.0
+
+output_schema:
+  ref: HardwareCaseR1CaseExtractionV13
+  version: v1
+
+execution:
+  timeout_seconds: 150
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 4096
+
+metadata:
+  business_domain: HARDWARE_CASE
+  provider_response_shape: json_object
+  pipeline_stage: STAGE_A_CASE_EXTRACTION
+  preview_only: true
+  formal_knowledge_write: false

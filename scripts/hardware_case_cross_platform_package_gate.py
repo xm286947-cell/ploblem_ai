@@ -17,7 +17,10 @@ PACKAGE_DIR = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
 
 def _archive() -> Path:
     candidates = sorted(
-        DIST.glob("HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip"),
+        [
+            *DIST.glob("HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip"),
+            *DIST.glob("HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip"),
+        ],
         key=lambda path: path.stat().st_mtime,
     )
     if not candidates:

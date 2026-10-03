@@ -16,9 +16,15 @@ on:
       - "START_HARDWARE_CASE.command"
       - "RUN_REAL_AI_VALIDATION.sh"
       - "config/runtime/agents/hardware_case.structure.yaml"
+      - "config/runtime/agents/hardware_case.r1_extract.yaml"
+      - "config/runtime/agents/hardware_case.r1_case_extract.yaml"
+      - "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
+      - "prompts/runtime/hardware_case/r1_extract_v2.md"
+      - "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+      - "prompts/runtime/hardware_case/r1_reuse_derive_v1.md"
       - "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
@@ -45,9 +51,13 @@ on:
       - "RUN_REAL_AI_VALIDATION.sh"
       - "00_README_FIRST.txt"
       - "config/runtime/agents/hardware_case.structure.yaml"
+      - "config/runtime/agents/hardware_case.r1_case_extract.yaml"
+      - "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
       - "config/runtime/model.local.hardware_case.example.yaml"
       - "config/hardware_case_real_validation.local.example.json"
       - "prompts/runtime/hardware_case/structure_v1.md"
+      - "prompts/runtime/hardware_case/r1_case_extract_v1.md"
+      - "prompts/runtime/hardware_case/r1_reuse_derive_v1.md"
       - "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md"
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
@@ -59,6 +69,8 @@ on:
 jobs:
   product-test-package:
     runs-on: ubuntu-latest
+    env:
+      HARDWARE_RELEASE_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -71,6 +83,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check quality_knowledge/web/static/hardware_case.js
+          node --check quality_knowledge/web/static/hardware_case_word_import.js
           node --check quality_knowledge/web/static/hardware_tree_import.js
 
       - name: Build product test package
@@ -91,6 +104,7 @@ jobs:
           assert manifest["package_status"] == "READY_FOR_INTERNAL_TEST"
           assert manifest["release_status"] == "TEST_PACKAGE_NOT_RELEASE"
           assert manifest["web_entry"] == "/p0/hardware-cases"
+          assert manifest["r1_word_import_web_entry"] == "/p0/hardware-cases/word-import"
           assert manifest["package_revision"] == "FULL_V0.1_P01_P07"
           assert manifest["product_version"] == "MVP_V0.1"
           assert manifest["public_contract_version"] == "hardware-public-consumer/v1"
@@ -103,6 +117,37 @@ jobs:
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
+          assert manifest["runtime"]["r1_pipeline_version"] == "hardware-r1-agent-pipeline/v1.3.3"
+          assert manifest["runtime"]["r1_stage_a_agent_id"] == "hardware_case.r1_case_extract"
+          assert manifest["runtime"]["r1_stage_a_schema"] == "HardwareCaseR1CaseExtractionV13"
+          assert manifest["runtime"]["r1_stage_b_agent_id"] == "hardware_case.r1_reuse_derive"
+          assert manifest["runtime"]["r1_stage_b_schema"] == "HardwareCaseR1ReusableKnowledgeV13"
+          assert manifest["runtime"]["r1_extraction_contract"] == "hardware-r1-extraction/v2"
+          assert manifest["runtime"]["r1_knowledge_object_contract"] == "hardware-case-knowledge-object/v1"
+          assert manifest["runtime"]["formal_knowledge_write"] is False
+          assert manifest["runtime"]["r1_preview_persistence"] == "LOCAL_SEPARATE_SQLITE"
+          assert manifest["runtime"]["r1_stage_a_input_contract"] == "hardware-case-r1-agent-input/v3"
+          assert manifest["runtime"]["r1_stage_a_payload"] == "SINGLE_MARKDOWN_PLUS_EVIDENCE_INDEX_NO_DUPLICATE_TEXT"
+          assert manifest["runtime"]["r1_stage_b_payload"] == "VALIDATED_CASE_FACTS_PLUS_NECESSARY_EVIDENCE_ONLY"
+          assert manifest["runtime"]["r1_partial_failure_preservation"] is True
+          assert manifest["runtime"]["r1_execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
+          assert manifest["runtime"]["r1_force_retry_new_run"] is True
+          assert manifest["runtime"]["r1_selective_retry_failed_stage"] is True
+          assert manifest["runtime"]["r1_stage_a_cache_key_v2"] == [
+              "source_id", "markdown_hash", "agent_config_hash", "prompt_version",
+              "pipeline_version", "validator_version", "schema_version"
+          ]
+          assert manifest["runtime"]["r1_stage_b_cache_key_v2"] == [
+              "source_id", "stage_b_input_hash", "agent_config_hash", "prompt_version",
+              "pipeline_version", "validator_version", "schema_version"
+          ]
+          assert manifest["runtime"]["r1_stage_execution_attribution"] == [
+              "execution_mode", "provider_call_count", "initial_call_count",
+              "transport_retry_count", "validation_retry_count",
+              "cache_recovery_call_count", "force_retry_call_count",
+              "provider_call_ms", "provider_attempts", "input_chars", "input_bytes",
+              "output_chars", "output_bytes", "prompt_tokens", "completion_tokens"
+          ]
           assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
           assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is False
@@ -128,15 +173,26 @@ jobs:
           assert "quality_knowledge/web/templates/hardware_case_search.html" in paths
           assert "quality_knowledge/web/templates/hardware_case_detail.html" in paths
           assert "quality_knowledge/web/templates/hardware_case_review.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_word_import.html" in paths
           assert "quality_knowledge/web/static/hardware_case.js" in paths
+          assert "quality_knowledge/web/static/hardware_case_word_import.js" in paths
           assert "quality_knowledge/web/static/hardware_case.css" in paths
           assert "quality_knowledge/web/templates/hardware_tree_import.html" in paths
           assert "quality_knowledge/web/static/hardware_tree_import.js" in paths
           assert "quality_knowledge/web/static/hardware_tree_import.css" in paths
           assert "config/runtime/agents/hardware_case.structure.yaml" in paths
+          assert "config/runtime/agents/hardware_case.r1_extract.yaml" in paths
+          assert "config/runtime/agents/hardware_case.r1_case_extract.yaml" in paths
+          assert "config/runtime/agents/hardware_case.r1_reuse_derive.yaml" in paths
           assert "config/runtime/model.local.hardware_case.example.yaml" in paths
           assert "prompts/runtime/hardware_case/structure_v1.md" in paths
+          assert "prompts/runtime/hardware_case/r1_extract_v2.md" in paths
+          assert "prompts/runtime/hardware_case/r1_case_extract_v1.md" in paths
+          assert "prompts/runtime/hardware_case/r1_reuse_derive_v1.md" in paths
           assert "services/hardware_case_runtime_adapter.py" in paths
+          assert "services/hardware_case_markdown_agent.py" in paths
+          assert "services/hardware_case_r1_runtime.py" in paths
+          assert "services/hardware_case_r1_preview_store.py" in paths
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "START_HARDWARE_CASE.sh" in paths
@@ -193,6 +249,12 @@ jobs:
           tests/test_hardware_tree_import_m3b_frontend.py
           tests/test_hardware_case_runtime_adapter.py
           tests/test_hardware_case_evidence_source.py
+          tests/test_hardware_r1_word_import_web.py
+          tests/test_hardware_r1_markdown_agent.py
+          tests/test_hardware_r1_golden_knowledge.py
+          tests/test_hardware_r1_runtime_v2.py
+          tests/test_hardware_r1_preview_store.py
+          tests/test_hardware_r1_pipeline_v13.py
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
@@ -212,8 +274,8 @@ jobs:
       - name: Stage delivery files
         run: |
           mkdir -p dist/product-test-delivery
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1_*.zip.sha256 dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip.sha256 dist/product-test-delivery/
           cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
           cp docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md dist/product-test-delivery/
 
