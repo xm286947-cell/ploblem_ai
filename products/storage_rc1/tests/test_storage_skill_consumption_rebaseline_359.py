@@ -1,4 +1,4 @@
-from storage_life import ai, parameter_baseline, templates
+from storage_life import ai, parameter_baseline, templates, product_api
 
 
 def test_359_ssd_direct_fact_contract_restores_frozen_fields():
@@ -63,3 +63,72 @@ def test_359_nand_bad_block_observability_is_not_runtime_bad_block_alias():
     # The descriptive runtime-bad-block fact remains independently visible; it is not
     # promoted into an observability capability without an explicit acquisition mechanism.
     assert "runtime_bad_block" in by_name
+
+
+def test_359_diagnostic_status_distinguishes_datasheet_knowledge_and_na():
+    field = {
+        "canonical_name": "percentage_used",
+        "group": parameter_baseline.KEY_DIAGNOSTIC,
+    }
+    explicit = product_api._diagnostic_semantics(
+        field=field,
+        coverage_status="FOUND",
+        primary={"ai_value": "supported"},
+        evidence=[{"source_id": "s", "source_page": 1}],
+        formal_knowledge={"status": "NO_MATCH"},
+    )
+    assert explicit["status"] == "DATASHEET_EXPLICIT"
+
+    standard = product_api._diagnostic_semantics(
+        field=field,
+        coverage_status="NOT_FOUND",
+        primary=None,
+        evidence=[],
+        formal_knowledge={"status": "MATCHED"},
+    )
+    assert standard["status"] == "STANDARD_APPLICABLE_REQUIRES_DEVICE_VALIDATION"
+
+    gap = product_api._diagnostic_semantics(
+        field=field,
+        coverage_status="NOT_FOUND",
+        primary=None,
+        evidence=[],
+        formal_knowledge={"status": "UNKNOWN", "code": "KNOWLEDGE_RELEASE_NOT_READY"},
+    )
+    assert gap["status"] == "KNOWLEDGE_GAP"
+
+    not_applicable = product_api._diagnostic_semantics(
+        field=field,
+        coverage_status="NOT_APPLICABLE",
+        primary=None,
+        evidence=[],
+        formal_knowledge={"status": "MATCHED"},
+    )
+    assert not_applicable["status"] == "NOT_APPLICABLE"
+
+
+def test_359_explicit_unsupported_is_not_collapsed_into_not_found():
+    field = {
+        "canonical_name": "smart_health",
+        "group": parameter_baseline.KEY_DIAGNOSTIC,
+    }
+    result = product_api._diagnostic_semantics(
+        field=field,
+        coverage_status="FOUND",
+        primary={"ai_value": "not supported"},
+        evidence=[{"source_id": "s", "source_page": 2}],
+        formal_knowledge={"status": "MATCHED"},
+    )
+    assert result["status"] == "EXPLICITLY_NOT_SUPPORTED"
+
+
+def test_359_search_coverage_is_distinct_from_fact_coverage():
+    slots = [
+        {"coverage_status": "FOUND", "review_status": "CONFIRMED", "value": "x"},
+        {"coverage_status": "NOT_FOUND", "review_status": "NOT_REVIEWED", "value": None},
+        {"coverage_status": "FOUND", "review_status": "UNREVIEWED", "value": None},
+        {"coverage_status": "NOT_APPLICABLE", "review_status": "NOT_REVIEWED", "value": None},
+    ]
+    metrics = product_api._coverage_metrics(slots)
+    assert metrics["search_coverage_ratio"] == 1.0
+    assert metrics["fact_coverage_ratio"] == 0.3333
