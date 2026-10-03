@@ -435,7 +435,7 @@ def test_359_product_ui_exposes_four_layer_semantics():
 
 def test_359_selected_device_skill_route_is_exposed():
     from storage_life.app import app
-    paths = {route.path for route in app.routes}
+    paths = {getattr(route, "path", None) for route in app.routes}
     assert "/api/product/devices/{device_id}/skills/{skill_id}/execute" in paths
 
 
@@ -550,3 +550,74 @@ def test_359_timar_real_source_rejects_cell_type_without_explicit_cell_evidence(
         x.get("type") == "semantic_validation_failed" and x.get("field_key") == "cell_type"
         for x in adapted["review_queue"]
     )
+
+
+def test_359_gd5f_real_source_excerpt_resolves_explicit_diagnostic_facts():
+    source = _load_359_real_source("gd5f1gq5")
+    pages = [(x["page"], x["text"], x["method"]) for x in source["pages"]]
+    result = {
+        "fields": [
+            {
+                "field_key": "pages_per_block", "value": "64", "unit": "pages",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 10, "quote": "1 block = (2K + 128) bytes x 64 pages"},
+            },
+            {
+                "field_key": "operating_temperature", "value": "-40 to 85 / -40 to 105", "unit": "C",
+                "status": "found", "condition": "part-number dependent", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 54, "quote": "Ambient Operating Temperature: -40 to 85°C / -40 to 105°C"},
+            },
+            {
+                "field_key": "status_register", "value": "C0H", "unit": "",
+                "status": "found", "condition": "", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 44, "quote": "Status C0H includes ECCS1 ECCS0 P_FAIL E_FAIL WEL OIP"},
+            },
+            {
+                "field_key": "program_fail", "value": "P_FAIL", "unit": "",
+                "status": "found", "condition": "program operation", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 44, "quote": "P_FAIL Program Fail indicates a program failure has occurred"},
+            },
+            {
+                "field_key": "erase_fail", "value": "E_FAIL", "unit": "",
+                "status": "found", "condition": "erase operation", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 44, "quote": "E_FAIL Erase Fail indicates an erase failure has occurred"},
+            },
+            {
+                "field_key": "ecc_status", "value": "ECCS/ECCSE", "unit": "",
+                "status": "found", "condition": "after valid READ", "scope_type": "product_family",
+                "scope_values": ["GD5F1GQ5UExxG"], "confidence": 0.99,
+                "evidence": {"page": 44, "quote": "ECCS/ECCSE provide ECC status after a valid READ"},
+            },
+        ]
+    }
+    expected = [
+        "pages_per_block", "operating_temperature", "status_register",
+        "program_fail", "erase_fail", "ecc_status",
+    ]
+    adapted = ai._adapt_single_pass(
+        result, pages, "NAND Flash", "GigaDevice", "GD5F1GQ5UExxG",
+        source["source_id"], expected_fields=expected,
+    )
+    candidates = {x["canonical_name"]: x for x in adapted["candidates"]}
+    assert set(candidates) == set(expected)
+    assert candidates["program_fail"]["ai_value"] == "P_FAIL"
+    assert candidates["erase_fail"]["ai_value"] == "E_FAIL"
+    assert candidates["status_register"]["ai_value"] == "C0H"
+    assert candidates["pages_per_block"]["ai_value"] == "64"
+
+
+def test_359_gd5f_bad_block_description_does_not_promote_to_count_observability():
+    source = _load_359_real_source("gd5f1gq5")
+    page48 = next(x for x in source["pages"] if x["page"] == 48)
+    assert "Bad Block Mark" in page48["text"]
+    fields = parameter_baseline.product_fields("NAND Flash", ai.expected_fields("NAND Flash"))
+    by_name = {x["canonical_name"]: x for x in fields}
+    assert "runtime_bad_block" in by_name
+    assert "bad_block_observability" in by_name
+    assert "runtime_bad_block" not in by_name["bad_block_observability"]["aliases"]
+    assert "bad-block-count observability" in ai._semantic_rules("NAND Flash")
