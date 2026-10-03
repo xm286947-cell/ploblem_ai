@@ -103,8 +103,7 @@ jobs:
           cp /tmp/runtime329/config/runtime/model.yaml             "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
           cp /tmp/runtime329/tools/openai_mock/server.py             "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
           cp /tmp/runtime329/requirements-runtime-p0-test.txt             "$PKG/vendor/unified_agent_runtime/"
-          printf '%s
-' "$RUNTIME_SNAPSHOT_COMMIT"             > "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+          echo "$RUNTIME_SNAPSHOT_COMMIT" > "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
 
           cat > "$PKG/start_four_family_validation.sh" <<'EOF'
           #!/usr/bin/env bash
@@ -223,8 +222,7 @@ jobs:
           )
           SHA="$(sha256sum "$ZIP" | awk '{print $1}')"
           SIZE="$(stat -c%s "$ZIP")"
-          printf '%s  %s
-' "$SHA" "$(basename "$ZIP")" > "$ZIP.sha256"
+          echo "$SHA  $(basename "$ZIP")" > "$ZIP.sha256"
           cat > "$ZIP.DELIVERY_MANIFEST.json" <<EOF
           {
             "package_id": "$PACKAGE_ID",
