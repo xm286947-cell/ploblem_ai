@@ -1,0 +1,58 @@
+name: Hardware R1 Durable Asset Foundation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-r1-durable-asset.yml"
+      - "services/hardware_asset_repository.py"
+      - "services/hardware_asset_migrations/**"
+      - "services/hardware_data_root.py"
+      - "services/hardware_data_reliability.py"
+      - "tests/test_hardware_candidate_asset_repository.py"
+      - "tests/test_hardware_data_root.py"
+      - "tests/test_hardware_data_reliability.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hardware-r1-durable-asset.yml"
+      - "services/hardware_asset_repository.py"
+      - "services/hardware_asset_migrations/**"
+      - "services/hardware_data_root.py"
+      - "services/hardware_data_reliability.py"
+      - "tests/test_hardware_candidate_asset_repository.py"
+      - "tests/test_hardware_data_root.py"
+      - "tests/test_hardware_data_reliability.py"
+  workflow_dispatch:
+
+jobs:
+  durable-asset:
+    name: durable-asset-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependency
+        run: python -m pip install pytest
+
+      - name: Compile durable asset modules
+        run: >
+          python -m py_compile
+          services/hardware_asset_repository.py
+          services/hardware_asset_migrations/__init__.py
+          services/hardware_asset_migrations/v001_candidate_repository.py
+
+      - name: Run durable asset and persistent data regressions
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_candidate_asset_repository.py
+          tests/test_hardware_data_root.py
+          tests/test_hardware_data_reliability.py
