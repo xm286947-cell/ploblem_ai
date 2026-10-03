@@ -100,6 +100,92 @@
     return item.result || item.orchestration_status || 'QUEUED';
   }
 
+  function localSummary(items = []) {
+    const summary = {
+      TOTAL: items.length,
+      QUEUED: 0,
+      RUNNING: 0,
+      CANDIDATE_READY: 0,
+      REVIEW: 0,
+      FAILED: 0,
+    };
+    items.forEach((item) => {
+      const value = displayResult(item);
+      if (Object.prototype.hasOwnProperty.call(summary, value)) {
+        summary[value] += 1;
+      }
+    });
+    return summary;
+  }
+
+  function localBatchStatus(items = []) {
+    const states = items.map((item) => displayResult(item));
+    if (!states.length) return 'EMPTY';
+    if (states.every((value) => value === 'QUEUED')) return 'QUEUED';
+    if (states.some((value) => value === 'RUNNING')) return 'RUNNING';
+    const failed = states.filter((value) => value === 'FAILED').length;
+    const ready = states.filter((value) =>
+      ['CANDIDATE_READY', 'REVIEW'].includes(value)).length;
+    if (failed === states.length) return 'FAILED';
+    if (failed && ready) return 'PARTIAL_FAILURE';
+    if (ready === states.length) return 'READY_FOR_REVIEW';
+    return 'MIXED';
+  }
+
+  function syncItemIntoBatch(item) {
+    if (!state.batch || state.batch.batch_id !== item.batch_id) return;
+    const items = [...(state.batch.items || [])];
+    const index = items.findIndex((value) => value.item_id === item.item_id);
+    if (index >= 0) items[index] = {...items[index], ...item};
+    else items.push(item);
+    renderBatch({
+      ...state.batch,
+      items,
+      summary: localSummary(items),
+      status: localBatchStatus(items),
+    });
+  }
+
+  function failureHint(item) {
+    if (item.error_code === 'PROVIDER_TIMEOUT' &&
+        ['STAGE_A', 'STAGE_B'].includes(item.failed_stage)) {
+      return 'Provider Timeout：使用 Retry Failed Stage，仅重试失败阶段；不要 Force Full Run。';
+    }
+    if (item.error_code) {
+      return '失败原因：' + item.error_code + '。可先查看 Advanced Debug，再按失败阶段选择性重试。';
+    }
+    return '';
+  }
+
+  async function refreshBatchSnapshot(batchId) {
+    const batch = await request('/batches/' + encodeURIComponent(batchId));
+    renderBatch(batch);
+    historySelect.value = batchId;
+    return batch;
+  }
+
+  function startBatchPolling(batchId) {
+    let stopped = false;
+    let running = false;
+    const tick = async () => {
+      if (stopped || running) return;
+      running = true;
+      try {
+        await refreshBatchSnapshot(batchId);
+      } catch (_) {
+        // Foreground action owns the user-visible error.
+      } finally {
+        running = false;
+      }
+    };
+    const timer = window.setInterval(tick, 1500);
+    tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }
+
   function renderBatch(batch) {
     state.batch = batch;
     q('[data-batch-ref]').textContent =
@@ -109,7 +195,7 @@
     retryBatchButton.disabled = !batch || !(batch.summary?.FAILED > 0);
 
     if (!batch) {
-      tbody.innerHTML = '<tr><td colspan="10" class="hc-empty">暂无 Batch。</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">暂无 Batch。</td></tr>';
       return;
     }
 
@@ -120,7 +206,7 @@
     });
 
     if (!items.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="hc-empty">当前筛选无 Case。</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">当前筛选无 Case。</td></tr>';
       return;
     }
 
@@ -137,6 +223,7 @@
           <td>${statusPill(item.stage_b)}</td>
           <td>${statusPill(item.gate)}</td>
           <td>${statusPill(result)}</td>
+          <td><small class="${item.error_code ? 'hc-error' : ''}">${escapeHtml(item.error_code || '—')}</small></td>
           <td>${Number(item.provider_calls || 0)}</td>
           <td>${Number(item.duration_ms || 0).toLocaleString()} ms</td>
           <td><small>${escapeHtml(item.updated_at || '—')}</small></td>
@@ -228,10 +315,17 @@
       setMessage(action === 'retry-failed-only'
         ? '正在执行 Retry Failed Only…'
         : '正在执行 Batch Run / Resume…');
-      const payload = await request(
-        '/batches/' + encodeURIComponent(state.batch.batch_id) + '/' + action,
-        {method: 'POST'}
-      );
+      const batchId = state.batch.batch_id;
+      const stopPolling = startBatchPolling(batchId);
+      let payload;
+      try {
+        payload = await request(
+          '/batches/' + encodeURIComponent(batchId) + '/' + action,
+          {method: 'POST'}
+        );
+      } finally {
+        stopPolling();
+      }
       renderBatch(payload);
       const selected = payload.retry_selected_count;
       setMessage(selected === undefined
@@ -251,6 +345,12 @@
     q('[data-detail-batch]').textContent = item.batch_id || '—';
     q('[data-detail-status]').innerHTML = statusPill(displayResult(item));
     q('[data-detail-failed-stage]').textContent = item.failed_stage || '—';
+    q('[data-detail-error-code]').textContent = item.error_code || '—';
+    const hint = q('[data-detail-failure-hint]');
+    const hintText = failureHint(item);
+    hint.textContent = hintText;
+    hint.hidden = !hintText;
+    hint.classList.toggle('hc-error', Boolean(item.error_code));
     q('[data-detail-provider-calls]').textContent = item.provider_calls ?? 0;
     q('[data-detail-duration]').textContent =
       Number(item.duration_ms || 0).toLocaleString() + ' ms';
@@ -278,6 +378,7 @@
     state.scrollY = window.scrollY;
     try {
       const item = await request('/items/' + encodeURIComponent(itemId));
+      syncItemIntoBatch(item);
       renderDetail(item);
     } catch (error) {
       setMessage('Case Detail 加载失败：' + error.message, true);
@@ -293,10 +394,18 @@
     }
     try {
       setMessage('正在执行 ' + action + '…');
-      const item = await request(
-        '/items/' + encodeURIComponent(state.item.item_id) + '/' + action,
-        {method: 'POST'}
-      );
+      const batchId = state.item.batch_id;
+      const stopPolling = startBatchPolling(batchId);
+      let item;
+      try {
+        item = await request(
+          '/items/' + encodeURIComponent(state.item.item_id) + '/' + action,
+          {method: 'POST'}
+        );
+      } finally {
+        stopPolling();
+      }
+      syncItemIntoBatch(item);
       const itemId = item.item_id;
       await loadBatch(item.batch_id);
       await openItem(itemId);
