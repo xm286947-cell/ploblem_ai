@@ -29,6 +29,27 @@ def project_root() -> Path:
     raise StorageKnowledgeProductError("KNOWLEDGE_PRODUCT_RUNTIME_NOT_PACKAGED")
 
 
+def model_config_path() -> Path:
+    """Use the same effective model config contract as Storage Runtime.
+
+    STORAGE_MODEL_CONFIG is the only override.  Otherwise the Storage package's
+    config/model.local.yaml is authoritative for both parameter extraction and
+    Knowledge Production.
+    """
+    product_root = Path(__file__).resolve().parents[1]
+    configured = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
+    path = Path(configured).expanduser() if configured else (product_root / "config" / "model.local.yaml")
+    if not path.is_absolute():
+        path = (product_root / path).resolve()
+    else:
+        path = path.resolve()
+    if not path.is_file():
+        raise StorageKnowledgeProductError(
+            f"STORAGE_MODEL_CONFIG_MISSING:{path}"
+        )
+    return path
+
+
 def repository_root() -> Path:
     configured = os.environ.get("STORAGE_KNOWLEDGE_REPOSITORY_DIR", "").strip()
     if configured:
@@ -108,17 +129,7 @@ def extract_source(
     requested_topics: list[str] | None = None,
 ) -> dict:
     root = project_root()
-    product_root = Path(__file__).resolve().parents[1]
-    configured_model = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
-    model_config = Path(configured_model) if configured_model else (product_root / "config" / "model.local.yaml")
-    if not model_config.is_absolute():
-        model_config = (product_root / model_config).resolve()
-    else:
-        model_config = model_config.expanduser().resolve()
-    if not model_config.is_file():
-        raise StorageKnowledgeProductError(
-            f"STORAGE_MODEL_CONFIG_MISSING:{model_config}"
-        )
+    model_config = model_config_path()
     bootstrap = KnowledgeExtractionService.from_project(
         root,
         model_config_path=model_config,
