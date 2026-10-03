@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      PRODUCT_SOURCE_COMMIT: 8f9e57de89d2a184079cfb410d53918d010fcddf
-      RUNTIME_SNAPSHOT_COMMIT: f9ca45f82960b3ce380273cf26868bc842a72b7f
+      PRODUCT_SOURCE_COMMIT: 98fa39ef345f2d5da9c1f65d9788cf4ea4ccd3cf
+      RUNTIME_SNAPSHOT_COMMIT: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
 
     steps:
@@ -348,7 +348,7 @@ jobs:
           assert ssd_status["configured"] is True, ssd_status
           assert ssd_status["execution_mode"] == "runtime"
           assert ssd_status["runtime"]["pinned"] is True
-          assert ssd_status["runtime"]["snapshot_commit"] == "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          assert ssd_status["runtime"]["snapshot_commit"] == "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
           assert ssd_status["active_route"]["agent_id"] == "storage.ai.json_call"
           assert ssd_status["active_route"]["model_ref"] == "qwen_prod"
           assert ssd_status["active_route"]["model"] == "qwen3.8-max"
