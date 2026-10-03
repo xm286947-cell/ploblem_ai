@@ -278,3 +278,143 @@ def test_359_product_knowledge_gap_is_explicit_partial(monkeypatch):
     assert result["result_status"] == "PARTIAL"
     assert result["knowledge_gap"] is True
     assert result["skill_result"]["status"] == "INSUFFICIENT_KNOWLEDGE"
+
+
+class _FakeKnowledgeStatus:
+    def status(self):
+        return {
+            "available": False,
+            "status": "NOT_READY",
+            "code": "FORMAL_KNOWLEDGE_RELEASE_REQUIRED",
+        }
+
+
+def _selected_device_detail():
+    return {
+        "device": {"id": "ssd-ctx", "device_type": "SSD", "vendor": "TIMAR", "model": "K97M8-Y"},
+        "device_facts": [
+            {
+                "canonical_name": "tbw",
+                "parameter_name": "TBW",
+                "value": "768",
+                "unit": "TB",
+                "condition": "WAF=1",
+                "scope": "256GB",
+                "evidence": [{"source_id": "TIMAR-97", "evidence_id": "EVD-TBW"}],
+            }
+        ],
+        "slots": [
+            {
+                "canonical_name": "percentage_used",
+                "group": parameter_baseline.KEY_DIAGNOSTIC,
+                "diagnostic_status": "KNOWLEDGE_GAP",
+                "value": None,
+                "review_status": "NOT_REVIEWED",
+                "evidence": [],
+            }
+        ],
+    }
+
+
+def test_359_selected_device_context_routes_all_four_existing_skills(monkeypatch):
+    service = _FakeSkillService()
+    monkeypatch.setattr(
+        real_knowledge.RealKnowledgeAssessmentService,
+        "current",
+        classmethod(lambda cls: service),
+    )
+    monkeypatch.setattr(product_api, "device_slots", lambda device_id: _selected_device_detail())
+    monkeypatch.setattr(
+        product_api.KnowledgeReleaseConsumer,
+        "current",
+        classmethod(lambda cls: _FakeKnowledgeStatus()),
+    )
+
+    write = product_api.execute_device_skill(
+        "ssd-ctx",
+        "storage-write-governance",
+        {"user_context": {"question": "small writes"}},
+    )
+    diagnostic = product_api.execute_device_skill(
+        "ssd-ctx",
+        "storage-diagnostic-validation",
+        {"runtime_observations": []},
+    )
+    change = product_api.execute_device_skill(
+        "ssd-ctx",
+        "storage-change-impact",
+        {"parameter_delta": [{"canonical_name": "tbw", "old": "768", "new": "3000"}]},
+    )
+    lifetime = product_api.execute_device_skill(
+        "ssd-ctx",
+        "storage-lifetime-budget",
+        {"requested_metric": "ssd.tbw", "assessment_request": {}},
+    )
+
+    assert [call[0] for call in service.calls] == [
+        "storage-write-governance",
+        "storage-diagnostic-validation",
+        "storage-change-impact",
+        "storage-lifetime-budget",
+    ]
+    assert write["adapter"] == "EXISTING_STORAGE_DOMAIN_SKILL_ADAPTER"
+    assert write["second_skill_stack"] is False
+    assert write["second_knowledge_stack"] is False
+    assert write["context"]["confirmed_device_facts"][0]["canonical_name"] == "tbw"
+    assert diagnostic["skill_payload"]["diagnostic_capabilities"][0]["canonical_name"] == "percentage_used"
+    assert change["skill_payload"]["parameter_delta"][0]["canonical_name"] == "tbw"
+    life_facts = lifetime["skill_payload"]["assessment_request"]["confirmed_facts"]
+    assert life_facts[0]["metric_name"] == "rated_tbw_bytes"
+    assert life_facts[0]["evidence_refs"] == ["EVD-TBW"]
+
+
+def test_359_engineering_result_has_required_product_shape():
+    view = product_api._engineering_result_view({
+        "skill_id": "storage-diagnostic-validation",
+        "status": "INSUFFICIENT_KNOWLEDGE",
+        "direct_answer": "knowledge missing",
+        "structured_result": {"validation_method": ["read health log"]},
+        "fact_derived_hypothesis_separation": {
+            "facts": [{"metric": "protocol", "value": "NVMe 2.0"}],
+            "derived": [],
+            "hypotheses": [],
+            "unknowns": ["runtime"],
+        },
+        "knowledge_refs": [],
+        "evidence_refs": ["EVD-PROTOCOL"],
+        "missing_information": ["FORMAL_KNOWLEDGE_RELEASE_REQUIRED"],
+        "decision_boundary": "NO_AUTO_REPLACEMENT_DECISION",
+    })
+    assert set({
+        "facts",
+        "formal_knowledge",
+        "derived_result",
+        "hypotheses",
+        "unknowns",
+        "evidence_refs",
+        "validation_requirements",
+        "next_action",
+    }) <= set(view)
+    assert view["evidence_refs"] == ["EVD-PROTOCOL"]
+    assert view["next_action"].startswith("补齐缺失")
+
+
+def test_359_selected_device_lifetime_requires_explicit_metric(monkeypatch):
+    service = _FakeSkillService()
+    monkeypatch.setattr(
+        real_knowledge.RealKnowledgeAssessmentService,
+        "current",
+        classmethod(lambda cls: service),
+    )
+    monkeypatch.setattr(product_api, "device_slots", lambda device_id: _selected_device_detail())
+    monkeypatch.setattr(
+        product_api.KnowledgeReleaseConsumer,
+        "current",
+        classmethod(lambda cls: _FakeKnowledgeStatus()),
+    )
+    try:
+        product_api.execute_device_skill("ssd-ctx", "storage-lifetime-budget", {})
+    except ValueError as exc:
+        assert str(exc) == "REQUESTED_METRIC_REQUIRED"
+    else:
+        raise AssertionError("lifetime execution must not guess a metric")
