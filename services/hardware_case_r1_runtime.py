@@ -1423,7 +1423,13 @@ def invalidate_hardware_r1_stage_cache(
     are intentionally preserved.
     """
     env = os.environ if environ is None else environ
-    root_path = Path(root).resolve() if root is not None else package_root()
+    # The host composition root may be shadowed by a later route function in
+    # closure scope. Fail safe to the package root rather than treating a
+    # non-path callable/object as a filesystem path.
+    if isinstance(root, (str, os.PathLike, Path)):
+        root_path = Path(root).resolve()
+    else:
+        root_path = package_root()
     runtime_raw = str(env.get("HARDWARE_CASE_RUNTIME_DB") or "").strip()
     runtime_db = (
         _resolved_path(root_path, runtime_raw)
