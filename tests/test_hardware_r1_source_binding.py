@@ -195,3 +195,119 @@ def test_r1_word_snapshot_binds_source_and_delete_reupload_api(tmp_path: Path) -
         headers=MAINTAINER,
     )
     assert again.status_code == 200
+
+
+def test_batch_workbench_source_persistence_gate(tmp_path: Path) -> None:
+    from zipfile import ZipFile
+
+    def docx_bytes(name: str, text: str) -> bytes:
+        path = tmp_path / name
+        document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>"""
+        with ZipFile(path, "w") as archive:
+            archive.writestr("word/document.xml", document)
+        return path.read_bytes()
+
+    client = TestClient(
+        create_p0_app(
+            tmp_path / "quality-batch.db",
+            project_root=tmp_path,
+            hardware_case_db_path=tmp_path / "hardware-batch.db",
+            hardware_tree_upload_dir=tmp_path / "trees-batch",
+            hardware_case_source_root=tmp_path / "sources-batch",
+            enabled_domains={"HARDWARE_CASE"},
+        )
+    )
+
+    a0152 = docx_bytes("A0152-batch-demo.docx", "MCU UART demo")
+    a0156 = docx_bytes("A0156-batch-demo.docx", "test point resistor demo")
+
+    created = client.post(
+        "/api/v2/hardware-cases/r1/workbench/batches",
+        files=[
+            (
+                "files",
+                (
+                    "A0152-batch-demo.docx",
+                    a0152,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "A0156-batch-demo.docx",
+                    a0156,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            ),
+            ("files", ("bad.pdf", b"not-a-docx", "application/pdf")),
+        ],
+        headers=MAINTAINER,
+    )
+    assert created.status_code == 201
+    payload = created.json()
+    assert payload["summary"]["TOTAL"] == 3
+
+    items = {item["source_file"]: item for item in payload["items"]}
+    assert items["A0152-batch-demo.docx"]["result"] == "QUEUED"
+    assert items["A0156-batch-demo.docx"]["result"] == "QUEUED"
+    assert items["bad.pdf"]["result"] == "FAILED"
+    assert items["bad.pdf"]["failed_stage"] == "PARSE"
+
+    source_a = client.get(
+        "/api/v2/hardware-cases/r1/sources/A0152",
+        headers=MAINTAINER,
+    )
+    source_b = client.get(
+        "/api/v2/hardware-cases/r1/sources/A0156",
+        headers=MAINTAINER,
+    )
+    assert source_a.status_code == 200
+    assert source_b.status_code == 200
+    assert source_a.json()["source_id"] == hashlib.sha256(a0152).hexdigest()
+    assert source_b.json()["source_id"] == hashlib.sha256(a0156).hexdigest()
+
+    duplicate = client.post(
+        "/api/v2/hardware-cases/r1/workbench/batches",
+        files=[
+            (
+                "files",
+                (
+                    "A0152-batch-demo.docx",
+                    a0152,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            )
+        ],
+        headers=MAINTAINER,
+    )
+    assert duplicate.status_code == 201
+    duplicate_item = duplicate.json()["items"][0]
+    assert duplicate_item["result"] == "DEPENDENCY_BLOCKED"
+    assert duplicate_item["error_code"] == "SOURCE_ALREADY_EXISTS"
+
+    deleted = client.delete(
+        "/api/v2/hardware-cases/r1/sources/A0152",
+        headers=MAINTAINER,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["runtime_audit_preserved"] is True
+
+    reuploaded = client.post(
+        "/api/v2/hardware-cases/r1/workbench/batches",
+        files=[
+            (
+                "files",
+                (
+                    "A0152-batch-demo.docx",
+                    a0152,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            )
+        ],
+        headers=MAINTAINER,
+    )
+    assert reuploaded.status_code == 201
+    assert reuploaded.json()["items"][0]["result"] == "QUEUED"

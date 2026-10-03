@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.hardware_public_api import create_hardware_public_router
 from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
+from quality_knowledge.web.hardware_r1_workbench_api import create_hardware_r1_workbench_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
 from quality_knowledge.web.p0_pages import (
     create_hardware_case_pages_router,
@@ -35,6 +36,10 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
+from services.hardware_case_r1_workbench import (
+    HardwareR1WorkbenchService,
+    HardwareR1WorkbenchStore,
+)
 from services.hardware_case_r1_runtime import invalidate_hardware_r1_stage_cache
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
@@ -399,6 +404,22 @@ def create_p0_app(
             app.state.hardware_r1_preview_store = hardware_r1_preview_store
             testability_mutable_paths.append(hardware_r1_preview_db)
 
+            hardware_r1_workbench_db = hardware_db.with_name(
+                hardware_db.stem + "_r1_workbench.db"
+            )
+            hardware_r1_workbench_store = HardwareR1WorkbenchStore(
+                hardware_r1_workbench_db
+            )
+            hardware_r1_workbench_service = HardwareR1WorkbenchService(
+                hardware_r1_workbench_store,
+                source_store=hardware_case_source_store,
+                structurer_factory=r1_structurer,
+                preview_store=hardware_r1_preview_store,
+            )
+            app.state.hardware_r1_workbench_store = hardware_r1_workbench_store
+            app.state.hardware_r1_workbench_service = hardware_r1_workbench_service
+            testability_mutable_paths.append(hardware_r1_workbench_db)
+
             hardware_tree_import_repository = HardwareTreeImportRepository(
                 hardware_db,
                 initialize_schema=False,
@@ -434,6 +455,11 @@ def create_p0_app(
                     ),
                 )
             )
+            app.include_router(
+                create_hardware_r1_workbench_router(
+                    hardware_r1_workbench_service
+                )
+            )
             app.include_router(create_hardware_public_router(hardware_case_service))
             testability_restore_hooks.append(hardware_data.ensure_ready)
         else:
@@ -442,6 +468,8 @@ def create_p0_app(
             app.state.hardware_case_source_store = None
             app.state.hardware_case_intake_service = None
             app.state.hardware_r1_preview_store = None
+            app.state.hardware_r1_workbench_store = None
+            app.state.hardware_r1_workbench_service = None
             app.state.hardware_tree_import_repository = None
             app.state.hardware_tree_file_store = None
 
