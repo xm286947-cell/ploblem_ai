@@ -72,6 +72,7 @@ def create_hardware_case_router(
     intake_service: HardwareCaseIntakeService | None = None,
     r1_structurer_factory: Callable[[], Any] | None = None,
     r1_preview_store: HardwareR1PreviewStore | None = None,
+    r1_stage_cache_invalidator: Callable[[str], int] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -110,9 +111,112 @@ def create_hardware_case_router(
                     "PARSE_MS": parse_ms,
                     "MARKDOWN_MS": markdown_ms,
                 }
+
+                identity = snapshot.get("identity") if isinstance(snapshot.get("identity"), dict) else {}
+                business_case_id = str(identity.get("business_case_id") or "").strip()
+                if source_store is not None and business_case_id:
+                    try:
+                        snapshot["source_binding"] = source_store.register_active_bytes(
+                            business_case_id,
+                            filename,
+                            payload,
+                            mime_type=file.content_type,
+                        )
+                    except HardwareCaseSourceError as error:
+                        if error.code == "SOURCE_ALREADY_EXISTS":
+                            raise HTTPException(status_code=409, detail=error.code) from error
+                        raise HTTPException(status_code=400, detail=error.code) from error
+                else:
+                    snapshot["source_binding"] = {
+                        "binding_status": "UNBOUND_IDENTITY_REVIEW",
+                        "business_case_id": business_case_id or None,
+                    }
                 return snapshot
             except (HardwareWordParseError, HardwareCaseMarkdownError) as error:
                 raise HTTPException(status_code=400, detail=error.code) from error
+
+    @router.get("/r1/sources/{business_case_id}")
+    def r1_get_active_source(
+        business_case_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if source_store is None:
+            raise HTTPException(status_code=503, detail="SOURCE_STORE_UNAVAILABLE")
+        try:
+            return source_store.get_active_source(business_case_id)
+        except HardwareCaseSourceError as error:
+            status = 404 if error.code == "SOURCE_NOT_REGISTERED" else 409
+            raise HTTPException(status_code=status, detail=error.code) from error
+
+    @router.delete("/r1/sources/{business_case_id}")
+    def r1_delete_active_source(
+        business_case_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if source_store is None:
+            raise HTTPException(status_code=503, detail="SOURCE_STORE_UNAVAILABLE")
+        try:
+            active = source_store.get_active_source(business_case_id)
+            refs = source_store.formal_knowledge_references(business_case_id)
+            if refs:
+                raise HardwareCaseSourceError(
+                    "SOURCE_IN_USE_BY_FORMAL_KNOWLEDGE"
+                )
+            source_id = str(active["source_id"])
+            preview_deleted = (
+                r1_preview_store.delete_source(source_id)
+                if r1_preview_store is not None
+                else 0
+            )
+            cache_deleted = (
+                int(r1_stage_cache_invalidator(source_id))
+                if r1_stage_cache_invalidator is not None
+                else 0
+            )
+            result = source_store.delete_active_source(
+                business_case_id,
+                deleted_by="MAINTAINER",
+            )
+            return {
+                **result,
+                "preview_records_invalidated": preview_deleted,
+                "stage_cache_records_invalidated": cache_deleted,
+                "runtime_audit_preserved": True,
+            }
+        except HardwareCaseSourceError as error:
+            if error.code == "SOURCE_NOT_REGISTERED":
+                status = 404
+            elif error.code in {
+                "SOURCE_IN_USE_BY_FORMAL_KNOWLEDGE",
+                "SOURCE_ALREADY_EXISTS",
+            }:
+                status = 409
+            else:
+                status = 400
+            raise HTTPException(status_code=status, detail=error.code) from error
+
+    @router.get("/r1/source-delete-audit")
+    def r1_source_delete_audit(
+        business_case_id: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if source_store is None:
+            raise HTTPException(status_code=503, detail="SOURCE_STORE_UNAVAILABLE")
+        items = source_store.list_delete_audit(
+            business_case_id=business_case_id,
+            limit=limit,
+        )
+        return {"items": items, "total": len(items)}
 
     @router.post("/r1/agent-extract")
     def r1_agent_extract(

@@ -54,7 +54,7 @@ def test_schema_registry_and_forward_migration_preserve_legacy_data(tmp_path):
 
     status = manager.inspect_status()
     assert status["status"] == "READY"
-    assert status["schema_version"] == 1
+    assert status["schema_version"] == CURRENT_SCHEMA_VERSION
     assert status["fingerprint"]
 
 
@@ -71,7 +71,7 @@ def test_migration_is_idempotent_and_not_reapplied(tmp_path):
         count = connection.execute(
             "SELECT COUNT(*) FROM hardware_schema_migration"
         ).fetchone()[0]
-    assert count == 1
+    assert count == 2
     assert _case_title(db) == "Legacy case"
 
 
@@ -121,7 +121,7 @@ def test_pre_migration_backup_is_traceable(tmp_path):
     assert manifest["backup_id"] == backup_id
     assert manifest["reason"] == "PRE_MIGRATION"
     assert manifest["source_schema"] == 0
-    assert manifest["target_schema"] == 1
+    assert manifest["target_schema"] == CURRENT_SCHEMA_VERSION
     assert len(manifest["backup_sha256"]) == 64
     assert (manager.backup_root / manifest["backup_file"]).is_file()
 
@@ -180,8 +180,8 @@ def test_restore_same_environment_roundtrip(tmp_path):
     manager.ensure_ready()
     backup = manager.create_backup(
         reason="MANUAL_TEST",
-        source_schema=1,
-        target_schema=1,
+        source_schema=CURRENT_SCHEMA_VERSION,
+        target_schema=CURRENT_SCHEMA_VERSION,
     )
 
     connection = sqlite3.connect(db)
@@ -207,8 +207,8 @@ def test_restore_fresh_environment_is_immediately_verifiable(tmp_path):
     manager.ensure_ready()
     backup = manager.create_backup(
         reason="PORTABLE_RESTORE",
-        source_schema=1,
-        target_schema=1,
+        source_schema=CURRENT_SCHEMA_VERSION,
+        target_schema=CURRENT_SCHEMA_VERSION,
     )
 
     fresh = tmp_path / "fresh" / "hardware.db"
@@ -218,7 +218,7 @@ def test_restore_fresh_environment_is_immediately_verifiable(tmp_path):
 
     fresh_status = HardwareDataReliabilityManager(fresh).inspect_status()
     assert fresh_status["status"] == "READY"
-    assert fresh_status["schema_version"] == 1
+    assert fresh_status["schema_version"] == CURRENT_SCHEMA_VERSION
 
 
 def test_restore_rejects_tampered_backup(tmp_path):
@@ -227,8 +227,8 @@ def test_restore_rejects_tampered_backup(tmp_path):
     manager.ensure_ready()
     backup = manager.create_backup(
         reason="TAMPER_TEST",
-        source_schema=1,
-        target_schema=1,
+        source_schema=CURRENT_SCHEMA_VERSION,
+        target_schema=CURRENT_SCHEMA_VERSION,
     )
     manifest = json.loads(
         (manager.backup_root / f"{backup['backup_id']}.json").read_text(

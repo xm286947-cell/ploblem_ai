@@ -35,6 +35,7 @@ from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
+from services.hardware_case_r1_runtime import invalidate_hardware_r1_stage_cache
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
@@ -425,6 +426,12 @@ def create_p0_app(
                     intake_service=hardware_case_intake_service,
                     r1_structurer_factory=r1_structurer,
                     r1_preview_store=hardware_r1_preview_store,
+                    r1_stage_cache_invalidator=lambda source_id, project_root=root: (
+                        invalidate_hardware_r1_stage_cache(
+                            source_id,
+                            root=project_root,
+                        )
+                    ),
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))

@@ -424,7 +424,7 @@ def main() -> int:
         "product": "HARDWARE_CASE",
         "target_version": "MVP_V0.1",
         "product_version": "MVP_V0.1",
-        "schema_version": "HARDWARE_SCHEMA_V1",
+        "schema_version": "HARDWARE_SCHEMA_V2",
         "package_revision": "FULL_V0.1_P01_P07",
         "package_status": "READY_FOR_INTERNAL_TEST",
         "release_status": "TEST_PACKAGE_NOT_RELEASE",
@@ -466,7 +466,7 @@ def main() -> int:
             "windows_macos_semantics": "SAME",
         },
         "data_reliability": {
-            "schema_version": "HARDWARE_SCHEMA_V1",
+            "schema_version": "HARDWARE_SCHEMA_V2",
             "migration_policy": "VERSIONED_DETERMINISTIC_ATOMIC",
             "backup_before_migration": "MANDATORY_FOR_EXISTING_DB",
             "unknown_schema": "FAIL_CLOSED",

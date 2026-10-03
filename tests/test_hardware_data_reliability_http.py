@@ -9,6 +9,8 @@ import services.hardware_operability as operability
 from quality_knowledge.web.p0_app import create_p0_app
 from repositories.hardware_case_repository import HardwareCaseRepository
 from services.hardware_data_reliability import (
+    CURRENT_SCHEMA_VERSION,
+    SCHEMA_VERSION_NAME,
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
 )
@@ -79,8 +81,8 @@ def test_schema_status_is_visible_and_ready_on_fresh_bootstrap(tmp_path):
     assert schema.status_code == 200
     payload = schema.json()
     assert payload["status"] == "READY"
-    assert payload["schema_version"] == 1
-    assert payload["schema_name"] == "HARDWARE_SCHEMA_V1"
+    assert payload["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert payload["schema_name"] == SCHEMA_VERSION_NAME
 
 
 def test_unknown_schema_blocks_hardware_business_routes(tmp_path):

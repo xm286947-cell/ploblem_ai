@@ -16,6 +16,7 @@ on:
       - "scripts/hardware_case_data_reliability.py"
       - "tests/test_hardware_data_reliability.py"
       - "tests/test_hardware_data_reliability_http.py"
+      - "tests/test_hardware_r1_source_binding.py"
   push:
     branches: [main]
     paths:
@@ -56,6 +57,7 @@ jobs:
           python -m pytest -q --noconftest
           tests/test_hardware_data_reliability.py
           tests/test_hardware_data_reliability_http.py
+          tests/test_hardware_r1_source_binding.py
 
       - name: CLI bootstrap and status smoke
         shell: bash
