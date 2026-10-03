@@ -11,9 +11,12 @@ from pathlib import Path
 
 import yaml
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from services.hardware_data_root import HardwareDataRootResolver
 
-ROOT = Path(__file__).resolve().parents[1]
 MODEL_EXAMPLE = ROOT / "config/runtime/model.local.hardware_case.example.yaml"
 MODEL_LOCAL = ROOT / "config/runtime/model.local.yaml"
 VALIDATION_EXAMPLE = ROOT / "config/hardware_case_real_validation.local.example.json"
