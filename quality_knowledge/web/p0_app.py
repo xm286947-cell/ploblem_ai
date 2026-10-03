@@ -425,6 +425,13 @@ def create_p0_app(
                     intake_service=hardware_case_intake_service,
                     r1_structurer_factory=r1_structurer,
                     r1_preview_store=hardware_r1_preview_store,
+                    r1_stage_cache_invalidator=lambda source_id: __import__(
+                        "services.hardware_case_r1_runtime",
+                        fromlist=["invalidate_hardware_r1_stage_cache"],
+                    ).invalidate_hardware_r1_stage_cache(
+                        source_id,
+                        root=root,
+                    ),
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
