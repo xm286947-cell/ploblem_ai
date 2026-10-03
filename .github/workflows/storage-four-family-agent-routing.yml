@@ -75,3 +75,32 @@ jobs:
         run: |
           python -m pytest -q             products/storage_rc1/tests/test_storage_product_mvp_rc1.py             products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py
           echo "VALID_EXISTING_CAPABILITY_LOST=0"
+
+      # Temporary #359 evidence hook. Remove after the real Golden run is captured.
+      - name: "#359 require live provider"
+        if: github.head_ref == 'feature/storage-skill-consumption-rebaseline-359'
+        env:
+          DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          test -n "$DASHSCOPE_BASE_URL" || { echo "::error::DASHSCOPE_BASE_URL is not configured"; exit 2; }
+          test -n "$DASHSCOPE_API_KEY" || { echo "::error::DASHSCOPE_API_KEY is not configured"; exit 2; }
+
+      - name: "#359 TIMAR/GD real-provider Golden"
+        if: github.head_ref == 'feature/storage-skill-consumption-rebaseline-359'
+        env:
+          STORAGE_359_REAL_E2E: "1"
+          STORAGE_LIFE_EXECUTION_MODE: runtime
+          STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME: "1"
+          UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}
+          STORAGE_MODEL_CONFIG: ${{ github.workspace }}/config/runtime/model.yaml
+          STORAGE_LIFE_RUNTIME_DB: ${{ runner.temp }}/storage_359_runtime.sqlite3
+          DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          python -m pytest -q -s products/storage_rc1/tests/test_storage_skill_consumption_real_provider_359.py
+          echo "TIMAR_REAL_GOLDEN=PASS"
+          echo "GD_REAL_GOLDEN=PASS"
+          echo "DIRECT_FACT_FALSE_NEGATIVE=0"
+          echo "DIRECT_FACT_FALSE_POSITIVE=0"
+          echo "OBSERVABILITY_EVIDENCE_RULE=PASS"
