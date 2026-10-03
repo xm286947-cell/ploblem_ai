@@ -130,6 +130,14 @@ jobs:
           assert manifest["runtime"]["r1_stage_a_payload"] == "SINGLE_MARKDOWN_PLUS_EVIDENCE_INDEX_NO_DUPLICATE_TEXT"
           assert manifest["runtime"]["r1_stage_b_payload"] == "VALIDATED_CASE_FACTS_PLUS_NECESSARY_EVIDENCE_ONLY"
           assert manifest["runtime"]["r1_partial_failure_preservation"] is True
+          assert manifest["knowledge_promotion"]["contract_version"] == "hardware-r1-knowledge-promotion/v1"
+          assert manifest["knowledge_promotion"]["fixed_technical_revision"] == 1
+          assert manifest["knowledge_promotion"]["revision_management"] is False
+          assert manifest["knowledge_promotion"]["auto_publish"] is False
+          assert manifest["knowledge_promotion"]["tree_required"] is False
+          assert manifest["knowledge_promotion"]["image_evidence"] == "DEFERRED_FAIL_CLOSED"
+          assert manifest["knowledge_promotion"]["second_runtime"] is False
+          assert manifest["knowledge_promotion"]["second_knowledge_stack"] is False
           assert manifest["runtime"]["r1_execution_trace_version"] == "hardware-r1-execution-trace/v1.5"
           assert manifest["runtime"]["r1_force_retry_new_run"] is True
           assert manifest["runtime"]["r1_selective_retry_failed_stage"] is True
@@ -193,6 +201,10 @@ jobs:
           assert "services/hardware_case_markdown_agent.py" in paths
           assert "services/hardware_case_r1_runtime.py" in paths
           assert "services/hardware_case_r1_preview_store.py" in paths
+          assert "services/hardware_case_knowledge_adapter.py" in paths
+          assert "services/hardware_r1_golden_knowledge_bridge.py" in paths
+          assert "services/hardware_r1_knowledge_promotion.py" in paths
+          assert "quality_knowledge/web/hardware_r1_workbench_api.py" in paths
           assert "00_README_FIRST.txt" in paths
           assert "START_HARDWARE_CASE.bat" in paths
           assert "START_HARDWARE_CASE.sh" in paths
@@ -257,6 +269,8 @@ jobs:
           tests/test_hardware_r1_preview_store.py
           tests/test_hardware_r1_pipeline_v13.py
           tests/test_hardware_r1_source_binding.py
+          tests/test_hardware_r1_workbench.py
+          tests/test_hardware_r1_knowledge_promotion.py
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py
