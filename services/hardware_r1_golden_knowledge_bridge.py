@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 from copy import deepcopy
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from services.hardware_case_knowledge_adapter import (
     HardwareCaseKnowledgeAdapter,
@@ -162,6 +163,33 @@ class HardwareR1GoldenKnowledgeBridge:
             "evidences": evidence_results,
             "candidate": candidate,
         }
+
+    def review(
+        self,
+        *,
+        candidate_id: str,
+        original_golden: Mapping[str, Any],
+        confirmed_content: Mapping[str, Any],
+        reviewer: str,
+        review_time: datetime,
+        review_comment: str | None = None,
+    ) -> dict[str, Any]:
+        if confirmed_content.get("contract_version") != GOLDEN_KNOWLEDGE_CONTRACT:
+            raise HardwareR1GoldenBridgeError("CONFIRMED_CONTENT_CONTRACT_INVALID")
+        if confirmed_content.get("source_fact") != original_golden.get("source_fact"):
+            raise HardwareR1GoldenBridgeError("SOURCE_FACT_IMMUTABLE")
+        try:
+            return self.adapter.review_candidate(
+                candidate_id=candidate_id,
+                state="CONFIRMED",
+                reviewer=reviewer,
+                review_time=review_time,
+                review_comment=review_comment,
+                confirmed_content=deepcopy(dict(confirmed_content)),
+                revision=FIXED_KNOWLEDGE_REVISION,
+            )
+        except HardwareKnowledgeAdapterError as error:
+            raise HardwareR1GoldenBridgeError(error.code) from error
 
     @staticmethod
     def evidence_id(business_case_id: str, source_id: str, block_id: str) -> str:
