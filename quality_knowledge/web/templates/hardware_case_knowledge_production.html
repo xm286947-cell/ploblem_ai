@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-workbench-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-workbench-v1.1">{% endblock %}
 {% block breadcrumb %}知识生产工作台{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
@@ -64,6 +64,7 @@
             <th>Stage B</th>
             <th>Gate</th>
             <th>Result</th>
+            <th>Error</th>
             <th>Provider Calls</th>
             <th>Duration</th>
             <th>Last Updated</th>
@@ -71,7 +72,7 @@
           </tr>
         </thead>
         <tbody data-batch-items>
-          <tr><td colspan="10" class="hc-empty">暂无 Batch。</td></tr>
+          <tr><td colspan="11" class="hc-empty">暂无 Batch。</td></tr>
         </tbody>
       </table>
     </div>
@@ -90,11 +91,13 @@
         <div><b>Batch Ref</b><span data-detail-batch>—</span></div>
         <div><b>Current Status</b><span data-detail-status>—</span></div>
         <div><b>Failed Stage</b><span data-detail-failed-stage>—</span></div>
+        <div><b>Error Code</b><span data-detail-error-code>—</span></div>
         <div><b>Provider Calls</b><span data-detail-provider-calls>—</span></div>
         <div><b>Duration</b><span data-detail-duration>—</span></div>
         <div><b>Run Ref</b><span data-detail-run-ref>—</span></div>
       </div>
       <div class="hc-workbench-stage-strip" data-detail-stages></div>
+      <p class="hc-workbench-message" data-detail-failure-hint hidden></p>
       <div class="hc-workbench-detail-actions">
         <button class="hc-button" type="button" data-item-run>Run / Resume</button>
         <button class="hc-button" type="button" data-item-retry>Retry Failed Stage</button>
@@ -125,4 +128,4 @@
   </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.1"></script>{% endblock %}
