@@ -27,6 +27,8 @@ from uuid import uuid4
 RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
 GENERIC_AGENT_ID = "storage.ai.json_call"
 EMMC_PARAMETER_AGENT_ID = "storage.emmc.parameter_extract"
+KNOWLEDGE_PRODUCTION_AGENT_ID = "knowledge.production.extract"
+FOUR_FAMILY_DEVICE_TYPES = ("NOR Flash", "NAND Flash", "eMMC", "SSD")
 
 _LOCK = threading.RLock()
 _RUNTIME = None
@@ -134,6 +136,63 @@ def resolve_semantic_repair_content(error: RuntimeBridgeCallError) -> str:
 
 def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+def agent_config_dir() -> Path:
+    """Canonical Storage-owned Runtime Agent configuration directory."""
+    return (_project_root() / "config" / "runtime" / "agents").resolve()
+
+
+def agent_config_path(agent_id: str) -> Path:
+    allowed = {GENERIC_AGENT_ID, EMMC_PARAMETER_AGENT_ID, KNOWLEDGE_PRODUCTION_AGENT_ID}
+    if agent_id not in allowed:
+        raise RuntimeBridgeUnavailable(f"未知 Storage/Knowledge Agent：{agent_id}")
+    return (agent_config_dir() / f"{agent_id}.yaml").resolve()
+
+
+def execution_mode_source() -> str:
+    return "environment" if "STORAGE_LIFE_EXECUTION_MODE" in os.environ else "legacy_compat_default"
+
+
+def route_for_device_type(device_type: str) -> dict[str, Any]:
+    """Return the frozen four-family parameter-extraction route.
+
+    eMMC owns a dedicated 37-field Runtime contract.  The other three families use
+    the generic Runtime JSON agent together with their device-specific schema/read
+    plan/semantic rules.  This function is intentionally deterministic and does not
+    inspect Provider or model state.
+    """
+    from . import templates
+
+    normalized = templates.normalize_device_type(device_type)
+    if normalized not in FOUR_FAMILY_DEVICE_TYPES:
+        raise RuntimeBridgeUnavailable(f"不支持的存储器件类型：{device_type}")
+    dedicated = normalized == "eMMC"
+    agent_id = EMMC_PARAMETER_AGENT_ID if dedicated else GENERIC_AGENT_ID
+    return {
+        "device_type": normalized,
+        "agent_id": agent_id,
+        "agent_config_path": str(agent_config_path(agent_id)),
+        "dedicated_agent": dedicated,
+        "business_contract": (
+            "StorageParameterExtractResultV1" if dedicated else "StorageDynamicJson"
+        ),
+        "specialization_source": "config/spec_templates.yaml",
+    }
+
+
+def routing_table() -> dict[str, dict[str, Any]]:
+    return {device_type: route_for_device_type(device_type) for device_type in FOUR_FAMILY_DEVICE_TYPES}
+
+
+def knowledge_production_boundary() -> dict[str, Any]:
+    return {
+        "agent_id": KNOWLEDGE_PRODUCTION_AGENT_ID,
+        "agent_config_path": str(agent_config_path(KNOWLEDGE_PRODUCTION_AGENT_ID)),
+        "scope": "GENERIC_KNOWLEDGE_PRODUCTION",
+        "device_context": "preserved_as_input_context",
+        "emmc_only": False,
+    }
 
 
 def model_config_path(runtime_root_path: Path) -> Path:
@@ -294,12 +353,16 @@ def _build_runtime():
     )
     # Runtime main now owns OpenAI-compatible Provider execution.  Storage must not
     # inject a second HTTP handler here, otherwise provider execution would fork.
-    generic_agent_config = (
-        project / "config" / "runtime" / "storage.ai.json_call.yaml"
-    ).resolve()
-    emmc_agent_config = (
-        project / "config" / "runtime" / "storage.emmc.parameter_extract.yaml"
-    ).resolve()
+    generic_agent_config = agent_config_path(GENERIC_AGENT_ID)
+    emmc_agent_config = agent_config_path(EMMC_PARAMETER_AGENT_ID)
+    missing_agent_configs = [
+        str(path) for path in (generic_agent_config, emmc_agent_config)
+        if not path.is_file()
+    ]
+    if missing_agent_configs:
+        raise RuntimeBridgeUnavailable(
+            "Storage canonical Agent 配置缺失：" + ", ".join(missing_agent_configs)
+        )
     resolved_generic = runtime.load_agent(generic_agent_config)
     resolved_emmc = runtime.load_agent(emmc_agent_config)
     resolved = {
@@ -343,27 +406,65 @@ def configured() -> bool:
         return False
 
 
-def status() -> dict[str, Any]:
+def status(device_type: str | None = None) -> dict[str, Any]:
+    routes = routing_table()
+    active_route = route_for_device_type(device_type) if device_type else None
+    mode = execution_mode()
     base = {
         "configured": False,
-        "execution_mode": execution_mode(),
+        "execution_mode": mode,
+        "execution_mode_source": execution_mode_source(),
         "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_root": str(runtime_root()) if runtime_root() else None,
+        "canonical_agent_config_dir": str(agent_config_dir()),
         "provider": None,
         "profile": None,
         "model": None,
         "max_output_tokens": None,
         "json_mode": True,
         "agents": [],
+        "agent_details": {},
+        "routing": routes,
+        "active_route": active_route,
+        "knowledge_production": knowledge_production_boundary(),
+        "legacy_config_policy": {
+            "path": str((_project_root() / "config" / "agent.yaml").resolve()),
+            "runtime_reads_legacy_config": False,
+            "compatibility_only": True,
+        },
         "last_execution": list(_LAST)[-1] if _LAST else None,
     }
-    if execution_mode() != "runtime":
-        return base
+    if mode != "runtime":
+        return {
+            **base,
+            "warning": (
+                "LEGACY_COMPATIBILITY_MODE_EXPLICIT"
+                if execution_mode_source() == "environment"
+                else "LEGACY_COMPATIBILITY_DEFAULT_NOT_FOR_RELEASE_LAUNCHER"
+            ),
+        }
     try:
         _runtime, resolved_map, _AgentRequest, _RuntimeStatus, runtime_info, store_path = _get_runtime()
     except Exception as exc:
         return {**base, "error": f"{type(exc).__name__}: {exc}"}
-    primary = resolved_map[EMMC_PARAMETER_AGENT_ID]
+
+    agent_details: dict[str, dict[str, Any]] = {}
+    for agent_id, resolved in resolved_map.items():
+        agent_details[agent_id] = {
+            "agent_id": agent_id,
+            "agent_config_path": (runtime_info.get("agent_configs") or {}).get(agent_id),
+            "model_ref": resolved.provider.profile_ref,
+            "provider": resolved.provider.type,
+            "model": resolved.provider.model,
+            "base_url": resolved.provider.base_url,
+            "base_url_env": resolved.provider.base_url_env,
+            "api_key_env": resolved.provider.api_key_env,
+            "max_output_tokens": resolved.execution_policy.model_policy.get("max_tokens"),
+        }
+
+    # Generic is the neutral top-level status surface.  eMMC is a device-specific
+    # dedicated route and must not appear to be the default for all Storage devices.
+    primary = resolved_map[GENERIC_AGENT_ID]
     try:
         resolved_secret = _runtime.config_loader.get_runtime_api_key(
             primary.config_hash,
@@ -371,6 +472,16 @@ def status() -> dict[str, Any]:
         )
     except Exception:
         resolved_secret = None
+
+    resolved_active_route = dict(active_route) if active_route else None
+    if resolved_active_route:
+        detail = agent_details.get(resolved_active_route["agent_id"]) or {}
+        resolved_active_route.update({
+            "model_ref": detail.get("model_ref"),
+            "provider": detail.get("provider"),
+            "model": detail.get("model"),
+        })
+
     return {
         **base,
         "configured": True,
@@ -385,6 +496,8 @@ def status() -> dict[str, Any]:
         "runtime": runtime_info,
         "runtime_db": str(store_path),
         "agents": list(resolved_map.keys()),
+        "agent_details": agent_details,
+        "active_route": resolved_active_route,
     }
 
 
