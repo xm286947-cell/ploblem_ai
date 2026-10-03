@@ -21,37 +21,26 @@ from services.hardware_data_root import (
     HardwareDataRootResolution,
     HardwareDataRootResolver,
 )
+from services.hardware_startup_coordinator import HardwareStartupCoordinator
 
 
-def build_app(
-    *,
-    db_path: str | Path,
-    hardware_case_db_path: str | Path,
-    hardware_tree_upload_dir: str | Path,
-    hardware_case_source_root: str | Path,
-    data_root_resolution: HardwareDataRootResolution,
-):
-    if data_root_resolution.classification not in {"FIRST_INSTALL", "EXISTING_INSTALL"}:
-        raise RuntimeError(
-            data_root_resolution.error_code or "HARDWARE_DATA_ROOT_NOT_READY"
-        )
+def build_app(*, data_root: str | Path, startup_status: dict[str, object]):
     from quality_knowledge.web import create_p0_app
 
-    db = Path(db_path)
-    db.parent.mkdir(parents=True, exist_ok=True)
-
-    hardware_db = Path(hardware_case_db_path)
-    hardware_db.parent.mkdir(parents=True, exist_ok=True)
-    upload_dir = Path(hardware_tree_upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    root = Path(data_root).expanduser().resolve(strict=False)
+    hardware_db = root / "db" / "hardware_case_mvp.db"
 
     return create_p0_app(
-        db,
+        hardware_db,
         stage_runner=object(),
         project_root=ROOT,
         hardware_case_db_path=hardware_db,
-        hardware_tree_upload_dir=upload_dir,
-        hardware_case_source_root=hardware_case_source_root,
+        hardware_tree_upload_dir=root / "sources" / "tree_uploads",
+        hardware_case_source_root=root / "sources",
+        hardware_r1_workbench_db_path=root / "db" / "workbench_runtime.db",
+        hardware_r1_preview_db_path=root / "rebuildable" / "preview.db",
+        portrait_db_path=":memory:",
+        hardware_startup_status=startup_status,
         enabled_domains={"HARDWARE_CASE"},
     )
 
@@ -107,14 +96,21 @@ def _run_isolated_startup_check() -> int:
             print("RESULT=BLOCKED")
             print("BLOCKER=" + (resolution.error_code or "DATA_ROOT_TEST_CLASSIFICATION_FAILED"))
             return 3
-
-        app = build_app(
-            db_path=temp_root / "quality_capability_p1.db",
-            hardware_case_db_path=temp_root / "hardware_case_mvp.db",
-            hardware_tree_upload_dir=temp_root / "tree_uploads",
-            hardware_case_source_root=temp_root / "sources",
-            data_root_resolution=resolution,
+        resolver = HardwareDataRootResolver(
+            ROOT,
+            environment={"HARDWARE_DATA_ROOT": str(temp_root)},
+            bootstrap_path=temp_root.parent / f"{temp_root.name}-bootstrap.json",
+            legacy_roots=(),
         )
+        startup_status = HardwareStartupCoordinator(
+            ROOT, resolver=resolver, resolution=resolution
+        ).run()
+        print("STARTUP_STATUS=" + str(startup_status.get("status")))
+        if not startup_status.get("ready"):
+            print("RESULT=BLOCKED")
+            print("BLOCKER=" + str(startup_status.get("error_code") or "HARDWARE_STARTUP_NOT_READY"))
+            return 3
+        app = build_app(data_root=temp_root, startup_status=startup_status)
         try:
             p01_path = str(app.url_path_for("hardware_case_home"))
             p07_path = str(app.url_path_for("hardware_case_base_data"))
@@ -145,18 +141,30 @@ def main() -> int:
     if args.check:
         return _run_isolated_startup_check()
 
-    resolution = HardwareDataRootResolver(ROOT).resolve()
+    resolver = HardwareDataRootResolver(ROOT)
+    resolution = resolver.resolve()
     print("DATA_ROOT_CLASSIFICATION=" + resolution.classification)
-    if resolution.classification in {"BLOCKED", "LEGACY_UPGRADE_REQUIRED"}:
-        print("RESULT=BLOCKED")
-        print("BLOCKER=" + (resolution.error_code or resolution.classification))
+    startup_status = HardwareStartupCoordinator(
+        ROOT, resolver=resolver, resolution=resolution
+    ).run()
+    print("STARTUP_STATUS=" + str(startup_status.get("status")))
+    print("STARTUP_PHASE=" + str(startup_status.get("phase")))
+    print("READY=" + str(bool(startup_status.get("ready"))).upper())
+    if startup_status.get("error_code"):
+        print("BLOCKER=" + str(startup_status["error_code"]))
+    data_root = startup_status.get("data_root") or resolution.data_root or resolver.default_data_root
+    app = build_app(data_root=data_root, startup_status=startup_status)
+    if startup_status.get("ready"):
+        print("RESULT=READY")
+    else:
+        print("RESULT=BLOCKED_DIAGNOSTICS_ONLY")
+    try:
+        import uvicorn
+    except ImportError:
+        print("BLOCKER=UVICORN_UNAVAILABLE")
         return 3
-    # The startup coordinator (A4) owns first-install initialization and
-    # existing-install readiness checks. Until it is present, this launcher
-    # must not construct any store.
-    print("RESULT=BLOCKED")
-    print("BLOCKER=HARDWARE_STARTUP_COORDINATOR_REQUIRED")
-    return 3
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0 if startup_status.get("ready") else 3
 
 
 if __name__ == "__main__":

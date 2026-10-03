@@ -344,6 +344,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _hardware_startup_binding() -> dict[str, object]:
+    """Gate the shared platform's Hardware routes on the Durable Data Plane."""
+    from services.hardware_data_root import HardwareDataRootResolver
+    from services.hardware_startup_coordinator import HardwareStartupCoordinator
+
+    resolver = HardwareDataRootResolver(ROOT)
+    resolution = resolver.resolve()
+    startup = HardwareStartupCoordinator(
+        ROOT, resolver=resolver, resolution=resolution
+    ).run()
+    data_root = Path(
+        str(startup.get("data_root") or resolution.data_root or resolver.default_data_root)
+    ).expanduser().resolve(strict=False)
+    hardware_db = data_root / "db" / "hardware_case_mvp.db"
+    return {
+        "hardware_case_db_path": hardware_db,
+        "hardware_tree_upload_dir": data_root / "sources" / "tree_uploads",
+        "hardware_case_source_root": data_root / "sources",
+        "hardware_r1_workbench_db_path": data_root / "db" / "workbench_runtime.db",
+        "hardware_r1_preview_db_path": data_root / "rebuildable" / "preview.db",
+        "hardware_startup_status": startup,
+    }
+
+
 def _print(result: dict) -> int:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -405,20 +429,30 @@ def main() -> int:
             import uvicorn
             from quality_knowledge.web import create_p0_app
 
-            uvicorn.run(create_p0_app(args.db), host=args.host, port=args.port)
+            app = create_p0_app(
+                args.db,
+                project_root=ROOT,
+                **_hardware_startup_binding(),
+            )
+            uvicorn.run(app, host=args.host, port=args.port)
             return 0
         if args.command == "knowledge-p1-start":
             import uvicorn
             from quality_knowledge.p0.initializer import P0Initializer
             from quality_knowledge.web import create_p0_app
 
+            hardware_binding = _hardware_startup_binding()
             initializer = P0Initializer(manifest_path=args.manifest, plc_seed_path=args.plc_seed)
             db_path = Path(args.db)
             if db_path.exists():
                 initializer.verify_ready(db_path)
             else:
                 initializer.initialize(db_path)
-            uvicorn.run(create_p0_app(db_path), host=args.host, port=args.port)
+            uvicorn.run(
+                create_p0_app(db_path, project_root=ROOT, **hardware_binding),
+                host=args.host,
+                port=args.port,
+            )
             return 0
         if args.command == "knowledge-import":
             from quality_knowledge.repositories import IssueKnowledgeRepository

@@ -88,6 +88,9 @@ def create_p0_app(
     hardware_case_db_path: str | Path | None = None,
     hardware_tree_upload_dir: str | Path | None = None,
     hardware_case_source_root: str | Path | None = None,
+    hardware_r1_workbench_db_path: str | Path | None = None,
+    hardware_r1_preview_db_path: str | Path | None = None,
+    hardware_startup_status: dict[str, Any] | None = None,
     hardware_case_structurer: Any | None = None,
     hardware_case_r1_structurer: Any | None = None,
     hardware_knowledge_adapter: Any | None = None,
@@ -126,6 +129,7 @@ def create_p0_app(
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
     app.state.storage_workspace_binding = None
+    app.state.hardware_startup_status = hardware_startup_status
     if storage_app is not None or app.state.overall_shell_enabled:
         from quality_knowledge.web.storage_workspace import bind_storage_workspace
 
@@ -334,7 +338,39 @@ def create_p0_app(
         repeat_web = None
         app.state.repeat_risk_service = None
 
-    if "HARDWARE_CASE" in domains:
+    if "HARDWARE_CASE" in domains and hardware_startup_status is not None and not hardware_startup_status.get("ready"):
+        hardware_db = (
+            Path(hardware_case_db_path)
+            if hardware_case_db_path is not None
+            else Path(db_path).with_name("hardware_case_mvp.db")
+        )
+        app.include_router(
+            create_hardware_operability_router(
+                project_root=root,
+                hardware_db_path=hardware_db,
+                startup_status=hardware_startup_status,
+            )
+        )
+        app.state.hardware_data_reliability = None
+        app.state.hardware_data_status = dict(hardware_startup_status)
+        app.state.hardware_case_repository = None
+        app.state.hardware_case_service = None
+        app.state.hardware_case_source_store = None
+        app.state.hardware_case_intake_service = None
+        app.state.hardware_r1_preview_store = None
+        app.state.hardware_r1_workbench_store = None
+        app.state.hardware_r1_workbench_service = None
+        app.state.hardware_r1_promotion_store = None
+        app.state.hardware_r1_promotion_service = None
+        app.state.hardware_r1_promotion_status = {
+            "ready": False,
+            "code": str(hardware_startup_status.get("error_code") or "HARDWARE_STARTUP_NOT_READY"),
+            "auto_publish": False,
+        }
+        app.state.hardware_tree_import_repository = None
+        app.state.hardware_tree_file_store = None
+
+    if "HARDWARE_CASE" in domains and (hardware_startup_status is None or hardware_startup_status.get("ready")):
         hardware_db = (
             Path(hardware_case_db_path)
             if hardware_case_db_path is not None
@@ -363,6 +399,7 @@ def create_p0_app(
             create_hardware_operability_router(
                 project_root=root,
                 hardware_db_path=hardware_db,
+                startup_status=hardware_startup_status,
             )
         )
 
@@ -409,15 +446,19 @@ def create_p0_app(
             )
             app.state.hardware_case_intake_service = hardware_case_intake_service
 
-            hardware_r1_preview_db = hardware_db.with_name(
-                hardware_db.stem + "_r1_preview.db"
+            hardware_r1_preview_db = (
+                Path(hardware_r1_preview_db_path)
+                if hardware_r1_preview_db_path is not None
+                else hardware_db.with_name(hardware_db.stem + "_r1_preview.db")
             )
             hardware_r1_preview_store = HardwareR1PreviewStore(hardware_r1_preview_db)
             app.state.hardware_r1_preview_store = hardware_r1_preview_store
             testability_mutable_paths.append(hardware_r1_preview_db)
 
-            hardware_r1_workbench_db = hardware_db.with_name(
-                hardware_db.stem + "_r1_workbench.db"
+            hardware_r1_workbench_db = (
+                Path(hardware_r1_workbench_db_path)
+                if hardware_r1_workbench_db_path is not None
+                else hardware_db.with_name(hardware_db.stem + "_r1_workbench.db")
             )
             hardware_r1_workbench_store = HardwareR1WorkbenchStore(
                 hardware_r1_workbench_db
@@ -624,8 +665,11 @@ def create_p0_app(
 
         root_target = "/p0/issues"
     else:
-        app.include_router(create_hardware_case_pages_router())
-        root_target = "/p0/hardware-cases"
+        if hardware_startup_status is None or hardware_startup_status.get("ready"):
+            app.include_router(create_hardware_case_pages_router())
+            root_target = "/p0/hardware-cases"
+        else:
+            root_target = "/ready"
 
     effective_testability = testability_enabled
     if effective_testability is None:
