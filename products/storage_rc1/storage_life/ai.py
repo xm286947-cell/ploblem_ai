@@ -1259,6 +1259,7 @@ def _semantic_rules(device_type: str) -> str:
             "NAND rules: cell_type only from explicit SLC/MLC/TLC/QLC wording; keep ECC condition on P/E endurance; "
             "ecc_capability is correction strength, not status code/parity data; internal_ecc describes support/default/config; "
             "ecc_status describes no-error/corrected/uncorrectable diagnostic states; keep factory and runtime bad-block concepts separate; "
+            "descriptive bad-block existence or growth does not prove bad-block-count observability; observability requires an explicit field, register/bit, command, counter, API/interface, health log, or documented acquisition method; "
             "minimum_valid_blocks is not total block count; read_retry only when an explicit mechanism/command exists."
         ),
         "NOR Flash": (
