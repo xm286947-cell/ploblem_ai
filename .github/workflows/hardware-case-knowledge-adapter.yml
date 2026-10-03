@@ -10,8 +10,6 @@ on:
       - "services/hardware_r1_golden_knowledge_bridge.py"
       - "services/hardware_r1_knowledge_promotion.py"
       - "tests/test_hardware_r1_knowledge_promotion.py"
-      - "services/hardware_r1_knowledge_promotion.py"
-      - "tests/test_hardware_r1_knowledge_promotion.py"
       - "tests/test_hardware_case_knowledge_adapter.py"
       - "docs/product/HARDWARE_CASE_KNOWLEDGE_ADAPTER_001.md"
       - ".github/workflows/hardware-case-knowledge-adapter.yml"
@@ -21,7 +19,9 @@ on:
     paths:
       - "services/hardware_case_knowledge_adapter.py"
       - "services/hardware_r1_golden_knowledge_bridge.py"
+      - "services/hardware_r1_knowledge_promotion.py"
       - "tests/test_hardware_r1_golden_unified_bridge_spike.py"
+      - "tests/test_hardware_r1_knowledge_promotion.py"
       - "tests/test_hardware_case_knowledge_adapter.py"
       - "docs/product/HARDWARE_CASE_KNOWLEDGE_ADAPTER_001.md"
       - ".github/workflows/hardware-case-knowledge-adapter.yml"
