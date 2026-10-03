@@ -494,26 +494,71 @@ class HardwareR1WorkbenchService:
         for item in items:
             if item["result"] != "QUEUED":
                 continue
-            self._run_item(item, retry_stage=None)
+            self._run_item(item, retry_stage=None, force_full_run=False)
         return self.get_batch(batch_id)
 
     def retry_failed_only(self, batch_id: str) -> dict[str, Any]:
         items = self.store.list_items(batch_id)
         selected = [
-            item for item in items
-            if item["result"] == "FAILED" and item["retryable"]
+            item
+            for item in items
+            if item["result"] == "FAILED"
+            and item["retryable"]
+            and item["orchestration_status"] not in {"RUNNING", "QUEUED"}
         ]
         for item in selected:
             retry_stage = item["failed_stage"]
+            # Gate failures do not invent a new Stage. Normal Run/Resume
+            # revalidates current cache/Last Good under the frozen Pipeline.
             if retry_stage == "GATE":
                 retry_stage = None
-            self._run_item(item, retry_stage=retry_stage)
+            self._run_item(
+                item,
+                retry_stage=retry_stage,
+                force_full_run=False,
+            )
         return {
             **self.get_batch(batch_id),
             "retry_selected_count": len(selected),
         }
 
-    def _run_item(self, item: dict[str, Any], retry_stage: str | None) -> None:
+    def run_resume_item(self, item_id: str) -> dict[str, Any]:
+        item = self.store.get_item(item_id)
+        if item["orchestration_status"] == "RUNNING":
+            raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
+        self._run_item(item, retry_stage=None, force_full_run=False)
+        return self.store.get_item(item_id)
+
+    def retry_failed_stage_item(self, item_id: str) -> dict[str, Any]:
+        item = self.store.get_item(item_id)
+        if item["result"] != "FAILED" or not item["retryable"]:
+            raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
+        retry_stage = item.get("failed_stage")
+        if retry_stage not in {"STAGE_A", "STAGE_B"}:
+            # Gate/parse failures have no frozen Stage retry identity. The
+            # caller must use Run/Resume or correct the parse/source problem.
+            raise HardwareR1WorkbenchError("RETRY_FAILED_STAGE_NOT_AVAILABLE")
+        self._run_item(
+            item,
+            retry_stage=str(retry_stage),
+            force_full_run=False,
+        )
+        return self.store.get_item(item_id)
+
+    def force_full_run_item(self, item_id: str) -> dict[str, Any]:
+        item = self.store.get_item(item_id)
+        if item["orchestration_status"] == "RUNNING":
+            raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
+        self._run_item(item, retry_stage=None, force_full_run=True)
+        return self.store.get_item(item_id)
+
+    def _run_item(
+        self,
+        item: dict[str, Any],
+        *,
+        retry_stage: str | None,
+        force_full_run: bool,
+    ) -> None:
         snapshot = item.get("snapshot")
         if not isinstance(snapshot, dict):
             self.store.update_item(
@@ -536,6 +581,7 @@ class HardwareR1WorkbenchService:
             result = run_r1_agent_extraction(
                 snapshot,
                 structurer,
+                force_retry=force_full_run,
                 retry_failed_stage=(
                     retry_stage if retry_stage in {"STAGE_A", "STAGE_B"} else None
                 ),
@@ -555,7 +601,10 @@ class HardwareR1WorkbenchService:
                 item["item_id"],
                 orchestration_status="RUNTIME_BLOCKED",
                 failed_stage=item.get("failed_stage"),
-                error_code=str(getattr(error, "code", None) or "RUNTIME_EXECUTION_FAILED"),
+                error_code=str(
+                    getattr(error, "code", None)
+                    or "RUNTIME_EXECUTION_FAILED"
+                ),
                 result=item.get("pipeline_result"),
             )
 
