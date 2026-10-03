@@ -8,7 +8,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from knowledge_production import KnowledgeExtractionService
-from storage_life import ai, runtime_bridge
+from storage_life import ai, runtime_bridge, knowledge_product
 from storage_life.app import app
 
 
@@ -99,6 +99,14 @@ def test_parameter_extraction_dispatch_never_routes_other_families_to_emmc(monke
             else runtime_bridge.GENERIC_AGENT_ID
         )
         assert calls == [expected]
+
+
+def test_parameter_and_knowledge_production_share_one_default_model_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("STORAGE_MODEL_CONFIG", raising=False)
+    parameter_path = runtime_bridge.model_config_path(tmp_path / "runtime")
+    knowledge_path = knowledge_product.model_config_path()
+    assert parameter_path == knowledge_path
+    assert parameter_path == (ROOT / "config" / "model.local.yaml").resolve()
 
 
 def test_knowledge_production_remains_generic_not_emmc():
