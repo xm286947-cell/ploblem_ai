@@ -41,11 +41,20 @@ def test_canonical_agent_config_directory_is_single_effective_storage_source():
     assert runtime_bridge.agent_config_dir() == canonical.resolve()
     assert (canonical / "storage.ai.json_call.yaml").is_file()
     assert (canonical / "storage.emmc.parameter_extract.yaml").is_file()
-    # Knowledge Production is shared-owned; Storage does not keep a divergent source copy.
-    assert not (canonical / "knowledge.production.extract.yaml").exists()
-    assert runtime_bridge.knowledge_production_agent_config_path().is_file()
 
-    # Old product-local duplicate paths are intentionally removed.
+    # Knowledge Production remains shared-owned in source.  A packaged candidate
+    # stages that exact shared canonical file under the package root so it can run
+    # independently after Fresh Extract.
+    kp_path = runtime_bridge.knowledge_production_agent_config_path()
+    assert kp_path.is_file()
+    packaged = (ROOT / "vendor" / "unified_agent_runtime").is_dir()
+    if packaged:
+        assert kp_path == (canonical / "knowledge.production.extract.yaml").resolve()
+    else:
+        assert not (canonical / "knowledge.production.extract.yaml").exists()
+        assert kp_path.name == "knowledge.production.extract.yaml"
+
+    # Old duplicate Storage parameter-agent paths are intentionally removed.
     assert not (ROOT / "config" / "runtime" / "storage.ai.json_call.yaml").exists()
     assert not (ROOT / "config" / "runtime" / "storage.emmc.parameter_extract.yaml").exists()
 
@@ -123,10 +132,18 @@ def test_storage_runtime_pin_includes_required_observation_and_semantic_handoff_
 
 
 def test_runtime_loader_uses_canonical_agent_and_model_paths(monkeypatch, tmp_path):
-    repository_root = ROOT.parents[1]
+    packaged_runtime = ROOT / "vendor" / "unified_agent_runtime"
+    if (packaged_runtime / "runtime" / "__init__.py").is_file():
+        runtime_root = packaged_runtime
+        monkeypatch.delenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", raising=False)
+    else:
+        runtime_root = ROOT.parents[1]
+        # Source-tree CI may execute against a newer repository Runtime than the
+        # Storage release pin.  Exact pin enforcement is validated in the package.
+        monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
+
     monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
-    monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(repository_root))
-    monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
+    monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(runtime_root))
     monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(ROOT / "config" / "model.local.yaml"))
     monkeypatch.setenv("STORAGE_LIFE_RUNTIME_DB", str(tmp_path / "runtime.sqlite3"))
     runtime_bridge.reset_for_tests()
@@ -140,6 +157,9 @@ def test_runtime_loader_uses_canonical_agent_and_model_paths(monkeypatch, tmp_pa
     assert ssd["active_route"]["model_ref"] == "qwen_prod"
     assert ssd["active_route"]["model"] == "qwen3.8-max"
     assert Path(ssd["runtime"]["model_config"]) == (ROOT / "config" / "model.local.yaml").resolve()
+    if (packaged_runtime / "runtime" / "__init__.py").is_file():
+        assert ssd["runtime"]["pinned"] is True
+        assert ssd["runtime"]["snapshot_commit"] == runtime_bridge.RUNTIME_EXPECTED_COMMIT
 
     emmc = runtime_bridge.status("eMMC")
     assert emmc["configured"] is True, emmc
