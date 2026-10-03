@@ -294,11 +294,31 @@ def test_production_launcher_blocks_before_store_construction(tmp_path, monkeypa
             return resolution
 
     monkeypatch.setattr(launcher, "HardwareDataRootResolver", Resolver)
+    class BlockedCoordinator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return {
+                "status": "BLOCKED",
+                "phase": "VERIFY_LAYOUT",
+                "ready": False,
+                "error_code": "HARDWARE_DATA_ROOT_MISSING",
+                "data_root": str(resolution.data_root),
+            }
+
+    created = []
+    monkeypatch.setattr(launcher, "HardwareStartupCoordinator", BlockedCoordinator)
     monkeypatch.setattr(
         launcher,
         "build_app",
-        lambda **kwargs: pytest.fail("store initialization ran before startup classification"),
+        lambda **kwargs: created.append(kwargs) or object(),
     )
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(sys, "argv", [str(launcher_path)])
 
     assert launcher.main() == 3
+    assert len(created) == 1
+    assert created[0]["startup_status"]["ready"] is False
