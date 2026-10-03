@@ -100,6 +100,42 @@
     return item.result || item.orchestration_status || 'QUEUED';
   }
 
+  function candidateForItem(item) {
+    return item.candidate || item.pipeline_result?.knowledge_object || null;
+  }
+
+  function openReviewConflicts(item) {
+    const candidate = candidateForItem(item);
+    const conflicts = Array.isArray(candidate?.conflicts) ? candidate.conflicts : [];
+    return conflicts.filter((conflict) =>
+      conflict?.status === 'OPEN' ||
+      conflict?.resolution_status === 'NEEDS_REVIEW'
+    );
+  }
+
+  function reviewSourceLabel(source) {
+    if (source === 'SOURCE_RAW_TITLE') return '标题';
+    if (source === 'AI_BODY_CANDIDATE') return '正文识别';
+    return source || '来源';
+  }
+
+  function reviewFieldLabel(field) {
+    if (field === 'primary_subject') return '主体';
+    return field || '字段';
+  }
+
+  function reviewConflictSummary(conflict) {
+    const values = Array.isArray(conflict?.source_values)
+      ? conflict.source_values
+      : [];
+    const valueText = values
+      .map((entry) =>
+        reviewSourceLabel(entry?.source) + '「' + String(entry?.value ?? '—') + '」'
+      )
+      .join(' ↔ ');
+    return reviewFieldLabel(conflict?.field) + '不一致：' + (valueText || conflict?.type || '需要人工确认');
+  }
+
   function localSummary(items = []) {
     const summary = {
       TOTAL: items.length,
