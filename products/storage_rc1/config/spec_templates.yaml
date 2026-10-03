@@ -151,6 +151,7 @@ device_types:
       nand_type: 单元类型（Cell Type）
       interface: 接口（Interface）
       protocol: 协议（Protocol）
+      host_memory_buffer: 主机内存缓冲（Host Memory Buffer / HMB）
       operating_temperature: 工作温度（Operating Temperature）
       sequential_read: 顺序读取（Sequential Read）
       sequential_write: 顺序写入（Sequential Write）
@@ -175,8 +176,13 @@ device_types:
       wear_level_remaining: 磨损/剩余寿命（Wear Level / Remaining Life）
       warranty_write_limit: 质保写入上限（Warranty Write Limit）
     analysis_fields:
+    - nand_type
     - cell_type
     - capacity
+    - interface
+    - protocol
+    - host_memory_buffer
+    - operating_temperature
     - tbw
     - dwpd
     - endurance_class
@@ -368,7 +374,12 @@ generic_section_groups:
     - SPECIFICATION
     fields:
     - capacity
+    - nand_type
     - cell_type
+    - interface
+    - protocol
+    - host_memory_buffer
+    - operating_temperature
     - plp
     - warranty_write_limit
   - name: performance
@@ -657,6 +668,7 @@ vendors:
         - cell_type
         - interface
         - protocol
+        - host_memory_buffer
         - sequential_read
         - sequential_write
         - tbw
