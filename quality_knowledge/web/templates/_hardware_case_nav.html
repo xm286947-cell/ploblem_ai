@@ -10,6 +10,7 @@
     <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例搜索</a>
     <a class="{% if hardware_active == 'word-import' %}active{% endif %}" href="/p0/hardware-cases/word-import">案例 Word 导入</a>
     {% if hardware_role == 'MAINTAINER' %}
+    <a class="{% if hardware_active == 'knowledge-production' %}active{% endif %}" href="/p0/hardware-cases/knowledge-production">知识生产</a>
     <a class="{% if hardware_active == 'intake' %}active{% endif %}" href="/p0/hardware-cases/intake">知识导入</a>
     <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review">案例确认</a>
     <a class="{% if hardware_active == 'base-data' %}active{% endif %}" href="/p0/hardware-cases/base-data">基础数据管理</a>
