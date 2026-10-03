@@ -118,6 +118,10 @@ def test_knowledge_production_remains_generic_not_emmc():
     assert Path(boundary["agent_config_path"]) == runtime_bridge.knowledge_production_agent_config_path()
 
 
+def test_storage_runtime_pin_includes_required_observation_and_semantic_handoff_baseline():
+    assert runtime_bridge.RUNTIME_EXPECTED_COMMIT == "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
+
+
 def test_runtime_loader_uses_canonical_agent_and_model_paths(monkeypatch, tmp_path):
     repository_root = ROOT.parents[1]
     monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
