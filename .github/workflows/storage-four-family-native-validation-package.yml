@@ -368,11 +368,11 @@ jobs:
           "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage329-system-after.txt
           cmp /tmp/storage329-system-before.txt /tmp/storage329-system-after.txt
 
-          test -f "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
-          grep -q '"execution_mode": "runtime"' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
-          grep -q 'storage.emmc.parameter_extract' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
-          grep -q 'storage.ai.json_call' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
-          grep -q 'model.local.yaml' "$PKG/release/EFFECTIVE_RUNTIME_CONFIG.json"
+          test -f "$PKG/logs/effective_runtime_config.json"
+          grep -q '"execution_mode": "runtime"' "$PKG/logs/effective_runtime_config.json"
+          grep -q 'storage.emmc.parameter_extract' "$PKG/logs/effective_runtime_config.json"
+          grep -q 'storage.ai.json_call' "$PKG/logs/effective_runtime_config.json"
+          grep -q 'model.local.yaml' "$PKG/logs/effective_runtime_config.json"
 
           kill -INT -- "-$LAUNCH_PID"
           set +e
