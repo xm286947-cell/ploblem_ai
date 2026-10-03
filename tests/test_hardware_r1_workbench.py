@@ -326,6 +326,8 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     assert "Retry Failed Only" in page.text
     assert "Advanced Debug" in page.text
     assert "Force Full Run" in page.text
+    assert "Error Code" in page.text
+    assert "data-detail-error-code" in page.text
 
     asset = client.get(
         "/p0/static/hardware_case_knowledge_production.js"
@@ -333,6 +335,9 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     assert asset.status_code == 200
     assert "retry-failed-only" in asset.text
     assert "advanced-debug" in asset.text
+    assert "startBatchPolling" in asset.text
+    assert "syncItemIntoBatch" in asset.text
+    assert "PROVIDER_TIMEOUT" in asset.text
 
     blocked = client.get(
         "/api/v2/hardware-cases/r1/workbench/batches"
