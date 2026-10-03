@@ -39,7 +39,10 @@ def _paths(tmp_path: Path, *, legacy_roots: tuple[Path, ...] = ()):
 def _install(tmp_path: Path):
     app_root, data_root, bootstrap, resolver = _paths(tmp_path)
     result = HardwareStartupCoordinator(app_root, resolver=resolver).run()
-    assert result["ready"] is True, result
+    assert result["ready"] is True, (
+        f"startup phase={result['phase']} error={result['error_code']} "
+        f"mode={result['installation_mode']}"
+    )
     return app_root, data_root, bootstrap, resolver, result
 
 
@@ -47,7 +50,10 @@ def test_first_install_and_existing_startup_are_idempotent(tmp_path: Path):
     app_root, data_root, bootstrap, resolver = _paths(tmp_path)
     first = HardwareStartupCoordinator(app_root, resolver=resolver).run()
 
-    assert first["ready"] is True
+    assert first["ready"] is True, (
+        f"startup phase={first['phase']} error={first['error_code']} "
+        f"mode={first['installation_mode']}"
+    )
     assert first["installation_mode"] == "FIRST_INSTALL"
     assert bootstrap.is_file()
     manifest_path = data_root / "manifest" / "hardware_data_manifest.json"
