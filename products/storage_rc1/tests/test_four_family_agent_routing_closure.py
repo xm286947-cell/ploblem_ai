@@ -118,6 +118,37 @@ def test_knowledge_production_remains_generic_not_emmc():
     assert Path(boundary["agent_config_path"]) == runtime_bridge.knowledge_production_agent_config_path()
 
 
+def test_runtime_loader_uses_canonical_agent_and_model_paths(monkeypatch, tmp_path):
+    repository_root = ROOT.parents[1]
+    monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
+    monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(repository_root))
+    monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
+    monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(ROOT / "config" / "model.local.yaml"))
+    monkeypatch.setenv("STORAGE_LIFE_RUNTIME_DB", str(tmp_path / "runtime.sqlite3"))
+    runtime_bridge.reset_for_tests()
+
+    ssd = runtime_bridge.status("SSD")
+    assert ssd["configured"] is True, ssd
+    assert ssd["active_route"]["agent_id"] == runtime_bridge.GENERIC_AGENT_ID
+    assert Path(ssd["active_route"]["agent_config_path"]) == (
+        ROOT / "config" / "runtime" / "agents" / "storage.ai.json_call.yaml"
+    ).resolve()
+    assert ssd["active_route"]["model_ref"] == "qwen_prod"
+    assert ssd["active_route"]["model"] == "qwen3.8-max"
+    assert Path(ssd["runtime"]["model_config"]) == (ROOT / "config" / "model.local.yaml").resolve()
+
+    emmc = runtime_bridge.status("eMMC")
+    assert emmc["configured"] is True, emmc
+    assert emmc["active_route"]["agent_id"] == runtime_bridge.EMMC_PARAMETER_AGENT_ID
+    assert Path(emmc["active_route"]["agent_config_path"]) == (
+        ROOT / "config" / "runtime" / "agents" / "storage.emmc.parameter_extract.yaml"
+    ).resolve()
+    assert emmc["active_route"]["model_ref"] == "qwen_prod"
+    assert emmc["active_route"]["model"] == "qwen3.8-max"
+
+    runtime_bridge.reset_for_tests()
+
+
 def test_runtime_status_exposes_routing_even_when_runtime_is_not_available(monkeypatch):
     monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
     monkeypatch.setattr(runtime_bridge, "runtime_root", lambda: None)
