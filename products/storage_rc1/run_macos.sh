@@ -46,10 +46,9 @@ echo "NETWORK_OWNER=UNIFIED_AGENT_RUNTIME_ONLY"
 echo "WEB=http://127.0.0.1:$STORAGE_WEB_PORT"
 echo "============================================================"
 
-# V1.12 windows_start.py is otherwise cross-platform, but its DualWriter lacks
-# the TTY method Uvicorn expects on macOS. Patch that compatibility in memory;
-# no package source file is modified.
-exec "$PY" - <<'PY'
+# Use the shared startup implementation without replacing the current shell.
+# Ctrl+C must stop the child server and return control to the invoking Terminal.
+"$PY" - <<'PY'
 import sys
 from scripts import windows_start as startup
 
