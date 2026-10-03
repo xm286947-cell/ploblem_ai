@@ -1,3 +1,4 @@
+from pathlib import Path
 from storage_life import ai, parameter_baseline, templates, product_api
 from skills import real_knowledge
 
@@ -418,3 +419,20 @@ def test_359_selected_device_lifetime_requires_explicit_metric(monkeypatch):
         assert str(exc) == "REQUESTED_METRIC_REQUIRED"
     else:
         raise AssertionError("lifetime execution must not guess a metric")
+
+
+def test_359_product_ui_exposes_four_layer_semantics():
+    html = (Path(__file__).resolve().parents[1] / "storage_life" / "index.html").read_text(encoding="utf-8")
+    assert "SEARCH_COVERAGE" in html
+    assert "FACT_COVERAGE" in html
+    assert "Datasheet Fact" in html
+    assert "Runtime Observation" in html
+    assert "Formal Knowledge" in html
+    assert "Engineering Assessment" in html
+    assert "诊断语义" in html
+
+
+def test_359_selected_device_skill_route_is_exposed():
+    from storage_life.app import app
+    paths = {route.path for route in app.routes}
+    assert "/api/product/devices/{device_id}/skills/{skill_id}/execute" in paths
