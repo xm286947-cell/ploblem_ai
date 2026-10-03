@@ -49,3 +49,27 @@
 .hc-toast{position:fixed;right:24px;bottom:24px;z-index:60;background:#172033;color:#fff;padding:10px 14px;border-radius:7px;box-shadow:0 8px 28px rgba(0,0,0,.2);font-size:13px}
 @media(max-width:1180px){.hc-search-hero{min-width:390px}.hc-tree-layout{grid-template-columns:250px 300px minmax(0,1fr)}.hc-detail-layout{grid-template-columns:minmax(0,1fr) 330px}.hc-review-grid{grid-template-columns:minmax(0,1fr) 330px}}
 @media(max-width:900px){.hc-product-bar{align-items:flex-start;flex-direction:column}.hc-search-hero,.hc-hero,.hc-page-head,.hc-detail-head{width:100%;min-width:0;flex-direction:column}.hc-tree-entry-grid,.hc-tree-layout,.hc-detail-layout,.hc-review-layout,.hc-review-grid{grid-template-columns:1fr}.hc-tree-panel,.hc-node-panel,.hc-review-queue,.hc-review-evidence{border-right:0;border-left:0;border-bottom:1px solid var(--hc-line)}.hc-filter-row{grid-template-columns:1fr 1fr}.hc-maintenance-strip{grid-template-columns:repeat(3,1fr)}.hc-maintenance-strip a{grid-column:1/-1;text-align:left}}
+
+/* Hardware R1 Knowledge Production Workbench */
+.hc-workbench-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hc-workbench-filters{display:flex;gap:8px;align-items:center}
+.hc-workbench-filters select{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:8px 10px;color:var(--hc-ink)}
+.hc-workbench-summary{display:grid;grid-template-columns:repeat(6,minmax(105px,1fr));gap:8px;padding:14px 16px;border-bottom:1px solid var(--hc-line);background:#fbfcfe}
+.hc-workbench-summary span{display:flex;flex-direction:column;gap:4px;padding:9px 11px;border:1px solid var(--hc-line);border-radius:7px;background:#fff}
+.hc-workbench-summary b{font-size:10px;letter-spacing:.05em;color:var(--hc-muted)}
+.hc-workbench-summary strong{font-size:20px;color:var(--hc-ink)}
+.hc-workbench-message{margin:0;padding:10px 16px;color:var(--hc-muted);font-size:12px;border-bottom:1px solid var(--hc-line)}
+.hc-workbench-table-wrap{overflow:auto}
+.hc-workbench-table{width:100%;border-collapse:collapse;min-width:1180px;font-size:12px}
+.hc-workbench-table th{position:sticky;top:0;z-index:1;background:#f8fafc;color:#5b687b;text-align:left;font-size:10px;letter-spacing:.03em;padding:9px 10px;border-bottom:1px solid var(--hc-line)}
+.hc-workbench-table td{padding:10px;border-bottom:1px solid var(--hc-line);vertical-align:middle}
+.hc-workbench-table td:first-child{min-width:210px}.hc-workbench-table td:first-child strong{display:block;color:var(--hc-ink)}.hc-workbench-table td:first-child small{display:block;color:var(--hc-muted);margin-top:3px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hc-workbench-detail{padding:16px}
+.hc-workbench-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px}
+.hc-workbench-detail-grid>div{padding:10px;border:1px solid var(--hc-line);border-radius:7px;background:#fafbfd}
+.hc-workbench-detail-grid b{display:block;font-size:10px;color:var(--hc-muted);margin-bottom:4px}.hc-workbench-detail-grid span{font-size:12px;word-break:break-all}
+.hc-workbench-stage-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0 14px}
+.hc-workbench-stage-strip>span{display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid var(--hc-line);border-radius:7px;background:#fff}.hc-workbench-stage-strip b{font-size:11px;color:var(--hc-muted)}
+.hc-workbench-detail-actions{display:flex;gap:8px;margin-bottom:18px}
+.hc-workbench-json{max-height:390px;overflow:auto;background:#f7f9fc;border:1px solid var(--hc-line);border-radius:7px;padding:12px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+@media(max-width:900px){.hc-workbench-summary{grid-template-columns:repeat(2,1fr)}.hc-workbench-detail-grid{grid-template-columns:1fr}.hc-workbench-actions,.hc-workbench-filters{width:100%}}
