@@ -26,13 +26,13 @@ Authoritative recovered Drive bundle:
 
 Recovered real-device source materials:
 
-| Device type | Golden sample | Historical source | Drive id | Reuse |
-|---|---|---|---|---|
-| eMMC | SkyHigh S40FC016 | `STDL-PM-001_skyhigh_s40fc016.pdf` | `1jObAf9vbwsHzu9X-sLM5kW9Gz4L8jjId` | DIRECT_REUSE |
-| NAND Flash | GigaDevice GD5F1GQ5UExxG | `STDL-PM-009_gd5f1gq5.pdf` | `1vjSqdrafib7z6Wl2bIKnQZ7lzRIHayKz` | DIRECT_REUSE |
-| NOR Flash | GigaDevice GD25Q64E | `STDL-PM-008_gd25q64e.pdf` | `1IEGloojrNGb247kqPri86KZt1VKUk1B2` | DIRECT_REUSE |
-| SSD | TIMAR 97 Series | `STDL-PM-010_timar_97_series.pdf` | `1vI0QRmrbooYAN0mFvZSvQA6_Idt-o4mP` | DIRECT_REUSE |
-| SSD | TIMAR K97M8-Y product-page snapshot | `STDL-PM-011_timar_k97m8.html` | `19lCC_0eVfGDQ4quwYRl0xPpszrxB6d6l` | DIRECT_REUSE |
+| Device type | Golden sample | Historical source | Drive id | SHA256 / source_id | Reuse |
+|---|---|---|---|---|---|
+| eMMC | SkyHigh S40FC016 | `STDL-PM-001_skyhigh_s40fc016.pdf` | `1jObAf9vbwsHzu9X-sLM5kW9Gz4L8jjId` | `a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978` | DIRECT_REUSE |
+| NAND Flash | GigaDevice GD5F1GQ5UExxG | `STDL-PM-009_gd5f1gq5.pdf` | `1vjSqdrafib7z6Wl2bIKnQZ7lzRIHayKz` | `99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a` | DIRECT_REUSE |
+| NOR Flash | GigaDevice GD25Q64E | `STDL-PM-008_gd25q64e.pdf` | `1IEGloojrNGb247kqPri86KZt1VKUk1B2` | `1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602` | DIRECT_REUSE |
+| SSD | TIMAR 97 Series | `STDL-PM-010_timar_97_series.pdf` | `1vI0QRmrbooYAN0mFvZSvQA6_Idt-o4mP` | `7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a` | DIRECT_REUSE |
+| SSD | TIMAR K97M8-Y product-page snapshot | `STDL-PM-011_timar_k97m8.html` | `19lCC_0eVfGDQ4quwYRl0xPpszrxB6d6l` | `dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c` | DIRECT_REUSE |
 
 Additional recovered bundle assets:
 
@@ -44,7 +44,7 @@ Additional recovered bundle assets:
 - Copy of NAND ChatGPT single-pass Benchmark V0.1
 - Copy of `STORAGE_RC1_R5_UAT_DATA_EVIDENCE_PACK_V0.1`
 
-Source byte hashes / canonical `source_id=SHA256` are not inferred here. Where not already frozen in repository evidence, hash recovery remains pending and MUST be computed from the original source bytes, not fabricated from Drive ids or names.
+Source byte hashes above were computed from the recovered original Drive bytes and are frozen as the canonical `source_id=SHA256` candidates for W0 reuse. They MUST NOT be replaced by hashes of filenames, Drive ids, extracted text, or regenerated copies.
 
 ## 3. Recovered Frozen Profile / Schema / Golden Baselines
 
@@ -280,7 +280,7 @@ Recovery status:
 - scope semantics: RECOVERED
 - condition semantics: RECOVERED
 - conflict/ambiguity semantics: RECOVERED
-- original source byte SHA256/source_id binding: PARTIAL — recover from source bytes / prior provenance evidence before closing W0
+- original source byte SHA256/source_id binding: RECOVERED for the four Golden sources plus the TIMAR K97M8-Y product-page snapshot
 
 ## 8. Preliminary Reuse Matrix
 
@@ -297,7 +297,7 @@ Recovery status:
 | M03/M23/M24/M25 fixtures | same repo paths | TEST_ONLY | no promotion to real Golden |
 | Device Profile Registry | spec_templates.yaml vendor/device registry | DIRECT_REUSE | add index only if needed |
 | Golden/Benchmark Registry | distributed assets | MIGRATE | build index, do not rewrite assets |
-| source_id SHA256 bindings | provenance/source bytes | PARTIAL | recover/compute from original bytes |
+| source_id SHA256 bindings | original recovered Drive bytes | DIRECT_REUSE | frozen in this inventory / registry |
 | Runtime Observation | separate live DUT evidence | MISSING for W0 source bundle | never fabricate |
 
 ## 9. W0 Gate Status
@@ -309,8 +309,8 @@ FOUR_DEVICE_GOLDEN_BASELINE_RECOVERED=PASS
 SOURCE_BUNDLE_BASELINE_RECOVERED=PASS
 EVIDENCE_SCOPE_CONDITION_CONFLICT_SEMANTICS=PASS
 DEVICE_PROFILE_REGISTRY_SEMANTICS=PASS_WITH_MIGRATED_EQUIVALENT
-GOLDEN_BENCHMARK_REGISTRY=PARTIAL_DISTRIBUTED
-SOURCE_ID_SHA256_BINDING=PARTIAL
+GOLDEN_BENCHMARK_REGISTRY=PASS_WITH_CANONICAL_INDEX
+SOURCE_ID_SHA256_BINDING=PASS
 NO_GOLDEN_REWRITE_TO_FIT_CURRENT_CODE=PASS
 NO_PROFILE_REINVENTION=PASS
 ```
@@ -318,10 +318,9 @@ NO_PROFILE_REINVENTION=PASS
 ## 10. Next Authorized Step
 
 Before product-code changes:
-1. compute/recover source_id SHA256 bindings for the four original source artifacts;
-2. bind the four real Golden samples to a machine-readable regression manifest without changing their expectations;
-3. execute current implementation against those frozen expectations;
-4. classify each delta as CURRENT_REGRESSION / INTENTIONAL_VERSION_CHANGE / HISTORICAL_ASSET_DRIFT;
-5. only CURRENT_REGRESSION items may proceed to minimum code repair under #359.
+1. bind the four real Golden samples to the machine-readable regression manifest without changing their expectations;
+2. execute current implementation against those frozen expectations;
+3. classify each delta as CURRENT_REGRESSION / INTENTIONAL_VERSION_CHANGE / HISTORICAL_ASSET_DRIFT;
+4. only CURRENT_REGRESSION items may proceed to minimum code repair under #359.
 
 No Skill rewrite, second Knowledge stack, second Runtime, or Golden rewrite is authorized.
