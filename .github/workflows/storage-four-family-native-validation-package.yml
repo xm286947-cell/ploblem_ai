@@ -1,6 +1,6 @@
 name: Storage Four-Family Native Validation Package
 
-# #329 candidate build; packaging-only workflow.
+# #329 candidate build; packaging-only workflow. Rebuild after launcher-gate portability fix.
 
 on:
   push:
