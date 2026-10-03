@@ -41,8 +41,23 @@ def test_canonical_agent_config_directory_is_single_effective_storage_source():
     assert runtime_bridge.agent_config_dir() == canonical.resolve()
     assert (canonical / "storage.ai.json_call.yaml").is_file()
     assert (canonical / "storage.emmc.parameter_extract.yaml").is_file()
-    # Knowledge Production is shared-owned; Storage does not keep a divergent source copy.
-    assert not (canonical / "knowledge.production.extract.yaml").exists()
+
+    # In the source repository, Knowledge Production remains shared-owned and
+    # Storage must not keep a divergent product-local source copy. In a packaged
+    # candidate, the shared canonical contract is deliberately staged under the
+    # package root so the package is self-contained.
+    repository_root = ROOT.parents[1]
+    if (repository_root / ".git").exists():
+        assert not (canonical / "knowledge.production.extract.yaml").exists()
+        assert (
+            repository_root
+            / "config"
+            / "runtime"
+            / "agents"
+            / "knowledge.production.extract.yaml"
+        ).is_file()
+    else:
+        assert (canonical / "knowledge.production.extract.yaml").is_file()
     assert runtime_bridge.knowledge_production_agent_config_path().is_file()
 
     # Old product-local duplicate paths are intentionally removed.
@@ -124,9 +139,17 @@ def test_storage_runtime_pin_includes_required_observation_and_semantic_handoff_
 
 def test_runtime_loader_uses_canonical_agent_and_model_paths(monkeypatch, tmp_path):
     repository_root = ROOT.parents[1]
+    packaged_runtime = ROOT / "vendor" / "unified_agent_runtime"
+    runtime_root = packaged_runtime if packaged_runtime.is_dir() else repository_root
+
     monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
-    monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(repository_root))
-    monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
+    monkeypatch.setenv("UNIFIED_AGENT_RUNTIME_ROOT", str(runtime_root))
+    if packaged_runtime.is_dir():
+        monkeypatch.delenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", raising=False)
+    else:
+        # Source-tree focused tests may run on a newer repository HEAD than the
+        # product's explicitly pinned Runtime snapshot.
+        monkeypatch.setenv("STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME", "1")
     monkeypatch.setenv("STORAGE_MODEL_CONFIG", str(ROOT / "config" / "model.local.yaml"))
     monkeypatch.setenv("STORAGE_LIFE_RUNTIME_DB", str(tmp_path / "runtime.sqlite3"))
     runtime_bridge.reset_for_tests()
