@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,11 @@ from services.hardware_r1_knowledge_promotion import (
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
+)
+from services.hardware_durable_mutation_gate import (
+    HardwareApplicationLock,
+    HardwareDurableMutationError,
+    HardwareDurableMutationGate,
 )
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
 
@@ -123,9 +129,61 @@ def create_p0_app(
     domains = _normalize_domains(enabled_domains)
     root = Path(project_root)
     primary_db = Path(db_path)
+    configured_hardware_db = (
+        Path(hardware_case_db_path)
+        if hardware_case_db_path is not None
+        else primary_db.with_name("hardware_case_mvp.db")
+    )
+    hardware_data_root = (
+        configured_hardware_db.parent.parent
+        if configured_hardware_db.parent.name == "db"
+        else configured_hardware_db.parent
+    ).resolve(strict=False)
+    hardware_mutation_gate = HardwareDurableMutationGate(hardware_data_root)
+
+    @asynccontextmanager
+    async def hardware_lifespan(application: FastAPI):
+        lease: HardwareApplicationLock | None = None
+        if "HARDWARE_CASE" in domains and (
+            hardware_startup_status is None or hardware_startup_status.get("ready")
+        ):
+            lease = HardwareApplicationLock(hardware_data_root)
+            lease.acquire()
+            application.state.hardware_application_lock = lease
+        try:
+            yield
+        finally:
+            if lease is not None:
+                lease.release()
+
     testability_mutable_paths: list[Path] = [primary_db]
     testability_restore_hooks: list[Any] = []
-    app = FastAPI(title="Quality Capability P1", version="2.1.0")
+    app = FastAPI(title="Quality Capability P1", version="2.1.0", lifespan=hardware_lifespan)
+    app.state.hardware_durable_mutation_gate = hardware_mutation_gate
+
+    @app.middleware("http")
+    async def hardware_durable_mutation_middleware(request: Request, call_next: Any):
+        hardware_path = request.url.path.startswith(
+            (
+                "/api/v2/hardware-cases",
+                "/api/public/hardware/v1",
+                "/p0/hardware-cases",
+            )
+        )
+        if (
+            "HARDWARE_CASE" in domains
+            and hardware_path
+            and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        ):
+            try:
+                with hardware_mutation_gate.mutation():
+                    return await call_next(request)
+            except HardwareDurableMutationError as error:
+                return JSONResponse(
+                    status_code=error.http_status,
+                    content={"detail": error.code},
+                )
+        return await call_next(request)
     app.state.enabled_domains = tuple(sorted(domains))
     app.state.overall_shell_enabled = domains == FULL_DOMAINS
     app.state.storage_workspace_binding = None
