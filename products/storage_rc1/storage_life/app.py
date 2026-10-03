@@ -558,9 +558,31 @@ def ai_status():
 
 
 @app.get("/api/v1/runtime/status", tags=["Runtime Integration"])
-def runtime_status():
+def runtime_status(device_type: str = ""):
     from . import runtime_bridge
-    return runtime_bridge.status()
+    try:
+        return runtime_bridge.status(device_type or None)
+    except runtime_bridge.RuntimeBridgeUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/v1/runtime/route", tags=["Runtime Integration"])
+def runtime_route(device_type: str):
+    from . import runtime_bridge
+    try:
+        route = runtime_bridge.route_for_device_type(device_type)
+        status = runtime_bridge.status(device_type)
+        return {
+            **route,
+            "execution_mode": status.get("execution_mode"),
+            "execution_mode_source": status.get("execution_mode_source"),
+            "model_ref": (status.get("active_route") or {}).get("model_ref"),
+            "provider": (status.get("active_route") or {}).get("provider"),
+            "model": (status.get("active_route") or {}).get("model"),
+            "model_config_path": ((status.get("runtime") or {}).get("model_config")),
+        }
+    except runtime_bridge.RuntimeBridgeUnavailable as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/v1/runtime/executions", tags=["Runtime Integration"])

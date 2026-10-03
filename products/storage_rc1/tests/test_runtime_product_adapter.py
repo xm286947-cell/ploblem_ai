@@ -70,11 +70,8 @@ def test_runtime_bridge_accepts_user_owned_model_config(monkeypatch, tmp_path):
     assert runtime_bridge.model_config_path(runtime_root) == local.resolve()
 
 
-def test_runtime_bridge_defaults_to_public_runtime_model_config(monkeypatch, tmp_path):
+def test_runtime_bridge_defaults_to_storage_model_config(monkeypatch, tmp_path):
     runtime_root = tmp_path / "runtime_repo"
-    fallback = runtime_root / "config" / "runtime" / "model.yaml"
-    fallback.parent.mkdir(parents=True)
-    fallback.write_text("active_model: qwen_prod\nmodels: {}\n", encoding="utf-8")
-
     monkeypatch.delenv("STORAGE_MODEL_CONFIG", raising=False)
-    assert runtime_bridge.model_config_path(runtime_root) == fallback.resolve()
+    expected = runtime_bridge._project_root() / "config" / "model.local.yaml"
+    assert runtime_bridge.model_config_path(runtime_root) == expected.resolve()

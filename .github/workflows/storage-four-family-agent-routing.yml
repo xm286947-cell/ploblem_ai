@@ -1,0 +1,77 @@
+name: Storage Four-Family Agent Routing Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/storage
+    paths:
+      - "products/storage_rc1/config/runtime/**"
+      - "products/storage_rc1/config/agent.yaml"
+      - "products/storage_rc1/config/spec_templates.yaml"
+      - "products/storage_rc1/storage_life/ai.py"
+      - "products/storage_rc1/storage_life/runtime_bridge.py"
+      - "products/storage_rc1/storage_life/app.py"
+      - "products/storage_rc1/run_local.sh"
+      - "products/storage_rc1/run_macos.sh"
+      - "products/storage_rc1/run_windows.bat"
+      - "products/storage_rc1/scripts/effective_runtime_config.py"
+      - "products/storage_rc1/docs/FOUR_FAMILY_CAPABILITY_MATRIX.md"
+      - "products/storage_rc1/tests/test_four_family_agent_routing_closure.py"
+      - "products/storage_rc1/tests/test_runtime_product_adapter.py"
+      - "products/storage_rc1/tests/test_runtime_product_contract_rc2.py"
+      - "products/storage_rc1/tests/test_rcfg01_product_config_entry.py"
+      - "test_assets/storage_rc1/**"
+      - "tests/test_storage_rc1_mock_assets.py"
+      - ".github/workflows/storage-four-family-agent-routing.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  four-family-agent-routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_LIFE_EXECUTION_MODE: runtime
+      STORAGE_LIFE_ALLOW_UNPINNED_RUNTIME: "1"
+      UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}
+      STORAGE_MODEL_CONFIG: ${{ github.workspace }}/products/storage_rc1/config/model.local.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r products/storage_rc1/requirements.txt
+          if [ -f requirements-runtime-p0-test.txt ]; then
+            python -m pip install -r requirements-runtime-p0-test.txt
+          fi
+
+      - name: Four-family routing and config-source gate
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_four_family_agent_routing_closure.py             products/storage_rc1/tests/test_runtime_product_adapter.py             products/storage_rc1/tests/test_runtime_product_contract_rc2.py             products/storage_rc1/tests/test_rcfg01_product_config_entry.py
+          echo "AGENT_CONFIG_SINGLE_SOURCE=PASS"
+          echo "RUNTIME_MODE_EXPLICIT=PASS"
+          echo "FOUR_FAMILY_ROUTING=PASS"
+          echo "CROSS_DEVICE_AGENT_MISROUTE=0"
+          echo "KNOWLEDGE_PRODUCTION_GENERIC_CONTRACT=PASS"
+
+      - name: Historical four-family Golden asset gate
+        run: |
+          python -m pytest -q             tests/test_storage_rc1_mock_assets.py             tests/test_storage_rc1_scenario_catalog.py
+          echo "M03_EMMC=PASS"
+          echo "M23_SSD=PASS"
+          echo "M24_NAND=PASS"
+          echo "M25_NOR=PASS"
+          echo "FOUR_FAMILY_GOLDEN=PASS"
+
+      - name: Existing Storage product regression
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_storage_product_mvp_rc1.py             products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py
+          echo "VALID_EXISTING_CAPABILITY_LOST=0"

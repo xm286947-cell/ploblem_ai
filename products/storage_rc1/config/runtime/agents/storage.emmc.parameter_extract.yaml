@@ -1,3 +1,5 @@
+# Canonical Storage eMMC Runtime Agent config.
+# Effective package path: config/runtime/agents/storage.emmc.parameter_extract.yaml
 agent_id: storage.emmc.parameter_extract
 version: v1
 label: Storage eMMC Parameter Extract
@@ -36,3 +38,5 @@ metadata:
   provider_retry_owner: RUNTIME
   business_contract: StorageParameterExtractResultV1
   field_count: 37
+  routing_scope:
+    - eMMC

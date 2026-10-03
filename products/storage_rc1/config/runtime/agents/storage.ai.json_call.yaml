@@ -1,3 +1,5 @@
+# Canonical Storage Runtime Agent config.
+# Effective package path: config/runtime/agents/storage.ai.json_call.yaml
 agent_id: storage.ai.json_call
 version: v1
 label: Storage Generic Structured AI Call
@@ -33,3 +35,7 @@ metadata:
   adapter_owner: STORAGE
   runtime_owner: UNIFIED_AGENT_RUNTIME
   provider_retry_owner: RUNTIME
+  routing_scope:
+    - NOR Flash
+    - NAND Flash
+    - SSD
