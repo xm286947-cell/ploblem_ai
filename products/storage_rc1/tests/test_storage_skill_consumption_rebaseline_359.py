@@ -50,12 +50,42 @@ def test_359_timar_read_plan_targets_frozen_direct_fact_fields():
     } <= targets
 
 
-def test_359_ssd_product_baseline_keeps_hmb_and_interface_protocol_mapping():
+def test_359_ssd_product_baseline_keeps_frozen_direct_facts_separate():
     fields = parameter_baseline.product_fields("SSD", ai.expected_fields("SSD"))
     by_name = {x["canonical_name"]: x for x in fields}
-    assert "host_memory_buffer" in by_name
+    assert {"host_memory_buffer", "interface", "protocol", "nand_type", "cell_type"} <= set(by_name)
     assert by_name["host_memory_buffer"]["requirement_level"] == "SHOULD"
-    assert {"interface", "protocol"} <= set(by_name["interface_protocol"]["aliases"])
+
+
+def test_359_historical_golden_facts_do_not_collapse_into_shared_slots():
+    expectations = {
+        "eMMC": {"pe_cycles": "pe_cycles"},
+        "NAND Flash": {
+            "ecc_capability": "ecc_requirement",
+            "ecc_status": "ecc_observability",
+            "program_fail": "program_fail",
+            "erase_fail": "erase_fail",
+            "read_retry": "read_retry",
+        },
+        "NOR Flash": {
+            "program_fail": "program_fail",
+            "erase_fail": "erase_fail",
+        },
+        "SSD": {
+            "interface": "interface",
+            "protocol": "protocol",
+            "nand_type": "nand_type",
+            "cell_type": "cell_type",
+        },
+    }
+    for device_type, expected_owners in expectations.items():
+        fields = parameter_baseline.product_fields(device_type, ai.expected_fields(device_type))
+        owners = {}
+        for field in fields:
+            for alias in field.get("aliases") or [field["canonical_name"]]:
+                owners.setdefault(alias, []).append(field["canonical_name"])
+        for field_key, expected_owner in expected_owners.items():
+            assert owners[field_key] == [expected_owner]
 
 
 def test_359_nand_bad_block_observability_is_not_runtime_bad_block_alias():
