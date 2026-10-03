@@ -79,6 +79,27 @@ def _result(
             {
                 "contract_version": "hardware-case-knowledge-object/v1",
                 "review": {"object_status": "CANDIDATE"},
+                "conflicts": (
+                    [
+                        {
+                            "conflict_id": "CONFLICT-title-subject",
+                            "type": "TITLE_CONTENT_SUBJECT_MISMATCH",
+                            "field": "primary_subject",
+                            "source_values": [
+                                {"source": "SOURCE_RAW_TITLE", "value": "CPU"},
+                                {
+                                    "source": "AI_BODY_CANDIDATE",
+                                    "value": "MCU串口输出配置",
+                                },
+                            ],
+                            "evidence_block_ids": ["B0007", "B0016", "B0019"],
+                            "status": "OPEN",
+                            "resolution_status": "NEEDS_REVIEW",
+                        }
+                    ]
+                    if status == "NEEDS_REVIEW"
+                    else []
+                ),
             }
             if failed_stage is None and gate == "PASS"
             else None
@@ -138,6 +159,36 @@ def test_gate_pass_review_required_maps_to_review_not_publish() -> None:
     )
     assert gate_failed["gate"] == "FAILED"
     assert gate_failed["result"] == "FAILED"
+
+
+
+def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        snapshot=_snapshot("A0152"),
+        result=_result(status="NEEDS_REVIEW"),
+        orchestration_status="REVIEW",
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+    )
+    item = service.get_item(item_id)
+    conflict = item["candidate"]["conflicts"][0]
+    assert conflict["type"] == "TITLE_CONTENT_SUBJECT_MISMATCH"
+    assert conflict["field"] == "primary_subject"
+    assert conflict["source_values"] == [
+        {"source": "SOURCE_RAW_TITLE", "value": "CPU"},
+        {"source": "AI_BODY_CANDIDATE", "value": "MCU串口输出配置"},
+    ]
+    assert conflict["evidence_block_ids"] == ["B0007", "B0016", "B0019"]
 
 
 def test_runtime_and_dependency_blocked_are_not_business_failed() -> None:
@@ -328,6 +379,8 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     assert "Force Full Run" in page.text
     assert "Error Code" in page.text
     assert "data-detail-error-code" in page.text
+    assert "data-review-required" in page.text
+    assert "需要人工确认" in page.text
 
     asset = client.get(
         "/p0/static/hardware_case_knowledge_production.js"
@@ -338,6 +391,10 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     assert "startBatchPolling" in asset.text
     assert "syncItemIntoBatch" in asset.text
     assert "PROVIDER_TIMEOUT" in asset.text
+    assert "openReviewConflicts" in asset.text
+    assert "reviewConflictSummary" in asset.text
+    assert "renderReviewRequired" in asset.text
+    assert "只需要确认下面" in asset.text
 
     blocked = client.get(
         "/api/v2/hardware-cases/r1/workbench/batches"

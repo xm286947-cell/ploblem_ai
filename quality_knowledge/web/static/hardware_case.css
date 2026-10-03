@@ -73,3 +73,21 @@
 .hc-workbench-detail-actions{display:flex;gap:8px;margin-bottom:18px}
 .hc-workbench-json{max-height:390px;overflow:auto;background:#f7f9fc;border:1px solid var(--hc-line);border-radius:7px;padding:12px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
 @media(max-width:900px){.hc-workbench-summary{grid-template-columns:repeat(2,1fr)}.hc-workbench-detail-grid{grid-template-columns:1fr}.hc-workbench-actions,.hc-workbench-filters{width:100%}}
+
+
+/* Hardware R1 review-required visibility */
+.hc-review-inline{margin-top:6px;max-width:260px;font-size:11px;line-height:1.35;color:#9a6700;font-weight:600;white-space:normal}
+.hc-review-required{margin:0 0 16px;padding:14px 16px;border:1px solid #f0b429;border-left:4px solid #d97706;border-radius:8px;background:#fff8e6}
+.hc-review-required>h3{margin:0 0 6px;font-size:15px;color:#8a4b08}
+.hc-review-required [data-review-summary]{margin:0 0 10px;font-size:12px;color:#6b4f1d}
+.hc-review-conflict{padding:10px 12px;border:1px solid #efd39a;border-radius:7px;background:#fff}
+.hc-review-conflict+.hc-review-conflict{margin-top:8px}
+.hc-review-conflict-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}
+.hc-review-conflict-head strong{font-size:13px;color:#172033}
+.hc-review-conflict-head span{font-size:10px;color:#9a6700;font-weight:700}
+.hc-review-compare{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.hc-review-value{padding:8px 10px;border-radius:6px;background:#f8fafc}
+.hc-review-value b{display:block;margin-bottom:3px;font-size:10px;color:#64748b}
+.hc-review-value span{font-size:13px;font-weight:700;color:#172033;word-break:break-word}
+.hc-review-evidence-ref{margin-top:8px;font-size:11px;color:#64748b}
+@media(max-width:900px){.hc-review-compare{grid-template-columns:1fr}.hc-review-inline{max-width:none}}

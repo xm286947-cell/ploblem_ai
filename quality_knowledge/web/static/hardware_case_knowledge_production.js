@@ -100,6 +100,42 @@
     return item.result || item.orchestration_status || 'QUEUED';
   }
 
+  function candidateForItem(item) {
+    return item.candidate || item.pipeline_result?.knowledge_object || null;
+  }
+
+  function openReviewConflicts(item) {
+    const candidate = candidateForItem(item);
+    const conflicts = Array.isArray(candidate?.conflicts) ? candidate.conflicts : [];
+    return conflicts.filter((conflict) =>
+      conflict?.status === 'OPEN' ||
+      conflict?.resolution_status === 'NEEDS_REVIEW'
+    );
+  }
+
+  function reviewSourceLabel(source) {
+    if (source === 'SOURCE_RAW_TITLE') return '标题';
+    if (source === 'AI_BODY_CANDIDATE') return '正文识别';
+    return source || '来源';
+  }
+
+  function reviewFieldLabel(field) {
+    if (field === 'primary_subject') return '主体';
+    return field || '字段';
+  }
+
+  function reviewConflictSummary(conflict) {
+    const values = Array.isArray(conflict?.source_values)
+      ? conflict.source_values
+      : [];
+    const valueText = values
+      .map((entry) =>
+        reviewSourceLabel(entry?.source) + '「' + String(entry?.value ?? '—') + '」'
+      )
+      .join(' ↔ ');
+    return reviewFieldLabel(conflict?.field) + '不一致：' + (valueText || conflict?.type || '需要人工确认');
+  }
+
   function localSummary(items = []) {
     const summary = {
       TOTAL: items.length,
@@ -212,6 +248,13 @@
 
     tbody.innerHTML = items.map((item) => {
       const result = displayResult(item);
+      const conflicts = openReviewConflicts(item);
+      const reviewInline = result === 'REVIEW' && conflicts.length
+        ? '<div class="hc-review-inline">需确认：' +
+          escapeHtml(reviewConflictSummary(conflicts[0])) +
+          (conflicts.length > 1 ? ' +' + (conflicts.length - 1) : '') +
+          '</div>'
+        : '';
       return `
         <tr>
           <td>
@@ -222,7 +265,7 @@
           <td>${statusPill(item.stage_a)}</td>
           <td>${statusPill(item.stage_b)}</td>
           <td>${statusPill(item.gate)}</td>
-          <td>${statusPill(result)}</td>
+          <td>${statusPill(result)}${reviewInline}</td>
           <td><small class="${item.error_code ? 'hc-error' : ''}">${escapeHtml(item.error_code || '—')}</small></td>
           <td>${Number(item.provider_calls || 0)}</td>
           <td>${Number(item.duration_ms || 0).toLocaleString()} ms</td>
@@ -336,6 +379,51 @@
     }
   }
 
+  function renderReviewRequired(item) {
+    const panel = q('[data-review-required]');
+    const summary = q('[data-review-summary]');
+    const container = q('[data-review-conflicts]');
+    const conflicts = openReviewConflicts(item);
+    const show = displayResult(item) === 'REVIEW' && conflicts.length > 0;
+    panel.hidden = !show;
+    if (!show) {
+      summary.textContent = '';
+      container.innerHTML = '';
+      return;
+    }
+
+    summary.textContent =
+      'Stage A / Stage B / Gate 已通过；只需要确认下面 ' +
+      conflicts.length +
+      ' 个冲突项，不需要重跑。';
+
+    container.innerHTML = conflicts.map((conflict) => {
+      const values = Array.isArray(conflict.source_values)
+        ? conflict.source_values
+        : [];
+      const comparisons = values.map((entry) =>
+        '<div class="hc-review-value"><b>' +
+        escapeHtml(reviewSourceLabel(entry?.source)) +
+        '</b><span>' +
+        escapeHtml(entry?.value ?? '—') +
+        '</span></div>'
+      ).join('');
+      const blocks = Array.isArray(conflict.evidence_block_ids)
+        ? conflict.evidence_block_ids.join(', ')
+        : '—';
+      return '<div class="hc-review-conflict">' +
+        '<div class="hc-review-conflict-head"><strong>' +
+        escapeHtml(reviewFieldLabel(conflict.field)) +
+        '</strong><span>' +
+        escapeHtml(conflict.type || 'NEEDS_REVIEW') +
+        '</span></div>' +
+        '<div class="hc-review-compare">' + comparisons + '</div>' +
+        '<div class="hc-review-evidence-ref">Evidence: ' +
+        escapeHtml(blocks) +
+        '</div></div>';
+    }).join('');
+  }
+
   function renderDetail(item) {
     state.item = item;
     detail.hidden = false;
@@ -364,6 +452,7 @@
     ].map(([name, value]) =>
       '<span><b>' + escapeHtml(name) + '</b>' + statusPill(value) + '</span>'
     ).join('');
+    renderReviewRequired(item);
     q('[data-candidate-preview]').textContent =
       JSON.stringify(item.candidate || null, null, 2);
     q('[data-evidence-summary]').textContent =
