@@ -44,16 +44,17 @@ Knowledge Production owns:
 Inside the Storage source tree:
 - products/storage_rc1/config/runtime/agents/storage.ai.json_call.yaml
 - products/storage_rc1/config/runtime/agents/storage.emmc.parameter_extract.yaml
-- products/storage_rc1/config/runtime/agents/knowledge.production.extract.yaml
-- products/storage_rc1/config/model.local.yaml (default package model config)
+- products/storage_rc1/config/model.local.yaml (single default Storage model config)
+- shared Knowledge Production canonical: config/runtime/agents/knowledge.production.extract.yaml
 
 Inside a packaged Storage candidate the effective paths are:
 - config/runtime/agents/storage.ai.json_call.yaml
 - config/runtime/agents/storage.emmc.parameter_extract.yaml
-- config/runtime/agents/knowledge.production.extract.yaml
+- config/runtime/agents/knowledge.production.extract.yaml (staged from the shared canonical at package build time)
 - config/model.local.yaml
 
 Legacy config/agent.yaml is compatibility-only and MUST NOT be read when STORAGE_LIFE_EXECUTION_MODE=runtime.
+Runtime's public config/runtime/model.yaml is a platform template and MUST NOT silently override Storage config/model.local.yaml.
 
 ## Routing contract
 
