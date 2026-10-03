@@ -608,6 +608,25 @@ class HardwareR1WorkbenchService:
                 result=item.get("pipeline_result"),
             )
 
+    def list_batches(self, limit: int = 50) -> dict[str, Any]:
+        items = self.store.list_batches(limit=limit)
+        return {
+            "contract_version": WORKBENCH_CONTRACT_VERSION,
+            "items": items,
+            "total": len(items),
+        }
+
+    def get_item(self, item_id: str) -> dict[str, Any]:
+        item = self.store.get_item(item_id)
+        # Candidate is a preview result. It is never promoted/published here.
+        result = item.get("pipeline_result") or {}
+        return {
+            "contract_version": WORKBENCH_CONTRACT_VERSION,
+            **item,
+            "candidate": result.get("knowledge_object"),
+            "evidence_validation": result.get("evidence_validation"),
+        }
+
     def get_batch(self, batch_id: str) -> dict[str, Any]:
         items = self.store.list_items(batch_id)
         if not items and batch_id not in {item["batch_id"] for item in self.store.list_batches()}:
