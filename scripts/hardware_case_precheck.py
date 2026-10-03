@@ -43,17 +43,6 @@ def ensure_local_templates() -> None:
             "CREATED",
             str(VALIDATION_LOCAL.relative_to(ROOT)),
         )
-    for relative in (
-        "data/input/word",
-        "data/tree",
-        "data/output",
-        "data/runtime",
-        "data/evidence_sources",
-        "data/hardware_case_sources",
-    ):
-        (ROOT / relative).mkdir(parents=True, exist_ok=True)
-
-
 def check_python() -> list[str]:
     errors: list[str] = []
     if sys.version_info < (3, 11):
@@ -93,27 +82,18 @@ def check_web() -> list[str]:
         else:
             errors.append(f"PACKAGE_FILE_MISSING:{relative}")
             emit(relative, "FAIL")
-    for relative in ("data", "data/runtime"):
-        path = ROOT / relative
-        path.mkdir(parents=True, exist_ok=True)
-        try:
-            probe = path / ".precheck-write"
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink()
-            emit(f"writable:{relative}", "PASS")
-        except OSError:
-            errors.append(f"DIRECTORY_NOT_WRITABLE:{relative}")
-            emit(f"writable:{relative}", "FAIL")
-
     if errors:
         return errors
 
     try:
         with tempfile.TemporaryDirectory(
             prefix="hc-web-precheck-",
-            dir=ROOT / "data",
         ) as temp:
             temp_root = Path(temp)
+            probe = temp_root / ".precheck-write"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            emit("writable:temporary-startup-root", "PASS")
             command = [
                 sys.executable,
                 str(ROOT / "scripts/hardware_case_web_start.py"),
