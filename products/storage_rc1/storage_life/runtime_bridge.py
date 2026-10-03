@@ -144,10 +144,31 @@ def agent_config_dir() -> Path:
 
 
 def agent_config_path(agent_id: str) -> Path:
-    allowed = {GENERIC_AGENT_ID, EMMC_PARAMETER_AGENT_ID, KNOWLEDGE_PRODUCTION_AGENT_ID}
+    allowed = {GENERIC_AGENT_ID, EMMC_PARAMETER_AGENT_ID}
     if agent_id not in allowed:
-        raise RuntimeBridgeUnavailable(f"未知 Storage/Knowledge Agent：{agent_id}")
+        raise RuntimeBridgeUnavailable(f"未知 Storage Parameter Agent：{agent_id}")
     return (agent_config_dir() / f"{agent_id}.yaml").resolve()
+
+
+def knowledge_production_agent_config_path() -> Path:
+    """Resolve the canonical shared Knowledge Production Agent contract.
+
+    In the repository, Knowledge Production owns config/runtime/agents.
+    A packaged candidate may stage that exact shared contract under its package
+    root at the same relative path.  Storage never maintains a divergent copy.
+    """
+    product = _project_root()
+    repository = product.parents[1] if len(product.parents) > 1 else product
+    shared = repository / "config" / "runtime" / "agents" / f"{KNOWLEDGE_PRODUCTION_AGENT_ID}.yaml"
+    if (repository / "knowledge_production").is_dir() and shared.is_file():
+        return shared.resolve()
+    packaged = product / "config" / "runtime" / "agents" / f"{KNOWLEDGE_PRODUCTION_AGENT_ID}.yaml"
+    if packaged.is_file():
+        return packaged.resolve()
+    raise RuntimeBridgeUnavailable(
+        "Knowledge Production canonical Agent 配置缺失："
+        f"checked={shared},{packaged}"
+    )
 
 
 def execution_mode_source() -> str:
@@ -188,7 +209,7 @@ def routing_table() -> dict[str, dict[str, Any]]:
 def knowledge_production_boundary() -> dict[str, Any]:
     return {
         "agent_id": KNOWLEDGE_PRODUCTION_AGENT_ID,
-        "agent_config_path": str(agent_config_path(KNOWLEDGE_PRODUCTION_AGENT_ID)),
+        "agent_config_path": str(knowledge_production_agent_config_path()),
         "scope": "GENERIC_KNOWLEDGE_PRODUCTION",
         "device_context": "preserved_as_input_context",
         "emmc_only": False,
@@ -196,11 +217,11 @@ def knowledge_production_boundary() -> dict[str, Any]:
 
 
 def model_config_path(runtime_root_path: Path) -> Path:
-    """Resolve user-owned Runtime model configuration.
+    """Resolve the single effective Storage Runtime model configuration.
 
-    STORAGE_MODEL_CONFIG may point anywhere on the test machine.  If it is not
-    set, Storage falls back to the public Runtime repository template so the
-    existing environment-variable CI mode keeps working.
+    User override is explicit via STORAGE_MODEL_CONFIG.  Without an override,
+    Storage always uses its own package/source config/model.local.yaml.  Runtime's
+    public model.yaml is a platform template and is not a silent Storage fallback.
     """
     explicit = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
     if explicit:
@@ -209,12 +230,15 @@ def model_config_path(runtime_root_path: Path) -> Path:
             path = (_project_root() / path).resolve()
         else:
             path = path.resolve()
-        if not path.is_file():
-            raise RuntimeBridgeUnavailable(
-                f"STORAGE_MODEL_CONFIG 不存在：{path}"
-            )
-        return path
-    return (runtime_root_path / "config" / "runtime" / "model.yaml").resolve()
+        source = "user"
+    else:
+        path = (_project_root() / "config" / "model.local.yaml").resolve()
+        source = "storage-default"
+    if not path.is_file():
+        raise RuntimeBridgeUnavailable(
+            f"Storage Runtime model config 不存在：{path} (source={source})"
+        )
+    return path
 
 
 def execution_mode() -> str:
