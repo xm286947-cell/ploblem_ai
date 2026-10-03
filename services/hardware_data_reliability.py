@@ -496,41 +496,44 @@ class HardwareDataReliabilityManager:
                 target_schema=CURRENT_SCHEMA_VERSION,
             )
         backup_id = backup.get("backup_id") if backup else None
-        migration = self._migration_for(source_version)
         try:
             with closing(self.connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 self._bootstrap_metadata(connection)
-                started_at = _utc_now()
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO hardware_schema_migration(
-                        migration_id,source_version,target_version,status,
-                        backup_id,started_at,completed_at,error_code
-                    ) VALUES(?,?,?,?,?,?,NULL,NULL)
-                    """,
-                    (
-                        migration.migration_id,
-                        migration.source_version,
-                        migration.target_version,
-                        "RUNNING",
-                        backup_id,
-                        started_at,
-                    ),
-                )
-                migration.apply(connection)
+                current = source_version
+                while current < CURRENT_SCHEMA_VERSION:
+                    migration = self._migration_for(current)
+                    started_at = _utc_now()
+                    connection.execute(
+                        """
+                        INSERT OR REPLACE INTO hardware_schema_migration(
+                            migration_id,source_version,target_version,status,
+                            backup_id,started_at,completed_at,error_code
+                        ) VALUES(?,?,?,?,?,?,NULL,NULL)
+                        """,
+                        (
+                            migration.migration_id,
+                            migration.source_version,
+                            migration.target_version,
+                            "RUNNING",
+                            backup_id,
+                            started_at,
+                        ),
+                    )
+                    migration.apply(connection)
+                    connection.execute(
+                        """
+                        UPDATE hardware_schema_migration
+                        SET status='COMPLETED',completed_at=?,error_code=NULL
+                        WHERE migration_id=?
+                        """,
+                        (_utc_now(), migration.migration_id),
+                    )
+                    current = migration.target_version
                 self._validate_required_schema(connection)
                 if self.fault_injector is not None:
                     self.fault_injector("before_commit")
-                self._record_ready(connection, migration.target_version)
-                connection.execute(
-                    """
-                    UPDATE hardware_schema_migration
-                    SET status='COMPLETED',completed_at=?,error_code=NULL
-                    WHERE migration_id=?
-                    """,
-                    (_utc_now(), migration.migration_id),
-                )
+                self._record_ready(connection, current)
                 connection.commit()
             self._clear_recovery()
             ready = self.inspect_status()
