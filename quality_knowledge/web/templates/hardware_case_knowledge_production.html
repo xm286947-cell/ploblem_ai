@@ -1,0 +1,128 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-r1-workbench-v1">{% endblock %}
+{% block breadcrumb %}知识生产工作台{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-r1-workbench data-api="{{ hardware_workbench_api_prefix }}">
+  <section class="hc-hero">
+    <div>
+      <span class="hc-kicker">HARDWARE R1 · BATCH FIRST KNOWLEDGE PRODUCTION</span>
+      <h1>知识生产工作台</h1>
+      <p>Batch 只负责组织与操作；每个 Case 继续复用冻结的 Parse → Stage A → Stage B → Gate。REVIEW 不等于 Formal Publish。</p>
+    </div>
+    <div class="hc-workbench-actions">
+      <label class="hc-button primary">
+        批量上传 Word
+        <input type="file" accept=".docx" multiple hidden data-batch-files>
+      </label>
+      <button class="hc-button" type="button" data-run-batch disabled>Run / Resume Batch</button>
+      <button class="hc-button" type="button" data-retry-failed disabled>Retry Failed Only</button>
+    </div>
+  </section>
+
+  <section class="hc-card">
+    <div class="hc-card-head">
+      <div>
+        <h2>Batch Queue</h2>
+        <p data-batch-ref>尚未选择 Batch。</p>
+      </div>
+      <div class="hc-workbench-filters">
+        <select data-batch-history aria-label="Batch History">
+          <option value="">Batch History</option>
+        </select>
+        <select data-result-filter aria-label="Result Filter">
+          <option value="">全部状态</option>
+          <option value="QUEUED">QUEUED</option>
+          <option value="RUNNING">RUNNING</option>
+          <option value="CANDIDATE_READY">CANDIDATE_READY</option>
+          <option value="REVIEW">REVIEW</option>
+          <option value="FAILED">FAILED</option>
+          <option value="RUNTIME_BLOCKED">RUNTIME_BLOCKED</option>
+          <option value="DEPENDENCY_BLOCKED">DEPENDENCY_BLOCKED</option>
+        </select>
+      </div>
+    </div>
+    <div class="hc-workbench-summary" data-batch-summary>
+      <span><b>TOTAL</b><strong>0</strong></span>
+      <span><b>QUEUED</b><strong>0</strong></span>
+      <span><b>RUNNING</b><strong>0</strong></span>
+      <span><b>CANDIDATE READY</b><strong>0</strong></span>
+      <span><b>REVIEW</b><strong>0</strong></span>
+      <span><b>FAILED</b><strong>0</strong></span>
+    </div>
+    <p class="hc-workbench-message" role="status" data-workbench-message>正在载入 Batch History…</p>
+    <div class="hc-workbench-table-wrap">
+      <table class="hc-workbench-table">
+        <thead>
+          <tr>
+            <th>Case / Source File</th>
+            <th>Parse</th>
+            <th>Stage A</th>
+            <th>Stage B</th>
+            <th>Gate</th>
+            <th>Result</th>
+            <th>Provider Calls</th>
+            <th>Duration</th>
+            <th>Last Updated</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody data-batch-items>
+          <tr><td colspan="10" class="hc-empty">暂无 Batch。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="hc-card" data-case-detail hidden>
+    <div class="hc-card-head">
+      <div>
+        <h2>Case Detail</h2>
+        <p data-case-heading>—</p>
+      </div>
+      <button class="hc-button" type="button" data-return-batch>Return to Batch</button>
+    </div>
+    <div class="hc-workbench-detail">
+      <div class="hc-workbench-detail-grid">
+        <div><b>Batch Ref</b><span data-detail-batch>—</span></div>
+        <div><b>Current Status</b><span data-detail-status>—</span></div>
+        <div><b>Failed Stage</b><span data-detail-failed-stage>—</span></div>
+        <div><b>Provider Calls</b><span data-detail-provider-calls>—</span></div>
+        <div><b>Duration</b><span data-detail-duration>—</span></div>
+        <div><b>Run Ref</b><span data-detail-run-ref>—</span></div>
+      </div>
+      <div class="hc-workbench-stage-strip" data-detail-stages></div>
+      <div class="hc-workbench-detail-actions">
+        <button class="hc-button" type="button" data-item-run>Run / Resume</button>
+        <button class="hc-button" type="button" data-item-retry>Retry Failed Stage</button>
+        <button class="hc-button" type="button" data-open-debug>Advanced Debug</button>
+      </div>
+      <h3>Candidate Preview</h3>
+      <pre class="hc-workbench-json" data-candidate-preview>—</pre>
+      <h3>Evidence / Gate Summary</h3>
+      <pre class="hc-workbench-json" data-evidence-summary>—</pre>
+    </div>
+  </section>
+
+  <section class="hc-card" data-advanced-debug hidden>
+    <div class="hc-card-head">
+      <div>
+        <h2>Advanced Debug</h2>
+        <p>专家诊断入口。只读诊断为默认；Force Full Run 会绕过 A/B Cache，成本更高。</p>
+      </div>
+      <button class="hc-button" type="button" data-close-debug>关闭 Debug</button>
+    </div>
+    <div class="hc-workbench-detail">
+      <div class="hc-source-warning">
+        Force Full Run 仅用于高级维护诊断。失败不得覆盖 Last Good Cache。
+      </div>
+      <button class="hc-button" type="button" data-force-item>Force Full Run</button>
+      <pre class="hc-workbench-json" data-debug-json>—</pre>
+    </div>
+  </section>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1"></script>{% endblock %}

@@ -84,6 +84,7 @@ jobs:
         run: |
           node --check quality_knowledge/web/static/hardware_case.js
           node --check quality_knowledge/web/static/hardware_case_word_import.js
+          node --check quality_knowledge/web/static/hardware_case_knowledge_production.js
           node --check quality_knowledge/web/static/hardware_tree_import.js
 
       - name: Build product test package
@@ -174,6 +175,10 @@ jobs:
           assert "quality_knowledge/web/templates/hardware_case_detail.html" in paths
           assert "quality_knowledge/web/templates/hardware_case_review.html" in paths
           assert "quality_knowledge/web/templates/hardware_case_word_import.html" in paths
+          assert "quality_knowledge/web/templates/hardware_case_knowledge_production.html" in paths
+          assert "quality_knowledge/web/hardware_r1_workbench_api.py" in paths
+          assert "services/hardware_case_r1_workbench.py" in paths
+          assert "quality_knowledge/web/static/hardware_case_knowledge_production.js" in paths
           assert "quality_knowledge/web/static/hardware_case.js" in paths
           assert "quality_knowledge/web/static/hardware_case_word_import.js" in paths
           assert "quality_knowledge/web/static/hardware_case.css" in paths
@@ -255,6 +260,7 @@ jobs:
           tests/test_hardware_r1_runtime_v2.py
           tests/test_hardware_r1_preview_store.py
           tests/test_hardware_r1_pipeline_v13.py
+          tests/test_hardware_r1_workbench.py
 
       - name: Run Hardware Public Consumer Contract regression
         run: python -m pytest -q --noconftest tests/test_hardware_public_consumer_contract.py

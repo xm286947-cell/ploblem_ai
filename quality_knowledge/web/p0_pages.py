@@ -456,6 +456,25 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get(
+        "/p0/hardware-cases/knowledge-production",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def hardware_r1_knowledge_production(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_knowledge_production.html",
+            {
+                "hardware_workbench_api_prefix": (
+                    "/api/v2/hardware-cases/r1/workbench"
+                ),
+                "page_title": "知识生产工作台 · 硬件案例库",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "knowledge-production",
+            },
+        )
+
     @router.get("/p0/hardware-cases/intake", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_intake(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
