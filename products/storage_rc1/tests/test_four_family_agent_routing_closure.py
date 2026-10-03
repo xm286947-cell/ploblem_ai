@@ -41,7 +41,9 @@ def test_canonical_agent_config_directory_is_single_effective_storage_source():
     assert runtime_bridge.agent_config_dir() == canonical.resolve()
     assert (canonical / "storage.ai.json_call.yaml").is_file()
     assert (canonical / "storage.emmc.parameter_extract.yaml").is_file()
-    assert (canonical / "knowledge.production.extract.yaml").is_file()
+    # Knowledge Production is shared-owned; Storage does not keep a divergent source copy.
+    assert not (canonical / "knowledge.production.extract.yaml").exists()
+    assert runtime_bridge.knowledge_production_agent_config_path().is_file()
 
     # Old product-local duplicate paths are intentionally removed.
     assert not (ROOT / "config" / "runtime" / "storage.ai.json_call.yaml").exists()
@@ -105,6 +107,7 @@ def test_knowledge_production_remains_generic_not_emmc():
     assert boundary["emmc_only"] is False
     assert KnowledgeExtractionService.AGENT_ID == "knowledge.production.extract"
     assert Path(boundary["agent_config_path"]).is_file()
+    assert Path(boundary["agent_config_path"]) == runtime_bridge.knowledge_production_agent_config_path()
 
 
 def test_runtime_status_exposes_routing_even_when_runtime_is_not_available(monkeypatch):
