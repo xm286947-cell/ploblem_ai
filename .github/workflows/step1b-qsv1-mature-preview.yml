@@ -44,7 +44,7 @@ jobs:
           .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
       - name: Run exact Windows launcher smoke
         shell: pwsh
-        run: .venv\Scripts\python.exe tools\step1b_qsv1_launcher_smoke.py --platform windows --port 8092
+        run: .venv\Scripts\python.exe tools\step1b_qsv1_launcher_smoke.py --platform windows --port 8082
 
   macos-startup:
     runs-on: macos-latest

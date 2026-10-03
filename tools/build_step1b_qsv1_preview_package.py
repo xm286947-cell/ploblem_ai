@@ -56,6 +56,9 @@ def main() -> int:
         "source_sha": source_sha,
         "candidate_class": "USER_PREVIEW",
         "formal_release_candidate": False,
+        "mature_code_restore": "PASS",
+        "mature_real_data_product_gate": "PENDING_EXTERNAL_DB",
+        "qsv1_additive_integration": "PASS",
         "windows_entry": "start_quality_capability_p1.bat",
         "macos_entry": "start_quality_capability_p1.command",
         "qsv1_db_env": "QUALITY_SCENARIO_V1_DB_PATH",
@@ -73,6 +76,10 @@ def main() -> int:
 SOURCE_SHA={source_sha}
 CANDIDATE_CLASS=USER_PREVIEW
 PRODUCT_COMPLETION=NO
+MATURE_CODE_RESTORE=PASS
+MATURE_REAL_DATA_PRODUCT_GATE=PENDING_EXTERNAL_DB
+QSV1_ADDITIVE_INTEGRATION=PASS
+SYNTHETIC_FIXTURE_USED=NO
 
 WINDOWS:
 1. Run INSTALL_OVERALL_R2_WINDOWS.bat once if needed.

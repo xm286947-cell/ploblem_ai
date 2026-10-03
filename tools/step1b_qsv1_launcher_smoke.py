@@ -107,8 +107,19 @@ def main() -> int:
             "/issues",
             "/analysis",
             "/import",
+            "/itr/recovery-workbench",
+            "/itr/resolution-workbench",
+            "/software-assessment",
+            "/missed-test-analysis",
+            "/product-reports",
+            "/quality-scenarios",
+            "/quality-scenario-assets",
+            "/quality-scenario-assets/portrait",
+            "/quality-scenarios/insights",
+            "/settings/scenario-taxonomy",
             "/p0/quality-scenarios/workbench",
             "/p0/quality-scenarios",
+            "/p0/quality-scenarios/library/QSV1-SMOKE-DETAIL",
             "/p0/quality-scenario-insights",
         )
         for route in routes:
@@ -129,6 +140,8 @@ def main() -> int:
             "P04_PUBLISHED_COUNT": 0,
             "SYNTHETIC_FIXTURE_USED": "NO",
         }
+        if Path(status["V1_DB_ABSOLUTE_PATH"]).resolve() != (temp_root / "qsv1.db").resolve():
+            raise RuntimeError("QSV1_DATABASE_BINDING_MISMATCH")
         for key, value in expected.items():
             if status.get(key) != value:
                 raise RuntimeError(f"{key}={status.get(key)!r}, expected {value!r}")
@@ -137,6 +150,8 @@ def main() -> int:
         print("MATURE_PLATFORM_BASE=PASS")
         print("NEW_QS_WORKBENCH_VISIBLE=PASS")
         print("NEW_QS_LIBRARY_VISIBLE=PASS")
+        print("MATURE_ROUTES=PASS")
+        print("QSV1_DETAIL_ROUTE=PASS")
         print("P04_REAL_PROVIDER_BINDING=PASS")
         print("SYNTHETIC_FIXTURE_USED=NO")
         print("V1_DB_ABSOLUTE_PATH=" + str(status["V1_DB_ABSOLUTE_PATH"]))
