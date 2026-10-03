@@ -708,6 +708,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
     dtype = templates.normalize_device_type(device_type) if device_type else ""
     evidence_by_field = {}
     lifecycle = None
+    detail = None
     if device_id:
         detail = device_slots(device_id)
         lifecycle = detail["lifecycle"]
@@ -723,7 +724,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         data_source, method, interpretation = DIAGNOSTIC_METHODS.get(key, ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"))
         slot = evidence_by_field.get(key) or {}
         formal = slot.get("review_status") == "CONFIRMED"
-        knowledge = _formal_knowledge(
+        knowledge = slot.get("formal_knowledge") or _formal_knowledge(
             key,
             field.get("parameter_name") or key,
             dtype,
@@ -738,6 +739,8 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "interpretation": interpretation,
             "fact_status": slot.get("status", "NOT_CHECKED") if device_id else "REFERENCE",
             "review_status": slot.get("review_status", "NOT_REVIEWED") if device_id else "REFERENCE",
+            "diagnostic_status": slot.get("diagnostic_status") if device_id else None,
+            "diagnostic_label": slot.get("diagnostic_label") if device_id else None,
             "evidence": slot.get("evidence", []) if formal else [],
             "runtime_observation": {
                 "status": "UNKNOWN",
@@ -747,15 +750,47 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 "source": None,
             },
             "formal_knowledge": knowledge,
-            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
+            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "KNOWLEDGE_GAP",
         })
+
+    skill_result = None
+    if detail is not None:
+        # Reuse the existing Storage Domain Skill adapter.  Product API composes context;
+        # it does not implement a second diagnostic skill or protocol knowledge stack.
+        from skills.real_knowledge import RealKnowledgeAssessmentService
+        capabilities = [
+            {
+                "canonical_name": x["canonical_name"],
+                "diagnostic_status": x.get("diagnostic_status"),
+                "datasheet_fact": x.get("value"),
+                "review_status": x.get("review_status"),
+                "evidence_refs": [
+                    e.get("evidence_id") or e.get("source_id")
+                    for e in x.get("evidence") or []
+                    if e.get("evidence_id") or e.get("source_id")
+                ],
+            }
+            for x in detail["slots"]
+            if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+        ]
+        skill_result = RealKnowledgeAssessmentService.current().execute_skill(
+            "storage-diagnostic-validation",
+            {
+                "device_type": dtype,
+                "target_question": f"{dtype} diagnostic capability validation and runtime observation requirements",
+                "diagnostic_capabilities": capabilities,
+                "runtime_observations": [],
+            },
+        )
     return {
         "device_type": dtype,
         "device_id": device_id or None,
         "items": rows,
-        "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
+        "layers": ["DATASHEET_FACT", "DOMAIN_KNOWLEDGE", "RUNTIME_OBSERVATION"],
         "lifecycle_gate": lifecycle,
         "formal_consumption_allowed": bool(lifecycle and lifecycle.get("formal_ready")) if device_id else None,
+        "skill_id": "storage-diagnostic-validation",
+        "skill_result": skill_result,
     }
 
 
@@ -798,7 +833,41 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
             "formal_knowledge": knowledge,
             "knowledge_analysis_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "STATIC_FALLBACK",
         })
-    return {"old_id": old_id, "new_id": new_id, "status": "DRAFT_FOR_ENGINEERING_REVIEW", "final_replacement_decision": None, "items": rows, "unknowns": list(dict.fromkeys(unknowns))}
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    skill_delta = [
+        {
+            "canonical_name": row["canonical_name"],
+            "old": row["old"].get("value"),
+            "new": row["new"].get("value"),
+            "old_status": row["old"].get("status"),
+            "new_status": row["new"].get("status"),
+            "evidence_refs": [
+                e.get("evidence_id") or e.get("source_id")
+                for cell in (row["old"], row["new"])
+                for e in cell.get("evidence") or []
+                if e.get("evidence_id") or e.get("source_id")
+            ],
+        }
+        for row in rows
+    ]
+    skill_result = RealKnowledgeAssessmentService.current().execute_skill(
+        "storage-change-impact",
+        {
+            "device_type": comparison["devices"][0]["device_type"],
+            "parameter_delta": skill_delta,
+            "question": "device parameter change lifetime software monitoring validation impact",
+        },
+    )
+    return {
+        "old_id": old_id,
+        "new_id": new_id,
+        "status": "DRAFT_FOR_ENGINEERING_REVIEW",
+        "final_replacement_decision": None,
+        "items": rows,
+        "unknowns": list(dict.fromkeys(unknowns)),
+        "skill_id": "storage-change-impact",
+        "skill_result": skill_result,
+    }
 
 
 def maintenance() -> dict[str, Any]:
