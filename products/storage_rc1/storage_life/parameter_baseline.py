@@ -84,7 +84,7 @@ BASELINES: dict[str, list[dict[str, Any]]] = {
         _f("operating_temperature", "工作温度范围（Operating Temperature Range）", KEY_SPEC),
         _f("erase_count_observability", "擦写次数可观测能力（Erase Count Observability）", KEY_DIAGNOSTIC, aliases=("lifetime_counter",)),
         _f("ecc_observability", "ECC 纠正 / 不可纠正错误可观测能力（Corrected / Uncorrectable ECC Observability）", KEY_DIAGNOSTIC, aliases=("ecc_status", "ecc_capability")),
-        _f("bad_block_observability", "坏块数量可观测能力（Bad Block Count Observability）", KEY_DIAGNOSTIC, aliases=("runtime_bad_block",)),
+        _f("bad_block_observability", "坏块数量可观测能力（Bad Block Count Observability）", KEY_DIAGNOSTIC),
         _f("wear_distribution_observability", "磨损分布可观测能力（Wear Distribution Observability）", KEY_DIAGNOSTIC),
         _f("failure_status", "读 / 编程 / 擦除失败状态（Read / Program / Erase Failure Status）", KEY_DIAGNOSTIC, "SHOULD", aliases=("read_retry", "program_fail", "erase_fail")),
         _f("data_source_read_method", "数据源与读取方法（Data Source / Read Method）", KEY_DIAGNOSTIC, aliases=("status_register",)),
