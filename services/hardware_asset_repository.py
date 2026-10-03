@@ -17,10 +17,19 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping
 from uuid import uuid4
 
-from services.hardware_asset_migrations import v001_candidate_repository
+from services.hardware_asset_migrations import (
+    v001_candidate_repository,
+    v002_legacy_migration,
+)
 
 
-ASSET_SCHEMA_VERSION = v001_candidate_repository.TARGET_VERSION
+_ASSET_MIGRATIONS = (v001_candidate_repository, v002_legacy_migration)
+_MIGRATIONS_BY_SOURCE = {item.SOURCE_VERSION: item for item in _ASSET_MIGRATIONS}
+ASSET_SCHEMA_VERSION = _ASSET_MIGRATIONS[-1].TARGET_VERSION
+_SCHEMA_NAMES = {
+    v001_candidate_repository.TARGET_VERSION: v001_candidate_repository.SCHEMA_NAME,
+    v002_legacy_migration.TARGET_VERSION: v002_legacy_migration.SCHEMA_NAME,
+}
 KNOWLEDGE_OBJECT_CONTRACT_VERSION = "hardware-case-knowledge-object/v1"
 ASSET_STATUSES = frozenset({"ACTIVE", "INVALIDATED"})
 REVIEW_STATUSES = frozenset({"NOT_REQUIRED", "REQUIRED", "RESOLVED"})
@@ -117,8 +126,16 @@ class CandidateAssetRepository:
                         raise CandidateAssetRepositoryError(
                             "ASSET_SCHEMA_VERSION_MISSING"
                         )
-                    self._apply_initial_schema(connection)
-                    self._write_migration_record(connection, 0)
+                    v001_candidate_repository.apply(connection)
+                    self._set_schema_version(
+                        connection,
+                        v001_candidate_repository.TARGET_VERSION,
+                        v001_candidate_repository.SCHEMA_NAME,
+                    )
+                    self._write_migration_record(
+                        connection, v001_candidate_repository, 0
+                    )
+                    current_version = v001_candidate_repository.TARGET_VERSION
                 else:
                     columns = self._columns(connection, version_table)
                     if not {"singleton", "schema_version", "schema_name", "updated_at"}.issubset(columns):
@@ -136,41 +153,30 @@ class CandidateAssetRepository:
                     current_version = int(version_row["schema_version"])
                     if current_version > ASSET_SCHEMA_VERSION:
                         raise CandidateAssetRepositoryError("ASSET_SCHEMA_TOO_NEW")
-                    if current_version == ASSET_SCHEMA_VERSION and (
-                        version_row["schema_name"]
-                        != v001_candidate_repository.SCHEMA_NAME
+                    if current_version > 0 and version_row["schema_name"] != _SCHEMA_NAMES.get(
+                        current_version
                     ):
                         raise CandidateAssetRepositoryError(
                             "ASSET_SCHEMA_VERSION_MISMATCH"
                         )
-                    if current_version < ASSET_SCHEMA_VERSION:
-                        if current_version != 0:
-                            raise CandidateAssetRepositoryError(
-                                "ASSET_SCHEMA_MIGRATION_UNSUPPORTED"
-                            )
-                        self._apply_initial_schema(connection)
-                        self._write_migration_record(connection, current_version)
-                    else:
-                        self._validate_schema(connection)
-                        migration = connection.execute(
-                            "SELECT source_version,target_version "
-                            "FROM hardware_asset_schema_migration "
-                            "WHERE migration_id=? AND target_version=?",
-                            (
-                                v001_candidate_repository.MIGRATION_ID,
-                                ASSET_SCHEMA_VERSION,
-                            ),
-                        ).fetchone()
-                        if (
-                            migration is None
-                            or int(migration["source_version"])
-                            != v001_candidate_repository.SOURCE_VERSION
-                            or int(migration["target_version"])
-                            != ASSET_SCHEMA_VERSION
-                        ):
-                            raise CandidateAssetRepositoryError(
-                                "ASSET_SCHEMA_MIGRATION_RECORD_MISSING"
-                            )
+                while current_version < ASSET_SCHEMA_VERSION:
+                    migration = _MIGRATIONS_BY_SOURCE.get(current_version)
+                    if migration is None:
+                        raise CandidateAssetRepositoryError(
+                            "ASSET_SCHEMA_MIGRATION_UNSUPPORTED"
+                        )
+                    migration.apply(connection)
+                    current_version = migration.TARGET_VERSION
+                    self._set_schema_version(
+                        connection,
+                        current_version,
+                        migration.SCHEMA_NAME,
+                    )
+                    self._write_migration_record(
+                        connection, migration, migration.SOURCE_VERSION
+                    )
+                self._validate_migration_history(connection)
+                self._validate_schema(connection)
                 integrity = connection.execute("PRAGMA integrity_check").fetchone()
                 if integrity is None or str(integrity[0]).lower() != "ok":
                     raise CandidateAssetRepositoryError(
@@ -203,8 +209,11 @@ class CandidateAssetRepository:
         }
 
     @staticmethod
-    def _apply_initial_schema(connection: sqlite3.Connection) -> None:
-        v001_candidate_repository.apply(connection)
+    def _set_schema_version(
+        connection: sqlite3.Connection,
+        schema_version: int,
+        schema_name: str,
+    ) -> None:
         now = _utc_now()
         connection.execute(
             """
@@ -216,16 +225,14 @@ class CandidateAssetRepository:
                 schema_name=excluded.schema_name,
                 updated_at=excluded.updated_at
             """,
-            (
-                ASSET_SCHEMA_VERSION,
-                v001_candidate_repository.SCHEMA_NAME,
-                now,
-            ),
+            (schema_version, schema_name, now),
         )
 
     @staticmethod
     def _write_migration_record(
-        connection: sqlite3.Connection, source_version: int
+        connection: sqlite3.Connection,
+        migration: Any,
+        source_version: int,
     ) -> None:
         now = _utc_now()
         connection.execute(
@@ -236,17 +243,36 @@ class CandidateAssetRepository:
             ON CONFLICT(migration_id) DO NOTHING
             """,
             (
-                v001_candidate_repository.MIGRATION_ID,
+                migration.MIGRATION_ID,
                 source_version,
-                ASSET_SCHEMA_VERSION,
+                migration.TARGET_VERSION,
                 now,
             ),
         )
-        CandidateAssetRepository._validate_schema(connection)
+
+    @staticmethod
+    def _validate_migration_history(connection: sqlite3.Connection) -> None:
+        for migration in _ASSET_MIGRATIONS:
+            row = connection.execute(
+                "SELECT source_version,target_version "
+                "FROM hardware_asset_schema_migration WHERE migration_id=?",
+                (migration.MIGRATION_ID,),
+            ).fetchone()
+            if (
+                row is None
+                or int(row["source_version"]) != migration.SOURCE_VERSION
+                or int(row["target_version"]) != migration.TARGET_VERSION
+            ):
+                raise CandidateAssetRepositoryError(
+                    "ASSET_SCHEMA_MIGRATION_RECORD_MISSING"
+                )
 
     @staticmethod
     def _validate_schema(connection: sqlite3.Connection) -> None:
-        for table, required in v001_candidate_repository.REQUIRED_COLUMNS.items():
+        required_columns = dict(v001_candidate_repository.REQUIRED_COLUMNS)
+        if ASSET_SCHEMA_VERSION >= v002_legacy_migration.TARGET_VERSION:
+            required_columns.update(v002_legacy_migration.REQUIRED_COLUMNS)
+        for table, required in required_columns.items():
             actual = CandidateAssetRepository._columns(connection, table)
             if not required.issubset(actual):
                 raise CandidateAssetRepositoryError(
@@ -259,6 +285,13 @@ class CandidateAssetRepository:
             "hardware_candidate_review_no_delete",
             "hardware_candidate_asset_no_delete",
         }
+        if ASSET_SCHEMA_VERSION >= v002_legacy_migration.TARGET_VERSION:
+            required_triggers.update(
+                {
+                    "hardware_candidate_legacy_origin_no_update",
+                    "hardware_candidate_legacy_origin_no_delete",
+                }
+            )
         triggers = {
             str(row[0])
             for row in connection.execute(
@@ -313,24 +346,11 @@ class CandidateAssetRepository:
                 raise CandidateAssetRepositoryError(
                     "ASSET_SCHEMA_MIGRATION_REQUIRED"
                 )
-            if version["schema_name"] != v001_candidate_repository.SCHEMA_NAME:
+            if version["schema_name"] != _SCHEMA_NAMES.get(schema_version):
                 raise CandidateAssetRepositoryError(
                     "ASSET_SCHEMA_VERSION_MISMATCH"
                 )
-            migration = connection.execute(
-                "SELECT source_version,target_version "
-                "FROM hardware_asset_schema_migration WHERE migration_id=?",
-                (v001_candidate_repository.MIGRATION_ID,),
-            ).fetchone()
-            if (
-                migration is None
-                or int(migration["source_version"])
-                != v001_candidate_repository.SOURCE_VERSION
-                or int(migration["target_version"]) != ASSET_SCHEMA_VERSION
-            ):
-                raise CandidateAssetRepositoryError(
-                    "ASSET_SCHEMA_MIGRATION_RECORD_MISSING"
-                )
+            self._validate_migration_history(connection)
             return connection
         except CandidateAssetRepositoryError:
             if connection is not None:

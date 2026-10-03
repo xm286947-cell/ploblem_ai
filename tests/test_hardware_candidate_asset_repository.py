@@ -17,6 +17,7 @@ from services.hardware_asset_repository import (
     candidate_identity,
     deterministic_evidence_id,
 )
+from services.hardware_asset_migrations import v001_candidate_repository
 
 
 CASE_ID = "A0152"
@@ -98,20 +99,21 @@ def _query(db_path: Path, sql: str, params: tuple = ()):
         return connection.execute(sql, params).fetchall()
 
 
-def test_asset_schema_v1_initializes_idempotently_and_records_migration(tmp_path):
+def test_asset_schema_v2_initializes_idempotently_and_records_migration(tmp_path):
     repository, db_path = _ready_repo(tmp_path)
 
-    assert repository.schema_version() == 1
-    assert repository.initialize()["schema_version"] == 1
+    assert repository.schema_version() == ASSET_SCHEMA_VERSION == 2
+    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION
     assert db_path.is_file() and db_path.stat().st_size > 0
     assert _query(
         db_path,
         "SELECT schema_version FROM hardware_asset_schema_version WHERE singleton=1",
-    ) == [(1,)]
+    ) == [(ASSET_SCHEMA_VERSION,)]
     assert _query(
         db_path,
-        "SELECT target_version FROM hardware_asset_schema_migration",
-    ) == [(1,)]
+        "SELECT source_version,target_version FROM hardware_asset_schema_migration "
+        "ORDER BY target_version",
+    ) == [(0, 1), (1, 2)]
     assert set(row[0] for row in _query(
         db_path,
         "SELECT name FROM sqlite_master WHERE type='table'",
@@ -121,7 +123,14 @@ def test_asset_schema_v1_initializes_idempotently_and_records_migration(tmp_path
         "hardware_candidate_review",
         "hardware_candidate_event",
         "hardware_asset_promotion",
+        "hardware_candidate_legacy_origin",
+        "hardware_asset_migration",
     }
+    review_columns = {
+        row[1]: row
+        for row in _query(db_path, "PRAGMA table_info(hardware_candidate_review)")
+    }
+    assert review_columns["before_candidate_hash"][3] == 0
 
 
 def test_v0_asset_schema_migrates_deterministically(tmp_path):
@@ -142,12 +151,96 @@ def test_v0_asset_schema_migrates_deterministically(tmp_path):
         )
 
     repository = CandidateAssetRepository(db_path)
-    assert repository.initialize()["schema_version"] == 1
-    assert repository.schema_version() == 1
+    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 2
+    assert repository.schema_version() == ASSET_SCHEMA_VERSION
     assert _query(
         db_path,
-        "SELECT source_version,target_version FROM hardware_asset_schema_migration",
-    ) == [(0, 1)]
+        "SELECT source_version,target_version FROM hardware_asset_schema_migration "
+        "ORDER BY target_version",
+    ) == [(0, 1), (1, 2)]
+
+
+def test_populated_v1_database_migrates_review_history_without_data_loss(tmp_path):
+    db_path = tmp_path / "populated-v1.db"
+    knowledge_object = _knowledge_object()
+    candidate_id = candidate_identity(CASE_ID, SOURCE_ID)
+    content_hash = candidate_content_hash(knowledge_object)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        v001_candidate_repository.apply(connection)
+        connection.execute(
+            "INSERT INTO hardware_asset_schema_version "
+            "(singleton,schema_version,schema_name,updated_at) VALUES(1,1,?,?)",
+            (v001_candidate_repository.SCHEMA_NAME, "legacy-v1"),
+        )
+        connection.execute(
+            "INSERT INTO hardware_asset_schema_migration "
+            "(migration_id,source_version,target_version,applied_at) VALUES(?,?,?,?)",
+            (
+                v001_candidate_repository.MIGRATION_ID,
+                v001_candidate_repository.SOURCE_VERSION,
+                v001_candidate_repository.TARGET_VERSION,
+                "legacy-v1",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO hardware_candidate_asset(
+                candidate_id,business_case_id,source_id,source_ref,candidate_hash,
+                knowledge_object_json,generation_run_id,pipeline_version,
+                agent_config_version,knowledge_schema_version,validator_version,
+                asset_status,production_review_status,promotion_status,row_version,
+                created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'ACTIVE','RESOLVED','NOT_STARTED',2,?,?)
+            """,
+            (
+                candidate_id,
+                CASE_ID,
+                SOURCE_ID,
+                SOURCE_REF,
+                content_hash,
+                json.dumps(knowledge_object, ensure_ascii=False, sort_keys=True),
+                "old-run",
+                VERSIONS["pipeline_version"],
+                VERSIONS["agent_config_version"],
+                VERSIONS["knowledge_schema_version"],
+                VERSIONS["validator_version"],
+                "old-created",
+                "old-updated",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO hardware_candidate_review(
+                review_id,candidate_id,before_candidate_hash,after_candidate_hash,
+                reviewer,reason,review_record_json,created_at
+            ) VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (
+                "old-review",
+                candidate_id,
+                "b" * 64,
+                content_hash,
+                "reviewer-1",
+                "legacy review",
+                '{"legacy":true}',
+                "old-reviewed-at",
+            ),
+        )
+
+    repository = CandidateAssetRepository(db_path)
+    assert repository.initialize()["schema_version"] == ASSET_SCHEMA_VERSION == 2
+    assert _query(
+        db_path,
+        "SELECT before_candidate_hash,after_candidate_hash,review_record_json "
+        "FROM hardware_candidate_review WHERE review_id='old-review'",
+    ) == [("b" * 64, content_hash, '{"legacy":true}')]
+    assert _query(
+        db_path,
+        "SELECT candidate_hash,production_review_status,row_version "
+        "FROM hardware_candidate_asset WHERE candidate_id=?",
+        (candidate_id,),
+    ) == [(content_hash, "RESOLVED", 2)]
 
 
 def test_candidate_operations_do_not_implicitly_migrate_v0_schema(tmp_path):
@@ -191,7 +284,8 @@ def test_newer_asset_schema_fails_closed(tmp_path):
     repository, db_path = _ready_repo(tmp_path)
     with sqlite3.connect(db_path) as connection:
         connection.execute(
-            "UPDATE hardware_asset_schema_version SET schema_version=2 WHERE singleton=1"
+            "UPDATE hardware_asset_schema_version SET schema_version=? WHERE singleton=1",
+            (ASSET_SCHEMA_VERSION + 1,),
         )
 
     with pytest.raises(CandidateAssetRepositoryError) as error:
