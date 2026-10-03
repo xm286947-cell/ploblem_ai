@@ -300,7 +300,7 @@ jobs:
           fi
           "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage329-system-before.txt
 
-          export PATH="/tmp/storage329-system-python/bin:/usr/bin:/bin"
+          export PATH="/tmp/storage329-system-python/bin:/usr/local/bin:/usr/bin:/bin"
           export PYTHONPATH=""
           cd "$PKG"
 
@@ -336,7 +336,17 @@ jobs:
           /usr/bin/curl -fsS "http://127.0.0.1:8765/api/v1/runtime/route?device_type=SSD" >/tmp/storage329-ssd.json
           /usr/bin/curl -fsS http://127.0.0.1:8765/api/product/skills/readiness >/tmp/storage329-readiness.json
 
-          "$PKG/.venv/bin/python" - <<'PY'
+          VENV_PY="$PKG/.venv/bin/python"
+          if [ ! -x "$VENV_PY" ]; then
+            VENV_PY="$PKG/.venv/bin/python3"
+          fi
+          if [ ! -x "$VENV_PY" ]; then
+            echo "PACKAGE_LOCAL_VENV_BOOTSTRAP=FAIL"
+            cat /tmp/storage329-launch.log || true
+            exit 1
+          fi
+
+          "$VENV_PY" - <<'PY'
           import json
           from pathlib import Path
 
@@ -371,7 +381,6 @@ jobs:
           assert ready["evidence_drilldown"]["status"] == "PASS"
           PY
 
-          test -x "$PKG/.venv/bin/python"
           "$SYSTEM_PY" -m pip freeze | sort > /tmp/storage329-system-after.txt
           cmp /tmp/storage329-system-before.txt /tmp/storage329-system-after.txt
 
