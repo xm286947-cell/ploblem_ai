@@ -47,7 +47,8 @@ jobs:
           echo "SKILL_GATE_REGRESSION=PASS"
       - name: Review UX and product regression
         run: |
-          python -m pytest -q             products/storage_rc1/tests/test_parameter_review_ux_353.py             products/storage_rc1/tests/test_storage_product_mvp_rc1.py             products/storage_rc1/tests/test_storage_rc1_r6_complete_assembly.py
+          cd products/storage_rc1
+          python -m pytest -q             tests/test_parameter_review_ux_353.py             tests/test_storage_product_mvp_rc1.py             tests/test_storage_rc1_r6_complete_assembly.py
           echo "REVIEW_UX_353_REGRESSION=PASS"
           echo "R1_REGRESSION=PASS"
           echo "VALID_EXISTING_CAPABILITY_LOST=0"
