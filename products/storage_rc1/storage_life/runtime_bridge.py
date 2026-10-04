@@ -721,7 +721,14 @@ def _build_emmc_long_content_observation(
         provider_calls = sum(
             1 for attempt in attempts if attempt.provider_call_seq is not None
         )
-        duration_ms = sum(_runtime_step_duration_ms(item) for item in step_runs)
+        active_step_runs = [
+            item
+            for item in step_runs
+            if not (getattr(item, "metadata", {}) or {}).get(
+                "reused_committed_execution"
+            )
+        ]
+        duration_ms = sum(_runtime_step_duration_ms(item) for item in active_step_runs)
         latest_error = None
         for attempt in attempts:
             safe_error = _safe_runtime_error(getattr(attempt, "error", None))
@@ -758,13 +765,7 @@ def _build_emmc_long_content_observation(
             "committed": committed,
             "provider_calls": provider_calls,
             "attempt_count": sum(int(item.attempt_count or 0) for item in step_runs),
-            "run_count": sum(
-                1
-                for item in step_runs
-                if not (getattr(item, "metadata", {}) or {}).get(
-                    "reused_committed_execution"
-                )
-            ),
+            "run_count": len(active_step_runs),
             "duration_ms": duration_ms,
             "error": latest_error,
             "provider_contract_chars": len(serialized_contract),

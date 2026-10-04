@@ -211,9 +211,36 @@ def test_t03_resume_observation_reuses_committed_chunks_and_matches_store(tmp_pa
     _bind_projection(monkeypatch, executor)
     with pytest.raises(runtime_bridge.RuntimeBridgeCallError):
         _run_bridge_call()
+
+    original_duration = runtime_bridge._runtime_step_duration_ms
+    reused_duration_reads = []
+
+    def duration_with_reuse_sentinel(step_run):
+        if (getattr(step_run, "metadata", {}) or {}).get("reused_committed_execution"):
+            reused_duration_reads.append(step_run.step_run_id)
+            return 123456
+        return original_duration(step_run)
+
+    monkeypatch.setattr(runtime_bridge, "_runtime_step_duration_ms", duration_with_reuse_sentinel)
     result = _run_bridge_call()
     event = runtime_bridge.last_executions()[-1]
     chunks = event["chunks"]
+
+    request = executor.store.load_request(event["task_id"])
+    step_chunk_map = request.input["step_chunk_map"]
+    expected_active_duration_by_chunk = {}
+    reused_step_count = 0
+    for run in executor.store.list_runs(event["task_id"]):
+        for step_run in executor.store.list_step_runs(run.run_id):
+            if (getattr(step_run, "metadata", {}) or {}).get("reused_committed_execution"):
+                reused_step_count += 1
+                continue
+            chunk_id = step_chunk_map.get(step_run.step_id)
+            if chunk_id is not None:
+                expected_active_duration_by_chunk[chunk_id] = (
+                    expected_active_duration_by_chunk.get(chunk_id, 0)
+                    + original_duration(step_run)
+                )
 
     assert result["fields"]
     assert event["observability_status"] == "READY"
@@ -222,6 +249,12 @@ def test_t03_resume_observation_reuses_committed_chunks_and_matches_store(tmp_pa
     assert [chunk["run_count"] for chunk in chunks] == [1, 1, 1, 2, 1, 1]
     assert [chunk["provider_calls"] for chunk in chunks] == [1, 1, 1, 2, 1, 1]
     assert all(chunk["committed"] is True for chunk in chunks)
+    assert reused_step_count >= 3
+    assert reused_duration_reads == []
+    assert [chunk["duration_ms"] for chunk in chunks] == [
+        expected_active_duration_by_chunk[chunk["chunk_id"]] for chunk in chunks
+    ]
+    assert event["duration_ms"] == sum(expected_active_duration_by_chunk.values())
     assert calls == [tuple(group) for _name, group in StorageEmmcDomainStrategy.atomic_groups[:4]] + [
         tuple(StorageEmmcDomainStrategy.atomic_groups[3][1]),
         tuple(StorageEmmcDomainStrategy.atomic_groups[4][1]),
