@@ -31,6 +31,10 @@ from services.hardware_asset_repository import (
 )
 from services.hardware_case_r1_workbench import HardwareR1WorkbenchStore
 from services.hardware_case_source_store import HardwareCaseSourceStore
+from services.hardware_recovery_coordinator import (
+    HardwareRecoveryCoordinator,
+    HardwareRecoveryError,
+)
 from services.hardware_data_reliability import (
     CURRENT_SCHEMA_VERSION,
     HardwareDataReliabilityError,
@@ -253,6 +257,13 @@ class HardwareStartupCoordinator:
             "ready": False,
             "error_code": None,
             "data_root": None,
+            "recovery_status": "NOT_STARTED",
+            "active_root_operation": None,
+            "pending_local_recovery_count": 0,
+            "pending_remote_reconciliation_count": 0,
+            "blocked_asset_count": 0,
+            "last_recovery_error": None,
+            "degraded": False,
         }
 
     def run(self) -> dict[str, Any]:
@@ -281,7 +292,12 @@ class HardwareStartupCoordinator:
                     self._legacy_upgrade(resolution)
                 else:
                     raise HardwareStartupError("HARDWARE_STARTUP_BLOCKED")
-        except (HardwareStartupError, HardwareDataReliabilityError, LegacyAssetMigrationError) as error:
+        except (
+            HardwareStartupError,
+            HardwareDataReliabilityError,
+            LegacyAssetMigrationError,
+            HardwareRecoveryError,
+        ) as error:
             code = str(getattr(error, "code", None) or "HARDWARE_STARTUP_BLOCKED")
             return self._blocked(code, str(self._status.get("phase") or "STARTUP"))
         except (OSError, sqlite3.Error, ValueError) as error:
@@ -490,6 +506,15 @@ class HardwareStartupCoordinator:
 
         self._phase("CHECK_RECOVERY_MARKER")
         if (root / ROOT_RECOVERY_MARKER).exists() and not first_install_activation:
+            try:
+                marker = json.loads((root / ROOT_RECOVERY_MARKER).read_text(encoding="utf-8"))
+                if isinstance(marker, dict):
+                    self._status["active_root_operation"] = str(
+                        marker.get("operation") or "UNKNOWN"
+                    )
+            except (OSError, ValueError):
+                self._status["active_root_operation"] = "UNKNOWN"
+            self._status["recovery_status"] = "BLOCKED"
             raise HardwareStartupError("HARDWARE_STARTUP_RECOVERY_REQUIRED")
         self._check_asset_migration_marker(root)
         hardware_path, asset_path, workbench_path, source_root = self._required_durable_paths(root)
@@ -533,6 +558,15 @@ class HardwareStartupCoordinator:
             asset_schema_version=asset_version,
             workbench_schema_version=workbench_version,
         )
+
+        self._phase("RECOVER_LOCAL_OPERATIONS")
+        recovery = HardwareRecoveryCoordinator(
+            hardware_db=hardware_path,
+            asset_db=asset_path,
+            source_root=source_root,
+        ).recover()
+        self._status.update(recovery)
+        self._status["degraded"] = recovery["recovery_status"] == "DEGRADED"
 
         # A schema mutation is committed to the manifest before its root
         # operation marker is cleared. A crash cannot leave migrated DBs paired

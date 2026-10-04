@@ -230,6 +230,8 @@ def test_root_recovery_marker_blocks_normal_startup(tmp_path: Path):
 
     assert result["ready"] is False
     assert result["error_code"] == "HARDWARE_STARTUP_RECOVERY_REQUIRED"
+    assert result["recovery_status"] == "BLOCKED"
+    assert result["active_root_operation"] == "MIGRATION"
     assert marker.is_file()
 
 

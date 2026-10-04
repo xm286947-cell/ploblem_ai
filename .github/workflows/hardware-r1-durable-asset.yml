@@ -12,6 +12,7 @@ on:
       - "services/hardware_case_source_store.py"
       - "services/hardware_asset_operation_journal.py"
       - "services/hardware_startup_coordinator.py"
+      - "services/hardware_recovery_coordinator.py"
       - "services/hardware_asset_backup.py"
       - "services/hardware_durable_mutation_gate.py"
       - "services/hardware_operability.py"
@@ -26,6 +27,7 @@ on:
       - "tests/test_hardware_data_root.py"
       - "tests/test_hardware_data_reliability.py"
       - "tests/test_hardware_startup_coordinator.py"
+      - "tests/test_hardware_recovery_coordinator.py"
       - "tests/test_hardware_asset_backup.py"
       - "tests/test_hardware_source_crash_safety.py"
       - "tests/test_hardware_r1_source_binding.py"
@@ -44,6 +46,7 @@ on:
       - "services/hardware_case_source_store.py"
       - "services/hardware_asset_operation_journal.py"
       - "services/hardware_startup_coordinator.py"
+      - "services/hardware_recovery_coordinator.py"
       - "services/hardware_asset_backup.py"
       - "services/hardware_durable_mutation_gate.py"
       - "services/hardware_operability.py"
@@ -58,6 +61,7 @@ on:
       - "tests/test_hardware_data_root.py"
       - "tests/test_hardware_data_reliability.py"
       - "tests/test_hardware_startup_coordinator.py"
+      - "tests/test_hardware_recovery_coordinator.py"
       - "tests/test_hardware_asset_backup.py"
       - "tests/test_hardware_source_crash_safety.py"
       - "tests/test_hardware_r1_source_binding.py"
@@ -93,6 +97,7 @@ jobs:
           services/hardware_case_source_store.py
           services/hardware_asset_operation_journal.py
           services/hardware_startup_coordinator.py
+          services/hardware_recovery_coordinator.py
           services/hardware_asset_backup.py
           services/hardware_durable_mutation_gate.py
           services/hardware_operability.py
@@ -115,6 +120,7 @@ jobs:
           tests/test_hardware_data_root.py
           tests/test_hardware_data_reliability.py
           tests/test_hardware_startup_coordinator.py
+          tests/test_hardware_recovery_coordinator.py
           tests/test_hardware_data_reliability_http.py
           tests/test_hardware_operability.py
           tests/test_hardware_r1_workbench.py
