@@ -919,6 +919,8 @@ class HardwareKnowledgeConsumptionService:
                                 "weight": weight,
                             }
                         )
+                if not reasons:
+                    continue
             results.append(
                 {
                     "contract_version": CONSUMPTION_CONTRACT_VERSION,

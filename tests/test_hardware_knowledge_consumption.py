@@ -342,11 +342,66 @@ def test_search_order_is_stable_by_score_then_knowledge_id(tmp_path):
     )
     store.replace_all([first, second])
 
-    result = service.search("nothing matching")
+    result = service.search("reset")
     assert [item["knowledge_id"] for item in result["results"]] == [
         "KNOWLEDGE-CONSUMPTION-0",
         KNOWLEDGE_ID,
     ]
+    assert result["results"][0]["match_score"] == result["results"][1]["match_score"]
+
+
+def test_nonempty_search_text_excludes_nonmatching_rows_but_empty_text_keeps_them(
+    tmp_path,
+):
+    service, store = _service(tmp_path)
+    service.rebuild_all_verified()
+    matching = store.get(KNOWLEDGE_ID)
+    nonmatching = dict(matching)
+    nonmatching.update(
+        knowledge_id="KNOWLEDGE-CONSUMPTION-0",
+        public_ref="HC-KNOWLEDGE-HC-CONSUMPTION-0-R1",
+        business_case_id="HC-CONSUMPTION-0",
+        title="Power supply drift",
+        symptom="Rail oscillation under load",
+        root_cause="Poor decoupling",
+        failure_mechanism="Voltage ripple",
+        engineering_rule="Add local capacitance",
+        design_constraint="Keep supply impedance low",
+        diagnostic_clue="Ripple grows with load",
+        verification_method="Measure rail ripple",
+        actions="Add decoupling capacitor",
+        interface="SPI",
+        signal="RESET_N",
+        key_parameters=[],
+        device_refs=[],
+        occurrence_condition="During transmission",
+        analysis_process="Compared rail measurements",
+        verification_result="Stable after change",
+        conclusion="Supply ripple caused failure",
+        applicability="Low-voltage digital systems",
+    )
+    store.replace_all([matching, nonmatching])
+
+    searched = service.search("mcu")
+    assert [item["knowledge_id"] for item in searched["results"]] == [KNOWLEDGE_ID]
+    assert searched["results"][0]["match_score"] > 0
+
+    structured_only = service.search("")
+    assert {item["knowledge_id"] for item in structured_only["results"]} == {
+        KNOWLEDGE_ID,
+        "KNOWLEDGE-CONSUMPTION-0",
+    }
+    assert all(item["match_score"] == 0 for item in structured_only["results"])
+
+
+def test_nonmatching_nonempty_search_returns_no_rows(tmp_path):
+    service, _store = _service(tmp_path)
+    service.rebuild_all_verified()
+
+    assert service.search("nothing matching") == {
+        "contract_version": CONSUMPTION_CONTRACT_VERSION,
+        "results": [],
+    }
 
 
 def test_missing_projection_and_read_only_http_contract(tmp_path):
