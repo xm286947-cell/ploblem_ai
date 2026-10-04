@@ -1,0 +1,35 @@
+name: Knowledge Windows-Safe Publish Idempotency
+
+on:
+  pull_request:
+    paths:
+      - "knowledge_production/public_service.py"
+      - "tests/test_hardware_r1_knowledge_promotion.py"
+      - "tests/test_hardware_r1_golden_unified_bridge_spike.py"
+      - ".github/workflows/knowledge-windows-safe-idempotency.yml"
+  workflow_dispatch:
+
+jobs:
+  publish-idempotency:
+    name: publish-idempotency-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install product and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Run Hardware R1 publish idempotency regressions
+        run: >
+          python -m pytest -q --noconftest
+          tests/test_hardware_r1_knowledge_promotion.py
+          tests/test_hardware_r1_golden_unified_bridge_spike.py
