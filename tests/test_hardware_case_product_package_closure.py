@@ -15,6 +15,8 @@ def test_all_asset_migration_modules_are_package_allowlisted_and_closure_roots()
     assert closure["status"] == "PASS"
     assert set(modules).issubset(set(closure["files"]))
     assert set(modules).issubset(set(closure["roots"]))
+    assert all("\\" not in path for path in closure["files"])
+    assert all("\\" not in edge["from"] and "\\" not in edge["target"] for edge in closure["edges"])
 
 
 def test_new_asset_migration_module_is_discovered_automatically(tmp_path: Path, monkeypatch):

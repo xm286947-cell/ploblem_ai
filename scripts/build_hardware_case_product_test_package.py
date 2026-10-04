@@ -270,7 +270,9 @@ def dependency_closure(root: Path = ROOT) -> dict[str, object]:
         if path in visited:
             continue
         if not path.is_file():
-            unresolved.append({"root": str(path.relative_to(root)), "reason": "ROOT_MISSING"})
+            unresolved.append(
+                {"root": path.relative_to(root).as_posix(), "reason": "ROOT_MISSING"}
+            )
             continue
         visited.add(path)
         current_module = _module_name(path, root)
@@ -280,21 +282,21 @@ def dependency_closure(root: Path = ROOT) -> dict[str, object]:
             ):
                 if target is not None:
                     edges.append({
-                        "from": str(path.relative_to(root)),
+                        "from": path.relative_to(root).as_posix(),
                         "import": imported,
                         "module": resolved_module,
-                        "target": str(target.relative_to(root)),
+                        "target": target.relative_to(root).as_posix(),
                     })
                     queue.append(target)
                 elif resolved_module.split(".", 1)[0] in LOCAL_IMPORT_PREFIXES:
                     unresolved.append({
-                        "from": str(path.relative_to(root)),
+                        "from": path.relative_to(root).as_posix(),
                         "module": resolved_module,
                         "import": imported,
                         "reason": "LOCAL_MODULE_MISSING",
                     })
 
-    files = sorted(str(path.relative_to(root)) for path in visited)
+    files = sorted(path.relative_to(root).as_posix() for path in visited)
     return {
         "scanner": "TOP_LEVEL_LOCAL_IMPORT_CLOSURE_V1",
         "roots": roots,
