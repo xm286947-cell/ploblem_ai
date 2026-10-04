@@ -134,6 +134,62 @@ def test_asset_schema_v3_initializes_idempotently_and_records_migration(tmp_path
     assert review_columns["before_candidate_hash"][3] == 0
 
 
+def test_list_promotion_records_returns_consistent_verified_ledger(tmp_path):
+    repository, _ = _ready_repo(tmp_path)
+    candidate = _create(repository)
+    state = candidate
+    transitions = (
+        ("NOT_STARTED", "PRECHECK_PASS"),
+        ("PRECHECK_PASS", "CANDIDATE_INTAKED"),
+        ("CANDIDATE_INTAKED", "REVIEW_CONFIRMED"),
+        ("REVIEW_CONFIRMED", "PUBLISHED_PENDING_QUERY_BACK"),
+        ("PUBLISHED_PENDING_QUERY_BACK", "VERIFIED"),
+    )
+    for expected, new in transitions:
+        state = repository.update_promotion_status(
+            candidate["candidate_id"],
+            expected_status=expected,
+            new_status=new,
+            expected_row_version=state["row_version"],
+            actor="test",
+            reason="verify read-only promotion listing",
+            knowledge_candidate_id="HC-KNOWLEDGE-A0152-R1",
+            knowledge_id="K-A0152-R1",
+            public_ref="HC-KNOWLEDGE-A0152-R1",
+        )
+
+    records = repository.list_promotion_records()
+    assert len(records) == 1
+    assert records[0]["asset_candidate_id"] == candidate["candidate_id"]
+    assert records[0]["promotion_status"] == "VERIFIED"
+    assert records[0]["knowledge_id"] == "K-A0152-R1"
+    assert records[0]["public_ref"] == "HC-KNOWLEDGE-A0152-R1"
+
+
+def test_list_promotion_records_fails_closed_on_candidate_ledger_mismatch(tmp_path):
+    repository, db_path = _ready_repo(tmp_path)
+    candidate = _create(repository)
+    repository.update_promotion_status(
+        candidate["candidate_id"],
+        expected_status="NOT_STARTED",
+        new_status="PRECHECK_PASS",
+        expected_row_version=candidate["row_version"],
+        actor="test",
+        reason="create ledger for mismatch test",
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_candidate_asset SET promotion_status='INTAKE_FAILED' "
+            "WHERE candidate_id=?",
+            (candidate["candidate_id"],),
+        )
+    with pytest.raises(
+        CandidateAssetRepositoryError,
+        match="CANDIDATE_DATA_INTEGRITY_ERROR",
+    ):
+        repository.list_promotion_records()
+
+
 def test_v0_asset_schema_migrates_deterministically(tmp_path):
     db_path = tmp_path / "hardware_asset.db"
     with sqlite3.connect(db_path) as connection:

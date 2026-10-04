@@ -860,6 +860,39 @@ class CandidateAssetRepository:
         except sqlite3.Error as error:
             raise CandidateAssetRepositoryError("CANDIDATE_DATA_INTEGRITY_ERROR") from error
 
+    def list_promotion_records(self) -> list[dict[str, Any]]:
+        """Read promotion ledger rows after checking candidate/ledger agreement."""
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT p.*, c.promotion_status AS candidate_promotion_status
+                    FROM hardware_asset_promotion AS p
+                    LEFT JOIN hardware_candidate_asset AS c
+                      ON c.candidate_id=p.asset_candidate_id
+                    ORDER BY p.asset_candidate_id
+                    """
+                ).fetchall()
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                record = dict(row)
+                candidate_status = record.pop("candidate_promotion_status")
+                if (
+                    candidate_status is None
+                    or record.get("promotion_status") != candidate_status
+                ):
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_DATA_INTEGRITY_ERROR"
+                    )
+                results.append(record)
+            return results
+        except CandidateAssetRepositoryError:
+            raise
+        except sqlite3.Error as error:
+            raise CandidateAssetRepositoryError(
+                "CANDIDATE_DATA_INTEGRITY_ERROR"
+            ) from error
+
     def _find(
         self,
         field: str,
