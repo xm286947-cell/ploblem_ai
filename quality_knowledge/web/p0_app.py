@@ -33,6 +33,8 @@ from quality_knowledge.major_cases.context import UnavailableMajorProblemContext
 from quality_knowledge.web.major_context_api import create_major_context_router
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
+from services.hardware_asset_repository import CandidateAssetRepository
+from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_knowledge_adapter import (
@@ -414,6 +416,8 @@ def create_p0_app(
         app.state.hardware_case_repository = None
         app.state.hardware_case_service = None
         app.state.hardware_case_source_store = None
+        app.state.hardware_candidate_asset_repository = None
+        app.state.hardware_asset_operation_journal = None
         app.state.hardware_case_intake_service = None
         app.state.hardware_r1_preview_store = None
         app.state.hardware_r1_workbench_store = None
@@ -476,11 +480,18 @@ def create_p0_app(
                 else hardware_db.with_name(hardware_db.stem + "_sources")
             )
             testability_mutable_paths.append(hardware_source_root)
+            hardware_asset_db = hardware_db.with_name("hardware_asset.db")
+            hardware_candidate_asset_repository = CandidateAssetRepository(hardware_asset_db)
+            hardware_operation_journal = HardwareAssetOperationJournal(hardware_asset_db)
             hardware_case_source_store = HardwareCaseSourceStore(
                 hardware_db,
                 hardware_source_root,
                 initialize_schema=False,
+                operation_journal=hardware_operation_journal,
+                candidate_repository=hardware_candidate_asset_repository,
             )
+            app.state.hardware_candidate_asset_repository = hardware_candidate_asset_repository
+            app.state.hardware_asset_operation_journal = hardware_operation_journal
             app.state.hardware_case_source_store = hardware_case_source_store
 
             def intake_structurer() -> Any:

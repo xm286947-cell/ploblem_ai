@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.p0_app import create_p0_app
+from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_runtime import (
     _R1StageCache,
@@ -22,8 +23,14 @@ from services.hardware_case_source_store import (
 MAINTAINER = {"X-Hardware-Case-Role": "MAINTAINER"}
 
 
+def _source_store(tmp_path: Path) -> HardwareCaseSourceStore:
+    hardware_db = tmp_path / "hardware.db"
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
+    return HardwareCaseSourceStore(hardware_db, tmp_path / "sources")
+
+
 def test_single_active_source_duplicate_delete_reupload(tmp_path: Path) -> None:
-    store = HardwareCaseSourceStore(tmp_path / "hardware.db", tmp_path / "sources")
+    store = _source_store(tmp_path)
     first = store.register_active_bytes(
         "A0152",
         "A0152-first.docx",
@@ -51,7 +58,7 @@ def test_single_active_source_duplicate_delete_reupload(tmp_path: Path) -> None:
 
 
 def test_formal_knowledge_reference_blocks_source_delete(tmp_path: Path) -> None:
-    store = HardwareCaseSourceStore(tmp_path / "hardware.db", tmp_path / "sources")
+    store = _source_store(tmp_path)
     source = store.register_active_bytes("A0207", "A0207.docx", b"source")
     lock = store.add_formal_knowledge_reference(
         "A0207",
@@ -146,6 +153,7 @@ def test_r1_word_snapshot_binds_source_and_delete_reupload_api(tmp_path: Path) -
     with ZipFile(docx, "w") as archive:
         archive.writestr("word/document.xml", document)
 
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
     runtime_db = tmp_path / "runtime.db"
     client = TestClient(
         create_p0_app(
@@ -209,6 +217,7 @@ def test_batch_workbench_source_persistence_gate(tmp_path: Path) -> None:
             archive.writestr("word/document.xml", document)
         return path.read_bytes()
 
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
     client = TestClient(
         create_p0_app(
             tmp_path / "quality-batch.db",

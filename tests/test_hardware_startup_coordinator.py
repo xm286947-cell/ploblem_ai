@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from services.hardware_asset_migrations import v001_candidate_repository
-from services.hardware_asset_repository import CandidateAssetRepository
+from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_asset_migrations import v001_candidate_repository
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_r1_workbench import HardwareR1WorkbenchStore
@@ -131,9 +130,9 @@ def test_asset_schema_migration_is_backed_up_and_manifested(tmp_path: Path):
     result = HardwareStartupCoordinator(app_root, resolver=resolver).run()
 
     assert result["ready"] is True, result
-    assert CandidateAssetRepository(asset_db).schema_version() == 2
+    assert CandidateAssetRepository(asset_db).schema_version() == 3
     updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert updated_manifest["asset_schema_version"] == 2
+    assert updated_manifest["asset_schema_version"] == 3
     assert updated_manifest["last_migration_id"] == "HARDWARE-ASSET-SCHEMA-MIGRATION"
     assert list((data_root / "backups" / "pre-asset-schema-migration").glob("*.sqlite3"))
 
@@ -285,7 +284,14 @@ def test_legacy_upgrade_uses_staging_and_preserves_legacy_root(tmp_path: Path):
     source_root.mkdir()
     HardwareDataReliabilityManager(hardware_db).ensure_ready()
     HardwareR1WorkbenchStore(workbench_db)
-    source_store = HardwareCaseSourceStore(hardware_db, source_root, initialize_schema=False)
+    fixture_asset_db = tmp_path / "legacy-source-journal.db"
+    CandidateAssetRepository(fixture_asset_db).initialize()
+    source_store = HardwareCaseSourceStore(
+        hardware_db,
+        source_root,
+        initialize_schema=False,
+        operation_journal=HardwareAssetOperationJournal(fixture_asset_db),
+    )
     source = source_store.register_active_bytes("A0152", "A0152.docx", b"legacy evidence")
     original_hashes = {
         path: hashlib.sha256(path.read_bytes()).hexdigest()

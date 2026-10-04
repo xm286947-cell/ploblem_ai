@@ -14,7 +14,8 @@ from services.hardware_asset_legacy_migration import (
     LegacyMigrationPaths,
     select_legacy_canonical_groups,
 )
-from services.hardware_asset_repository import candidate_content_hash
+from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
+from services.hardware_asset_repository import CandidateAssetRepository, candidate_content_hash
 from services.hardware_case_r1_workbench import HardwareR1WorkbenchStore
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_r1_knowledge_promotion import HardwareR1KnowledgePromotionStore
@@ -26,6 +27,13 @@ SOURCE_BYTES = b"legacy source bytes used for source-binding verification"
 
 class SimulatedCrash(BaseException):
     pass
+
+
+def _legacy_fixture_journal(tmp_path: Path) -> HardwareAssetOperationJournal:
+    path = tmp_path / "legacy-fixture-operation-journal.db"
+    if not path.is_file():
+        CandidateAssetRepository(path).initialize()
+    return HardwareAssetOperationJournal(path)
 
 
 def _knowledge_object(source_id: str, *, subject: str, reviewed: bool) -> dict:
@@ -99,7 +107,11 @@ def _setup(tmp_path: Path):
     hardware_db = legacy / "hardware_case_mvp.db"
     workbench_db = legacy / "hardware_case_mvp_r1_workbench.db"
     source_root = legacy / "hardware_case_mvp_sources"
-    source_store = HardwareCaseSourceStore(hardware_db, source_root)
+    source_store = HardwareCaseSourceStore(
+        hardware_db,
+        source_root,
+        operation_journal=_legacy_fixture_journal(tmp_path),
+    )
     binding = source_store.register_active_bytes(
         CASE_ID, "source.docx", SOURCE_BYTES
     )
@@ -315,7 +327,11 @@ def test_promotion_hash_and_formal_reference_are_migrated_without_republishing(t
         knowledge_id="UK-KNOWLEDGE-7",
         public_ref="hardware://A0162/7",
     )
-    source_store = HardwareCaseSourceStore(paths.hardware_db, paths.source_root)
+    source_store = HardwareCaseSourceStore(
+        paths.hardware_db,
+        paths.source_root,
+        operation_journal=_legacy_fixture_journal(tmp_path),
+    )
     source_store.add_formal_knowledge_reference(
         CASE_ID, "UK-KNOWLEDGE-7", source_id=binding["source_id"]
     )

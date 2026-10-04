@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import hashlib
 import json
 from typing import Any
 
@@ -71,6 +73,21 @@ def _business_source_type(domain: str) -> BusinessSourceType:
         return BusinessSourceType(normalized)
     except ValueError:
         return BusinessSourceType.OTHER
+
+
+def _publish_idempotency_marker_paths(idempotency_key: str) -> tuple[str, str]:
+    directory = "knowledge/production/public/idempotency/publish/"
+    safe_name = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"{directory}{safe_name}.json", f"{directory}{idempotency_key}.json"
+
+
+def _legacy_marker_path_is_unaddressable(error: OSError | ValueError) -> bool:
+    if isinstance(error, ValueError):
+        return True
+    return (
+        error.errno in {errno.EINVAL, errno.ENAMETOOLONG}
+        or getattr(error, "winerror", None) in {123, 206}
+    )
 
 
 class PublicKnowledgeService:
@@ -265,12 +282,20 @@ class PublicKnowledgeService:
         except ValidationError as exc:
             raise PublicKnowledgeError("PUBLISH_CONTRACT_INVALID") from exc
 
-        marker_path = (
-            "knowledge/production/public/idempotency/publish/"
-            f"{request.idempotency_key}.json"
+        marker_path, legacy_marker_path = _publish_idempotency_marker_paths(
+            request.idempotency_key
         )
         marker = self.repository.load(marker_path)
+        if marker is None:
+            try:
+                marker = self.repository.load(legacy_marker_path)
+            except (OSError, ValueError) as exc:
+                if not _legacy_marker_path_is_unaddressable(exc):
+                    raise
+                marker = None
         if isinstance(marker, dict):
+            if marker.get("idempotency_key") != request.idempotency_key:
+                raise PublicKnowledgeError("IDEMPOTENCY_KEY_CONFLICT")
             if marker.get("candidate_id") != request.candidate_id:
                 raise PublicKnowledgeError("IDEMPOTENCY_KEY_CONFLICT")
             object_id = str(marker.get("knowledge_id") or "")

@@ -125,6 +125,14 @@ def create_hardware_case_router(
                     except HardwareCaseSourceError as error:
                         if error.code == "SOURCE_ALREADY_EXISTS":
                             raise HTTPException(status_code=409, detail=error.code) from error
+                        if error.code in {
+                            "SOURCE_OPERATION_JOURNAL_UNAVAILABLE",
+                            "SOURCE_UPLOAD_COMMIT_FAILED",
+                            "SOURCE_UPLOAD_STAGING_FAILED",
+                            "SOURCE_RECOVERY_REQUIRED",
+                            "SOURCE_OPERATION_JOURNAL_INVALID",
+                        }:
+                            raise HTTPException(status_code=503, detail=error.code) from error
                         raise HTTPException(status_code=400, detail=error.code) from error
                 else:
                     snapshot["source_binding"] = {
@@ -169,6 +177,10 @@ def create_hardware_case_router(
                     "SOURCE_IN_USE_BY_FORMAL_KNOWLEDGE"
                 )
             source_id = str(active["source_id"])
+            result = source_store.delete_active_source(
+                business_case_id,
+                deleted_by="MAINTAINER",
+            )
             preview_deleted = (
                 r1_preview_store.delete_source(source_id)
                 if r1_preview_store is not None
@@ -178,10 +190,6 @@ def create_hardware_case_router(
                 int(r1_stage_cache_invalidator(source_id))
                 if r1_stage_cache_invalidator is not None
                 else 0
-            )
-            result = source_store.delete_active_source(
-                business_case_id,
-                deleted_by="MAINTAINER",
             )
             return {
                 **result,
@@ -195,8 +203,21 @@ def create_hardware_case_router(
             elif error.code in {
                 "SOURCE_IN_USE_BY_FORMAL_KNOWLEDGE",
                 "SOURCE_ALREADY_EXISTS",
+                "SOURCE_DELETE_BLOCKED_BY_PROMOTION",
+                "SOURCE_RECOVERY_LOCKED",
             }:
                 status = 409
+            elif error.code in {
+                "SOURCE_OPERATION_JOURNAL_UNAVAILABLE",
+                "SOURCE_OPERATION_JOURNAL_INVALID",
+                "SOURCE_CANDIDATE_STORE_UNAVAILABLE",
+                "SOURCE_CANDIDATE_INVALIDATION_FAILED",
+                "SOURCE_RECOVERY_REQUIRED",
+                "SOURCE_DELETE_RECOVERY_CONFLICT",
+                "SOURCE_DELETE_RECOVERY_REQUIRED",
+                "SOURCE_OPERATION_QUARANTINE_CONFLICT",
+            }:
+                status = 503
             else:
                 status = 400
             raise HTTPException(status_code=status, detail=error.code) from error
@@ -458,6 +479,16 @@ def create_hardware_case_router(
                 )
             except HardwareCaseSourceError as error:
                 code = error.code
+                if code in {
+                    "SOURCE_OPERATION_JOURNAL_UNAVAILABLE",
+                    "SOURCE_UPLOAD_COMMIT_FAILED",
+                    "SOURCE_UPLOAD_STAGING_FAILED",
+                    "SOURCE_RECOVERY_REQUIRED",
+                    "SOURCE_UPLOAD_RECONCILIATION_CONFLICT",
+                    "SOURCE_OPERATION_JOURNAL_INVALID",
+                    "SOURCE_OPERATION_QUARANTINE_CONFLICT",
+                }:
+                    raise HTTPException(status_code=503, detail=code) from error
                 if code in {"SOURCE_REF_CONFLICT", "HASH_MISMATCH"}:
                     raise HTTPException(status_code=409, detail=code) from error
                 if code in {"SOURCE_TOO_LARGE", "SOURCE_FILENAME_INVALID", "SOURCE_REF_REQUIRED"}:
@@ -675,6 +706,14 @@ def create_hardware_case_router(
                 return HTTPException(status_code=404, detail=error.code)
             if error.code in {"HASH_MISMATCH", "SOURCE_REF_CONFLICT"}:
                 return HTTPException(status_code=409, detail=error.code)
+            if error.code in {
+                "SOURCE_OPERATION_JOURNAL_UNAVAILABLE",
+                "SOURCE_OPERATION_JOURNAL_INVALID",
+                "SOURCE_RECOVERY_REQUIRED",
+                "SOURCE_CANDIDATE_STORE_UNAVAILABLE",
+                "SOURCE_CANDIDATE_INVALIDATION_FAILED",
+            }:
+                return HTTPException(status_code=503, detail=error.code)
             return HTTPException(status_code=400, detail=error.code)
 
         @router.get("/{case_id}/evidence/{evidence_id}/source-meta")
