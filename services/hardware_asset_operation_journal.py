@@ -86,6 +86,7 @@ class HardwareAssetOperationJournal:
         source_id: str | None,
         desired_action: str,
         request_fingerprint: Mapping[str, Any],
+        remote_idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         op_id = str(operation_id or "").strip()
         op_type = str(operation_type or "").strip().upper()
@@ -101,6 +102,7 @@ class HardwareAssetOperationJournal:
             str(source_id).strip().lower() if source_id is not None else None,
             action,
             _fingerprint(request_fingerprint),
+            str(remote_idempotency_key).strip() if remote_idempotency_key else None,
             now,
             now,
         )
@@ -116,6 +118,8 @@ class HardwareAssetOperationJournal:
                     if (
                         result["operation_type"] != op_type
                         or result["request_fingerprint"] != dict(request_fingerprint)
+                        or result["remote_idempotency_key"]
+                        != (str(remote_idempotency_key).strip() if remote_idempotency_key else None)
                     ):
                         raise HardwareAssetOperationJournalError(
                             "OPERATION_IDEMPOTENCY_CONFLICT"
@@ -129,7 +133,7 @@ class HardwareAssetOperationJournal:
                         source_id,desired_action,operation_state,request_fingerprint,
                         remote_idempotency_key,started_at,updated_at,completed_at,
                         error_code,recovery_action
-                    ) VALUES(?,?,?,?,?,?,'PREPARED',?,NULL,?,?,NULL,NULL,NULL)
+                    ) VALUES(?,?,?,?,?,?,'PREPARED',?,?,?,?,NULL,NULL,NULL)
                     """,
                     values,
                 )
@@ -179,9 +183,14 @@ class HardwareAssetOperationJournal:
                 if row is None:
                     raise HardwareAssetOperationJournalError("OPERATION_NOT_FOUND")
                 current = str(row["operation_state"])
-                if target != current and target not in _ALLOWED_TRANSITIONS.get(current, set()):
+                retrying_failed = current == "FAILED" and target == "PREPARED"
+                if target != current and not retrying_failed and target not in _ALLOWED_TRANSITIONS.get(current, set()):
                     raise HardwareAssetOperationJournalError("OPERATION_STATE_TRANSITION_INVALID")
-                completed_at = now if target in TERMINAL_STATES else row["completed_at"]
+                completed_at = (
+                    now if target in TERMINAL_STATES
+                    else None if retrying_failed
+                    else row["completed_at"]
+                )
                 connection.execute(
                     """
                     UPDATE hardware_asset_operation_journal
@@ -223,6 +232,38 @@ class HardwareAssetOperationJournal:
             with closing(self._connect()) as connection:
                 rows = connection.execute(sql, params).fetchall()
                 return [self._public(row) for row in rows]
+        except HardwareAssetOperationJournalError:
+            raise
+        except sqlite3.Error as error:
+            raise HardwareAssetOperationJournalError("OPERATION_JOURNAL_UNAVAILABLE") from error
+
+    def list_operations(
+        self,
+        *,
+        candidate_id: str | None = None,
+        operation_type: str | None = None,
+        states: set[str] | frozenset[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List journal entries for recovery without exposing database rows."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if candidate_id is not None:
+            clauses.append("candidate_id=?")
+            params.append(str(candidate_id))
+        if operation_type is not None:
+            clauses.append("operation_type=?")
+            params.append(str(operation_type).strip().upper())
+        if states:
+            normalized = tuple(sorted(str(item).strip().upper() for item in states))
+            clauses.append(f"operation_state IN ({','.join('?' for _ in normalized)})")
+            params.extend(normalized)
+        sql = "SELECT * FROM hardware_asset_operation_journal"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY started_at,operation_id"
+        try:
+            with closing(self._connect()) as connection:
+                return [self._public(row) for row in connection.execute(sql, params).fetchall()]
         except HardwareAssetOperationJournalError:
             raise
         except sqlite3.Error as error:

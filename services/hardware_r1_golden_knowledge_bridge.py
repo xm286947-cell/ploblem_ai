@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime
 from copy import deepcopy
 from typing import Any, Mapping, Protocol, Sequence
@@ -109,6 +110,11 @@ class HardwareR1GoldenKnowledgeBridge:
         self,
         golden: Mapping[str, Any],
         evidence_validation: Mapping[str, Any],
+        *,
+        asset_candidate_id: str | None = None,
+        operation_runner: Any | None = None,
+        reconciliation: bool = False,
+        candidate_created_at: str | None = None,
     ) -> dict[str, Any]:
         check = self.precheck(golden, evidence_validation)
         case_id = check["business_case_id"]
@@ -123,19 +129,55 @@ class HardwareR1GoldenKnowledgeBridge:
             locator = dict(item.get("source_locator") or {})
             locator.setdefault("block_id", block_id)
             try:
-                result = self.adapter.intake_evidence(
+                evidence_payload = {
+                    "evidence_id": evidence_id,
+                    "source_ref": source_ref,
+                    "evidence_type": str(item.get("block_type") or "TEXT").upper(),
+                    "locator": locator,
+                    "excerpt_or_caption": str(item.get("text") or ""),
+                }
+                invoke = lambda: self.adapter.intake_evidence(
                     case_id=case_id,
                     source_metadata=source,
-                    evidence={
-                        "evidence_id": evidence_id,
-                        "source_ref": source_ref,
-                        "evidence_type": str(item.get("block_type") or "TEXT").upper(),
-                        "locator": locator,
-                        "excerpt_or_caption": str(item.get("text") or ""),
-                    },
+                    evidence=evidence_payload,
                     revision=FIXED_KNOWLEDGE_REVISION,
                     source_revision=source_id,
                 )
+                if operation_runner is None:
+                    result = invoke()
+                else:
+                    excerpt_hash = hashlib.sha256(
+                        str(evidence_payload["excerpt_or_caption"]).encode("utf-8")
+                    ).hexdigest()
+                    result = operation_runner(
+                        operation_type="EVIDENCE_INTAKE",
+                        asset_candidate_id=asset_candidate_id,
+                        business_case_id=case_id,
+                        source_id=source_id,
+                        evidence_id=evidence_id,
+                        remote_idempotency_key=evidence_id,
+                        request_fingerprint={
+                            "asset_candidate_id": asset_candidate_id,
+                            "business_case_id": case_id,
+                            "source_id": source_id,
+                            "source_ref": source_ref,
+                            "evidence_id": evidence_id,
+                            "evidence_type": evidence_payload["evidence_type"],
+                            "locator": locator,
+                            "excerpt_sha256": excerpt_hash,
+                            "revision": FIXED_KNOWLEDGE_REVISION,
+                        },
+                        reconciliation=reconciliation,
+                        completed_response={
+                            "evidence_id": evidence_id,
+                            "source": {
+                                "source_id": source_id,
+                                "uri": source_ref,
+                                "metadata": {"hardware_locator": locator},
+                            },
+                        },
+                        action=invoke,
+                    )
             except HardwareKnowledgeAdapterError as error:
                 raise HardwareR1GoldenBridgeError(error.code) from error
             evidence_results.append(result)
@@ -143,7 +185,10 @@ class HardwareR1GoldenKnowledgeBridge:
 
         structured_content = deepcopy(dict(golden))
         try:
-            candidate = self.adapter.intake_candidate(
+            candidate_id = self.adapter.candidate_id(
+                case_id, FIXED_KNOWLEDGE_REVISION
+            )
+            invoke = lambda: self.adapter.intake_candidate(
                 case_id=case_id,
                 source_document_id=source_id,
                 source_ref=source_ref,
@@ -151,7 +196,49 @@ class HardwareR1GoldenKnowledgeBridge:
                 evidence_refs=evidence_refs,
                 revision=FIXED_KNOWLEDGE_REVISION,
                 source_version=source_id,
+                created_at=candidate_created_at,
             )
+            if operation_runner is None:
+                candidate = invoke()
+            else:
+                content_json = json.dumps(
+                    structured_content,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                candidate = operation_runner(
+                    operation_type="CANDIDATE_INTAKE",
+                    asset_candidate_id=asset_candidate_id,
+                    business_case_id=case_id,
+                    source_id=source_id,
+                    evidence_id=None,
+                    remote_idempotency_key=candidate_id,
+                    request_fingerprint={
+                        "asset_candidate_id": asset_candidate_id,
+                        "business_case_id": case_id,
+                        "source_id": source_id,
+                        "candidate_id": candidate_id,
+                        "source_ref": source_ref,
+                        "structured_content_sha256": hashlib.sha256(
+                            content_json.encode("utf-8")
+                        ).hexdigest(),
+                        "evidence_refs": evidence_refs,
+                        "revision": FIXED_KNOWLEDGE_REVISION,
+                        "created_at": candidate_created_at,
+                    },
+                    reconciliation=reconciliation,
+                    completed_response={
+                        "contract_version": self.adapter.descriptor.contract_versions["candidate"],
+                        "candidate_id": candidate_id,
+                        "domain": "HARDWARE_CASE",
+                        "object_type": "HARDWARE_CASE",
+                        "structured_content": structured_content,
+                        "evidence_refs": evidence_refs,
+                        "revision": FIXED_KNOWLEDGE_REVISION,
+                    },
+                    action=invoke,
+                )
         except HardwareKnowledgeAdapterError as error:
             raise HardwareR1GoldenBridgeError(error.code) from error
         if candidate.get("structured_content") != structured_content:
@@ -173,13 +260,18 @@ class HardwareR1GoldenKnowledgeBridge:
         reviewer: str,
         review_time: datetime,
         review_comment: str | None = None,
+        asset_candidate_id: str | None = None,
+        business_case_id: str | None = None,
+        source_id: str | None = None,
+        operation_runner: Any | None = None,
+        reconciliation: bool = False,
     ) -> dict[str, Any]:
         if confirmed_content.get("contract_version") != GOLDEN_KNOWLEDGE_CONTRACT:
             raise HardwareR1GoldenBridgeError("CONFIRMED_CONTENT_CONTRACT_INVALID")
         if confirmed_content.get("source_fact") != original_golden.get("source_fact"):
             raise HardwareR1GoldenBridgeError("SOURCE_FACT_IMMUTABLE")
         try:
-            return self.adapter.review_candidate(
+            invoke = lambda: self.adapter.review_candidate(
                 candidate_id=candidate_id,
                 state="CONFIRMED",
                 reviewer=reviewer,
@@ -187,6 +279,44 @@ class HardwareR1GoldenKnowledgeBridge:
                 review_comment=review_comment,
                 confirmed_content=deepcopy(dict(confirmed_content)),
                 revision=FIXED_KNOWLEDGE_REVISION,
+            )
+            if operation_runner is None:
+                return invoke()
+            confirmed_json = json.dumps(
+                dict(confirmed_content),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            return operation_runner(
+                operation_type="FORMAL_REVIEW",
+                asset_candidate_id=asset_candidate_id,
+                business_case_id=business_case_id,
+                source_id=source_id,
+                evidence_id=None,
+                remote_idempotency_key=f"{candidate_id}:review:r{FIXED_KNOWLEDGE_REVISION}",
+                request_fingerprint={
+                    "asset_candidate_id": asset_candidate_id,
+                    "business_case_id": business_case_id,
+                    "source_id": source_id,
+                    "candidate_id": candidate_id,
+                    "action": "CONFIRM",
+                    "reviewer": reviewer,
+                    "review_time": review_time.isoformat(),
+                    "review_comment": review_comment,
+                    "confirmed_content_sha256": hashlib.sha256(
+                        confirmed_json.encode("utf-8")
+                    ).hexdigest(),
+                    "revision": FIXED_KNOWLEDGE_REVISION,
+                },
+                reconciliation=reconciliation,
+                completed_response={
+                    "contract_version": self.adapter.descriptor.contract_versions["review"],
+                    "candidate_id": candidate_id,
+                    "review_status": "CONFIRMED",
+                    "revision": FIXED_KNOWLEDGE_REVISION,
+                },
+                action=invoke,
             )
         except HardwareKnowledgeAdapterError as error:
             raise HardwareR1GoldenBridgeError(error.code) from error
@@ -199,10 +329,15 @@ class HardwareR1GoldenKnowledgeBridge:
         evidence_refs: Sequence[str],
         publisher: str,
         published_at: datetime,
+        asset_candidate_id: str | None = None,
+        source_id: str | None = None,
+        operation_runner: Any | None = None,
+        reconciliation: bool = False,
+        record_source_reference: bool = True,
     ) -> dict[str, Any]:
         source = self.source_store.get_active_source(business_case_id)
         try:
-            published = self.adapter.publish(
+            invoke = lambda: self.adapter.publish(
                 candidate_id=candidate_id,
                 hardware_publish_gate={
                     "passed": True,
@@ -213,6 +348,33 @@ class HardwareR1GoldenKnowledgeBridge:
                 published_at=published_at,
                 revision=FIXED_KNOWLEDGE_REVISION,
             )
+            if operation_runner is None:
+                published = invoke()
+            else:
+                idempotency_key = self.adapter.publish_idempotency_key(
+                    candidate_id, FIXED_KNOWLEDGE_REVISION
+                )
+                published = operation_runner(
+                    operation_type="PUBLISH",
+                    asset_candidate_id=asset_candidate_id,
+                    business_case_id=business_case_id,
+                    source_id=source_id or str(source.get("source_id") or ""),
+                    evidence_id=None,
+                    remote_idempotency_key=idempotency_key,
+                    request_fingerprint={
+                        "asset_candidate_id": asset_candidate_id,
+                        "business_case_id": business_case_id,
+                        "source_id": source_id or str(source.get("source_id") or ""),
+                        "candidate_id": candidate_id,
+                        "revision": FIXED_KNOWLEDGE_REVISION,
+                        "evidence_refs": list(evidence_refs),
+                        "publisher": publisher,
+                        "published_at": published_at.isoformat(),
+                        "idempotency_key": idempotency_key,
+                    },
+                    reconciliation=reconciliation,
+                    action=invoke,
+                )
         except HardwareKnowledgeAdapterError as error:
             raise HardwareR1GoldenBridgeError(error.code) from error
 
@@ -222,12 +384,27 @@ class HardwareR1GoldenKnowledgeBridge:
         knowledge_id = str(obj.get("knowledge_id") or "").strip()
         if not knowledge_id:
             raise HardwareR1GoldenBridgeError("KNOWLEDGE_OBJECT_ID_MISSING")
+        if not record_source_reference:
+            return published
         lock = self.source_store.add_formal_knowledge_reference(
             business_case_id,
             knowledge_id,
             source_id=str(source["source_id"]),
         )
         return {**published, "source_reference_lock": lock}
+
+    def add_source_reference(
+        self, business_case_id: str, source_id: str, knowledge_id: str
+    ) -> dict[str, Any]:
+        try:
+            return self.source_store.add_formal_knowledge_reference(
+                business_case_id,
+                knowledge_id,
+                source_id=source_id,
+            )
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "SOURCE_REFERENCE_LOCK_FAILED")
+            raise HardwareR1GoldenBridgeError(code) from error
 
     def query_back(self, business_case_id: str) -> dict[str, Any]:
         source = self.source_store.get_active_source(business_case_id)

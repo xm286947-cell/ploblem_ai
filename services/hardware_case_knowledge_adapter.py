@@ -220,11 +220,23 @@ class HardwareCaseKnowledgeAdapter:
                 ),
             },
         }
-        return self._request(
+        response = self._request(
             "POST",
             "/v1/knowledge/evidences",
             json_body=payload,
         )
+        if (
+            response.get("evidence_id") != evidence_id
+            or response.get("source_document_id") != source_document_id
+            or response.get("source_ref") != source_ref
+            or response.get("content_hash") != content_hash
+            or int(response.get("revision") or 0) != int(revision)
+            or response.get("page") != payload["page"]
+            or response.get("section") != payload["section"]
+            or response.get("paragraph") != payload["paragraph"]
+        ):
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_EVIDENCE_RESPONSE_MISMATCH")
+        return response
 
     def intake_candidate(
         self,
@@ -237,6 +249,7 @@ class HardwareCaseKnowledgeAdapter:
         revision: int,
         source_version: str | None = None,
         object_type: str = OBJECT_TYPE,
+        created_at: str | None = None,
     ) -> dict[str, Any]:
         if (
             not str(case_id or "").strip()
@@ -259,7 +272,7 @@ class HardwareCaseKnowledgeAdapter:
             "structured_content": dict(structured_content),
             "evidence_refs": refs,
             "status": "PENDING_REVIEW",
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": str(created_at or (datetime.utcnow().isoformat() + "Z")),
             "revision": int(revision),
             "source_version": source_version or f"R{revision}",
             "producer": "hardware-case/v1",
@@ -284,6 +297,10 @@ class HardwareCaseKnowledgeAdapter:
             "contract_version",
             CONTRACT_VERSIONS["candidate"],
         )
+        if response.get("candidate_id") != payload["candidate_id"]:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_CANDIDATE_ID_MISMATCH"
+            )
         if response.get("domain") != DOMAIN:
             raise HardwareKnowledgeAdapterError(
                 "KNOWLEDGE_DOMAIN_MISMATCH"
@@ -354,10 +371,26 @@ class HardwareCaseKnowledgeAdapter:
             "contract_version",
             CONTRACT_VERSIONS["review"],
         )
+        if response.get("candidate_id") != candidate_id:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_REVIEW_CANDIDATE_MISMATCH"
+            )
+        if not str(response.get("review_id") or "").strip():
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_REVIEW_ID_MISSING")
         expected = "CONFIRMED" if normalized == "CONFIRMED" else "REJECTED"
         if response.get("review_status") != expected:
             raise HardwareKnowledgeAdapterError(
                 "KNOWLEDGE_REVIEW_STATUS_MISMATCH"
+            )
+        try:
+            response_revision = int(response.get("revision") or 0)
+        except (TypeError, ValueError) as error:
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_REVIEW_REVISION_MISMATCH"
+            ) from error
+        if response_revision != int(revision):
+            raise HardwareKnowledgeAdapterError(
+                "KNOWLEDGE_REVIEW_REVISION_MISMATCH"
             )
         return response
 
