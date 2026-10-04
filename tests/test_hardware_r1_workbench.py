@@ -560,7 +560,106 @@ def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
     assert conflict["evidence_block_ids"] == ["B0001"]
 
 
-def test_durable_candidate_review_binding_is_deferred_to_b2(tmp_path: Path) -> None:
+def test_review_conflict_commits_to_durable_asset_and_preserves_debug_snapshot(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    asset_path = tmp_path / "hardware_asset.db"
+    repository = _candidate_repository(asset_path)
+    batch_id = store.create_batch()
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    debug_result = deepcopy(result)
+    debug_conflict = debug_result["knowledge_object"]["conflicts"][0]
+    debug_conflict["source_values"] = [
+        {"source": "DEBUG_ONLY", "value": "must not be reviewed"}
+    ]
+    debug_result["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] = "debug snapshot only"
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot("A0152"),
+        result=debug_result,
+        orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    reviewed = service.resolve_review_conflict(
+        item_id,
+        conflict_id="CONFLICT-title-subject",
+        decision_source="SOURCE_RAW_TITLE",
+        reviewer="reviewer-b2",
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "RESOLVED"
+    assert durable["row_version"] == asset["row_version"] + 1
+    assert durable["candidate_hash"] != asset["candidate_hash"]
+    assert durable["knowledge_object"]["engineering_context"][
+        "primary_subject"
+    ]["value"] == "CPU"
+    conflict = durable["knowledge_object"]["conflicts"][0]
+    assert conflict["status"] == "RESOLVED"
+    assert conflict["resolution_status"] == "CONFIRMED"
+    assert conflict["resolution"]["reviewer"] == "reviewer-b2"
+    assert conflict["resolution"]["decision_source"] == "SOURCE_RAW_TITLE"
+    assert durable["knowledge_object"]["review"]["field_decisions"] == [
+        {
+            "conflict_id": "CONFLICT-title-subject",
+            "field": "primary_subject",
+            "decision_source": "SOURCE_RAW_TITLE",
+            "selected_value": "CPU",
+            "reviewer": "reviewer-b2",
+            "reviewed_at": conflict["resolution"]["reviewed_at"],
+        }
+    ]
+    assert reviewed["result"] == "CANDIDATE_READY"
+    assert reviewed["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "CPU"
+    assert reviewed["pipeline_result"]["knowledge_object"][
+        "engineering_context"
+    ]["primary_subject"]["value"] == "debug snapshot only"
+    assert reviewed["pipeline_result"]["knowledge_object"]["conflicts"][0][
+        "source_values"
+    ] == [{"source": "DEBUG_ONLY", "value": "must not be reviewed"}]
+    assert reviewed["provider_calls"] == debug_result["provider_call_count"]
+    with sqlite3.connect(asset_path) as connection:
+        review_rows = connection.execute(
+            "SELECT reviewer,reason FROM hardware_candidate_review WHERE candidate_id=?",
+            (asset["candidate_id"],),
+        ).fetchall()
+        audit_rows = connection.execute(
+            "SELECT event_type,old_candidate_hash,new_candidate_hash "
+            "FROM hardware_candidate_event WHERE candidate_id=? "
+            "AND event_type='PRODUCTION_REVIEWED'",
+            (asset["candidate_id"],),
+        ).fetchall()
+    assert review_rows[0][0] == "reviewer-b2"
+    assert "CONFLICT-title-subject" in review_rows[0][1]
+    assert audit_rows == [
+        (
+            "PRODUCTION_REVIEWED",
+            asset["candidate_hash"],
+            durable["candidate_hash"],
+        )
+    ]
+
+
+def test_review_commit_restart_recovers_ready_after_workbench_write_failure(
+    tmp_path: Path,
+) -> None:
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
     repository = _candidate_repository(tmp_path / "hardware_asset.db")
     batch_id = store.create_batch()
@@ -584,18 +683,296 @@ def test_durable_candidate_review_binding_is_deferred_to_b2(tmp_path: Path) -> N
         structurer_factory=lambda: object(),
         candidate_repository=repository,
     )
+    original_update = store.update_item
+
+    def fail_workbench_state_update(*args, **kwargs):
+        raise OSError("simulated process interruption after durable commit")
+
+    store.update_item = fail_workbench_state_update  # type: ignore[method-assign]
+    with pytest.raises(OSError, match="simulated process interruption"):
+        service.resolve_review_conflict(
+            item_id,
+            conflict_id="CONFLICT-title-subject",
+            decision_source="SOURCE_RAW_TITLE",
+            reviewer="reviewer-b2",
+        )
+    store.update_item = original_update  # type: ignore[method-assign]
+
+    restarted = HardwareR1WorkbenchService(
+        HardwareR1WorkbenchStore(tmp_path / "workbench.db"),
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=_candidate_repository(tmp_path / "hardware_asset.db"),
+    ).get_item(item_id)
+    assert restarted["result"] == "CANDIDATE_READY"
+    assert restarted["candidate_asset"]["production_review_status"] == "RESOLVED"
+    assert restarted["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "CPU"
+    assert restarted["pipeline_result"]["knowledge_object"]["conflicts"][0][
+        "status"
+    ] == "OPEN"
+
+
+def test_review_conflict_api_uses_durable_review_and_maps_conflict_errors(
+    tmp_path: Path,
+) -> None:
+    app = create_p0_app(
+        tmp_path / "quality.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_tree_upload_dir=tmp_path / "trees",
+        hardware_case_source_root=tmp_path / "sources",
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    service = app.state.hardware_r1_workbench_service
+    repository = app.state.hardware_candidate_asset_repository
+    repository.initialize()
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot("A0152"),
+        result=result,
+        orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
+    )
+    client = TestClient(app)
+    response = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{item_id}/review-conflicts/"
+        "CONFLICT-title-subject/resolve",
+        headers=MAINTAINER,
+        json={
+            "decision_source": "SOURCE_RAW_TITLE",
+            "reviewer": "reviewer-api",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["result"] == "CANDIDATE_READY"
+    assert repository.get_candidate(asset["candidate_id"])[
+        "production_review_status"
+    ] == "RESOLVED"
+
+    second_result = _result(status="NEEDS_REVIEW", case_id="A0153", source_id="b" * 64)
+    second_asset = _commit_fixture_asset(
+        repository, second_result, case_id="A0153", source_id="b" * 64
+    )
+    second_item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0153.docx",
+        business_case_id="A0153",
+        source_id="b" * 64,
+        snapshot=_snapshot("A0153", "b" * 64),
+        result=second_result,
+        orchestration_status="REVIEW",
+        candidate_id=second_asset["candidate_id"],
+    )
+    with sqlite3.connect(app.state.hardware_candidate_asset_repository.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_candidate_asset SET asset_status='INVALIDATED' "
+            "WHERE candidate_id=?",
+            (second_asset["candidate_id"],),
+        )
+    failed = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{second_item_id}/review-conflicts/"
+        "CONFLICT-title-subject/resolve",
+        headers=MAINTAINER,
+        json={"decision_source": "SOURCE_RAW_TITLE", "reviewer": "reviewer-api"},
+    )
+    assert failed.status_code == 409
+    assert failed.json()["detail"] == "CANDIDATE_ASSET_INVALIDATED"
+
+
+@pytest.mark.parametrize(
+    ("asset_patch", "expected_code"),
+    [
+        ({"asset_status": "INVALIDATED"}, "CANDIDATE_ASSET_INVALIDATED"),
+        ({"promotion_status": "PRECHECK_PASS"}, "CANDIDATE_LOCKED_BY_PROMOTION"),
+    ],
+)
+def test_review_fails_closed_for_invalidated_or_promoting_candidate(
+    tmp_path: Path, asset_patch: dict[str, str], expected_code: str
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    item_id = store.add_item(
+        store.create_batch(),
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot("A0152"),
+        result=result,
+        orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
+    )
+    column, value = next(iter(asset_patch.items()))
+    with sqlite3.connect(tmp_path / "hardware_asset.db") as connection:
+        connection.execute(
+            f"UPDATE hardware_candidate_asset SET {column}=? WHERE candidate_id=?",
+            (value, asset["candidate_id"]),
+        )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
     with pytest.raises(HardwareR1WorkbenchError) as error:
         service.resolve_review_conflict(
             item_id,
             conflict_id="CONFLICT-title-subject",
             decision_source="SOURCE_RAW_TITLE",
-            reviewer="tester",
+            reviewer="reviewer-b2",
         )
-    assert error.value.code == "DURABLE_REVIEW_BINDING_NOT_IN_B1"
-    unchanged = service.get_item(item_id)
-    assert unchanged["result"] == "REVIEW"
-    assert unchanged["candidate_asset"]["production_review_status"] == "REQUIRED"
-    assert unchanged["candidate"]["conflicts"][0]["status"] == "OPEN"
+    assert error.value.code == expected_code
+    assert store.get_item(item_id)["result"] == "REVIEW"
+
+
+def test_concurrent_durable_review_fails_closed_without_ready_state(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    asset_path = tmp_path / "hardware_asset.db"
+    repository = _candidate_repository(asset_path)
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    item_id = store.add_item(
+        store.create_batch(),
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot("A0152"),
+        result=result,
+        orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
+    )
+    apply_review = repository.apply_production_review
+
+    def advance_row_version_then_apply(*args, **kwargs):
+        with sqlite3.connect(asset_path) as connection:
+            connection.execute(
+                "UPDATE hardware_candidate_asset SET row_version=row_version+1 "
+                "WHERE candidate_id=?",
+                (asset["candidate_id"],),
+            )
+        return apply_review(*args, **kwargs)
+
+    repository.apply_production_review = advance_row_version_then_apply  # type: ignore[method-assign]
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    with pytest.raises(HardwareR1WorkbenchError) as error:
+        service.resolve_review_conflict(
+            item_id,
+            conflict_id="CONFLICT-title-subject",
+            decision_source="SOURCE_RAW_TITLE",
+            reviewer="reviewer-b2",
+        )
+    assert error.value.code == "CANDIDATE_CONCURRENT_UPDATE"
+    assert store.get_item(item_id)["result"] == "REVIEW"
+    current = repository.get_candidate(asset["candidate_id"])
+    assert current["production_review_status"] == "REQUIRED"
+    assert current["knowledge_object"]["conflicts"][0]["status"] == "OPEN"
+
+
+@pytest.mark.parametrize(
+    (
+        "conflict_id",
+        "decision_source",
+        "conflict_patch",
+        "expected_code",
+    ),
+    [
+        (
+            "missing-conflict",
+            "SOURCE_RAW_TITLE",
+            {},
+            "REVIEW_CONFLICT_NOT_FOUND",
+        ),
+        (
+            "CONFLICT-title-subject",
+            "UNLISTED_SOURCE",
+            {},
+            "REVIEW_DECISION_SOURCE_INVALID",
+        ),
+        (
+            "CONFLICT-title-subject",
+            "SOURCE_RAW_TITLE",
+            {"field": "unfrozen_field"},
+            "REVIEW_FIELD_NOT_SUPPORTED",
+        ),
+        (
+            "CONFLICT-title-subject",
+            "SOURCE_RAW_TITLE",
+            {"resolution_status": "CONFIRMED"},
+            "REVIEW_CONFLICT_ALREADY_RESOLVED",
+        ),
+    ],
+)
+def test_review_rejects_invalid_conflict_decisions_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    conflict_id: str,
+    decision_source: str,
+    conflict_patch: dict[str, str],
+    expected_code: str,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    item_id = store.add_item(
+        store.create_batch(),
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot("A0152"),
+        result=result,
+        orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
+    )
+    original_get_candidate = repository.get_candidate
+
+    def get_modified_candidate(candidate_id: str) -> dict | None:
+        current = original_get_candidate(candidate_id)
+        if current and conflict_patch:
+            current["knowledge_object"]["conflicts"][0].update(conflict_patch)
+        return current
+
+    monkeypatch.setattr(repository, "get_candidate", get_modified_candidate)
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    with pytest.raises(HardwareR1WorkbenchError) as error:
+        service.resolve_review_conflict(
+            item_id,
+            conflict_id=conflict_id,
+            decision_source=decision_source,
+            reviewer="reviewer-b2",
+        )
+    assert error.value.code == expected_code
+    assert store.get_item(item_id)["result"] == "REVIEW"
+    current = original_get_candidate(asset["candidate_id"])
+    assert current["production_review_status"] == "REQUIRED"
+    assert current["row_version"] == asset["row_version"]
 
 
 def test_runtime_and_dependency_blocked_are_not_business_failed() -> None:
