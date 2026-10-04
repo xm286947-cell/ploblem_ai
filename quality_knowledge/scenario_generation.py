@@ -13,6 +13,10 @@ from builder.ai_client import OpenAICompatibleClient
 from builder.json_response import parse_json_object
 from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
 from quality_knowledge.reverse_quality_scenario_adapter import adapt_reverse_quality_result
+from quality_knowledge.scenario_source_bundle_v1 import (
+    ScenarioSourceBundleV1SnapshotStore,
+    build_scenario_source_bundle_v1,
+)
 
 
 STANDARDIZATION_PROMPT = """/no_think
@@ -51,6 +55,7 @@ class ScenarioGenerationService:
         self.scenarios = scenario_repository
         self.root = Path(root)
         self.ai_client = ai_client
+        self.source_bundle_snapshots = ScenarioSourceBundleV1SnapshotStore(self.scenarios.db_path)
         with self.scenarios.connect() as c:
             c.execute('CREATE TABLE IF NOT EXISTS scenario_generation_source(generation_id TEXT PRIMARY KEY,records_json TEXT NOT NULL)')
 
@@ -62,6 +67,21 @@ class ScenarioGenerationService:
         with self.scenarios.connect() as c:
             row=c.execute('SELECT records_json FROM scenario_generation_source WHERE generation_id=?',(generation_id,)).fetchone()
         return json.loads(row[0]) if row else []
+
+    def snapshot_source_bundles(self, records, *, trigger_source="SOFTWARE_ASSESSMENT", trigger_reason="QUALITY_SCENARIO_GENERATION"):
+        """Freeze an auditable W1 bundle per selected software-assessment row."""
+        bundles = []
+        for record in records:
+            source_id = str(record.get("source_material_id") or record.get("knowledge_id") or "").strip()
+            bundle = build_scenario_source_bundle_v1(
+                self.scenarios,
+                source_id,
+                trigger_source=trigger_source,
+                trigger_reason=trigger_reason,
+            )
+            self.source_bundle_snapshots.save(bundle)
+            bundles.append(bundle)
+        return bundles
 
     def candidate_from_reverse_quality(self, result):
         payload=result.get('result') if isinstance(result,dict) and isinstance(result.get('result'),dict) else result
