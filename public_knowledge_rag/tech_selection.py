@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import re
 import tempfile
 import urllib.request
 import uuid
@@ -22,6 +23,8 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from qdrant_client import QdrantClient, models
 from docling_core.types.doc.items.table.table import TableItem
+from docling.chunking import HybridChunker
+from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
 from .contracts import Chunk, Index, ParsedDocument, Retriever, SearchHit
 
@@ -40,6 +43,7 @@ class ParsedElement:
 class StructuredDocument(ParsedDocument):
     elements: tuple[ParsedElement, ...] = ()
     page_count: int = 0
+    native_document: Any | None = None
 
 
 class DoclingParser:
@@ -112,102 +116,76 @@ class DoclingParser:
             parser_version=self.parser_version,
             elements=tuple(elements),
             page_count=pages,
+            native_document=result.document,
         )
 
 
 class StructureAwareChunker:
-    """Heading/page-aware chunking; tables remain whole when feasible."""
+    """Docling-native token-aware chunking with structural locators."""
 
-    def __init__(self, target_tokens: int = 800, overlap_tokens: int = 100) -> None:
-        if target_tokens < 100 or overlap_tokens < 0 or overlap_tokens >= target_tokens:
-            raise ValueError("Invalid target/overlap token budget")
+    def __init__(self, target_tokens: int = 800) -> None:
+        if target_tokens < 100:
+            raise ValueError("Invalid token budget")
+        # HybridChunker preserves headings/captions, merges peer elements, and
+        # repeats table headers when oversized tables need to be split.
         self.target = target_tokens
-        self.overlap = overlap_tokens
+        default_tokenizer = HybridChunker().tokenizer
+        tokenizer = HuggingFaceTokenizer(tokenizer=default_tokenizer.tokenizer, max_tokens=target_tokens)
+        self.hybrid = HybridChunker(tokenizer=tokenizer, merge_peers=True, repeat_table_header=True)
 
-    @staticmethod
-    def _tokens(text: str) -> list[str]:
-        return text.split()
+    def token_count(self, text: str) -> int:
+        return int(self.hybrid.tokenizer.count_tokens(text))
 
     def chunk(self, parsed: StructuredDocument) -> list[Chunk]:
-        if not parsed.elements:
-            return [Chunk(0, parsed.text, "document:all")]
+        if parsed.native_document is None:
+            raise ValueError("Docling HybridChunker requires the native parsed DoclingDocument")
         out: list[Chunk] = []
-        group: list[ParsedElement] = []
-        group_tokens = 0
-        current_key: tuple[tuple[str, ...], int | None] | None = None
-
-        def emit(elements: list[ParsedElement], body_override: str | None = None) -> None:
-            if not elements:
-                return
-            pages = [e.page_no for e in elements if e.page_no is not None]
-            sections = elements[0].section_path
+        for doc_chunk in self.hybrid.chunk(parsed.native_document):
+            meta = doc_chunk.meta
+            items = list(meta.doc_items or [])
+            pages = [int(prov.page_no) for item in items for prov in (getattr(item, "prov", None) or [])
+                     if getattr(prov, "page_no", None) is not None]
+            labels = [getattr(getattr(item, "label", None), "value", str(getattr(item, "label", ""))) for item in items]
+            refs = [str(getattr(item, "self_ref", "")) for item in items]
+            headings = list(meta.headings or [])
+            captions = list(meta.captions or [])
             locator = json.dumps(
                 {
                     "page_start": min(pages) if pages else None,
                     "page_end": max(pages) if pages else None,
-                    "section_path": list(sections),
-                    "element_ids": [e.element_id for e in elements],
-                    "labels": [e.label for e in elements],
+                    "headings": headings,
+                    "captions": captions,
+                    "element_refs": refs,
+                    "labels": labels,
+                    "table_count": sum(1 for label in labels if "table" in label.lower()),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
             )
-            body = body_override if body_override is not None else "\n\n".join(e.text for e in elements)
-            prefix = " > ".join(sections)
-            out.append(Chunk(len(out), f"{prefix}\n{body}" if prefix else body, locator))
-
-        def flush() -> None:
-            nonlocal group, group_tokens
-            if not group:
-                return
-            # Tables are emitted as atomic chunks when they fit; oversized tables
-            # are split only as a last resort, with the same table locator.
-            if len(group) == 1 and group[0].is_table:
-                emit(group)
-            else:
-                words = "\n\n".join(e.text for e in group).split()
-                if len(words) <= self.target:
-                    emit(group)
-                else:
-                    start = 0
-                    step = self.target - self.overlap
-                    while start < len(words):
-                        stop = min(len(words), start + self.target)
-                        emit(group, " ".join(words[start:stop]))
-                        if stop >= len(words):
-                            break
-                        start += step
-            group = []
-            group_tokens = 0
-
-        for element in parsed.elements:
-            key = (element.section_path, element.page_no)
-            count = len(self._tokens(element.text))
-            if group and (key != current_key or group_tokens + count > self.target or element.is_table):
-                flush()
-            group.append(element)
-            group_tokens += count
-            current_key = key
-            if element.is_table:
-                flush()
-        flush()
+            # Contextualize includes heading and caption context in retrieval text.
+            out.append(Chunk(len(out), self.hybrid.contextualize(doc_chunk), locator))
         return out
 
 
 
 class OllamaEmbeddingProvider:
     provider_id = "ollama-remote-qwen3-embedding-0.6b"
+    QUERY_INSTRUCTION = (
+        "Instruct: Given a query about storage-device specifications or storage-software behavior, "
+        "retrieve relevant passages that answer the query.\nQuery: "
+    )
 
     def __init__(self, base_url: str | None = None, model: str | None = None, timeout: float = 180.0) -> None:
         self.base_url = (base_url or os.getenv("OLLAMA_URL", "http://192.168.1.100:11434")).rstrip("/")
         self.model = model or os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b")
         self.timeout = timeout
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
         if not texts:
             return []
-        payload = json.dumps({"model": self.model, "input": texts, "truncate": False}).encode()
+        inputs = [self.QUERY_INSTRUCTION + text for text in texts] if query else texts
+        payload = json.dumps({"model": self.model, "input": inputs, "truncate": False}).encode()
         request = urllib.request.Request(
             f"{self.base_url}/api/embed", data=payload, headers={"Content-Type": "application/json"}
         )
@@ -297,7 +275,7 @@ class QdrantDenseIndex(Index):
             self.client.upsert(collection_name=self.collection, points=points, wait=True)
 
     def search(self, query: str, top_k: int, source_ids: list[str] | None = None) -> list[SearchHit]:
-        vector = self.embedding.embed([query])[0]
+        vector = self.embedding.embed([query], query=True)[0]
         query_filter = None
         if source_ids:
             query_filter = models.Filter(must=[models.FieldCondition(key="source_id", match=models.MatchAny(any=source_ids))])
@@ -322,6 +300,7 @@ class HybridRRFIndex(Retriever):
         rrf_k: int = 60,
         dense_candidates: int = 20,
         lexical_candidates: int = 20,
+        source_metadata: list[dict[str, str]] | None = None,
     ) -> None:
         if rrf_k <= 0 or dense_candidates <= 0 or lexical_candidates <= 0:
             raise ValueError("RRF and candidate limits must be positive")
@@ -330,10 +309,93 @@ class HybridRRFIndex(Retriever):
         self.rrf_k = rrf_k
         self.dense_candidates = dense_candidates
         self.lexical_candidates = lexical_candidates
+        self.source_metadata = source_metadata or []
+        self.last_search_filter: dict[str, Any] = {"applied": False, "reasons": []}
+
+    @staticmethod
+    def _normalized(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+    @classmethod
+    def explicit_metadata_scope(
+        cls, query: str, source_metadata: list[dict[str, str]]
+    ) -> tuple[list[str] | None, dict[str, Any]]:
+        """Derive generic filters only from entity/class/version text in the query."""
+        normalized_query = cls._normalized(query)
+        matched: list[set[str]] = []
+        reasons: list[dict[str, Any]] = []
+
+        entity_alias_ids: dict[str, set[str]] = {}
+        for source in source_metadata:
+            title = str(source.get("title", ""))
+            source_id = str(source.get("source_id", ""))
+            aliases = {str(source.get("material_id", ""))}
+            title_tokens = re.findall(r"[A-Za-z][A-Za-z0-9._-]*", title)
+            # Source titles are frozen registry metadata. Treat only the leading
+            # vendor name and model-like tokens containing digits as entities;
+            # generic topic words such as "block", "SMART", or "endurance"
+            # must never narrow retrieval.
+            if title_tokens and not re.fullmatch(r"M\d+", title_tokens[0], re.IGNORECASE):
+                aliases.add(title_tokens[0])
+            aliases.update(
+                token for token in title_tokens
+                if len(token) >= 5 and any(char.isdigit() for char in token)
+                and not re.fullmatch(r"\d+(?:\.\d+)+(?:[a-z])?", token, re.IGNORECASE)
+            )
+            for alias in aliases:
+                norm_alias = cls._normalized(alias)
+                # Manufacturer/model/family identifiers are scoped only when the
+                # query contains the same explicit token or phrase.
+                if norm_alias and (f" {norm_alias} " in f" {normalized_query} "):
+                    entity_alias_ids.setdefault(norm_alias, set()).add(source_id)
+        entity_ids = set.intersection(*entity_alias_ids.values()) if entity_alias_ids else set()
+        if entity_ids:
+            matched.append(entity_ids)
+            reasons.append({"kind": "explicit_entity", "values": sorted(entity_alias_ids), "source_ids": sorted(entity_ids)})
+
+        source_class_terms = {
+            "datasheet": ("datasheet", "data sheet", "规格书", "数据手册"),
+            "standard": ("standard", "标准", "nvme spec", "nvme specification"),
+            "software": ("software documentation", "software doc", "软件文档", "api 文档", "linux 文档"),
+        }
+        for source_class, terms in source_class_terms.items():
+            if any(
+                (cls._normalized(term) and cls._normalized(term) in normalized_query)
+                or (not cls._normalized(term) and term in query.lower())
+                for term in terms
+            ):
+                ids = {str(s.get("source_id", "")) for s in source_metadata if s.get("source_class") == source_class}
+                if ids:
+                    matched.append(ids)
+                    reasons.append({"kind": "explicit_source_class", "value": source_class, "source_ids": sorted(ids)})
+
+        versions = set(re.findall(r"\b\d+(?:\.\d+)+(?:[a-z])?\b", query.lower()))
+        if versions:
+            candidates: set[str] = set()
+            for source in source_metadata:
+                source_text = cls._normalized(f"{source.get('title', '')} {source.get('source_id', '')} {source.get('source_revision', '')}")
+                compact_source = source_text.replace(" ", "")
+                if any("".join(re.findall(r"[a-z0-9]", version)) in compact_source for version in versions):
+                    candidates.add(str(source.get("source_id", "")))
+            if candidates:
+                matched.append(candidates)
+                reasons.append({"kind": "explicit_standard_version", "values": sorted(versions), "source_ids": sorted(candidates)})
+
+        if not matched:
+            return None, {"applied": False, "reasons": []}
+        allowed = set.intersection(*matched)
+        # Never convert incomplete catalog metadata into a zero-result query.
+        if not allowed:
+            return None, {"applied": False, "reasons": reasons, "fallback": "empty_intersection"}
+        return sorted(allowed), {"applied": True, "reasons": reasons, "source_ids": sorted(allowed)}
 
     def search(self, query: str, top_k: int, source_ids: list[str] | None = None) -> list[SearchHit]:
-        dense_hits = self.dense.search(query, self.dense_candidates, source_ids)
-        lexical_hits = self.lexical.search(query, self.lexical_candidates, source_ids)
+        scoped_ids, filter_evidence = self.explicit_metadata_scope(query, self.source_metadata)
+        if source_ids:
+            scoped_ids = sorted(set(source_ids).intersection(scoped_ids)) if scoped_ids else source_ids
+        self.last_search_filter = filter_evidence
+        dense_hits = self.dense.search(query, self.dense_candidates, scoped_ids)
+        lexical_hits = self.lexical.search(query, self.lexical_candidates, scoped_ids)
         by_id: dict[str, tuple[SearchHit, float]] = {}
         for hits in (dense_hits, lexical_hits):
             for rank, hit in enumerate(hits, start=1):
