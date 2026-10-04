@@ -196,11 +196,59 @@ def section_groups(device_type: str, vendor: str = ""):
     return groups
 
 
+def effective_analysis_fields(device_type: str, vendor: str = "") -> list[str]:
+    """Return generic analysis fields plus existing fields targeted by vendor overrides."""
+    dtype = normalize_device_type(device_type)
+    canonical_fields = fields_for(dtype)
+    ordered = list(analysis_fields_for(dtype))
+    seen = set(ordered)
+    vendor_id = vendor_key(vendor)
+    overrides = load_templates().get("vendors", {}).get(vendor_id, {}).get("overrides", {}) if vendor_id else {}
+    for group in overrides.get(dtype, []):
+        for field in group.get("fields") or []:
+            key = str(field)
+            if key in canonical_fields and key not in seen:
+                ordered.append(key)
+                seen.add(key)
+    return ordered
+
+
 def _contains_heading(text: str, heading: str) -> bool:
     # Section navigation only: this is deliberately not a value-extraction rule.
     hay = " ".join(str(text or "").upper().split())
     needle = " ".join(str(heading or "").upper().split())
     return bool(needle and needle in hay)
+
+
+def identity_headings_for(vendor: str) -> list[str]:
+    key = vendor_key(vendor)
+    if not key:
+        return []
+    headings = load_templates()["vendors"][key].get("identity_headings") or []
+    return list(dict.fromkeys(str(item).strip() for item in headings if str(item).strip()))
+
+
+def identity_page_hits(pages, vendor: str) -> list[int]:
+    """Return matching source page numbers for prioritization only; extract no identity values."""
+    headings = identity_headings_for(vendor)
+    if not headings:
+        return []
+    hits = []
+    for item in pages or []:
+        if isinstance(item, dict):
+            page, text = item.get("page"), item.get("text")
+        else:
+            try:
+                page, text = item[0], item[1]
+            except (IndexError, TypeError):
+                continue
+        try:
+            page_number = int(page)
+        except (TypeError, ValueError):
+            continue
+        if page_number not in hits and any(_contains_heading(text, heading) for heading in headings):
+            hits.append(page_number)
+    return hits
 
 
 def build_read_plan(pages, device_type: str, vendor: str = ""):
@@ -299,6 +347,8 @@ def template_summary(device_type: str, vendor: str = ""):
         "fields": [{"canonical_name": k, "parameter_name": v, **parameter_knowledge(dtype, k)} for k, v in fields_for(dtype).items()],
         "lifetime_profile": lifetime_profile(dtype),
         "analysis_fields": analysis_fields_for(dtype),
+        "effective_analysis_fields": effective_analysis_fields(dtype, vendor),
+        "identity_headings": identity_headings_for(vendor),
         "section_groups": [
             {"name": g.get("name"), "headings": list(g.get("headings") or []), "fields": list(g.get("fields") or [])}
             for g in section_groups(dtype, vendor)

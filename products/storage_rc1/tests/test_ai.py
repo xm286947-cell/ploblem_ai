@@ -426,10 +426,10 @@ def test_final_review_isolates_one_bad_json_field(monkeypatch):
     assert any(f['canonical_name']=='ecc_requirement' for f in result['findings'])
 
 
-def _single_pass_payload(device_type, found=None):
+def _single_pass_payload(device_type, found=None, vendor=""):
     """Build a complete contract response; unspecified fields are legitimate missing."""
     found = found or {}
-    _, keys = ai._single_pass_schema(device_type)
+    _, keys = ai._single_pass_schema(device_type, vendor)
     fields = []
     for key in keys:
         item = {
@@ -463,7 +463,7 @@ def test_single_pass_extractor_calls_model_once_and_resolves_evidence(monkeypatc
                          'evidence':{'source_id':'pdf1','page':1,'section':'Health','quote':'SMART / Health supported'},
                          'conflict_evidence':[]},
     }
-    payload = _single_pass_payload('SSD', found)
+    payload = _single_pass_payload('SSD', found, vendor='TIMAR')
     calls = {'n': 0}
     def handler(request):
         calls['n'] += 1
@@ -488,7 +488,7 @@ def test_single_pass_contract_adapter_accepts_legacy_name(monkeypatch):
                 'evidence':{'source_id':'p','page':1,'section':'x','quote':'TBW: 600 TB'}, 'conflict_evidence':[]},
         'smart_health': {'value':'Supported','status':'found','confidence':.9,
                          'evidence':{'source_id':'p','page':1,'section':'x','quote':'SMART supported'}, 'conflict_evidence':[]},
-    })
+    }, vendor='TIMAR')
     # Simulate a provider contract drift: field_key -> name. Adapter may reshape only.
     tbw = next(x for x in payload['fields'] if x['field_key'] == 'tbw')
     tbw['name'] = tbw.pop('field_key')
@@ -512,7 +512,7 @@ def test_multi_source_conflict_preserves_both_provenances(monkeypatch):
                 'evidence':{'source_id':'pdf','page':1,'section':'Feature','quote':'Power Loss Protection: No'}, 'conflict_evidence':[]},
         'smart_health': {'value':'Supported','status':'found','confidence':.9,
                          'evidence':{'source_id':'web','page':1,'section':'Product page','quote':'Power Loss Protection: Supported'}, 'conflict_evidence':[]},
-    })
+    }, vendor='TIMAR')
     # Values above deliberately use locators that resolve; semantic value support is not a resolver responsibility.
     result = ai.extract_specification_bundle_once([
         {'source_id':'pdf','pages':pdf_pages}, {'source_id':'web','pages':web_pages}
@@ -537,7 +537,7 @@ def test_review_gate_ignores_noncritical_missing(monkeypatch):
                 'evidence':{'source_id':'p','page':1,'section':'x','quote':'TBW: 600 TB'}, 'conflict_evidence':[]},
         'smart_health': {'value':'Supported','status':'found','confidence':.9,
                          'evidence':{'source_id':'p','page':1,'section':'x','quote':'SMART supported'}, 'conflict_evidence':[]},
-    })
+    }, vendor='TIMAR')
     result = ai.extract_specification_once(pages, 'SSD', 'TIMAR', '97', source_id='p', client=mock_client(payload))
     assert result['review_required'] is False
     assert not any(x['type'] == 'critical_missing' for x in result['review_queue'])

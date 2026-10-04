@@ -349,7 +349,9 @@ def device_slots(device_id: str) -> dict[str, Any]:
     device = devices[device_id]
     coverage = _coverage_states(device_id)
     candidates = _candidate_map(device_id)
-    fields = parameter_baseline.product_fields(device["device_type"], ai.expected_fields(device["device_type"]))
+    fields = parameter_baseline.product_fields(
+        device["device_type"], ai.expected_fields(device["device_type"], device.get("vendor", ""))
+    )
     slots = []
     for field in fields:
         key = field["canonical_name"]
@@ -647,7 +649,9 @@ def review_workbench(device_id: str) -> dict[str, Any]:
     device = devices[device_id]
     coverage = _coverage_states(device_id)
     candidates = _candidate_map(device_id)
-    fields = parameter_baseline.product_fields(device["device_type"], ai.expected_fields(device["device_type"]))
+    fields = parameter_baseline.product_fields(
+        device["device_type"], ai.expected_fields(device["device_type"], device.get("vendor", ""))
+    )
     rows_out = []
     for field in fields:
         key = field["canonical_name"]
@@ -735,10 +739,14 @@ def review_workbench(device_id: str) -> dict[str, Any]:
             "not_applicable": summary[UX_NOT_APPLICABLE],
             "confirmed": summary[UX_CONFIRMED],
             "exception_count": len(exception_rows),
+            "action_required_count": summary[UX_NEEDS_ATTENTION],
             "batch_confirmable_count": sum(1 for x in rows_out if x["batch_confirmable"]),
             "critical_visible_count": len(critical_rows),
         },
-        "exception_candidate_ids": [x["candidate_id"] for x in exception_rows if x.get("candidate_id")],
+        "exception_candidate_ids": [
+            x["candidate_id"] for x in rows_out
+            if x["ux_state"] == UX_NEEDS_ATTENTION and x.get("candidate_id")
+        ],
         "batch_candidate_ids": [x["candidate_id"] for x in rows_out if x["batch_confirmable"]],
         "critical_fields": [
             {"canonical_name": x["canonical_name"], "parameter_name": x["parameter_name"], "ux_state": x["ux_state"]}
@@ -795,14 +803,26 @@ def complete_parameter_review(device_id: str) -> dict[str, Any]:
             "reasons": x.get("exception_reasons") or [],
         }
         for x in workbench["rows"]
-        if x["ux_state"] in {UX_NEEDS_ATTENTION, UX_UNKNOWN, UX_TRUSTED}
+        if x["ux_state"] in {UX_NEEDS_ATTENTION, UX_TRUSTED}
         and x.get("requirement_level") in {"MUST", "SHOULD"}
     ]
+    non_actionable_missing = [
+        {
+            "canonical_name": x["canonical_name"],
+            "parameter_name": x["parameter_name"],
+            "ux_state": x["ux_state"],
+            "reasons": x.get("exception_reasons") or [],
+        }
+        for x in workbench["rows"]
+        if x["ux_state"] == UX_UNKNOWN
+    ]
+    workflow = {**workflow, "non_actionable_missing": non_actionable_missing}
     return {
         "device_id": device_id,
         "completed": bool(workflow.get("formal_ready")),
         "workflow": workflow,
         "blockers": blockers,
+        "non_actionable_missing": non_actionable_missing,
         "gate": "CONFIRMED_DEVICE_FACT_GATE_UNCHANGED",
     }
 
