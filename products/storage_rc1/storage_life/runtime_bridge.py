@@ -15,6 +15,8 @@ Retry/Task/Resume/Budget/Provider HTTP remain owned by Unified Agent Runtime.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -32,6 +34,7 @@ FOUR_FAMILY_DEVICE_TYPES = ("NOR Flash", "NAND Flash", "eMMC", "SSD")
 
 _LOCK = threading.RLock()
 _RUNTIME = None
+_EMMC_LONG_CONTENT_EXECUTOR = None
 _LAST = deque(maxlen=50)
 
 
@@ -406,9 +409,10 @@ def _build_runtime():
 
 
 def reset_for_tests() -> None:
-    global _RUNTIME
+    global _RUNTIME, _EMMC_LONG_CONTENT_EXECUTOR
     with _LOCK:
         _RUNTIME = None
+        _EMMC_LONG_CONTENT_EXECUTOR = None
         _LAST.clear()
 
 
@@ -418,6 +422,331 @@ def _get_runtime():
         if _RUNTIME is None:
             _RUNTIME = _build_runtime()
         return _RUNTIME
+
+
+def _get_emmc_long_content_executor():
+    """Bind the frozen eMMC strategy to Runtime's public recovery executor."""
+    global _EMMC_LONG_CONTENT_EXECUTOR
+    with _LOCK:
+        if _EMMC_LONG_CONTENT_EXECUTOR is not None:
+            return _EMMC_LONG_CONTENT_EXECUTOR
+        runtime, _resolved, _AgentRequest, _RuntimeStatus, _info, _store_path = _get_runtime()
+        from runtime.content import LongContentRecoveryExecutor
+
+        executor = LongContentRecoveryExecutor(
+            runtime,
+            runtime.store,
+            chunk_payload_builder=_emmc_chunk_payload_builder,
+            merger=_StorageEmmcResultMerger(),
+            final_validator=_emmc_final_validator,
+            business_gate=_emmc_business_gate,
+        )
+        executor.bind_configured_agent(agent_config_path(EMMC_PARAMETER_AGENT_ID))
+        provider_handler = executor.provider_handler
+
+        def validate_chunk_result(provider_payload, context):
+            return _validate_emmc_chunk_result(
+                provider_handler(provider_payload, context),
+                provider_payload,
+            )
+
+        executor.provider_handler = validate_chunk_result
+        _EMMC_LONG_CONTENT_EXECUTOR = executor
+        return executor
+
+
+def _emmc_source_text(payload: dict[str, Any]) -> str:
+    text = payload.get("page_text")
+    if isinstance(text, str) and text.strip():
+        return text
+    pages = payload.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise RuntimeBridgeCallError(
+            "eMMC long-content binding requires source pages/page_text",
+            code="STORAGE_EMMC_LONG_CONTENT_SOURCE_MISSING",
+            category="VALIDATION",
+            retryable=False,
+        )
+    return "\n\n".join(
+        f"SOURCE {item.get('source_id') or ''} PAGE {item.get('page') or ''}\n{item.get('text') or ''}"
+        for item in pages
+        if isinstance(item, dict)
+    )
+
+
+def _emmc_chunk_schema(schema: dict[str, Any], field_keys: list[str]) -> dict[str, Any]:
+    """Narrow the existing eMMC output contract without changing its shape."""
+    narrowed = json.loads(json.dumps(schema))
+    fields = narrowed.get("properties", {}).get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("items"), dict):
+        raise RuntimeBridgeCallError(
+            "eMMC output schema is incompatible with StorageParameterExtractResultV1",
+            code="STORAGE_EMMC_LONG_CONTENT_SCHEMA_INVALID",
+            category="VALIDATION",
+            retryable=False,
+        )
+    fields["minItems"] = len(field_keys)
+    fields["maxItems"] = len(field_keys)
+    fields["items"].setdefault("properties", {}).setdefault("field_key", {})["enum"] = list(field_keys)
+    return narrowed
+
+
+def _emmc_chunk_payload_builder(bundle, _plan, chunk, _context):
+    request = bundle.shared_context.get("storage_provider_request") or {}
+    instructions = request.get("instructions")
+    provider_payload = request.get("provider_payload")
+    schema = request.get("schema")
+    if not isinstance(instructions, str) or not isinstance(provider_payload, dict) or not isinstance(schema, dict):
+        raise RuntimeBridgeCallError(
+            "eMMC Runtime bundle is missing the provider request contract",
+            code="STORAGE_EMMC_LONG_CONTENT_REQUEST_MISSING",
+            category="VALIDATION",
+            retryable=False,
+        )
+    unit_by_id = {unit.unit_id: unit for unit in bundle.logical_units}
+    field_keys = [
+        str(unit_by_id[unit_id].metadata.get("storage_field_key") or "")
+        for unit_id in chunk.unit_ids
+        if unit_id in unit_by_id
+    ]
+    if not field_keys or any(not key for key in field_keys):
+        raise RuntimeBridgeCallError(
+            "Runtime produced an eMMC chunk without Storage field keys",
+            code="STORAGE_EMMC_LONG_CONTENT_FIELDS_MISSING",
+            category="VALIDATION",
+            retryable=False,
+        )
+    chunk_provider_payload = dict(provider_payload)
+    chunk_provider_payload["target_fields"] = field_keys
+    return {
+        "instructions": instructions,
+        "provider_payload": chunk_provider_payload,
+        "schema": _emmc_chunk_schema(schema, field_keys),
+    }
+
+
+def _validate_emmc_chunk_result(result: Any, request: dict[str, Any]) -> dict[str, Any]:
+    from jsonschema import validate as validate_json_schema
+    from runtime.contracts import ErrorCategory
+    from runtime.reliability.errors import RuntimeStepError
+
+    schema = request.get("schema")
+    try:
+        validate_json_schema(result, schema)
+    except Exception as exc:
+        raise RuntimeStepError(
+            "eMMC provider chunk failed its Runtime-bound group schema",
+            code="PROVIDER_SCHEMA_INVALID",
+            category=ErrorCategory.VALIDATION,
+            retryable=True,
+            details={"schema_validation_error": type(exc).__name__},
+        ) from exc
+    requested = list((request.get("provider_payload") or {}).get("target_fields") or [])
+    fields = result.get("fields") if isinstance(result, dict) else None
+    returned = [
+        str(item.get("field_key") or "").strip()
+        for item in fields or []
+        if isinstance(item, dict)
+    ]
+    if (
+        not isinstance(fields, list)
+        or len(returned) != len(fields)
+        or len(returned) != len(requested)
+        or set(returned) != set(requested)
+        or len(set(returned)) != len(returned)
+    ):
+        raise RuntimeStepError(
+            "eMMC provider chunk must return each requested field exactly once",
+            code="PROVIDER_SCHEMA_INVALID",
+            category=ErrorCategory.VALIDATION,
+            retryable=True,
+            details={"requested_fields": requested, "returned_fields": returned},
+        )
+    return result
+
+
+class _StorageEmmcResultMerger:
+    """Adapt the frozen Storage merge into Runtime's public MergeResult contract."""
+
+    def merge(self, inputs, context):
+        from runtime.contracts import MergeResult
+        from .runtime_domain_strategy import StorageEmmcDomainStrategy
+
+        merged = StorageEmmcDomainStrategy.merge_partials(inputs)
+        missing = list(merged.get("missing_field_keys") or [])
+        return MergeResult(
+            merge_key=context.merge_key,
+            data=merged,
+            derived_from_partial_ids=[item.partial_id for item in inputs],
+            complete=not missing and not any(
+                str(item.get("type") or "").startswith("invalid_")
+                for item in merged.get("merge_conflicts") or []
+            ),
+            missing_partial_ids=[],
+            warnings=["STORAGE_EMMC_SEMANTIC_CONFLICT"] if merged.get("merge_conflicts") else [],
+            metadata={"business_domain": "STORAGE", "field_count": merged.get("field_count")},
+        )
+
+
+def _emmc_final_validator(merged: Any) -> bool:
+    from .runtime_domain_strategy import EMMC_FIELD_ORDER
+
+    return (
+        isinstance(merged, dict)
+        and len(merged.get("fields") or []) == len(EMMC_FIELD_ORDER)
+        and not merged.get("missing_field_keys")
+        and not any(str(item.get("type") or "").startswith("invalid_") for item in merged.get("merge_conflicts") or [])
+    )
+
+
+def _emmc_business_gate(merge, coverages, _bundle, _plan) -> bool:
+    from .runtime_domain_strategy import StorageEmmcDomainStrategy
+
+    if merge is None or not coverages or not all(item.complete for item in coverages):
+        return False
+    gate = StorageEmmcDomainStrategy.business_gate(
+        merge.data,
+        evidence_resolved=False,
+        review_resolved=False,
+    )
+    # Runtime establishes complete field coverage and preserves review/evidence
+    # findings; Storage's existing evidence resolver and human-review path consume
+    # those findings after the extraction result returns.
+    return not any(
+        reason not in {"BUSINESS_REVIEW_REQUIRED", "EVIDENCE_NOT_RESOLVED"}
+        for reason in gate["reasons"]
+    )
+
+
+def _call_emmc_long_content(
+    instructions: str,
+    payload: dict[str, Any],
+    schema: dict[str, Any],
+) -> dict[str, Any]:
+    from .runtime_domain_strategy import EMMC_FIELD_ORDER, StorageEmmcDomainStrategy
+
+    requested = schema.get("properties", {}).get("fields", {}).get("items", {}).get("properties", {}).get("field_key", {}).get("enum", [])
+    if list(requested) != list(EMMC_FIELD_ORDER):
+        raise RuntimeBridgeCallError(
+            "eMMC long-content binding applies only to the frozen 37-field extraction contract",
+            code="STORAGE_EMMC_LONG_CONTENT_CONTRACT_MISMATCH",
+            category="VALIDATION",
+            retryable=False,
+        )
+
+    source_id = str(payload.get("primary_source_id") or "").strip()
+    pages = payload.get("pages")
+    if not source_id and isinstance(pages, list):
+        source_id = next(
+            (str(item.get("source_id") or "").strip() for item in pages if isinstance(item, dict) and item.get("source_id")),
+            "",
+        )
+    if not source_id:
+        raise RuntimeBridgeCallError(
+            "eMMC long-content binding requires primary_source_id",
+            code="STORAGE_EMMC_LONG_CONTENT_SOURCE_ID_MISSING",
+            category="VALIDATION",
+            retryable=False,
+        )
+    source_text = _emmc_source_text(payload)
+    fingerprint = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    descriptor = StorageEmmcDomainStrategy.descriptor(
+        source_ref={
+            "source_id": source_id,
+            "source_type": "STORAGE_DATASHEET",
+            "content_hash": fingerprint,
+            "fingerprint": fingerprint,
+            "uri": f"storage-source:{source_id}",
+        },
+        source_text=source_text,
+        schema_version="emmc_schema_v0.2",
+    )
+    bundle = StorageEmmcDomainStrategy.to_runtime_bundle(descriptor)
+    bundle.shared_context["storage_provider_request"] = {
+        "instructions": instructions,
+        "provider_payload": payload,
+        "schema": schema,
+    }
+    executor = _get_emmc_long_content_executor()
+    request_fingerprint = hashlib.sha256(
+        json.dumps(
+            {"instructions": instructions, "payload": payload, "schema": schema,
+             "strategy_ref": StorageEmmcDomainStrategy.strategy_ref},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    request_id = "storage-emmc-lc-" + request_fingerprint
+    existing_task = executor.store.get_task_by_request_id(request_id)
+    metadata = {
+        "business_domain": "STORAGE",
+        "storage_execution_mode": "runtime_long_content",
+        "storage_agent_id": EMMC_PARAMETER_AGENT_ID,
+        "source_id": source_id,
+        "source_fingerprint": fingerprint,
+    }
+    if existing_task is None:
+        outcome = executor.execute(
+            bundle,
+            request_id=request_id,
+            strategy_ref=StorageEmmcDomainStrategy.strategy_ref,
+            metadata=metadata,
+        )
+    elif str(existing_task.status.value) in {"PARTIAL", "RUNNING"}:
+        outcome = executor.resume(existing_task.task_id)
+    elif str(existing_task.status.value) == "COMPLETED":
+        outcome = executor.outcome(existing_task.task_id)
+    else:
+        raise RuntimeBridgeCallError(
+            "Existing Runtime eMMC long-content task is not resumable",
+            code="STORAGE_EMMC_LONG_CONTENT_TASK_NOT_RESUMABLE",
+            category="EXECUTION",
+            retryable=False,
+            details={"task_id": existing_task.task_id, "status": existing_task.status.value},
+        )
+    _LAST.append({
+        "agent_id": EMMC_PARAMETER_AGENT_ID,
+        "request_id": request_id,
+        "task_id": outcome.task_id,
+        "run_id": outcome.run_id,
+        "status": outcome.status.value,
+        "runtime_status": outcome.runtime_status.value,
+        "provider_calls": outcome.provider_calls,
+        "runtime_long_content": True,
+        "plan_id": outcome.plan_id,
+        "source_id": source_id,
+        "source_fingerprint": fingerprint,
+        "committed_partial_count": len(outcome.committed_partials),
+        "business_consumable": outcome.business_consumable,
+    })
+    if not outcome.business_consumable or outcome.merge is None or not isinstance(outcome.merge.data, dict):
+        raise RuntimeBridgeCallError(
+            "Runtime eMMC long-content execution is incomplete",
+            code="STORAGE_EMMC_LONG_CONTENT_INCOMPLETE",
+            category="EXECUTION",
+            retryable=False,
+            details={
+                "request_id": request_id,
+                "task_id": outcome.task_id,
+                "status": outcome.status.value,
+                "runtime_status": outcome.runtime_status.value,
+                "plan_id": outcome.plan_id,
+                "committed_partial_count": len(outcome.committed_partials),
+                "gate": outcome.gate.model_dump(mode="json"),
+            },
+        )
+    merged = outcome.merge.data
+    if merged.get("missing_field_keys") or len(merged.get("fields") or []) != len(EMMC_FIELD_ORDER):
+        raise RuntimeBridgeCallError(
+            "Runtime eMMC long-content merge did not return exactly 37 fields",
+            code="STORAGE_EMMC_LONG_CONTENT_MERGE_INVALID",
+            category="VALIDATION",
+            retryable=False,
+            details={"task_id": outcome.task_id, "missing_field_keys": merged.get("missing_field_keys")},
+        )
+    return merged
 
 
 def configured() -> bool:
@@ -605,4 +934,23 @@ def call_json(instructions: str, payload: dict[str, Any], schema: dict[str, Any]
 
 def call_parameter_extract(instructions: str, payload: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
     """Run the frozen eMMC 37-field business extraction through its dedicated Runtime agent."""
+    route = None
+    if str(payload.get("device_type") or "").strip():
+        route = route_for_device_type(str(payload["device_type"]))
+    if (
+        route is not None
+        and route.get("agent_id") == EMMC_PARAMETER_AGENT_ID
+        and bool(str(payload.get("primary_source_id") or "").strip())
+        and isinstance(payload.get("pages"), list)
+        and bool(payload.get("pages"))
+        and isinstance(payload.get("page_text"), str)
+        and bool(payload.get("page_text", "").strip())
+        and isinstance(schema, dict)
+        and schema.get("properties", {}).get("fields", {}).get("items", {}).get("properties", {}).get("field_key", {}).get("enum")
+    ):
+        from .runtime_domain_strategy import EMMC_FIELD_ORDER
+
+        requested = schema["properties"]["fields"]["items"]["properties"]["field_key"]["enum"]
+        if list(requested) == list(EMMC_FIELD_ORDER):
+            return _call_emmc_long_content(instructions, payload, schema)
     return _invoke_json(EMMC_PARAMETER_AGENT_ID, instructions, payload, schema)
