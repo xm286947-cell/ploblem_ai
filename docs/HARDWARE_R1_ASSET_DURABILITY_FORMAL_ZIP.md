@@ -44,7 +44,16 @@ Asset Durability certification criterion. Product readiness remains
 `NOT_CERTIFIED_OUT_OF_SCOPE`. The detached `RELEASE_MANIFEST.json` binds the exact ZIP
 SHA-256, source commit, D2 artifacts, and both native reports.
 
-The ZIP's `RELEASE_CONTENT_MANIFEST.json` records:
+The ZIP's `RELEASE_CONTENT_MANIFEST.json` remains pending until native startup
+reports are bound:
+
+```ini
+CERTIFICATION_STATUS=PENDING_NATIVE_STARTUP_BINDING
+CERTIFICATION_SCOPE=HARDWARE_R1_ASSET_DURABILITY
+```
+
+Only the detached `RELEASE_MANIFEST.json`, emitted after both native startup
+reports pass, records:
 
 ```ini
 CERTIFICATION_STATUS=PASS
