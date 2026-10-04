@@ -52,6 +52,7 @@ from services.hardware_r1_golden_knowledge_bridge import HardwareR1GoldenKnowled
 from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1KnowledgePromotionStore,
+    HardwareR1PromotionError,
 )
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
@@ -562,7 +563,7 @@ def create_p0_app(
                 )
             if effective_knowledge_adapter is not None:
                 hardware_r1_promotion_store = HardwareR1KnowledgePromotionStore(
-                    hardware_r1_workbench_db
+                    hardware_r1_workbench_db, read_only=True
                 )
                 hardware_r1_promotion_bridge = HardwareR1GoldenKnowledgeBridge(
                     effective_knowledge_adapter,
@@ -572,14 +573,27 @@ def create_p0_app(
                     hardware_r1_promotion_store,
                     workbench_service=hardware_r1_workbench_service,
                     bridge=hardware_r1_promotion_bridge,
+                    candidate_repository=hardware_candidate_asset_repository,
                 )
                 app.state.hardware_r1_promotion_store = hardware_r1_promotion_store
-                app.state.hardware_r1_promotion_service = hardware_r1_promotion_service
-                app.state.hardware_r1_promotion_status = {
-                    "ready": True,
-                    "code": "READY",
-                    "auto_publish": False,
-                }
+                try:
+                    migration_status = hardware_r1_promotion_service.migrate_legacy_records()
+                except HardwareR1PromotionError as error:
+                    hardware_r1_promotion_service = None
+                    app.state.hardware_r1_promotion_service = None
+                    app.state.hardware_r1_promotion_status = {
+                        "ready": False,
+                        "code": error.code,
+                        "auto_publish": False,
+                    }
+                else:
+                    app.state.hardware_r1_promotion_service = hardware_r1_promotion_service
+                    app.state.hardware_r1_promotion_status = {
+                        "ready": True,
+                        "code": "READY",
+                        "legacy_migration": migration_status,
+                        "auto_publish": False,
+                    }
             else:
                 app.state.hardware_r1_promotion_store = None
                 app.state.hardware_r1_promotion_service = None

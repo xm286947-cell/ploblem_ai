@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,7 +13,10 @@ from fastapi.testclient import TestClient
 
 from knowledge_production import KnowledgeReleaseService, create_knowledge_api_app
 from repositories import JsonArtifactRepository
-from services.hardware_asset_repository import CandidateAssetRepository
+from services.hardware_asset_repository import (
+    CandidateAssetRepository,
+    CandidateAssetRepositoryError,
+)
 from services.hardware_case_knowledge_adapter import HardwareCaseKnowledgeAdapter
 from services.hardware_case_source_store import (
     HardwareCaseSourceError,
@@ -191,6 +196,21 @@ def validation(*, passed: bool = True) -> dict[str, Any]:
     }
 
 
+def persist_candidate(repository: CandidateAssetRepository, source: Mapping[str, Any], obj: Mapping[str, Any]) -> str:
+    saved = repository.create_or_commit_candidate(
+        business_case_id=str(obj["identity"]["business_case_id"]),
+        source_id=str(source["source_id"]),
+        source_ref=str(source["source_ref"]),
+        knowledge_object=obj,
+        generation_run_id="promotion-test-run",
+        pipeline_version="test-pipeline-v1",
+        agent_config_version="test-agent-v1",
+        knowledge_schema_version="hardware-case-knowledge-object/v1",
+        validator_version="test-validator-v1",
+    )
+    return str(saved["candidate_id"])
+
+
 def setup_case(
     tmp_path: Path,
     *,
@@ -199,7 +219,8 @@ def setup_case(
     batch_id: str,
 ):
     payload = f"source-{case_id}".encode()
-    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
+    asset_repository = CandidateAssetRepository(tmp_path / "hardware_asset.db")
+    asset_repository.initialize()
     source_store = HardwareCaseSourceStore(
         tmp_path / "hardware.db",
         tmp_path / "sources",
@@ -232,11 +253,13 @@ def setup_case(
         source["source_id"],
         "B0004" if case_id == "A0152" else "B0007",
     )
+    candidate_id = persist_candidate(asset_repository, source, candidate)
     item = {
         "item_id": item_id,
         "batch_id": batch_id,
         "business_case_id": case_id,
         "source_id": source["source_id"],
+        "candidate_id": candidate_id,
         "result": "CANDIDATE_READY",
         "candidate": candidate,
         "evidence_validation": validation(),
@@ -246,6 +269,7 @@ def setup_case(
         HardwareR1KnowledgePromotionStore(tmp_path / "hardware.db"),
         workbench_service=workbench,
         bridge=bridge,
+        candidate_repository=asset_repository,
     )
     return (
         promotion,
@@ -288,10 +312,133 @@ def test_precheck_and_candidate_intake_are_item_idempotent_and_do_not_publish(
     assert second["status"] == "CANDIDATE_INTAKED"
     assert second["idempotent_reuse"] is True
     assert len(transport.calls) == calls_after_first
-    assert first["candidate_id"] == "HC-KNOWLEDGE-A0152-R1"
+    assert first["knowledge_candidate_id"] == "HC-KNOWLEDGE-A0152-R1"
+    assert first["asset_candidate_id"].startswith("HCAND-")
     assert first["evidence_refs"]
+    durable = promotion.assets.get_candidate(first["asset_candidate_id"])
+    ledger = promotion.assets.get_promotion_record(first["asset_candidate_id"])
+    assert durable["promotion_status"] == ledger["promotion_status"] == "CANDIDATE_INTAKED"
+    assert durable["row_version"] == 3
+    assert ledger["knowledge_candidate_id"] == "HC-KNOWLEDGE-A0152-R1"
+    assert ledger["origin_batch_id"] == "HWB-1"
+    assert ledger["origin_item_id"] == "HWI-A0152"
+    assert ledger["retry_count"] == 0
+    assert promotion.assets.get_promotion_record(first["asset_candidate_id"])["knowledge_candidate_id"] == first["knowledge_candidate_id"]
+    with sqlite3.connect(promotion.assets.db_path) as connection:
+        event_types = [row[0] for row in connection.execute(
+            "SELECT event_type FROM hardware_candidate_event WHERE candidate_id=? ORDER BY created_at,event_id",
+            (first["asset_candidate_id"],),
+        )]
+    assert "PROMOTION_STARTED" in event_types
+    # A fresh service instance recovers solely from the Asset Plane ledger.
+    restarted = HardwareR1KnowledgePromotionService(
+        HardwareR1KnowledgePromotionStore(promotion.store.db_path, read_only=True),
+        workbench_service=promotion.workbench,
+        bridge=promotion.bridge,
+        candidate_repository=promotion.assets,
+    )
+    assert restarted.get_item("HWI-A0152")["knowledge_candidate_id"] == first["knowledge_candidate_id"]
     assert not any(call["path"] == "/v1/knowledge/publish" for call in transport.calls)
     assert candidate["review"]["object_status"] == "CANDIDATE"
+
+
+def test_promotion_reads_durable_candidate_and_locks_it_after_precheck(tmp_path: Path) -> None:
+    promotion, workbench, _, _, _, _, golden_object = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-DURABLE", batch_id="HWB-DURABLE"
+    )
+    item = workbench.items["HWI-DURABLE"]
+    item["candidate"] = {"wrong": "Workbench snapshot must not be used"}
+    check = promotion.precheck_item("HWI-DURABLE")
+    assert check["precheck"]["status"] == "PASS"
+    asset = promotion.assets.get_candidate(item["candidate_id"])
+    assert asset["knowledge_object"] == golden_object
+    assert asset["promotion_status"] == "PRECHECK_PASS"
+    modified = copy.deepcopy(golden_object)
+    modified["identity"]["raw_title"] = "attempted mutation after precheck"
+    with pytest.raises(CandidateAssetRepositoryError, match="CANDIDATE_LOCKED_BY_PROMOTION"):
+        promotion.assets.create_or_commit_candidate(
+            business_case_id=asset["business_case_id"],
+            source_id=asset["source_id"],
+            source_ref=asset["source_ref"],
+            knowledge_object=modified,
+            generation_run_id="second-run",
+            pipeline_version="test-pipeline-v1",
+            agent_config_version="test-agent-v1",
+            knowledge_schema_version="hardware-case-knowledge-object/v1",
+            validator_version="test-validator-v1",
+        )
+
+
+def test_promotion_rejects_production_review_required_candidate(tmp_path: Path) -> None:
+    promotion, workbench, *_ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-REVIEW-LOCK", batch_id="HWB-LOCK"
+    )
+    item = workbench.items["HWI-REVIEW-LOCK"]
+    asset = promotion.assets.get_candidate(item["candidate_id"])
+    obj = copy.deepcopy(asset["knowledge_object"])
+    obj["conflicts"] = [{"conflict_id": "conflict-1", "status": "OPEN", "resolution_status": "NEEDS_REVIEW"}]
+    reviewed = promotion.assets.create_or_commit_candidate(
+        business_case_id=asset["business_case_id"],
+        source_id=asset["source_id"],
+        source_ref=asset["source_ref"],
+        knowledge_object=obj,
+        generation_run_id="review-required-run",
+        pipeline_version="test-pipeline-v1",
+        agent_config_version="test-agent-v1",
+        knowledge_schema_version="hardware-case-knowledge-object/v1",
+        validator_version="test-validator-v1",
+    )
+    item["candidate_id"] = reviewed["candidate_id"]
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_LOCKED_BY_REVIEW"):
+        promotion.precheck_item("HWI-REVIEW-LOCK")
+
+
+def test_legacy_promotion_row_migrates_idempotently_to_asset_ledger(tmp_path: Path) -> None:
+    promotion, workbench, *_ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-LEGACY", batch_id="HWB-LEGACY"
+    )
+    item = workbench.items["HWI-LEGACY"]
+    asset = promotion.assets.get_candidate(item["candidate_id"])
+    golden_hash = hashlib.sha256(
+        json.dumps(asset["knowledge_object"], ensure_ascii=False, sort_keys=True,
+                   separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    promotion.store.ensure(
+        item_id="HWI-LEGACY", batch_id="HWB-LEGACY", business_case_id="A0152",
+        source_id=asset["source_id"], golden_hash=golden_hash,
+    )
+    promotion.store.update(
+        "HWI-LEGACY", status="PRECHECK_PASS", last_action="PRECHECK",
+        candidate_id="KC-LEGACY", review_status="CONFIRMED",
+        knowledge_id="K-LEGACY", public_ref="P-LEGACY",
+    )
+    with sqlite3.connect(promotion.store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_knowledge_promotion SET retry_count=2 WHERE item_id=?",
+            ("HWI-LEGACY",),
+        )
+    migration = promotion.migrate_legacy_records()
+    result = promotion.precheck_item("HWI-LEGACY")["promotion"]
+    ledger = promotion.assets.get_promotion_record(asset["candidate_id"])
+    assert result["asset_candidate_id"] == asset["candidate_id"]
+    assert result["knowledge_candidate_id"] == "KC-LEGACY"
+    assert ledger["promotion_status"] == "PRECHECK_PASS"
+    assert ledger["knowledge_id"] == "K-LEGACY"
+    assert ledger["public_ref"] == "P-LEGACY"
+    assert ledger["formal_review_status"] == "CONFIRMED"
+    assert ledger["retry_count"] == 2
+    assert ledger["origin_batch_id"] == "HWB-LEGACY"
+    assert ledger["origin_item_id"] == "HWI-LEGACY"
+    assert migration == {"status": "PASS", "migrated": 1, "idempotent_reuse": 0}
+    # Reading/migrating leaves the old ledger unchanged.
+    assert promotion.store.get("HWI-LEGACY")["candidate_id"] == "KC-LEGACY"
+    legacy_read_only = HardwareR1KnowledgePromotionStore(
+        promotion.store.db_path, read_only=True
+    )
+    with pytest.raises(HardwareR1PromotionError, match="LEGACY_PROMOTION_READ_ONLY"):
+        legacy_read_only.update(
+            "HWI-LEGACY", status="VERIFIED", last_action="UNAUTHORIZED"
+        )
 
 
 def test_human_review_publish_release_query_back_and_source_lock(
@@ -325,6 +472,8 @@ def test_human_review_publish_release_query_back_and_source_lock(
         review_comment="R1 formal promotion review",
     )
     assert reviewed["status"] == "REVIEW_CONFIRMED"
+    durable_review = promotion.assets.get_promotion_record(intake["asset_candidate_id"])
+    assert durable_review["formal_review_status"] == "CONFIRMED"
 
     published = promotion.publish_item(
         "HWI-A0207",
@@ -334,6 +483,10 @@ def test_human_review_publish_release_query_back_and_source_lock(
     assert published["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert published["knowledge_id"]
     assert published["evidence_refs"] == intake["evidence_refs"]
+    durable_publish = promotion.assets.get_promotion_record(intake["asset_candidate_id"])
+    assert durable_publish["knowledge_candidate_id"] == intake["knowledge_candidate_id"]
+    assert durable_publish["knowledge_id"] == published["knowledge_id"]
+    assert durable_publish["public_ref"] == intake["knowledge_candidate_id"]
 
     # Query-back is deliberately separate from Publish. Unified Knowledge
     # release ownership stays outside Hardware R1.
@@ -349,6 +502,7 @@ def test_human_review_publish_release_query_back_and_source_lock(
     assert verified["status"] == "VERIFIED"
     assert verified["retry_count"] == 1
     assert verified["public_ref"] == "HC-KNOWLEDGE-A0207-R1"
+    assert promotion.assets.get_promotion_record(intake["asset_candidate_id"])["promotion_status"] == "VERIFIED"
 
     refs = source_store.formal_knowledge_references("A0207")
     assert refs[0]["source_id"] == source["source_id"]
@@ -380,7 +534,8 @@ def test_publish_requires_explicit_human_review(tmp_path: Path) -> None:
 def test_batch_intake_isolates_not_ready_item(tmp_path: Path) -> None:
     payload_a = b"source-A0152"
     payload_b = b"source-A0207"
-    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
+    asset_repository = CandidateAssetRepository(tmp_path / "hardware_asset.db")
+    asset_repository.initialize()
     source_store = HardwareCaseSourceStore(
         tmp_path / "hardware.db",
         tmp_path / "sources",
@@ -433,11 +588,15 @@ def test_batch_intake_isolates_not_ready_item(tmp_path: Path) -> None:
             "evidence_validation": None,
         },
     ]
+    for item in items[:2]:
+        source = source_a if item["business_case_id"] == "A0152" else source_b
+        item["candidate_id"] = persist_candidate(asset_repository, source, item["candidate"])
     workbench = FakeWorkbench(items)
     promotion = HardwareR1KnowledgePromotionService(
         HardwareR1KnowledgePromotionStore(tmp_path / "hardware.db"),
         workbench_service=workbench,
         bridge=bridge,
+        candidate_repository=asset_repository,
     )
 
     result = promotion.intake_batch("HWB-BATCH")
@@ -489,6 +648,7 @@ def test_failed_intake_retry_is_item_scoped(tmp_path: Path) -> None:
         HardwareR1KnowledgePromotionStore(tmp_path / "promotion.db"),
         workbench_service=workbench,
         bridge=FailOnceBridge(real),  # type: ignore[arg-type]
+        candidate_repository=CandidateAssetRepository(tmp_path / "hardware_asset.db"),
     )
 
     first = promotion.intake_item("HWI-RETRY")

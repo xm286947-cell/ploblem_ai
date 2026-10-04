@@ -69,7 +69,10 @@ def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
 
 
 def _promotion_error(error: HardwareR1PromotionError) -> HTTPException:
-    if error.code in {"BATCH_NOT_FOUND", "BATCH_ITEM_NOT_FOUND", "PROMOTION_NOT_FOUND"}:
+    if error.code in {
+        "BATCH_NOT_FOUND", "BATCH_ITEM_NOT_FOUND", "PROMOTION_NOT_FOUND",
+        "CANDIDATE_NOT_FOUND",
+    }:
         return HTTPException(status_code=404, detail=error.code)
     if error.code in {
         "GOLDEN_CANDIDATE_NOT_READY",
@@ -78,6 +81,13 @@ def _promotion_error(error: HardwareR1PromotionError) -> HTTPException:
         "PUBLISH_REQUIRED_BEFORE_QUERY_BACK",
         "PROMOTION_RETRY_NOT_ALLOWED",
         "PROMOTION_IDEMPOTENCY_CONFLICT",
+        "PROMOTION_STATE_INVALID",
+        "CANDIDATE_ASSET_INVALIDATED",
+        "CANDIDATE_LOCKED_BY_REVIEW",
+        "CANDIDATE_LOCKED_BY_PROMOTION",
+        "CANDIDATE_CONCURRENT_UPDATE",
+        "CANDIDATE_PROMOTION_TRANSITION_INVALID",
+        "CANDIDATE_DATA_INTEGRITY_ERROR",
     }:
         return HTTPException(status_code=409, detail=error.code)
     return HTTPException(status_code=422, detail=error.code)
