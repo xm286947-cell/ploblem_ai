@@ -51,6 +51,7 @@ def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
         "BATCH_NOT_FOUND",
         "BATCH_ITEM_NOT_FOUND",
         "REVIEW_CONFLICT_NOT_FOUND",
+        "CANDIDATE_NOT_FOUND",
     }:
         return HTTPException(status_code=404, detail=error.code)
     if error.code in {
@@ -58,7 +59,10 @@ def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
         "RETRY_FAILED_STAGE_NOT_AVAILABLE",
         "REVIEW_NOT_REQUIRED",
         "REVIEW_CONFLICT_ALREADY_RESOLVED",
-        "DURABLE_REVIEW_BINDING_NOT_IN_B1",
+        "CANDIDATE_CONCURRENT_UPDATE",
+        "CANDIDATE_ASSET_INVALIDATED",
+        "CANDIDATE_LOCKED_BY_PROMOTION",
+        "CANDIDATE_REVIEW_TRANSITION_INVALID",
     }:
         return HTTPException(status_code=409, detail=error.code)
     return HTTPException(status_code=400, detail=error.code)

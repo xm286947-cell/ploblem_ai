@@ -15,6 +15,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Callable
 from uuid import uuid4
 
+from services.hardware_asset_repository import CandidateAssetRepositoryError
 from services.hardware_case_markdown_agent import (
     build_markdown_view,
     run_r1_agent_extraction,
@@ -866,14 +867,35 @@ class HardwareR1WorkbenchService:
         item = self.store.get_item(item_id)
         if item["result"] != "REVIEW":
             raise HardwareR1WorkbenchError("REVIEW_NOT_REQUIRED")
-        if item.get("candidate_id"):
-            # Durable Production Review binding is a separate B2 milestone.
-            raise HardwareR1WorkbenchError("DURABLE_REVIEW_BINDING_NOT_IN_B1")
 
-        result = deepcopy(item.get("pipeline_result") or {})
-        candidate = result.get("knowledge_object")
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        if not candidate_id:
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        getter = getattr(self.candidate_repository, "get_candidate", None)
+        if not callable(getter):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        try:
+            asset = getter(candidate_id)
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+        if not isinstance(asset, dict) or str(asset.get("candidate_id") or "") != candidate_id:
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        if str(asset.get("asset_status") or "").upper() != "ACTIVE":
+            raise HardwareR1WorkbenchError("CANDIDATE_ASSET_INVALIDATED")
+        if str(asset.get("promotion_status") or "").upper() != "NOT_STARTED":
+            raise HardwareR1WorkbenchError("CANDIDATE_LOCKED_BY_PROMOTION")
+        if str(asset.get("production_review_status") or "").upper() != "REQUIRED":
+            raise HardwareR1WorkbenchError(
+                "CANDIDATE_REVIEW_TRANSITION_INVALID"
+            )
+        try:
+            expected_row_version = int(asset["row_version"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise HardwareR1WorkbenchError("CANDIDATE_REVIEW_TRANSITION_INVALID") from error
+
+        candidate = deepcopy(asset.get("knowledge_object"))
         if not isinstance(candidate, dict):
-            raise HardwareR1WorkbenchError("REVIEW_CANDIDATE_REQUIRED")
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
 
         conflicts = candidate.get("conflicts")
         if not isinstance(conflicts, list):
@@ -892,7 +914,7 @@ class HardwareR1WorkbenchService:
             raise HardwareR1WorkbenchError("REVIEW_CONFLICT_NOT_FOUND")
         if (
             str(conflict.get("status") or "").upper() != "OPEN"
-            and str(conflict.get("resolution_status") or "").upper()
+            or str(conflict.get("resolution_status") or "").upper()
             != "NEEDS_REVIEW"
         ):
             raise HardwareR1WorkbenchError("REVIEW_CONFLICT_ALREADY_RESOLVED")
@@ -917,7 +939,11 @@ class HardwareR1WorkbenchService:
 
         # V1 closure only supports the frozen title/body subject conflict.
         # Other review semantics must be versioned rather than guessed here.
-        if field != "primary_subject":
+        if (
+            str(conflict.get("type") or "")
+            != "TITLE_CONTENT_SUBJECT_MISMATCH"
+            or field != "primary_subject"
+        ):
             raise HardwareR1WorkbenchError("REVIEW_FIELD_NOT_SUPPORTED")
         engineering = candidate.get("engineering_context")
         if not isinstance(engineering, dict):
@@ -928,6 +954,7 @@ class HardwareR1WorkbenchService:
         primary["value"] = chosen_value
 
         reviewed_at = _utc_now()
+        reviewer_name = str(reviewer or "MAINTAINER").strip() or "MAINTAINER"
         conflict["status"] = "RESOLVED"
         conflict["resolution_status"] = "CONFIRMED"
         conflict["reviewer_note"] = (
@@ -936,25 +963,9 @@ class HardwareR1WorkbenchService:
         conflict["resolution"] = {
             "decision_source": str(decision_source),
             "selected_value": chosen_value,
-            "reviewer": str(reviewer or "MAINTAINER"),
+            "reviewer": reviewer_name,
             "reviewed_at": reviewed_at,
         }
-
-        structured = result.get("structured_result")
-        if isinstance(structured, dict):
-            for value in structured.get("conflicts") or []:
-                if (
-                    isinstance(value, dict)
-                    and str(value.get("conflict_id") or "") == str(conflict_id)
-                ):
-                    value.update(
-                        {
-                            "status": "RESOLVED",
-                            "resolution_status": "CONFIRMED",
-                            "reviewer_note": conflict["reviewer_note"],
-                            "resolution": dict(conflict["resolution"]),
-                        }
-                    )
 
         review = candidate.setdefault("review", {})
         decisions = review.setdefault("field_decisions", [])
@@ -967,11 +978,11 @@ class HardwareR1WorkbenchService:
                 "field": field,
                 "decision_source": str(decision_source),
                 "selected_value": chosen_value,
-                "reviewer": str(reviewer or "MAINTAINER"),
+                "reviewer": reviewer_name,
                 "reviewed_at": reviewed_at,
             }
         )
-        review["reviewer"] = str(reviewer or "MAINTAINER")
+        review["reviewer"] = reviewer_name
         review["reviewed_at"] = reviewed_at
 
         remaining = [
@@ -984,21 +995,42 @@ class HardwareR1WorkbenchService:
                 == "NEEDS_REVIEW"
             )
         ]
-        if not remaining:
-            # Human conflict resolution promotes the already-passed Candidate
-            # to CANDIDATE_READY without another Provider call.
-            result["status"] = "PASS"
-            orchestration_status = "CANDIDATE_READY"
-        else:
-            orchestration_status = "REVIEW"
+        if remaining:
+            raise HardwareR1WorkbenchError(
+                "CANDIDATE_REVIEW_TRANSITION_INVALID"
+            )
 
-        provider_calls_before = int(result.get("provider_call_count") or 0)
+        pipeline_result = item.get("pipeline_result") or {}
+        provider_calls_before = int(pipeline_result.get("provider_call_count") or 0)
+        reason = (
+            f"Resolved {field} conflict {conflict_id} "
+            f"using {decision_source}"
+        )
+        apply_review = getattr(
+            self.candidate_repository, "apply_production_review", None
+        )
+        if not callable(apply_review):
+            raise HardwareR1WorkbenchError(
+                "CANDIDATE_REVIEW_TRANSITION_INVALID"
+            )
+        try:
+            apply_review(
+                candidate_id,
+                reviewed_knowledge_object=candidate,
+                expected_row_version=expected_row_version,
+                reviewer=reviewer_name,
+                reason=reason,
+            )
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+
+        # Keep result_json as the original Pipeline / execution snapshot.
         self.store.update_item(
             item_id,
-            orchestration_status=orchestration_status,
+            orchestration_status="CANDIDATE_READY",
             failed_stage=None,
             error_code=None,
-            result=result,
+            result=pipeline_result,
         )
         resolved = self.get_item(item_id)
         if int(resolved.get("provider_calls") or 0) != provider_calls_before:
