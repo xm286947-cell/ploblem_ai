@@ -113,7 +113,14 @@ class HardwareRecoveryCoordinator:
         )
         last_error = next(
             (str(item.get("error_code")) for item in blocked_local if item.get("error_code")),
-            None,
+            next(
+                (
+                    str(item.get("error_code"))
+                    for item in pending_remote
+                    if item.get("error_code")
+                ),
+                None,
+            ),
         )
         degraded = bool(pending_remote or blocked_local)
         return {

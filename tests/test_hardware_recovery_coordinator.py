@@ -164,4 +164,6 @@ def test_unknown_nonterminal_operation_blocks_startup_without_mutating_journal(t
 
     assert result["ready"] is False
     assert result["error_code"] == "RECOVERY_OPERATION_UNKNOWN"
+    assert result["recovery_status"] == "BLOCKED"
+    assert result["last_recovery_error"] == "RECOVERY_OPERATION_UNKNOWN"
     assert source_store.operation_journal.list_nonterminal()[0]["operation_state"] == "PREPARED"

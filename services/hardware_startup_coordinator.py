@@ -299,6 +299,11 @@ class HardwareStartupCoordinator:
             HardwareRecoveryError,
         ) as error:
             code = str(getattr(error, "code", None) or "HARDWARE_STARTUP_BLOCKED")
+            if isinstance(error, HardwareRecoveryError):
+                self._status.update(
+                    recovery_status="BLOCKED",
+                    last_recovery_error=code,
+                )
             return self._blocked(code, str(self._status.get("phase") or "STARTUP"))
         except (OSError, sqlite3.Error, ValueError) as error:
             code = str(getattr(error, "code", None) or "HARDWARE_STARTUP_BLOCKED")
