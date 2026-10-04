@@ -22,7 +22,7 @@ FIELD_AUTHORITIES = {
     "root_cause_and_corrective_actions": ["RESOLUTION"],
     "missed_test_and_verification_gap": ["MISSED_TEST_EFFECTIVE_ANALYSIS"],
     "human_confirmation": "OVERRIDES_AI_INFERENCE_WHEN_FIELD_KEY_MATCHES",
-    "conflict_policy": "PRESERVE_REFERENCES_AND_WARN",
+    "conflict_policy": "PRESERVE_REFERENCES_BLOCK_AUTOMATIC_FACTS",
 }
 
 _ASSESSMENT_FIELDS = (
@@ -130,7 +130,7 @@ def build_scenario_source_bundle_v1(
             raise ValueError("SOURCE_CHANGED_DURING_BUILD")
 
     sources: dict[str, dict[str, Any]] = {}
-    missing_information: list[dict[str, str]] = []
+    missing_information: list[dict[str, Any]] = []
     warnings: list[dict[str, str]] = []
     for source_type in SOURCE_TYPES:
         records = refs_by_type[source_type]
@@ -163,6 +163,17 @@ def build_scenario_source_bundle_v1(
                 "code": "SOURCE_RELATION_CONFLICT",
                 "message": "冻结快照记录了来源关系冲突，Bundle 不重新选择来源。",
             })
+            missing_information.append({
+                "source_type": source_type,
+                "code": "SOURCE_RELATION_CONFLICT",
+                "severity": "BLOCKER",
+                "affected_fields": (
+                    ["problem_description", "product_model", "product_code", "customer", "industry", "ipmt", "spdt",
+                     "occurrence_context", "root_cause", "corrective_actions", "verification_result"]
+                    if source_type == "RESOLUTION" else ["all_facts_from_conflicted_source"]
+                ),
+                "message": "来源关系存在冲突，需要人工确认；冲突来源不得参与自动事实取值。",
+            })
         else:
             sources[source_type] = {"status": "PRESENT", "records": records}
 
@@ -175,7 +186,10 @@ def build_scenario_source_bundle_v1(
             row = located[str(ref["source_id"])]
             raw = json.loads(row.get("raw_json") or "{}")
             raw = raw if isinstance(raw, dict) else {}
-            raw_by_type[source_type].append((ref, raw))
+            # Keep raw fields for audit, but never let a conflicted relation
+            # participate in authority selection (including first-record wins).
+            if sources[source_type]["status"] != "CONFLICT":
+                raw_by_type[source_type].append((ref, raw))
             allowed = set(_ALLOWED_FIELDS[source_type])
             field_values[source_type].append({key: value for key, value in raw.items() if key in allowed and value not in (None, "", [], {})})
 

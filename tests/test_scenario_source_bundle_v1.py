@@ -167,6 +167,58 @@ def test_bundle_marks_missing_sources_and_revision_includes_effective_analyses(t
     assert "missed_test_cause" not in bundle["facts"]
 
 
+def test_conflicted_resolutions_never_supply_facts_and_safe_fields_fallback(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100006", {
+        "问题信息_问题描述": "考核源描述 fallback",
+        "问题信息_产品型号": "P-SW",
+        "问题信息_产品编码": "PLC-SW",
+        "问题信息_客户名称": "考核客户",
+        "问题信息_客户行业": "工业",
+        "问题信息_IPMT": "IPMT-SW",
+        "问题信息_SPDT": "SPDT-SW",
+    })
+    resolution_a = _add(repo, "ITR-CS", "ITR2026100006CS-A", {
+        "问题信息_问题描述": "冲突 Resolution A 描述",
+        "问题信息_产品型号": "P-A",
+        "问题信息_客户名称": "客户 A",
+        "问题信息_问题原因定位": "冲突根因 A",
+        "问题处理结果_问题解决方案": "冲突措施 A",
+    })
+    resolution_b = _add(repo, "ITR-CS", "ITR2026100006CS-B", {
+        "问题信息_问题描述": "冲突 Resolution B 描述",
+        "问题信息_产品型号": "P-B",
+        "问题信息_客户名称": "客户 B",
+        "问题信息_问题原因定位": "冲突根因 B",
+        "问题处理结果_问题解决方案": "冲突措施 B",
+    })
+    ref_a = _ref("RESOLUTION", resolution_a)
+    ref_b = _ref("RESOLUTION", resolution_b)
+    ref_a["binding_status"] = "CONFLICT"
+    ref_b["binding_status"] = "CONFLICT"
+
+    bundle = build_scenario_source_bundle_v1(
+        _snapshot(assessment, [ref_a, ref_b]), evidence_repository=repo
+    )
+
+    assert bundle["source_status"]["RESOLUTION"] == "CONFLICT"
+    assert bundle["facts"]["problem_description"] == "考核源描述 fallback"
+    assert bundle["facts"]["product_context"] == {"product_model": "P-SW", "product_code": "PLC-SW"}
+    assert bundle["facts"]["customer_context"] == {"customer": "考核客户", "industry": "工业"}
+    assert bundle["facts"]["organization_context"] == {"ipmt": "IPMT-SW", "spdt": "SPDT-SW"}
+    assert "root_cause" not in bundle["facts"]
+    assert "corrective_actions" not in bundle["facts"]
+    conflict_blockers = [
+        item for item in bundle["missing_information"]
+        if item["code"] == "SOURCE_RELATION_CONFLICT" and item["source_type"] == "RESOLUTION"
+    ]
+    assert len(conflict_blockers) == 1
+    assert conflict_blockers[0]["severity"] == "BLOCKER"
+    assert {"root_cause", "corrective_actions"}.issubset(conflict_blockers[0]["affected_fields"])
+    assert "冲突根因 A" not in json.dumps(bundle["facts"], ensure_ascii=False)
+    assert "冲突根因 B" not in json.dumps(bundle["facts"], ensure_ascii=False)
+
+
 def test_bundle_requires_a_frozen_snapshot_and_selected_assessment_locator(tmp_path):
     repo = MaterialRepository(tmp_path / "mature.db")
     with pytest.raises(ValueError, match="FROZEN_SOURCE_SNAPSHOT_SELECTED_ISSUE_REQUIRED"):
