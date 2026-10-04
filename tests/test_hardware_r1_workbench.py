@@ -1,17 +1,30 @@
 from __future__ import annotations
 
+import sqlite3
+from copy import deepcopy
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.p0_app import create_p0_app
+from services.hardware_asset_repository import CandidateAssetRepository
+from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
+from services.hardware_case_r1_runtime import (
+    R1_STAGE_A_VALIDATOR_VERSION,
+    R1_STAGE_B_VALIDATOR_VERSION,
+    _R1StageCache,
+    invalidate_hardware_r1_stage_cache,
+)
 from services.hardware_case_r1_workbench import (
+    HardwareR1WorkbenchError,
     HardwareR1WorkbenchService,
     HardwareR1WorkbenchStore,
     aggregate_batch_status,
     bind_case_status,
 )
+import services.hardware_case_r1_workbench as workbench_module
 
 
 MAINTAINER = {"X-Hardware-Case-Role": "MAINTAINER"}
@@ -45,6 +58,62 @@ def _snapshot(case_id: str = "A0152", source_id: str = "a" * 64) -> dict:
     }
 
 
+def _knowledge_object(case_id: str, source_id: str, *, needs_review: bool = False) -> dict:
+    conflicts = (
+        [
+            {
+                "conflict_id": "CONFLICT-title-subject",
+                "type": "TITLE_CONTENT_SUBJECT_MISMATCH",
+                "field": "primary_subject",
+                "source_values": [
+                    {"source": "SOURCE_RAW_TITLE", "value": "CPU"},
+                    {"source": "AI_BODY_CANDIDATE", "value": "MCU串口输出配置"},
+                ],
+                "evidence_block_ids": ["B0001"],
+                "status": "OPEN",
+                "resolution_status": "NEEDS_REVIEW",
+            }
+        ]
+        if needs_review
+        else []
+    )
+    return {
+        "contract_version": "hardware-case-knowledge-object/v1",
+        "identity": {
+            "business_case_id": case_id,
+            "raw_title": "demo",
+            "identity_status": "PARSED",
+        },
+        "source_fact": {
+            "source_id": source_id,
+            "business_case_id": case_id,
+            "raw_title": "demo",
+        },
+        "engineering_context": {
+            "primary_subject": {
+                "value": "MCU串口输出配置",
+                "extraction_status": "EXTRACTED",
+                "evidence_block_ids": ["B0001"],
+            }
+        },
+        "evidence": [
+            {
+                "block_id": "B0001",
+                "source_locator": {"paragraph": 1},
+                "text": "MCU UART demo",
+            }
+        ],
+        "conflicts": conflicts,
+        "review": {
+            "object_status": "CANDIDATE",
+            "reviewer": None,
+            "reviewed_at": None,
+            "field_decisions": [],
+        },
+        "provenance": {"agent_config_version": "hardware-case-r1-agent/v1"},
+    }
+
+
 def _result(
     *,
     status: str = "PASS",
@@ -53,6 +122,8 @@ def _result(
     gate: str = "PASS",
     a_cache: bool = False,
     b_cache: bool = False,
+    case_id: str = "A0152",
+    source_id: str = "a" * 64,
 ) -> dict:
     return {
         "pipeline_version": "hardware-r1-agent-pipeline/v1.3.3",
@@ -70,49 +141,18 @@ def _result(
         "provider_call_count": 0,
         "validation_retry_count": 0,
         "run_id": "run-1",
+        "knowledge_object_contract_version": "hardware-case-knowledge-object/v1",
+        "runtime": {
+            "stage_a": {"agent_config_version": "hardware-case-r1-stage-a/v1"},
+            "stage_b": {"agent_config_version": "hardware-case-r1-stage-b/v1"},
+        },
         "evidence_validation": {
             "status": gate,
             "fabricated_fact_count": 0,
             "fabricated_block_id_count": 0,
         },
         "knowledge_object": (
-            {
-                "contract_version": "hardware-case-knowledge-object/v1",
-                "engineering_context": {
-                    "primary_subject": {
-                        "value": "MCU串口输出配置",
-                        "extraction_status": "EXTRACTED",
-                        "evidence_block_ids": ["B0007", "B0016", "B0019"],
-                    }
-                },
-                "review": {
-                    "object_status": "CANDIDATE",
-                    "reviewer": None,
-                    "reviewed_at": None,
-                    "field_decisions": [],
-                },
-                "conflicts": (
-                    [
-                        {
-                            "conflict_id": "CONFLICT-title-subject",
-                            "type": "TITLE_CONTENT_SUBJECT_MISMATCH",
-                            "field": "primary_subject",
-                            "source_values": [
-                                {"source": "SOURCE_RAW_TITLE", "value": "CPU"},
-                                {
-                                    "source": "AI_BODY_CANDIDATE",
-                                    "value": "MCU串口输出配置",
-                                },
-                            ],
-                            "evidence_block_ids": ["B0007", "B0016", "B0019"],
-                            "status": "OPEN",
-                            "resolution_status": "NEEDS_REVIEW",
-                        }
-                    ]
-                    if status == "NEEDS_REVIEW"
-                    else []
-                ),
-            }
+            _knowledge_object(case_id, source_id, needs_review=status == "NEEDS_REVIEW")
             if failed_stage is None and gate == "PASS"
             else None
         ),
@@ -145,6 +185,54 @@ def _result(
     }
 
 
+def _commit_fixture_asset(
+    repository: CandidateAssetRepository,
+    result: dict,
+    *,
+    case_id: str,
+    source_id: str,
+) -> dict:
+    return repository.create_or_commit_candidate(
+        business_case_id=case_id,
+        source_id=source_id,
+        source_ref=f"r1:{case_id}:{source_id}",
+        knowledge_object=result["knowledge_object"],
+        generation_run_id=result.get("run_id"),
+        pipeline_version=result["pipeline_version"],
+        agent_config_version=(
+            "stage_a=hardware-case-r1-stage-a/v1;"
+            "stage_b=hardware-case-r1-stage-b/v1"
+        ),
+        knowledge_schema_version=result["knowledge_object_contract_version"],
+        validator_version=(
+            f"stage_a={R1_STAGE_A_VALIDATOR_VERSION};"
+            f"stage_b={R1_STAGE_B_VALIDATOR_VERSION}"
+        ),
+    )
+
+
+def _candidate_repository(path: Path) -> CandidateAssetRepository:
+    repository = CandidateAssetRepository(path)
+    repository.initialize()
+    return repository
+
+
+class _ActiveSourceStub:
+    def __init__(self, case_id: str, source_id: str):
+        self.case_id = case_id
+        self.source_id = source_id
+        self.source_ref = f"r1:{case_id}:{source_id}"
+
+    def get_active_source(self, business_case_id: str) -> dict:
+        assert business_case_id == self.case_id
+        return {
+            "business_case_id": self.case_id,
+            "binding_status": "ACTIVE",
+            "source_id": self.source_id,
+            "source_ref": self.source_ref,
+        }
+
+
 def _docx(path: Path) -> bytes:
     document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -174,23 +262,292 @@ def test_gate_pass_review_required_maps_to_review_not_publish() -> None:
 
 
 
-def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
-    tmp_path: Path,
+def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-workbench.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE hardware_r1_batch (
+                batch_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE hardware_r1_batch_item (
+                item_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL,
+                business_case_id TEXT, source_id TEXT, source_file TEXT NOT NULL,
+                orchestration_status TEXT NOT NULL, failed_stage TEXT, error_code TEXT,
+                snapshot_json TEXT, result_json TEXT, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+    store = HardwareR1WorkbenchStore(db_path)
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id, source_file="A0152.docx", candidate_id="HCAND-test"
+    )
+    assert store.get_item(item_id)["candidate_id"] == "HCAND-test"
+    with sqlite3.connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(hardware_r1_batch_item)"
+            )
+        }
+    assert "candidate_id" in columns
+
+
+@pytest.mark.parametrize("status", ["REVIEW", "CANDIDATE_READY"])
+def test_final_workbench_state_without_candidate_id_fails_closed(
+    tmp_path: Path, status: str
 ) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / f"{status}.db")
+    batch_id = store.create_batch()
+    pipeline_status = "NEEDS_REVIEW" if status == "REVIEW" else "PASS"
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        snapshot=_snapshot(),
+        result=_result(status=pipeline_status),
+        orchestration_status=status,
+    )
+    item = store.get_item(item_id)
+    assert item["result"] == "FAILED"
+    assert item["error_code"] == "CANDIDATE_ASSET_NOT_BOUND"
+    assert item["candidate_id"] is None
+    assert item["retryable"] is True
+
+
+def test_candidate_commit_precedes_ready_and_survives_restart_and_cache_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case_id, source_id = "A0152", "a" * 64
+    result = _result(case_id=case_id, source_id=source_id)
+    store_path = tmp_path / "workbench.db"
+    asset_path = tmp_path / "hardware_asset.db"
+    runtime_path = tmp_path / "runtime.db"
+    store = HardwareR1WorkbenchStore(store_path)
+    repository = _candidate_repository(asset_path)
+    preview_store = HardwareR1PreviewStore(tmp_path / "preview.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id=case_id,
+        source_id=source_id,
+        snapshot=_snapshot(case_id, source_id),
+    )
+    monkeypatch.setattr(
+        workbench_module,
+        "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: deepcopy(result),
+    )
+    cache = _R1StageCache(runtime_path)
+    cache.put(
+        "STAGE_A",
+        "cache-key",
+        {"candidate": "stage result"},
+        {"run_id": "runtime-run"},
+        source_id=source_id,
+        validator_version=R1_STAGE_A_VALIDATOR_VERSION,
+        pipeline_version=result["pipeline_version"],
+        schema_version="stage-a/v1",
+        agent_config_hash="config-hash",
+        prompt_version="prompt/v1",
+    )
+
+    commit_states: list[str] = []
+    original_commit = repository.create_or_commit_candidate
+
+    def observe_commit(**kwargs):
+        commit_states.append(store.get_item(item_id)["orchestration_status"])
+        return original_commit(**kwargs)
+
+    monkeypatch.setattr(repository, "create_or_commit_candidate", observe_commit)
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=_ActiveSourceStub(case_id, source_id),
+        structurer_factory=lambda: object(),
+        preview_store=preview_store,
+        candidate_repository=repository,
+    )
+
+    batch = service.run_batch(batch_id)
+    item = batch["items"][0]
+    candidate_id = item["candidate_id"]
+    assert commit_states == ["RUNNING"]
+    assert item["result"] == "CANDIDATE_READY"
+    assert candidate_id
+    assert item["candidate"]["identity"]["business_case_id"] == case_id
+    assert repository.get_candidate(candidate_id)["candidate_id"] == candidate_id
+
+    resumed = service.run_resume_item(item_id)
+    assert resumed["candidate_id"] == candidate_id
+    assert resumed["result"] == "CANDIDATE_READY"
+    with sqlite3.connect(asset_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM hardware_candidate_asset WHERE candidate_id=?",
+            (candidate_id,),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM hardware_candidate_event WHERE candidate_id=?",
+            (candidate_id,),
+        ).fetchone()[0] == 1
+
+    assert preview_store.clear() == 2
+    assert invalidate_hardware_r1_stage_cache(
+        source_id,
+        root=tmp_path,
+        environ={"HARDWARE_CASE_RUNTIME_DB": str(runtime_path)},
+    ) == 1
+    assert repository.get_candidate(candidate_id) is not None
+
+    restarted = HardwareR1WorkbenchService(
+        HardwareR1WorkbenchStore(store_path),
+        source_store=_ActiveSourceStub(case_id, source_id),
+        structurer_factory=lambda: object(),
+        candidate_repository=_candidate_repository(asset_path),
+    ).get_item(item_id)
+    assert restarted["candidate_id"] == candidate_id
+    assert restarted["candidate"]["identity"]["business_case_id"] == case_id
+    assert restarted["result"] == "CANDIDATE_READY"
+
+
+def test_review_gate_commits_durable_candidate_before_review_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case_id, source_id = "A0152", "a" * 64
+    result = _result(status="NEEDS_REVIEW", case_id=case_id, source_id=source_id)
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    batch_id = store.create_batch()
+    store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id=case_id,
+        source_id=source_id,
+        snapshot=_snapshot(case_id, source_id),
+    )
+    monkeypatch.setattr(
+        workbench_module,
+        "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: deepcopy(result),
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=_ActiveSourceStub(case_id, source_id),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    item = service.run_batch(batch_id)["items"][0]
+    assert item["result"] == "REVIEW"
+    assert item["candidate_id"]
+    assert item["candidate_asset"]["production_review_status"] == "REQUIRED"
+
+
+def test_candidate_commit_failure_never_enters_review_or_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case_id, source_id = "A0152", "a" * 64
+    result = _result(status="NEEDS_REVIEW", case_id=case_id, source_id=source_id)
+
+    class FailingCandidateRepository:
+        def create_or_commit_candidate(self, **_kwargs):
+            raise OSError("simulated durable storage failure")
+
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id=case_id,
+        source_id=source_id,
+        snapshot=_snapshot(case_id, source_id),
+    )
+    monkeypatch.setattr(
+        workbench_module,
+        "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: deepcopy(result),
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=_ActiveSourceStub(case_id, source_id),
+        structurer_factory=lambda: object(),
+        candidate_repository=FailingCandidateRepository(),
+    )
+    item = service.run_batch(batch_id)["items"][0]
+    assert item["result"] == "FAILED"
+    assert item["orchestration_status"] == "FAILED"
+    assert item["error_code"] == "CANDIDATE_ASSET_COMMIT_FAILED"
+    assert item["candidate_id"] is None
+    assert item["candidate"] is None
+
+
+def test_workbench_candidate_display_reads_asset_not_result_json(tmp_path: Path) -> None:
+    case_id, source_id = "A0152", "a" * 64
+    asset_result = _result(case_id=case_id, source_id=source_id)
+    asset_result["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] = "durable value"
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    asset = _commit_fixture_asset(
+        repository, asset_result, case_id=case_id, source_id=source_id
+    )
+    debug_result = _result(case_id=case_id, source_id=source_id)
+    debug_result["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] = "debug-only value"
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
     batch_id = store.create_batch()
     item_id = store.add_item(
         batch_id,
         source_file="A0152.docx",
+        business_case_id=case_id,
+        source_id=source_id,
+        snapshot=_snapshot(case_id, source_id),
+        result=debug_result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    item = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    ).get_item(item_id)
+    assert item["pipeline_result"]["knowledge_object"]["engineering_context"][
+        "primary_subject"
+    ]["value"] == "debug-only value"
+    assert item["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "durable value"
+
+
+def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    batch_id = store.create_batch()
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
         business_case_id="A0152",
+        source_id="a" * 64,
         snapshot=_snapshot("A0152"),
-        result=_result(status="NEEDS_REVIEW"),
+        result=result,
         orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
     )
     service = HardwareR1WorkbenchService(
         store,
         source_store=object(),
         structurer_factory=lambda: object(),
+        candidate_repository=repository,
     )
     item = service.get_item(item_id)
     conflict = item["candidate"]["conflicts"][0]
@@ -200,78 +557,45 @@ def test_review_candidate_keeps_machine_readable_reason_for_fast_ui(
         {"source": "SOURCE_RAW_TITLE", "value": "CPU"},
         {"source": "AI_BODY_CANDIDATE", "value": "MCU串口输出配置"},
     ]
-    assert conflict["evidence_block_ids"] == ["B0007", "B0016", "B0019"]
+    assert conflict["evidence_block_ids"] == ["B0001"]
 
 
-def test_review_conflict_confirmation_persists_decision_without_provider_rerun(
-    tmp_path: Path,
-) -> None:
+def test_durable_candidate_review_binding_is_deferred_to_b2(tmp_path: Path) -> None:
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
     batch_id = store.create_batch()
+    result = _result(status="NEEDS_REVIEW")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0152", source_id="a" * 64
+    )
     item_id = store.add_item(
         batch_id,
         source_file="A0152.docx",
         business_case_id="A0152",
+        source_id="a" * 64,
         snapshot=_snapshot("A0152"),
-        result=_result(status="NEEDS_REVIEW"),
+        result=result,
         orchestration_status="REVIEW",
+        candidate_id=asset["candidate_id"],
     )
     service = HardwareR1WorkbenchService(
         store,
         source_store=object(),
         structurer_factory=lambda: object(),
+        candidate_repository=repository,
     )
-
-    before = service.get_item(item_id)
-    assert before["result"] == "REVIEW"
-    assert before["provider_calls"] == 0
-
-    after = service.resolve_review_conflict(
-        item_id,
-        conflict_id="CONFLICT-title-subject",
-        decision_source="AI_BODY_CANDIDATE",
-        reviewer="tester",
-    )
-    assert after["result"] == "CANDIDATE_READY"
-    assert after["provider_calls"] == 0
-    assert (
-        after["candidate"]["engineering_context"]["primary_subject"]["value"]
-        == "MCU串口输出配置"
-    )
-    conflict = after["candidate"]["conflicts"][0]
-    assert conflict["status"] == "RESOLVED"
-    assert conflict["resolution_status"] == "CONFIRMED"
-    assert conflict["resolution"]["decision_source"] == "AI_BODY_CANDIDATE"
-    decision = after["candidate"]["review"]["field_decisions"][0]
-    assert decision["field"] == "primary_subject"
-    assert decision["selected_value"] == "MCU串口输出配置"
-    assert after["candidate"]["review"]["reviewer"] == "tester"
-
-
-def test_review_conflict_can_choose_source_title_value(tmp_path: Path) -> None:
-    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
-    batch_id = store.create_batch()
-    item_id = store.add_item(
-        batch_id,
-        source_file="A0152.docx",
-        business_case_id="A0152",
-        snapshot=_snapshot("A0152"),
-        result=_result(status="NEEDS_REVIEW"),
-        orchestration_status="REVIEW",
-    )
-    service = HardwareR1WorkbenchService(
-        store,
-        source_store=object(),
-        structurer_factory=lambda: object(),
-    )
-    after = service.resolve_review_conflict(
-        item_id,
-        conflict_id="CONFLICT-title-subject",
-        decision_source="SOURCE_RAW_TITLE",
-        reviewer="tester",
-    )
-    assert after["result"] == "CANDIDATE_READY"
-    assert after["candidate"]["engineering_context"]["primary_subject"]["value"] == "CPU"
+    with pytest.raises(HardwareR1WorkbenchError) as error:
+        service.resolve_review_conflict(
+            item_id,
+            conflict_id="CONFLICT-title-subject",
+            decision_source="SOURCE_RAW_TITLE",
+            reviewer="tester",
+        )
+    assert error.value.code == "DURABLE_REVIEW_BINDING_NOT_IN_B1"
+    unchanged = service.get_item(item_id)
+    assert unchanged["result"] == "REVIEW"
+    assert unchanged["candidate_asset"]["production_review_status"] == "REQUIRED"
+    assert unchanged["candidate"]["conflicts"][0]["status"] == "OPEN"
 
 
 def test_runtime_and_dependency_blocked_are_not_business_failed() -> None:
@@ -310,22 +634,37 @@ def test_batch_aggregate_contract() -> None:
 
 def test_retry_failed_only_selects_failed_cases_and_preserves_ready(tmp_path: Path) -> None:
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
     batch_id = store.create_batch()
+    ready_result = _result(status="PASS", case_id="A1", source_id="a" * 64)
+    ready_asset = _commit_fixture_asset(
+        repository, ready_result, case_id="A1", source_id="a" * 64
+    )
     ready_id = store.add_item(
         batch_id,
         source_file="A1.docx",
         business_case_id="A1",
+        source_id="a" * 64,
         snapshot=_snapshot("A1"),
-        result=_result(status="PASS"),
+        result=ready_result,
         orchestration_status="CANDIDATE_READY",
+        candidate_id=ready_asset["candidate_id"],
+    )
+    review_result = _result(
+        status="NEEDS_REVIEW", case_id="A2", source_id="b" * 64
+    )
+    review_asset = _commit_fixture_asset(
+        repository, review_result, case_id="A2", source_id="b" * 64
     )
     review_id = store.add_item(
         batch_id,
         source_file="A2.docx",
         business_case_id="A2",
+        source_id="b" * 64,
         snapshot=_snapshot("A2", "b" * 64),
-        result=_result(status="NEEDS_REVIEW"),
+        result=review_result,
         orchestration_status="REVIEW",
+        candidate_id=review_asset["candidate_id"],
     )
     stage_a_id = store.add_item(
         batch_id,
@@ -366,6 +705,7 @@ def test_retry_failed_only_selects_failed_cases_and_preserves_ready(tmp_path: Pa
         store,
         source_store=object(),
         structurer_factory=lambda: object(),
+        candidate_repository=repository,
     )
     calls: list[tuple[str, str | None, bool]] = []
 
@@ -445,15 +785,18 @@ def test_batch_upload_is_file_isolated_and_source_binding_dependency_visible(
 def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     tmp_path: Path,
 ) -> None:
-    client = TestClient(
-        create_p0_app(
-            tmp_path / "quality.db",
-            hardware_case_db_path=tmp_path / "hardware.db",
-            hardware_tree_upload_dir=tmp_path / "trees",
-            hardware_case_source_root=tmp_path / "sources",
-            enabled_domains={"HARDWARE_CASE"},
-        )
+    app = create_p0_app(
+        tmp_path / "quality.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_tree_upload_dir=tmp_path / "trees",
+        hardware_case_source_root=tmp_path / "sources",
+        enabled_domains={"HARDWARE_CASE"},
     )
+    assert (
+        app.state.hardware_r1_workbench_service.candidate_repository
+        is app.state.hardware_candidate_asset_repository
+    )
+    client = TestClient(app)
     page = client.get("/p0/hardware-cases/knowledge-production")
     assert page.status_code == 200
     assert "知识生产工作台" in page.text

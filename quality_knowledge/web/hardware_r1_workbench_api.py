@@ -58,6 +58,7 @@ def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
         "RETRY_FAILED_STAGE_NOT_AVAILABLE",
         "REVIEW_NOT_REQUIRED",
         "REVIEW_CONFLICT_ALREADY_RESOLVED",
+        "DURABLE_REVIEW_BINDING_NOT_IN_B1",
     }:
         return HTTPException(status_code=409, detail=error.code)
     return HTTPException(status_code=400, detail=error.code)
