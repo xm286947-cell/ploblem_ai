@@ -8,6 +8,7 @@
     <a class="{% if hardware_active == 'home' %}active{% endif %}" href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例首页</a>
     <a class="{% if hardware_active == 'tree' %}active{% endif %}" href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">双树导航</a>
     <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例搜索</a>
+    <a class="{% if hardware_active == 'knowledge' %}active{% endif %}" href="/p0/hardware-cases/knowledge">正式知识消费</a>
     <a class="{% if hardware_active == 'word-import' %}active{% endif %}" href="/p0/hardware-cases/word-import">案例 Word 导入</a>
     {% if hardware_role == 'MAINTAINER' %}
     <a class="{% if hardware_active == 'knowledge-production' %}active{% endif %}" href="/p0/hardware-cases/knowledge-production">知识生产</a>
