@@ -111,7 +111,23 @@ def test_case_05_solution_missing_is_not_case_failure(tmp_path: Path) -> None:
 
 def test_case_06_evidence_is_complete_and_traceable(tmp_path: Path) -> None:
     evidence = _save_case(tmp_path).get_case("CASE-H-1")["evidence"]
-    assert evidence == [{
+    assert len(evidence) == 1
+    item = evidence[0]
+    assert {
+        key: item[key]
+        for key in (
+            "evidence_id",
+            "source_type",
+            "source_id",
+            "source_version",
+            "source_ref",
+            "file_name",
+            "page",
+            "section",
+            "raw_text",
+            "url",
+        )
+    } == {
         "evidence_id": "MJR-EVD-HIST-001",
         "source_type": "REPORT",
         "source_id": "ITR-H-1",
@@ -122,7 +138,22 @@ def test_case_06_evidence_is_complete_and_traceable(tmp_path: Path) -> None:
         "section": "root_cause",
         "raw_text": "报告确认 CAN 接收队列没有流控。",
         "url": None,
-    }]
+    }
+    common = item["common_evidence"]
+    assert common["contract_version"] == "common-evidence/v1.0"
+    assert common["evidence_id"] == "MJR-EVD-HIST-001"
+    assert common["evidence_type"] == "SOURCE_EXCERPT"
+    assert common["producer_domain"] == "MAJOR_CASE"
+    assert common["producer_object_id"] == "CASE-H-1"
+    assert common["source"] == {
+        "source_type": "REPORT",
+        "source_id": "ITR-H-1",
+        "source_version": "KREV-H-1",
+    }
+    assert common["locator"]["page"] == 3
+    assert common["locator"]["section"] == "root_cause"
+    assert common["excerpt"] == "报告确认 CAN 接收队列没有流控。"
+
 
 
 def test_case_07_page_unavailable_is_null(tmp_path: Path) -> None:
