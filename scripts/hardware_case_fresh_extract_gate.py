@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import importlib
 import json
 import os
 import subprocess
@@ -82,11 +83,40 @@ def _startup_check(root: Path, work: Path) -> None:
         )
 
 
+def _verify_asset_migration_imports(manifest: dict) -> None:
+    package = manifest.get("asset_migration_package")
+    if not isinstance(package, dict) or package.get("status") != "PASS":
+        raise SystemExit("FRESH_EXTRACT_ASSET_MIGRATION_MANIFEST_INVALID")
+    modules = package.get("modules")
+    if not isinstance(modules, list):
+        raise SystemExit("FRESH_EXTRACT_ASSET_MIGRATION_LIST_MISSING")
+    required = {
+        "services/hardware_asset_migrations/v001_candidate_repository.py",
+        "services/hardware_asset_migrations/v002_legacy_migration.py",
+        "services/hardware_asset_migrations/v003_source_operation_journal.py",
+    }
+    if not required.issubset(set(modules)):
+        raise SystemExit("FRESH_EXTRACT_ASSET_MIGRATION_MODULES_MISSING")
+    packaged_paths = {item.get("path") for item in manifest.get("files", [])}
+    if not required.issubset(packaged_paths):
+        raise SystemExit("FRESH_EXTRACT_ASSET_MIGRATION_FILES_MISSING")
+    try:
+        importlib.import_module("services.hardware_asset_repository")
+        for relative in modules:
+            module = Path(str(relative)).with_suffix("").as_posix().replace("/", ".")
+            if module.endswith(".__init__"):
+                module = module[: -len(".__init__")]
+            importlib.import_module(module)
+    except (ImportError, ValueError) as error:
+        raise SystemExit("FRESH_EXTRACT_ASSET_MIGRATION_IMPORT_FAIL=" + str(error)) from error
+
+
 def main() -> int:
     manifest_path = ROOT / "PACKAGE_MANIFEST.json"
     if not manifest_path.is_file():
         raise SystemExit("PACKAGE_MANIFEST_MISSING")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _verify_asset_migration_imports(manifest)
 
     required_files = (
         "START_HARDWARE_CASE.bat",
@@ -188,6 +218,7 @@ def main() -> int:
             gc.collect()
 
     print("FRESH_EXTRACT_STARTUP=PASS")
+    print("ASSET_MIGRATION_IMPORT=PASS")
     print("HEALTH=PASS")
     print("READINESS=PASS")
     print("DEPENDENCY_UNREADY=PASS")
