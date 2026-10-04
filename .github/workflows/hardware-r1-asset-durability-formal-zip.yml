@@ -82,9 +82,8 @@ jobs:
               run_url: run.data.html_url,
               artifacts,
             };
-            require("fs").mkdirSync("release-package", { recursive: true });
             require("fs").writeFileSync(
-              "release-package/d2_evidence_binding.json",
+              "d2_evidence_binding.json",
               JSON.stringify(binding, null, 2) + "\n",
             );
 
@@ -127,12 +126,13 @@ jobs:
           python -m pytest -q --noconftest tests/test_hardware_r1_asset_durability_formal_zip.py
 
       - name: Build scoped Formal ZIP from exact main source
-        run: >-
-          python scripts/build_hardware_r1_asset_durability_formal_zip.py build
-          --source-commit "$SOURCE_COMMIT"
-          --output-dir release-package
-          --d2-evidence-root d2-evidence
-          --d2-binding release-package/d2_evidence_binding.json
+        run: |
+          python scripts/build_hardware_r1_asset_durability_formal_zip.py build \
+            --source-commit "$SOURCE_COMMIT" \
+            --output-dir release-package \
+            --d2-evidence-root d2-evidence \
+            --d2-binding d2_evidence_binding.json
+          cp d2_evidence_binding.json release-package/d2_evidence_binding.json
 
       - uses: actions/upload-artifact@v4
         with:
