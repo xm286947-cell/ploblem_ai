@@ -17,9 +17,11 @@ and MSI/DMG/PKG installer certification. This workflow does not claim formal
 Hardware product release certification.
 
 The generated package is named
-`HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5.zip` and is built from exact
-source commit `0d0160cc24f5640642094eb82e2a5fe0d6033891`. It is built afresh
-from the frozen runtime allowlist. Neither the existing
+`HARDWARE_R1_ASSET_DURABILITY_FORMAL_<source-short>.zip`, where `<source-short>`
+is the first 12 characters of the exact 40-character source commit. A manual
+workflow run accepts both values and verifies that the package identity is
+derived from the full source SHA. It is built afresh from the frozen runtime
+allowlist. Neither the existing
 `HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1` ZIP nor the
 `HARDWARE_CASE_MVP_RC0_PREP` archive is copied, relabeled, or reused as the
 certified package; their existing statuses remain unchanged.

@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-SOURCE_BASE = "0d0160cc24f5640642094eb82e2a5fe0d6033891"
+PACKAGE_ID_PREFIX = "HARDWARE_R1_ASSET_DURABILITY_FORMAL_"
 REQUIRED_ENDPOINTS = (
     "/health",
     "/api/system/hardware/startup",
@@ -67,7 +67,13 @@ def _verify_content(app_root: Path, package_id: str, package_hash: str) -> dict[
     manifest = _read_object(app_root / "RELEASE_CONTENT_MANIFEST.json")
     if manifest.get("package_id") != package_id:
         raise ValueError("PACKAGE_ID_MISMATCH")
-    if manifest.get("source_commit") != SOURCE_BASE:
+    source_commit = manifest.get("source_commit")
+    if (
+        not isinstance(source_commit, str)
+        or len(source_commit) != 40
+        or any(character not in "0123456789abcdef" for character in source_commit)
+        or package_id != f"{PACKAGE_ID_PREFIX}{source_commit[:12]}.zip"
+    ):
         raise ValueError("SOURCE_COMMIT_MISMATCH")
     if manifest.get("certification_scope") != "HARDWARE_R1_ASSET_DURABILITY":
         raise ValueError("CERTIFICATION_SCOPE_MISMATCH")
@@ -308,7 +314,7 @@ def run_startup_smoke(
             "platform": expected_platform,
             "package_id": expected_package_id,
             "package_sha256": expected_package_sha256,
-            "source_commit": SOURCE_BASE,
+            "source_commit": content_manifest.get("source_commit"),
             "certification_scope": "HARDWARE_R1_ASSET_DURABILITY",
             "fresh_extract": True,
             "persistent_data_root_isolated": (

@@ -28,6 +28,7 @@ from typing import Any
 
 TASK = "HARDWARE-R1-ASSET-DURABILITY-FORMAL-ZIP-BINDING-001"
 SOURCE_BASE = "0d0160cc24f5640642094eb82e2a5fe0d6033891"
+PACKAGE_ID_PREFIX = "HARDWARE_R1_ASSET_DURABILITY_FORMAL_"
 D2_RUN_ID = 37194611177
 D2_HEAD = "ce04ec824e1682891e6266e628e48ecbc4995c2e"
 D2_OLD_SOURCE = "4a9cfdfc2c10366c86ab01efcc1c236da5942d38"
@@ -164,6 +165,12 @@ def _resolve_commit(repo_root: Path, commit: str) -> str:
     if resolved != commit:
         raise GateError(f"SOURCE_COMMIT_MISMATCH:{commit}:{resolved}")
     return resolved
+
+
+def _formal_package_id(source_commit: str) -> str:
+    if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise GateError("SOURCE_COMMIT_MUST_BE_FULL_SHA")
+    return f"{PACKAGE_ID_PREFIX}{source_commit[:12]}.zip"
 
 
 def _extract_source_archive(repo_root: Path, commit: str, destination: Path) -> Path:
@@ -542,15 +549,12 @@ def build_package(
     d2_binding_path: Path,
     repo_root: Path = REPO_ROOT,
 ) -> dict[str, Any]:
-    if source_commit != SOURCE_BASE:
-        raise GateError("RELEASE_SOURCE_MUST_MATCH_FROZEN_BASE")
+    package_id = _formal_package_id(source_commit)
     _resolve_commit(repo_root, source_commit)
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise GateError("RELEASE_OUTPUT_DIR_MUST_BE_EMPTY_OR_NONEXISTENT")
     output_dir.mkdir(parents=True, exist_ok=True)
     d2 = _check_d2_binding(d2_binding_path, d2_evidence_root)
-    package_id = f"HARDWARE_R1_ASSET_DURABILITY_FORMAL_{source_commit[:12]}.zip"
-
     with tempfile.TemporaryDirectory(prefix="hardware-r1-formal-zip-") as temp_name:
         temp_root = Path(temp_name)
         release_source = _extract_source_archive(repo_root, source_commit, temp_root / "source-release")
@@ -689,13 +693,17 @@ def finalize_release_manifest(
     output_path: Path,
 ) -> dict[str, Any]:
     build = _read_json(package_build_manifest_path)
+    source_commit = build.get("source_commit")
+    try:
+        expected_package_id = _formal_package_id(source_commit)
+    except GateError as error:
+        raise GateError("RELEASE_BUILD_BINDING_INVALID") from error
     if (
         build.get("task") != TASK
         or build.get("CERTIFICATION_STATUS") != "PENDING_NATIVE_STARTUP_BINDING"
-        or build.get("source_commit") != SOURCE_BASE
         or build.get("certification_scope") != "HARDWARE_R1_ASSET_DURABILITY"
         or build.get("runtime_payload_sha256") != build.get("d2_tested_runtime_payload_sha256")
-        or build.get("package_id") != f"HARDWARE_R1_ASSET_DURABILITY_FORMAL_{SOURCE_BASE[:12]}.zip"
+        or build.get("package_id") != expected_package_id
     ):
         raise GateError("RELEASE_BUILD_BINDING_INVALID")
     archive_path = package_build_manifest_path.parent / str(build.get("package_id") or "")
@@ -756,7 +764,7 @@ def finalize_release_manifest(
         ("CERTIFICATION_STATUS", "PENDING_NATIVE_STARTUP_BINDING"),
         ("CERTIFICATION_SCOPE", "HARDWARE_R1_ASSET_DURABILITY"),
         ("package_id", build.get("package_id")),
-        ("source_commit", SOURCE_BASE),
+        ("source_commit", source_commit),
         ("certification_scope", "HARDWARE_R1_ASSET_DURABILITY"),
         ("runtime_payload_sha256", build.get("runtime_payload_sha256")),
         ("d2_evidence_tree_sha256", build.get("d2_evidence_tree_sha256")),

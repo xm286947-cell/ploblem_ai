@@ -9,16 +9,27 @@ on:
       - "tests/test_hardware_r1_asset_durability_formal_zip.py"
       - "docs/HARDWARE_R1_ASSET_DURABILITY_FORMAL_ZIP.md"
   workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full source commit to bind into the scoped Formal ZIP
+        required: true
+        default: 0d0160cc24f5640642094eb82e2a5fe0d6033891
+        type: string
+      package_id:
+        description: Derived package id; must use the first 12 characters of source_commit
+        required: true
+        default: HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5.zip
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 env:
-  SOURCE_COMMIT: 0d0160cc24f5640642094eb82e2a5fe0d6033891
+  SOURCE_COMMIT: ${{ inputs.source_commit || '0d0160cc24f5640642094eb82e2a5fe0d6033891' }}
   D2_RUN_ID: "37194611177"
   D2_HEAD_SHA: ce04ec824e1682891e6266e628e48ecbc4995c2e
-  PACKAGE_ID: HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5.zip
+  PACKAGE_ID: ${{ inputs.package_id || 'HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5.zip' }}
 
 jobs:
   build-package:
@@ -133,6 +144,10 @@ jobs:
             --d2-evidence-root d2-evidence \
             --d2-binding d2_evidence_binding.json
           cp d2_evidence_binding.json release-package/d2_evidence_binding.json
+
+      - name: Verify source-derived package identity
+        run: |
+          python -c 'import json, os; from pathlib import Path; manifest=json.loads(Path("release-package/package_build_manifest.json").read_text()); assert manifest["source_commit"] == os.environ["SOURCE_COMMIT"]; assert manifest["package_id"] == os.environ["PACKAGE_ID"]'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -299,7 +314,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success() && needs.native-startup.result == 'success'
         with:
-          name: HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5_CERTIFIED
+          name: ${{ env.PACKAGE_ID }}_CERTIFIED
           path: certified/*
           if-no-files-found: error
           retention-days: 90

@@ -19,8 +19,11 @@ def _json_bytes(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, object]]:
-    package_id = f"HARDWARE_R1_ASSET_DURABILITY_FORMAL_{release.SOURCE_BASE[:12]}.zip"
+def _fixture(
+    tmp_path: Path,
+    source_commit: str = release.SOURCE_BASE,
+) -> tuple[Path, Path, Path, Path, dict[str, object]]:
+    package_id = f"{release.PACKAGE_ID_PREFIX}{source_commit[:12]}.zip"
     artifact_metadata = {
         name: {
             "id": release.D2_ARTIFACT_IDS[name],
@@ -70,7 +73,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, object]]
         "CERTIFICATION_STATUS": "PENDING_NATIVE_STARTUP_BINDING",
         "CERTIFICATION_SCOPE": "HARDWARE_R1_ASSET_DURABILITY",
         "package_id": package_id,
-        "source_commit": release.SOURCE_BASE,
+        "source_commit": source_commit,
         "certification_scope": "HARDWARE_R1_ASSET_DURABILITY",
         "runtime_payload_sha256": release._tree_digest([runtime_entry]),
         "runtime_payload_inventory": [runtime_entry],
@@ -102,7 +105,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, object]]
         "package_id": package_id,
         "package_sha256": package_sha,
         "package_size_bytes": archive_path.stat().st_size,
-        "source_commit": release.SOURCE_BASE,
+        "source_commit": source_commit,
         "certification_scope": "HARDWARE_R1_ASSET_DURABILITY",
         "runtime_payload_sha256": content_manifest["runtime_payload_sha256"],
         "d2_tested_runtime_payload_sha256": content_manifest["runtime_payload_sha256"],
@@ -120,7 +123,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, object]]
         "status": "PASS",
         "package_id": package_id,
         "package_sha256": package_sha,
-        "source_commit": release.SOURCE_BASE,
+        "source_commit": source_commit,
         "fresh_extract": True,
         "persistent_data_root_isolated": True,
         "persistent_data_root": "/isolated/data",
@@ -158,6 +161,29 @@ def test_finalizer_binds_scoped_certification_and_nonclaims(tmp_path: Path) -> N
     assert manifest["TEST_PACKAGE_NOT_RELEASE"] == "NOT_REUSED_AS_RELEASE"
     assert manifest["WINDOWS_NATIVE_STARTUP"] == "PASS"
     assert manifest["MACOS_NATIVE_STARTUP"] == "PASS"
+
+
+def test_finalizer_accepts_merge_bound_source_and_smoke_report_uses_it(tmp_path: Path) -> None:
+    source_commit = "800c1861ec4245e72747240f49eaa609111fc263"
+    build_path, binding_path, windows_path, macos_path, build = _fixture(tmp_path, source_commit)
+
+    manifest = release.finalize_release_manifest(
+        build_path,
+        binding_path,
+        windows_path,
+        macos_path,
+        tmp_path / "RELEASE_MANIFEST.json",
+    )
+
+    package_id = f"{release.PACKAGE_ID_PREFIX}{source_commit[:12]}.zip"
+    assert build["package_id"] == package_id
+    assert manifest["SOURCE_COMMIT"] == source_commit
+    extract_root = tmp_path / "merge-extract"
+    extract_root.mkdir()
+    with zipfile.ZipFile(tmp_path / package_id) as archive:
+        archive.extractall(extract_root)
+    content = smoke._verify_content(extract_root, package_id, str(build["package_sha256"]))
+    assert content["source_commit"] == source_commit
 
 
 def test_finalizer_rejects_same_installation_identity(tmp_path: Path) -> None:
