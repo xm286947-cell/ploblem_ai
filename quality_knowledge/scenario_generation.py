@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from builder.ai_client import OpenAICompatibleClient
 from builder.json_response import parse_json_object
 from quality_knowledge.model_config import choose_quality_issue_agent, load_quality_issue_ai_config, resolve_model_config_path
 from quality_knowledge.reverse_quality_scenario_adapter import adapt_reverse_quality_result
+from quality_knowledge.materials import MaterialRepository
 from quality_knowledge.scenario_source_bundle_v1 import (
     ScenarioSourceBundleV1SnapshotStore,
     build_scenario_source_bundle_v1,
@@ -55,27 +57,60 @@ class ScenarioGenerationService:
         self.scenarios = scenario_repository
         self.root = Path(root)
         self.ai_client = ai_client
+        self.materials = MaterialRepository(self.scenarios.db_path)
         self.source_bundle_snapshots = ScenarioSourceBundleV1SnapshotStore(self.scenarios.db_path)
         with self.scenarios.connect() as c:
             c.execute('CREATE TABLE IF NOT EXISTS scenario_generation_source(generation_id TEXT PRIMARY KEY,records_json TEXT NOT NULL)')
 
     def save_source_snapshot(self,generation_id,records):
+        frozen_records = list(records)
+        if frozen_records and not any(row.get("snapshot_metadata") for row in frozen_records):
+            source_hashes = sorted({
+                str(value)
+                for row in frozen_records
+                for value in (row.get("source_hashes") or [])
+                if value
+            } | {
+                str(ref.get("source_revision") or "")
+                for row in frozen_records
+                for ref in (row.get("source_refs") or [])
+                if ref.get("source_revision")
+            } | {
+                str(item.get("analysis_revision") or "")
+                for row in frozen_records
+                for item in (row.get("effective_analysis") or row.get("analysis_provenance") or {}).values()
+                if item.get("analysis_revision")
+            })
+            source_count = len({
+                str(ref.get("source_id") or "")
+                for row in frozen_records
+                for ref in (row.get("source_refs") or [])
+                if ref.get("source_id")
+            })
+            metadata = {
+                "snapshot_id": str(generation_id),
+                "built_at": datetime.now(timezone.utc).isoformat(),
+                "builder_version": "scenario-source-snapshot/v1",
+                "selected_issue_count": len(frozen_records),
+                "source_count": source_count,
+                "source_hashes": source_hashes,
+            }
+            frozen_records = [{**row, "snapshot_metadata": metadata} for row in frozen_records]
         with self.scenarios.connect() as c:
-            c.execute('INSERT INTO scenario_generation_source VALUES(?,?)',(generation_id,json.dumps(records,ensure_ascii=False,default=str)))
+            c.execute('INSERT INTO scenario_generation_source VALUES(?,?)',(generation_id,json.dumps(frozen_records,ensure_ascii=False,default=str)))
 
     def source_snapshot(self,generation_id):
         with self.scenarios.connect() as c:
             row=c.execute('SELECT records_json FROM scenario_generation_source WHERE generation_id=?',(generation_id,)).fetchone()
         return json.loads(row[0]) if row else []
 
-    def snapshot_source_bundles(self, records, *, trigger_source="SOFTWARE_ASSESSMENT", trigger_reason="QUALITY_SCENARIO_GENERATION"):
-        """Freeze an auditable W1 bundle per selected software-assessment row."""
+    def snapshot_source_bundles(self, frozen_records, *, trigger_source="SOFTWARE_ASSESSMENT", trigger_reason="QUALITY_SCENARIO_GENERATION"):
+        """Build W1 bundles from already-frozen selection records only."""
         bundles = []
-        for record in records:
-            source_id = str(record.get("source_material_id") or record.get("knowledge_id") or "").strip()
+        for record in frozen_records:
             bundle = build_scenario_source_bundle_v1(
-                self.scenarios,
-                source_id,
+                record,
+                evidence_repository=self.materials,
                 trigger_source=trigger_source,
                 trigger_reason=trigger_reason,
             )

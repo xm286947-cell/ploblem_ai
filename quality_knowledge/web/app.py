@@ -579,11 +579,12 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         from quality_knowledge.scenario_sources import scene_source_records
         rows=scene_source_records(scenario_generation_svc,'operations',{'product_code':product_code,'ipmt':ipmt,'spdt':spdt,'product_model':product_model,'product_series':product_series,'industry':industry,'customer':customer,'year':year,'start_month':start_month,'end_month':end_month},selected_ids)
         if {x['knowledge_id'] for x in rows}!=set(selected_ids):raise HTTPException(409,'选中数据已变化或不属于当前软件考核筛选范围，请重新预览')
+        scenario_generation_svc.save_source_snapshot(generation_id,rows)
+        frozen_rows=scenario_generation_svc.source_snapshot(generation_id)
         try:
-            scenario_generation_svc.snapshot_source_bundles(rows)
+            scenario_generation_svc.snapshot_source_bundles(frozen_rows)
         except ValueError as error:
             raise HTTPException(409,str(error)) from error
-        scenario_generation_svc.save_source_snapshot(generation_id,rows)
         scenario_repo.create_generation(generation_id,product_code,start_month,end_month,len(selected_ids),'WEB_USER')
         threading.Thread(target=scenario_generation_svc.run_job,args=(generation_id,product_code,start_month,end_month,list(selected_ids)),daemon=True,name=f'scenario-{generation_id[-8:]}').start()
         return RedirectResponse(f'/quality-scenarios/generate?job_id={generation_id}',303)

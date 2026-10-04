@@ -1,4 +1,5 @@
 """Software-operation selection, with explicit field-level evidence provenance."""
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -124,6 +125,58 @@ def _analyses(service, matches, product_code=''):
             if latest.get('result'):analyses[stage]=latest['result']
     return issue,analyses
 
+def _analysis_snapshot(service, issue):
+    """Capture the completed analysis revisions and the human answers they used."""
+    if not issue:return {},{}
+    repository=getattr(service.issues,'repository',None)
+    try:
+        confirmations=repository.get_human_confirmations(issue['knowledge_id']) if repository and hasattr(repository,'get_human_confirmations') else []
+    except Exception:
+        confirmations=[]
+    results={};provenance={}
+    for stage in ('occurrence','escape','recurrence','capability_gap'):
+        record=service.issues.get_latest_analysis(issue['knowledge_id'],stage) or {}
+        result=record.get('result') if isinstance(record.get('result'),dict) else {}
+        if result:results[stage]=result
+        stage_confirmations=[item for item in confirmations if str(item.get('stage') or '')==stage]
+        effective_result=dict(result)
+        for item in stage_confirmations:
+            key=str(item.get('question_key') or '')
+            if key in effective_result and str(item.get('status') or '').upper() in {'CONFIRMED','CORRECTED'} and item.get('answer'):
+                effective_result[key]=item['answer']
+        revision_data={
+            'analysis_run_id':record.get('analysis_run_id') or '',
+            'issue_version_id':record.get('issue_version_id') or '',
+            'status':record.get('status') or '',
+            'input_hash':record.get('input_hash') or '',
+            'result':result,
+            'effective_result':effective_result,
+            'human_confirmations':stage_confirmations,
+        }
+        provenance[stage]={
+            'analysis_run_id':record.get('analysis_run_id') or '',
+            'analysis_type':record.get('analysis_type') or stage,
+            'issue_version_id':record.get('issue_version_id') or '',
+            'status':record.get('status') or ('HUMAN_CONFIRMED' if stage_confirmations else 'MISSING'),
+            'input_hash':record.get('input_hash') or '',
+            'started_at':record.get('started_at') or '',
+            'completed_at':record.get('completed_at') or '',
+            'analysis_revision':hashlib.sha256(json.dumps(revision_data,ensure_ascii=False,sort_keys=True,default=str).encode()).hexdigest(),
+            'result':result,
+            'effective_result':effective_result,
+            'human_confirmations':stage_confirmations,
+        }
+    return results,provenance
+
+def _material_ref(source_type,row,*,binding_status='BOUND'):
+    return {
+        'source_type':source_type,'source_id':str(row.get('material_id') or ''),
+        'source_revision':str(row.get('source_hash') or ''),'version_no':int(row.get('version_no') or 0),
+        'business_key':str(row.get('business_key') or ''),'group_code':str(row.get('group_code') or ''),
+        'relation_type':'PRIMARY_SOURCE' if source_type=='SOFTWARE_ASSESSMENT' else 'SUPPORTING_EVIDENCE',
+        'binding_status':binding_status,'evidence_kind':'SOURCE_MATERIAL',
+    }
+
 def material_scene_records(service, filters=None, selected_ids=None, metadata_only=False, include_analysis=True):
     """One controlled scene input per canonical ITR; CS facts win, ITR only fills gaps."""
     filters=filters or {};selected=set(selected_ids or [])
@@ -201,7 +254,7 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         # CS/ITR and issue analyses enrich the selected rows later and must never
         # reduce the number of selectable operation issues.
         materials=[dict(r) for r in c.execute('''WITH ranked AS (
-                SELECT m.*,y.reporting_year,y.year_source,
+                SELECT m.*,g.group_code,y.reporting_year,y.year_source,
                        ROW_NUMBER() OVER (
                          PARTITION BY m.group_id,COALESCE(NULLIF(m.canonical_itr,''),m.business_key)
                          ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC
@@ -212,7 +265,7 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
                 WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'
             ) SELECT * FROM ranked WHERE rn=1 ORDER BY business_key,material_id''')]
         issues=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
-    latest={}; cs=defaultdict(list); index=defaultdict(list)
+    latest={}; cs=defaultdict(list); itr_sources=defaultdict(list); index=defaultdict(list)
     for row in materials:latest[(row['material_type'],row['group_id'],normalize_itr(row['business_key']))]=row
     for row in issues:index[normalize_itr(row['business_issue_id'])].append(row)
     # Metadata/choices and filtered counts need no CS join.  For the full rows,
@@ -221,6 +274,8 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
     if not metadata_only:
         for row in _latest_materials(service,('ITR_CS',)):
             cs[normalize_itr(row['business_key'])].append(row)
+        for row in _latest_materials(service,('ITR_SOURCE',)):
+            itr_sources[normalize_itr(row['canonical_itr'] or row['business_key'])].append(row)
     records=[]
     for material in latest.values():
         if material['material_type']!='SOFTWARE_OPERATION' or (selected and material['material_id'] not in selected):continue
@@ -245,13 +300,10 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
             if narrowed:matches=narrowed
         issue=matches[0] if len(matches)==1 else None
         linked=cs[canonical]; source=linked[0] if len(linked)==1 else None
+        linked_itr=itr_sources[canonical]; itr_record=linked_itr[0] if len(linked_itr)==1 else None
         facts=json.loads(source['raw_json']) if source else raw
         context=context_from(facts)
-        analyses={}
-        if issue:
-            for stage in ('occurrence','escape','recurrence','capability_gap'):
-                latest_analysis=service.issues.get_latest_analysis(issue['knowledge_id'],stage) or {}
-                if latest_analysis.get('result'):analyses[stage]=latest_analysis['result']
+        analyses,analysis_provenance=_analysis_snapshot(service,issue)
         root=service._value(analyses.get('occurrence',{}),'root_cause_summary','root_cause')
         escape=service._value(analyses.get('escape',{}),'escape_cause_summary','escape_reason')
         label='LEAKAGE' if root and escape else 'PARTIAL' if analyses and source else 'CS_ONLY' if source and not analyses else 'INSUFFICIENT'
@@ -263,17 +315,52 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         warnings=[]
         if len(matches)>1:warnings.append('关联到多个漏测问题，未自动选择，请核对')
         if len(linked)>1:warnings.append('关联到多个彻底解决单数据组，未自动选择，请核对')
+        if len(linked_itr)>1:warnings.append('关联到多个ITR来源数据组，未自动选择，请核对')
         if not source:warnings.append('未唯一关联彻底解决单，事实暂取软件考核记录')
         if not escape:warnings.append('缺少漏测流出原因，不得推断已完成测试分析')
         field_evidence={key:{'source':'ITR_CS' if source else 'SOFTWARE_OPERATION','value':value,'material_id':source['material_id'] if source else material['material_id']} for key,value in context.items() if value}
+        current_issue=service.issues.get_issue(issue['knowledge_id']) if issue and hasattr(service.issues,'get_issue') else None
+        try:normalized_facts=json.loads((current_issue or {}).get('normalized_json') or '{}')
+        except (TypeError,ValueError):normalized_facts={}
+        source_refs=[_material_ref('SOFTWARE_ASSESSMENT',material)]
+        source_refs.extend(_material_ref('RESOLUTION',row,binding_status='BOUND' if len(linked)==1 else 'CONFLICT') for row in linked)
+        source_refs.extend(_material_ref('ITR',row,binding_status='BOUND' if len(linked_itr)==1 else 'CONFLICT') for row in linked_itr)
+        try:
+            linked_materials=service.materials.materials_for_issue(issue['knowledge_id']) if issue and hasattr(service,'materials') else []
+        except Exception:
+            linked_materials=[]
+        missed_materials=[row for row in linked_materials if row.get('material_type')=='ESCAPE_ANALYSIS']
+        source_refs.extend(_material_ref('MISSED_TEST',row) for row in missed_materials)
+        for stage,metadata in analysis_provenance.items():
+            if stage=='escape' and metadata.get('status')!='MISSING':
+                source_refs.append({
+                    'source_type':'MISSED_TEST','source_id':metadata.get('analysis_run_id') or f"{issue['knowledge_id']}:{stage}",
+                    'source_revision':metadata.get('analysis_revision') or '', 'version_no':0,
+                    'business_key':issue.get('business_issue_id') or '', 'group_code':'QUALITY_ISSUE_ANALYSIS',
+                    'relation_type':'EFFECTIVE_ANALYSIS','binding_status':'BOUND','evidence_kind':'EFFECTIVE_ANALYSIS',
+                })
+        if len(missed_materials)>1:warnings.append('关联到多个漏测源材料，均保留为证据，不据此选择分析结论')
+        selected_issue={
+            'knowledge_id':issue.get('knowledge_id') if issue else '',
+            'business_issue_id':issue.get('business_issue_id') if issue else material.get('business_key') or '',
+            'software_assessment_record_id':material['material_id'],
+            'software_assessment_revision':material.get('source_hash') or '',
+            'product_code':issue.get('business_type') if issue else '',
+            'product_model':values.get('product_model') or '', 'ipmt':values.get('ipmt') or '',
+            'spdt':values.get('spdt') or '', 'industry':values.get('industry') or '',
+            'customer':values.get('customer') or '', 'kpi_year':year, 'kpi_month':month,
+        }
         records.append({'knowledge_id':material['material_id'],'business_issue_id':material['business_key'],
             'title':description or '问题描述待补充','description':description,'month':month,'year':year,
             **values,'severity':first(facts,'问题信息_问题等级','问题等级'),
             'source_status':label,'source_label':LABELS[label], 'source_warnings':warnings,
             'source_material_id':material['material_id'],'cs_material_id':source['material_id'] if source else '',
+            'itr_material_id':itr_record['material_id'] if itr_record else '',
             'source_workbench':'software-operations','canonical_itr':canonical,
             'linked_knowledge_id':issue['knowledge_id'] if issue else '',
             'field_sources':provenance,'field_evidence':field_evidence,'leakage_analysis':analyses,
+            'effective_analysis':analysis_provenance,'analysis_provenance':analysis_provenance,
+            'normalized_facts':normalized_facts,'selected_issue':selected_issue,'source_refs':source_refs,
             'occurrence':{'root_cause':root or ((context['root_cause'] or context['trc_root_cause']) if source else '')},
             'escape':{'reason':escape},'itr_cs_context':context if source else {},
             'supplemental_context':context,'missing_leakage':not bool(analyses),

@@ -229,7 +229,7 @@ def _v1_save_question_confirmations(self,kid,answers,confirmed_by='web'):
 IssueKnowledgeRepository.save_question_confirmations=_v1_save_question_confirmations
 
 def _v1_human_confirmations(self,kid):
-    return [{'question_id':x['question_id'],'stage':x['stage'],'question':x['question'].get('question'),'status':x['status'],'answer':x.get('answer') or '','evidence':x.get('evidence') or '','confirmed_by':x.get('confirmed_by')} for x in self.list_open_questions(kid,50) if x.get('status')!='PENDING']
+    return [{'question_id':x['question_id'],'question_key':x.get('question_key') or x['question'].get('question_key') or '', 'stage':x['stage'],'question':x['question'].get('question'),'status':x['status'],'answer':x.get('answer') or '','evidence':x.get('evidence') or '','confirmed_by':x.get('confirmed_by')} for x in self.list_open_questions(kid,50) if x.get('status')!='PENDING']
 IssueKnowledgeRepository.get_human_confirmations=_v1_human_confirmations
 
 def _v1_save_gaps(self,kid,vid,rid,gaps):
