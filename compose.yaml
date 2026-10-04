@@ -1,0 +1,27 @@
+services:
+  public-knowledge:
+    build:
+      context: .
+    image: storage-public-knowledge:0.1.0
+    container_name: storage-public-knowledge
+    restart: unless-stopped
+    env_file:
+      - path: public_knowledge_rag/.env
+        required: false
+    environment:
+      PKR_DATA_DIR: /var/lib/public-knowledge
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - public_knowledge_data:/var/lib/public-knowledge
+    mem_limit: 4g
+    cpus: 4
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+
+volumes:
+  public_knowledge_data:
