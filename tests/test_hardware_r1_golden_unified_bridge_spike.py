@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -245,6 +247,7 @@ def test_human_edit_is_preserved_and_source_fact_is_immutable(tmp_path: Path) ->
 
 def test_publish_is_idempotent_locks_source_and_query_back_traces_source(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, source_store, bridge, source = setup_case(tmp_path, "A0207")
     original = golden("A0207", source["source_id"])
@@ -271,6 +274,69 @@ def test_publish_is_idempotent_locks_source_and_query_back_traces_source(
         publisher="hardware-publisher",
         published_at=NOW,
     )
+
+    idempotency_key = bridge.adapter.publish_idempotency_key(
+        candidate["candidate_id"], FIXED_KNOWLEDGE_REVISION
+    )
+    assert idempotency_key == "HC-KNOWLEDGE-A0207-R1:publish:r1"
+    assert first["idempotency_key"] == idempotency_key
+    marker_directory = root / "knowledge/production/public/idempotency/publish"
+    legacy_marker_relative_path = (
+        "knowledge/production/public/idempotency/publish/"
+        f"{idempotency_key}.json"
+    )
+    safe_marker_path = marker_directory / (
+        hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest() + ".json"
+    )
+    legacy_marker_path = marker_directory / f"{idempotency_key}.json"
+    assert safe_marker_path.is_file()
+    marker_payload = json.loads(safe_marker_path.read_text(encoding="utf-8"))
+    assert marker_payload["idempotency_key"] == idempotency_key
+    if os.name != "nt":
+        assert not legacy_marker_path.exists()
+
+    # A marker at the hashed path must be bound to the exact business key.
+    safe_marker_path.write_text(
+        json.dumps({**marker_payload, "idempotency_key": "different-key"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(HardwareR1GoldenBridgeError, match="IDEMPOTENCY_KEY_CONFLICT"):
+        bridge.publish(
+            business_case_id="A0207",
+            candidate_id=candidate["candidate_id"],
+            evidence_refs=evidence_refs,
+            publisher="hardware-publisher",
+            published_at=NOW,
+        )
+
+    safe_marker_path.write_text(
+        json.dumps(marker_payload),
+        encoding="utf-8",
+    )
+    safe_marker_path.unlink()
+    if os.name == "nt":
+        # Windows cannot create the old colon-containing filename. Simulate a
+        # pre-upgrade POSIX marker at the repository boundary instead.
+        repository = (
+            bridge.adapter.transport.client.app.state.public_knowledge.repository
+        )
+        original_load = repository.load
+        legacy_lookups: list[str] = []
+
+        def load_with_legacy_marker(path: str | Path, *, required: bool = False):
+            path_text = str(path)
+            if path_text == legacy_marker_relative_path:
+                legacy_lookups.append(path_text)
+                return marker_payload
+            return original_load(path, required=required)
+
+        monkeypatch.setattr(repository, "load", load_with_legacy_marker)
+    else:
+        legacy_marker_path.write_text(
+            json.dumps(marker_payload),
+            encoding="utf-8",
+        )
+
     second = bridge.publish(
         business_case_id="A0207",
         candidate_id=candidate["candidate_id"],
@@ -283,6 +349,11 @@ def test_publish_is_idempotent_locks_source_and_query_back_traces_source(
         first["object"]["knowledge_id"]
         == second["object"]["knowledge_id"]
     )
+    assert not safe_marker_path.exists()
+    if os.name == "nt":
+        assert legacy_lookups == [legacy_marker_relative_path]
+    else:
+        assert legacy_marker_path.is_file()
     assert source_store.formal_knowledge_references("A0207")
 
     with pytest.raises(
