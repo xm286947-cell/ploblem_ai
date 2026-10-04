@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/hardware-knowledge-consumption/v1",
+  "title": "Hardware Knowledge Consumption Contract V1",
+  "description": "Read-only, explainable projection over locally verified Formal Hardware Knowledge. The projection is rebuildable and is not a source of truth.",
+  "$defs": {
+    "DeviceRef": {
+      "type": "object",
+      "required": [
+        "category",
+        "generic_name_or_series",
+        "internal_material_no",
+        "manufacturer",
+        "manufacturer_part_no",
+        "evidence_refs",
+        "status"
+      ],
+      "properties": {
+        "category": {"type": ["string", "null"]},
+        "generic_name_or_series": {"type": ["string", "null"]},
+        "internal_material_no": {"type": ["string", "null"]},
+        "manufacturer": {"type": ["string", "null"]},
+        "manufacturer_part_no": {"type": ["string", "null"]},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        "status": {"enum": ["EXPLICIT", "MISSING"]}
+      },
+      "additionalProperties": false
+    },
+    "MatchReason": {
+      "type": "object",
+      "required": ["matched_field", "match_type", "matched_text", "weight"],
+      "properties": {
+        "matched_field": {"type": "string"},
+        "match_type": {"const": "SUBSTRING"},
+        "matched_text": {"type": "string"},
+        "weight": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "ConsumptionRecord": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "projection_schema_version",
+        "knowledge_id",
+        "public_ref",
+        "business_case_id",
+        "title",
+        "symptom",
+        "occurrence_condition",
+        "failure_mode",
+        "root_cause",
+        "failure_mechanism",
+        "analysis_process",
+        "actions",
+        "verification_result",
+        "engineering_rule",
+        "design_constraint",
+        "diagnostic_clue",
+        "verification_method",
+        "applicability",
+        "conclusion",
+        "interface",
+        "signal",
+        "key_parameters",
+        "device_refs",
+        "evidence_refs",
+        "source_domain",
+        "source_object_type",
+        "formal_revision",
+        "formal_status",
+        "formal_object_hash",
+        "projected_at"
+      ],
+      "properties": {
+        "contract_version": {"const": "hardware-knowledge-consumption/v1"},
+        "projection_schema_version": {"const": 1},
+        "knowledge_id": {"type": "string", "minLength": 1},
+        "public_ref": {"type": "string", "minLength": 1},
+        "business_case_id": {"type": "string", "minLength": 1},
+        "title": {"type": ["string", "null"]},
+        "symptom": {"type": ["string", "null"]},
+        "occurrence_condition": {"type": ["string", "null"]},
+        "failure_mode": {"type": ["string", "null"]},
+        "root_cause": {"type": ["string", "null"]},
+        "failure_mechanism": {"type": ["string", "null"]},
+        "analysis_process": {"type": ["string", "null"]},
+        "actions": {"type": ["string", "null"]},
+        "verification_result": {"type": ["string", "null"]},
+        "engineering_rule": {"type": ["string", "null"]},
+        "design_constraint": {"type": ["string", "null"]},
+        "diagnostic_clue": {"type": ["string", "null"]},
+        "verification_method": {"type": ["string", "null"]},
+        "applicability": {"type": ["string", "null"]},
+        "conclusion": {"type": ["string", "null"]},
+        "interface": {"type": ["string", "null"]},
+        "signal": {"type": ["string", "null"]},
+        "key_parameters": {"type": "array", "items": {"type": "object"}},
+        "device_refs": {"type": "array", "items": {"$ref": "#/$defs/DeviceRef"}},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+        "source_domain": {"const": "HARDWARE_CASE"},
+        "source_object_type": {"const": "HARDWARE_CASE"},
+        "formal_revision": {"type": "integer", "minimum": 1},
+        "formal_status": {"type": "string", "minLength": 1},
+        "formal_object_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "projected_at": {"type": "string", "minLength": 1},
+        "match_score": {"type": "integer", "minimum": 0},
+        "match_reasons": {"type": "array", "items": {"$ref": "#/$defs/MatchReason"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/ConsumptionRecord"},
+    {
+      "type": "object",
+      "required": ["contract_version", "results"],
+      "properties": {
+        "contract_version": {"const": "hardware-knowledge-consumption/v1"},
+        "results": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ConsumptionRecord"}
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -12,6 +12,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from quality_knowledge.web.hardware_public_api import create_hardware_public_router
+from quality_knowledge.web.hardware_knowledge_consumption_api import (
+    create_hardware_knowledge_consumption_router,
+)
 from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
 from quality_knowledge.web.hardware_r1_workbench_api import create_hardware_r1_workbench_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
@@ -42,6 +45,11 @@ from services.hardware_case_knowledge_adapter import (
     KnowledgeHttpTransport,
 )
 from services.hardware_case_source_store import HardwareCaseSourceStore
+from services.hardware_knowledge_consumption import (
+    PROJECTION_FILENAME,
+    HardwareKnowledgeConsumptionProjectionStore,
+    HardwareKnowledgeConsumptionService,
+)
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_workbench import (
     HardwareR1WorkbenchService,
@@ -430,6 +438,7 @@ def create_p0_app(
             "code": str(hardware_startup_status.get("error_code") or "HARDWARE_STARTUP_NOT_READY"),
             "auto_publish": False,
         }
+        app.state.hardware_knowledge_consumption_service = None
         app.state.hardware_tree_import_repository = None
         app.state.hardware_tree_file_store = None
 
@@ -467,6 +476,16 @@ def create_p0_app(
         )
 
         if hardware_data_ready:
+            consumption_projection = HardwareKnowledgeConsumptionProjectionStore(
+                hardware_data_root / "rebuildable" / PROJECTION_FILENAME
+            )
+            hardware_knowledge_consumption_service = (
+                HardwareKnowledgeConsumptionService(consumption_projection)
+            )
+            app.state.hardware_knowledge_consumption_service = (
+                hardware_knowledge_consumption_service
+            )
+
             hardware_case_repository = HardwareCaseRepository(
                 hardware_db,
                 initialize_schema=False,
@@ -716,6 +735,11 @@ def create_p0_app(
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
+            app.include_router(
+                create_hardware_knowledge_consumption_router(
+                    hardware_knowledge_consumption_service
+                )
+            )
             testability_restore_hooks.append(hardware_data.ensure_ready)
         else:
             app.state.hardware_case_repository = None
@@ -732,6 +756,7 @@ def create_p0_app(
                 "code": "HARDWARE_DATA_NOT_READY",
                 "auto_publish": False,
             }
+            app.state.hardware_knowledge_consumption_service = None
             app.state.hardware_tree_import_repository = None
             app.state.hardware_tree_file_store = None
 
