@@ -20,6 +20,9 @@ def main() -> int:
     chunking = json.loads((evidence / "chunking_summary.json").read_text(encoding="utf-8"))
     source_rows = chunking["sources"]
     row_by_material = {r["material_id"]: r for r in source_rows}
+    chunks = json.loads((RUN / "parsed/hybrid_chunks.json").read_text(encoding="utf-8"))
+    chunk_by_id = {chunk["chunk_id"]: chunk for chunk in chunks}
+    source_by_id = {row["source_id"]: row for row in source_rows}
     source_metadata = [{
         "material_id": row["material_id"],
         "source_id": row["source_id"],
@@ -51,7 +54,22 @@ def main() -> int:
         for hit in hits:
             try:
                 locator = json.loads(hit.locator)
-                if not isinstance(locator, dict) or not (locator.get("page_start") or locator.get("element_refs")):
+                indexed_chunk = chunk_by_id.get(hit.hit_id)
+                source = source_by_id.get(hit.source_id, {})
+                refs = locator.get("element_refs", []) if isinstance(locator, dict) else []
+                page_start = locator.get("page_start") if isinstance(locator, dict) else None
+                page_end = locator.get("page_end") if isinstance(locator, dict) else None
+                resolves_to_chunk = bool(
+                    indexed_chunk
+                    and indexed_chunk["source_id"] == hit.source_id
+                    and indexed_chunk["source_revision"] == hit.source_revision
+                    and indexed_chunk["locator"] == hit.locator
+                )
+                resolves_to_location = bool(refs) or bool(
+                    page_start and page_end and page_start >= 1 and page_end >= page_start
+                    and page_end <= source.get("page_count", 0)
+                )
+                if not resolves_to_chunk or not resolves_to_location:
                     locators.append(hit.hit_id)
             except Exception:
                 locators.append(hit.hit_id)
