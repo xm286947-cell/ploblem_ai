@@ -307,6 +307,8 @@ jobs:
           cp "certification/package/$PACKAGE_ID" certified/
           cp "certification/package/$PACKAGE_ID.sha256" certified/
           cp certification/package/package_build_manifest.json certified/
+          cp certification/package/package_build_manifest.json certified/PACKAGE_MANIFEST.json
+          cp certification/package/d2_evidence_binding.json certified/D2_EVIDENCE_BINDING.json
           cp certification/RELEASE_MANIFEST.json certified/
           cp certification/windows/startup_report.json certified/windows_startup_report.json
           cp certification/macos/startup_report.json certified/macos_startup_report.json
