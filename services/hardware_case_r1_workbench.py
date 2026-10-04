@@ -20,6 +20,10 @@ from services.hardware_case_markdown_agent import (
     run_r1_agent_extraction,
 )
 from services.hardware_case_word import parse_docx
+from services.hardware_case_r1_runtime import (
+    R1_STAGE_A_VALIDATOR_VERSION,
+    R1_STAGE_B_VALIDATOR_VERSION,
+)
 
 
 WORKBENCH_CONTRACT_VERSION = "hardware-r1-knowledge-production-workbench/v1"
@@ -52,6 +56,18 @@ def bind_case_status(
     error_code: str | None = None,
 ) -> dict[str, Any]:
     """Bind frozen Runtime/Pipeline truth to the UED state contract."""
+    if error_code == "CANDIDATE_ASSET_COMMIT_FAILED":
+        trace = (result or {}).get("latency_trace") or {}
+        return {
+            "parse": "PASS" if snapshot else "WAITING",
+            "stage_a": _stage_status(trace, "A", True),
+            "stage_b": _stage_status(trace, "B", True),
+            "gate": "PASS",
+            "result": "FAILED",
+            "failed_stage": "CANDIDATE_ASSET_COMMIT",
+            "error_code": error_code,
+            "retryable": True,
+        }
     if orchestration_status in {"RUNTIME_BLOCKED", "DEPENDENCY_BLOCKED"}:
         return {
             "parse": "PASS" if snapshot else "WAITING",
@@ -194,6 +210,7 @@ class HardwareR1WorkbenchStore:
                     error_code TEXT,
                     snapshot_json TEXT,
                     result_json TEXT,
+                    candidate_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(batch_id) REFERENCES hardware_r1_batch(batch_id)
@@ -201,6 +218,20 @@ class HardwareR1WorkbenchStore:
                 CREATE INDEX IF NOT EXISTS idx_hardware_r1_batch_item_batch
                 ON hardware_r1_batch_item(batch_id, created_at);
                 """
+            )
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(hardware_r1_batch_item)"
+                ).fetchall()
+            }
+            if "candidate_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch_item ADD COLUMN candidate_id TEXT"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_hardware_r1_batch_item_candidate "
+                "ON hardware_r1_batch_item(candidate_id)"
             )
 
     def create_batch(self) -> str:
@@ -225,6 +256,7 @@ class HardwareR1WorkbenchStore:
         error_code: str | None = None,
         snapshot: dict[str, Any] | None = None,
         result: dict[str, Any] | None = None,
+        candidate_id: str | None = None,
     ) -> str:
         item_id = "HWI-" + uuid4().hex[:16]
         now = _utc_now()
@@ -234,8 +266,8 @@ class HardwareR1WorkbenchStore:
                 INSERT INTO hardware_r1_batch_item(
                     item_id,batch_id,business_case_id,source_id,source_file,
                     orchestration_status,failed_stage,error_code,
-                    snapshot_json,result_json,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    snapshot_json,result_json,candidate_id,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     item_id,
@@ -248,6 +280,7 @@ class HardwareR1WorkbenchStore:
                     error_code,
                     json.dumps(snapshot, ensure_ascii=False) if snapshot is not None else None,
                     json.dumps(result, ensure_ascii=False) if result is not None else None,
+                    candidate_id,
                     now,
                     now,
                 ),
@@ -266,6 +299,7 @@ class HardwareR1WorkbenchStore:
         failed_stage: str | None,
         error_code: str | None,
         result: dict[str, Any] | None,
+        candidate_id: str | None = None,
     ) -> None:
         now = _utc_now()
         with self._connect() as connection:
@@ -279,7 +313,7 @@ class HardwareR1WorkbenchStore:
                 """
                 UPDATE hardware_r1_batch_item
                 SET orchestration_status=?,failed_stage=?,error_code=?,
-                    result_json=?,updated_at=?
+                    result_json=?,candidate_id=COALESCE(?,candidate_id),updated_at=?
                 WHERE item_id=?
                 """,
                 (
@@ -287,6 +321,7 @@ class HardwareR1WorkbenchStore:
                     failed_stage,
                     error_code,
                     json.dumps(result, ensure_ascii=False) if result is not None else None,
+                    candidate_id,
                     now,
                     item_id,
                 ),
@@ -306,6 +341,18 @@ class HardwareR1WorkbenchStore:
             orchestration_status=row["orchestration_status"],
             error_code=row["error_code"],
         )
+        candidate_id = str(row["candidate_id"] or "").strip() or None
+        if bound["result"] in {"REVIEW", "CANDIDATE_READY"} and not candidate_id:
+            bound = {
+                **bound,
+                "result": "FAILED",
+                "failed_stage": "CANDIDATE_ASSET_COMMIT",
+                "error_code": "CANDIDATE_ASSET_NOT_BOUND",
+                "retryable": True,
+            }
+            orchestration_status = "FAILED"
+        else:
+            orchestration_status = row["orchestration_status"]
         trace = (result or {}).get("latency_trace") or {}
         return {
             "item_id": row["item_id"],
@@ -313,7 +360,8 @@ class HardwareR1WorkbenchStore:
             "business_case_id": row["business_case_id"],
             "source_id": row["source_id"],
             "source_file": row["source_file"],
-            "orchestration_status": row["orchestration_status"],
+            "candidate_id": candidate_id,
+            "orchestration_status": orchestration_status,
             "failed_stage": bound["failed_stage"],
             "error_code": bound["error_code"],
             "parse": bound["parse"],
@@ -403,11 +451,13 @@ class HardwareR1WorkbenchService:
         source_store: Any,
         structurer_factory: Callable[[], Any],
         preview_store: Any | None = None,
+        candidate_repository: Any | None = None,
     ):
         self.store = store
         self.source_store = source_store
         self.structurer_factory = structurer_factory
         self.preview_store = preview_store
+        self.candidate_repository = candidate_repository
 
     def upload_batch(self, files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
         batch_id = self.store.create_batch()
@@ -491,7 +541,10 @@ class HardwareR1WorkbenchService:
         return self.get_batch(batch_id)
 
     def run_batch(self, batch_id: str) -> dict[str, Any]:
-        items = self.store.list_items(batch_id)
+        items = [
+            self._resolve_candidate(item)
+            for item in self.store.list_items(batch_id)
+        ]
         for item in items:
             if item["result"] != "QUEUED":
                 continue
@@ -499,7 +552,10 @@ class HardwareR1WorkbenchService:
         return self.get_batch(batch_id)
 
     def retry_failed_only(self, batch_id: str) -> dict[str, Any]:
-        items = self.store.list_items(batch_id)
+        items = [
+            self._resolve_candidate(item)
+            for item in self.store.list_items(batch_id)
+        ]
         selected = [
             item
             for item in items
@@ -524,14 +580,14 @@ class HardwareR1WorkbenchService:
         }
 
     def run_resume_item(self, item_id: str) -> dict[str, Any]:
-        item = self.store.get_item(item_id)
+        item = self._resolve_candidate(self.store.get_item(item_id))
         if item["orchestration_status"] == "RUNNING":
             raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
         self._run_item(item, retry_stage=None, force_full_run=False)
-        return self.store.get_item(item_id)
+        return self.get_item(item_id)
 
     def retry_failed_stage_item(self, item_id: str) -> dict[str, Any]:
-        item = self.store.get_item(item_id)
+        item = self._resolve_candidate(self.store.get_item(item_id))
         if item["result"] != "FAILED" or not item["retryable"]:
             raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
         retry_stage = item.get("failed_stage")
@@ -544,14 +600,14 @@ class HardwareR1WorkbenchService:
             retry_stage=str(retry_stage),
             force_full_run=False,
         )
-        return self.store.get_item(item_id)
+        return self.get_item(item_id)
 
     def force_full_run_item(self, item_id: str) -> dict[str, Any]:
-        item = self.store.get_item(item_id)
+        item = self._resolve_candidate(self.store.get_item(item_id))
         if item["orchestration_status"] == "RUNNING":
             raise HardwareR1WorkbenchError("RETRY_NOT_ALLOWED")
         self._run_item(item, retry_stage=None, force_full_run=True)
-        return self.store.get_item(item_id)
+        return self.get_item(item_id)
 
     def _run_item(
         self,
@@ -587,15 +643,47 @@ class HardwareR1WorkbenchService:
                     retry_stage if retry_stage in {"STAGE_A", "STAGE_B"} else None
                 ),
             )
-            if self.preview_store is not None:
-                result["preview"] = self.preview_store.save(snapshot, result)
             bound = bind_case_status(snapshot=snapshot, result=result)
+            candidate_id = None
+            if bound["result"] in {"REVIEW", "CANDIDATE_READY"}:
+                try:
+                    committed = self._commit_candidate_asset(item, snapshot, result)
+                    candidate_id = str(committed.get("candidate_id") or "").strip()
+                    if not candidate_id:
+                        raise HardwareR1WorkbenchError("CANDIDATE_ID_MISSING")
+                    bound["result"] = (
+                        "REVIEW"
+                        if bound["result"] == "REVIEW"
+                        or str(committed.get("production_review_status") or "").upper()
+                        == "REQUIRED"
+                        else "CANDIDATE_READY"
+                    )
+                except Exception:
+                    self.store.update_item(
+                        item["item_id"],
+                        orchestration_status="FAILED",
+                        failed_stage="CANDIDATE_ASSET_COMMIT",
+                        error_code="CANDIDATE_ASSET_COMMIT_FAILED",
+                        result=result,
+                    )
+                    return
+
+            # Preview storage is an expendable view, never Candidate truth.
+            if self.preview_store is not None:
+                try:
+                    result["preview"] = self.preview_store.save(snapshot, result)
+                except Exception as preview_error:
+                    result["preview_error_code"] = str(
+                        getattr(preview_error, "code", None)
+                        or "PREVIEW_SAVE_FAILED"
+                    )
             self.store.update_item(
                 item["item_id"],
                 orchestration_status=bound["result"],
                 failed_stage=bound["failed_stage"],
                 error_code=bound["error_code"],
                 result=result,
+                candidate_id=candidate_id,
             )
         except Exception as error:
             self.store.update_item(
@@ -609,8 +697,158 @@ class HardwareR1WorkbenchService:
                 result=item.get("pipeline_result"),
             )
 
+    def _commit_candidate_asset(
+        self,
+        item: dict[str, Any],
+        snapshot: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        repository = self.candidate_repository
+        commit = getattr(repository, "create_or_commit_candidate", None)
+        if not callable(commit):
+            raise HardwareR1WorkbenchError("CANDIDATE_ASSET_REPOSITORY_UNAVAILABLE")
+        if result.get("pipeline_status") != "GOLDEN_PREVIEW_READY":
+            raise HardwareR1WorkbenchError("PIPELINE_GATE_NOT_PASSED")
+        evidence_gate = result.get("evidence_validation")
+        if not isinstance(evidence_gate, dict) or str(
+            evidence_gate.get("status") or ""
+        ).upper() != "PASS":
+            raise HardwareR1WorkbenchError("EVIDENCE_GATE_NOT_PASSED")
+        knowledge_object = result.get("knowledge_object")
+        if not isinstance(knowledge_object, dict):
+            raise HardwareR1WorkbenchError("KNOWLEDGE_OBJECT_REQUIRED")
+
+        identity = snapshot.get("identity") or {}
+        business_case_id = str(
+            item.get("business_case_id") or identity.get("business_case_id") or ""
+        ).strip()
+        source = self.source_store.get_active_source(business_case_id)
+        source_id = str(source.get("source_id") or "").strip()
+        expected_source_id = str(
+            item.get("source_id")
+            or (snapshot.get("source") or {}).get("source_id")
+            or ""
+        ).strip()
+        source_ref = str(source.get("source_ref") or "").strip()
+        if (
+            not business_case_id
+            or not source_id
+            or source_id != expected_source_id
+            or not source_ref
+            or str(source.get("binding_status") or "").upper() != "ACTIVE"
+        ):
+            raise HardwareR1WorkbenchError("ACTIVE_SOURCE_BINDING_REQUIRED")
+
+        runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
+        stage_a = runtime.get("stage_a") if isinstance(runtime.get("stage_a"), dict) else {}
+        stage_b = runtime.get("stage_b") if isinstance(runtime.get("stage_b"), dict) else {}
+        provenance = (
+            knowledge_object.get("provenance")
+            if isinstance(knowledge_object.get("provenance"), dict)
+            else {}
+        )
+        config_versions = [
+            (name, str(stage.get("agent_config_version") or "").strip())
+            for name, stage in (("stage_a", stage_a), ("stage_b", stage_b))
+            if str(stage.get("agent_config_version") or "").strip()
+        ]
+        agent_config_version = ";".join(
+            f"{name}={version}" for name, version in config_versions
+        ) or str(provenance.get("agent_config_version") or "").strip()
+        pipeline_version = str(result.get("pipeline_version") or "").strip()
+        knowledge_schema_version = str(
+            result.get("knowledge_object_contract_version")
+            or knowledge_object.get("contract_version")
+            or ""
+        ).strip()
+        validator_version = (
+            f"stage_a={R1_STAGE_A_VALIDATOR_VERSION};"
+            f"stage_b={R1_STAGE_B_VALIDATOR_VERSION}"
+        )
+        if not all(
+            (agent_config_version, pipeline_version, knowledge_schema_version)
+        ):
+            raise HardwareR1WorkbenchError("CANDIDATE_VERSION_METADATA_REQUIRED")
+        return commit(
+            business_case_id=business_case_id,
+            source_id=source_id,
+            source_ref=source_ref,
+            knowledge_object=knowledge_object,
+            generation_run_id=(str(result.get("run_id") or "").strip() or None),
+            pipeline_version=pipeline_version,
+            agent_config_version=agent_config_version,
+            knowledge_schema_version=knowledge_schema_version,
+            validator_version=validator_version,
+        )
+
+    def _resolve_candidate(self, item: dict[str, Any]) -> dict[str, Any]:
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        if not candidate_id:
+            return {**item, "candidate": None, "candidate_asset": None}
+        getter = getattr(self.candidate_repository, "get_candidate", None)
+        try:
+            asset = getter(candidate_id) if callable(getter) else None
+        except Exception:
+            asset = None
+        if (
+            not isinstance(asset, dict)
+            or str(asset.get("candidate_id") or "") != candidate_id
+            or str(asset.get("business_case_id") or "")
+            != str(item.get("business_case_id") or "")
+            or str(asset.get("source_id") or "") != str(item.get("source_id") or "")
+            or not isinstance(asset.get("knowledge_object"), dict)
+        ):
+            return {
+                **item,
+                "result": "FAILED",
+                "orchestration_status": "FAILED",
+                "failed_stage": "CANDIDATE_ASSET_READ",
+                "error_code": "CANDIDATE_ASSET_NOT_FOUND",
+                "retryable": True,
+                "candidate": None,
+                "candidate_asset": None,
+            }
+        result = str(item.get("result") or "")
+        if str(asset.get("asset_status") or "").upper() != "ACTIVE":
+            return {
+                **item,
+                "result": "FAILED",
+                "orchestration_status": "FAILED",
+                "failed_stage": "CANDIDATE_ASSET_READ",
+                "error_code": "CANDIDATE_ASSET_NOT_ACTIVE",
+                "retryable": False,
+                "candidate": asset["knowledge_object"],
+                "candidate_asset": asset,
+            }
+        if result in {"REVIEW", "CANDIDATE_READY"}:
+            result = (
+                "REVIEW"
+                if str(asset.get("production_review_status") or "").upper()
+                == "REQUIRED"
+                else "CANDIDATE_READY"
+            )
+        return {
+            **item,
+            "result": result,
+            "candidate": asset["knowledge_object"],
+            "candidate_asset": asset,
+        }
+
     def list_batches(self, limit: int = 50) -> dict[str, Any]:
-        items = self.store.list_batches(limit=limit)
+        batches = self.store.list_batches(limit=limit)
+        items = []
+        for batch in batches:
+            batch_items = [
+                self._resolve_candidate(item)
+                for item in self.store.list_items(str(batch["batch_id"]))
+            ]
+            items.append(
+                {
+                    **batch,
+                    "status": aggregate_batch_status(batch_items),
+                    "summary": _summary(batch_items),
+                }
+            )
         return {
             "contract_version": WORKBENCH_CONTRACT_VERSION,
             "items": items,
@@ -628,6 +866,9 @@ class HardwareR1WorkbenchService:
         item = self.store.get_item(item_id)
         if item["result"] != "REVIEW":
             raise HardwareR1WorkbenchError("REVIEW_NOT_REQUIRED")
+        if item.get("candidate_id"):
+            # Durable Production Review binding is a separate B2 milestone.
+            raise HardwareR1WorkbenchError("DURABLE_REVIEW_BINDING_NOT_IN_B1")
 
         result = deepcopy(item.get("pipeline_result") or {})
         candidate = result.get("knowledge_object")
@@ -765,18 +1006,21 @@ class HardwareR1WorkbenchService:
         return resolved
 
     def get_item(self, item_id: str) -> dict[str, Any]:
-        item = self.store.get_item(item_id)
-        # Candidate is a preview result. It is never promoted/published here.
+        item = self._resolve_candidate(self.store.get_item(item_id))
         result = item.get("pipeline_result") or {}
         return {
             "contract_version": WORKBENCH_CONTRACT_VERSION,
             **item,
-            "candidate": result.get("knowledge_object"),
+            "candidate": item.get("candidate"),
+            "candidate_asset": item.get("candidate_asset"),
             "evidence_validation": result.get("evidence_validation"),
         }
 
     def get_batch(self, batch_id: str) -> dict[str, Any]:
-        items = self.store.list_items(batch_id)
+        items = [
+            self._resolve_candidate(item)
+            for item in self.store.list_items(batch_id)
+        ]
         if not items and batch_id not in {item["batch_id"] for item in self.store.list_batches()}:
             # Empty batches are valid; list_batches is the authoritative existence check.
             batches = self.store.list_batches()

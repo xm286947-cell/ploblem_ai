@@ -537,6 +537,7 @@ def create_p0_app(
                 source_store=hardware_case_source_store,
                 structurer_factory=r1_structurer,
                 preview_store=hardware_r1_preview_store,
+                candidate_repository=hardware_candidate_asset_repository,
             )
             app.state.hardware_r1_workbench_store = hardware_r1_workbench_store
             app.state.hardware_r1_workbench_service = hardware_r1_workbench_service
