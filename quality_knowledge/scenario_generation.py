@@ -118,6 +118,16 @@ class ScenarioGenerationService:
             bundles.append(bundle)
         return bundles
 
+    def reverse_quality_from_bundle(self, bundle, *, taxonomy=None, reverse_quality_service=None):
+        """Run mature Reverse Quality from a frozen W1 Bundle, never from a material locator."""
+        from quality_knowledge.reverse_quality import ReverseQualityService
+        from quality_knowledge.reverse_quality_bundle_bridge import ReverseQualityBundleBridge
+
+        service = reverse_quality_service or ReverseQualityService(
+            self.materials, self.scenarios, self.issues, self.root, ai_client=None
+        )
+        return ReverseQualityBundleBridge(service, self.source_bundle_snapshots).analyse(bundle, taxonomy=taxonomy)
+
     def candidate_from_reverse_quality(self, result):
         payload=result.get('result') if isinstance(result,dict) and isinstance(result.get('result'),dict) else result
         if not isinstance(payload,dict):

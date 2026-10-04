@@ -15,6 +15,8 @@ from quality_knowledge.scenario_source_bundle_v1 import (
     ScenarioSourceBundleV1SnapshotStore,
     build_scenario_source_bundle_v1,
 )
+from quality_knowledge.reverse_quality_bundle_adapter import reverse_quality_facts_from_bundle
+from quality_knowledge.reverse_quality_bundle_bridge import ReverseQualityBundleBridge
 
 
 def _add(repo: MaterialRepository, group: str, business_key: str, raw: dict):
@@ -217,6 +219,149 @@ def test_conflicted_resolutions_never_supply_facts_and_safe_fields_fallback(tmp_
     assert {"root_cause", "corrective_actions"}.issubset(conflict_blockers[0]["affected_fields"])
     assert "冲突根因 A" not in json.dumps(bundle["facts"], ensure_ascii=False)
     assert "冲突根因 B" not in json.dumps(bundle["facts"], ensure_ascii=False)
+
+
+def test_bundle_adapter_preserves_frozen_provenance_and_never_reopens_sources(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100007", {
+        "问题信息_问题描述": "冻结描述", "问题信息_产品型号": "P-SW",
+    })
+    resolution = _add(repo, "ITR-CS", "ITR2026100007CS", {
+        "问题信息_问题原因定位": "冻结根因", "问题处理结果_问题解决方案": "冻结措施",
+    })
+    analysis_ref = {
+        "source_type": "MISSED_TEST", "source_id": "RUN-ESC-1", "source_revision": "esc-r1",
+        "version_no": 0, "business_key": "ITR2026100007", "group_code": "QUALITY_ISSUE_ANALYSIS",
+        "relation_type": "EFFECTIVE_ANALYSIS", "binding_status": "BOUND",
+        "evidence_kind": "EFFECTIVE_ANALYSIS", "analysis_type": "escape",
+    }
+    bundle = build_scenario_source_bundle_v1(
+        _snapshot(assessment, [_ref("RESOLUTION", resolution), analysis_ref]), evidence_repository=repo
+    )
+
+    facts = reverse_quality_facts_from_bundle(bundle)
+    # A source mutation after the immutable Bundle was built is intentionally
+    # irrelevant: this adapter performs no repository lookup.
+    with repo.connect() as connection:
+        connection.execute("UPDATE source_material SET raw_json=? WHERE material_id=?", (
+            json.dumps({"问题信息_问题原因定位": "后改根因"}, ensure_ascii=False), resolution["material_id"],
+        ))
+    facts_after_mutation = reverse_quality_facts_from_bundle(bundle)
+
+    assert facts_after_mutation == facts
+    assert facts["bundle_provenance"]["bundle_id"] == bundle["bundle_id"]
+    assert facts["bundle_provenance"]["bundle_revision"] == bundle["bundle_revision"]
+    assert facts["bundle_provenance"]["snapshot_id"] == bundle["snapshot_metadata"]["snapshot_id"]
+    root_evidence = facts["evidence"][facts["bundle_facts"]["root_cause"]["evidence_ids"][0]]
+    assert root_evidence["value"] == "冻结根因"
+    assert root_evidence["source_type"] == "RESOLUTION"
+    assert facts["bundle_facts"]["missed_test_cause"]["value"] == "人工确认：需求评审遗漏"
+
+
+def test_bundle_adapter_fails_closed_on_duplicate_effective_analysis_stage(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100008", {"问题信息_问题描述": "冻结描述"})
+    refs = []
+    for run_id in ("RUN-ESC-A", "RUN-ESC-B"):
+        refs.append({
+            "source_type": "MISSED_TEST", "source_id": run_id, "source_revision": run_id + "-rev",
+            "version_no": 0, "business_key": "ITR2026100008", "group_code": "QUALITY_ISSUE_ANALYSIS",
+            "relation_type": "EFFECTIVE_ANALYSIS", "binding_status": "BOUND",
+            "evidence_kind": "EFFECTIVE_ANALYSIS", "analysis_type": "escape",
+        })
+    bundle = build_scenario_source_bundle_v1(_snapshot(assessment, refs), evidence_repository=repo)
+
+    with pytest.raises(ValueError, match="MULTIPLE_EFFECTIVE_ANALYSIS_REFS:escape"):
+        reverse_quality_facts_from_bundle(bundle)
+
+
+def test_bundle_bridge_does_not_invoke_runtime_for_conflict_blocker(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100009", {"问题信息_问题描述": "考核源描述"})
+    resolution_a = _add(repo, "ITR-CS", "ITR2026100009CS-A", {"问题信息_问题原因定位": "根因 A"})
+    resolution_b = _add(repo, "ITR-CS", "ITR2026100009CS-B", {"问题信息_问题原因定位": "根因 B"})
+    ref_a = _ref("RESOLUTION", resolution_a); ref_a["binding_status"] = "CONFLICT"
+    ref_b = _ref("RESOLUTION", resolution_b); ref_b["binding_status"] = "CONFLICT"
+    analysis_ref = {
+        "source_type": "MISSED_TEST", "source_id": "RUN-ESC-1", "source_revision": "esc-r1",
+        "version_no": 0, "business_key": "ITR2026100009", "group_code": "QUALITY_ISSUE_ANALYSIS",
+        "relation_type": "EFFECTIVE_ANALYSIS", "binding_status": "BOUND",
+        "evidence_kind": "EFFECTIVE_ANALYSIS", "analysis_type": "escape",
+    }
+    bundle = build_scenario_source_bundle_v1(_snapshot(assessment, [ref_a, ref_b, analysis_ref]), evidence_repository=repo)
+    bundle_store = ScenarioSourceBundleV1SnapshotStore(repo.db_path)
+    bundle_store.save(bundle)
+
+    class RuntimeForbiddenService:
+        def get(self, _canonical):
+            return None
+
+        def _analyse_run(self, *_args):
+            raise AssertionError("Runtime must not run for a conflict blocker")
+
+    with pytest.raises(ValueError, match="INFORMATION_REQUIRED:SOURCE_RELATION_CONFLICT:RESOLUTION"):
+        ReverseQualityBundleBridge(RuntimeForbiddenService(), bundle_store).analyse(bundle, taxonomy={})
+
+
+def test_bundle_bridge_passes_only_bundle_facts_to_mature_service(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100010", {
+        "问题信息_问题描述": "Bundle 描述", "问题信息_产品型号": "P-SW",
+    })
+    resolution = _add(repo, "ITR-CS", "ITR2026100010CS", {"问题信息_问题原因定位": "Bundle 根因"})
+    analysis_ref = {
+        "source_type": "MISSED_TEST", "source_id": "RUN-ESC-1", "source_revision": "esc-r1",
+        "version_no": 0, "business_key": "ITR2026100010", "group_code": "QUALITY_ISSUE_ANALYSIS",
+        "relation_type": "EFFECTIVE_ANALYSIS", "binding_status": "BOUND",
+        "evidence_kind": "EFFECTIVE_ANALYSIS", "analysis_type": "escape",
+    }
+    bundle = build_scenario_source_bundle_v1(
+        _snapshot(assessment, [_ref("RESOLUTION", resolution), analysis_ref]), evidence_repository=repo
+    )
+    bundle_store = ScenarioSourceBundleV1SnapshotStore(repo.db_path)
+    bundle_store.save(bundle)
+
+    class Repository:
+        def __init__(self):
+            self.input = None
+
+        def start_run(self, **kwargs):
+            self.input = kwargs["input_payload"]
+            return {"run_id": "RQ-RUN-BUNDLE"}
+
+        def fail_run(self, *_args):
+            raise AssertionError("unexpected failure")
+
+    class Scenarios:
+        @staticmethod
+        def taxonomy_active(_product):
+            return {"version_id": "TAX-1"}
+
+    class MatureService:
+        def __init__(self):
+            self.repository = Repository()
+            self.scenarios = Scenarios()
+
+        @staticmethod
+        def get(_canonical):
+            return None
+
+        @staticmethod
+        def _analyse_run(facts, _taxonomy, _source_hash, _run_id, _product_code):
+            return {"input": facts}
+
+    service = MatureService()
+    result = ReverseQualityBundleBridge(service, bundle_store).analyse(bundle)
+
+    assert result["input"]["bundle_provenance"]["bundle_revision"] == bundle["bundle_revision"]
+    assert result["input"]["bundle_facts"]["problem_description"]["value"] == "Bundle 描述"
+    assert result["input"]["bundle_facts"]["root_cause"]["value"] == "Bundle 根因"
+    assert service.repository.input["bundle_provenance"]["snapshot_id"] == bundle["snapshot_metadata"]["snapshot_id"]
+
+    altered = json.loads(json.dumps(bundle, ensure_ascii=False))
+    altered["facts"]["problem_description"] = "未冻结的新描述"
+    with pytest.raises(ValueError, match="SCENARIO_SOURCE_BUNDLE_SNAPSHOT_MISMATCH"):
+        ReverseQualityBundleBridge(service, bundle_store).analyse(altered)
 
 
 def test_bundle_requires_a_frozen_snapshot_and_selected_assessment_locator(tmp_path):

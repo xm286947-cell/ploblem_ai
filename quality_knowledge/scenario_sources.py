@@ -332,12 +332,13 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         missed_materials=[row for row in linked_materials if row.get('material_type')=='ESCAPE_ANALYSIS']
         source_refs.extend(_material_ref('MISSED_TEST',row) for row in missed_materials)
         for stage,metadata in analysis_provenance.items():
-            if stage=='escape' and metadata.get('status')!='MISSING':
+            if metadata.get('status')!='MISSING':
                 source_refs.append({
                     'source_type':'MISSED_TEST','source_id':metadata.get('analysis_run_id') or f"{issue['knowledge_id']}:{stage}",
                     'source_revision':metadata.get('analysis_revision') or '', 'version_no':0,
                     'business_key':issue.get('business_issue_id') or '', 'group_code':'QUALITY_ISSUE_ANALYSIS',
                     'relation_type':'EFFECTIVE_ANALYSIS','binding_status':'BOUND','evidence_kind':'EFFECTIVE_ANALYSIS',
+                    'analysis_type':stage,
                 })
         if len(missed_materials)>1:warnings.append('关联到多个漏测源材料，均保留为证据，不据此选择分析结论')
         selected_issue={
