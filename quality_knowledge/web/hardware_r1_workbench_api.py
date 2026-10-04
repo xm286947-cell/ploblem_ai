@@ -88,6 +88,14 @@ def _promotion_error(error: HardwareR1PromotionError) -> HTTPException:
         "CANDIDATE_CONCURRENT_UPDATE",
         "CANDIDATE_PROMOTION_TRANSITION_INVALID",
         "CANDIDATE_DATA_INTEGRITY_ERROR",
+        "REMOTE_OUTCOME_UNKNOWN",
+        "EVIDENCE_INTAKE_RECONCILIATION_REQUIRED",
+        "CANDIDATE_INTAKE_RECONCILIATION_REQUIRED",
+        "FORMAL_REVIEW_RECONCILIATION_REQUIRED",
+        "PUBLISH_RECONCILIATION_REQUIRED",
+        "OPERATION_IDEMPOTENCY_CONFLICT",
+        "OPERATION_JOURNAL_UNAVAILABLE",
+        "ASSET_SCOPED_AMBIGUITY",
     }:
         return HTTPException(status_code=409, detail=error.code)
     return HTTPException(status_code=422, detail=error.code)
@@ -373,6 +381,35 @@ def create_hardware_r1_workbench_router(
         promotion = require_promotion_service()
         try:
             return promotion.retry_failed_item(item_id)
+        except HardwareR1PromotionError as error:
+            raise _promotion_error(error) from error
+
+    @router.post("/items/{item_id}/promotion/reconcile")
+    def promotion_reconcile(
+        item_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None,
+            alias="X-Hardware-Case-Role",
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        promotion = require_promotion_service()
+        try:
+            return promotion.reconcile_item(item_id)
+        except HardwareR1PromotionError as error:
+            raise _promotion_error(error) from error
+
+    @router.get("/promotion/recovery")
+    def promotion_recovery_diagnostics(
+        x_hardware_case_role: str | None = Header(
+            default=None,
+            alias="X-Hardware-Case-Role",
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        promotion = require_promotion_service()
+        try:
+            return promotion.recovery_diagnostics()
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
 

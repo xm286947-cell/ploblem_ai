@@ -68,6 +68,21 @@ class HardwareRecoveryCoordinator:
             if unknown:
                 raise HardwareRecoveryError("RECOVERY_OPERATION_UNKNOWN")
 
+            for item in pending_before:
+                if (
+                    item["operation_type"] in REMOTE_KNOWLEDGE_OPERATIONS
+                    and item["operation_state"] == "REMOTE_SENT"
+                ):
+                    journal.transition(
+                        str(item["operation_id"]),
+                        "OUTCOME_UNKNOWN",
+                        error_code="REMOTE_OUTCOME_UNKNOWN",
+                        recovery_action=(
+                            item.get("recovery_action")
+                            or "REMOTE_RESULT_NOT_COMMITTED_LOCALLY"
+                        ),
+                    )
+
             local = [
                 item for item in pending_before
                 if item["operation_type"] in LOCAL_SOURCE_OPERATIONS
@@ -122,9 +137,12 @@ class HardwareRecoveryCoordinator:
                 None,
             ),
         )
+        if pending_remote and not last_error:
+            last_error = "REMOTE_RECONCILIATION_PENDING"
         degraded = bool(pending_remote or blocked_local)
         return {
             "recovery_status": "DEGRADED" if degraded else "COMPLETED",
+            "recovery_class": "CLASS_A" if blocked_local else "CLASS_B" if pending_remote else None,
             "active_root_operation": None,
             "pending_local_recovery_count": len(pending_local),
             "pending_remote_reconciliation_count": len(pending_remote),

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from knowledge_production import KnowledgeReleaseService, create_knowledge_api_app
@@ -17,7 +18,11 @@ from services.hardware_asset_repository import (
     CandidateAssetRepository,
     CandidateAssetRepositoryError,
 )
-from services.hardware_case_knowledge_adapter import HardwareCaseKnowledgeAdapter
+from services.hardware_asset_operation_journal import HardwareAssetOperationJournalError
+from services.hardware_case_knowledge_adapter import (
+    HardwareCaseKnowledgeAdapter,
+    HardwareKnowledgeAdapterError,
+)
 from services.hardware_case_source_store import (
     HardwareCaseSourceError,
     HardwareCaseSourceStore,
@@ -29,6 +34,9 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
+)
+from quality_knowledge.web.hardware_r1_workbench_api import (
+    create_hardware_r1_workbench_router,
 )
 
 
@@ -661,3 +669,483 @@ def test_failed_intake_retry_is_item_scoped(tmp_path: Path) -> None:
     retried = promotion.retry_failed_item("HWI-RETRY")
     assert retried["status"] == "CANDIDATE_INTAKED"
     assert retried["retry_count"] == 1
+
+
+class SimulatedPowerLoss(BaseException):
+    pass
+
+
+def _prepare_reviewed_promotion(promotion, candidate):
+    intake = promotion.intake_item("HWI-RECOVERY")
+    confirmed = copy.deepcopy(candidate)
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "human-confirmed recovery rule"
+    promotion.review_item(
+        "HWI-RECOVERY",
+        reviewer="recovery-reviewer",
+        confirmed_content=confirmed,
+        review_time=NOW,
+        review_comment="recovery test",
+    )
+    return intake
+
+
+def _count_calls(transport, method, path):
+    return sum(call["method"] == method and call["path"] == path for call in transport.calls)
+
+
+def test_remote_write_is_journaled_before_send_and_remote_key_is_idempotent(tmp_path, monkeypatch):
+    promotion, _, _, _, _, transport, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    original = transport.request
+    observed = []
+
+    def inspect_before_send(method, path, *, json_body=None, query=None):
+        if method == "POST" and path in {
+            "/v1/knowledge/evidences", "/v1/knowledge/candidates",
+            "/v1/knowledge/reviews", "/v1/knowledge/publish",
+        }:
+            expected_type = {
+                "/v1/knowledge/evidences": "EVIDENCE_INTAKE",
+                "/v1/knowledge/candidates": "CANDIDATE_INTAKE",
+                "/v1/knowledge/reviews": "FORMAL_REVIEW",
+                "/v1/knowledge/publish": "PUBLISH",
+            }[path]
+            pending = promotion.operation_journal.list_nonterminal()
+            observed.append(
+                any(
+                    item["candidate_id"] == promotion.workbench.items["HWI-RECOVERY"]["candidate_id"]
+                    and item["operation_state"] == "REMOTE_SENT"
+                    and item["operation_type"] == expected_type
+                    for item in pending
+                )
+            )
+        return original(method, path, json_body=json_body, query=query)
+
+    monkeypatch.setattr(transport, "request", inspect_before_send)
+    result = promotion.intake_item("HWI-RECOVERY")
+    assert result["status"] == "CANDIDATE_INTAKED"
+
+    candidate = promotion.workbench.items["HWI-RECOVERY"]["candidate"]
+    confirmed = copy.deepcopy(candidate)
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "confirmed journal rule"
+    promotion.review_item(
+        "HWI-RECOVERY", reviewer="journal-reviewer", confirmed_content=confirmed,
+        review_time=NOW,
+    )
+    promotion.publish_item(
+        "HWI-RECOVERY", publisher="journal-publisher", published_at=NOW
+    )
+    assert observed and all(observed)
+
+    candidate_id = result["asset_candidate_id"]
+    journal = promotion.operation_journal
+    args = {
+        "operation_id": "stable-key-check",
+        "operation_type": "PUBLISH",
+        "business_case_id": "A0152",
+        "candidate_id": candidate_id,
+        "source_id": result["source_id"],
+        "desired_action": "PUBLISH",
+        "request_fingerprint": {"candidate_id": "KC-1", "revision": 1},
+        "remote_idempotency_key": "KC-1:publish:r1",
+    }
+    first = journal.prepare(**args)
+    second = journal.prepare(**args)
+    assert first["remote_idempotency_key"] == second["remote_idempotency_key"]
+    with pytest.raises(HardwareAssetOperationJournalError, match="OPERATION_IDEMPOTENCY_CONFLICT"):
+        journal.prepare(**{**args, "remote_idempotency_key": "different-key"})
+
+
+def test_candidate_intake_timeout_reconciles_with_one_controlled_replay(tmp_path, monkeypatch):
+    promotion, _, _, _, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    original = transport.request
+
+    def success_then_timeout(method, path, *, json_body=None, query=None):
+        response = original(method, path, json_body=json_body, query=query)
+        if method == "POST" and path == "/v1/knowledge/candidates" and not getattr(success_then_timeout, "failed", False):
+            success_then_timeout.failed = True
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE")
+        return response
+
+    monkeypatch.setattr(transport, "request", success_then_timeout)
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.intake_item("HWI-RECOVERY")
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.retry_failed_item("HWI-RECOVERY")
+
+    candidate_ops = promotion.operation_journal.list_operations(
+        candidate_id=promotion.workbench.items["HWI-RECOVERY"]["candidate_id"],
+        operation_type="CANDIDATE_INTAKE",
+    )
+    assert len(candidate_ops) == 1
+    assert candidate_ops[0]["operation_state"] == "OUTCOME_UNKNOWN"
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 1
+
+    recovered = promotion.reconcile_item("HWI-RECOVERY")
+    assert recovered["status"] == "CANDIDATE_INTAKED"
+    assert recovered["knowledge_candidate_id"] == "HC-KNOWLEDGE-A0152-R1"
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 2
+    assert (knowledge_root / "knowledge/production/candidates/HC-KNOWLEDGE-A0152-R1.json").is_file()
+    assert candidate["identity"]["business_case_id"] == "A0152"
+
+
+def test_candidate_reconciliation_replay_timeout_is_never_replayed_again(
+    tmp_path, monkeypatch
+):
+    promotion, _, _, _, _, transport, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    original = transport.request
+
+    def initial_success_then_timeout(method, path, *, json_body=None, query=None):
+        response = original(method, path, json_body=json_body, query=query)
+        if method == "POST" and path == "/v1/knowledge/candidates":
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE")
+        return response
+
+    monkeypatch.setattr(transport, "request", initial_success_then_timeout)
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.intake_item("HWI-RECOVERY")
+
+    def replay_response_mismatch(method, path, *, json_body=None, query=None):
+        status, response = original(method, path, json_body=json_body, query=query)
+        if method == "POST" and path == "/v1/knowledge/candidates":
+            response["candidate_id"] = "HC-KNOWLEDGE-WRONG-R1"
+        return status, response
+
+    monkeypatch.setattr(transport, "request", replay_response_mismatch)
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.reconcile_item("HWI-RECOVERY")
+
+    operation = promotion.operation_journal.list_operations(
+        candidate_id=promotion.workbench.items["HWI-RECOVERY"]["candidate_id"],
+        operation_type="CANDIDATE_INTAKE",
+    )[0]
+    assert operation["operation_state"] == "OUTCOME_UNKNOWN"
+    assert operation["recovery_action"] == "CANDIDATE_INTAKE_CONTROLLED_REPLAY_OUTCOME_UNKNOWN"
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 2
+    with pytest.raises(HardwareR1PromotionError, match="CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.reconcile_item("HWI-RECOVERY")
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 2
+
+
+def test_evidence_reconciliation_replay_timeout_is_never_replayed_again(
+    tmp_path, monkeypatch
+):
+    promotion, _, _, _, _, _, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    asset_id = promotion.workbench.items["HWI-RECOVERY"]["candidate_id"]
+    asset = promotion.assets.get_candidate(asset_id)
+    evidence_id = asset["evidence_refs"][0]["evidence_id"]
+    operation = {
+        "operation_type": "EVIDENCE_INTAKE",
+        "asset_candidate_id": asset_id,
+        "business_case_id": "A0152",
+        "source_id": asset["source_id"],
+        "evidence_id": evidence_id,
+        "remote_idempotency_key": evidence_id,
+        "request_fingerprint": {
+            "asset_candidate_id": asset_id,
+            "business_case_id": "A0152",
+            "source_id": asset["source_id"],
+            "source_ref": asset["source_ref"],
+            "evidence_id": evidence_id,
+            "locator": {"paragraph": 4, "block_id": "B0004"},
+            "excerpt_sha256": hashlib.sha256(b"synthetic evidence").hexdigest(),
+            "revision": 1,
+        },
+    }
+    action_calls = 0
+
+    def missing_evidence(_evidence_id):
+        raise HardwareKnowledgeAdapterError("EVIDENCE_NOT_FOUND", status_code=404)
+
+    def timeout_after_replay():
+        nonlocal action_calls
+        action_calls += 1
+        raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE")
+
+    monkeypatch.setattr(promotion.bridge.adapter, "resolve_evidence", missing_evidence)
+    with pytest.raises(HardwareR1PromotionError, match="EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion._run_remote_operation(**operation, reconciliation=False, action=timeout_after_replay)
+    with pytest.raises(HardwareR1PromotionError, match="EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion._run_remote_operation(**operation, reconciliation=True, action=timeout_after_replay)
+
+    journal_id = promotion._operation_id(asset_id, "EVIDENCE_INTAKE", 1, evidence_id)
+    journal = promotion.operation_journal.get(journal_id)
+    assert journal["operation_state"] == "OUTCOME_UNKNOWN"
+    assert journal["recovery_action"] == "EVIDENCE_INTAKE_CONTROLLED_REPLAY_OUTCOME_UNKNOWN"
+    with pytest.raises(HardwareR1PromotionError, match="EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion._run_remote_operation(**operation, reconciliation=True, action=timeout_after_replay)
+    assert action_calls == 2
+
+
+def test_startup_remote_reconciliation_obeys_finite_query_budget(tmp_path, monkeypatch):
+    promotion, _, _, _, _, _, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    asset_id = promotion.workbench.items["HWI-RECOVERY"]["candidate_id"]
+    asset = promotion.assets.get_candidate(asset_id)
+    for index in range(3):
+        evidence_id = f"HCE-UNKNOWN-{index}"
+        operation_id = promotion._operation_id(
+            asset_id, "EVIDENCE_INTAKE", 1, evidence_id
+        )
+        promotion.operation_journal.prepare(
+            operation_id=operation_id,
+            operation_type="EVIDENCE_INTAKE",
+            business_case_id="A0152",
+            candidate_id=asset_id,
+            source_id=asset["source_id"],
+            desired_action="HARDWARE_R1_EVIDENCE_INTAKE",
+            request_fingerprint={"evidence_id": evidence_id},
+            remote_idempotency_key=evidence_id,
+        )
+        promotion.operation_journal.transition(operation_id, "REMOTE_SENT")
+        promotion.operation_journal.transition(
+            operation_id, "OUTCOME_UNKNOWN", error_code="REMOTE_OUTCOME_UNKNOWN"
+        )
+
+    queried = []
+
+    def unavailable(evidence_id):
+        queried.append(evidence_id)
+        raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE", status_code=503)
+
+    monkeypatch.setattr(promotion.bridge.adapter, "resolve_evidence", unavailable)
+    result = promotion.reconcile_startup(max_remote_queries=2)
+
+    assert result["startup_queries_used"] == 2
+    assert len(queried) == 2
+    assert result["pending_remote_reconciliation_count"] == 3
+    assert result["blocked_asset_count"] == 1
+    assert result["recovery_status"] == "DEGRADED"
+
+
+def test_promotion_recovery_diagnostics_route_is_maintainer_only(tmp_path):
+    promotion, workbench, *_ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    app = FastAPI()
+    app.include_router(
+        create_hardware_r1_workbench_router(
+            workbench, promotion_service=promotion
+        )
+    )
+    client = TestClient(app)
+    path = "/api/v2/hardware-cases/r1/workbench/promotion/recovery"
+
+    assert client.get(path).status_code == 403
+    response = client.get(path, headers={"X-Hardware-Case-Role": "MAINTAINER"})
+    assert response.status_code == 200
+    assert response.json() == {
+        "pending_remote_reconciliation_count": 0,
+        "blocked_asset_count": 0,
+        "last_recovery_error": None,
+        "recovery_status": "COMPLETED",
+    }
+
+
+def test_evidence_remote_success_timeout_resolves_before_candidate_intake(tmp_path, monkeypatch):
+    promotion, _, source_store, _, knowledge_root, transport, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    original = transport.request
+
+    def evidence_success_then_timeout(method, path, *, json_body=None, query=None):
+        response = original(method, path, json_body=json_body, query=query)
+        if method == "POST" and path == "/v1/knowledge/evidences" and not getattr(evidence_success_then_timeout, "failed", False):
+            evidence_success_then_timeout.failed = True
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE")
+        return response
+
+    monkeypatch.setattr(transport, "request", evidence_success_then_timeout)
+    with pytest.raises(HardwareR1PromotionError, match="EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"):
+        promotion.intake_item("HWI-RECOVERY")
+    # The public evidence lookup is release-scoped. Seed an unrelated active
+    # publication so the recovery path can use only the frozen public query.
+    other_source = source_store.register_active_bytes("A0207", "A0207.docx", b"release seed")
+    other_golden = golden("A0207", other_source["source_id"], "B0007")
+    adapter = promotion.bridge.adapter
+    other_evidence = other_golden["evidence"][0]
+    other_evidence_id = promotion.bridge.evidence_id(
+        "A0207", other_source["source_id"], other_evidence["block_id"]
+    )
+    adapter.intake_evidence(
+        case_id="A0207",
+        source_metadata=other_source,
+        evidence={
+            "evidence_id": other_evidence_id,
+            "source_ref": other_source["source_ref"],
+            "evidence_type": "PARAGRAPH",
+            "locator": {**other_evidence["source_locator"], "block_id": other_evidence["block_id"]},
+            "excerpt_or_caption": other_evidence["text"],
+        },
+        revision=1,
+        source_revision=other_source["source_id"],
+    )
+    adapter.intake_candidate(
+        case_id="A0207",
+        source_document_id=other_source["source_id"],
+        source_ref=other_source["source_ref"],
+        structured_content=other_golden,
+        evidence_refs=[other_evidence_id],
+        revision=1,
+        source_version=other_source["source_id"],
+    )
+    adapter.review_candidate(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        state="CONFIRMED",
+        reviewer="release-seed-reviewer",
+        review_time=NOW,
+        confirmed_content=other_golden,
+        revision=1,
+    )
+    adapter.publish(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        hardware_publish_gate={"passed": True},
+        evidence_refs=[other_evidence_id],
+        publisher="release-seed-publisher",
+        published_at=NOW,
+        revision=1,
+    )
+    KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+        RELEASE, created_at=NOW
+    )
+    recovered = promotion.reconcile_item("HWI-RECOVERY")
+    assert recovered["status"] == "CANDIDATE_INTAKED"
+    # One seed evidence plus the timed-out request and its single controlled replay.
+    assert _count_calls(transport, "POST", "/v1/knowledge/evidences") == 3
+    evidence_id = promotion.assets.get_candidate(
+        promotion.workbench.items["HWI-RECOVERY"]["candidate_id"]
+    )["evidence_refs"][0]["evidence_id"]
+    assert _count_calls(transport, "GET", "/v1/knowledge/evidences/" + evidence_id) == 1
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 2
+    assert promotion.recovery_diagnostics()["pending_remote_reconciliation_count"] == 0
+
+
+def test_formal_review_unknown_is_asset_scoped_and_blocks_publish(tmp_path, monkeypatch):
+    promotion, _, _, _, _, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    intake = promotion.intake_item("HWI-RECOVERY")
+    confirmed = copy.deepcopy(candidate)
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "human-confirmed recovery rule"
+    original = transport.request
+
+    def review_success_then_timeout(method, path, *, json_body=None, query=None):
+        response = original(method, path, json_body=json_body, query=query)
+        if method == "POST" and path == "/v1/knowledge/reviews":
+            raise HardwareKnowledgeAdapterError("KNOWLEDGE_UNAVAILABLE")
+        return response
+
+    monkeypatch.setattr(transport, "request", review_success_then_timeout)
+    with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
+        promotion.review_item(
+            "HWI-RECOVERY", reviewer="recovery-reviewer", confirmed_content=confirmed,
+            review_time=NOW, review_comment="unknown review outcome",
+        )
+    with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
+        promotion.publish_item("HWI-RECOVERY", publisher="recovery-publisher", published_at=NOW)
+    with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
+        promotion.reconcile_item("HWI-RECOVERY")
+    assert promotion.get_item("HWI-RECOVERY")["status"] == "CANDIDATE_INTAKED"
+    assert promotion.recovery_diagnostics()["blocked_asset_count"] == 1
+    assert _count_calls(transport, "POST", "/v1/knowledge/reviews") == 1
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 0
+    assert intake["asset_candidate_id"] == promotion.workbench.items["HWI-RECOVERY"]["candidate_id"]
+
+
+@pytest.mark.parametrize("crash_point", ["remote-before-ledger", "ledger-before-source-ref", "source-ref-before-journal"])
+def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monkeypatch, crash_point):
+    promotion, _, source_store, source, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    intake = _prepare_reviewed_promotion(promotion, candidate)
+    original_transition = promotion._transition
+    original_add_reference = promotion.bridge.add_source_reference
+    original_journal_transition = promotion._journal_transition
+    publish_operation_id = promotion._operation_id(
+        intake["asset_candidate_id"], "PUBLISH", 1
+    )
+
+    def crash_on_asset_commit(*args, **kwargs):
+        if crash_point == "remote-before-ledger" and args[3] == "PUBLISHED_PENDING_QUERY_BACK":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_transition(*args, **kwargs)
+
+    def crash_before_source_ref(*args, **kwargs):
+        if crash_point == "ledger-before-source-ref":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_add_reference(*args, **kwargs)
+
+    def crash_before_journal_complete(operation_id, state, **kwargs):
+        if crash_point == "source-ref-before-journal" and operation_id == publish_operation_id and state == "COMPLETED":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_journal_transition(operation_id, state, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_on_asset_commit)
+    monkeypatch.setattr(promotion.bridge, "add_source_reference", crash_before_source_ref)
+    monkeypatch.setattr(promotion, "_journal_transition", crash_before_journal_complete)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.publish_item("HWI-RECOVERY", publisher="recovery-publisher", published_at=NOW)
+
+    monkeypatch.undo()
+    restarted = HardwareR1KnowledgePromotionService(
+        HardwareR1KnowledgePromotionStore(promotion.store.db_path, read_only=True),
+        workbench_service=promotion.workbench,
+        bridge=promotion.bridge,
+        candidate_repository=promotion.assets,
+        operation_journal=promotion.operation_journal,
+    )
+    repaired = restarted.reconcile_item("HWI-RECOVERY")
+    assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
+    assert repaired["knowledge_id"]
+    journal = promotion.operation_journal.get(publish_operation_id)
+    assert journal["operation_state"] == "COMPLETED"
+    refs = source_store.formal_knowledge_references("A0152")
+    assert any(item["knowledge_id"] == repaired["knowledge_id"] for item in refs)
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    assert restarted.recovery_diagnostics()["pending_remote_reconciliation_count"] == 0
+    assert source["source_id"] == promotion.assets.get_candidate(intake["asset_candidate_id"])["source_id"]
+
+
+def test_candidate_remote_success_crash_before_promotion_ledger_recovers_on_restart(tmp_path, monkeypatch):
+    promotion, _, _, _, _, transport, _ = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    original_transition = promotion._transition
+
+    def crash_before_local_candidate_commit(item, asset, record, target, **kwargs):
+        if target == "CANDIDATE_INTAKED":
+            raise SimulatedPowerLoss()
+        return original_transition(item, asset, record, target, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_before_local_candidate_commit)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.intake_item("HWI-RECOVERY")
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 1
+    monkeypatch.undo()
+    restarted = HardwareR1KnowledgePromotionService(
+        HardwareR1KnowledgePromotionStore(promotion.store.db_path, read_only=True),
+        workbench_service=promotion.workbench,
+        bridge=promotion.bridge,
+        candidate_repository=promotion.assets,
+        operation_journal=promotion.operation_journal,
+    )
+    recovered = restarted.reconcile_item("HWI-RECOVERY")
+    assert recovered["status"] == "CANDIDATE_INTAKED"
+    assert _count_calls(transport, "POST", "/v1/knowledge/candidates") == 1

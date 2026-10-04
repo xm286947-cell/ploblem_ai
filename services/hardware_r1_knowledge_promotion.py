@@ -22,6 +22,11 @@ from services.hardware_asset_repository import (
     CandidateAssetRepository,
     CandidateAssetRepositoryError,
 )
+from services.hardware_asset_operation_journal import (
+    HardwareAssetOperationJournal,
+    HardwareAssetOperationJournalError,
+)
+from services.hardware_case_knowledge_adapter import HardwareKnowledgeAdapterError
 
 PROMOTION_CONTRACT_VERSION = "hardware-r1-knowledge-promotion/v1"
 PROMOTION_REVISION = 1
@@ -293,11 +298,309 @@ class HardwareR1KnowledgePromotionService:
         workbench_service: Any,
         bridge: HardwareR1GoldenKnowledgeBridge,
         candidate_repository: CandidateAssetRepository,
+        operation_journal: HardwareAssetOperationJournal | None = None,
     ) -> None:
         self.store = store
         self.workbench = workbench_service
         self.bridge = bridge
         self.assets = candidate_repository
+        self.operation_journal = operation_journal or HardwareAssetOperationJournal(
+            candidate_repository.db_path
+        )
+
+    @staticmethod
+    def _operation_id(
+        asset_candidate_id: str,
+        operation_type: str,
+        revision: int,
+        evidence_id: str | None = None,
+    ) -> str:
+        identity = "|".join(
+            [asset_candidate_id, operation_type, str(int(revision)), evidence_id or ""]
+        )
+        return "HOP-R1-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
+    @staticmethod
+    def _reconciliation_error(operation_type: str) -> str:
+        return {
+            "EVIDENCE_INTAKE": "EVIDENCE_INTAKE_RECONCILIATION_REQUIRED",
+            "CANDIDATE_INTAKE": "CANDIDATE_INTAKE_RECONCILIATION_REQUIRED",
+            "FORMAL_REVIEW": "FORMAL_REVIEW_RECONCILIATION_REQUIRED",
+            "PUBLISH": "PUBLISH_RECONCILIATION_REQUIRED",
+        }.get(str(operation_type).upper(), "REMOTE_OUTCOME_UNKNOWN")
+
+    def _journal_transition(self, operation_id: str, state: str, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return self.operation_journal.transition(operation_id, state, **kwargs)
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+
+    def _run_remote_operation(
+        self,
+        *,
+        operation_type: str,
+        asset_candidate_id: str | None,
+        business_case_id: str,
+        source_id: str,
+        evidence_id: str | None,
+        remote_idempotency_key: str | None,
+        request_fingerprint: Mapping[str, Any],
+        reconciliation: bool,
+        action: Any,
+        completed_response: Mapping[str, Any] | None = None,
+        retry_failed: bool = False,
+    ) -> dict[str, Any]:
+        op_type = str(operation_type).strip().upper()
+        asset_id = str(asset_candidate_id or "").strip()
+        if not asset_id:
+            raise HardwareR1PromotionError("CANDIDATE_NOT_FOUND")
+        operation_id = self._operation_id(
+            asset_id, op_type, PROMOTION_REVISION, evidence_id
+        )
+        try:
+            entry = self.operation_journal.prepare(
+                operation_id=operation_id,
+                operation_type=op_type,
+                business_case_id=business_case_id,
+                candidate_id=asset_id,
+                source_id=source_id,
+                desired_action=f"HARDWARE_R1_{op_type}",
+                request_fingerprint=request_fingerprint,
+                remote_idempotency_key=remote_idempotency_key,
+            )
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+
+        state = str(entry["operation_state"])
+        prior_ambiguity = state in {"REMOTE_SENT", "OUTCOME_UNKNOWN", "RECONCILING"}
+        controlled_replay_attempt = False
+        if state == "COMPLETED":
+            if completed_response is not None:
+                return dict(completed_response)
+            if op_type == "EVIDENCE_INTAKE":
+                fp = entry["request_fingerprint"]
+                return {
+                    "evidence_id": evidence_id,
+                    "source": {
+                        "source_id": source_id,
+                        "uri": fp.get("source_ref"),
+                        "metadata": {"hardware_locator": fp.get("locator")},
+                    },
+                }
+            if op_type == "CANDIDATE_INTAKE":
+                fp = entry["request_fingerprint"]
+                return {
+                    "contract_version": "knowledge-candidate/v1",
+                    "candidate_id": fp.get("candidate_id"),
+                    "domain": "HARDWARE_CASE",
+                    "object_type": "HARDWARE_CASE",
+                    "structured_content": None,
+                    "evidence_refs": fp.get("evidence_refs") or [],
+                    "revision": PROMOTION_REVISION,
+                }
+            if op_type == "FORMAL_REVIEW":
+                return {
+                    "contract_version": "knowledge-review/v1",
+                    "candidate_id": entry["request_fingerprint"].get("candidate_id"),
+                    "review_status": "CONFIRMED",
+                    "revision": PROMOTION_REVISION,
+                }
+            if op_type == "PUBLISH":
+                try:
+                    obj = self.bridge.adapter.resolve_publication(
+                        str(entry["request_fingerprint"].get("candidate_id") or ""),
+                        expected_revision=PROMOTION_REVISION,
+                    )
+                    return {"object": obj}
+                except HardwareKnowledgeAdapterError as error:
+                    raise HardwareR1PromotionError("PUBLISH_RECONCILIATION_REQUIRED") from error
+
+        if state == "FAILED":
+            entry = self._journal_transition(operation_id, "PREPARED")
+            state = "PREPARED"
+            prior_ambiguity = False
+
+        if state == "REMOTE_SENT":
+            entry = self._journal_transition(
+                operation_id,
+                "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=(
+                    entry.get("recovery_action")
+                    or "REMOTE_RESULT_NOT_COMMITTED_LOCALLY"
+                ),
+            )
+            state = "OUTCOME_UNKNOWN"
+            prior_ambiguity = True
+
+        if state in {"OUTCOME_UNKNOWN", "RECONCILING"}:
+            if not reconciliation:
+                raise HardwareR1PromotionError(self._reconciliation_error(op_type))
+            if op_type == "EVIDENCE_INTAKE":
+                prior = self.operation_journal.get(operation_id) or {}
+                self._journal_transition(
+                    operation_id,
+                    "RECONCILING",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action="EVIDENCE_QUERY_PENDING",
+                )
+                try:
+                    resolved = self.bridge.adapter.resolve_evidence(str(evidence_id or ""))
+                except HardwareKnowledgeAdapterError as error:
+                    if error.status_code == 404 or error.code in {
+                        "EVIDENCE_NOT_FOUND", "KNOWLEDGE_EVIDENCE_NOT_FOUND"
+                    }:
+                        if "CONTROLLED_REPLAY" in str(prior.get("recovery_action") or ""):
+                            self._journal_transition(
+                                operation_id, "OUTCOME_UNKNOWN",
+                                error_code="REMOTE_OUTCOME_UNKNOWN",
+                                recovery_action="EVIDENCE_REPLAY_OUTCOME_UNKNOWN",
+                            )
+                            raise HardwareR1PromotionError(
+                                "EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"
+                            ) from error
+                        self._journal_transition(
+                            operation_id, "REMOTE_SENT",
+                            error_code="REMOTE_OUTCOME_UNKNOWN",
+                            recovery_action="EVIDENCE_CONTROLLED_REPLAY_SENT",
+                        )
+                        controlled_replay_attempt = True
+                    else:
+                        self._journal_transition(
+                            operation_id, "OUTCOME_UNKNOWN",
+                            error_code="REMOTE_OUTCOME_UNKNOWN",
+                            recovery_action="EVIDENCE_QUERY_FAILED",
+                        )
+                        raise HardwareR1PromotionError(
+                            "EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"
+                        ) from error
+                else:
+                    source = resolved.get("source")
+                    metadata = source.get("metadata") if isinstance(source, Mapping) else None
+                    matches = (
+                        resolved.get("evidence_id") == evidence_id
+                        and isinstance(source, Mapping)
+                        and str(source.get("source_id") or "") == source_id
+                        and str(source.get("uri") or "")
+                        == str(entry["request_fingerprint"].get("source_ref") or "")
+                        and isinstance(metadata, Mapping)
+                        and metadata.get("hardware_locator")
+                        == entry["request_fingerprint"].get("locator")
+                        and hashlib.sha256(
+                            str(resolved.get("excerpt") or "").encode("utf-8")
+                        ).hexdigest()
+                        == entry["request_fingerprint"].get("excerpt_sha256")
+                    )
+                    if not matches:
+                        self._journal_transition(
+                            operation_id, "OUTCOME_UNKNOWN",
+                            error_code="ASSET_SCOPED_AMBIGUITY",
+                            recovery_action="EVIDENCE_IDENTITY_CONFLICT",
+                        )
+                        raise HardwareR1PromotionError("ASSET_SCOPED_AMBIGUITY")
+                    self._journal_transition(operation_id, "COMPLETED")
+                    return resolved
+            elif op_type == "CANDIDATE_INTAKE":
+                prior = self.operation_journal.get(operation_id) or {}
+                if "CONTROLLED_REPLAY" in str(prior.get("recovery_action") or ""):
+                    self._journal_transition(
+                        operation_id, "OUTCOME_UNKNOWN",
+                        error_code="REMOTE_OUTCOME_UNKNOWN",
+                        recovery_action="CANDIDATE_REPLAY_OUTCOME_UNKNOWN",
+                    )
+                    raise HardwareR1PromotionError(
+                        "CANDIDATE_INTAKE_RECONCILIATION_REQUIRED"
+                    )
+                self._journal_transition(
+                    operation_id, "RECONCILING",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action="CANDIDATE_CONTROLLED_REPLAY_PENDING",
+                )
+                self._journal_transition(
+                    operation_id, "REMOTE_SENT",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action="CANDIDATE_CONTROLLED_REPLAY_SENT",
+                )
+                controlled_replay_attempt = True
+            else:
+                self._journal_transition(
+                    operation_id, "OUTCOME_UNKNOWN",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action="RECONCILIATION_REQUIRED_NO_QUERY_CONTRACT",
+                )
+                raise HardwareR1PromotionError(self._reconciliation_error(op_type))
+
+        if state == "PREPARED":
+            self._journal_transition(operation_id, "REMOTE_SENT")
+        elif op_type == "EVIDENCE_INTAKE" and reconciliation and state in {
+            "OUTCOME_UNKNOWN", "RECONCILING"
+        }:
+            # The explicit not-found branch above has authorized exactly one replay.
+            latest = self.operation_journal.get(operation_id) or {}
+            if latest.get("operation_state") != "REMOTE_SENT":
+                raise HardwareR1PromotionError(
+                    "EVIDENCE_INTAKE_RECONCILIATION_REQUIRED"
+                )
+
+        try:
+            response = action()
+        except HardwareKnowledgeAdapterError as error:
+            status = error.status_code
+            if op_type == "EVIDENCE_INTAKE" and status == 409:
+                self._journal_transition(
+                    operation_id, "OUTCOME_UNKNOWN",
+                    error_code="ASSET_SCOPED_AMBIGUITY",
+                    recovery_action="EVIDENCE_ID_CONFLICT",
+                )
+                raise HardwareR1PromotionError("ASSET_SCOPED_AMBIGUITY") from error
+            local_rejection = error.code in {
+                "REVISION_INVALID", "EVIDENCE_CONTRACT_INVALID",
+                "CANDIDATE_CONTRACT_INVALID", "REVIEW_CONTRACT_INVALID",
+                "PUBLISH_CONTRACT_INVALID", "HARDWARE_PUBLISH_GATE_NOT_PASSED",
+                "EVIDENCE_MISSING",
+            }
+            ambiguous_http_status = status in {408, 425, 429}
+            definite_rejection = (
+                not prior_ambiguity
+                and not ambiguous_http_status
+                and (local_rejection or (status is not None and 400 <= status < 500 and status != 409))
+            )
+            if definite_rejection:
+                self._journal_transition(
+                    operation_id, "FAILED", error_code=error.code,
+                    recovery_action="REMOTE_BUSINESS_REJECTION",
+                )
+                raise
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=(
+                    f"{op_type}_CONTROLLED_REPLAY_OUTCOME_UNKNOWN"
+                    if controlled_replay_attempt
+                    else "REMOTE_RESPONSE_UNVERIFIED"
+                ),
+            )
+            raise HardwareR1PromotionError(self._reconciliation_error(op_type)) from error
+        except Exception as error:
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=(
+                    f"{op_type}_CONTROLLED_REPLAY_OUTCOME_UNKNOWN"
+                    if controlled_replay_attempt
+                    else "REMOTE_TRANSPORT_OR_RESPONSE_FAILURE"
+                ),
+            )
+            raise HardwareR1PromotionError(self._reconciliation_error(op_type)) from error
+
+        if op_type == "PUBLISH":
+            self._journal_transition(
+                operation_id, "REMOTE_SENT",
+                recovery_action="REMOTE_RESPONSE_VALIDATED_LOCAL_COMMIT_PENDING",
+            )
+            return response
+        self._journal_transition(operation_id, "COMPLETED")
+        return response
 
     def _context(self, item_id: str) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
         try:
@@ -484,7 +787,9 @@ class HardwareR1KnowledgePromotionService:
         return {"contract_version": PROMOTION_CONTRACT_VERSION, "precheck": check,
                 "promotion": self._promotion_view(record, evidence_ids)}
 
-    def intake_item(self, item_id: str, *, retry: bool = False) -> dict[str, Any]:
+    def intake_item(
+        self, item_id: str, *, retry: bool = False, reconciliation: bool = False
+    ) -> dict[str, Any]:
         prechecked = self.precheck_item(item_id)
         item, asset, evidence_ids = self._context(item_id)
         record = self._record(item, asset)
@@ -497,7 +802,16 @@ class HardwareR1KnowledgePromotionService:
         if record["promotion_status"] not in {"PRECHECK_PASS", "INTAKE_FAILED"}:
             raise HardwareR1PromotionError("PROMOTION_STATE_INVALID")
         try:
-            result = self.bridge.intake(asset["knowledge_object"], item["evidence_validation"])
+            result = self.bridge.intake(
+                asset["knowledge_object"],
+                item["evidence_validation"],
+                asset_candidate_id=str(asset["candidate_id"]),
+                candidate_created_at=str(asset.get("created_at") or "") or None,
+                reconciliation=reconciliation,
+                operation_runner=lambda **operation: self._run_remote_operation(
+                    **operation, retry_failed=retry
+                ),
+            )
             knowledge_candidate_id = str(result["candidate"]["candidate_id"])
             returned_ids = [str(value) for value in result["candidate"].get("evidence_refs") or []]
             if sorted(returned_ids) != sorted(evidence_ids):
@@ -618,6 +932,13 @@ class HardwareR1KnowledgePromotionService:
                 reviewer=reviewer,
                 review_time=review_time,
                 review_comment=review_comment,
+                asset_candidate_id=str(asset["candidate_id"]),
+                business_case_id=str(asset["business_case_id"]),
+                source_id=str(asset["source_id"]),
+                reconciliation=False,
+                operation_runner=lambda **operation: self._run_remote_operation(
+                    **operation
+                ),
             )
         except HardwareR1GoldenBridgeError as error:
             failed = self.store.update(
@@ -840,7 +1161,9 @@ class HardwareR1KnowledgePromotionService:
         return {"contract_version": PROMOTION_CONTRACT_VERSION, "precheck": check,
                 "promotion": self._promotion_view(record, evidence_ids)}
 
-    def intake_item(self, item_id: str, *, retry: bool = False) -> dict[str, Any]:
+    def intake_item(
+        self, item_id: str, *, retry: bool = False, reconciliation: bool = False
+    ) -> dict[str, Any]:
         self.precheck_item(item_id)
         item, asset, evidence_ids = self._context(item_id)
         record = self._record(item, asset)
@@ -852,7 +1175,16 @@ class HardwareR1KnowledgePromotionService:
         if record["promotion_status"] not in {"PRECHECK_PASS", "INTAKE_FAILED"}:
             raise HardwareR1PromotionError("PROMOTION_STATE_INVALID")
         try:
-            result = self.bridge.intake(asset["knowledge_object"], item["evidence_validation"])
+            result = self.bridge.intake(
+                asset["knowledge_object"],
+                item["evidence_validation"],
+                asset_candidate_id=str(asset["candidate_id"]),
+                candidate_created_at=str(asset.get("created_at") or "") or None,
+                reconciliation=reconciliation,
+                operation_runner=lambda **operation: self._run_remote_operation(
+                    **operation, retry_failed=retry
+                ),
+            )
             knowledge_candidate_id = str(result["candidate"]["candidate_id"])
             returned_ids = [str(value) for value in result["candidate"].get("evidence_refs") or []]
             if sorted(returned_ids) != sorted(evidence_ids):
@@ -891,6 +1223,12 @@ class HardwareR1KnowledgePromotionService:
                 reviewer=reviewer,
                 review_time=review_time,
                 review_comment=review_comment,
+                asset_candidate_id=str(asset["candidate_id"]),
+                business_case_id=str(asset["business_case_id"]),
+                source_id=str(asset["source_id"]),
+                operation_runner=lambda **operation: self._run_remote_operation(
+                    **operation
+                ),
             )
         except HardwareR1GoldenBridgeError as error:
             failed = self._transition(item, asset, record, "REVIEW_FAILED", action="REVIEW",
@@ -909,6 +1247,7 @@ class HardwareR1KnowledgePromotionService:
         record = self._record(item, asset)
         if record is None:
             raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
+        self._raise_for_pending_operation(str(asset["candidate_id"]))
         state = record["promotion_status"]
         if state in {"VERIFIED", "PUBLISHED_PENDING_QUERY_BACK"}:
             return {**self._promotion_view(record, evidence_ids), "idempotent_reuse": True}
@@ -919,11 +1258,37 @@ class HardwareR1KnowledgePromotionService:
                 business_case_id=str(asset["business_case_id"]),
                 candidate_id=str(record["knowledge_candidate_id"]),
                 evidence_refs=evidence_ids, publisher=publisher, published_at=published_at,
+                asset_candidate_id=str(asset["candidate_id"]),
+                source_id=str(asset["source_id"]),
+                reconciliation=False,
+                record_source_reference=False,
+                operation_runner=lambda **operation: self._run_remote_operation(
+                    **operation, retry_failed=retry
+                ),
             )
             obj = result.get("object")
             if not isinstance(obj, Mapping) or not obj.get("knowledge_id"):
                 raise HardwareR1PromotionError("KNOWLEDGE_OBJECT_ID_MISSING")
         except HardwareR1GoldenBridgeError as error:
+            operation_id = self._operation_id(
+                str(asset["candidate_id"]), "PUBLISH", PROMOTION_REVISION
+            )
+            try:
+                operation = self.operation_journal.get(operation_id)
+            except HardwareAssetOperationJournalError as journal_error:
+                raise HardwareR1PromotionError(journal_error.code) from journal_error
+            if operation and operation.get("operation_state") in {
+                "PREPARED", "REMOTE_SENT", "OUTCOME_UNKNOWN", "RECONCILING"
+            }:
+                if operation.get("operation_state") == "REMOTE_SENT":
+                    self._journal_transition(
+                        operation_id, "OUTCOME_UNKNOWN",
+                        error_code="REMOTE_OUTCOME_UNKNOWN",
+                        recovery_action="REMOTE_RESPONSE_UNVERIFIED",
+                    )
+                raise HardwareR1PromotionError(
+                    "PUBLISH_RECONCILIATION_REQUIRED"
+                ) from error
             failed = self._transition(item, asset, record, "PUBLISH_FAILED", action="PUBLISH",
                                       retry=retry, error_code=error.code)
             return {**self._promotion_view(failed, evidence_ids), "idempotent_reuse": False}
@@ -932,13 +1297,306 @@ class HardwareR1KnowledgePromotionService:
             retry=retry, knowledge_id=str(obj["knowledge_id"]),
             public_ref=str(result.get("public_ref") or record["knowledge_candidate_id"]),
         )
+        try:
+            self.bridge.add_source_reference(
+                str(asset["business_case_id"]),
+                str(asset["source_id"]),
+                str(obj["knowledge_id"]),
+            )
+        except HardwareR1GoldenBridgeError as error:
+            raise HardwareR1PromotionError("PUBLISH_RECONCILIATION_REQUIRED") from error
+        operation_id = self._operation_id(
+            str(asset["candidate_id"]), "PUBLISH", PROMOTION_REVISION
+        )
+        self._journal_transition(operation_id, "COMPLETED")
         return {**self._promotion_view(committed, evidence_ids), "idempotent_reuse": False}
+
+    def _pending_operations(self, asset_candidate_id: str) -> list[dict[str, Any]]:
+        try:
+            return [
+                item for item in self.operation_journal.list_nonterminal()
+                if str(item.get("candidate_id") or "") == str(asset_candidate_id)
+            ]
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+
+    def _raise_for_pending_operation(self, asset_candidate_id: str) -> None:
+        pending = self._pending_operations(asset_candidate_id)
+        if pending:
+            raise HardwareR1PromotionError(
+                self._reconciliation_error(str(pending[0].get("operation_type") or ""))
+            )
+
+    def recovery_diagnostics(self) -> dict[str, Any]:
+        try:
+            pending = [
+                item for item in self.operation_journal.list_nonterminal()
+                if item.get("operation_type") in {
+                    "EVIDENCE_INTAKE", "CANDIDATE_INTAKE", "FORMAL_REVIEW", "PUBLISH"
+                }
+            ]
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+        blocked = {
+            str(item.get("candidate_id") or item.get("business_case_id") or item["operation_id"])
+            for item in pending
+        }
+        last_error = next(
+            (str(item.get("error_code")) for item in reversed(pending) if item.get("error_code")),
+            self._reconciliation_error(str(pending[-1]["operation_type"])) if pending else None,
+        )
+        return {
+            "pending_remote_reconciliation_count": len(pending),
+            "blocked_asset_count": len(blocked),
+            "last_recovery_error": last_error,
+            "recovery_status": "DEGRADED" if pending else "COMPLETED",
+        }
+
+    def _reconcile_evidence_entry(
+        self, entry: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        operation_id = str(entry["operation_id"])
+        state = str(entry.get("operation_state") or "")
+        if state == "REMOTE_SENT":
+            entry = self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=entry.get("recovery_action") or "REMOTE_RESULT_NOT_COMMITTED_LOCALLY",
+            )
+        self._journal_transition(
+            operation_id, "RECONCILING",
+            error_code="REMOTE_OUTCOME_UNKNOWN",
+            recovery_action="EVIDENCE_QUERY_PENDING",
+        )
+        fp = entry.get("request_fingerprint") or {}
+        evidence_id = str(entry.get("source_id") or "")
+        # Evidence id is not a journal column; it is part of the operation identity
+        # and fingerprint. Resolve it from the persisted request fingerprint.
+        evidence_id = str(fp.get("evidence_id") or "")
+        try:
+            resolved = self.bridge.adapter.resolve_evidence(evidence_id)
+        except HardwareKnowledgeAdapterError as error:
+            if error.status_code == 404 or error.code in {
+                "EVIDENCE_NOT_FOUND", "KNOWLEDGE_EVIDENCE_NOT_FOUND"
+            }:
+                self._journal_transition(
+                    operation_id, "OUTCOME_UNKNOWN",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action="EVIDENCE_QUERY_NOT_FOUND",
+                )
+                return None
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action="EVIDENCE_QUERY_FAILED",
+            )
+            return None
+        source = resolved.get("source")
+        metadata = source.get("metadata") if isinstance(source, Mapping) else None
+        matches = (
+            resolved.get("evidence_id") == evidence_id
+            and isinstance(source, Mapping)
+            and str(source.get("source_id") or "") == str(entry.get("source_id") or "")
+            and str(source.get("uri") or "") == str(fp.get("source_ref") or "")
+            and isinstance(metadata, Mapping)
+            and metadata.get("hardware_locator") == fp.get("locator")
+            and hashlib.sha256(
+                str(resolved.get("excerpt") or "").encode("utf-8")
+            ).hexdigest() == fp.get("excerpt_sha256")
+        )
+        if not matches:
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="ASSET_SCOPED_AMBIGUITY",
+                recovery_action="EVIDENCE_IDENTITY_CONFLICT",
+            )
+            raise HardwareR1PromotionError("ASSET_SCOPED_AMBIGUITY")
+        self._journal_transition(operation_id, "COMPLETED")
+        return resolved
+
+    def _reconcile_publish(
+        self,
+        item: Mapping[str, Any],
+        asset: Mapping[str, Any],
+        evidence_ids: list[str],
+        record: Mapping[str, Any],
+        entry: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        operation_id = str(entry["operation_id"])
+        if str(entry.get("operation_state")) == "REMOTE_SENT":
+            entry = self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=entry.get("recovery_action") or "REMOTE_RESULT_NOT_COMMITTED_LOCALLY",
+            )
+        self._journal_transition(
+            operation_id, "RECONCILING",
+            error_code="REMOTE_OUTCOME_UNKNOWN",
+            recovery_action="PUBLICATION_QUERY_PENDING",
+        )
+        knowledge_candidate_id = str(record.get("knowledge_candidate_id") or "")
+        if not knowledge_candidate_id:
+            raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+        try:
+            published = self.bridge.adapter.resolve_publication(
+                knowledge_candidate_id,
+                expected_revision=PROMOTION_REVISION,
+            )
+        except HardwareKnowledgeAdapterError as error:
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action=(
+                    "PUBLICATION_QUERY_NOT_FOUND"
+                    if error.status_code == 404 or error.code == "KNOWLEDGE_PUBLIC_REF_NOT_FOUND"
+                    else "PUBLICATION_QUERY_FAILED"
+                ),
+            )
+            raise HardwareR1PromotionError("PUBLISH_RECONCILIATION_REQUIRED") from error
+        knowledge_id = str(published.get("knowledge_id") or "")
+        valid = (
+            published.get("candidate_ref") == knowledge_candidate_id
+            and int(published.get("revision") or 0) == PROMOTION_REVISION
+            and list(published.get("evidence_refs") or []) == evidence_ids
+            and published.get("domain") == "HARDWARE_CASE"
+            and published.get("object_type") == "HARDWARE_CASE"
+            and bool(knowledge_id)
+        )
+        if not valid:
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="CANDIDATE_DATA_INTEGRITY_ERROR",
+                recovery_action="PUBLICATION_METADATA_MISMATCH",
+            )
+            raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+
+        current_status = str(record.get("promotion_status") or "")
+        if current_status in {"REVIEW_CONFIRMED", "PUBLISH_FAILED"}:
+            repaired = self._transition(
+                item, asset, record, "PUBLISHED_PENDING_QUERY_BACK",
+                action="PUBLISH_RECOVERY", knowledge_id=knowledge_id,
+                public_ref=knowledge_candidate_id,
+            )
+        elif current_status in {"PUBLISHED_PENDING_QUERY_BACK", "VERIFIED"}:
+            if str(record.get("knowledge_id") or "") != knowledge_id:
+                raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+            repaired = dict(record)
+        else:
+            raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+        try:
+            self.bridge.add_source_reference(
+                str(asset["business_case_id"]), str(asset["source_id"]), knowledge_id
+            )
+        except HardwareR1GoldenBridgeError as error:
+            self._journal_transition(
+                operation_id, "OUTCOME_UNKNOWN",
+                error_code="REMOTE_OUTCOME_UNKNOWN",
+                recovery_action="FORMAL_SOURCE_REFERENCE_REPAIR_PENDING",
+            )
+            raise HardwareR1PromotionError("PUBLISH_RECONCILIATION_REQUIRED") from error
+        self._journal_transition(operation_id, "COMPLETED")
+        return {
+            **self._promotion_view(repaired, evidence_ids),
+            "idempotent_reuse": False,
+            "reconciled": True,
+        }
+
+    def reconcile_item(self, item_id: str) -> dict[str, Any]:
+        item, asset, evidence_ids = self._context(item_id)
+        record = self._record(item, asset)
+        if record is None:
+            raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
+        try:
+            pending = [
+                entry for entry in self.operation_journal.list_nonterminal()
+                if str(entry.get("candidate_id") or "") == str(asset["candidate_id"])
+            ]
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+        if not pending:
+            completed = self.operation_journal.list_operations(
+                candidate_id=str(asset["candidate_id"]),
+                operation_type="CANDIDATE_INTAKE",
+                states={"COMPLETED"},
+            )
+            if record.get("promotion_status") == "PRECHECK_PASS" and completed:
+                result = self.intake_item(item_id, reconciliation=True)
+                return {**result, "reconciled": True}
+            return {**self._promotion_view(record, evidence_ids), "reconciled": False}
+
+        entry = pending[0]
+        operation_type = str(entry.get("operation_type") or "")
+        if operation_type in {"EVIDENCE_INTAKE", "CANDIDATE_INTAKE"}:
+            if record.get("promotion_status") not in {"PRECHECK_PASS", "INTAKE_FAILED"}:
+                raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+            result = self.intake_item(item_id, retry=True, reconciliation=True)
+            return {**result, "reconciled": True}
+        if operation_type == "FORMAL_REVIEW":
+            if entry.get("operation_state") == "REMOTE_SENT":
+                self._journal_transition(
+                    str(entry["operation_id"]), "OUTCOME_UNKNOWN",
+                    error_code="REMOTE_OUTCOME_UNKNOWN",
+                    recovery_action=entry.get("recovery_action") or "REMOTE_RESULT_NOT_COMMITTED_LOCALLY",
+                )
+            raise HardwareR1PromotionError("FORMAL_REVIEW_RECONCILIATION_REQUIRED")
+        if operation_type == "PUBLISH":
+            return self._reconcile_publish(item, asset, evidence_ids, record, entry)
+        raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
+
+    def reconcile_startup(self, *, max_remote_queries: int = 2) -> dict[str, Any]:
+        """Use a bounded read-only reconciliation budget during app startup."""
+        budget = max(0, min(int(max_remote_queries), 4))
+        try:
+            entries = self.operation_journal.list_nonterminal()
+        except HardwareAssetOperationJournalError as error:
+            raise HardwareR1PromotionError(error.code) from error
+        attempts = 0
+        for entry in entries:
+            if attempts >= budget:
+                break
+            if entry.get("operation_state") not in {
+                "REMOTE_SENT", "OUTCOME_UNKNOWN", "RECONCILING"
+            }:
+                continue
+            op_type = str(entry.get("operation_type") or "")
+            if op_type not in {"EVIDENCE_INTAKE", "PUBLISH"}:
+                continue
+            attempts += 1
+            try:
+                if op_type == "EVIDENCE_INTAKE":
+                    self._reconcile_evidence_entry(entry)
+                    continue
+                asset_id = str(entry.get("candidate_id") or "")
+                asset = self.assets.get_candidate(asset_id)
+                promotion_record = self.assets.get_promotion_record(asset_id)
+                if not asset or not promotion_record:
+                    self._journal_transition(
+                        str(entry["operation_id"]), "OUTCOME_UNKNOWN",
+                        error_code="CANDIDATE_DATA_INTEGRITY_ERROR",
+                        recovery_action="PROMOTION_RECORD_MISSING",
+                    )
+                    continue
+                item_id = str(promotion_record.get("origin_item_id") or "")
+                item = self._workbench_item(item_id)
+                evidence_ids = [
+                    str(value.get("evidence_id") or "")
+                    for value in asset.get("evidence_refs") or []
+                    if isinstance(value, Mapping)
+                ]
+                self._reconcile_publish(
+                    item, asset, evidence_ids, promotion_record, entry
+                )
+            except (HardwareR1PromotionError, CandidateAssetRepositoryError):
+                # Ambiguity remains asset-scoped and is reflected in diagnostics.
+                continue
+        return {**self.recovery_diagnostics(), "startup_queries_used": attempts}
 
     def verify_item(self, item_id: str, *, retry: bool = False) -> dict[str, Any]:
         item, asset, evidence_ids = self._context(item_id)
         record = self._record(item, asset)
         if record is None:
             raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
+        self._raise_for_pending_operation(str(asset["candidate_id"]))
         state = record["promotion_status"]
         if state == "VERIFIED":
             return {**self._promotion_view(record, evidence_ids), "idempotent_reuse": True}
@@ -994,11 +1652,35 @@ class HardwareR1KnowledgePromotionService:
 
     def retry_failed_item(self, item_id: str) -> dict[str, Any]:
         current = self.get_item(item_id)
+        _, asset, _ = self._context(item_id)
+        self._raise_for_pending_operation(str(asset["candidate_id"]))
         if current["status"] == "INTAKE_FAILED":
             return self.intake_item(item_id, retry=True)
         if current["status"] == "PUBLISH_FAILED":
-            return self.publish_item(item_id, publisher="hardware-promotion-retry",
-                                     published_at=datetime.now(timezone.utc), retry=True)
+            operation_id = self._operation_id(
+                str(asset["candidate_id"]), "PUBLISH", PROMOTION_REVISION
+            )
+            try:
+                journal_entry = self.operation_journal.get(operation_id)
+            except HardwareAssetOperationJournalError as error:
+                raise HardwareR1PromotionError(error.code) from error
+            fingerprint = (
+                journal_entry.get("request_fingerprint")
+                if isinstance(journal_entry, Mapping)
+                else {}
+            )
+            publisher = str(fingerprint.get("publisher") or "hardware-promotion-retry")
+            published_at_text = str(fingerprint.get("published_at") or "")
+            try:
+                published_at = (
+                    datetime.fromisoformat(published_at_text)
+                    if published_at_text
+                    else datetime.now(timezone.utc)
+                )
+            except ValueError as error:
+                raise HardwareR1PromotionError("OPERATION_JOURNAL_INVALID") from error
+            return self.publish_item(item_id, publisher=publisher,
+                                     published_at=published_at, retry=True)
         if current["status"] == "VERIFY_FAILED":
             return self.verify_item(item_id, retry=True)
         raise HardwareR1PromotionError("PROMOTION_RETRY_NOT_ALLOWED")

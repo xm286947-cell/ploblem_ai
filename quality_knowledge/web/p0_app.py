@@ -587,13 +587,80 @@ def create_p0_app(
                         "auto_publish": False,
                     }
                 else:
+                    try:
+                        remote_recovery = hardware_r1_promotion_service.reconcile_startup(
+                            max_remote_queries=2
+                        )
+                    except HardwareR1PromotionError as error:
+                        remote_recovery = {
+                            "pending_remote_reconciliation_count": 0,
+                            "blocked_asset_count": 0,
+                            "last_recovery_error": error.code,
+                            "recovery_status": "DEGRADED",
+                            "startup_queries_used": 0,
+                        }
                     app.state.hardware_r1_promotion_service = hardware_r1_promotion_service
                     app.state.hardware_r1_promotion_status = {
                         "ready": True,
-                        "code": "READY",
+                        "code": (
+                            "READY_DEGRADED"
+                            if remote_recovery.get("pending_remote_reconciliation_count")
+                            or remote_recovery.get("last_recovery_error")
+                            else "READY"
+                        ),
                         "legacy_migration": migration_status,
+                        "remote_recovery": remote_recovery,
                         "auto_publish": False,
                     }
+                    app.state.hardware_data_status.update(
+                        {
+                            "pending_remote_reconciliation_count": remote_recovery.get(
+                                "pending_remote_reconciliation_count", 0
+                            ),
+                            "blocked_asset_count": remote_recovery.get(
+                                "blocked_asset_count", 0
+                            ),
+                        }
+                    )
+                    if hardware_startup_status is not None:
+                        local_recovery_pending = bool(
+                            hardware_startup_status.get("pending_local_recovery_count")
+                        )
+                        remote_recovery_pending = bool(
+                            remote_recovery.get("pending_remote_reconciliation_count")
+                            or remote_recovery.get("last_recovery_error")
+                        )
+                        hardware_startup_status.update(
+                            {
+                                "pending_remote_reconciliation_count": remote_recovery.get(
+                                    "pending_remote_reconciliation_count", 0
+                                ),
+                                "blocked_asset_count": remote_recovery.get(
+                                    "blocked_asset_count", 0
+                                ),
+                                "recovery_class": (
+                                    "CLASS_A"
+                                    if local_recovery_pending
+                                    else "CLASS_B"
+                                    if remote_recovery_pending
+                                    else None
+                                ),
+                                "recovery_status": (
+                                    "DEGRADED"
+                                    if remote_recovery_pending or local_recovery_pending
+                                    else "COMPLETED"
+                                ),
+                                "degraded": remote_recovery_pending or local_recovery_pending,
+                                "last_recovery_error": (
+                                    remote_recovery.get("last_recovery_error")
+                                    or (
+                                        hardware_startup_status.get("last_recovery_error")
+                                        if local_recovery_pending
+                                        else None
+                                    )
+                                ),
+                            }
+                        )
             else:
                 app.state.hardware_r1_promotion_store = None
                 app.state.hardware_r1_promotion_service = None
