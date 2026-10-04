@@ -1,0 +1,9 @@
+{
+  "source_dir": "external-wave4-data",
+  "max_cases": 30,
+  "validation_data_root": "external-wave4-data/validation-root",
+  "normal_product_data_root": "external-wave4-data/normal-product-root",
+  "output_report_dir": "wave4-reports",
+  "provider_runtime_reference": "configure-in-approved-environment",
+  "knowledge_endpoint": null
+}
