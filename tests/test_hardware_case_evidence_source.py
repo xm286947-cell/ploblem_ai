@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from repositories.hardware_case_repository import HardwareCaseRepository
+from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_case_source_store import (
     HardwareCaseSourceError,
@@ -50,10 +51,15 @@ def _case(status: str = "PUBLISHED") -> dict:
     }
 
 
+def _source_store(db: Path, source_root: Path) -> HardwareCaseSourceStore:
+    CandidateAssetRepository(db.with_name("hardware_asset.db")).initialize()
+    return HardwareCaseSourceStore(db, source_root)
+
+
 def _stack(tmp_path: Path, *, status: str = "PUBLISHED"):
     db = tmp_path / "hardware_case.sqlite3"
     backend = HardwareCaseBackendService(HardwareCaseRepository(db))
-    source_store = HardwareCaseSourceStore(db, tmp_path / "sources")
+    source_store = _source_store(db, tmp_path / "sources")
     backend.create_case(_case(status))
     backend.save_evidence(
         {
@@ -78,7 +84,7 @@ def _stack(tmp_path: Path, *, status: str = "PUBLISHED"):
 
 def test_source_store_register_preview_and_never_exposes_absolute_path(tmp_path: Path):
     source = _docx(tmp_path)
-    store = HardwareCaseSourceStore(tmp_path / "db.sqlite3", tmp_path / "sources")
+    store = _source_store(tmp_path / "db.sqlite3", tmp_path / "sources")
 
     meta = store.register_file("word:A9001-source.docx", source)
     serialized = repr(meta)
@@ -99,7 +105,7 @@ def test_source_store_register_preview_and_never_exposes_absolute_path(tmp_path:
 
 def test_source_store_fails_closed_when_file_missing_or_hash_changes(tmp_path: Path):
     source = _docx(tmp_path)
-    store = HardwareCaseSourceStore(tmp_path / "db.sqlite3", tmp_path / "sources")
+    store = _source_store(tmp_path / "db.sqlite3", tmp_path / "sources")
     store.register_file("word:A9001-source.docx", source)
 
     stored = store.resolve_path("word:A9001-source.docx")

@@ -13,6 +13,12 @@ DIST = ROOT / "dist"
 PACKAGE_NAME = "HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1"
 PACKAGE_ARCHIVE_VARIANT = "DEPENDENCY_CLOSURE_R1"
 STAGE = DIST / PACKAGE_NAME
+ASSET_MIGRATION_MODULE_DIR = "services/hardware_asset_migrations"
+REQUIRED_ASSET_MIGRATION_MODULES = {
+    f"{ASSET_MIGRATION_MODULE_DIR}/v001_candidate_repository.py",
+    f"{ASSET_MIGRATION_MODULE_DIR}/v002_legacy_migration.py",
+    f"{ASSET_MIGRATION_MODULE_DIR}/v003_source_operation_journal.py",
+}
 
 INCLUDE_DIRS = [
     # Unified Runtime is the only executable shared platform subtree required
@@ -24,6 +30,7 @@ INCLUDE_GLOBS = [
     "services/hardware_case*.py",
     "services/hardware_tree*.py",
     "services/hardware_migrations/*.py",
+    "services/hardware_asset_migrations/*.py",
     "repositories/hardware_case*.py",
     "repositories/hardware_tree*.py",
     "schema/hardware_case*.json",
@@ -184,6 +191,20 @@ def _module_name(path: Path, root: Path) -> str:
     return ".".join(parts)
 
 
+def asset_migration_module_paths(root: Path = ROOT) -> list[str]:
+    directory = root / ASSET_MIGRATION_MODULE_DIR
+    modules = []
+    for path in directory.glob("*.py"):
+        relative = path.relative_to(root)
+        if path.is_file() and allowed(relative):
+            modules.append(relative.as_posix())
+    modules.sort()
+    missing = sorted(REQUIRED_ASSET_MIGRATION_MODULES - set(modules))
+    if missing:
+        raise SystemExit("ASSET_MIGRATION_MODULE_SET_INCOMPLETE=" + ",".join(missing))
+    return modules
+
+
 def _module_path(module: str, root: Path) -> Path | None:
     if not module:
         return None
@@ -237,7 +258,9 @@ def _direct_imports(path: Path, root: Path) -> list[tuple[str, int, str]]:
 
 
 def dependency_closure(root: Path = ROOT) -> dict[str, object]:
-    queue = [root / relative for relative in CLOSURE_ROOTS]
+    migration_modules = asset_migration_module_paths(root)
+    roots = [*CLOSURE_ROOTS, *migration_modules]
+    queue = [root / relative for relative in roots]
     visited: set[Path] = set()
     edges: list[dict[str, str]] = []
     unresolved: list[dict[str, str]] = []
@@ -247,7 +270,9 @@ def dependency_closure(root: Path = ROOT) -> dict[str, object]:
         if path in visited:
             continue
         if not path.is_file():
-            unresolved.append({"root": str(path.relative_to(root)), "reason": "ROOT_MISSING"})
+            unresolved.append(
+                {"root": path.relative_to(root).as_posix(), "reason": "ROOT_MISSING"}
+            )
             continue
         visited.add(path)
         current_module = _module_name(path, root)
@@ -257,24 +282,25 @@ def dependency_closure(root: Path = ROOT) -> dict[str, object]:
             ):
                 if target is not None:
                     edges.append({
-                        "from": str(path.relative_to(root)),
+                        "from": path.relative_to(root).as_posix(),
                         "import": imported,
                         "module": resolved_module,
-                        "target": str(target.relative_to(root)),
+                        "target": target.relative_to(root).as_posix(),
                     })
                     queue.append(target)
                 elif resolved_module.split(".", 1)[0] in LOCAL_IMPORT_PREFIXES:
                     unresolved.append({
-                        "from": str(path.relative_to(root)),
+                        "from": path.relative_to(root).as_posix(),
                         "module": resolved_module,
                         "import": imported,
                         "reason": "LOCAL_MODULE_MISSING",
                     })
 
-    files = sorted(str(path.relative_to(root)) for path in visited)
+    files = sorted(path.relative_to(root).as_posix() for path in visited)
     return {
         "scanner": "TOP_LEVEL_LOCAL_IMPORT_CLOSURE_V1",
-        "roots": list(CLOSURE_ROOTS),
+        "roots": roots,
+        "asset_migration_modules": migration_modules,
         "files": files,
         "edges": sorted(edges, key=lambda item: (item["from"], item["target"])),
         "unresolved_local_imports": unresolved,
@@ -294,13 +320,16 @@ def copy_dependency_closure() -> dict[str, object]:
     return report
 
 
-def verify_staged_dependency_closure() -> dict[str, object]:
+def verify_staged_dependency_closure(expected_files: list[str]) -> dict[str, object]:
     report = dependency_closure(STAGE)
     if report["status"] != "PASS":
         raise SystemExit(
             "STAGED_DEPENDENCY_CLOSURE_FAIL="
             + json.dumps(report["unresolved_local_imports"], ensure_ascii=False)
         )
+    missing = sorted(set(expected_files) - set(report["files"]))
+    if missing:
+        raise SystemExit("STAGED_DEPENDENCY_CLOSURE_MISSING=" + ",".join(missing))
     return report
 
 
@@ -395,12 +424,13 @@ def main() -> int:
     ):
         (STAGE / relative).mkdir(parents=True, exist_ok=True)
 
-    staged_closure = verify_staged_dependency_closure()
+    staged_closure = verify_staged_dependency_closure(list(closure["files"]))
     closure_report = {
         **closure,
         "staged_verification": {
             "status": staged_closure["status"],
             "file_count": len(staged_closure["files"]),
+            "expected_file_count": len(closure["files"]),
         },
     }
     (STAGE / "PACKAGE_DEPENDENCY_CLOSURE.json").write_text(
@@ -618,6 +648,12 @@ def main() -> int:
             "platform_shared": ["runtime"],
             "package_policy": "EXPLICIT_HARDWARE_ALLOWLIST",
             "cross_domain_business_code_bundled": False,
+        },
+        "asset_migration_package": {
+            "module_dir": ASSET_MIGRATION_MODULE_DIR,
+            "required_modules": sorted(REQUIRED_ASSET_MIGRATION_MODULES),
+            "modules": list(closure["asset_migration_modules"]),
+            "status": "PASS",
         },
         "known_gaps": [
             "Real company Word/Excel data is not bundled",

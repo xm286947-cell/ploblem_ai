@@ -149,20 +149,44 @@ def readiness_status(
     root: str | Path,
     hardware_db_path: str | Path,
     environ: Mapping[str, str] | None = None,
+    startup_status: Mapping[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     root_path = Path(root).resolve()
     env = os.environ if environ is None else environ
+    if startup_status is not None and not bool(startup_status.get("ready")):
+        code = str(startup_status.get("error_code") or "HARDWARE_STARTUP_NOT_READY")
+        payload = {
+            "status": "UNREADY",
+            "service": "HARDWARE_CASE",
+            "dependencies": {
+                "HARDWARE_STARTUP": {
+                    "status": "UNREADY",
+                    "error_code": code,
+                    "phase": startup_status.get("phase"),
+                }
+            },
+            "startup": dict(startup_status),
+            "binding": release_binding(root_path),
+        }
+        return 503, payload
     dependencies = {
         "HARDWARE_DB": _db_ready(Path(hardware_db_path)),
         "PUBLIC_CONTRACT": _contract_ready(root_path),
         "UNIFIED_RUNTIME_CONFIG": _runtime_ready(root_path, env),
         "UNIFIED_KNOWLEDGE": _knowledge_ready(env),
     }
+    if startup_status is not None:
+        dependencies["HARDWARE_STARTUP"] = {
+            "status": "READY" if startup_status.get("ready") else "UNREADY",
+            "phase": startup_status.get("phase"),
+            "error_code": startup_status.get("error_code"),
+        }
     ready = all(item.get("status") == "READY" for item in dependencies.values())
     payload = {
         "status": "READY" if ready else "UNREADY",
         "service": "HARDWARE_CASE",
         "dependencies": dependencies,
+        "startup": dict(startup_status) if startup_status is not None else None,
         "binding": release_binding(root_path),
     }
     return (200 if ready else 503), payload

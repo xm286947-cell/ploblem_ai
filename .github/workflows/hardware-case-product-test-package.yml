@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_package_closure_gate.py"
       - "scripts/hardware_case_product_test_smoke.py"
       - "run_hardware_case_product_test.bat"
       - "run_hardware_case_product_test.sh"
@@ -30,11 +31,14 @@ on:
       - "quality_knowledge/**"
       - "repositories/hardware_*"
       - "services/hardware_*"
+      - "services/hardware_asset_migrations/**"
       - "schema/hardware_*"
+      - "tests/test_hardware_case_product_package_closure.py"
   push:
     branches: [main]
     paths:
       - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_package_closure_gate.py"
       - "scripts/hardware_case_product_test_smoke.py"
       - "scripts/hardware_case_fresh_extract_gate.py"
       - "scripts/hardware_case_precheck.py"
@@ -63,7 +67,9 @@ on:
       - "quality_knowledge/**"
       - "repositories/hardware_*"
       - "services/hardware_*"
+      - "services/hardware_asset_migrations/**"
       - "schema/hardware_*"
+      - "tests/test_hardware_case_product_package_closure.py"
   workflow_dispatch:
 
 jobs:
@@ -88,6 +94,12 @@ jobs:
 
       - name: Build product test package
         run: python scripts/build_hardware_case_product_test_package.py
+
+      - name: Verify asset migration package closure
+        run: python scripts/hardware_case_package_closure_gate.py
+
+      - name: Run package closure regression
+        run: python -m pytest -q --noconftest tests/test_hardware_case_product_package_closure.py
 
       - name: Verify POSIX launcher modes from fresh extract
         run: python scripts/hardware_case_package_launcher_gate.py
