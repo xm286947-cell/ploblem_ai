@@ -836,8 +836,6 @@ def _verify_new_install(evidence_root: Path, data_root: Path, app_root: Path) ->
         # Preview is disposable; clearing it must not touch durable identities.
         preview_rows_cleared = live_app.state.hardware_r1_preview_store.clear()
         preview_path = data_root / "rebuildable" / "preview.db"
-        if preview_path.exists():
-            preview_path.unlink()
         cache_rows_invalidated = 0
         from services.hardware_case_r1_runtime import invalidate_hardware_r1_stage_cache
 
@@ -849,6 +847,11 @@ def _verify_new_install(evidence_root: Path, data_root: Path, app_root: Path) ->
             )
         after_clear_state = _active_state(live_app, data_root, first_status, backup_id=pre_state.get("backup_id"))
         assert not _diff(_critical_view(initial_state), _critical_view(after_clear_state))
+    # Stop the app before removing its disposable SQLite file. Windows keeps
+    # SQLite file handles exclusive until app shutdown; the durable-state
+    # isolation assertion above is unchanged.
+    if preview_path.exists():
+        preview_path.unlink()
 
     # The same upgraded root must start a second time without a second migration.
     first_manifest = json.loads((data_root / MANIFEST_RELATIVE_PATH).read_text(encoding="utf-8"))
