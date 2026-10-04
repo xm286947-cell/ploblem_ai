@@ -116,7 +116,9 @@ def _setup(tmp_path: Path):
         CASE_ID, "source.docx", SOURCE_BYTES
     )
     workbench = HardwareR1WorkbenchStore(workbench_db)
-    promotion_store = HardwareR1KnowledgePromotionStore(workbench_db)
+    # Explicit writable legacy fixture: these tests seed old rows to exercise
+    # the deterministic read-only C1 migration path.
+    promotion_store = HardwareR1KnowledgePromotionStore(workbench_db, read_only=False)
 
     data_root = tmp_path / "durable-data"
     for relative in ("db", "manifest", "backups"):

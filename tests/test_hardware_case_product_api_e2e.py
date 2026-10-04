@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -185,3 +186,26 @@ def test_hardware_case_synthetic_golden_path_on_unified_p0_app(tmp_path):
     assert p0_db.exists()
     assert hardware_db.exists()
     assert p0_db != hardware_db
+
+
+def test_promotion_service_uses_asset_repository_and_legacy_store_read_only(tmp_path):
+    p0_db = tmp_path / "quality_capability_p0.db"
+    hardware_db = tmp_path / "hardware_case_mvp.db"
+    _initializer().initialize(p0_db)
+
+    app = create_p0_app(
+        p0_db,
+        stage_runner=object(),
+        hardware_case_db_path=hardware_db,
+        hardware_knowledge_adapter=object(),
+        hardware_knowledge_release_version="test-release",
+    )
+
+    assert app.state.hardware_r1_promotion_status["ready"] is True
+    assert app.state.hardware_r1_promotion_service.assets is app.state.hardware_candidate_asset_repository
+    assert app.state.hardware_r1_promotion_store.read_only is True
+    with sqlite3.connect(app.state.hardware_r1_workbench_store.db_path) as connection:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hardware_r1_knowledge_promotion'"
+        ).fetchone()
+    assert table is None

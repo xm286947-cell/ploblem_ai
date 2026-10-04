@@ -831,6 +831,35 @@ class CandidateAssetRepository:
                 "CANDIDATE_DATA_INTEGRITY_ERROR"
             ) from error
 
+    def get_promotion_record(self, asset_candidate_id: str) -> dict[str, Any] | None:
+        candidate_key = str(asset_candidate_id or "").strip()
+        if not candidate_key:
+            raise CandidateAssetRepositoryError("PROMOTION_NOT_FOUND")
+        try:
+            with closing(self._connect()) as connection:
+                candidate = connection.execute(
+                    "SELECT promotion_status FROM hardware_candidate_asset WHERE candidate_id=?",
+                    (candidate_key,),
+                ).fetchone()
+                row = connection.execute(
+                    "SELECT * FROM hardware_asset_promotion WHERE asset_candidate_id=?",
+                    (candidate_key,),
+                ).fetchone()
+            if candidate is None:
+                raise CandidateAssetRepositoryError("CANDIDATE_NOT_FOUND")
+            if row is None:
+                if candidate["promotion_status"] != "NOT_STARTED":
+                    raise CandidateAssetRepositoryError("CANDIDATE_DATA_INTEGRITY_ERROR")
+                return None
+            record = dict(row)
+            if record["promotion_status"] != candidate["promotion_status"]:
+                raise CandidateAssetRepositoryError("CANDIDATE_DATA_INTEGRITY_ERROR")
+            return record
+        except CandidateAssetRepositoryError:
+            raise
+        except sqlite3.Error as error:
+            raise CandidateAssetRepositoryError("CANDIDATE_DATA_INTEGRITY_ERROR") from error
+
     def _find(
         self,
         field: str,
@@ -1132,6 +1161,13 @@ class CandidateAssetRepository:
         actor: str,
         reason: str,
         error_code: str | None = None,
+        knowledge_candidate_id: str | None = None,
+        knowledge_id: str | None = None,
+        public_ref: str | None = None,
+        formal_review_status: str | None = None,
+        origin_batch_id: str | None = None,
+        origin_item_id: str | None = None,
+        retry_count: int | None = None,
     ) -> dict[str, Any]:
         candidate_key = str(candidate_id or "").strip()
         expected = str(expected_status or "").strip().upper()
@@ -1176,6 +1212,22 @@ class CandidateAssetRepository:
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_LOCKED_BY_REVIEW"
                     )
+                existing_ledger = connection.execute(
+                    "SELECT * FROM hardware_asset_promotion WHERE asset_candidate_id=?",
+                    (candidate_key,),
+                ).fetchone()
+                if expected == "NOT_STARTED":
+                    if existing_ledger is not None:
+                        raise CandidateAssetRepositoryError(
+                            "CANDIDATE_DATA_INTEGRITY_ERROR"
+                        )
+                elif (
+                    existing_ledger is None
+                    or existing_ledger["promotion_status"] != expected
+                ):
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_DATA_INTEGRITY_ERROR"
+                    )
                 if expected == "NOT_STARTED" and target != "PRECHECK_PASS":
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_PROMOTION_TRANSITION_INVALID"
@@ -1189,13 +1241,24 @@ class CandidateAssetRepository:
                     (target, now, candidate_key),
                 )
                 if expected == "NOT_STARTED":
+                    metadata = {
+                        "knowledge_candidate_id": knowledge_candidate_id,
+                        "knowledge_id": knowledge_id,
+                        "public_ref": public_ref,
+                        "formal_review_status": formal_review_status,
+                        "origin_batch_id": origin_batch_id,
+                        "origin_item_id": origin_item_id,
+                        "retry_count": 0 if retry_count is None else int(retry_count),
+                    }
                     connection.execute(
                         """
                         INSERT INTO hardware_asset_promotion(
                             asset_candidate_id,promotion_status,source_id,
                             business_case_id,last_action,error_code,retry_count,
+                            knowledge_candidate_id,knowledge_id,public_ref,
+                            formal_review_status,origin_batch_id,origin_item_id,
                             created_at,updated_at
-                        ) VALUES(?,?,?,?,?,?,0,?,?)
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
                             candidate_key,
@@ -1204,6 +1267,13 @@ class CandidateAssetRepository:
                             row["business_case_id"],
                             target,
                             error_code,
+                            metadata["retry_count"],
+                            metadata["knowledge_candidate_id"],
+                            metadata["knowledge_id"],
+                            metadata["public_ref"],
+                            metadata["formal_review_status"],
+                            metadata["origin_batch_id"],
+                            metadata["origin_item_id"],
                             now,
                             now,
                         ),
@@ -1223,10 +1293,23 @@ class CandidateAssetRepository:
                     cursor = connection.execute(
                         """
                         UPDATE hardware_asset_promotion
-                        SET promotion_status=?,last_action=?,error_code=?,updated_at=?
+                        SET promotion_status=?,last_action=?,error_code=?,
+                            knowledge_candidate_id=COALESCE(?,knowledge_candidate_id),
+                            knowledge_id=COALESCE(?,knowledge_id),
+                            public_ref=COALESCE(?,public_ref),
+                            formal_review_status=COALESCE(?,formal_review_status),
+                            origin_batch_id=COALESCE(?,origin_batch_id),
+                            origin_item_id=COALESCE(?,origin_item_id),
+                            retry_count=COALESCE(?,retry_count),updated_at=?
                         WHERE asset_candidate_id=?
                         """,
-                        (target, target, error_code, now, candidate_key),
+                        (
+                            target, target, error_code, knowledge_candidate_id,
+                            knowledge_id, public_ref, formal_review_status,
+                            origin_batch_id, origin_item_id,
+                            None if retry_count is None else int(retry_count),
+                            now, candidate_key,
+                        ),
                     )
                     if cursor.rowcount != 1:
                         raise CandidateAssetRepositoryError(
