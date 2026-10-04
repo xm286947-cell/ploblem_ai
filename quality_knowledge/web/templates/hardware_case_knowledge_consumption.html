@@ -1,0 +1,47 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware Knowledge{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1"><link rel="stylesheet" href="/p0/static/hardware_case_knowledge_consumption.css?v=wave3b-v1">{% endblock %}
+{% block breadcrumb %}正式知识消费{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page hc-knowledge-page" data-hc-page="knowledge-consumption" data-api="{{ hardware_knowledge_api_prefix }}">
+  <header class="hc-page-head">
+    <div>
+      <span class="hc-kicker">HARDWARE KNOWLEDGE · WAVE 3B</span>
+      <h1>正式硬件知识消费</h1>
+      <p>面向研发复用、器件风险和市场应用问题的只读正式知识检索。</p>
+    </div>
+    <span class="hc-status ok">Formal Knowledge · Read only</span>
+  </header>
+
+  <section class="hc-card hc-knowledge-query" aria-label="正式知识检索">
+    <div class="hc-knowledge-scenarios" role="tablist" aria-label="消费场景">
+      <button type="button" class="active" role="tab" aria-selected="true" data-scenario="research">研发设计复用</button>
+      <button type="button" role="tab" aria-selected="false" data-scenario="risk">器件与电路风险</button>
+      <button type="button" role="tab" aria-selected="false" data-scenario="market">市场与应用问题检索</button>
+    </div>
+    <form class="hc-knowledge-form" data-knowledge-form>
+      <label class="hc-knowledge-keyword">关键词<input type="search" data-knowledge-text placeholder="标题、现象、根因、措施、器件或接口"></label>
+      <label>接口<input type="text" data-knowledge-filter="interface" placeholder="如 UART"></label>
+      <label>信号<input type="text" data-knowledge-filter="signal" placeholder="如 3.3V TTL TX"></label>
+      <label>器件<input type="text" data-knowledge-filter="device" placeholder="如 MCU"></label>
+      <div class="hc-knowledge-actions"><button type="submit" class="hc-button primary">检索</button><button type="button" class="hc-button secondary" data-knowledge-clear>清空筛选</button></div>
+    </form>
+  </section>
+
+  <section class="hc-card" aria-live="polite">
+    <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">hardware-knowledge-consumption/v1</span></div>
+    <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>正式知识消费索引当前不可用，请先重建 Consumption Projection。</div>
+    <div class="hc-knowledge-results" data-knowledge-results><div class="hc-empty">请输入关键词或结构化筛选条件。</div></div>
+  </section>
+
+  <aside class="hc-knowledge-detail hc-card" data-knowledge-detail hidden aria-label="正式知识详情">
+    <div class="hc-card-head"><div><h2 data-detail-title>正式知识详情</h2><p data-detail-subtitle></p></div><button type="button" class="hc-icon-button" data-detail-close aria-label="关闭详情">×</button></div>
+    <div class="hc-knowledge-detail-body" data-detail-body></div>
+  </aside>
+  <div class="hc-toast" data-hc-toast hidden></div>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=wave3b-v1"></script>{% endblock %}

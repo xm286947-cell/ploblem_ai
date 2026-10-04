@@ -401,6 +401,25 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get(
+        "/p0/hardware-cases/knowledge",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def hardware_case_knowledge_consumption(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_knowledge_consumption.html",
+            {
+                "hardware_knowledge_api_prefix": (
+                    "/api/public/hardware-knowledge/v1"
+                ),
+                "page_title": "正式知识消费 · 硬件案例库",
+                "hardware_role": "CONSUMER",
+                "hardware_active": "knowledge",
+            },
+        )
+
     @router.get("/p0/hardware-cases/review", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_review_queue(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
