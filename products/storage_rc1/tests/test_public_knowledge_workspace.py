@@ -29,6 +29,28 @@ def test_fixture_health_does_not_call_model_provider():
     assert result["status"] == "not_called"
 
 
+def test_live_status_exposes_only_model_identity_and_safe_status(monkeypatch):
+    def request(mode, path, payload=None, base_url=None):
+        if path == "/health":
+            return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
+        if path == "/config":
+            return {"config": {
+                "ollama_model": "qwen-text:latest",
+                "credential_status": {"secret": "must not escape"},
+                "parser_status": "ready",
+                "api_key": "secret-value",
+            }, "config_hash": "safe-hash"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    result = client.get("/api/public-knowledge/status?mode=LIVE").json()
+    assert result["model_name"] == "qwen-text:latest"
+    assert result["credential_status"] == "not_reported"
+    assert result["parser_status"] == "ready"
+    assert "secret" not in str(result)
+    assert "api_key" not in result
+
+
 def test_import_rejects_non_public_before_forwarding(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("non-public content must not reach the service")

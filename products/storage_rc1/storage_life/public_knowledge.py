@@ -70,11 +70,15 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
 @router.get("/status")
 def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
-        return {"mode": mode, "connected": True, "service": "本地演示回放", "llm": "演示数据，不调用模型"}
+        return {"mode": mode, "connected": True, "service": "本地演示回放", "llm": "演示数据，不调用模型", "model_name": "Not applicable · fixture replay", "credential_status": "not_reported", "parser_status": "not_reported"}
     h = _request(mode, "/health", base_url=base_url)
     cfg = _request(mode, "/config", base_url=base_url)
+    config = cfg.get("config") if isinstance(cfg.get("config"), dict) else {}
+    model_name = next((config.get(key) for key in ("ollama_model", "generation_model", "model_name") if isinstance(config.get(key), str) and config.get(key).strip()), None)
+    credential_status = next((config.get(key) for key in ("credential_status", "provider_credential_status") if isinstance(config.get(key), str) and config.get(key) in {"configured", "missing", "not_required", "not_reported"}), "not_reported")
+    parser_status = next((config.get(key) for key in ("parser_status", "document_parser_status") if isinstance(config.get(key), str) and config.get(key) in {"ready", "degraded", "unavailable", "not_reported"}), "not_reported")
     # Never return provider URLs, environment values, or credentials to the UI.
-    return {"mode": "LIVE", "connected": h.get("status") == "ok", "service": h.get("service"), "version": h.get("version"), "config_hash": cfg.get("config_hash"), "llm": "通过服务健康接口确认；未读取或展示凭证"}
+    return {"mode": "LIVE", "connected": h.get("status") == "ok", "service": h.get("service"), "version": h.get("version"), "config_hash": cfg.get("config_hash"), "llm": "通过服务健康接口确认；未读取或展示凭证", "model_name": model_name or "Not Reported", "credential_status": credential_status, "parser_status": parser_status}
 
 
 @router.get("/provider-health")
