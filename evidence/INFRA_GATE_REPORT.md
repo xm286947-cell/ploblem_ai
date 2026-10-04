@@ -38,6 +38,7 @@ All service and provider gates below passed. `NEXTCLOUD_DELIVERY` remains blocke
 | `CITATION_CONTRACT` | PASS | `source_id`, revision, locator, text resolved by citation endpoint |
 | `CONFIG_HASH` | PASS | Stable 64-character SHA-256 from `/config` |
 | `SECRET_ISOLATION` | PASS | No `.env` tracked; policy tests reject credential patterns; no credentials in evidence |
+| Fresh package extraction smoke | PASS | ZIP CRC and 33 manifest file hashes verified; extracted Compose service booted healthy; LIVE/citation/fixture and 503 fail-closed smokes passed |
 | `NEXTCLOUD_DELIVERY` | BLOCKED | No configured Nextcloud destination or client/connector on this Mac |
 
 Automated tests: 6 passed. The only test warning is Starlette's deprecation notice recommending `httpx2` for `TestClient`; no test failed.
