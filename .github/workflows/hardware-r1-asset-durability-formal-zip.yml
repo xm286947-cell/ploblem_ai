@@ -1,0 +1,305 @@
+name: Hardware R1 Asset Durability Formal ZIP
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-r1-asset-durability-formal-zip.yml"
+      - "scripts/build_hardware_r1_asset_durability_formal_zip.py"
+      - "scripts/hardware_r1_asset_durability_formal_zip_smoke.py"
+      - "tests/test_hardware_r1_asset_durability_formal_zip.py"
+      - "docs/HARDWARE_R1_ASSET_DURABILITY_FORMAL_ZIP.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SOURCE_COMMIT: 0d0160cc24f5640642094eb82e2a5fe0d6033891
+  D2_RUN_ID: "37194611177"
+  D2_HEAD_SHA: ce04ec824e1682891e6266e628e48ecbc4995c2e
+  PACKAGE_ID: HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5.zip
+
+jobs:
+  build-package:
+    name: Build exact-source scoped ZIP
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Resolve and pin frozen D2 run artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = Number(process.env.D2_RUN_ID);
+            const expectedHead = process.env.D2_HEAD_SHA;
+            const expectedArtifacts = {
+              "hardware-native-durability-windows": 11300725500,
+              "hardware-native-durability-packages": 11300288239,
+              "hardware-native-durability-macos": 11300273472,
+              "hardware-native-durability-summary": 11300034094,
+            };
+            const run = await github.rest.actions.getWorkflowRun({
+              ...context.repo,
+              run_id: runId,
+            });
+            if (run.data.status !== "completed" || run.data.conclusion !== "success" || run.data.head_sha !== expectedHead) {
+              throw new Error("FROZEN_D2_RUN_BINDING_INVALID");
+            }
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              ...context.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const artifacts = {};
+            for (const [name, expectedId] of Object.entries(expectedArtifacts)) {
+              const item = response.data.artifacts.find((candidate) => candidate.name === name);
+              if (!item || item.id !== expectedId || item.expired) {
+                throw new Error(`FROZEN_D2_ARTIFACT_INVALID:${name}`);
+              }
+              artifacts[name] = {
+                id: item.id,
+                name: item.name,
+                expired: item.expired,
+                digest: item.digest,
+                size_in_bytes: item.size_in_bytes,
+                created_at: item.created_at,
+                expires_at: item.expires_at,
+              };
+            }
+            const binding = {
+              run_id: run.data.id,
+              head_sha: run.data.head_sha,
+              head_branch: run.data.head_branch,
+              conclusion: run.data.conclusion,
+              run_url: run.data.html_url,
+              artifacts,
+            };
+            require("fs").writeFileSync(
+              "d2_evidence_binding.json",
+              JSON.stringify(binding, null, 2) + "\n",
+            );
+
+      - name: Download exact frozen D2 evidence artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: hardware-native-durability-windows
+          run-id: 37194611177
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: d2-evidence/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-native-durability-macos
+          run-id: 37194611177
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: d2-evidence/macos
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-native-durability-summary
+          run-id: 37194611177
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: d2-evidence/summary
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-native-durability-packages
+          run-id: 37194611177
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: d2-evidence/packages
+
+      - name: Validate package builder tests
+        run: |
+          python -m pip install pytest
+          python -m pytest -q --noconftest tests/test_hardware_r1_asset_durability_formal_zip.py
+
+      - name: Build scoped Formal ZIP from exact main source
+        run: |
+          python scripts/build_hardware_r1_asset_durability_formal_zip.py build \
+            --source-commit "$SOURCE_COMMIT" \
+            --output-dir release-package \
+            --d2-evidence-root d2-evidence \
+            --d2-binding d2_evidence_binding.json
+          cp d2_evidence_binding.json release-package/d2_evidence_binding.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardware-r1-asset-durability-formal-package-build
+          path: release-package/*
+          if-no-files-found: error
+          retention-days: 30
+
+  native-startup:
+    name: Fresh ZIP native startup (${{ matrix.platform }})
+    needs: build-package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+          - platform: macos
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-r1-asset-durability-formal-package-build
+          path: release-package
+
+      - name: Verify package SHA256 and safely extract
+        shell: pwsh
+        if: runner.os == 'Windows'
+        env:
+          APP_ROOT: ${{ runner.temp }}\hardware-r1-formal-fresh-extract
+        run: |
+          $line = Get-Content "release-package\$env:PACKAGE_ID.sha256" -Raw
+          $expected = ($line -split '\s+')[0]
+          $actual = (Get-FileHash "release-package\$env:PACKAGE_ID" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "FORMAL_PACKAGE_SHA256_MISMATCH" }
+          python -c "import os; from pathlib import Path; from scripts.hardware_r1_asset_durability_formal_zip_smoke import _extract_safely; _extract_safely(Path('release-package') / os.environ['PACKAGE_ID'], Path(os.environ['APP_ROOT']))"
+          "FORMAL_PACKAGE_SHA256=$actual" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+      - name: Verify package SHA256 and safely extract
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APP_ROOT: ${{ runner.temp }}/hardware-r1-formal-fresh-extract
+        run: |
+          expected="$(awk '{print $1}' "release-package/$PACKAGE_ID.sha256")"
+          actual="$(shasum -a 256 "release-package/$PACKAGE_ID" | awk '{print $1}')"
+          test "$actual" = "$expected" || { echo FORMAL_PACKAGE_SHA256_MISMATCH; exit 2; }
+          python -c 'import os; from pathlib import Path; from scripts.hardware_r1_asset_durability_formal_zip_smoke import _extract_safely; _extract_safely(Path("release-package") / os.environ["PACKAGE_ID"], Path(os.environ["APP_ROOT"]))'
+          echo "FORMAL_PACKAGE_SHA256=$actual" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install packaged runtime dependencies
+        shell: pwsh
+        if: runner.os == 'Windows'
+        env:
+          APP_ROOT: ${{ runner.temp }}\hardware-r1-formal-fresh-extract
+        run: python -m pip install -r "$env:APP_ROOT\requirements-hardware-r1.txt"
+
+      - name: Install packaged runtime dependencies
+        if: runner.os == 'macOS'
+        env:
+          APP_ROOT: ${{ runner.temp }}/hardware-r1-formal-fresh-extract
+        run: python -m pip install -r "$APP_ROOT/requirements-hardware-r1.txt"
+
+      - name: Fresh-extract native startup on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          APP_ROOT: ${{ runner.temp }}\hardware-r1-formal-fresh-extract
+          STARTUP_REPORT: ${{ github.workspace }}\native-reports\windows\startup_report.json
+        run: |
+          $packageSha = ((Get-Content "release-package\$env:PACKAGE_ID.sha256" -Raw).Trim() -split '\s+')[0]
+          python scripts/hardware_r1_asset_durability_formal_zip_smoke.py `
+            --package "release-package\$env:PACKAGE_ID" `
+            --app-root "$env:APP_ROOT" `
+            --already-extracted `
+            --report "$env:STARTUP_REPORT" `
+            --platform windows `
+            --package-id "$env:PACKAGE_ID" `
+            --package-sha256 "$packageSha"
+
+      - name: Fresh-extract native startup on macOS
+        if: runner.os == 'macOS'
+        env:
+          APP_ROOT: ${{ runner.temp }}/hardware-r1-formal-fresh-extract
+          STARTUP_REPORT: ${{ github.workspace }}/native-reports/macos/startup_report.json
+        run: |
+          package_sha256="$(awk '{print $1}' "release-package/$PACKAGE_ID.sha256")"
+          python scripts/hardware_r1_asset_durability_formal_zip_smoke.py \
+            --package "release-package/$PACKAGE_ID" \
+            --app-root "$APP_ROOT" \
+            --already-extracted \
+            --report "$STARTUP_REPORT" \
+            --platform macos \
+            --package-id "$PACKAGE_ID" \
+            --package-sha256 "$package_sha256"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-r1-asset-durability-startup-${{ matrix.platform }}
+          path: native-reports/${{ matrix.platform }}/startup_report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  bind-certification:
+    name: Bind ZIP, D2 evidence, and both native reports
+    if: always()
+    needs: [build-package, native-startup]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        if: needs.build-package.result == 'success'
+        with:
+          name: hardware-r1-asset-durability-formal-package-build
+          path: certification/package
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: hardware-r1-asset-durability-startup-windows
+          path: certification/windows
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: hardware-r1-asset-durability-startup-macos
+          path: certification/macos
+
+      - name: Finalize scoped Release Manifest
+        if: needs.build-package.result == 'success'
+        run: >-
+          python scripts/build_hardware_r1_asset_durability_formal_zip.py finalize
+          --package-build-manifest certification/package/package_build_manifest.json
+          --d2-binding certification/package/d2_evidence_binding.json
+          --windows-report certification/windows/startup_report.json
+          --macos-report certification/macos/startup_report.json
+          --output certification/RELEASE_MANIFEST.json
+
+      - name: Assemble certified package bundle
+        if: success() && needs.native-startup.result == 'success'
+        run: |
+          mkdir -p certified
+          cp "certification/package/$PACKAGE_ID" certified/
+          cp "certification/package/$PACKAGE_ID.sha256" certified/
+          cp certification/package/package_build_manifest.json certified/
+          cp certification/RELEASE_MANIFEST.json certified/
+          cp certification/windows/startup_report.json certified/windows_startup_report.json
+          cp certification/macos/startup_report.json certified/macos_startup_report.json
+
+      - uses: actions/upload-artifact@v4
+        if: success() && needs.native-startup.result == 'success'
+        with:
+          name: HARDWARE_R1_ASSET_DURABILITY_FORMAL_0d0160cc24f5_CERTIFIED
+          path: certified/*
+          if-no-files-found: error
+          retention-days: 90
