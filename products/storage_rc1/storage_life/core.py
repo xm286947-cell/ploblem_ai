@@ -432,7 +432,7 @@ def import_document(filename, data, vendor, model, device_type, original_url="",
 
     if not extraction_meta["coverage"]:
         from .coverage import IDENTITY_FIELDS, compute_coverage
-        expected = [*IDENTITY_FIELDS, *(x["canonical_name"] for x in ai.expected_fields(device_type))]
+        expected = [*IDENTITY_FIELDS, *(x["canonical_name"] for x in ai.expected_fields(device_type, vendor))]
         extraction_meta["expected_fields"] = list(dict.fromkeys(expected))
         extraction_meta["searched_pages"] = list(analyzed_pages)
         extraction_meta["coverage"] = compute_coverage(
