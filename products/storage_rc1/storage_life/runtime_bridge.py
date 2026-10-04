@@ -618,6 +618,179 @@ def _emmc_business_gate(merge, coverages, _bundle, _plan) -> bool:
     )
 
 
+def _runtime_status_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _safe_runtime_error(error: Any) -> dict[str, Any] | None:
+    if error is None:
+        return None
+    if isinstance(error, dict):
+        code = error.get("code")
+        category = error.get("category")
+        retryable = error.get("retryable")
+    else:
+        code = getattr(error, "code", None)
+        category = getattr(error, "category", None)
+        retryable = getattr(error, "retryable", None)
+    if code is None and category is None and retryable is None:
+        return None
+    return {
+        "code": _runtime_status_value(code) if code is not None else None,
+        "category": _runtime_status_value(category) if category is not None else None,
+        "retryable": retryable if isinstance(retryable, bool) else None,
+    }
+
+
+def _runtime_step_duration_ms(step_run: Any) -> int:
+    started = getattr(step_run, "started_at", None)
+    completed = getattr(step_run, "completed_at", None)
+    if started is None or completed is None:
+        return 0
+    try:
+        return max(0, int((completed - started).total_seconds() * 1000))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _build_emmc_long_content_observation(
+    task_id: str,
+    outcome: Any = None,
+) -> dict[str, Any]:
+    """Project persisted Runtime facts into a safe Storage eMMC execution event."""
+    from runtime.contracts import ContentPlan, SourceBundle
+
+    executor = _get_emmc_long_content_executor()
+    store = executor.store
+    request = store.load_request(task_id)
+    request_input = getattr(request, "input", None)
+    if not isinstance(request_input, dict):
+        raise TypeError("persisted long-content request input is unavailable")
+    bundle = SourceBundle.model_validate(request_input.get("bundle"))
+    plan = ContentPlan.model_validate(request_input.get("plan"))
+    step_chunk_map = request_input.get("step_chunk_map")
+    if not isinstance(step_chunk_map, dict):
+        raise TypeError("persisted long-content step map is unavailable")
+
+    runs = store.list_runs(task_id)
+    step_runs_by_chunk: dict[str, list[Any]] = {}
+    for run in runs:
+        for step_run in store.list_step_runs(run.run_id):
+            chunk_id = step_chunk_map.get(step_run.step_id)
+            if chunk_id is not None:
+                step_runs_by_chunk.setdefault(str(chunk_id), []).append(step_run)
+
+    partials = store.list_partial_results(task_id)
+    committed_chunk_ids = {str(item.chunk_id) for item in partials}
+    unit_to_groups: dict[str, list[str]] = {}
+    for group in bundle.atomic_groups:
+        for unit_id in group.unit_ids:
+            unit_to_groups.setdefault(str(unit_id), []).append(str(group.group_id))
+    unit_by_id = {str(unit.unit_id): unit for unit in bundle.logical_units}
+
+    chunks: list[dict[str, Any]] = []
+    for chunk in plan.chunks:
+        chunk_id = str(chunk.chunk_id)
+        unit_ids = [str(unit_id) for unit_id in chunk.unit_ids]
+        target_fields = [
+            str(unit_by_id[unit_id].metadata.get("storage_field_key"))
+            for unit_id in unit_ids
+            if unit_id in unit_by_id
+            and unit_by_id[unit_id].metadata.get("storage_field_key")
+        ]
+        group_ids: list[str] = []
+        for unit_id in unit_ids:
+            for group_id in unit_to_groups.get(unit_id, []):
+                if group_id not in group_ids:
+                    group_ids.append(group_id)
+
+        step_runs = step_runs_by_chunk.get(chunk_id, [])
+        committed = chunk_id in committed_chunk_ids
+        latest_step = step_runs[-1] if step_runs else None
+        status = (
+            _runtime_status_value(latest_step.status)
+            if latest_step is not None
+            else ("COMPLETED" if committed else "PENDING")
+        )
+        if committed and status == "PENDING":
+            status = "COMPLETED"
+
+        attempts: list[Any] = []
+        for step_run in step_runs:
+            attempts.extend(store.list_attempts(step_run.step_run_id))
+        provider_calls = sum(
+            1 for attempt in attempts if attempt.provider_call_seq is not None
+        )
+        duration_ms = sum(_runtime_step_duration_ms(item) for item in step_runs)
+        latest_error = None
+        for attempt in attempts:
+            safe_error = _safe_runtime_error(getattr(attempt, "error", None))
+            if safe_error is not None:
+                latest_error = safe_error
+        for step_run in step_runs:
+            safe_error = _safe_runtime_error(getattr(step_run, "error", None))
+            if safe_error is not None:
+                latest_error = safe_error
+
+        provider_contract = _emmc_chunk_payload_builder(
+            bundle,
+            plan,
+            chunk,
+            {},
+        )
+        serialized_contract = json.dumps(
+            provider_contract,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+        provider_payload = provider_contract.get("provider_payload") or {}
+        page_text = provider_payload.get("page_text")
+        pages = provider_payload.get("pages")
+        chunks.append({
+            "group_id": group_ids[0] if len(group_ids) == 1 else None,
+            "group_ids": group_ids,
+            "chunk_id": chunk_id,
+            "target_fields": target_fields,
+            "field_count": len(target_fields),
+            "status": status,
+            "committed": committed,
+            "provider_calls": provider_calls,
+            "attempt_count": sum(int(item.attempt_count or 0) for item in step_runs),
+            "run_count": sum(
+                1
+                for item in step_runs
+                if not (getattr(item, "metadata", {}) or {}).get(
+                    "reused_committed_execution"
+                )
+            ),
+            "duration_ms": duration_ms,
+            "error": latest_error,
+            "provider_contract_chars": len(serialized_contract),
+            "source_text_chars": len(page_text) if isinstance(page_text, str) else 0,
+            "selected_page_count": len(pages) if isinstance(pages, list) else 0,
+        })
+
+    runtime, _resolved, _agent_request, _runtime_status, runtime_info, _store_path = _get_runtime()
+    runtime_commit = (
+        runtime_info.get("head")
+        or runtime_info.get("snapshot_commit")
+    )
+    runtime_provider_calls = store.count_task_provider_calls(task_id)
+    return {
+        "observability_status": "READY",
+        "strategy_ref": plan.strategy_ref,
+        "runtime_commit": runtime_commit,
+        "source_fingerprint_kind": "structured_source_text_sha256",
+        "provider_calls": runtime_provider_calls,
+        "duration_ms": sum(item["duration_ms"] for item in chunks),
+        "resume_count": max(0, len(runs) - 1),
+        "chunk_count": len(plan.chunks),
+        "chunks": chunks,
+    }
+
+
 def _call_emmc_long_content(
     instructions: str,
     payload: dict[str, Any],
@@ -706,7 +879,7 @@ def _call_emmc_long_content(
             retryable=False,
             details={"task_id": existing_task.task_id, "status": existing_task.status.value},
         )
-    _LAST.append({
+    event = {
         "agent_id": EMMC_PARAMETER_AGENT_ID,
         "request_id": request_id,
         "task_id": outcome.task_id,
@@ -720,7 +893,16 @@ def _call_emmc_long_content(
         "source_fingerprint": fingerprint,
         "committed_partial_count": len(outcome.committed_partials),
         "business_consumable": outcome.business_consumable,
-    })
+    }
+    try:
+        event.update(_build_emmc_long_content_observation(outcome.task_id, outcome))
+    except Exception as exc:
+        event["observability_status"] = "DEGRADED"
+        event["observability_error"] = {
+            "type": type(exc).__name__,
+            "message": "Runtime execution evidence could not be projected.",
+        }
+    _LAST.append(event)
     if not outcome.business_consumable or outcome.merge is None or not isinstance(outcome.merge.data, dict):
         raise RuntimeBridgeCallError(
             "Runtime eMMC long-content execution is incomplete",
