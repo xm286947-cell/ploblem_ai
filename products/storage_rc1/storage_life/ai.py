@@ -60,10 +60,10 @@ def _use_emmc_runtime_contract(device_type: str) -> bool:
     return _execution_mode() == "runtime" and templates.normalize_device_type(device_type) == "eMMC"
 
 
-def _analysis_fields(device_type: str) -> list[str]:
+def _analysis_fields(device_type: str, vendor: str = "") -> list[str]:
     if _use_emmc_runtime_contract(device_type):
         return list(EMMC_ANALYSIS_FIELDS)
-    return templates.analysis_fields_for(device_type)
+    return templates.effective_analysis_fields(device_type, vendor)
 
 
 def _field_labels(device_type: str) -> dict[str, str]:
@@ -79,9 +79,9 @@ def _identity_fields(device_type: str) -> list[str]:
     return list(IDENTITY_FIELD_KEYS)
 
 
-def expected_fields(device_type: str):
+def expected_fields(device_type: str, vendor: str = ""):
     fields = _field_labels(device_type)
-    return [{"canonical_name": key, "parameter_name": fields.get(key, key), **templates.parameter_knowledge(device_type, key)} for key in _analysis_fields(device_type)]
+    return [{"canonical_name": key, "parameter_name": fields.get(key, key), **templates.parameter_knowledge(device_type, key)} for key in _analysis_fields(device_type, vendor)]
 
 
 def _env_int(name: str, default: int) -> int:
@@ -916,7 +916,7 @@ def final_review(device_type, vendor, product_family, models, candidates, client
     if not configured():
         raise AIUnavailable("未配置 Agent，无法执行最终整体审核")
     device_type = templates.normalize_device_type(device_type)
-    expected = expected_fields(device_type)
+    expected = expected_fields(device_type, vendor)
     present = {str(x.get("canonical_name") or "") for x in candidates if (x.get("final_value") or x.get("ai_value"))}
     missing = [x["canonical_name"] for x in expected if x["canonical_name"] not in present]
     compact_candidates, valid_ids = _compact_review_candidates(candidates)
@@ -1131,12 +1131,12 @@ CRITICAL_FIELDS_BY_DEVICE = {
 }
 
 
-def _single_pass_schema(device_type: str):
+def _single_pass_schema(device_type: str, vendor: str = ""):
     dtype = templates.normalize_device_type(device_type)
     if _use_emmc_runtime_contract(dtype):
         allowed = list(EMMC_FIELD_ORDER)
     else:
-        spec_fields = templates.analysis_fields_for(dtype)
+        spec_fields = templates.effective_analysis_fields(dtype, vendor)
         allowed = list(dict.fromkeys(IDENTITY_FIELD_KEYS + spec_fields))
     evidence = {
         "type": ["object", "null"],
@@ -1186,6 +1186,9 @@ def _single_pass_pages(pages, device_type: str, vendor: str, max_chars: int = 56
         page = entry.get("page")
         if page in by_page:
             ranked.append((int(entry.get("priority", 999)), page))
+    for page in templates.identity_page_hits(selected, vendor):
+        if page in by_page:
+            ranked.append((-200, page))
     # Identity/version facts commonly live at the beginning/end and must not require a
     # second model call.
     for page in list(sorted(by_page)[:6]) + list(sorted(by_page)[-3:]):
@@ -1316,7 +1319,7 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
     dtype = templates.normalize_device_type(device_type)
     field_map = _field_labels(dtype)
     identity_fields = set(_identity_fields(dtype))
-    _, default_expected = _single_pass_schema(dtype)
+    _, default_expected = _single_pass_schema(dtype, vendor)
     expected = list(expected_fields or default_expected)
     raw_fields = result.get("fields") if isinstance(result, dict) else None
     if not isinstance(raw_fields, list):
@@ -1476,9 +1479,9 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
     }
 
 
-def _supplement_schema(device_type: str, field_keys):
+def _supplement_schema(device_type: str, field_keys, vendor: str = ""):
     """Return the normal fact contract narrowed to one deterministic field subset."""
-    schema, allowed = _single_pass_schema(device_type)
+    schema, allowed = _single_pass_schema(device_type, vendor)
     requested = [str(x) for x in field_keys if str(x) in allowed]
     requested = list(dict.fromkeys(requested))
     if not requested:
@@ -1640,7 +1643,7 @@ def _run_critical_targeted_supplement(base, sources, device_type: str, vendor: s
         base["supplement_status"] = "no_target_pages"
         return base
 
-    schema, targets = _supplement_schema(device_type, unresolved)
+    schema, targets = _supplement_schema(device_type, unresolved, vendor)
     payload_pages = []
     for sid, pages in plan["sources"].items():
         payload_pages.extend(_source_payload(pages, sid))
@@ -1717,7 +1720,7 @@ def _secondary_unresolved_field(field_key: str, device_type: str) -> dict:
     }
 
 
-def _secondary_partition_groups(device_type: str, field_keys=None) -> list[list[str]]:
+def _secondary_partition_groups(device_type: str, field_keys=None, vendor: str = "") -> list[list[str]]:
     """Deterministically split the business contract into small semantic rescue groups.
 
     This is used only after the normal Secondary Extraction itself returns semantic
@@ -1725,7 +1728,7 @@ def _secondary_partition_groups(device_type: str, field_keys=None) -> list[list[
     preserving the rule that Storage never parses/repairs malformed JSON.
     """
     dtype = templates.normalize_device_type(device_type)
-    _schema, full_order = _single_pass_schema(dtype)
+    _schema, full_order = _single_pass_schema(dtype, vendor)
     if field_keys is None:
         ordered = list(full_order)
     else:
@@ -1800,12 +1803,12 @@ def _partitioned_secondary_extraction(
         + _semantic_rules(dtype)
     )
 
-    groups = _secondary_partition_groups(dtype, target_fields)
+    groups = _secondary_partition_groups(dtype, target_fields, vendor)
     if not groups:
         raise AIResponseError("Secondary Extraction 分组恢复没有可用目标字段")
 
     for group_index, group in enumerate(groups, start=1):
-        group_schema, requested = _supplement_schema(dtype, group)
+        group_schema, requested = _supplement_schema(dtype, group, vendor)
         payload = {
             "operation": "secondary_structured_extraction_partition",
             "trigger": "SECONDARY_SEMANTIC_REPAIR_REQUIRED",
@@ -2004,7 +2007,7 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
     if not prepared:
         raise ValueError("Source Bundle 没有可用于规格抽取的正文")
     primary_source_id = next(iter(prepared))
-    schema, expected = _single_pass_schema(dtype)
+    schema, expected = _single_pass_schema(dtype, vendor)
     labels = _field_labels(dtype)
     field_map = {k: labels.get(k, k) for k in expected}
     instructions = (
