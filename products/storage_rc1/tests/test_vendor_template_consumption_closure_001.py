@@ -9,24 +9,42 @@ from storage_life.app import app
 from storage_life.runtime_domain_strategy import EMMC_FIELD_ORDER
 
 
-def test_t01_effective_analysis_fields_are_vendor_scoped_stable_and_canonical():
+def test_t01_empty_or_unknown_vendor_preserves_generic_universe_for_every_device_type():
+    for device_type in templates.device_types():
+        generic = templates.analysis_fields_for(device_type)
+        assert templates.effective_analysis_fields(device_type, "") == generic
+        assert templates.effective_analysis_fields(device_type, "unknown vendor") == generic
+
+
+def test_t02_nor_unknown_vendor_does_not_promote_generic_navigation_fields():
+    generic = templates.analysis_fields_for("NOR Flash")
+    effective = templates.effective_analysis_fields("NOR Flash", "unknown vendor")
+    navigation_only = {"capacity", "interface", "voltage", "clock_frequency"}
+
+    assert effective == generic
+    assert navigation_only.isdisjoint(set(effective) - set(generic))
+
+
+def test_t03_timar_ssd_adds_only_existing_vendor_override_fields():
     generic = templates.analysis_fields_for("SSD")
     effective = templates.effective_analysis_fields("SSD", "TIMAR")
     vendor_only = ["sequential_read", "sequential_write", "mtbf", "uber"]
 
+    assert effective == generic + vendor_only
     assert effective[: len(generic)] == generic
     assert all(effective.count(key) == 1 for key in effective)
     assert [key for key in effective if key not in generic] == vendor_only
     assert set(effective) <= set(templates.fields_for("SSD"))
-    assert templates.effective_analysis_fields("SSD", "unknown vendor") == generic
 
 
-def test_t02_vendor_schema_and_expected_fields_keep_emmc_runtime_contract(monkeypatch):
+def test_t04_vendor_schema_and_expected_fields_include_vendor_only_fields():
     _, ssd_order = ai._single_pass_schema("SSD", "TIMAR")
     expected_ssd = {item["canonical_name"] for item in ai.expected_fields("SSD", "TIMAR")}
     assert {"sequential_read", "sequential_write", "mtbf", "uber"} <= set(ssd_order)
     assert {"sequential_read", "sequential_write", "mtbf", "uber"} <= expected_ssd
 
+
+def test_t05_emmc_runtime_schema_retains_all_37_fields_in_original_order(monkeypatch):
     monkeypatch.setenv("STORAGE_LIFE_EXECUTION_MODE", "runtime")
     _schema, emmc_order = ai._single_pass_schema("eMMC", "SkyHigh")
     assert emmc_order == list(EMMC_FIELD_ORDER)

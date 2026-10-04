@@ -202,7 +202,9 @@ def effective_analysis_fields(device_type: str, vendor: str = "") -> list[str]:
     canonical_fields = fields_for(dtype)
     ordered = list(analysis_fields_for(dtype))
     seen = set(ordered)
-    for group in section_groups(dtype, vendor):
+    vendor_id = vendor_key(vendor)
+    overrides = load_templates().get("vendors", {}).get(vendor_id, {}).get("overrides", {}) if vendor_id else {}
+    for group in overrides.get(dtype, []):
         for field in group.get("fields") or []:
             key = str(field)
             if key in canonical_fields and key not in seen:
