@@ -403,11 +403,14 @@ def test_legacy_promotion_row_migrates_idempotently_to_asset_ledger(tmp_path: Pa
         json.dumps(asset["knowledge_object"], ensure_ascii=False, sort_keys=True,
                    separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    promotion.store.ensure(
+    legacy_writer = HardwareR1KnowledgePromotionStore(
+        promotion.store.db_path, read_only=False
+    )
+    legacy_writer.ensure(
         item_id="HWI-LEGACY", batch_id="HWB-LEGACY", business_case_id="A0152",
         source_id=asset["source_id"], golden_hash=golden_hash,
     )
-    promotion.store.update(
+    legacy_writer.update(
         "HWI-LEGACY", status="PRECHECK_PASS", last_action="PRECHECK",
         candidate_id="KC-LEGACY", review_status="CONFIRMED",
         knowledge_id="K-LEGACY", public_ref="P-LEGACY",

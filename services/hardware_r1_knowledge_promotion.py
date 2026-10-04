@@ -58,7 +58,7 @@ def _json_hash(value: Mapping[str, Any]) -> str:
 class HardwareR1KnowledgePromotionStore:
     """Promotion ledger only; Formal Knowledge remains Unified Knowledge owned."""
 
-    def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
+    def __init__(self, db_path: str | Path, *, read_only: bool = True) -> None:
         self.db_path = Path(db_path)
         self.read_only = bool(read_only)
         if not self.read_only:
