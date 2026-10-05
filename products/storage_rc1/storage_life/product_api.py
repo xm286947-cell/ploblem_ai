@@ -635,6 +635,13 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             ],
             "interpretation_performed": False,
         },
+        "action_checklist": {
+            "items": core.list_engineering_actions(device_id),
+            "open_count": sum(
+                1 for x in core.list_engineering_actions(device_id)
+                if x.get("status") in {"OPEN", "IN_PROGRESS"}
+            ),
+        },
         "public_knowledge": {
             "integration": "IN_CONTEXT",
             "role": "ENGINEERING_CONTEXT_AND_CITATION",
@@ -1018,22 +1025,71 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         remaining.append("尚未提供当前软件写入 / 日志 / 持久化行为")
     remaining.extend(skill.get("missing_information") or [])
 
+    controls = structured.get("engineering_control_options") or []
+    validation_actions = structured.get("suggested_validation") or []
+    action_checklist = None
+    if request.get("persist_actions") is True:
+        source_assessment_id = (optimization.get("assessment_record") or {}).get("id")
+        action_rows = [
+            {"action_type": "SOFTWARE_CONTROL", "title": str(x), "detail": str(x)}
+            for x in controls if str(x).strip()
+        ] + [
+            {"action_type": "TEST_VALIDATION", "title": str(x), "detail": str(x)}
+            for x in validation_actions if str(x).strip()
+        ]
+        if remaining:
+            action_rows.extend(
+                {"action_type": "FOLLOW_UP", "title": str(x), "detail": str(x)}
+                for x in remaining if str(x).strip()
+            )
+        action_checklist = core.create_engineering_actions(
+            device_id,
+            source_assessment_id,
+            action_rows,
+            evidence_refs=skill.get("evidence_refs") or [],
+            knowledge_refs=skill.get("knowledge_refs") or [],
+            created_by=str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
+        )
+
     return {
         "device": detail["device"],
         "current_state": current_state,
-        "engineering_controls": structured.get("engineering_control_options") or [],
+        "engineering_controls": controls,
         "potential_risks": structured.get("potential_risk") or [],
-        "validation_actions": structured.get("suggested_validation") or [],
+        "validation_actions": validation_actions,
         "conditions_and_limits": structured.get("conditions_and_limits") or [],
         "remaining_information": sorted({str(x) for x in remaining if str(x)}),
         "knowledge_refs": skill.get("knowledge_refs") or [],
         "evidence_refs": skill.get("evidence_refs") or [],
         "optimization_assessment": optimization.get("assessment_record"),
+        "action_checklist": action_checklist,
         "skill_result": skill,
         "decision_boundary": skill.get("decision_boundary") or "ENGINEERING_REVIEW_REQUIRED",
         "orchestration_only": True,
         "new_rule_stack": False,
     }
+
+
+def engineering_action_checklist(device_id: str) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    items = core.list_engineering_actions(device_id)
+    summary = {
+        "open": sum(1 for x in items if x["status"] == "OPEN"),
+        "in_progress": sum(1 for x in items if x["status"] == "IN_PROGRESS"),
+        "done": sum(1 for x in items if x["status"] == "DONE"),
+        "waived": sum(1 for x in items if x["status"] == "WAIVED"),
+    }
+    return {"device": devices[device_id], "summary": summary, "items": items}
+
+
+def update_engineering_action(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return core.update_engineering_action(
+        action_id,
+        payload.get("status"),
+        updated_by=str(payload.get("updated_by") or "Storage MVP UI"),
+    )
 
 
 def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
