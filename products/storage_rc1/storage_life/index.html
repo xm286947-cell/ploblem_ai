@@ -146,6 +146,22 @@ function renderDetailBase(){let d=CURRENT.device,c=CURRENT.counts,slots=CURRENT.
 async function loadCompare(direction=null){let ids=$$('.cmp:checked').map(x=>x.value);if(ids.length<2||ids.length>4)return msg('请选择 2～4 个器件',true);try{let directed=direction?.oldId&&direction?.newId&&ids.length===2,requestIds=directed?[direction.oldId,direction.newId]:ids;CMP=await api('/api/product/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_ids:requestIds})});renderCompareRows();if(requestIds.length===2){let a=DEV.find(x=>x.id===requestIds[0]),b=DEV.find(x=>x.id===requestIds[1]);if(a&&b&&a.device_type!==b.device_type){$('#compareImpactSummary').innerHTML='<div class="warning card"><b>仅展示原始参数对照</b><p>两个器件类型不同，系统不会把跨介质参数差异解释成可替代的工程影响。请选择同类器件执行完整 S2。</p></div>'}else if(directed){await loadCompareImpactSummary(requestIds[0],requestIds[1])}else{$('#compareImpactSummary').innerHTML='<div class="card"><b>请选择变更方向</b><p>参数对比本身无方向，但软件 / 测试 / 寿命影响必须明确“旧器件 → 新器件”。</p><div class="row"><button class="primary" onclick="loadCompareImpactSummary(\''+esc(requestIds[0])+'\',\''+esc(requestIds[1])+'\')">'+esc(a?.model||'A')+' → '+esc(b?.model||'B')+'</button><button class="secondary" onclick="loadCompareImpactSummary(\''+esc(requestIds[1])+'\',\''+esc(requestIds[0])+'\')">'+esc(b?.model||'B')+' → '+esc(a?.model||'A')+'</button></div></div>'}}else $('#compareImpactSummary').innerHTML='<div class="empty">寿命 / 软件 / 测试影响摘要当前按两个器件生成；请只选择两个器件查看完整闭环。</div>'}catch(e){msg(e.message,true)}}
 function uniqueText(items){return [...new Set((items||[]).map(x=>String(x||'').trim()).filter(Boolean))]}
 function compareImpactList(title,items,emptyText){let values=uniqueText(items);return '<div class="card"><b>'+esc(title)+'</b>'+(values.length?'<ul>'+values.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'<p class="muted">'+esc(emptyText||'当前没有可证据化结论')+'</p>')+'</div>'}
+function diagnosticSeverityBadge(severity){
+  let raw=String(severity||'INFO').toUpperCase(),cls=raw==='CRITICAL'?'NEEDS_ATTENTION':raw==='WARNING'?'AMBIGUOUS':'CONFIRMED';
+  return '<span class="badge '+cls+'">'+esc(raw)+'</span>';
+}
+function diagnosticSignalList(signals,emptyText){
+  signals=Array.isArray(signals)?signals.filter(Boolean):[];
+  if(!signals.length)return '<div class="card"><b>异常 / 退化信号</b><p class="muted">'+esc(emptyText||'当前没有触发已注册的确定性异常信号；这不等同于证明介质无风险。')+'</p></div>';
+  return '<div class="card"><div class="pagehead"><div><b>异常 / 退化信号</b><p class="muted">以下结论来自 Storage 确定性判读；Public Knowledge 只提供背景，不参与信号触发。</p></div><span class="badge NEEDS_ATTENTION">'+esc(signals.length)+' SIGNALS</span></div><div class="tablewrap"><table><tr><th>级别</th><th>指标</th><th>观测</th><th>阈值 / 来源</th><th>判读</th><th>Evidence</th></tr>'+
+    signals.map(x=>{
+      let observed=String(x.observed_value??'—')+(x.unit?' '+x.unit:'');
+      let threshold=x.threshold_value!=null?(String(x.threshold_value)+(x.unit?' '+x.unit:'')+' · '+String(x.threshold_source||'EXPLICIT')):'—';
+      let refs=[x.evidence_ref,...(x.threshold_evidence_refs||[])].filter(Boolean);
+      return '<tr><td>'+diagnosticSeverityBadge(x.severity)+'</td><td><b>'+esc(x.metric_name||'')+'</b><br><small>'+esc(x.code||'')+'</small></td><td>'+esc(observed)+'</td><td>'+esc(threshold)+'</td><td>'+esc(x.rationale||'')+'</td><td><small>'+esc(refs.join('；')||'—')+'</small></td></tr>';
+    }).join('')+'</table></div></div>';
+}
+
 async function loadCompareImpactSummary(oldId,newId){let el=$('#compareImpactSummary');if(!el)return;el.innerHTML='<div class="card">正在生成寿命 / 可观测性 / 软件 / 测试差异摘要…</div>';try{let r=await api('/api/product/change-impact/record?old_id='+encodeURIComponent(oldId)+'&new_id='+encodeURIComponent(newId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assessment_author:'Storage MVP Compare UI'})}),sr=r.skill_result||{},st=sr.structured_result||{},items=r.items||[],lifetime=[...(st.lifetime_impact||[])],observability=[...(st.diagnostic_monitoring_impact||[]),...items.map(x=>x.monitoring_impact)],software=items.map(x=>x.software_impact),tests=items.map(x=>x.test_impact),lifeKeys=['tbw','dwpd','pe_cycles','retention','life_time','endurance','percentage_used'];for(let x of items){if(lifeKeys.some(k=>String(x.canonical_name||'').toLowerCase().includes(k)))lifetime.push(x.technical_meaning)}let oldDev=DEV.find(d=>d.id===oldId)||{},newDev=DEV.find(d=>d.id===newId)||{};el.innerHTML='<div class="pagehead"><div><div class="kicker">MVP CHANGE SUMMARY</div><h3>'+esc(oldDev.model||oldId)+' → '+esc(newDev.model||newId)+'</h3><div class="muted">基于 Confirmed Device Fact + Existing storage-change-impact Skill；不自动输出替代批准结论。</div></div><div class="row"><button class="secondary" onclick="openImpactFromCompare(\''+esc(oldId)+'\',\''+esc(newId)+'\')">完整变更影响</button><button class="secondary" onclick="openDeviceScenario(\''+esc(newId)+'\',\'lifetimePanel\')">新器件寿命</button><button class="secondary" onclick="openDiagnosisForDevice(\''+esc(newId)+'\')">新器件诊断</button><button class="secondary" onclick="openDeviceScenario(\''+esc(newId)+'\',\'optimizationPanel\')">新器件优化</button></div></div><div class="grid4">'+compareImpactList('寿命能力差异',lifetime,'当前差异中没有已确认的寿命能力结论')+compareImpactList('诊断 / 可观测性差异',observability,'当前没有可证据化的可观测性差异')+compareImpactList('软件关注',software,'当前没有新增软件关注项')+compareImpactList('测试关注',tests,'当前没有新增测试关注项')+'</div>'+(r.unknowns?.length?'<div class="card warning"><b>待验证</b><ul>'+r.unknowns.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>':'')+'<div id="comparePublicContext"></div>';let diffTopics=items.map(x=>x.parameter_name||x.canonical_name).filter(Boolean).slice(0,12).join(' ');pkContextSearchInline({focus:'COMPARE',device_type:newDev.device_type||oldDev.device_type||'',vendor:newDev.vendor||'',model:newDev.model||'',parameter_name:diffTopics||'device parameter difference lifetime software test impact'},'comparePublicContext')}catch(e){el.innerHTML='<div class="danger card"><b>差异摘要未完成</b><p>'+esc(e.message)+'</p></div>'}}
 async function openImpactFromCompare(oldId,newId){show('p07');$('#impactOld').value=oldId;$('#impactNew').value=newId;await loadImpact(false)}
 async function openDeviceScenario(deviceId,targetId){await openDevice(deviceId);let aliases={lifetime:'lifetimePanel',optimization:'optimizationPanel',diagnosis:'diagnosticRuntimePanel'},resolved=aliases[targetId]||targetId;if(targetId==='diagnosis'){await openDiagnosisForCurrentDevice();return}setTimeout(()=>document.getElementById(resolved)?.scrollIntoView({behavior:'smooth',block:'start'}),0)}
@@ -274,7 +290,7 @@ async function executeRuntimeDiagnosis(){
       body:JSON.stringify({target_question:question,runtime_observations:[observation],record_assessment:true,assessment_author:'Storage MVP UI'})
     }),sr=r.skill_result||{},er=r.engineering_result||{},st=sr.structured_result||{},current=st.current_observation||[],methods=st.acquisition_method||[],bounds=st.interpretation_boundary||[],signals=st.abnormality_signal||[],missing=sr.missing_information||st.missing_information||[];
     let observed=current[0]||observation,html='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'"><b>'+esc(sr.status||'UNKNOWN')+' · '+esc(item?.indicator||metric)+'</b><p>'+esc(sr.direct_answer||er.direct_answer||'')+'</p><div class="grid4"><div><small>运行值</small><p><b>'+esc(observed.normalized_value??observed.raw_value??'—')+' '+esc(observed.unit||'')+'</b></p></div><div><small>采集接口</small><p>'+esc(observed.source_command_or_interface||'—')+'</p></div><div><small>证据引用</small><p>'+esc(observed.evidence_ref||observed.raw_output_ref||'—')+'</p></div><div><small>采集时间</small><p>'+esc(observed.capture_time||'—')+'</p></div></div><small>运行观测只进入 Storage；RAG/Public Knowledge 只提供公开背景。</small></div>';
-    html+=compareImpactList('异常信号',signals,'现有 Skill 未形成确定性异常信号；保持待验证');
+    html+=diagnosticSignalList(signals,'当前没有触发已注册的确定性异常信号；这不等同于证明介质无风险。');
     html+=compareImpactList('采集 / 验证方法',methods,'当前没有正式采集方法');
     html+=compareImpactList('解释边界',bounds,'当前没有可发布的解释边界');
     if(missing.length)html+=compareImpactList('缺失信息',missing,'');
@@ -754,8 +770,9 @@ async function executeParsedHealthAnalysis(){
   if(diagnosis){
     if(diagnosis.error)html+='<div class="danger card"><b>运行诊断未完成</b><p>'+esc(diagnosis.error)+'</p></div>';
     else{
-      let sr=diagnosis.skill_result||{},er=diagnosis.engineering_result||{},st=sr.structured_result||{},missing=sr.missing_information||st.missing_information||[];
+      let sr=diagnosis.skill_result||{},er=diagnosis.engineering_result||{},st=sr.structured_result||{},signals=st.abnormality_signal||[],missing=sr.missing_information||st.missing_information||[];
       html+='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'"><b>运行诊断 · '+esc(sr.status||'UNKNOWN')+'</b><p>'+esc(sr.direct_answer||er.direct_answer||'')+'</p><small>消费 '+esc((st.current_observation||[]).length)+' 个运行观测。</small></div>';
+      html+=diagnosticSignalList(signals,'当前没有触发已注册的确定性异常信号；仍需结合趋势和工程边界。');
       if(missing.length)html+=compareImpactList('诊断仍缺信息',missing,'');
     }
   }
@@ -788,9 +805,10 @@ async function executeParsedBatchDiagnosis(){
         record_assessment:true,
         assessment_author:'Storage MVP Runtime Import'
       })
-    }),sr=r.skill_result||{},er=r.engineering_result||{},st=sr.structured_result||{},current=st.current_observation||[],methods=st.acquisition_method||[],bounds=st.interpretation_boundary||[],missing=sr.missing_information||st.missing_information||[];
+    }),sr=r.skill_result||{},er=r.engineering_result||{},st=sr.structured_result||{},current=st.current_observation||[],signals=st.abnormality_signal||[],methods=st.acquisition_method||[],bounds=st.interpretation_boundary||[],missing=sr.missing_information||st.missing_information||[];
     box.innerHTML='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'"><b>'+esc(sr.status||'UNKNOWN')+' · 本次运行数据诊断</b><p>'+esc(sr.direct_answer||er.direct_answer||'')+'</p><small>共消费 '+current.length+' 个 Runtime Observation；未把原始运行数据发送给 Public Knowledge。</small></div>'+
       '<div class="tablewrap"><table><tr><th>指标</th><th>运行值</th><th>证据</th></tr>'+current.map(x=>'<tr><td><b>'+esc(x.metric_name||'')+'</b></td><td>'+esc(x.normalized_value??x.raw_value??'—')+' '+esc(x.unit||'')+'</td><td><small>'+esc(x.evidence_ref||x.raw_output_ref||'—')+'</small></td></tr>').join('')+'</table></div>'+
+      diagnosticSignalList(signals,'当前没有触发已注册的确定性异常信号；仍需结合趋势和工程边界。')+
       compareImpactList('采集 / 验证方法',methods,'当前没有正式采集方法')+
       compareImpactList('解释边界',bounds,'当前没有可发布的解释边界')+
       (missing.length?compareImpactList('仍缺信息',missing,''):'')+
