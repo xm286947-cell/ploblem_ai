@@ -147,4 +147,12 @@ test('Wave3B scene tabs drive formal scene query and explicit device aggregation
   assert.match(panel.innerHTML, /1 个 Case/);
   assert.match(panel.innerHTML, /voltage droop/);
   assert.match(panel.innerHTML, /match external load/);
+
+  scenarios[2].listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.ok(requested.some(url => url.includes('scene=MARKET_ISSUE')));
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.innerHTML, '');
 });
