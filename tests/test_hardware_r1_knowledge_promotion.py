@@ -458,11 +458,11 @@ def test_formal_review_uses_exact_durable_candidate_content(
 ) -> None:
     (
         promotion,
+        _,
+        _,
+        _,
+        _,
         transport,
-        _,
-        _,
-        _,
-        _,
         _,
     ) = setup_case(
         tmp_path,
