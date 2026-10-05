@@ -6,7 +6,7 @@
     const section = Array.from(detail.querySelectorAll('.hc-knowledge-detail-section')).find(node => node.querySelector('h3')?.textContent.trim() === 'Evidence refs');
     if (!section || section.dataset.e2eBound === '1') return;
     section.dataset.e2eBound = '1';
-    const caseId = document.querySelector('[data-detail-subtitle]')?.textContent.split('·').pop()?.trim();
+    const caseId = detail.dataset.businessCaseId || '';
     const refs = Array.from(section.querySelectorAll('code')).map(code => code.textContent.trim()).filter(Boolean);
     const controls = document.createElement('div');
     controls.className = 'hc-knowledge-detail-item';
@@ -19,7 +19,11 @@
       if (!button) return;
       const id = button.dataset.e2ePreview || button.dataset.e2eSource;
       const file = Boolean(button.dataset.e2eSource);
-      const params = new URLSearchParams({business_case_id: caseId || ''});
+      if (!caseId) {
+        output.textContent = 'Evidence 回看失败：BUSINESS_CASE_ID_MISSING';
+        return;
+      }
+      const params = new URLSearchParams({business_case_id: caseId});
       output.textContent = file ? '正在读取来源 Word…' : '正在定位原文…';
       try {
         const response = await fetch(`/api/public/hardware-knowledge/v1/evidence/${encodeURIComponent(id)}/${file ? 'source-file' : 'source-preview'}?${params}`, {headers:{'X-Hardware-Case-Role':'MAINTAINER', Accept:file?'application/octet-stream':'application/json'}});
@@ -31,6 +35,7 @@
         if (file) {
           const url = URL.createObjectURL(await response.blob());
           window.open(url, '_blank', 'noopener');
+          window.setTimeout(() => URL.revokeObjectURL(url), 60000);
           output.textContent = '原始 Word 已打开。';
         } else {
           output.innerHTML = `<pre>${esc(JSON.stringify(await response.json(), null, 2))}</pre>`;
