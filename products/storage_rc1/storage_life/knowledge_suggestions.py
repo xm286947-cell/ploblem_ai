@@ -385,8 +385,26 @@ class PublicKnowledgeSuggestionService:
         if ref.get("revision") not in valid_revisions and ref.get("revision") != current_revision:
             raise SuggestionError("SOURCE_REVISION_MISMATCH")
         if ref.get("immutable_identity"):
-            actual_identity = source.get("immutable_identity") or source.get("content_hash")
-            if actual_identity != ref["immutable_identity"]:
+            matching_revision = next(
+                (
+                    row for row in revisions
+                    if isinstance(row, dict)
+                    and str(
+                        row.get("revision_id")
+                        or row.get("source_revision")
+                        or row.get("version")
+                        or ""
+                    ) == str(ref.get("revision") or "")
+                ),
+                None,
+            )
+            actual_identity = (
+                (matching_revision or {}).get("raw_sha256")
+                or (matching_revision or {}).get("content_sha256")
+                or source.get("immutable_identity")
+                or source.get("content_hash")
+            )
+            if not actual_identity or actual_identity != ref["immutable_identity"]:
                 raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
         return citation, source
 
