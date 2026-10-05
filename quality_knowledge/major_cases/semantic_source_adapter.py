@@ -74,10 +74,12 @@ class MajorSemanticSourceAdapter:
         with self.repository.connect() as connection:
             fact_row = connection.execute(
                 """SELECT * FROM kb_source_fact_revision WHERE case_id=?
+                   AND UPPER(source_type)='EXCEL'
                    ORDER BY revision_no DESC LIMIT 1""",
                 (case_id,),
             ).fetchone()
         source_fact = dict(fact_row) if fact_row else None
+        source_links = self.repository.source_links(case_id)
         raw_excel = {
             "case_id": case_id,
             "source_excel": source_fact.get("source_ref", "") if source_fact else "",
@@ -91,7 +93,9 @@ class MajorSemanticSourceAdapter:
         return {
             "case_id": case_id,
             "standard_case": standard_case,
-            "semantic_slots": self._semantic_slots(standard_case, fragment_refs, source_fact, version_ids),
+            "semantic_slots": self._semantic_slots(
+                standard_case, fragment_refs, source_fact, version_ids, source_links
+            ),
             "source_fact_revision_id": source_fact.get("source_fact_revision_id") if source_fact else None,
             "document_version_ids": version_ids,
             "fusion_version": "EvidenceFusion",
@@ -191,40 +195,108 @@ class MajorSemanticSourceAdapter:
         fragment_refs: dict[str, list[dict]],
         source_fact: dict[str, Any] | None,
         version_ids: list[str],
+        source_links: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
         analysis = standard_case.get("analysis", {})
         solution = standard_case.get("solution", {})
+        source_links_by_record: dict[str, list[dict[str, Any]]] = {}
+        for link in source_links:
+            record_id = str(link.get("record_id") or "")
+            if record_id:
+                source_links_by_record.setdefault(record_id, []).append(link)
+
+        def attach_source_links(evidence: dict[str, Any], record_id: str) -> None:
+            ids = [
+                str(link.get("source_link_id") or "")
+                for link in source_links_by_record.get(record_id, [])
+                if link.get("source_link_id")
+            ]
+            if ids:
+                evidence["source_link_ids"] = ids
+
         for entry_type, (semantic_slot, parent, field) in SEMANTIC_SLOTS.items():
-            refs: list[dict[str, Any]] = []
+            items: list[dict[str, Any]] = []
             if parent in {"trc", "mrc"}:
                 detail = analysis.get(parent, {}).get(field, {})
                 original = str(detail.get("original") or "").strip()
                 report = str(detail.get("report") or "").strip()
                 excel_field = f"{parent}_{field}"
                 if original and source_fact:
-                    refs.append({
+                    evidence = {
                         "source_type": "EXCEL",
                         "source_fact_revision_id": source_fact.get("source_fact_revision_id"),
                         "locator": f"{source_fact.get('source_ref', '')};field={excel_field}",
                         "excerpt": original,
-                    })
+                    }
+                    attach_source_links(evidence, str(source_fact.get("source_fact_revision_id") or ""))
+                    items.append({"value": original, "source_type": "EXCEL", "evidence_refs": [evidence]})
                 section_type = excel_field
-                refs.extend({"source_type": "PDF", **item} for item in fragment_refs.get(section_type, []))
-                values = [report or original] if report or original else []
-                conflict = bool(original and report and original != report)
+                for fragment in fragment_refs.get(section_type, []):
+                    evidence = {"source_type": "PDF", **fragment}
+                    attach_source_links(evidence, str(fragment.get("version_id") or ""))
+                    items.append({
+                        "value": str(fragment.get("excerpt") or "").strip(),
+                        "source_type": "PDF",
+                        "evidence_refs": [evidence],
+                    })
+                effective_value = report or original
             else:
                 source_values = solution.get(field, []) or []
-                values = [str(item.get("value") or "").strip() for item in source_values if str(item.get("value") or "").strip()]
-                refs.extend({"source_type": "PDF", **item} for item in fragment_refs.get(field, []))
-                conflict = False
+                slot_fragments = fragment_refs.get(field, [])
+                for index, source_value in enumerate(source_values):
+                    value = str(source_value.get("value") or "").strip()
+                    if not value:
+                        continue
+                    fragment = slot_fragments[index] if index < len(slot_fragments) else None
+                    evidence_refs = []
+                    if fragment:
+                        evidence = {"source_type": "PDF", **fragment}
+                        attach_source_links(evidence, str(fragment.get("version_id") or ""))
+                        evidence_refs.append(evidence)
+                    items.append({"value": value, "source_type": "PDF", "evidence_refs": evidence_refs})
+                effective_value = "\n\n".join(item["value"] for item in items)
+
+            values = list(dict.fromkeys(item["value"] for item in items))
+            source_record_ids = {
+                str(source_fact.get("source_fact_revision_id") or "") if item["source_type"] == "EXCEL"
+                else str(next((ref.get("version_id") for ref in item["evidence_refs"]), "") or "")
+                for item in items
+            }
+            relation_conflicts = [
+                link for record_id in source_record_ids if record_id
+                for link in source_links_by_record.get(record_id, [])
+                if link and str(link.get("match_status") or "").upper() == "CONFLICT"
+            ]
+            distinct_values = set(values)
+            if relation_conflicts:
+                status = "CONFLICT"
+                review_status = "REVIEW_REQUIRED"
+            elif not items:
+                status = "MISSING"
+                review_status = "NOT_APPLICABLE"
+            elif parent == "solution":
+                status = "AVAILABLE"
+                review_status = "NOT_REQUIRED"
+            elif len(distinct_values) > 1:
+                # W1 has no semantic entailment model. Different text is not
+                # proof of contradiction; leave the relationship for Review.
+                status = "MULTI_SOURCE"
+                review_status = "REVIEW_REQUIRED"
+            else:
+                status = "AVAILABLE"
+                review_status = "NOT_REQUIRED"
             result[entry_type] = {
                 "semantic_slot": semantic_slot,
+                "items": items,
                 "values": values,
-                "status": "MISSING" if not values else ("CONFLICT" if conflict else "AVAILABLE"),
-                "evidence_refs": refs,
+                "effective_value": effective_value,
+                "status": status,
+                "review_status": review_status,
+                "evidence_refs": [ref for item in items for ref in item["evidence_refs"]],
                 "source_fact_revision_id": source_fact.get("source_fact_revision_id") if source_fact else None,
                 "document_version_ids": list(version_ids),
+                "source_relation_conflicts": [str(link.get("source_link_id") or "") for link in relation_conflicts],
             }
         return result
 
