@@ -495,30 +495,51 @@
   }
 
   function humanReviewEditor(value, path) {
-    const encodedPath = encodeURIComponent(JSON.stringify(path));
     if (Array.isArray(value)) {
-      return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
-        escapeHtml(humanReviewLabel(path)) +
-        '</h3><span class="hc-status">ARRAY</span></div>' +
-        '<textarea class="hc-review-textarea" rows="4" data-human-review-path="' +
-        encodedPath + '" data-human-review-type="json">' +
-        escapeHtml(JSON.stringify(value, null, 2)) + '</textarea></article>';
+      return value.map((child, index) =>
+        humanReviewEditor(child, [...path, index])
+      ).join('');
     }
-    if (value && typeof value === 'object') {
+    if (!value || typeof value !== 'object') return '';
+    if (!Object.prototype.hasOwnProperty.call(value, 'value')) {
       return Object.entries(value).map(([key, child]) =>
         humanReviewEditor(child, [...path, key])
       ).join('');
     }
-    const type = value === null ? 'null' : typeof value;
+
+    const fieldValue = value.value;
+    const fieldPath = [...path, 'value'];
+    const encodedPath = encodeURIComponent(JSON.stringify(fieldPath));
+    const type = Array.isArray(fieldValue)
+      ? 'json'
+      : fieldValue === null
+        ? 'null'
+        : typeof fieldValue;
+    const editableValue = type === 'json'
+      ? JSON.stringify(fieldValue, null, 2)
+      : fieldValue ?? '';
+    const evidenceRefs = Array.isArray(value.evidence_block_ids)
+      ? value.evidence_block_ids.join(', ')
+      : '—';
+    const metadata = [
+      value.extraction_status ? 'status=' + value.extraction_status : '',
+      evidenceRefs !== '—' ? 'evidence=' + evidenceRefs : '',
+      value.confidence !== undefined && value.confidence !== null
+        ? 'confidence=' + value.confidence
+        : '',
+      value.unit ? 'unit=' + value.unit : '',
+    ].filter(Boolean).join(' · ');
+
     return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
       escapeHtml(humanReviewLabel(path)) +
-      '</h3><span class="hc-status">' + escapeHtml(type) + '</span></div>' +
+      '</h3><span class="hc-status">VALUE ONLY</span></div>' +
       '<div class="hc-review-columns"><div class="hc-review-column"><label>AI Candidate</label><p>' +
-      escapeHtml(value ?? '—') +
-      '</p></div><div class="hc-review-column"><label>人工确认值</label>' +
+      escapeHtml(fieldValue ?? '—') +
+      '</p><small>' + escapeHtml(metadata || 'Evidence metadata is read-only') +
+      '</small></div><div class="hc-review-column"><label>人工确认值</label>' +
       '<textarea class="hc-review-textarea" rows="2" data-human-review-path="' +
       encodedPath + '" data-human-review-type="' + escapeHtml(type) + '">' +
-      escapeHtml(value ?? '') + '</textarea></div></div></article>';
+      escapeHtml(editableValue) + '</textarea></div></div></article>';
   }
 
   function setHumanReviewDraftValue(path, raw, type) {
