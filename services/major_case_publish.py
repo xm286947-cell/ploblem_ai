@@ -523,7 +523,35 @@ class MajorCasePublishAdapter:
                     raise PublishValidationError("PUBLISH_EVIDENCE_SOURCE_NOT_FOUND")
                 if evidence.get("fragment_id") and not fragment:
                     raise PublishValidationError("PUBLISH_EVIDENCE_FRAGMENT_NOT_FOUND")
-                if not source_link and not fragment:
+                if not source_link and fragment:
+                    # The I2 compatibility slots may carry a Fragment but omit
+                    # source_link_id. Resolve only the exact registered document
+                    # relation; never pick an arbitrary source for the excerpt.
+                    fragment_version_id = _text(fragment.get("version_id"))
+                    event_itr = _text(event.get("standard_itr"))
+                    matching_record_links = [
+                        link for link in source_links.values()
+                        if fragment_version_id
+                        and _text(link.get("record_id")) == fragment_version_id
+                    ]
+                    matching_scope_links = [
+                        link for link in matching_record_links
+                        if _text(link.get("event_id")) in {None, event.get("event_id")}
+                        and (
+                            not _text(link.get("standard_itr"))
+                            or not event_itr
+                            or _text(link.get("standard_itr")) == event_itr
+                        )
+                    ]
+                    if len(matching_scope_links) == 1:
+                        source_link = matching_scope_links[0]
+                    elif matching_record_links:
+                        raise PublishValidationError(
+                            "PUBLISH_EVIDENCE_EVENT_MISMATCH"
+                            if not matching_scope_links
+                            else "PUBLISH_EVIDENCE_SOURCE_MISMATCH"
+                        )
+                if not source_link:
                     raise PublishValidationError("PUBLISH_EVIDENCE_SOURCE_REQUIRED")
                 snapshot: dict[str, Any] = {}
                 if source_link:
@@ -556,8 +584,6 @@ class MajorCasePublishAdapter:
                     _text((source_link or {}).get("source_type"))
                     or ("REPORT" if fragment else PUBLICATION_SOURCE_TYPE)
                 )
-                if source_link and source_link.get("event_id") not in {None, event.get("event_id")}:
-                    raise PublishValidationError("PUBLISH_EVIDENCE_EVENT_MISMATCH")
                 source_id = (
                     _text((source_link or {}).get("standard_itr"))
                     or _text(event.get("standard_itr"))
@@ -567,6 +593,35 @@ class MajorCasePublishAdapter:
                     _text((source_link or {}).get("record_id"))
                     or _text(snapshot.get("record_id"))
                 )
+                link_event_id = _text((source_link or {}).get("event_id"))
+                link_itr = _text((source_link or {}).get("standard_itr"))
+                event_itr = _text(event.get("standard_itr"))
+                if (
+                    (link_event_id and link_event_id != event.get("event_id"))
+                    or (link_itr and event_itr and link_itr != event_itr)
+                ):
+                    raise PublishValidationError("PUBLISH_EVIDENCE_EVENT_MISMATCH")
+                if fragment:
+                    fragment_version_id = _text(fragment.get("version_id"))
+                    source_version_id = (
+                        _text(snapshot.get("version_id"))
+                        or _text(snapshot.get("document_version_id"))
+                        or source_record_id
+                    )
+                    if (
+                        not fragment_version_id
+                        or not source_version_id
+                        or fragment_version_id != source_version_id
+                    ):
+                        raise PublishValidationError("PUBLISH_EVIDENCE_SOURCE_MISMATCH")
+                if "SOURCE_FACT" in source_type.upper():
+                    source_fact_revision_id = _text(snapshot.get("source_fact_revision_id"))
+                    if (
+                        source_fact_revision_id
+                        and source_record_id
+                        and source_fact_revision_id != source_record_id
+                    ):
+                        raise PublishValidationError("PUBLISH_EVIDENCE_SOURCE_MISMATCH")
                 source_modality = _source_modality(
                     _text(snapshot.get("source_type")) or source_type,
                     file_name,

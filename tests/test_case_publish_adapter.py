@@ -418,6 +418,130 @@ def test_wrong_event_and_missing_source_lineage_fail_closed(tmp_path: Path) -> N
         MajorCasePublishAdapter(repo).build_candidate(missing_event["event_id"])
 
 
+def test_fragment_requires_resolvable_source_link_and_exact_document_version(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    missing_case, missing_event = _active_case_event(repo, itr="ITR-NO-SOURCE-LINK")
+    missing_pdf = tmp_path / "unlinked.pdf"
+    missing_pdf.write_bytes(b"test-only-placeholder")
+    missing_document = repo.ingest_file(missing_case["case_id"], missing_pdf)
+    missing_fragment = repo.save_parse_result(
+        missing_document["version_id"],
+        ParseResult("PDF", [ParsedFragment(1, "cause", "PAGE", "4", "TEXT", "来源片段")]),
+    )[0]
+    missing_pending = repo.add_entry(
+        missing_case["case_id"], "TRC_OCCURRENCE", "人工确认的原因",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=missing_event["event_id"], evidence=[{
+            "fragment_id": missing_fragment["fragment_id"],
+            "locator": "page:4", "excerpt": "来源片段",
+        }],
+    )
+    repo.revise_entry(
+        missing_pending["entry_id"], "人工确认的原因", "CONFIRMED", "reviewer", "审核"
+    )
+
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_SOURCE_REQUIRED"):
+        MajorCasePublishAdapter(repo).build_candidate(missing_event["event_id"])
+
+    mismatch_case, mismatch_event = _active_case_event(repo, itr="ITR-WRONG-DOCUMENT")
+    linked_pdf = tmp_path / "linked.pdf"
+    linked_pdf.write_bytes(b"linked-placeholder")
+    linked_document = repo.ingest_file(mismatch_case["case_id"], linked_pdf)
+    foreign_pdf = tmp_path / "foreign.pdf"
+    foreign_pdf.write_bytes(b"foreign-placeholder")
+    foreign_document = repo.ingest_file(mismatch_case["case_id"], foreign_pdf)
+    foreign_fragment = repo.save_parse_result(
+        foreign_document["version_id"],
+        ParseResult("PDF", [ParsedFragment(1, "cause", "PAGE", "4", "TEXT", "另一文档片段")]),
+    )[0]
+    linked_source = repo.add_source_link(
+        mismatch_case["case_id"], mismatch_event["event_id"],
+        {
+            "record_id": linked_document["version_id"],
+            "source_type": "MAJOR_SOURCE_DOCUMENT",
+            "source_system": "TEST",
+            "version_id": linked_document["version_id"],
+        },
+        standard_itr=mismatch_event["standard_itr"],
+        role="CURRENT_EVENT", status="LINKED",
+    )
+    mismatch_pending = repo.add_entry(
+        mismatch_case["case_id"], "TRC_OCCURRENCE", "人工确认的原因",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=mismatch_event["event_id"], evidence=[{
+            "source_link_id": linked_source["source_link_id"],
+            "fragment_id": foreign_fragment["fragment_id"],
+            "locator": "page:4", "excerpt": "另一文档片段",
+        }],
+    )
+    repo.revise_entry(
+        mismatch_pending["entry_id"], "人工确认的原因", "CONFIRMED", "reviewer", "审核"
+    )
+
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_SOURCE_MISMATCH"):
+        MajorCasePublishAdapter(repo).build_candidate(mismatch_event["event_id"])
+
+    resolved_case, resolved_event = _active_case_event(repo, itr="ITR-EXACT-LINK")
+    resolved_pdf = tmp_path / "resolvable.pdf"
+    resolved_pdf.write_bytes(b"resolvable-placeholder")
+    resolved_document = repo.ingest_file(resolved_case["case_id"], resolved_pdf)
+    resolved_fragment = repo.save_parse_result(
+        resolved_document["version_id"],
+        ParseResult("PDF", [ParsedFragment(1, "cause", "PAGE", "4", "TEXT", "精确来源片段")]),
+    )[0]
+    exact_source = repo.add_source_link(
+        resolved_case["case_id"], resolved_event["event_id"],
+        {
+            "record_id": resolved_document["version_id"],
+            "source_type": "MAJOR_SOURCE_DOCUMENT",
+            "source_system": "TEST",
+            "version_id": resolved_document["version_id"],
+        },
+        standard_itr=resolved_event["standard_itr"],
+        role="CURRENT_EVENT", status="LINKED",
+    )
+    resolved_pending = repo.add_entry(
+        resolved_case["case_id"], "TRC_OCCURRENCE", "人工确认的原因",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=resolved_event["event_id"], evidence=[{
+            "fragment_id": resolved_fragment["fragment_id"],
+            "locator": "page:4", "excerpt": "精确来源片段",
+        }],
+    )
+    repo.revise_entry(
+        resolved_pending["entry_id"], "人工确认的原因", "CONFIRMED", "reviewer", "审核"
+    )
+
+    resolved = MajorCasePublishAdapter(repo).build_candidate(resolved_event["event_id"])
+    section = resolved["raw_evidence"]["sections"][0]
+    assert section["source_link_id"] == exact_source["source_link_id"]
+    assert section["origin_source_id"] == resolved_document["version_id"]
+    assert section["origin_source_version"] == resolved_document["version_id"]
+
+
+def test_eventless_source_link_with_other_itr_cannot_cross_event(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event_a = _active_case_event(repo, itr="ITR-A")
+    event_b = repo.upsert_event(case["case_id"], standard_itr="ITR-B", internal_event_key="ITR-B")
+    shared_link = repo.add_source_link(
+        case["case_id"], None,
+        {"record_id": "ROW-B-SHARED", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr=event_b["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    pending = repo.add_entry(
+        case["case_id"], "TRC_OCCURRENCE", "事件 A 的人工结论",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=event_a["event_id"], evidence=[{
+            "source_link_id": shared_link["source_link_id"],
+            "locator": "row:B", "excerpt": "事件 B 来源",
+        }],
+    )
+    repo.revise_entry(pending["entry_id"], "事件 A 的人工结论", "CONFIRMED", "reviewer", "审核")
+
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_EVENT_MISMATCH"):
+        MajorCasePublishAdapter(repo).build_candidate(event_a["event_id"])
+
+
 def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     case, event = _active_case_event(repo)
