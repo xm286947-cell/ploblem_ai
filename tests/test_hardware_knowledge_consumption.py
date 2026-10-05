@@ -607,6 +607,64 @@ def test_incompatible_projection_schema_is_detected_and_rebuilt(tmp_path):
     assert service.rebuild_all_verified()["projection_status"]["status"] == "READY"
 
 
+def test_retrieval_strategy_is_replaceable_behind_stable_service_contract(tmp_path):
+    class SpyStrategy:
+        def __init__(self):
+            self.calls = []
+
+        def retrieve(self, rows, *, text, scene, limit, search_values):
+            materialized = [dict(row) for row in rows]
+            self.calls.append(
+                {
+                    "rows": materialized,
+                    "text": text,
+                    "scene": scene,
+                    "limit": limit,
+                    "search_values": search_values,
+                }
+            )
+            if not materialized:
+                return []
+            return [
+                {
+                    "contract_version": CONSUMPTION_CONTRACT_VERSION,
+                    **materialized[0],
+                    "match_score": 0,
+                    "match_reasons": [],
+                }
+            ]
+
+    store = HardwareKnowledgeConsumptionProjectionStore(
+        tmp_path / "rebuildable" / "hardware_knowledge_consumption.db"
+    )
+    strategy = SpyStrategy()
+    service = HardwareKnowledgeConsumptionService(
+        store,
+        candidate_repository=FakeAssets(),
+        knowledge_adapter=FakeAdapter(),
+        retrieval_strategy=strategy,
+    )
+    service.rebuild_all_verified()
+
+    result = service.search(
+        "MCU",
+        interface=" uart ",
+        scene="RND_DIAGNOSIS",
+        limit=7,
+    )
+
+    assert len(strategy.calls) == 1
+    call = strategy.calls[0]
+    assert call["text"] == "MCU"
+    assert call["scene"] == "RND_DIAGNOSIS"
+    assert call["limit"] == 7
+    assert [row["knowledge_id"] for row in call["rows"]] == [KNOWLEDGE_ID]
+    assert call["search_values"](call["rows"][0], "device_refs") == ["MCU"]
+    assert result["contract_version"] == CONSUMPTION_CONTRACT_VERSION
+    assert result["results"][0]["knowledge_id"] == KNOWLEDGE_ID
+    _validate(result)
+
+
 def test_consumption_v0_has_no_external_search_engine_or_embedding_dependency():
     source = (ROOT / "services/hardware_knowledge_consumption.py").read_text(
         encoding="utf-8"
