@@ -689,7 +689,12 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         "scenarios": scenario_items,
         "runtime": {
             "snapshot_count": runtime_trend.get("snapshot_count") or 0,
-            "metric_count": len(runtime_trend.get("metrics") or []),
+            "metric_count": sum(1 for x in (runtime_trend.get("metrics") or []) if x.get("latest")),
+            "raw_metric_count": len(runtime_trend.get("metrics") or []),
+            "unverified_metric_count": sum(
+                1 for x in (runtime_trend.get("metrics") or [])
+                if not x.get("latest") and (x.get("raw_sample_count") or 0) > 0
+            ),
             "latest_metrics": [
                 {
                     "metric_name": x.get("metric_name"),
@@ -697,9 +702,11 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                     "latest": x.get("latest"),
                     "delta": x.get("delta"),
                 }
-                for x in (runtime_trend.get("metrics") or [])[:12]
-            ],
+                for x in (runtime_trend.get("metrics") or [])
+                if x.get("latest")
+            ][:12],
             "interpretation_performed": False,
+            "formal_trend_only": bool(runtime_trend.get("formal_trend_only")),
         },
         "action_checklist": {
             "items": action_items,
@@ -1059,7 +1066,11 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         context_terms.append(f"lifetime assessment status {lifetime['status']}")
     if diagnosis:
         context_terms.append(f"diagnosis assessment status {diagnosis['status']}")
-    metric_names = [x.get("metric_name") for x in (trend.get("metrics") or []) if x.get("metric_name")]
+    metric_names = [
+        x.get("metric_name")
+        for x in (trend.get("metrics") or [])
+        if x.get("metric_name") and x.get("latest")
+    ]
     runtime_context = [
         {
             "metric_name": x.get("metric_name"),
