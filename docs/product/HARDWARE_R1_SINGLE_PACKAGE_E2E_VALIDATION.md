@@ -22,4 +22,12 @@ The safe defaults are `HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD`, `HARDWARE_R1_E2E
 
 No step auto-reviews or auto-publishes. CI uses synthetic DOCX and fake providers only; it never includes real corpus files or makes real provider calls. Earlier Prepare and Execution packages remain internal engineering tools and are not part of this package or its user path.
 
+## Stage4 search behavior
+
+Search remains a rebuildable read model over verified Formal Knowledge. It uses Unicode NFKC normalization, normalized substring matching, the frozen field weights, and deterministic structured filters; no vector database, embedding, semantic retrieval, query rewrite, or RAG is introduced.
+
+When a user enters multiple whitespace-separated keywords, every normalized keyword must be supported somewhere in the projected Formal Knowledge record. Keywords may match across different weighted fields (for example device + interface + symptom). Each field contributes its configured weight at most once, and the UI shows the matched field, matched keyword(s), actual Formal Knowledge field value, and weight as the Match Reason.
+
+Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. E2E Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
+
 Scope is limited to Hardware R1 E2E validation. This ZIP does not certify the whole Hardware Case MVP, a formal product release, or installer packages.
