@@ -229,9 +229,15 @@ class StorageDomainSkillAdapter:
                         if str(x or "").strip()
                     )[:1600]
                 )
+                risk_context = item.get("risk_context")
+                if isinstance(risk_context, dict) and risk_context:
+                    query_parts.append(f"{key} risk context {risk_context}"[:2200])
         metrics = assessment_context.get("runtime_metrics")
         if isinstance(metrics, list) and metrics:
             query_parts.append("runtime metrics " + " ".join(str(x) for x in metrics[:20]))
+        runtime_context = assessment_context.get("runtime_context")
+        if isinstance(runtime_context, list) and runtime_context:
+            query_parts.append(f"runtime trend context {runtime_context[:12]}"[:2400])
         question = " ".join(x for x in query_parts if x.strip())
         knowledge = self.query_pack("PACK_WRITE_GOVERNANCE", question, device_type=device_type)
         items = knowledge.get("items") or []
