@@ -614,9 +614,31 @@ class StorageDomainSkillAdapter:
     def execute_diagnostic_validation(self, *, device_type: str, target_question: str,
                                       diagnostic_capabilities: list[dict[str, Any]] | None = None,
                                       runtime_observations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        knowledge = self.query_pack("PACK_DIAGNOSTIC_VALIDATION", target_question, device_type=device_type)
-        items = knowledge.get("items") or []
         observations = list(runtime_observations or [])
+        capabilities = list(diagnostic_capabilities or [])
+        metric_terms = [
+            str(x.get("metric_name") or "").strip()
+            for x in observations
+            if isinstance(x, dict) and str(x.get("metric_name") or "").strip()
+        ]
+        capability_terms = [
+            str(x.get("canonical_name") or "").strip()
+            for x in capabilities
+            if isinstance(x, dict) and str(x.get("canonical_name") or "").strip()
+        ]
+        knowledge_query = " ".join(
+            x for x in [
+                str(target_question or "").strip(),
+                " ".join(metric_terms[:20]),
+                " ".join(capability_terms[:20]),
+            ] if x
+        )
+        knowledge = self.query_pack(
+            "PACK_DIAGNOSTIC_VALIDATION",
+            knowledge_query,
+            device_type=device_type,
+        )
+        items = knowledge.get("items") or []
         current: list[dict[str, Any]] = []
         excluded: list[str] = []
 
@@ -642,7 +664,7 @@ class StorageDomainSkillAdapter:
         signals = self._deterministic_abnormality_signals(
             current,
             released_semantics=released_semantics,
-            diagnostic_capabilities=list(diagnostic_capabilities or []),
+            diagnostic_capabilities=capabilities,
         )
 
         if not current:
@@ -713,7 +735,19 @@ class StorageDomainSkillAdapter:
     def execute_change_impact(self, *, device_type: str, parameter_delta: list[dict[str, Any]],
                               question: str = "device parameter change lifetime software monitoring validation impact",
                               software_impact_request: SoftwareImpactAnalysisRequest | None = None) -> dict[str, Any]:
-        knowledge = self.query_pack("PACK_CHANGE_IMPACT", question, device_type=device_type)
+        delta = list(parameter_delta or [])
+        delta_terms = [
+            str(x.get("canonical_name") or "").strip()
+            for x in delta
+            if isinstance(x, dict) and str(x.get("canonical_name") or "").strip()
+        ]
+        knowledge_query = " ".join(
+            x for x in [
+                str(question or "").strip(),
+                " ".join(delta_terms[:30]),
+            ] if x
+        )
+        knowledge = self.query_pack("PACK_CHANGE_IMPACT", knowledge_query, device_type=device_type)
         items = knowledge.get("items") or []
         impacts = []
         impact_refs: list[str] = []
@@ -728,15 +762,15 @@ class StorageDomainSkillAdapter:
             if analyzed.status not in {SoftwareImpactAnalysisStatus.EVIDENCED, SoftwareImpactAnalysisStatus.NOT_APPLICABLE}:
                 missing.append(f"SOFTWARE_IMPACT:{analyzed.status.value}")
         classifications = ["KNOWLEDGE_BACKED" for _ in items]
-        if parameter_delta and not items:
-            classifications = ["UNKNOWN" for _ in parameter_delta]
+        if delta and not items:
+            classifications = ["UNKNOWN" for _ in delta]
         status = "ANSWERED" if items or impacts else "INSUFFICIENT_KNOWLEDGE"
         return self._base_result(
             "storage-change-impact", status,
             "参数差异已按正式知识/既有影响分析边界投影；未知项保持 UNKNOWN，需工程评审。"
             if status == "ANSWERED" else "当前没有足够正式知识支撑该变更影响，未知项不得视为安全。",
             {
-                "parameter_changes": list(parameter_delta),
+                "parameter_changes": delta,
                 "technical_meaning": [_text(x) for x in items if _text(x)],
                 "lifetime_impact": [_text(x) for x in items if _text(x)],
                 "software_impact": impacts,
@@ -751,7 +785,7 @@ class StorageDomainSkillAdapter:
             evidence_refs=(knowledge.get("evidence_refs") or []) + impact_evidence,
             missing=missing,
             separation={
-                "facts": list(parameter_delta),
+                "facts": delta,
                 "derived": impacts,
                 "hypotheses": [],
                 "unknowns": sorted(set(missing)),
