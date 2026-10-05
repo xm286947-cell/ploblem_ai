@@ -333,6 +333,8 @@ async function reuseAssessmentHistory(id){
     if($('#diagRuntimeUnit'))$('#diagRuntimeUnit').value=obs.unit||'';
     if($('#diagRuntimeSource'))$('#diagRuntimeSource').value=obs.source_command_or_interface||'';
     if($('#diagRuntimeEvidence'))$('#diagRuntimeEvidence').value=obs.evidence_ref||obs.raw_output_ref||'';
+    if($('#diagCapturedAt')&&obs.capture_time)$('#diagCapturedAt').value=runtimeLocalInputValue(new Date(obs.capture_time));
+    if($('#diagObservationConfirmed'))$('#diagObservationConfirmed').checked=(obs.quality_status==='VALID'&&obs.availability_status==='AVAILABLE');
     if($('#diagQuestion'))$('#diagQuestion').value=input.target_question||'当前观测是否提示寿命退化、介质健康或可观测性风险？';
     return msg('已恢复本次运行诊断输入，可继续修改后重新分析。');
   }
@@ -343,6 +345,8 @@ async function reuseAssessmentHistory(id){
     if($('#lifeRuntimeUnit'))$('#lifeRuntimeUnit').value=obs.unit||'';
     if($('#lifeRuntimeSource'))$('#lifeRuntimeSource').value=obs.source_command_or_interface||'';
     if($('#lifeRuntimeEvidence'))$('#lifeRuntimeEvidence').value=obs.evidence_ref||obs.raw_output_ref||'';
+    if($('#lifeCapturedAt')&&obs.capture_time)$('#lifeCapturedAt').value=runtimeLocalInputValue(new Date(obs.capture_time));
+    if($('#lifeObservationConfirmed'))$('#lifeObservationConfirmed').checked=(obs.quality_status==='VALID'&&obs.availability_status==='AVAILABLE');
     let assumptions=input.assessment_request?.assumptions||[],days=assumptions.find(a=>a.name==='time_window_days');
     if($('#lifeTimeWindow'))$('#lifeTimeWindow').value=days?.value??'';
     if($('#lifeTargetYears'))$('#lifeTargetYears').value=input.target_service_life?.value??'';
