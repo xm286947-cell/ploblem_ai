@@ -1463,6 +1463,19 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     repository = _candidate_repository(tmp_path / "hardware_asset.db")
     batch_id = store.create_batch()
     result = _result(status="PASS", case_id="A0201", source_id="c" * 64)
+    for section, field, value in (
+        ("observed_problem", "symptom", "原始现象"),
+        ("engineering_analysis", "root_cause", "原始根因"),
+        ("engineering_resolution", "actions", "原始措施"),
+        ("reusable_knowledge", "engineering_rule", "原始规则"),
+    ):
+        result["knowledge_object"][section] = {
+            field: {
+                "value": value,
+                "extraction_status": "EXTRACTED",
+                "evidence_block_ids": ["B0001"],
+            }
+        }
     asset = _commit_fixture_asset(
         repository, result, case_id="A0201", source_id="c" * 64
     )
@@ -1492,6 +1505,13 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     confirmed["engineering_context"]["primary_subject"]["extraction_status"] = (
         "MISSING"
     )
+    confirmed["observed_problem"]["symptom"]["value"] = "人工确认现象"
+    confirmed["engineering_analysis"]["root_cause"]["value"] = "人工确认根因"
+    confirmed["engineering_resolution"]["actions"]["value"] = "人工确认措施"
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "人工确认规则"
+    confirmed["engineering_analysis"]["root_cause"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
     confirmed["schema_extension"] = {"value": "must not be persisted"}
 
     reviewed = service.apply_human_review(
@@ -1515,6 +1535,21 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
         "extraction_status"
     ] == "EXTRACTED"
     assert "schema_extension" not in durable["knowledge_object"]
+    assert durable["knowledge_object"]["observed_problem"]["symptom"]["value"] == (
+        "人工确认现象"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"]["value"] == (
+        "人工确认根因"
+    )
+    assert durable["knowledge_object"]["engineering_resolution"]["actions"]["value"] == (
+        "人工确认措施"
+    )
+    assert durable["knowledge_object"]["reusable_knowledge"]["engineering_rule"]["value"] == (
+        "人工确认规则"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"][
+        "evidence_block_ids"
+    ] == ["B0001"]
     assert durable["knowledge_object"]["source_fact"] == asset["knowledge_object"][
         "source_fact"
     ]
