@@ -80,11 +80,15 @@ async function loadMvpGuidedFlow(){
   if(!id)return msg('请选择分析器件',true);
   box.innerHTML='<div class="card">正在汇总 S1～S5 当前状态…</div>';
   try{
-    let r=await api('/api/product/devices/'+encodeURIComponent(id)+'/mvp-summary'),sc=r.scenarios||[],actions=r.remaining_actions||[],pk=r.public_knowledge||{},ac=r.action_checklist||{};
-    box.innerHTML='<div class="grid4">'+sc.map(x=>'<div class="card"><div class="pagehead"><div><b>'+esc(x.label||x.type)+'</b><p>'+esc(x.direct_answer||'尚未执行')+'</p></div>'+badge(x.status||'NOT_RUN')+'</div>'+guidedScenarioAction(x.type,id)+'</div>').join('')+'</div>'+
-      '<div class="card"><b>Public Knowledge</b> '+badge(pk.integration||'UNKNOWN')+'<p>'+esc(pk.role||'')+'</p><button class="secondary" onclick="openDeviceKnowledge(\''+esc(id)+'\')">查当前器件公共知识</button></div>'+
+    let results=await Promise.all([
+      api('/api/product/devices/'+encodeURIComponent(id)+'/mvp-summary'),
+      api('/api/public-knowledge/status?mode=LIVE').catch(()=>({connected:false}))
+    ]),r=results[0],pkHealth=results[1]||{},sc=r.scenarios||[],actions=r.remaining_actions||[],pk=r.public_knowledge||{},ac=r.action_checklist||{},pkReady=pkHealth.connected===true;
+    box.innerHTML='<div class="grid4">'+sc.map(x=>'<div class="card"><div class="pagehead"><div><b>'+esc(x.label||x.type)+'</b><p>'+esc(x.direct_answer||'尚未执行')+'</p>'+(x.next_action?'<small>下一步：'+esc(x.next_action)+'</small>':'')+'</div>'+badge(x.status||'NOT_RUN')+'</div>'+guidedScenarioAction(x.type,id)+'</div>').join('')+'</div>'+
+      '<div class="card"><b>Public Knowledge</b> '+badge(pkReady?'READY':'UNAVAILABLE')+'<p>'+esc(pk.role||'')+'</p><small>'+(pkReady?'RAG 服务已连接。':'RAG 服务当前不可用；Storage 分析保持可用，但 Public Knowledge MVP 验收尚未满足。')+'</small><div class="row" style="margin-top:8px"><button class="secondary" onclick="openDeviceKnowledge(\''+esc(id)+'\')">查当前器件公共知识</button></div></div>'+
       '<div class="card"><b>Engineering Actions</b><p>Open / In Progress：'+esc(ac.open_count||0)+'</p><button class="secondary" onclick="openDevice(\''+esc(id)+'\');setTimeout(()=>scrollDeviceSection(\'engineeringActionsPanel\'),0)">打开执行清单</button></div>'+
-      (actions.length?'<div class="warning card"><b>下一步</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>':'<div class="fact card"><b>S1～S5 已有可回溯结果。</b><p>可以进入器件详情查看综合评估和工程执行清单。</p><button class="primary" onclick="openDevice(\''+esc(id)+'\')">打开完整结果</button></div>');
+      (!pkReady?'<div class="warning card"><b>Public Knowledge 未就绪</b><p>先恢复 Public Knowledge 服务；不要把“代码已嵌入”误判成“RAG 当前可用”。</p></div>':'')+
+      (actions.length?'<div class="warning card"><b>下一步</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>':'<div class="'+(pkReady?'fact':'warning')+' card"><b>S1～S5 已有可回溯结果。</b><p>'+(pkReady?'Public Knowledge 同时在线，可进入完整结果。':'Storage S1～S5 已形成结果，但 RAG 当前未连接。')+'</p><button class="primary" onclick="openDevice(\''+esc(id)+'\')">打开完整结果</button></div>');
   }catch(e){box.innerHTML='<div class="danger card"><b>MVP 进度读取失败</b><p>'+esc(e.message)+'</p></div>'}
 }
 async function runGuidedCompare(){
