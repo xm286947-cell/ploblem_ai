@@ -7,6 +7,7 @@
   const state = {
     batch: null,
     item: null,
+    promotion: null,
     scrollY: 0,
   };
 
@@ -463,7 +464,93 @@
     q('[data-item-retry]').disabled =
       !(item.result === 'FAILED' && ['STAGE_A', 'STAGE_B'].includes(item.failed_stage));
     updateUrl({batchId: item.batch_id, itemId: item.item_id});
+    const promotionPanel = q('[data-e2e-promotion]');
+    if (promotionPanel) {
+      promotionPanel.hidden = !item.candidate_id && !item.candidate?.candidate_id;
+      if (!promotionPanel.hidden) refreshPromotion(item.item_id);
+    }
     detail.scrollIntoView({block: 'start', behavior: 'smooth'});
+  }
+
+  function paintPromotion(payload, note = '') {
+    const panel = q('[data-e2e-promotion]');
+    if (!panel) return;
+    const promotion = payload?.promotion || payload || {};
+    state.promotion = promotion;
+    const status = promotion.status || promotion.promotion_status || 'NOT_STARTED';
+    q('[data-promotion-status]').textContent = [
+      '状态：' + status,
+      promotion.knowledge_id ? 'knowledge_id：' + promotion.knowledge_id : '',
+      promotion.error_code ? '错误：' + promotion.error_code : '',
+      note,
+    ].filter(Boolean).join(' · ');
+    const canAct = Boolean(state.item && ['CANDIDATE_READY', 'REVIEW'].includes(displayResult(state.item)));
+    q('[data-promotion-precheck]').disabled = !canAct || !['NOT_STARTED', 'PRECHECK_PASS'].includes(status);
+    q('[data-promotion-intake]').disabled = !canAct || !['PRECHECK_PASS', 'INTAKE_FAILED'].includes(status);
+    q('[data-promotion-review]').disabled = !canAct || status !== 'CANDIDATE_INTAKED';
+    q('[data-promotion-publish]').disabled = !canAct || !['REVIEW_CONFIRMED', 'PUBLISH_FAILED'].includes(status);
+    q('[data-promotion-verify]').disabled = !canAct || !['PUBLISHED_PENDING_QUERY_BACK', 'VERIFY_FAILED'].includes(status);
+    q('[data-project-consumption]').disabled = !canAct || status !== 'VERIFIED';
+  }
+
+  async function refreshPromotion(itemId = state.item?.item_id) {
+    if (!itemId) return;
+    try {
+      paintPromotion(await request('/items/' + encodeURIComponent(itemId) + '/promotion'));
+    } catch (error) {
+      if (error.message === 'PROMOTION_NOT_FOUND') paintPromotion({status: 'NOT_STARTED'});
+      else paintPromotion({status: 'BLOCKED', error_code: error.message});
+    }
+  }
+
+  async function promotionAction(action) {
+    if (!state.item) return;
+    const itemId = encodeURIComponent(state.item.item_id);
+    try {
+      let payload;
+      if (action === 'review') {
+        const reviewer = q('[data-formal-reviewer]').value.trim();
+        if (!reviewer || !window.confirm('确认将当前 Durable Candidate 提交为人工 Formal Review？')) return;
+        payload = await request('/items/' + itemId + '/promotion/review', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({reviewer, confirmed_content: state.item.candidate, review_comment: q('[data-formal-review-comment]').value.trim()}),
+        });
+      } else if (action === 'publish') {
+        const publisher = q('[data-formal-reviewer]').value.trim();
+        if (!publisher || !window.confirm('只向当前配置的 NON_PROD Unified Knowledge 发布。确认继续？')) return;
+        payload = await request('/items/' + itemId + '/promotion/publish', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({publisher}),
+        });
+      } else {
+        payload = await request('/items/' + itemId + '/promotion/' + action, {method: 'POST'});
+      }
+      paintPromotion(payload);
+      setMessage('Promotion 操作完成：' + action);
+    } catch (error) {
+      paintPromotion(state.promotion || {}, '操作被阻止：' + error.message);
+      setMessage('Promotion 操作失败：' + error.message, true);
+    }
+  }
+
+  async function verifyAndProject() {
+    if (!state.item) return;
+    try {
+      const verified = await request('/items/' + encodeURIComponent(state.item.item_id) + '/promotion/verify', {method: 'POST'});
+      paintPromotion(verified, '远端 Query Back 身份已校验');
+      const candidateId = state.item.candidate_id || state.item.candidate?.candidate_id;
+      if (!candidateId) throw new Error('CANDIDATE_ID_MISSING');
+      const projected = await fetch('/api/v2/hardware-cases/r1/workbench/consumption/project/' + encodeURIComponent(candidateId), {
+        method: 'POST', headers: {'X-Hardware-Case-Role': 'MAINTAINER', Accept: 'application/json'},
+      });
+      const body = await projected.json().catch(() => ({}));
+      if (!projected.ok) throw new Error(body.detail || 'PROJECTION_UPDATE_FAILED');
+      paintPromotion(verified, 'Query Back PASS · Consumption Projection 已更新');
+      setMessage('Formal Knowledge 已验证并进入 Knowledge Search。');
+    } catch (error) {
+      paintPromotion(state.promotion || {}, '验证/Projection 失败：' + error.message);
+      setMessage('Verify / Projection 失败：' + error.message, true);
+    }
   }
 
   async function openItem(itemId) {
@@ -605,6 +692,21 @@
     detail.scrollIntoView({block: 'start', behavior: 'smooth'});
   });
   q('[data-force-item]').addEventListener('click', () => itemAction('force-full-run'));
+  q('[data-promotion-precheck]').addEventListener('click', () => promotionAction('precheck'));
+  q('[data-promotion-intake]').addEventListener('click', () => promotionAction('intake'));
+  q('[data-promotion-review]').addEventListener('click', () => promotionAction('review'));
+  q('[data-promotion-publish]').addEventListener('click', () => promotionAction('publish'));
+  q('[data-promotion-verify]').addEventListener('click', verifyAndProject);
+  q('[data-project-consumption]').addEventListener('click', async () => {
+    const candidateId = state.item?.candidate_id || state.item?.candidate?.candidate_id;
+    try {
+      const response = await fetch('/api/v2/hardware-cases/r1/workbench/consumption/project/' + encodeURIComponent(candidateId), {method: 'POST', headers: {'X-Hardware-Case-Role': 'MAINTAINER'}});
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || 'PROJECTION_UPDATE_FAILED');
+      paintPromotion(state.promotion, 'Consumption Projection 已更新');
+      setMessage('Projection 已更新，可打开 Knowledge Search 验证。');
+    } catch (error) { paintPromotion(state.promotion, 'Projection 失败：' + error.message); }
+  });
 
   const params = new URL(window.location.href).searchParams;
   resultFilter.value = params.get('status') || '';

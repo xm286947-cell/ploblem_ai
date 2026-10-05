@@ -107,6 +107,21 @@
       <pre class="hc-workbench-json" data-candidate-preview>—</pre>
       <h3>Evidence / Gate Summary</h3>
       <pre class="hc-workbench-json" data-evidence-summary>—</pre>
+      <section class="hc-card" data-e2e-promotion hidden>
+        <div class="hc-card-head"><div><h3>Durable Candidate → Formal Knowledge</h3><p>每个远端写入都需要人工逐步确认；Publish 仅允许配置为 NON_PROD 的 Unified Knowledge。</p></div></div>
+        <p role="status" data-promotion-status>读取 Promotion 状态…</p>
+        <label>Reviewer <input type="text" data-formal-reviewer value="E2E_MAINTAINER"></label>
+        <label>Review Comment <input type="text" data-formal-review-comment placeholder="审核说明"></label>
+        <div class="hc-workbench-actions">
+          <button class="hc-button" type="button" data-promotion-precheck>Precheck</button>
+          <button class="hc-button" type="button" data-promotion-intake>Intake Candidate</button>
+          <button class="hc-button" type="button" data-promotion-review>人工 Formal Review</button>
+          <button class="hc-button primary" type="button" data-promotion-publish>人工确认 Publish</button>
+          <button class="hc-button" type="button" data-promotion-verify>Verify + Query Back</button>
+          <button class="hc-button" type="button" data-project-consumption>更新本地 Consumption Projection</button>
+          <a class="hc-button secondary" href="/p0/hardware-cases/knowledge?e2e=1">打开 Knowledge Search</a>
+        </div>
+      </section>
     </div>
   </section>
 

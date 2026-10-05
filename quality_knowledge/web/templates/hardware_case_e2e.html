@@ -1,0 +1,23 @@
+{% extends "p0_base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+{% block brand_subtitle %}Hardware R1 E2E Validation{% endblock %}
+{% block shell_product %}硬件案例库{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hardware-r1-e2e-v1">{% endblock %}
+{% block breadcrumb %}R1 端到端验证{% endblock %}
+{% block body %}
+{% include "_hardware_case_nav.html" %}
+<main class="hc-page" data-hardware-r1-e2e>
+  <header class="hc-hero"><div><span class="hc-kicker">ONE PACKAGE · ONE LAUNCHER · EXISTING HARDWARE CASE WEB</span><h1>Hardware R1 端到端验证</h1><p>从 Word 导入开始，经 Stage A/B、Evidence Gate、Durable Candidate、人工 Review 与人工 Publish，最后在同一应用中检索正式知识并回看原始 Word Evidence。</p></div></header>
+  <section class="hc-card"><div class="hc-card-head"><div><h2>环境与安全状态</h2><p>此检查只读取配置，不会调用 Provider，也不会执行 Publish。</p></div><button class="hc-button" type="button" data-e2e-refresh>刷新状态</button></div><div data-e2e-readiness role="status">正在检查环境…</div></section>
+  <section class="hc-card"><div class="hc-card-head"><div><h2>单包验证路径</h2><p>所有步骤都由当前 Hardware Case Web 完成；Manifest、Source SHA 与隔离 Data Root 在后台自动管理。</p></div></div>
+    <ol class="hc-e2e-steps">
+      <li><b>导入 Word 并运行知识生产</b><p>选择 20–30 篇 Word，启动批次；页面显示 Parse、Stage A、Stage B、Evidence Gate 与 Candidate 状态。</p><a class="hc-button primary" href="/p0/hardware-cases/knowledge-production">进入知识生产工作台</a></li>
+      <li><b>人工确认 Candidate</b><p>在同一 Case 详情中处理冲突；通过后使用 Promotion 区域执行 Precheck、Candidate Intake、人工 Formal Review。</p></li>
+      <li><b>人工确认非生产 Publish</b><p>只有明确配置 NON_PROD Unified Knowledge 环境时才开放 Publish；不执行自动 Review 或自动 Publish。</p></li>
+      <li><b>检索、详情与原始 Evidence 回看</b><p>Query Back 成功后更新可重建 Projection，再通过搜索结果打开详情并回到来源 Word。</p><a class="hc-button" href="/p0/hardware-cases/knowledge?e2e=1">进入 E2E 正式知识搜索</a></li>
+    </ol>
+  </section>
+  <p class="hc-source-warning">Real Provider、真实 Word 与正式环境 Publish 仅由后续人工测试执行。此页面的状态探测不会发送模型请求。</p>
+</main>
+{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_e2e.js?v=hardware-r1-e2e-v1"></script>{% endblock %}

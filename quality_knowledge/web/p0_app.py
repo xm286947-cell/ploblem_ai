@@ -15,6 +15,7 @@ from quality_knowledge.web.hardware_public_api import create_hardware_public_rou
 from quality_knowledge.web.hardware_knowledge_consumption_api import (
     create_hardware_knowledge_consumption_router,
 )
+from quality_knowledge.web.hardware_r1_e2e_api import create_hardware_r1_e2e_router
 from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
 from quality_knowledge.web.hardware_r1_workbench_api import create_hardware_r1_workbench_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
@@ -66,6 +67,7 @@ from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
 )
+from services.hardware_data_root import HardwareDataRootResolver
 from services.hardware_durable_mutation_gate import (
     HardwareApplicationLock,
     HardwareDurableMutationError,
@@ -594,6 +596,8 @@ def create_p0_app(
                     bridge=hardware_r1_promotion_bridge,
                     candidate_repository=hardware_candidate_asset_repository,
                 )
+                hardware_knowledge_consumption_service.assets = hardware_candidate_asset_repository
+                hardware_knowledge_consumption_service.adapter = effective_knowledge_adapter
                 app.state.hardware_r1_promotion_store = hardware_r1_promotion_store
                 try:
                     migration_status = hardware_r1_promotion_service.migrate_legacy_records()
@@ -732,14 +736,34 @@ def create_p0_app(
                 create_hardware_r1_workbench_router(
                     hardware_r1_workbench_service,
                     promotion_service=hardware_r1_promotion_service,
+                    consumption_service=hardware_knowledge_consumption_service,
+                    publish_allowed=(
+                        os.getenv("HARDWARE_R1_E2E_PROFILE") != "1"
+                        or (
+                            os.getenv("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "").strip().upper() == "NON_PROD"
+                            and bool(os.getenv("HARDWARE_KNOWLEDGE_BASE_URL", "").strip())
+                            and bool(os.getenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION", "").strip())
+                        )
+                    ),
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
             app.include_router(
                 create_hardware_knowledge_consumption_router(
-                    hardware_knowledge_consumption_service
+                    hardware_knowledge_consumption_service,
+                    source_store=hardware_case_source_store,
+                    knowledge_adapter=effective_knowledge_adapter,
                 )
             )
+            if os.getenv("HARDWARE_R1_E2E_PROFILE") == "1":
+                app.include_router(
+                    create_hardware_r1_e2e_router(
+                        app_root=root,
+                        data_root=hardware_data_root,
+                        normal_data_root=HardwareDataRootResolver(root).default_data_root,
+                        promotion_status=app.state.hardware_r1_promotion_status,
+                    )
+                )
             testability_restore_hooks.append(hardware_data.ensure_ready)
         else:
             app.state.hardware_case_repository = None

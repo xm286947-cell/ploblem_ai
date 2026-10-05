@@ -1,0 +1,18 @@
+{
+  "profile": "HARDWARE_R1_SINGLE_PACKAGE_E2E",
+  "knowledge_environment": "NON_PROD",
+  "notes": [
+    "Copy to a user-managed local file outside the package before enabling controlled Publish.",
+    "Configure the non-production Unified Knowledge endpoint and release version using environment variables.",
+    "Provider credentials must be supplied only through environment variables; never store secrets in this file.",
+    "Without explicit NON_PROD endpoint configuration, Publish remains blocked."
+  ],
+  "required_environment": [
+    "HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD",
+    "HARDWARE_KNOWLEDGE_BASE_URL",
+    "HARDWARE_KNOWLEDGE_RELEASE_VERSION"
+  ],
+  "provider_environment_reference_only": true,
+  "automatic_review": false,
+  "automatic_publish": false
+}

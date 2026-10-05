@@ -20,6 +20,7 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1PromotionError,
 )
+from services.hardware_knowledge_consumption import HardwareKnowledgeConsumptionError, HardwareKnowledgeConsumptionService
 
 
 class ReviewConflictDecisionRequest(BaseModel):
@@ -105,6 +106,8 @@ def create_hardware_r1_workbench_router(
     service: HardwareR1WorkbenchService,
     *,
     promotion_service: HardwareR1KnowledgePromotionService | None = None,
+    consumption_service: HardwareKnowledgeConsumptionService | None = None,
+    publish_allowed: bool = True,
     prefix: str = "/api/v2/hardware-cases/r1/workbench",
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-r1-workbench"])
@@ -113,6 +116,21 @@ def create_hardware_r1_workbench_router(
         if promotion_service is None:
             raise HTTPException(status_code=503, detail="KNOWLEDGE_PROMOTION_UNAVAILABLE")
         return promotion_service
+
+    @router.post("/consumption/project/{asset_candidate_id}")
+    def project_verified_candidate(
+        asset_candidate_id: str,
+        x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if consumption_service is None:
+            raise HTTPException(status_code=503, detail="CONSUMPTION_PROJECTION_UNAVAILABLE")
+        try:
+            return consumption_service.project_verified(asset_candidate_id)
+        except HardwareKnowledgeConsumptionError as error:
+            if error.code.startswith("CONSUMPTION_PROJECTION_"):
+                raise HTTPException(status_code=503, detail=error.code) from error
+            raise _workbench_error(error) from error
 
     @router.post("/batches", status_code=201)
     async def upload_batch(
@@ -344,6 +362,8 @@ def create_hardware_r1_workbench_router(
         ),
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
+        if not publish_allowed:
+            raise HTTPException(status_code=503, detail="BLOCKED_BY_ENVIRONMENT")
         promotion = require_promotion_service()
         try:
             return promotion.publish_item(

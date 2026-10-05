@@ -373,6 +373,18 @@ def create_p0_insights_router(
             },
         )
 
+    @router.get("/p0/hardware-cases/e2e", response_class=HTMLResponse, include_in_schema=False)
+    async def hardware_case_e2e(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "hardware_case_e2e.html",
+            {
+                "page_title": "R1 端到端验证",
+                "hardware_role": "MAINTAINER",
+                "hardware_active": "e2e",
+            },
+        )
+
     @router.get("/p0/hardware-cases/tree", response_class=HTMLResponse, include_in_schema=False)
     async def hardware_case_tree(request: Request) -> HTMLResponse:
         role = "MAINTAINER" if request.query_params.get("role") == "maintainer" else "CONSUMER"
@@ -417,6 +429,7 @@ def create_p0_insights_router(
                 "page_title": "正式知识消费 · 硬件案例库",
                 "hardware_role": "CONSUMER",
                 "hardware_active": "knowledge",
+                "e2e_evidence_enabled": request.query_params.get("e2e") == "1",
             },
         )
 
