@@ -942,6 +942,7 @@ def dashboard() -> dict[str, Any]:
         "by_type": by_type,
         "attention_count": sum(x["attention"] for x in summaries),
         "devices": summaries,
+        "recent_assessments": core.list_recent_device_assessments(limit=10),
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
     }
 
