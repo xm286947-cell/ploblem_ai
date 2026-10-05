@@ -2180,10 +2180,16 @@ def runtime_metric_trends(device_id, limit=40):
 
 def create_engineering_actions(device_id, source_assessment_id, actions, *,
                                evidence_refs=None, knowledge_refs=None,
+                               source_assessment_ids=None,
                                created_by="Storage MVP"):
     """Persist user-facing engineering actions from an existing assessment result."""
     import json
     allowed_types = {"SOFTWARE_CONTROL", "TEST_VALIDATION", "MONITORING", "FOLLOW_UP"}
+    source_ids = []
+    for value in [source_assessment_id, *(source_assessment_ids or [])]:
+        value = str(value or "").strip()
+        if value and value not in source_ids:
+            source_ids.append(value)
     created = []
     timestamp = now()
     with connect() as con:
@@ -2216,11 +2222,11 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
                     str(created_by or "Storage MVP"),
                     action_id,
                 ))
-                if source_assessment_id:
+                for source_id in source_ids:
                     con.execute("""INSERT OR IGNORE INTO engineering_action_sources
                       (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
                       VALUES (?,?,?,?,?,?)""", (
-                        uuid4().hex, action_id, source_assessment_id,
+                        uuid4().hex, action_id, source_id,
                         json.dumps(list(evidence_refs or []), ensure_ascii=False),
                         json.dumps(list(knowledge_refs or []), ensure_ascii=False),
                         timestamp,
@@ -2237,11 +2243,11 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
                 json.dumps(list(knowledge_refs or []), ensure_ascii=False),
                 actor, actor, timestamp, timestamp,
             ))
-            if source_assessment_id:
+            for source_id in source_ids:
                 con.execute("""INSERT OR IGNORE INTO engineering_action_sources
                   (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
                   VALUES (?,?,?,?,?,?)""", (
-                    uuid4().hex, action_id, source_assessment_id,
+                    uuid4().hex, action_id, source_id,
                     json.dumps(list(evidence_refs or []), ensure_ascii=False),
                     json.dumps(list(knowledge_refs or []), ensure_ascii=False),
                     timestamp,
