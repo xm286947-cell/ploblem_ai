@@ -312,36 +312,34 @@ LIFETIME_FORMAL_KNOWLEDGE_QUERIES = {
 
 
 def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[dict[str, Any]]:
-    """Map only the current Formal Knowledge Release into LifetimeEngine input.
+    """Map only PACK_LIFETIME_ENGINEERING released objects into LifetimeEngine.
 
-    Public Knowledge/RAG is deliberately excluded.  Parameters are copied only
-    when they are explicit structured fields in a released Knowledge Object;
-    prose is never parsed into protocol constants.
+    Public Knowledge/RAG is deliberately excluded.  The existing Skill Pack
+    performs release-version/object-type/evidence filtering first.  Protocol
+    parameters are copied only from explicit structured fields; prose is never
+    parsed into constants.
     """
     from .lifetime_engine import FormulaRegistry
+    from skills.real_knowledge import RealKnowledgeAssessmentService
 
     formal_metric = FormulaRegistry.canonicalize(requested_metric)
     config = LIFETIME_FORMAL_KNOWLEDGE_QUERIES.get(formal_metric)
     if not config:
         return []
 
-    consumer = KnowledgeReleaseConsumer.current()
-    status = consumer.status()
-    if not status.get("available") or status.get("status") != "READY":
+    service = RealKnowledgeAssessmentService.current()
+    result = service.adapter.query_pack(
+        "PACK_LIFETIME_ENGINEERING",
+        config["query"],
+        device_type=device_type,
+        top_k=8,
+    )
+    if result.get("status") != "READY":
         return []
 
-    try:
-        result = consumer.query(
-            config["query"],
-            device_type=device_type,
-            top_k=8,
-            knowledge_release_version=status.get("knowledge_release_version"),
-        )
-    except Exception:
-        return []
-
+    release_version = str(result.get("knowledge_release_version") or "")
     refs: list[dict[str, Any]] = []
-    for obj in result.get("results") or []:
+    for obj in result.get("items") or []:
         evidence_refs = [
             str(x).strip()
             for x in (obj.get("evidence_refs") or [])
@@ -379,21 +377,19 @@ def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[
             ]
             if str(x or "").strip()
         )
+        knowledge_id = str(obj.get("object_id") or "")
+        object_release_version = str(obj.get("knowledge_release_version") or release_version)
+        if not knowledge_id or not object_release_version:
+            continue
         refs.append({
-            "knowledge_id": str(obj.get("object_id") or ""),
-            "release_version": str(
-                obj.get("knowledge_release_version")
-                or result.get("knowledge_release_version")
-                or status.get("knowledge_release_version")
-                or ""
-            ),
+            "knowledge_id": knowledge_id,
+            "release_version": object_release_version,
             "release_status": "RELEASED",
             "semantic_scope": semantic_scope or formal_metric,
             "evidence_refs": evidence_refs,
             "parameters": parameters,
         })
-    return [x for x in refs if x["knowledge_id"] and x["release_version"]]
-
+    return refs
 
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
