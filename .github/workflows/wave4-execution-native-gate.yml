@@ -1,0 +1,123 @@
+name: Hardware R1 Wave4 Real Execution Native Package Gate
+
+on:
+  pull_request:
+    branches: [feature/hardware-r1-wave4-validation-package]
+    paths:
+      - "tools/hardware_r1_wave4_execution.py"
+      - "scripts/build_hardware_r1_wave4_execution_package.py"
+      - "config/hardware_r1_wave4_execution.example.json"
+      - "README_WAVE4_REAL_EXECUTION.md"
+      - "RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.*"
+      - "tests/test_hardware_r1_wave4_execution.py"
+      - ".github/workflows/wave4-execution-native-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-package-gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize Windows package inputs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config core.autocrlf false
+          git config core.eol lf
+          git checkout --force HEAD -- .
+          $roots = @("services", "repositories", "runtime", "models", "parser", "contracts", "quality_knowledge", "schema", "config", "prompts", "tools", "scripts", "README_WAVE4_REAL_EXECUTION.md", "WAVE4_FIELD_AUDIT_TEMPLATE.md", "RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat", "RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.command", "requirements.txt", "requirements-runtime-p0-test.txt")
+          $extensions = @(".py", ".md", ".json", ".yaml", ".yml", ".txt", ".bat", ".command", ".css", ".js", ".html", ".sql")
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          foreach ($root in $roots) {
+            $target = Join-Path $PWD $root
+            if (!(Test-Path $target)) { continue }
+            $items = if ((Get-Item $target).PSIsContainer) { Get-ChildItem $target -Recurse -File } else { Get-Item $target }
+            foreach ($item in $items) {
+              if ($extensions -notcontains $item.Extension.ToLowerInvariant()) { continue }
+              $text = [System.IO.File]::ReadAllText($item.FullName)
+              [System.IO.File]::WriteAllText($item.FullName, $text.Replace("`r`n", "`n").Replace("`r", "`n"), $utf8)
+            }
+          }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install focused dependencies
+        run: python -m pip install pytest "pydantic>=2.7,<3" "PyYAML>=6,<7" "jsonschema>=4.21,<5" "langgraph>=1,<2"
+
+      - name: Run execution and Prepare regressions
+        run: python -m pytest -q tests/test_hardware_r1_wave4_execution.py tests/test_hardware_r1_wave4_validation_package.py
+
+      - name: Build execution package
+        run: python scripts/build_hardware_r1_wave4_execution_package.py
+
+      - name: Verify ZIP and package security
+        shell: bash
+        run: |
+          package="dist/HARDWARE_R1_WAVE4_REAL_EXECUTION_ca310a5062c8.zip"
+          python -m zipfile -t "$package"
+          python - "$package" <<'PY'
+          import hashlib, json, sys, zipfile
+          from pathlib import PurePosixPath
+          archive = zipfile.ZipFile(sys.argv[1])
+          for name in archive.namelist():
+              path = PurePosixPath(name)
+              if path.suffix.lower() in {'.docx','.xlsx','.db','.sqlite','.sqlite3','.pyc'} or path.name.lower() in {'.env','.env.local'}:
+                  raise SystemExit('FORBIDDEN_PACKAGE_FILE=' + name)
+              payload = archive.read(name)
+              if any(marker in payload for marker in (b'/private/', b'/Users/', b'C:\\Users\\')):
+                  raise SystemExit('ABSOLUTE_PATH_IN_PACKAGE=' + name)
+          manifest = json.loads(archive.read('EXECUTION_PACKAGE_MANIFEST.json'))
+          assert manifest['source_product_commit'] == 'ca310a5062c8fa15e6a00d22c718fdc7504192c8'
+          assert manifest['prepare_package_sha256'] == 'd8305b991ffc40b43c72d8aefde64db13c0128784efc75a5286cefc7c80621e0'
+          assert manifest['real_data_included'] is False and manifest['secrets_included'] is False
+          print('PACKAGE_SECURITY=PASS')
+          print('EXECUTION_PACKAGE_SHA256=' + hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
+          PY
+
+      - name: Fresh extract and fake execution
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then runner_tmp="$(cygpath -u "$RUNNER_TEMP")"; else runner_tmp="$RUNNER_TEMP"; fi
+          extract="$runner_tmp/wave4-execution-extract"
+          mkdir -p "$extract"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python -m zipfile -e dist/HARDWARE_R1_WAVE4_REAL_EXECUTION_ca310a5062c8.zip "$extract"
+          else
+            ditto -x -k dist/HARDWARE_R1_WAVE4_REAL_EXECUTION_ca310a5062c8.zip "$extract"
+          fi
+          python -m compileall -q "$extract"
+          cd "$extract"
+          python -c "from services.hardware_data_root import HardwareDataRootResolver; from services.hardware_startup_coordinator import HardwareStartupCoordinator; from services.hardware_case_source_store import HardwareCaseSourceStore; from services.hardware_asset_repository import CandidateAssetRepository; from services.hardware_asset_operation_journal import HardwareAssetOperationJournal; from services.hardware_case_r1_workbench import HardwareR1WorkbenchService; from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer; print('STARTUP_IMPORT=PASS')"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd.exe /c "$(cygpath -w "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat")"
+            launcher_status=$?
+          else
+            "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.command"
+            launcher_status=$?
+          fi
+          test "$launcher_status" -ne 0
+          mkdir -p tests
+          cp "$GITHUB_WORKSPACE/tests/test_hardware_r1_wave4_execution.py" tests/
+          export PYTHONPATH="$extract"
+          python -m pytest -q tests/test_hardware_r1_wave4_execution.py
+          mkdir -p "$runner_tmp"
+          cat > "$runner_tmp/WAVE4_EXECUTION_NATIVE_GATE_REPORT.json" <<JSON
+          {"platform":"${{ runner.os }}","fresh_extract":"PASS","python_compile":"PASS","startup_import":"PASS","launcher_no_args_fail_closed":"PASS","synthetic_execution_fake_provider":"PASS","real_provider_calls":0,"data_root_isolation":"PASS","security_scan":"PASS","real_docx_included":false}
+          JSON
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_WAVE4_EXECUTION_NATIVE_GATE_${{ runner.os }}_${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/WAVE4_EXECUTION_NATIVE_GATE_REPORT.json
+            dist/HARDWARE_R1_WAVE4_REAL_EXECUTION_ca310a5062c8.zip.sha256
