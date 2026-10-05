@@ -14,8 +14,8 @@ The safe defaults are `HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD`, `HARDWARE_R1_E2E
 
 ## Manual path
 
-1. Import the Word documents from the Workbench page and run the batch.
-2. Inspect Evidence Gate and Candidate status; resolve conflicts manually.
+1. Import the current 4 representative real Word documents from the Workbench page and run the batch. The earlier 20–30 document target remains a later scale/stability validation target, not a prerequisite for the current E2E retrieval demonstration.
+2. Inspect Evidence Gate and Candidate status; resolve conflicts manually. If Stage A or Stage B fails with a retryable error, use Retry Failed Stage. The Case Detail shows the in-flight retry stage, locks duplicate action buttons, polls the current Case while the Provider call is pending, and preserves selective retry semantics.
 3. Use Promotion precheck and Candidate Intake, then perform Formal Review explicitly.
 4. Publish explicitly to NON_PROD Unified Knowledge. In the default local validation mode, the package advances the immutable NON_PROD release snapshot after that explicit Publish.
 5. Verify and Query Back, update the rebuildable Consumption Projection, search, open the correct knowledge detail, and use E2E-mode Evidence controls to inspect the source passage or open the original Word.
