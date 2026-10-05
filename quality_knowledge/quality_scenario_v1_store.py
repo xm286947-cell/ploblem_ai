@@ -233,6 +233,26 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
         )
         return self.save(scenario, actor=ScenarioActor.AI)
 
+    def create_candidate_if_absent(
+        self,
+        candidate: ScenarioCandidateV1,
+        *,
+        scenario_id: str,
+        created_by: str = "",
+    ) -> tuple[QualityScenarioV1, bool]:
+        """Atomically create a candidate without ever overwriting its lineage."""
+        scenario = scenario_from_candidate(candidate, scenario_id, created_by=created_by)
+        try:
+            saved = self.save(scenario, actor=ScenarioActor.AI, _create_only=True)
+            return saved, True
+        except ValueError as error:
+            if str(error) != "QSV1_SCENARIO_ID_ALREADY_EXISTS":
+                raise
+            existing = self.get(scenario_id)
+            if existing is None:
+                raise
+            return existing, False
+
     def _load(self, connection: sqlite3.Connection, scenario_id: str) -> QualityScenarioV1 | None:
         row = connection.execute(
             "SELECT * FROM quality_scenario_v1 WHERE scenario_id=?",
@@ -309,11 +329,14 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
         *,
         actor: ScenarioActor | str = ScenarioActor.HUMAN,
         expected_scenario_version: int | None = None,
+        _create_only: bool = False,
     ) -> QualityScenarioV1:
         scenario = QualityScenarioV1.model_validate(scenario)
         actor_type = ScenarioActor(actor)
         with self._transaction() as connection:
             existing = self._load(connection, scenario.scenario_id)
+            if _create_only and existing is not None:
+                raise ValueError("QSV1_SCENARIO_ID_ALREADY_EXISTS")
             if expected_scenario_version is not None:
                 if existing is None or existing.scenario_version != expected_scenario_version:
                     raise ValueError("SCENARIO_VERSION_CONFLICT")

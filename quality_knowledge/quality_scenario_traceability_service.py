@@ -61,7 +61,7 @@ class QualityScenarioTraceabilityService:
             unknown_supports = sorted(
                 support
                 for support in evidence.supports
-                if support not in VALID_SUPPORT_FIELDS
+                if support not in VALID_SUPPORT_FIELDS and support != "production_provenance"
             )
             if unknown_supports:
                 for support in unknown_supports:
