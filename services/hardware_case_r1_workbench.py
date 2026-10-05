@@ -575,6 +575,207 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 class HardwareR1WorkbenchService:
+    def apply_human_review(
+        self,
+        item_id: str,
+        *,
+        decision: str,
+        reviewer: str,
+        reason: str,
+        confirmed_content: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Apply an explicit human decision to the Durable Candidate.
+
+        CONFIRM may correct editable knowledge fields. Source identity, provenance,
+        Evidence and Candidate contract identity remain server-owned and immutable.
+        DEFER/REJECT keep the Candidate blocked from Promotion without deleting it.
+        """
+        decision_name = str(decision or "").strip().upper()
+        reviewer_name = str(reviewer or "").strip()
+        reason_text = str(reason or "").strip()
+        if (
+            decision_name not in {"CONFIRM", "DEFER", "REJECT"}
+            or not reviewer_name
+            or not reason_text
+        ):
+            raise HardwareR1WorkbenchError("REVIEW_DECISION_INVALID")
+
+        item = self.store.get_item(item_id)
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        if not candidate_id:
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        getter = getattr(self.candidate_repository, "get_candidate", None)
+        if not callable(getter):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        try:
+            asset = getter(candidate_id)
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+        if not isinstance(asset, dict):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        if str(asset.get("asset_status") or "").upper() != "ACTIVE":
+            raise HardwareR1WorkbenchError("CANDIDATE_ASSET_INVALIDATED")
+        if str(asset.get("promotion_status") or "").upper() != "NOT_STARTED":
+            raise HardwareR1WorkbenchError("CANDIDATE_LOCKED_BY_PROMOTION")
+        try:
+            expected_row_version = int(asset["row_version"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise HardwareR1WorkbenchError("CANDIDATE_REVIEW_TRANSITION_INVALID") from error
+
+        pipeline_result = item.get("pipeline_result") or {}
+        if decision_name in {"DEFER", "REJECT"}:
+            recorder = getattr(
+                self.candidate_repository,
+                "record_production_review_decision",
+                None,
+            )
+            if not callable(recorder):
+                raise HardwareR1WorkbenchError(
+                    "CANDIDATE_REVIEW_TRANSITION_INVALID"
+                )
+            try:
+                recorder(
+                    candidate_id,
+                    expected_row_version=expected_row_version,
+                    reviewer=reviewer_name,
+                    disposition=(
+                        "DEFERRED" if decision_name == "DEFER" else "REJECTED"
+                    ),
+                    reason=reason_text,
+                )
+            except CandidateAssetRepositoryError as error:
+                raise HardwareR1WorkbenchError(error.code) from error
+            self.store.update_item(
+                item_id,
+                orchestration_status="REVIEW",
+                failed_stage=None,
+                error_code=None,
+                result=pipeline_result,
+            )
+            return self.get_item(item_id)
+
+        if not isinstance(confirmed_content, dict):
+            raise HardwareR1WorkbenchError("REVIEW_CONFIRMED_CONTENT_REQUIRED")
+        original = deepcopy(asset.get("knowledge_object"))
+        if not isinstance(original, dict):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+
+        # The client may edit business knowledge sections only.  Identity,
+        # source/evidence/provenance, conflicts and review metadata are
+        # reconstructed from the authoritative Durable Candidate.
+        reviewed = deepcopy(original)
+
+        def merge_review_values(target: Any, incoming: Any) -> None:
+            if isinstance(target, dict):
+                if "value" in target:
+                    if isinstance(incoming, dict):
+                        if "value" in incoming:
+                            target["value"] = deepcopy(incoming["value"])
+                        # Key-parameter business semantics are editable, but
+                        # Evidence/status/confidence/warnings remain server-owned.
+                        if "name" in target and "name" in incoming:
+                            target["name"] = deepcopy(incoming["name"])
+                        if "unit" in target and "unit" in incoming:
+                            target["unit"] = deepcopy(incoming["unit"])
+                    return
+                if not isinstance(incoming, dict):
+                    return
+                for key, child in target.items():
+                    if key in incoming:
+                        merge_review_values(child, incoming[key])
+                return
+            if isinstance(target, list) and isinstance(incoming, list):
+                for index, child in enumerate(target):
+                    if index < len(incoming):
+                        merge_review_values(child, incoming[index])
+
+        # Only business field values are editable. Evidence bindings,
+        # extraction status/confidence, derived-from metadata and every
+        # Source/identity/provenance field remain server-owned.
+        for key in (
+            "engineering_context",
+            "observed_problem",
+            "engineering_analysis",
+            "engineering_resolution",
+            "reusable_knowledge",
+            "facts",  # compatibility with earlier Candidate fixtures
+        ):
+            if key in reviewed and key in confirmed_content:
+                merge_review_values(reviewed[key], confirmed_content[key])
+
+        reviewed_at = _utc_now()
+        conflicts = reviewed.get("conflicts")
+        if not isinstance(conflicts, list):
+            conflicts = []
+            reviewed["conflicts"] = conflicts
+        review = reviewed.get("review")
+        if not isinstance(review, dict):
+            review = {}
+            reviewed["review"] = review
+        decisions = review.get("field_decisions")
+        if not isinstance(decisions, list):
+            decisions = []
+            review["field_decisions"] = decisions
+
+        for conflict in conflicts:
+            if not isinstance(conflict, dict):
+                continue
+            if (
+                str(conflict.get("status") or "").upper() != "OPEN"
+                and str(conflict.get("resolution_status") or "").upper()
+                != "NEEDS_REVIEW"
+            ):
+                continue
+            conflict_id = str(conflict.get("conflict_id") or "")
+            field = str(conflict.get("field") or "")
+            conflict["status"] = "RESOLVED"
+            conflict["resolution_status"] = "CONFIRMED"
+            conflict["reviewer_note"] = reason_text
+            conflict["resolution"] = {
+                "decision_source": "HUMAN_REVIEW",
+                "reviewer": reviewer_name,
+                "reviewed_at": reviewed_at,
+            }
+            decisions.append(
+                {
+                    "conflict_id": conflict_id,
+                    "field": field,
+                    "decision_source": "HUMAN_REVIEW",
+                    "reviewer": reviewer_name,
+                    "reviewed_at": reviewed_at,
+                }
+            )
+        review["object_status"] = "CANDIDATE"
+        review["reviewer"] = reviewer_name
+        review["reviewed_at"] = reviewed_at
+
+        apply_review = getattr(
+            self.candidate_repository, "apply_production_review", None
+        )
+        if not callable(apply_review):
+            raise HardwareR1WorkbenchError(
+                "CANDIDATE_REVIEW_TRANSITION_INVALID"
+            )
+        try:
+            apply_review(
+                candidate_id,
+                reviewed_knowledge_object=reviewed,
+                expected_row_version=expected_row_version,
+                reviewer=reviewer_name,
+                reason=reason_text,
+            )
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+
+        self.store.update_item(
+            item_id,
+            orchestration_status="CANDIDATE_READY",
+            failed_stage=None,
+            error_code=None,
+            result=pipeline_result,
+        )
+        return self.get_item(item_id)
+
     def __init__(
         self,
         store: HardwareR1WorkbenchStore,
@@ -1264,12 +1465,23 @@ class HardwareR1WorkbenchService:
     def get_item(self, item_id: str) -> dict[str, Any]:
         item = self._resolve_candidate(self.store.get_item(item_id))
         result = item.get("pipeline_result") or {}
+        review_history: list[dict[str, Any]] = []
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        history_reader = getattr(
+            self.candidate_repository, "list_production_reviews", None
+        )
+        if candidate_id and callable(history_reader):
+            try:
+                review_history = history_reader(candidate_id)
+            except CandidateAssetRepositoryError as error:
+                raise HardwareR1WorkbenchError(error.code) from error
         return {
             "contract_version": WORKBENCH_CONTRACT_VERSION,
             **item,
             "candidate": item.get("candidate"),
             "candidate_asset": item.get("candidate_asset"),
             "evidence_validation": result.get("evidence_validation"),
+            "review_history": review_history,
         }
 
     def get_batch(self, batch_id: str) -> dict[str, Any]:

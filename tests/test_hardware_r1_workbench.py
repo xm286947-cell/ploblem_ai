@@ -1454,3 +1454,267 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     )
     assert batches.status_code == 200
     assert batches.json()["items"] == []
+
+
+def test_human_review_can_correct_candidate_without_machine_conflict(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0201", source_id="c" * 64)
+    for section, field, value in (
+        ("observed_problem", "symptom", "原始现象"),
+        ("engineering_analysis", "root_cause", "原始根因"),
+        ("engineering_resolution", "actions", "原始措施"),
+        ("reusable_knowledge", "engineering_rule", "原始规则"),
+    ):
+        result["knowledge_object"][section] = {
+            field: {
+                "value": value,
+                "extraction_status": "EXTRACTED",
+                "evidence_block_ids": ["B0001"],
+            }
+        }
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "baud_rate",
+            "value": 115200,
+            "unit": "bps",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "warnings": [],
+        }
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0201", source_id="c" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0201.docx",
+        business_case_id="A0201",
+        source_id="c" * 64,
+        snapshot=_snapshot("A0201"),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["primary_subject"]["value"] = (
+        "人工确认后的 MCU 串口知识"
+    )
+    confirmed["engineering_context"]["primary_subject"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
+    confirmed["engineering_context"]["primary_subject"]["extraction_status"] = (
+        "MISSING"
+    )
+    parameter = confirmed["engineering_context"]["key_parameters"][0]
+    parameter["name"] = "uart_baud_rate"
+    parameter["value"] = 921600
+    parameter["unit"] = "bit/s"
+    parameter["evidence_block_ids"] = ["FORGED-EVIDENCE"]
+    parameter["extraction_status"] = "MISSING"
+    confirmed["observed_problem"]["symptom"]["value"] = "人工确认现象"
+    confirmed["engineering_analysis"]["root_cause"]["value"] = "人工确认根因"
+    confirmed["engineering_resolution"]["actions"]["value"] = "人工确认措施"
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "人工确认规则"
+    confirmed["engineering_analysis"]["root_cause"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
+    confirmed["schema_extension"] = {"value": "must not be persisted"}
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision="CONFIRM",
+        reviewer="reviewer-product",
+        reason="真实业务复核后修正 AI 主体描述",
+        confirmed_content=confirmed,
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "RESOLVED"
+    assert durable["candidate_hash"] != asset["candidate_hash"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "evidence_block_ids"
+    ] == ["B0001"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "extraction_status"
+    ] == "EXTRACTED"
+    durable_parameter = durable["knowledge_object"]["engineering_context"][
+        "key_parameters"
+    ][0]
+    assert durable_parameter["name"] == "uart_baud_rate"
+    assert durable_parameter["value"] == 921600
+    assert durable_parameter["unit"] == "bit/s"
+    assert durable_parameter["evidence_block_ids"] == ["B0001"]
+    assert durable_parameter["extraction_status"] == "EXTRACTED"
+    assert "schema_extension" not in durable["knowledge_object"]
+    assert durable["knowledge_object"]["observed_problem"]["symptom"]["value"] == (
+        "人工确认现象"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"]["value"] == (
+        "人工确认根因"
+    )
+    assert durable["knowledge_object"]["engineering_resolution"]["actions"]["value"] == (
+        "人工确认措施"
+    )
+    assert durable["knowledge_object"]["reusable_knowledge"]["engineering_rule"]["value"] == (
+        "人工确认规则"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"][
+        "evidence_block_ids"
+    ] == ["B0001"]
+    assert durable["knowledge_object"]["source_fact"] == asset["knowledge_object"][
+        "source_fact"
+    ]
+    assert durable["knowledge_object"]["evidence"] == asset["knowledge_object"][
+        "evidence"
+    ]
+    assert reviewed["result"] == "CANDIDATE_READY"
+    assert reviewed["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert reviewed["pipeline_result"]["knowledge_object"]["engineering_context"][
+        "primary_subject"
+    ]["value"] == "MCU串口输出配置"
+    assert reviewed["review_history"][-1]["reviewer"] == "reviewer-product"
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_disposition"),
+    [("DEFER", "DEFERRED"), ("REJECT", "REJECTED")],
+)
+def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
+    tmp_path: Path,
+    decision: str,
+    expected_disposition: str,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / f"workbench-{decision}.db")
+    repository = _candidate_repository(tmp_path / f"hardware-asset-{decision}.db")
+    batch_id = store.create_batch()
+    case_id = f"A02{decision[:1]}1"
+    result = _result(status="PASS", case_id=case_id, source_id="d" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id=case_id, source_id="d" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file=f"{decision}.docx",
+        business_case_id=case_id,
+        source_id="d" * 64,
+        snapshot=_snapshot(case_id),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision=decision,
+        reviewer="reviewer-product",
+        reason=f"{decision} pending engineering confirmation",
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "REQUIRED"
+    assert durable["candidate_hash"] == asset["candidate_hash"]
+    assert reviewed["result"] == "REVIEW"
+    history = reviewed["review_history"]
+    assert history[-1]["review_record"]["disposition"] == expected_disposition
+    assert history[-1]["before_candidate_hash"] == asset["candidate_hash"]
+    assert history[-1]["after_candidate_hash"] == asset["candidate_hash"]
+
+
+def test_human_review_api_corrects_candidate_and_blocks_rejected_candidate(
+    tmp_path: Path,
+) -> None:
+    app = create_p0_app(
+        tmp_path / "quality.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_tree_upload_dir=tmp_path / "trees",
+        hardware_case_source_root=tmp_path / "sources",
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    service = app.state.hardware_r1_workbench_service
+    repository = app.state.hardware_candidate_asset_repository
+    repository.initialize()
+    client = TestClient(app)
+
+    result = _result(status="PASS", case_id="A0202", source_id="e" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0202", source_id="e" * 64
+    )
+    item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0202.docx",
+        business_case_id="A0202",
+        source_id="e" * 64,
+        snapshot=_snapshot("A0202", "e" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    edited = deepcopy(result["knowledge_object"])
+    edited["engineering_context"]["primary_subject"]["value"] = "人工 API 修正"
+
+    response = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "CONFIRM",
+            "reviewer": "reviewer-api",
+            "reason": "manual correction",
+            "confirmed_content": edited,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工 API 修正"
+    assert response.json()["candidate_asset"]["production_review_status"] == "RESOLVED"
+
+    reject_result = _result(
+        status="PASS", case_id="A0203", source_id="f" * 64
+    )
+    reject_asset = _commit_fixture_asset(
+        repository, reject_result, case_id="A0203", source_id="f" * 64
+    )
+    reject_item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0203.docx",
+        business_case_id="A0203",
+        source_id="f" * 64,
+        snapshot=_snapshot("A0203", "f" * 64),
+        result=reject_result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=reject_asset["candidate_id"],
+    )
+    rejected = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{reject_item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "REJECT",
+            "reviewer": "reviewer-api",
+            "reason": "insufficient engineering confidence",
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["result"] == "REVIEW"
+    assert rejected.json()["candidate_asset"]["production_review_status"] == "REQUIRED"
+    assert rejected.json()["review_history"][-1]["review_record"]["disposition"] == "REJECTED"

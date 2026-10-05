@@ -10,7 +10,10 @@ on:
       - "scripts/build_hardware_r1_e2e_validation_package.py"
       - "tests/test_hardware_r1_single_package_e2e.py"
       - "tests/test_hardware_knowledge_consumption.py"
+      - "tests/test_hardware_r1_promotion_architecture.py"
+      - "tests/test_hardware_r1_workbench_architecture.py"
       - "tests/js/test_hardware_r1_retry_visible_state.mjs"
+      - "tests/js/test_hardware_r1_human_review.mjs"
       - "docs/product/HARDWARE_R1_SINGLE_PACKAGE_E2E_VALIDATION.md"
       - ".github/workflows/hardware-r1-single-package-e2e.yml"
   workflow_dispatch:
@@ -37,13 +40,14 @@ jobs:
       - name: Install runtime and test dependencies
         run: python -m pip install -r requirements.txt
       - name: Synthetic, consumption and fake-provider E2E regressions
-        run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py
+        run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py tests/test_hardware_r1_promotion_architecture.py tests/test_hardware_r1_workbench_architecture.py
       - name: Hardware JavaScript syntax and retry UX gate
         run: |
           node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
           node --check quality_knowledge/web/static/hardware_case_e2e_evidence.js
+          node --check quality_knowledge/web/static/hardware_case_knowledge_evidence.js
           node --check quality_knowledge/web/static/hardware_case_knowledge_production.js
-          node --test tests/js/test_hardware_r1_retry_visible_state.mjs
+          node --test tests/js/test_hardware_r1_retry_visible_state.mjs tests/js/test_hardware_r1_human_review.mjs
       - name: Build the single package
         run: python scripts/build_hardware_r1_e2e_validation_package.py --output-dir "${{ runner.temp }}"
       - name: Fresh extract, compile, launcher and package-security gate

@@ -104,6 +104,38 @@
         <button class="hc-button" type="button" data-item-retry>Retry Failed Stage</button>
         <button class="hc-button" type="button" data-open-debug>Advanced Debug</button>
       </div>
+      <section class="hc-card" data-human-review>
+        <div class="hc-card-head">
+          <div>
+            <h3>人工知识审核</h3>
+            <p>复用成熟 Review 交互：AI Candidate 与 Evidence 对照后，可人工修正、确认、暂缓或拒绝。Source / Evidence 身份不可编辑。</p>
+          </div>
+          <span class="hc-status" data-human-review-status>—</span>
+        </div>
+        <div class="hc-review-grid">
+          <section class="hc-review-facts">
+            <div data-human-review-fields></div>
+          </section>
+          <aside class="hc-review-evidence">
+            <h3>Evidence 对照</h3>
+            <div data-human-review-evidence></div>
+          </aside>
+        </div>
+        <div class="hc-workbench-detail-grid">
+          <label>Reviewer <input type="text" data-human-reviewer value="E2E_MAINTAINER"></label>
+          <label>Review Reason <input type="text" data-human-review-reason placeholder="说明确认、修改、暂缓或拒绝原因"></label>
+        </div>
+        <div class="hc-workbench-detail-actions">
+          <button class="hc-button primary" type="button" data-human-review-action="CONFIRM">确认 / 保存修正</button>
+          <button class="hc-button secondary" type="button" data-human-review-action="DEFER">暂缓</button>
+          <button class="hc-button secondary" type="button" data-human-review-action="REJECT">拒绝</button>
+        </div>
+        <div class="hc-workbench-message" data-human-review-message hidden></div>
+        <details>
+          <summary>Review Audit</summary>
+          <div data-human-review-history></div>
+        </details>
+      </section>
       <h3>Candidate Preview</h3>
       <pre class="hc-workbench-json" data-candidate-preview>—</pre>
       <h3>Evidence / Gate Summary</h3>
