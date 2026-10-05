@@ -2204,8 +2204,8 @@ def save_device_assessment(device_id, assessment_type, status, input_payload, re
     """Persist one user-visible Storage assessment for later review/reuse."""
     import json
     assessment_type = str(assessment_type or "").strip().upper()
-    if assessment_type not in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
-        raise ValueError("assessment_type 仅支持 LIFETIME / DIAGNOSIS / OPTIMIZATION")
+    if assessment_type not in {"COMPARE", "LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+        raise ValueError("assessment_type 仅支持 COMPARE / LIFETIME / DIAGNOSIS / OPTIMIZATION")
     with connect() as con:
         if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
             raise KeyError(device_id)
