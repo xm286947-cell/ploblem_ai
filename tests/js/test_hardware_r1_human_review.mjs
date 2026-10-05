@@ -32,7 +32,9 @@ test('human review preserves Evidence as read-only comparison context', () => {
 
 test('human review editor exposes value only and keeps metadata read-only', () => {
   assert.match(source, /VALUE ONLY/);
-  assert.match(source, /\[\.\.\.path, 'value'\]/);
+  assert.match(source, /semanticKeys/);
+  assert.match(source, /\['name', 'value', 'unit'\]/);
+  assert.match(source, /\[\.\.\.path, key\]/);
   assert.match(source, /evidence_block_ids/);
   assert.match(source, /Evidence metadata is read-only/);
 });
