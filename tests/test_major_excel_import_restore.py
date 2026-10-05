@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -400,6 +401,55 @@ def test_import_result_lists_every_case_and_case_detail_shows_events_and_facts(t
     assert page.status_code == 200
     script = client.get("/p0/static/major_production.js?v=major-excel-restore-v1")
     assert "查看 Case / Event / Source Fact" in script.text
+
+
+def test_multi_itr_excel_source_fact_is_case_scoped_and_analyzable_for_each_event(tmp_path: Path):
+    client = _client(tmp_path)
+    content = _xlsx_with_rows([[
+        "IGR-MULTI-ITR-001", "ITR20269921", "One Excel row spans two ITRs",
+        "Shared TRC occurrence", "Shared TRC escape", "Shared MRC occurrence",
+        "Shared MRC escape", "", "ITR20269922",
+    ]], headers=[
+        "IGR编号", "ITR单号", "问题描述", "TRC发生", "TRC流出", "MRC发生", "MRC流出",
+        "报告文件名", "关联ITR",
+    ])
+    preview = client.post(
+        "/api/v2/major-production/excel/preview",
+        data={"group_code": "MAJOR", "domain": "QUALITY"},
+        files={"file": ("multi-itr.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    ).json()
+    assert preview["blocked"] == 0
+    imported = client.post(
+        "/api/v2/major-production/excel/confirm", data={"batch_id": preview["batch_id"]},
+    )
+    assert imported.status_code == 200, imported.text
+    case_id = imported.json()["result"]["case_ids"][0]
+    detail = client.get(f"/api/v2/major-production/cases/{case_id}").json()
+    assert [item["standard_itr"] for item in detail["events"]] == ["ITR20269921", "ITR20269922"]
+    assert detail["source_fact_revisions"][0]["normalized"]["itrs"] == ["ITR20269921", "ITR20269922"]
+
+    fact_links = [
+        item for item in detail["source_links"]
+        if item["source_type"] == "MAJOR_EXCEL_SOURCE_FACT"
+    ]
+    assert len(fact_links) == 1
+    shared_link = fact_links[0]
+    assert shared_link["event_id"] is None
+    assert shared_link["standard_itr"] == ""
+    assert json.loads(shared_link["snapshot_json"])["binding_scope"] == "CASE_SHARED"
+
+    for event in detail["events"]:
+        response = client.post(
+            f"/api/v2/major-production/cases/{case_id}/analysis",
+            json={"event_id": event["event_id"]},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["event_id"] == event["event_id"]
+        assert all(item["event_id"] == event["event_id"] for item in body["candidates"])
+        occurrence = next(item for item in body["candidates"] if item["entry_type"] == "TRC_OCCURRENCE")
+        assert occurrence["content"] == "Shared TRC occurrence"
+        assert {item["source_link_id"] for item in occurrence["evidence"]} == {shared_link["source_link_id"]}
 
 
 def test_repeated_excel_source_is_idempotent_then_changed_content_adds_revision(tmp_path: Path):

@@ -5,9 +5,13 @@
   if (!root) return;
 
   const api = (window.P0_MAJOR_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '') + '/major-production';
-  const state = { caseId: null, eventId: null, analysisMode: null };
+  const state = { caseId: null, eventId: null, analysisMode: null, caseDetail: null };
   const message = root.querySelector('[data-major-message]');
   const excelPreview = root.querySelector('[data-major-excel-preview]');
+  const workflow = root.querySelector('[data-major-workflow]');
+  const eventSelect = root.querySelector('[data-major-event-select]');
+  const analyzeButton = root.querySelector('[data-major-analyze]');
+  const eventEntries = root.querySelector('[data-major-event-entries]');
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
@@ -20,6 +24,61 @@
     if (!response.ok) throw new Error(data.detail || 'REQUEST_FAILED');
     return data;
   }
+
+  function renderEventEntries() {
+    if (!eventEntries || !state.caseDetail || !state.eventId) {
+      if (eventEntries) eventEntries.innerHTML = '';
+      return;
+    }
+    const items = (state.caseDetail.entries || []).filter(item => item.event_id === state.eventId);
+    const rows = items.map(item => '<li><strong>' + esc(item.entry_type) + ' · ' + esc(item.status) +
+      ' · revision ' + esc(item.revision_no) + '</strong><p>' + esc(item.content || '（MISSING）') +
+      '</p><small>来源：' + esc(item.origin) + ' · Evidence ' + esc((item.evidence || []).length) + '</small></li>').join('');
+    eventEntries.innerHTML = '<h3>所选 Event 的当前 Entries / Human Revisions</h3><ul>' +
+      (rows || '<li>该 Event 尚无持久化 Entry。</li>') + '</ul>';
+  }
+
+  function activateCase(detail, identitySuffix) {
+    const events = detail.events || [];
+    state.caseId = detail.case_id;
+    state.eventId = events.length === 1 ? events[0].event_id : null;
+    state.analysisMode = null;
+    state.caseDetail = detail;
+    eventSelect.innerHTML = '<option value="">请选择 Event</option>' + events.map(event => {
+      const label = [event.standard_itr || event.event_title || event.internal_event_key, event.event_id]
+        .filter(Boolean).join(' · ');
+      return '<option value="' + esc(event.event_id) + '">' + esc(label) + '</option>';
+    }).join('');
+    eventSelect.value = state.eventId || '';
+    workflow.hidden = false;
+    analyzeButton.disabled = !state.eventId;
+    root.querySelector('[data-major-candidates]').innerHTML = '';
+    root.querySelector('[data-major-publish]').disabled = true;
+    root.querySelector('[data-major-state]').textContent = state.eventId ? 'EVENT_SELECTED' :
+      (events.length ? 'EVENT_SELECTION_REQUIRED' : 'NO_EVENT');
+    root.querySelector('[data-major-identity]').textContent =
+      (detail.title || 'Major Case') + ' · Case ' + detail.case_id + ' · ' + events.length +
+      ' Event' + (identitySuffix ? ' · ' + identitySuffix : '');
+    renderEventEntries();
+    if (events.length > 1) {
+      say('该 Case 有多个 Event。请明确选择本次分析对象；系统不会默认选择第一个。');
+    } else if (!events.length) {
+      say('该 Case 尚无可分析的 Event。', true);
+    } else {
+      say('已选择唯一 Event：' + events[0].event_id);
+    }
+  }
+
+  eventSelect.addEventListener('change', () => {
+    state.eventId = eventSelect.value || null;
+    state.analysisMode = null;
+    root.querySelector('[data-major-candidates]').innerHTML = '';
+    root.querySelector('[data-major-publish]').disabled = true;
+    analyzeButton.disabled = !state.eventId;
+    root.querySelector('[data-major-state]').textContent = state.eventId ? 'EVENT_SELECTED' : 'EVENT_SELECTION_REQUIRED';
+    renderEventEntries();
+    say(state.eventId ? '已切换分析 Event；候选区已清空，请重新分析。' : '请先选择本次分析的 Event。');
+  });
 
   function renderPreview(data) {
     const summary = data.match_summary || {};
@@ -89,7 +148,7 @@
   }
 
   async function openMajorCase(caseId) {
-    const panel = excelPreview.querySelector('[data-major-case-details]');
+    const panel = excelPreview && excelPreview.querySelector('[data-major-case-details]');
     try {
       say('正在读取 Case、Event 和 Source Fact…');
       const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(caseId)));
@@ -104,11 +163,14 @@
           esc(fact.source_ref) + ' · ' + esc(fact.source_hash) + '</p><details><summary>查看规范化字段</summary><ul>' +
           fields + '</ul></details></article>';
       }).join('');
-      panel.innerHTML = '<section class="major-case-detail"><h4>' + esc(detail.title) + '</h4>' +
-        '<p>Case ID：' + esc(detail.case_id) + ' · 状态：' + esc(detail.status) + '</p>' +
-        '<h5>Events</h5><ul>' + (events || '<li>无 Event</li>') + '</ul>' +
-        '<h5>EXCEL Source Fact Revisions</h5>' + (facts || '<p>无 Source Fact</p>') + '</section>';
-      say('Case、Event 与 Source Fact 已加载。');
+      if (panel) {
+        panel.innerHTML = '<section class="major-case-detail"><h4>' + esc(detail.title) + '</h4>' +
+          '<p>Case ID：' + esc(detail.case_id) + ' · 状态：' + esc(detail.status) + '</p>' +
+          '<h5>Events</h5><ul>' + (events || '<li>无 Event</li>') + '</ul>' +
+          '<h5>EXCEL Source Fact Revisions</h5>' + (facts || '<p>无 Source Fact</p>') + '</section>';
+      }
+      activateCase(detail);
+      workflow.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
       say(error.message, true);
     }
@@ -191,11 +253,9 @@
     try {
       say('正在导入 Major Source…');
       const data = await read(await fetch(api + '/sources', { method: 'POST', body: new FormData(event.currentTarget) }));
-      state.caseId = data.case.case_id;
-      state.eventId = data.event.event_id;
-      root.querySelector('[data-major-workflow]').hidden = false;
-      root.querySelector('[data-major-identity]').textContent =
-        'ITR ' + data.event.standard_itr + ' · Source ' + data.document.original_filename + ' · Version ' + data.document.version_no;
+      const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(data.case.case_id)));
+      activateCase(detail, 'ITR ' + data.event.standard_itr + ' · Source ' + data.document.original_filename +
+        ' · Version ' + data.document.version_no);
       say('Major Source 已入库，已建立 Event 与证据版本。');
     } catch (error) {
       say(error.message, true);
@@ -204,9 +264,24 @@
 
   root.querySelector('[data-major-analyze]').addEventListener('click', async () => {
     if (!state.caseId) return;
+    if (!state.eventId) {
+      say('多 Event Case 必须先选择一个 Event，系统不会自动使用第一个。', true);
+      return;
+    }
+    const requestedEventId = state.eventId;
     try {
       say('正在读取 Source 并生成语义 Review 候选…');
-      const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis', { method: 'POST' }));
+      const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_id: requestedEventId })
+      }));
+      if (state.eventId !== requestedEventId || data.event_id !== requestedEventId) {
+        throw new Error('MAJOR_ANALYSIS_EVENT_MISMATCH');
+      }
+      if ((data.candidates || []).some(item => item.event_id !== requestedEventId)) {
+        throw new Error('MAJOR_ANALYSIS_EVENT_MISMATCH');
+      }
       state.analysisMode = data.mode || 'LEGACY_AI';
       const box = root.querySelector('[data-major-candidates]');
       if (state.analysisMode === 'SOURCE_FUSION') {
@@ -225,6 +300,8 @@
         say(runtimeStatus === 'FAILED'
           ? 'Runtime 标准化未完成；原始 Source Typed 候选仍可审核。'
           : 'Source Fusion 候选已生成；请逐条核对来源证据，MULTI_SOURCE / CONFLICT 需填写人工结论和理由。');
+        state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
+        renderEventEntries();
         return;
       }
       box.innerHTML = data.candidates.map(item =>
@@ -234,12 +311,15 @@
       box.querySelectorAll('[data-entry]').forEach(button => button.addEventListener('click', () => confirmEntry(button)));
       root.querySelector('[data-major-state]').textContent = 'REVIEW_REQUIRED';
       say('AI 候选已生成，必须逐条人工确认。');
+      state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
+      renderEventEntries();
     } catch (error) {
       say(error.message, true);
     }
   });
 
   async function confirmEntry(button) {
+    const requestedEventId = state.eventId;
     try {
       const card = button.closest('.major-candidate');
       const textarea = card.querySelector('[data-candidate-content]');
@@ -262,11 +342,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reviewer: 'web-reviewer',
+          event_id: requestedEventId,
           content,
           reason: reasonInput ? reasonInput.value : 'Web human review',
           action: button.dataset.reviewAction || 'CONFIRM'
         })
       }));
+      if (state.eventId !== requestedEventId || data.event_id !== requestedEventId) {
+        throw new Error('MAJOR_REVIEW_EVENT_MISMATCH');
+      }
       card.querySelector('h3').textContent =
         data.entry_type + ' · ' + data.status + ' · revision ' + data.revision_no;
       card.querySelectorAll('[data-entry]').forEach(item => { item.disabled = true; });
@@ -277,6 +361,8 @@
       } else if (all) {
         root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_COMPLETE_I3_PENDING';
       }
+      state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
+      renderEventEntries();
       say(data.status === 'CORRECTED' ? '已创建人工更正修订。' : '已创建人工确认修订。');
     } catch (error) {
       say(error.message, true);
@@ -292,4 +378,7 @@
       say(error.message, true);
     }
   });
+
+  const linkedCaseId = new URLSearchParams(window.location.search).get('case_id');
+  if (linkedCaseId) openMajorCase(linkedCaseId);
 })();

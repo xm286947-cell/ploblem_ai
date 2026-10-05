@@ -66,20 +66,50 @@ class MajorSemanticSourceAdapter:
         app_config = yaml.safe_load((self.project_root / "config/app.yaml").read_text(encoding="utf-8"))
         self.fusion = EvidenceFusion(app_config)
 
-    def build_draft(self, case_id: str) -> dict[str, Any]:
+    def build_draft(self, case_id: str, event_id: str | None = None) -> dict[str, Any]:
         """Return a fused in-memory draft with formal repository evidence refs."""
         case = self.repository.get_case(case_id)
         if not case:
             raise KeyError(case_id)
+        all_source_links = self.repository.source_links(case_id)
+        if event_id is None:
+            source_links = all_source_links
+        else:
+            event = self.repository.event(event_id)
+            if not event or event.get("case_id") != case_id:
+                raise ValueError("MAJOR_ANALYSIS_EVENT_INVALID")
+            source_links = [
+                link for link in all_source_links
+                if link.get("event_id") in {event_id, None}
+            ]
         with self.repository.connect() as connection:
-            fact_row = connection.execute(
+            fact_rows = connection.execute(
                 """SELECT * FROM kb_source_fact_revision WHERE case_id=?
-                   AND UPPER(source_type)='EXCEL'
-                   ORDER BY revision_no DESC LIMIT 1""",
+                   AND UPPER(source_type)='EXCEL' ORDER BY revision_no DESC""",
                 (case_id,),
-            ).fetchone()
-        source_fact = dict(fact_row) if fact_row else None
-        source_links = self.repository.source_links(case_id)
+            ).fetchall()
+        source_facts = [dict(row) for row in fact_rows]
+        if event_id is not None:
+            linked_fact_ids = {
+                str(link.get("record_id") or "")
+                for link in source_links
+                if str(link.get("record_id") or "")
+            }
+            event_fact_ids = {
+                str(link.get("record_id") or "")
+                for link in source_links
+                if link.get("event_id") == event_id and str(link.get("record_id") or "")
+            }
+            source_facts = [
+                fact for fact in source_facts
+                if fact.get("source_fact_revision_id") in linked_fact_ids
+            ]
+            event_facts = [
+                fact for fact in source_facts
+                if fact.get("source_fact_revision_id") in event_fact_ids
+            ]
+            source_facts = event_facts or source_facts
+        source_fact = source_facts[0] if source_facts else None
         raw_excel = {
             "case_id": case_id,
             "source_excel": source_fact.get("source_ref", "") if source_fact else "",
@@ -88,10 +118,13 @@ class MajorSemanticSourceAdapter:
             "parse_status": "SUCCESS" if source_fact else "MISSING",
             "mapped_fields": _json_object(source_fact.get("normalized_json")) if source_fact else {},
         }
-        raw_evidence, fragment_refs, version_ids = self._document_projection(case_id)
+        raw_evidence, fragment_refs, version_ids = self._document_projection(
+            case_id, event_id=event_id, source_links=all_source_links
+        )
         standard_case = self.fusion.fuse(raw_excel, raw_evidence)
         return {
             "case_id": case_id,
+            "event_id": event_id,
             "standard_case": standard_case,
             "semantic_slots": self._semantic_slots(
                 standard_case, fragment_refs, source_fact, version_ids, source_links
@@ -197,8 +230,20 @@ class MajorSemanticSourceAdapter:
             },
         }
 
-    def _document_projection(self, case_id: str) -> tuple[dict[str, Any], dict[str, list[dict]], list[str]]:
+    def _document_projection(
+        self,
+        case_id: str,
+        *,
+        event_id: str | None = None,
+        source_links: list[dict[str, Any]] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, list[dict]], list[str]]:
         detail = self.repository.case_detail(case_id) or {}
+        links = source_links if source_links is not None else self.repository.source_links(case_id)
+        links_by_record: dict[str, list[dict[str, Any]]] = {}
+        for link in links:
+            record_id = str(link.get("record_id") or "")
+            if record_id:
+                links_by_record.setdefault(record_id, []).append(link)
         sections: list[dict[str, Any]] = []
         fragment_refs: dict[str, list[dict]] = {}
         version_ids: list[str] = []
@@ -206,6 +251,7 @@ class MajorSemanticSourceAdapter:
         warnings: list[str] = []
         parse_statuses: list[str] = []
         current_documents: dict[str, dict[str, Any]] = {}
+        event_count = len(self.repository.events(case_id)) if event_id is not None else 0
         for document in detail.get("documents", []):
             document_id = str(document.get("document_id") or document.get("version_id") or "")
             previous = current_documents.get(document_id)
@@ -215,6 +261,16 @@ class MajorSemanticSourceAdapter:
             version_id = str(document.get("version_id") or "")
             if not version_id:
                 continue
+            document_links = links_by_record.get(version_id, [])
+            if event_id is not None:
+                if document_links and not any(
+                    link.get("event_id") in {event_id, None} for link in document_links
+                ):
+                    continue
+                if event_count > 1 and not document_links:
+                    # In a multi-Event Case, an unlinked document has no
+                    # defensible Event scope. Do not silently reuse it for all.
+                    continue
             version_ids.append(version_id)
             source_name = str(document.get("original_filename") or document.get("logical_name") or version_id)
             if source_name not in source_names:

@@ -156,6 +156,60 @@ def test_formal_source_relation_conflict_is_exposed_as_conflict(tmp_path: Path):
     assert relation["source_link_id"] in slot["source_relation_conflicts"]
 
 
+def test_event_specific_pdf_evidence_is_not_reused_for_another_event(tmp_path: Path):
+    repository = _repository(tmp_path)
+    case = repository.create_case("event-specific document evidence", "MAJOR")
+    event_a = repository.upsert_event(case["case_id"], standard_itr="ITR20261021", title="Event A")
+    event_b = repository.upsert_event(case["case_id"], standard_itr="ITR20261022", title="Event B")
+    fact_b = repository.add_source_fact_revision(
+        case["case_id"], source_type="EXCEL", source_ref="batch.xlsx#row:22",
+        raw={}, normalized={"trc_occurrence": "Event B Excel occurrence"}, actor="test",
+    )
+    repository.add_source_link(
+        case["case_id"], event_b["event_id"],
+        {"record_id": fact_b["source_fact_revision_id"], "source_type": "MAJOR_EXCEL_SOURCE_FACT"},
+        standard_itr=event_b["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    document_path = tmp_path / "event-a.pdf"
+    document_path.write_bytes(b"event-specific document")
+    document = repository.ingest_file(case["case_id"], document_path)
+    repository.save_parse_result(document["version_id"], ParseResult("PDF", [
+        ParsedFragment(1, "", "PAGE", "page:1", "TEXT", "TRC发生\nEvent A PDF occurrence"),
+    ]))
+    event_a_document_link = repository.add_source_link(
+        case["case_id"], event_a["event_id"],
+        {"record_id": document["version_id"], "source_type": "MAJOR_SOURCE_DOCUMENT"},
+        standard_itr=event_a["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    unlinked_path = tmp_path / "unlinked.pdf"
+    unlinked_path.write_bytes(b"unlinked document with unknown event scope")
+    unlinked_document = repository.ingest_file(case["case_id"], unlinked_path)
+    repository.save_parse_result(unlinked_document["version_id"], ParseResult("PDF", [
+        ParsedFragment(1, "", "PAGE", "page:1", "TEXT", "TRC发生\\nUnlinked PDF occurrence"),
+    ]))
+
+    adapter = MajorSemanticSourceAdapter(repository, ROOT)
+    draft_a = adapter.build_draft(case["case_id"], event_a["event_id"])
+    draft_b = adapter.build_draft(case["case_id"], event_b["event_id"])
+
+    assert document["version_id"] in draft_a["document_version_ids"]
+    assert unlinked_document["version_id"] not in draft_a["document_version_ids"]
+    assert unlinked_document["version_id"] not in draft_b["document_version_ids"]
+    assert event_a_document_link["source_link_id"] in {
+        source_link_id
+        for item in draft_a["semantic_slots"]["TRC_OCCURRENCE"]["items"]
+        for ref in item["evidence_refs"]
+        for source_link_id in ref.get("source_link_ids", [])
+    }
+    assert document["version_id"] not in draft_b["document_version_ids"]
+    assert draft_b["semantic_slots"]["TRC_OCCURRENCE"]["values"] == ["Event B Excel occurrence"]
+    assert all(
+        ref.get("fragment_id") is None
+        for item in draft_b["semantic_slots"]["TRC_OCCURRENCE"]["items"]
+        for ref in item["evidence_refs"]
+    )
+
+
 def test_later_non_excel_source_fact_does_not_replace_latest_excel_fact(tmp_path: Path):
     repository = _repository(tmp_path)
     case = repository.create_case("typed source selection", "MAJOR")

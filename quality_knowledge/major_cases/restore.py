@@ -749,22 +749,40 @@ class MajorCaseRestoreService:
                     )
                 stats["events"] += len(events)
 
-                for event in events:
+                source_link_snapshot = {
+                    "record_id": source_fact["source_fact_revision_id"],
+                    "source_type": "MAJOR_EXCEL_SOURCE_FACT",
+                    "source_system": "MAJOR_EXCEL_IMPORT",
+                    "group_code": group_code,
+                    "source_hash": source_fact["source_hash"],
+                    "source_ref": source_ref,
+                    "itrs": list(row.get("itrs") or []),
+                    "binding_scope": "CASE_SHARED" if len(events) > 1 else "EVENT",
+                    "batch_id": batch_id,
+                    "run_id": run_id,
+                    "template_version": governance["template_version"],
+                    "mapping_version": governance["mapping_version"],
+                }
+                if len(events) > 1:
+                    # A single Excel row can explicitly describe several ITRs.
+                    # The repository source-link key is unique per source fact
+                    # and role, so repeated event-specific upserts would leave
+                    # the fact attached only to the last Event. Preserve one
+                    # truthful Case-level relation instead of rebinding it.
+                    self.repository.add_source_link(
+                        case_id,
+                        None,
+                        source_link_snapshot,
+                        standard_itr="",
+                        role="CURRENT_EVENT",
+                        status="LINKED",
+                    )
+                else:
+                    event = events[0]
                     self.repository.add_source_link(
                         case_id,
                         event["event_id"],
-                        {
-                            "record_id": source_fact["source_fact_revision_id"],
-                            "source_type": "MAJOR_EXCEL_SOURCE_FACT",
-                            "source_system": "MAJOR_EXCEL_IMPORT",
-                            "group_code": group_code,
-                            "source_hash": source_fact["source_hash"],
-                            "source_ref": source_ref,
-                            "batch_id": batch_id,
-                            "run_id": run_id,
-                            "template_version": governance["template_version"],
-                            "mapping_version": governance["mapping_version"],
-                        },
+                        source_link_snapshot,
                         standard_itr=event.get("standard_itr") or "",
                         role="CURRENT_EVENT",
                         status="LINKED" if event.get("standard_itr") else "NOT_FOUND",

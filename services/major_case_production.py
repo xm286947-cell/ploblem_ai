@@ -120,23 +120,38 @@ class MajorCaseProductionService:
             "parse": {"fragment_count": len(fragments), "warnings": parsed.warnings},
         }
 
-    def analyze(self, case_id: str) -> dict[str, Any]:
+    def analyze(self, case_id: str, event_id: str | None = None) -> dict[str, Any]:
         detail = self.repository.case_detail(case_id)
         if not detail:
             raise MajorProductionError("MAJOR_CASE_NOT_FOUND")
-        draft = self.semantic_adapter.build_draft(case_id)
+        event = self._resolve_analysis_event(case_id, event_id)
+        draft = self.semantic_adapter.build_draft(case_id, event["event_id"])
         has_typed_source = bool(draft.get("source_fact_revision_id")) or any(
             slot.get("items") for slot in draft.get("semantic_slots", {}).values()
         )
         if has_typed_source:
-            return self._analyze_source_fusion(case_id, draft)
-        return self._analyze_legacy(case_id, detail)
+            return self._analyze_source_fusion(case_id, draft, event)
+        return self._analyze_legacy(case_id, detail, event)
 
-    def _analyze_source_fusion(self, case_id: str, draft: dict[str, Any]) -> dict[str, Any]:
+    def _resolve_analysis_event(self, case_id: str, event_id: str | None) -> dict[str, Any]:
         events = self.repository.events(case_id)
-        if len(events) != 1:
-            raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_ONE_EVENT")
-        event = events[0]
+        if event_id:
+            event = self.repository.event(str(event_id))
+            if not event or event.get("case_id") != case_id:
+                raise MajorProductionError("MAJOR_ANALYSIS_EVENT_INVALID")
+            return event
+        if len(events) == 1:
+            return events[0]
+        if not events:
+            raise MajorProductionError("MAJOR_ANALYSIS_EVENT_REQUIRED")
+        raise MajorProductionError("MAJOR_ANALYSIS_EVENT_SELECTION_REQUIRED")
+
+    def _analyze_source_fusion(
+        self,
+        case_id: str,
+        draft: dict[str, Any],
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
         source_links = self.repository.source_links(case_id)
         links_by_id = {str(link.get("source_link_id")): link for link in source_links}
         candidates: list[dict[str, Any]] = []
@@ -477,13 +492,14 @@ class MajorCaseProductionService:
             raise MajorProductionError("MAJOR_SEMANTIC_EVIDENCE_REFERENCE_MISSING")
         return result
 
-    def _analyze_legacy(self, case_id: str, detail: dict[str, Any]) -> dict[str, Any]:
+    def _analyze_legacy(
+        self,
+        case_id: str,
+        detail: dict[str, Any],
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
         if self.provider is None:
             raise MajorProductionError("MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED")
-        events = self.repository.events(case_id)
-        if len(events) != 1:
-            raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_ONE_EVENT")
-        event = events[0]
         links = [link for link in self.repository.source_links(case_id) if link.get("event_id") == event["event_id"]]
         if not links:
             raise MajorProductionError("MAJOR_SOURCE_NOT_FOUND")
@@ -567,6 +583,7 @@ class MajorCaseProductionService:
         entry_id: str,
         *,
         reviewer: str,
+        event_id: str | None = None,
         content: str = "",
         reason: str = "",
         action: str = "",
@@ -574,6 +591,12 @@ class MajorCaseProductionService:
         entry = self.repository.entry(entry_id)
         if not entry:
             raise MajorProductionError("MAJOR_ENTRY_NOT_FOUND")
+        if event_id and entry.get("event_id") != event_id:
+            raise MajorProductionError("MAJOR_REVIEW_EVENT_MISMATCH")
+        if not event_id:
+            events = self.repository.events(entry.get("case_id") or "")
+            if len(events) != 1 or events[0].get("event_id") != entry.get("event_id"):
+                raise MajorProductionError("MAJOR_REVIEW_EVENT_SELECTION_REQUIRED")
         if entry.get("status") != "PENDING" or entry.get("origin") not in {"AI", "SOURCE_FUSION"}:
             raise MajorProductionError("MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE")
         if not reviewer.strip():

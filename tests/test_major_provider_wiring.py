@@ -129,3 +129,85 @@ def test_formal_provider_wiring_returns_four_pending_candidates(tmp_path: Path) 
     assert client.get("/api/v2/historical-cases").json()["total"] == 0
     assert client.post(f"/api/v2/major-production/events/{event_id}/publish").status_code == 409
     assert FORMAL_MOCK_FIXTURE_ID == "MAJOR_REPEAT_V11_F02"
+
+
+def test_multi_event_analysis_and_review_are_bound_to_explicit_event(tmp_path: Path) -> None:
+    p0_db = tmp_path / "multi-event-provider.sqlite3"
+    _initialize_p0(p0_db)
+    client = TestClient(create_p0_app(
+        p0_db,
+        project_root=ROOT,
+        major_case_db_path=tmp_path / "major.sqlite3",
+        major_attachment_root=tmp_path / "attachments",
+        major_artifact_root=tmp_path / "artifacts",
+        major_provider=formal_mock_provider,
+    ))
+
+    created = _intake(client)
+    case_id = created["case"]["case_id"]
+    selected_event_id = created["event"]["event_id"]
+    other_event = client.app.state.major_case_repository.upsert_event(
+        case_id, standard_itr="ITR-CANONICAL-F02-002", title="Second event",
+    )
+
+    missing_selection = client.post(
+        f"/api/v2/major-production/cases/{case_id}/analysis",
+    )
+    assert missing_selection.status_code == 409
+    assert missing_selection.json()["detail"] == "MAJOR_ANALYSIS_EVENT_SELECTION_REQUIRED"
+
+    invalid_selection = client.post(
+        f"/api/v2/major-production/cases/{case_id}/analysis",
+        json={"event_id": "not-an-event-in-this-case"},
+    )
+    assert invalid_selection.status_code == 409
+    assert invalid_selection.json()["detail"] == "MAJOR_ANALYSIS_EVENT_INVALID"
+
+    analysis = client.post(
+        f"/api/v2/major-production/cases/{case_id}/analysis",
+        json={"event_id": selected_event_id},
+    )
+    assert analysis.status_code == 200, analysis.text
+    body = analysis.json()
+    assert body["event_id"] == selected_event_id
+    assert body["candidates"]
+    assert all(item["event_id"] == selected_event_id for item in body["candidates"])
+
+    candidate = body["candidates"][0]
+    unbound_review = client.post(
+        f"/api/v2/major-production/entries/{candidate['entry_id']}/confirm",
+        json={
+            "reviewer": "reviewer",
+            "content": candidate["content"],
+            "reason": "event selection is required",
+            "action": "CONFIRM",
+        },
+    )
+    assert unbound_review.status_code == 409
+    assert unbound_review.json()["detail"] == "MAJOR_REVIEW_EVENT_SELECTION_REQUIRED"
+
+    mismatched_review = client.post(
+        f"/api/v2/major-production/entries/{candidate['entry_id']}/confirm",
+        json={
+            "reviewer": "reviewer",
+            "event_id": other_event["event_id"],
+            "content": candidate["content"],
+            "reason": "wrong Event must be rejected",
+            "action": "CONFIRM",
+        },
+    )
+    assert mismatched_review.status_code == 409
+    assert mismatched_review.json()["detail"] == "MAJOR_REVIEW_EVENT_MISMATCH"
+
+    reviewed = client.post(
+        f"/api/v2/major-production/entries/{candidate['entry_id']}/confirm",
+        json={
+            "reviewer": "reviewer",
+            "event_id": selected_event_id,
+            "content": candidate["content"],
+            "reason": "reviewed in selected Event",
+            "action": "CONFIRM",
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["event_id"] == selected_event_id

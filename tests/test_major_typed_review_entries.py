@@ -66,6 +66,44 @@ def _setup(tmp_path: Path, *, formal_conflict: bool = False, provider=None):
     return repository, case, event, fact, document, excel_link, pdf_link, service
 
 
+def _multi_event_source_fusion_service(tmp_path: Path, provider=None):
+    repository = MajorKnowledgeRepository(tmp_path / "major.db", tmp_path / "attachments")
+    case = repository.create_case("Multi Event typed review", "MAJOR")
+    events = [
+        repository.upsert_event(
+            case["case_id"], standard_itr=f"ITR2026101{index}",
+            title=f"Event {index}",
+        )
+        for index in (1, 2)
+    ]
+    facts = []
+    links = []
+    for index, event in enumerate(events, start=1):
+        fact = repository.add_source_fact_revision(
+            case["case_id"], source_type="EXCEL", source_ref=f"batch.xlsx#row:{index}",
+            raw={}, normalized={
+                "itr_id": event["standard_itr"],
+                "original_description": f"Event {index} symptom",
+                "trc_occurrence": f"Event {index} TRC occurrence",
+                "trc_escape": f"Event {index} TRC escape",
+                "mrc_occurrence": f"Event {index} MRC occurrence",
+                "mrc_escape": f"Event {index} MRC escape",
+            }, actor="test",
+        )
+        link = repository.add_source_link(
+            case["case_id"], event["event_id"],
+            {"record_id": fact["source_fact_revision_id"], "source_type": "MAJOR_EXCEL_SOURCE_FACT"},
+            standard_itr=event["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+        )
+        facts.append(fact)
+        links.append(link)
+    service = MajorCaseProductionService(
+        repository, JsonArtifactRepository(tmp_path / "artifacts"), tmp_path / "runtime.db",
+        provider=provider, project_root=ROOT,
+    )
+    return repository, case, events, facts, links, service
+
+
 def test_source_fusion_creates_typed_candidates_with_exact_action_evidence_and_safe_missing(tmp_path: Path):
     repository, case, event, _, document, _, pdf_link, service = _setup(tmp_path)
     with repository.connect() as connection:
@@ -551,3 +589,97 @@ def test_confirming_edited_available_candidate_requires_explicit_correct_action(
         candidate["entry_id"], reviewer="reviewer", content="rewritten", reason="clearer", action="CORRECT",
     )
     assert corrected["status"] == "CORRECTED"
+
+
+def test_multi_event_analysis_requires_explicit_valid_event_selection(tmp_path: Path):
+    _, case, events, _, _, service = _multi_event_source_fusion_service(tmp_path)
+
+    with pytest.raises(MajorProductionError, match="MAJOR_ANALYSIS_EVENT_SELECTION_REQUIRED"):
+        service.analyze(case["case_id"])
+    with pytest.raises(MajorProductionError, match="MAJOR_ANALYSIS_EVENT_INVALID"):
+        service.analyze(case["case_id"], event_id="not-an-event-in-this-case")
+
+    selected = service.analyze(case["case_id"], event_id=events[1]["event_id"])
+    assert selected["event_id"] == events[1]["event_id"]
+    assert selected["candidates"]
+    assert all(item["event_id"] == events[1]["event_id"] for item in selected["candidates"])
+    with pytest.raises(MajorProductionError, match="MAJOR_REVIEW_EVENT_SELECTION_REQUIRED"):
+        service.confirm_entry(selected["candidates"][0]["entry_id"], reviewer="reviewer")
+
+
+def test_multi_event_source_fact_binding_and_reanalysis_are_event_scoped(tmp_path: Path):
+    def provider(provider_input, pending_specs, _context):
+        return [
+            {
+                "object_id": spec["object_id"],
+                "data": {"content": "Suggestion: " + next(
+                    item["source_content"] for item in provider_input["entries"]
+                    if item["entry_id"] == spec["object_id"]
+                )},
+            }
+            for spec in pending_specs
+        ]
+
+    repository, case, events, facts, links, service = _multi_event_source_fusion_service(
+        tmp_path, provider,
+    )
+    event_a, event_b = events
+    fact_a, fact_b = facts
+    link_a, link_b = links
+
+    analysis_a = service.analyze(case["case_id"], event_id=event_a["event_id"])
+    entries_a = analysis_a["candidates"]
+    assert analysis_a["event_id"] == event_a["event_id"]
+    assert all(item["event_id"] == event_a["event_id"] for item in entries_a)
+    occurrence_a = next(item for item in entries_a if item["entry_type"] == "TRC_OCCURRENCE")
+    assert occurrence_a["content"] == "Event 1 TRC occurrence"
+    assert occurrence_a["analysis_metadata"]["source_fact_revision_id"] == fact_a["source_fact_revision_id"]
+    assert {item["source_link_id"] for item in occurrence_a["evidence"]} == {link_a["source_link_id"]}
+    assert link_b["source_link_id"] not in {
+        item["source_link_id"] for entry in entries_a for item in entry["evidence"]
+    }
+
+    corrected = service.confirm_entry(
+        occurrence_a["entry_id"], reviewer="reviewer", event_id=event_a["event_id"],
+        content="Human corrected Event 1 occurrence", reason="Event 1 source reviewed", action="CORRECT",
+    )
+    with pytest.raises(MajorProductionError, match="MAJOR_REVIEW_EVENT_MISMATCH"):
+        service.confirm_entry(
+            occurrence_a["entry_id"], reviewer="reviewer", event_id=event_b["event_id"],
+            content="Cross-event overwrite", reason="wrong event", action="CORRECT",
+        )
+
+    analysis_b = service.analyze(case["case_id"], event_id=event_b["event_id"])
+    entries_b = analysis_b["candidates"]
+    assert analysis_b["event_id"] == event_b["event_id"]
+    assert all(item["event_id"] == event_b["event_id"] for item in entries_b)
+    occurrence_b = next(item for item in entries_b if item["entry_type"] == "TRC_OCCURRENCE")
+    assert occurrence_b["content"] == "Event 2 TRC occurrence"
+    assert occurrence_b["analysis_metadata"]["source_fact_revision_id"] == fact_b["source_fact_revision_id"]
+    assert {item["source_link_id"] for item in occurrence_b["evidence"]} == {link_b["source_link_id"]}
+
+    snapshot_b = {
+        item["entry_id"]: (
+            item["current_revision_id"], item["content"],
+            tuple(sorted(evidence["evidence_id"] for evidence in item["evidence"])),
+            item["archived_at"],
+        )
+        for item in entries_b
+    }
+    service.analyze(case["case_id"], event_id=event_a["event_id"])
+
+    after_corrected = repository.entry(corrected["entry_id"])
+    assert after_corrected["status"] == "CORRECTED"
+    assert after_corrected["origin"] == "HUMAN"
+    assert after_corrected["assertion_kind"] == "HUMAN_REVISION"
+    assert after_corrected["current_revision_id"] == corrected["current_revision_id"]
+    assert after_corrected["content"] == corrected["content"]
+    assert after_corrected["archived_at"] is None
+    for entry_id, expected in snapshot_b.items():
+        after = repository.entry(entry_id)
+        assert after["event_id"] == event_b["event_id"]
+        assert (
+            after["current_revision_id"], after["content"],
+            tuple(sorted(evidence["evidence_id"] for evidence in after["evidence"])),
+            after["archived_at"],
+        ) == expected

@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
@@ -26,6 +26,11 @@ def _error(error: MajorProductionError) -> HTTPException:
         "MAJOR_CORRECTION_MUST_CHANGE_CONTENT",
         "MAJOR_SEMANTIC_SOURCE_LINK_MISSING",
         "MAJOR_SEMANTIC_EVIDENCE_REFERENCE_MISSING",
+        "MAJOR_ANALYSIS_EVENT_REQUIRED",
+        "MAJOR_ANALYSIS_EVENT_SELECTION_REQUIRED",
+        "MAJOR_ANALYSIS_EVENT_INVALID",
+        "MAJOR_REVIEW_EVENT_SELECTION_REQUIRED",
+        "MAJOR_REVIEW_EVENT_MISMATCH",
     } else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
     return HTTPException(status, error.code)
 
@@ -200,9 +205,10 @@ def create_major_production_router(
             raise _error(error) from error
 
     @router.post("/cases/{case_id}/analysis")
-    def analyze(case_id: str) -> dict[str, Any]:
+    def analyze(case_id: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
         try:
-            return run_mutation(lambda: service.analyze(case_id))
+            event_id = str((payload or {}).get("event_id") or "").strip() or None
+            return run_mutation(lambda: service.analyze(case_id, event_id=event_id))
         except MajorProductionError as error:
             raise _error(error) from error
 
@@ -213,6 +219,7 @@ def create_major_production_router(
                 lambda: service.confirm_entry(
                     entry_id,
                     reviewer=str(payload.get("reviewer") or ""),
+                    event_id=str(payload.get("event_id") or "").strip() or None,
                     content=str(payload.get("content") or ""),
                     reason=str(payload.get("reason") or ""),
                     action=str(payload.get("action") or ""),
