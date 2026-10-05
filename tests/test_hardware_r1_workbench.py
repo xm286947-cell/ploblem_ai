@@ -1566,3 +1566,82 @@ def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
     assert history[-1]["review_record"]["disposition"] == expected_disposition
     assert history[-1]["before_candidate_hash"] == asset["candidate_hash"]
     assert history[-1]["after_candidate_hash"] == asset["candidate_hash"]
+
+
+def test_human_review_api_corrects_candidate_and_blocks_rejected_candidate(
+    tmp_path: Path,
+) -> None:
+    app = create_p0_app(
+        tmp_path / "quality.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_tree_upload_dir=tmp_path / "trees",
+        hardware_case_source_root=tmp_path / "sources",
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    service = app.state.hardware_r1_workbench_service
+    repository = app.state.hardware_candidate_asset_repository
+    repository.initialize()
+    client = TestClient(app)
+
+    result = _result(status="PASS", case_id="A0202", source_id="e" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0202", source_id="e" * 64
+    )
+    item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0202.docx",
+        business_case_id="A0202",
+        source_id="e" * 64,
+        snapshot=_snapshot("A0202", "e" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    edited = deepcopy(result["knowledge_object"])
+    edited["engineering_context"]["primary_subject"]["value"] = "人工 API 修正"
+
+    response = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "CONFIRM",
+            "reviewer": "reviewer-api",
+            "reason": "manual correction",
+            "confirmed_content": edited,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工 API 修正"
+    assert response.json()["candidate_asset"]["production_review_status"] == "RESOLVED"
+
+    reject_result = _result(
+        status="PASS", case_id="A0203", source_id="f" * 64
+    )
+    reject_asset = _commit_fixture_asset(
+        repository, reject_result, case_id="A0203", source_id="f" * 64
+    )
+    reject_item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0203.docx",
+        business_case_id="A0203",
+        source_id="f" * 64,
+        snapshot=_snapshot("A0203", "f" * 64),
+        result=reject_result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=reject_asset["candidate_id"],
+    )
+    rejected = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{reject_item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "REJECT",
+            "reviewer": "reviewer-api",
+            "reason": "insufficient engineering confidence",
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["result"] == "REVIEW"
+    assert rejected.json()["candidate_asset"]["production_review_status"] == "REQUIRED"
+    assert rejected.json()["review_history"][-1]["review_record"]["disposition"] == "REJECTED"
