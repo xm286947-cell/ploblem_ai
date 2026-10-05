@@ -472,6 +472,7 @@ class StorageDomainSkillAdapter:
         for metric, code, severity in (
             ("media_errors", "MEDIA_ERROR_PRESENT", "WARNING"),
             ("ecc_uncorrectable", "UNCORRECTABLE_ECC_PRESENT", "CRITICAL"),
+            ("runtime_bad_block", "RUNTIME_BAD_BLOCK_PRESENT", "WARNING"),
             ("program_fail", "PROGRAM_FAIL_PRESENT", "WARNING"),
             ("erase_fail", "ERASE_FAIL_PRESENT", "WARNING"),
         ):
