@@ -90,6 +90,14 @@ jobs:
           $scan | Set-Content "$env:RUNNER_TEMP\scan.py" -Encoding utf8
           python "$env:RUNNER_TEMP\scan.py" $extract
 
+      - name: Preserve failed-build diagnostic package
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_WAVE4_WINDOWS_BUILD_DIAGNOSTIC_${{ github.sha }}
+          path: ${{ github.workspace }}/dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip
+          if-no-files-found: ignore
+
       - name: Synthetic prepare, isolation, and disabled-run gate
         shell: pwsh
         run: |
