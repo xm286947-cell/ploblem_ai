@@ -889,6 +889,9 @@ class HardwareKnowledgeConsumptionService:
         if int(limit) < 1 or int(limit) > 500:
             raise HardwareKnowledgeConsumptionError("SEARCH_LIMIT_INVALID")
         query_text = normalize_search_text(text)
+        query_terms = list(dict.fromkeys(
+            term for term in query_text.split(" ") if term
+        ))
         rows = self.store.list_all()
         filtered = [
             row
@@ -908,20 +911,34 @@ class HardwareKnowledgeConsumptionService:
         for row in filtered:
             score = 0
             reasons: list[dict[str, Any]] = []
-            if query_text:
+            matched_terms: set[str] = set()
+            if query_terms:
                 for field, weight in FIELD_WEIGHTS:
-                    values = self._search_values(row, field)
-                    if any(query_text in normalize_search_text(value) for value in values):
+                    normalized_values = [
+                        normalize_search_text(value)
+                        for value in self._search_values(row, field)
+                    ]
+                    field_terms = [
+                        term
+                        for term in query_terms
+                        if any(term in value for value in normalized_values)
+                    ]
+                    if field_terms:
                         score += weight
+                        matched_terms.update(field_terms)
                         reasons.append(
                             {
                                 "matched_field": field,
                                 "match_type": "SUBSTRING",
-                                "matched_text": query_text,
+                                "matched_text": " ".join(field_terms),
                                 "weight": weight,
                             }
                         )
-                if not reasons:
+                # Multi-keyword search stays deterministic and conservative:
+                # every normalized term must be supported somewhere in the
+                # projected Formal Knowledge record.  Fields contribute their
+                # configured weight at most once, even when several terms hit.
+                if len(matched_terms) != len(query_terms):
                     continue
             results.append(
                 {
