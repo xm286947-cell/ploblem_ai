@@ -10,6 +10,7 @@
     promotion: null,
     scrollY: 0,
     itemAction: {pending: false, action: null, stage: null},
+    reviewDraft: null,
   };
 
   const q = (selector) => root.querySelector(selector);
@@ -484,6 +485,166 @@
     }).join('');
   }
 
+  const humanReviewProtectedTop = new Set([
+    'contract_version', 'identity', 'source_fact', 'evidence',
+    'conflicts', 'review', 'provenance'
+  ]);
+
+  function humanReviewLabel(path) {
+    return path.map((part) => String(part).replaceAll('_', ' ')).join(' › ');
+  }
+
+  function humanReviewEditor(value, path) {
+    const encodedPath = encodeURIComponent(JSON.stringify(path));
+    if (Array.isArray(value)) {
+      return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
+        escapeHtml(humanReviewLabel(path)) +
+        '</h3><span class="hc-status">ARRAY</span></div>' +
+        '<textarea class="hc-review-textarea" rows="4" data-human-review-path="' +
+        encodedPath + '" data-human-review-type="json">' +
+        escapeHtml(JSON.stringify(value, null, 2)) + '</textarea></article>';
+    }
+    if (value && typeof value === 'object') {
+      return Object.entries(value).map(([key, child]) =>
+        humanReviewEditor(child, [...path, key])
+      ).join('');
+    }
+    const type = value === null ? 'null' : typeof value;
+    return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
+      escapeHtml(humanReviewLabel(path)) +
+      '</h3><span class="hc-status">' + escapeHtml(type) + '</span></div>' +
+      '<div class="hc-review-columns"><div class="hc-review-column"><label>AI Candidate</label><p>' +
+      escapeHtml(value ?? '—') +
+      '</p></div><div class="hc-review-column"><label>人工确认值</label>' +
+      '<textarea class="hc-review-textarea" rows="2" data-human-review-path="' +
+      encodedPath + '" data-human-review-type="' + escapeHtml(type) + '">' +
+      escapeHtml(value ?? '') + '</textarea></div></div></article>';
+  }
+
+  function setHumanReviewDraftValue(path, raw, type) {
+    if (!state.reviewDraft || !path.length) return;
+    let target = state.reviewDraft;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      if (!target[path[index]] || typeof target[path[index]] !== 'object') {
+        target[path[index]] = {};
+      }
+      target = target[path[index]];
+    }
+    let value = raw;
+    if (type === 'json') {
+      value = JSON.parse(raw);
+    } else if (type === 'number') {
+      value = raw === '' ? null : Number(raw);
+    } else if (type === 'boolean') {
+      value = String(raw).trim().toLowerCase() === 'true';
+    } else if (type === 'null' && raw === '') {
+      value = null;
+    }
+    target[path[path.length - 1]] = value;
+  }
+
+  function renderHumanReview(item) {
+    const panel = q('[data-human-review]');
+    const candidate = candidateForItem(item);
+    panel.hidden = !candidate;
+    if (!candidate) {
+      state.reviewDraft = null;
+      return;
+    }
+    state.reviewDraft = JSON.parse(JSON.stringify(candidate));
+    const asset = item.candidate_asset || {};
+    const reviewStatus = asset.production_review_status || 'NOT_REQUIRED';
+    q('[data-human-review-status]').textContent = reviewStatus;
+
+    const editable = Object.entries(candidate)
+      .filter(([key]) => !humanReviewProtectedTop.has(key))
+      .map(([key, value]) => humanReviewEditor(value, [key]))
+      .join('');
+    q('[data-human-review-fields]').innerHTML = editable ||
+      '<div class="hc-empty">当前 Candidate 没有可编辑业务字段。</div>';
+
+    const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
+    q('[data-human-review-evidence]').innerHTML = evidence.length
+      ? evidence.map((entry) =>
+          '<article class="hc-evidence-item"><strong>' +
+          escapeHtml(entry.block_id || 'Evidence') +
+          '</strong><p>' + escapeHtml(entry.text || entry.caption || '—') +
+          '</p><small>' +
+          escapeHtml(JSON.stringify(entry.source_locator || {})) +
+          '</small></article>'
+        ).join('')
+      : '<div class="hc-empty">暂无 Evidence。</div>';
+
+    const history = Array.isArray(item.review_history) ? item.review_history : [];
+    q('[data-human-review-history]').innerHTML = history.length
+      ? history.map((entry) => {
+          const disposition = entry.review_record?.disposition || 'CONFIRMED';
+          return '<div class="hc-review-value"><b>' +
+            escapeHtml(disposition) + '</b><span>' +
+            escapeHtml(entry.reviewer || '—') + ' · ' +
+            escapeHtml(entry.reason || '—') + ' · ' +
+            escapeHtml(entry.created_at || '—') + '</span></div>';
+        }).join('')
+      : '<div class="hc-empty">暂无人工 Review Audit。</div>';
+
+    const locked = String(asset.promotion_status || 'NOT_STARTED') !== 'NOT_STARTED';
+    root.querySelectorAll('[data-human-review-action]').forEach((button) => {
+      button.disabled = locked;
+    });
+    const reviewMessage = q('[data-human-review-message]');
+    reviewMessage.hidden = true;
+    reviewMessage.textContent = '';
+  }
+
+  async function humanReviewAction(decision) {
+    if (!state.item) return;
+    const reviewer = q('[data-human-reviewer]').value.trim();
+    const reason = q('[data-human-review-reason]').value.trim();
+    const reviewMessage = q('[data-human-review-message]');
+    if (!reviewer || !reason) {
+      reviewMessage.hidden = false;
+      reviewMessage.textContent = 'Reviewer 和 Review Reason 必填。';
+      reviewMessage.classList.add('hc-error');
+      return;
+    }
+    if (decision === 'CONFIRM' && !window.confirm(
+      '确认保存人工修正并将 Candidate 标记为已审核？Source / Evidence 不会被修改。'
+    )) return;
+    if (decision === 'REJECT' && !window.confirm(
+      '拒绝后 Candidate 会保留但继续阻断 Promotion。确认？'
+    )) return;
+    try {
+      reviewMessage.hidden = false;
+      reviewMessage.classList.remove('hc-error');
+      reviewMessage.textContent = '正在保存人工 Review…';
+      const payload = await request(
+        '/items/' + encodeURIComponent(state.item.item_id) + '/human-review',
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            decision,
+            reviewer,
+            reason,
+            confirmed_content: decision === 'CONFIRM' ? state.reviewDraft : null,
+          }),
+        }
+      );
+      syncItemIntoBatch(payload);
+      renderDetail(payload, {scroll: false});
+      setMessage(
+        decision === 'CONFIRM'
+          ? '人工修正已写入 Durable Candidate，可继续 Promotion。'
+          : '人工 Review 已记录，Candidate 保持阻断状态。'
+      );
+    } catch (error) {
+      reviewMessage.hidden = false;
+      reviewMessage.classList.add('hc-error');
+      reviewMessage.textContent = '人工 Review 保存失败：' + error.message;
+      setMessage('人工 Review 保存失败：' + error.message, true);
+    }
+  }
+
   function renderDetail(
     item,
     {scroll = true, refreshPromotionState = true} = {}
@@ -516,6 +677,7 @@
       '<span><b>' + escapeHtml(name) + '</b>' + statusPill(value) + '</span>'
     ).join('');
     renderReviewRequired(item);
+    renderHumanReview(item);
     q('[data-candidate-preview]').textContent =
       JSON.stringify(item.candidate || null, null, 2);
     q('[data-evidence-summary]').textContent =
@@ -546,7 +708,11 @@
       promotion.error_code ? '错误：' + promotion.error_code : '',
       note,
     ].filter(Boolean).join(' · ');
-    const canAct = Boolean(state.item && ['CANDIDATE_READY', 'REVIEW'].includes(displayResult(state.item)));
+    const canAct = Boolean(
+      state.item &&
+      ['CANDIDATE_READY', 'REVIEW'].includes(displayResult(state.item)) &&
+      state.item.candidate_asset?.production_review_status !== 'REQUIRED'
+    );
     q('[data-promotion-precheck]').disabled = !canAct || !['NOT_STARTED', 'PRECHECK_PASS'].includes(status);
     q('[data-promotion-intake]').disabled = !canAct || !['PRECHECK_PASS', 'INTAKE_FAILED'].includes(status);
     q('[data-promotion-review]').disabled = !canAct || status !== 'CANDIDATE_INTAKED';
@@ -781,6 +947,21 @@
   q('[data-review-conflicts]').addEventListener('click', (event) => {
     const button = event.target.closest('[data-review-conflict]');
     if (button) confirmReviewConflict(button);
+  });
+  q('[data-human-review-fields]').addEventListener('input', (event) => {
+    const field = event.target.closest('[data-human-review-path]');
+    if (!field) return;
+    try {
+      const path = JSON.parse(decodeURIComponent(field.dataset.humanReviewPath));
+      setHumanReviewDraftValue(path, field.value, field.dataset.humanReviewType);
+      field.classList.remove('hc-error');
+    } catch (_) {
+      field.classList.add('hc-error');
+    }
+  });
+  q('[data-human-review]').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-human-review-action]');
+    if (button) humanReviewAction(button.dataset.humanReviewAction);
   });
   q('[data-item-run]').addEventListener('click', () => itemAction('run-resume'));
   q('[data-item-retry]').addEventListener('click', () => itemAction('retry-failed-stage'));
