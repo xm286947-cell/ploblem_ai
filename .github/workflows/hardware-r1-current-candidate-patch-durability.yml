@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  OLD_SOURCE_COMMIT: 87fcfaede66f4565eb3fba12330f7b8fba51187a
+  OLD_SOURCE_COMMIT: 4a9cfdfc2c10366c86ab01efcc1c236da5942d38
   NEW_SOURCE_COMMIT: ${{ github.sha }}
 
 jobs:
