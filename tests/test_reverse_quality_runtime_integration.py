@@ -241,10 +241,12 @@ def test_reverse_quality_service_uses_runtime_and_preserves_result_contract(tmp_
         bundle=build_scenario_source_bundle_v1(snapshot,evidence_repository=repo)
         description_evidence=next(item["evidence_id"] for item in bundle["field_evidence"] if item["target_field"]=="problem_description")
         root_evidence=next(item["evidence_id"] for item in bundle["field_evidence"] if item["target_field"]=="root_cause")
+        product_model_evidence=next(item["evidence_id"] for item in bundle["field_evidence"] if item["target_field"]=="product_model")
         state.payload={
             "fields":{
                 "customer_experience":{"value":"客户看到运行问题","evidence_ids":[description_evidence],"confidence":0.9},
                 "root_cause":{"value":"冻结 Bundle 根因","evidence_ids":[root_evidence],"confidence":1.0},
+                "related_objects":{"value":"PLC AM600","evidence_ids":[product_model_evidence],"confidence":0.9},
             },
             "lifecycle_code":"","activity_code":"","match_reason":"","missing_condition":"","questions":[],
         }
@@ -290,6 +292,8 @@ def test_reverse_quality_service_uses_runtime_and_preserves_result_contract(tmp_
         assert saved["result"]["identity"]["bundle_id"]==bundle["bundle_id"]
         assert saved["review"]["root_cause"]["value"]=="冻结 Bundle 根因"
         assert saved["review"]["root_cause"]["evidence_ids"]==[root_evidence]
+        assert saved["review"]["related_objects"]["value"]=="PLC AM600"
+        assert saved["review"]["related_objects"]["evidence_ids"]==[product_model_evidence]
         assert saved["input"]["evidence"][next(iter(bundle["field_evidence"]))["evidence_id"]]["value"]=="冻结 Bundle 描述"
         assert saved["scene_match_status"]=="NEED_REVIEW"
         assert any(item["code"]=="MISSED_TEST_EFFECTIVE_ANALYSIS_MISSING" for item in saved["bundle_provenance"]["missing_information"])
