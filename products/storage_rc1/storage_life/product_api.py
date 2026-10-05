@@ -609,6 +609,16 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             )
             controls = structured.get("engineering_control_options") or []
             validation = structured.get("suggested_validation") or []
+            chain_context = dict((recorded_input.get("user_context") or {}).get("assessment_context") or {})
+            chain_lifetime = dict(chain_context.get("latest_lifetime") or {})
+            chain_diagnosis = dict(chain_context.get("latest_diagnosis") or {})
+            current_lifetime_id = (latest.get("LIFETIME") or {}).get("id")
+            current_diagnosis_id = (latest.get("DIAGNOSIS") or {}).get("id")
+            chain_current = bool(
+                current_lifetime_id and current_diagnosis_id
+                and chain_lifetime.get("assessment_id") == current_lifetime_id
+                and chain_diagnosis.get("assessment_id") == current_diagnosis_id
+            )
             if not has_behavior:
                 complete = False
                 next_action = "补充当前软件写入 / 日志 / 持久化行为后重新生成针对性优化建议。"
