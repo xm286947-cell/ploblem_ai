@@ -825,11 +825,8 @@ class HardwareR1KnowledgePromotionService:
         return {**self._promotion_view(committed, evidence_ids), "idempotent_reuse": False,
                 "intake_status": result["status"]}
 
-    # C1 Durable Asset-backed implementations intentionally shadow the legacy
-    # orchestration methods above; all local state reads/writes go through the
-    # Candidate Asset repository from this point forward.
     def review_item(
-        self, item_id: str, *, reviewer: str, confirmed_content: Mapping[str, Any],
+        self, item_id: str, *, reviewer: str,
         review_time: datetime, review_comment: str | None = None,
     ) -> dict[str, Any]:
         item, asset, evidence_ids = self._context(item_id)
@@ -846,7 +843,10 @@ class HardwareR1KnowledgePromotionService:
             response = self.bridge.review(
                 candidate_id=str(record["knowledge_candidate_id"]),
                 original_golden=asset["knowledge_object"],
-                confirmed_content=confirmed_content,
+                # Formal Review is an approval step, not a second content editor.
+                # The already reviewed Durable Candidate is the only content
+                # allowed to cross into Unified Knowledge.
+                confirmed_content=asset["knowledge_object"],
                 reviewer=reviewer,
                 review_time=review_time,
                 review_comment=review_comment,
