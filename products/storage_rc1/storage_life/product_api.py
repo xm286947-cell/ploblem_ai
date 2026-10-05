@@ -686,6 +686,8 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 current_lifetime_id and current_diagnosis_id
                 and chain_lifetime.get("assessment_id") == current_lifetime_id
                 and chain_diagnosis.get("assessment_id") == current_diagnosis_id
+                and str(chain_lifetime.get("status") or "").upper() in {"ANSWERED", "CALCULATED"}
+                and str(chain_diagnosis.get("status") or "").upper() == "ANSWERED"
             )
             if not has_behavior:
                 complete = False
