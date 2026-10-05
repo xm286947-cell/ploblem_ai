@@ -245,8 +245,11 @@ class StorageDomainSkillAdapter:
         result = self.lifetime_engine.assess(request, requested_metric)
         missing = list(result.missing_inputs) + list(result.error_details)
         target = dict(target_service_life or {})
-        target_supported = not bool(target)
-        if target and requested_metric not in {"ssd.dwpd"}:
+        # The UI and newer product adapters use the frozen formal metric id,
+        # while older callers may still use the compatibility alias.
+        target_supported_metrics = {"ssd.dwpd", "SSD_DWPD_OBSERVED_V1"}
+        target_supported = not bool(target) or requested_metric in target_supported_metrics
+        if target and requested_metric not in target_supported_metrics:
             missing.append("TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED")
         status_map = {
             LifetimeAssessmentStatus.CALCULATED: "ANSWERED" if target_supported else "PARTIAL",
