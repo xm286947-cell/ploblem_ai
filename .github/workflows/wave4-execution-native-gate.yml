@@ -99,13 +99,14 @@ jobs:
           cd "$extract"
           python -c "from services.hardware_data_root import HardwareDataRootResolver; from services.hardware_startup_coordinator import HardwareStartupCoordinator; from services.hardware_case_source_store import HardwareCaseSourceStore; from services.hardware_asset_repository import CandidateAssetRepository; from services.hardware_asset_operation_journal import HardwareAssetOperationJournal; from services.hardware_case_r1_workbench import HardwareR1WorkbenchService; from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer; print('STARTUP_IMPORT=PASS')"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cmd.exe /c "$(cygpath -w "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat")"
-            launcher_status=$?
+            win_bat="$(cygpath -w "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat")"
+            if launcher_output=$(cmd.exe /d /c "call \"$win_bat\"" 2>&1); then launcher_status=0; else launcher_status=$?; fi
           else
-            "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.command"
-            launcher_status=$?
+            if launcher_output=$("$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.command" 2>&1); then launcher_status=0; else launcher_status=$?; fi
           fi
+          printf '%s\n' "$launcher_output"
           test "$launcher_status" -ne 0
+          [[ "$launcher_output" == *"usage:"* ]]
           mkdir -p tests
           cp "$GITHUB_WORKSPACE/tests/test_hardware_r1_wave4_execution.py" tests/
           export PYTHONPATH="$extract"

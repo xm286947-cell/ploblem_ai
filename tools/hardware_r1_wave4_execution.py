@@ -14,6 +14,11 @@ from uuid import uuid4
 
 import yaml
 
+# Launchers execute this file directly from the package's tools directory.
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
 from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_r1_workbench import HardwareR1WorkbenchService, HardwareR1WorkbenchStore
