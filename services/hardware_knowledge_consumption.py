@@ -17,7 +17,7 @@ import threading
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Sequence
 
 from services.hardware_asset_repository import (
     CandidateAssetRepository,
@@ -55,18 +55,6 @@ FIELD_WEIGHTS: tuple[tuple[str, int], ...] = (
     ("conclusion", 50),
     ("applicability", 45),
 )
-
-SCENE_PRIORITY_FIELDS: dict[str, frozenset[str]] = {
-    "MARKET_ISSUE": frozenset(
-        {"symptom", "occurrence_condition", "failure_mode"}
-    ),
-    "RND_DIAGNOSIS": frozenset(
-        {"symptom", "diagnostic_clue", "failure_mechanism", "verification_method"}
-    ),
-    "DEVICE_RISK": frozenset(
-        {"device_refs", "interface", "signal", "key_parameters"}
-    ),
-}
 
 _TEXT_FIELDS = (
     "title",
@@ -763,14 +751,10 @@ class HardwareKnowledgeConsumptionService:
         *,
         candidate_repository: CandidateAssetRepository | Any | None = None,
         knowledge_adapter: HardwareCaseKnowledgeAdapter | Any | None = None,
-        retrieval_strategy: "RetrievalStrategy | None" = None,
     ) -> None:
         self.store = projection_store
         self.assets = candidate_repository
         self.adapter = knowledge_adapter
-        self.retrieval_strategy = (
-            retrieval_strategy or NormalizedSubstringRetrievalStrategy()
-        )
 
     def projection_status(self) -> dict[str, Any]:
         return self.store.projection_status()
@@ -900,14 +884,14 @@ class HardwareKnowledgeConsumptionService:
         interface: str | None = None,
         signal: str | None = None,
         device: str | None = None,
-        scene: str | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
         if int(limit) < 1 or int(limit) > 500:
             raise HardwareKnowledgeConsumptionError("SEARCH_LIMIT_INVALID")
-        scene_key = str(scene or "").strip().upper()
-        if scene_key and scene_key not in SCENE_PRIORITY_FIELDS:
-            raise HardwareKnowledgeConsumptionError("SEARCH_SCENE_INVALID")
+        query_text = normalize_search_text(text)
+        query_terms = list(dict.fromkeys(
+            term for term in query_text.split(" ") if term
+        ))
         rows = self.store.list_all()
         filtered = [
             row
@@ -923,16 +907,51 @@ class HardwareKnowledgeConsumptionService:
                 device=device,
             )
         ]
-        results = self.retrieval_strategy.retrieve(
-            filtered,
-            text=text,
-            scene=scene_key or None,
-            limit=int(limit),
-            search_values=self._search_values,
-        )
+        results: list[dict[str, Any]] = []
+        for row in filtered:
+            score = 0
+            reasons: list[dict[str, Any]] = []
+            matched_terms: set[str] = set()
+            if query_terms:
+                for field, weight in FIELD_WEIGHTS:
+                    normalized_values = [
+                        normalize_search_text(value)
+                        for value in self._search_values(row, field)
+                    ]
+                    field_terms = [
+                        term
+                        for term in query_terms
+                        if any(term in value for value in normalized_values)
+                    ]
+                    if field_terms:
+                        score += weight
+                        matched_terms.update(field_terms)
+                        reasons.append(
+                            {
+                                "matched_field": field,
+                                "match_type": "SUBSTRING",
+                                "matched_text": " ".join(field_terms),
+                                "weight": weight,
+                            }
+                        )
+                # Multi-keyword search stays deterministic and conservative:
+                # every normalized term must be supported somewhere in the
+                # projected Formal Knowledge record.  Fields contribute their
+                # configured weight at most once, even when several terms hit.
+                if len(matched_terms) != len(query_terms):
+                    continue
+            results.append(
+                {
+                    "contract_version": CONSUMPTION_CONTRACT_VERSION,
+                    **row,
+                    "match_score": score,
+                    "match_reasons": reasons,
+                }
+            )
+        results.sort(key=lambda item: (-int(item["match_score"]), str(item["knowledge_id"])))
         return {
             "contract_version": CONSUMPTION_CONTRACT_VERSION,
-            "results": results,
+            "results": results[: int(limit)],
         }
 
     @staticmethod
@@ -1030,111 +1049,14 @@ class HardwareKnowledgeConsumptionService:
         return []
 
 
-class RetrievalStrategy(Protocol):
-    """Stable retrieval seam behind hardware-knowledge-consumption/v1."""
-
-    def retrieve(
-        self,
-        rows: Sequence[Mapping[str, Any]],
-        *,
-        text: str,
-        scene: str | None,
-        limit: int,
-        search_values: Callable[[Mapping[str, Any], str], list[str]],
-    ) -> list[dict[str, Any]]:
-        ...
-
-
-class NormalizedSubstringRetrievalStrategy:
-    """V0 structured read-model retrieval with frozen substring semantics."""
-
-    def retrieve(
-        self,
-        rows: Sequence[Mapping[str, Any]],
-        *,
-        text: str,
-        scene: str | None,
-        limit: int,
-        search_values: Callable[[Mapping[str, Any], str], list[str]],
-    ) -> list[dict[str, Any]]:
-        query_text = normalize_search_text(text)
-        query_terms = list(
-            dict.fromkeys(term for term in query_text.split(" ") if term)
-        )
-        scene_fields = SCENE_PRIORITY_FIELDS.get(
-            str(scene or "").strip().upper(),
-            frozenset(),
-        )
-        results: list[dict[str, Any]] = []
-        for source_row in rows:
-            row = dict(source_row)
-            score = 0
-            reasons: list[dict[str, Any]] = []
-            matched_terms: set[str] = set()
-            if query_terms:
-                for field, weight in FIELD_WEIGHTS:
-                    normalized_values = [
-                        normalize_search_text(value)
-                        for value in search_values(row, field)
-                    ]
-                    field_terms = [
-                        term
-                        for term in query_terms
-                        if any(term in value for value in normalized_values)
-                    ]
-                    if field_terms:
-                        score += weight
-                        matched_terms.update(field_terms)
-                        reasons.append(
-                            {
-                                "matched_field": field,
-                                "match_type": "SUBSTRING",
-                                "matched_text": " ".join(field_terms),
-                                "weight": weight,
-                            }
-                        )
-                # Every normalized keyword must be supported by Formal
-                # Knowledge.  A field contributes its frozen weight at most
-                # once even when several terms hit it.
-                if len(matched_terms) != len(query_terms):
-                    continue
-            scene_priority_score = sum(
-                int(reason["weight"])
-                for reason in reasons
-                if reason["matched_field"] in scene_fields
-            )
-            results.append(
-                {
-                    "contract_version": CONSUMPTION_CONTRACT_VERSION,
-                    **row,
-                    "match_score": score,
-                    "match_reasons": reasons,
-                    "_scene_priority_score": scene_priority_score,
-                }
-            )
-        results.sort(
-            key=lambda item: (
-                -int(item["_scene_priority_score"]),
-                -int(item["match_score"]),
-                str(item["knowledge_id"]),
-            )
-        )
-        for item in results:
-            item.pop("_scene_priority_score", None)
-        return results[:limit]
-
-
 __all__ = [
     "CONSUMPTION_CONTRACT_VERSION",
     "FIELD_WEIGHTS",
     "FORMAL_KNOWLEDGE_OBJECT_VERSION",
     "PROJECTION_FILENAME",
     "PROJECTION_SCHEMA_VERSION",
-    "SCENE_PRIORITY_FIELDS",
     "HardwareKnowledgeConsumptionError",
     "HardwareKnowledgeConsumptionProjectionStore",
     "HardwareKnowledgeConsumptionService",
-    "NormalizedSubstringRetrievalStrategy",
-    "RetrievalStrategy",
     "normalize_search_text",
 ]
