@@ -670,6 +670,20 @@ class StorageDomainSkillAdapter:
             if current and items else
             "INCOMPLETE"
         )
+        signal_evidence_refs = sorted({
+            str(ref)
+            for item in signals
+            for ref in (
+                [item.get("evidence_ref")]
+                + list(item.get("threshold_evidence_refs") or [])
+            )
+            if str(ref or "").strip()
+        })
+        combined_evidence_refs = sorted({
+            str(ref)
+            for ref in list(knowledge.get("evidence_refs") or []) + signal_evidence_refs
+            if str(ref or "").strip()
+        })
         return self._base_result(
             "storage-diagnostic-validation", status,
             answer,
@@ -683,10 +697,10 @@ class StorageDomainSkillAdapter:
                 "abnormality_signal": signals,
                 "validation_method": methods,
                 "missing_information": sorted(set(missing)),
-                "evidence_refs": knowledge.get("evidence_refs") or [],
+                "evidence_refs": combined_evidence_refs,
             },
             knowledge_refs=knowledge.get("knowledge_refs") or [],
-            evidence_refs=knowledge.get("evidence_refs") or [],
+            evidence_refs=combined_evidence_refs,
             missing=missing,
             separation={
                 "facts": current,
