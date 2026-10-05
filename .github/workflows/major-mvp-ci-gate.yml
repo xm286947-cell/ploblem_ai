@@ -183,6 +183,7 @@ jobs:
           mkdir -p "$extract_root"
           python - "$CANDIDATE_ARCHIVE" "$extract_root" "$ARTIFACT_DIR" <<'PY'
           import json
+          import subprocess
           import sys
           import zipfile
           from pathlib import PurePosixPath
@@ -196,7 +197,7 @@ jobs:
                   path = PurePosixPath(name)
                   if path.is_absolute() or ".." in path.parts:
                       raise SystemExit(f"UNSAFE_ZIP_PATH={name}")
-              package.extractall(destination)
+          subprocess.run(["unzip", "-q", archive, "-d", destination], check=True)
           roots = [item for item in __import__("pathlib").Path(destination).iterdir() if item.is_dir()]
           if len(roots) != 1:
               raise SystemExit("FRESH_EXTRACT_ROOT_INVALID")
