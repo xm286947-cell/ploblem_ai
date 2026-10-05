@@ -1,0 +1,11 @@
+{
+  "source_dir": "/external/approved-wave4-docx",
+  "dataset_manifest": "/external/approved-wave4-output/DATASET_MANIFEST.json",
+  "validation_data_root": "/external/wave4-validation-data",
+  "validation_bootstrap_path": "/external/wave4-bootstrap/bootstrap.json",
+  "normal_product_data_root": "/application-data/HardwareKnowledge",
+  "output_dir": "/external/wave4-execution-output",
+  "model_config": "/external/model-config.yaml",
+  "max_cases": 30,
+  "allow_real_provider": false
+}
