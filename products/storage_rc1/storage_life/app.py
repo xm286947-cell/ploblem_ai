@@ -331,6 +331,18 @@ def product_change_impact(old_id: str, new_id: str):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/product/change-impact/record", tags=["Storage Product MVP"])
+def product_record_change_impact(old_id: str, new_id: str, body: dict | None = None):
+    try:
+        return product_api.record_change_impact(
+            old_id,
+            new_id,
+            assessment_author=str((body or {}).get("assessment_author") or "Storage MVP UI"),
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/product/maintenance", tags=["Storage Product MVP"])
 def product_maintenance():
     return product_api.maintenance()
