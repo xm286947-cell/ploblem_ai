@@ -157,6 +157,9 @@ class _InvalidInput(Exception):
 
 class LifetimeEngine:
     BYTE_FACTORS = {"b": 1, "bytes": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3, "tb": 1000**4, "pb": 1000**5, "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4, "pib": 1024**5}
+    # Preserve the long-standing case-insensitive byte-unit contract above, but
+    # recognize the explicit JEDEC/datasheet bit spelling before lower-casing.
+    BIT_TO_BYTE_FACTORS = {"Kb": 1000 / 8, "Mb": 1000**2 / 8, "Gb": 1000**3 / 8, "Tb": 1000**4 / 8}
 
     def __init__(self, registry: type[FormulaRegistry] = FormulaRegistry): self.registry = registry
 
@@ -196,6 +199,9 @@ class LifetimeEngine:
         u = unit.strip().lower().replace(" ", "_")
         number = cls._number(value, name)
         if target == "bytes":
+            exact_unit = unit.strip().replace(" ", "")
+            if exact_unit in cls.BIT_TO_BYTE_FACTORS:
+                return number * cls.BIT_TO_BYTE_FACTORS[exact_unit], "bytes"
             key = u.replace("_", "")
             if key not in cls.BYTE_FACTORS: raise _InvalidInput([f"{name}:UNIT_INCOMPATIBLE:{unit}"])
             return number * cls.BYTE_FACTORS[key], "bytes"
