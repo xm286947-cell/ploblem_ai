@@ -936,40 +936,33 @@ async function executeOptimizationAssessment(){
   if(!d)return;
   let behavior=$('#optimizationBehavior')?.value.trim()||'';
   if(!behavior)return msg('请先描述当前写入 / 日志 / 持久化行为',true);
-  let payload={
-    user_context:{
-      question:'storage software write governance cache batching persistence logging wear lifetime optimization'
-    },
-    workload_software_facts:[
-      {
-        source:'USER_DECLARED_WORKLOAD',
-        description:behavior
-      }
-    ],
-    record_assessment:true,
-    assessment_author:'Storage MVP UI'
-  };
-  $('#optimizationResult').innerHTML='<div class="card">正在执行现有 Write Governance Skill…</div>';
+  $('#optimizationResult').innerHTML='<div class="card">正在汇总最新 S3 / S4 / Runtime 状态并执行 Existing Write Governance Skill…</div>';
   try{
-    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/skills/storage-write-governance/execute',{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/integrated-action-plan',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
+      body:JSON.stringify({
+        software_behavior:behavior,
+        persist_actions:false,
+        assessment_author:'Storage MVP S5 UI'
+      })
     });
-    let sr=r.skill_result||{},er=r.engineering_result||{},st=sr.structured_result||{};
-    let missing=sr.missing_information||st.missing_information||[];
+    let sr=r.skill_result||{},st=sr.structured_result||{},missing=r.remaining_information||sr.missing_information||st.missing_information||[],state=r.current_state||[];
     let html='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'">'+
-      '<b>'+esc(sr.status||'UNKNOWN')+' · Storage Write Governance</b>'+
-      '<p>'+esc(sr.direct_answer||er.direct_answer||'')+'</p>'+
-      '<p><b>Decision Boundary：</b>'+esc(sr.decision_boundary||'ENGINEERING_REVIEW_REQUIRED')+'</p>'+
-      '<small>当前行为保留在 Storage；Public Knowledge 不接收该内部上下文。</small></div>';
-    html+=optimizationList('潜在机制',st.potential_mechanism);
-    html+=optimizationList('潜在风险',st.potential_risk);
-    html+=optimizationList('软件优化 / 控制选项',st.engineering_control_options);
-    html+=optimizationList('验证要求',st.suggested_validation);
-    html+=optimizationList('适用条件 / 边界',st.conditions_and_limits);
+      '<b>'+esc(sr.status||'UNKNOWN')+' · S5 Integrated Write Governance</b>'+
+      '<p>'+esc(sr.direct_answer||'')+'</p>'+
+      '<p><b>Decision Boundary：</b>'+esc(r.decision_boundary||sr.decision_boundary||'ENGINEERING_REVIEW_REQUIRED')+'</p>'+
+      '<small>输入自动绑定最新 S3 寿命 / S4 诊断 / Runtime Trend；当前行为仍只留在 Storage。</small></div>';
+    html+=optimizationList('当前状态依据',state.map(x=>{
+      if(x.kind==='RUNTIME_TREND')return 'Runtime Trend · '+(x.snapshot_count||0)+' snapshots · '+((x.metric_names||[]).join(' / ')||'no metric');
+      return (x.kind||'Assessment')+' · '+(x.status||'UNKNOWN')+(x.direct_answer?' · '+x.direct_answer:'');
+    }));
+    html+=optimizationList('潜在风险 / 机制',r.potential_risks||st.potential_risk);
+    html+=optimizationList('软件优化 / 控制选项',r.engineering_controls||st.engineering_control_options);
+    html+=optimizationList('验证要求',r.validation_actions||st.suggested_validation);
+    html+=optimizationList('适用条件 / 边界',r.conditions_and_limits||st.conditions_and_limits);
     if(missing.length)html+=optimizationList('仍缺信息',missing);
-    html+='<div class="row">'+
+    html+='<div class="row"><button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">保存为工程执行清单</button>'+
       pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging wear leveling monitoring lifetime optimization'},'展开更多公共知识')+
       '</div><div id="optimizationPublicContext"></div>';
     $('#optimizationResult').innerHTML=html;
