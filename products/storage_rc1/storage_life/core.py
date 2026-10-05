@@ -2125,6 +2125,7 @@ def runtime_metric_trends(device_id, limit=40):
     snapshots = list_runtime_snapshots(device_id, limit=limit)
     series = {}
     latest_formal_snapshot_created_at = None
+    latest_formal_capture_time = None
     for batch in reversed(snapshots):
         batch_has_formal = False
         for obs in batch.get("observations") or []:
@@ -2157,8 +2158,11 @@ def runtime_metric_trends(device_id, limit=40):
             series.setdefault(metric, []).append(point)
         if batch_has_formal:
             created_at = str(batch.get("created_at") or "")
+            captured_at = str(batch.get("captured_at") or "")
             if created_at and (latest_formal_snapshot_created_at is None or created_at > latest_formal_snapshot_created_at):
                 latest_formal_snapshot_created_at = created_at
+            if captured_at and (latest_formal_capture_time is None or captured_at > latest_formal_capture_time):
+                latest_formal_capture_time = captured_at
 
     result = []
     for metric, all_points in sorted(series.items()):
@@ -2182,6 +2186,7 @@ def runtime_metric_trends(device_id, limit=40):
         "device_id": device_id,
         "snapshot_count": len(snapshots),
         "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
+        "latest_formal_capture_time": latest_formal_capture_time,
         "metrics": result,
         "interpretation_performed": False,
         "formal_trend_only": True,
