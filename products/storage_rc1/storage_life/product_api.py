@@ -622,6 +622,9 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             if not has_behavior:
                 complete = False
                 next_action = "补充当前软件写入 / 日志 / 持久化行为后重新生成针对性优化建议。"
+            elif not chain_current:
+                complete = False
+                next_action = "基于最新 S3 寿命结果和 S4 诊断结果重新生成综合优化方案。"
             elif status in completed_statuses and not controls and not validation:
                 complete = False
                 next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
