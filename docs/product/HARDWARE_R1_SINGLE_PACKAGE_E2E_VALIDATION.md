@@ -30,13 +30,9 @@ Immediately before Stage A/B execution, the Workbench re-resolves the ACTIVE sou
 
 ## Stage4 search behavior
 
-Search remains a rebuildable read model over verified Formal Knowledge. The stable Service delegates retrieval to a `RetrievalStrategy`; the default `NormalizedSubstringRetrievalStrategy` uses Unicode NFKC normalization, normalized substring matching, the frozen field weights, and deterministic structured filters. The service contract is independent of that implementation, and no vector database, embedding, semantic retrieval, query rewrite, or RAG is introduced.
+Search remains a rebuildable read model over verified Formal Knowledge. It uses Unicode NFKC normalization, normalized substring matching, the frozen field weights, and deterministic structured filters; no vector database, embedding, semantic retrieval, query rewrite, or RAG is introduced.
 
 When a user enters multiple whitespace-separated keywords, every normalized keyword must be supported somewhere in the projected Formal Knowledge record. Keywords may match across different weighted fields (for example device + interface + symptom). Each field contributes its configured weight at most once, and the UI shows the matched field, matched keyword(s), actual Formal Knowledge field value, and weight as the Match Reason.
-
-Wave3B scene tabs now bind to the formal query scenes `RND_DIAGNOSIS`, `DEVICE_RISK`, and `MARKET_ISSUE`. Scene selection does not change substring matching, does not invent new weights, and does not change the returned `match_score`; it only uses the existing matched-field weights to prioritize scene-relevant results before applying the normal global score and stable knowledge-id tie break.
-
-In `DEVICE_RISK`, the UI also derives a read-only risk aggregation from explicit `DeviceRef` values already present in Formal Knowledge results. It groups matched Case/Knowledge counts and shows existing failure-mechanism and design-constraint text. Records without explicit `DeviceRef` are not inferred or assigned to a device group.
 
 Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. E2E Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
 
