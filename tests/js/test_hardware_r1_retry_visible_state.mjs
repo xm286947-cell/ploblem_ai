@@ -196,8 +196,10 @@ test('retry shows visible Stage B running state before delayed POST completes', 
   retryButton.listeners.click();
   assert.equal(postCount, 1);
 
-  // Drive the current-item polling callback while the POST is still pending.
+  // Let the immediate first poll settle, then drive the next current-item
+  // poll while the POST is still deliberately pending.
   assert.ok(intervalCallbacks.length > 0);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await intervalCallbacks.at(-1)();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.match(element('[data-detail-status]').innerHTML, /RUNNING/);
