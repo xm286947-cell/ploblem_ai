@@ -507,17 +507,11 @@
       ).join('');
     }
 
-    const fieldValue = value.value;
-    const fieldPath = [...path, 'value'];
-    const encodedPath = encodeURIComponent(JSON.stringify(fieldPath));
-    const type = Array.isArray(fieldValue)
-      ? 'json'
-      : fieldValue === null
-        ? 'null'
-        : typeof fieldValue;
-    const editableValue = type === 'json'
-      ? JSON.stringify(fieldValue, null, 2)
-      : fieldValue ?? '';
+    const semanticKeys = Object.prototype.hasOwnProperty.call(value, 'name')
+      ? ['name', 'value', 'unit'].filter((key) =>
+          Object.prototype.hasOwnProperty.call(value, key)
+        )
+      : ['value'];
     const evidenceRefs = Array.isArray(value.evidence_block_ids)
       ? value.evidence_block_ids.join(', ')
       : '—';
@@ -527,19 +521,38 @@
       value.confidence !== undefined && value.confidence !== null
         ? 'confidence=' + value.confidence
         : '',
-      value.unit ? 'unit=' + value.unit : '',
     ].filter(Boolean).join(' · ');
+    const aiSummary = semanticKeys.map((key) =>
+      key + '=' + String(value[key] ?? '—')
+    ).join(' · ');
+    const editors = semanticKeys.map((key) => {
+      const fieldValue = value[key];
+      const fieldPath = [...path, key];
+      const encodedPath = encodeURIComponent(JSON.stringify(fieldPath));
+      const type = Array.isArray(fieldValue)
+        ? 'json'
+        : fieldValue === null
+          ? 'null'
+          : typeof fieldValue;
+      const editableValue = type === 'json'
+        ? JSON.stringify(fieldValue, null, 2)
+        : fieldValue ?? '';
+      return '<label>' + escapeHtml(key) +
+        '<textarea class="hc-review-textarea" rows="2" data-human-review-path="' +
+        encodedPath + '" data-human-review-type="' + escapeHtml(type) + '">' +
+        escapeHtml(editableValue) + '</textarea></label>';
+    }).join('');
 
     return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
       escapeHtml(humanReviewLabel(path)) +
-      '</h3><span class="hc-status">VALUE ONLY</span></div>' +
+      '</h3><span class="hc-status">' +
+      (semanticKeys.length > 1 ? 'PARAMETER SEMANTICS' : 'VALUE ONLY') +
+      '</span></div>' +
       '<div class="hc-review-columns"><div class="hc-review-column"><label>AI Candidate</label><p>' +
-      escapeHtml(fieldValue ?? '—') +
+      escapeHtml(aiSummary) +
       '</p><small>' + escapeHtml(metadata || 'Evidence metadata is read-only') +
       '</small></div><div class="hc-review-column"><label>人工确认值</label>' +
-      '<textarea class="hc-review-textarea" rows="2" data-human-review-path="' +
-      encodedPath + '" data-human-review-type="' + escapeHtml(type) + '">' +
-      escapeHtml(editableValue) + '</textarea></div></div></article>';
+      editors + '</div></div></article>';
   }
 
   function setHumanReviewDraftValue(path, raw, type) {
