@@ -922,6 +922,120 @@ def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
     }
 
 
+def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compose current Storage evidence into one optimization action plan.
+
+    This is orchestration only: current-state facts come from persisted
+    Lifetime/Diagnosis assessments and Runtime snapshots; engineering controls
+    come from the existing storage-write-governance Skill.
+    """
+    request = dict(payload or {})
+    detail = device_slots(device_id)
+    assessments = core.list_device_assessments(device_id, limit=50)
+    latest: dict[str, dict[str, Any]] = {}
+    for item in assessments:
+        kind = str(item.get("assessment_type") or "").upper()
+        if kind and kind not in latest:
+            latest[kind] = item
+
+    trend = core.runtime_metric_trends(device_id, limit=40)
+
+    def assessment_view(kind: str) -> dict[str, Any] | None:
+        item = latest.get(kind)
+        if not item:
+            return None
+        result = item.get("result") or {}
+        skill = result.get("skill_result") or {}
+        engineering = result.get("engineering_result") or {}
+        return {
+            "assessment_id": item.get("id"),
+            "status": item.get("status") or skill.get("status") or "UNKNOWN",
+            "created_at": item.get("created_at"),
+            "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
+            "next_action": engineering.get("next_action"),
+            "missing_information": skill.get("missing_information") or [],
+        }
+
+    lifetime = assessment_view("LIFETIME")
+    diagnosis = assessment_view("DIAGNOSIS")
+    software_behavior = str(request.get("software_behavior") or "").strip()
+
+    context_terms = [
+        "storage software write governance",
+        "write amplification cache batching persistence logging wear lifetime optimization",
+    ]
+    if lifetime:
+        context_terms.append(f"lifetime assessment status {lifetime['status']}")
+    if diagnosis:
+        context_terms.append(f"diagnosis assessment status {diagnosis['status']}")
+    metric_names = [x.get("metric_name") for x in (trend.get("metrics") or []) if x.get("metric_name")]
+    if metric_names:
+        context_terms.append("runtime metrics " + " ".join(metric_names[:12]))
+
+    workload_facts = []
+    if software_behavior:
+        workload_facts.append({
+            "source": "USER_DECLARED_WORKLOAD",
+            "description": software_behavior,
+        })
+
+    optimization = execute_device_skill(device_id, "storage-write-governance", {
+        "user_context": {
+            "question": " ".join(context_terms),
+            "assessment_context": {
+                "latest_lifetime": lifetime,
+                "latest_diagnosis": diagnosis,
+                "runtime_snapshot_count": trend.get("snapshot_count") or 0,
+                "runtime_metrics": metric_names[:12],
+            },
+        },
+        "workload_software_facts": workload_facts,
+        "record_assessment": True,
+        "assessment_author": str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
+    })
+    skill = optimization.get("skill_result") or {}
+    structured = skill.get("structured_result") or {}
+
+    current_state = []
+    if lifetime:
+        current_state.append({"kind": "LIFETIME", **lifetime})
+    if diagnosis:
+        current_state.append({"kind": "DIAGNOSIS", **diagnosis})
+    if metric_names:
+        current_state.append({
+            "kind": "RUNTIME_TREND",
+            "snapshot_count": trend.get("snapshot_count") or 0,
+            "metric_names": metric_names[:12],
+            "interpretation": "EXPLICIT_VALUE_TREND_ONLY",
+        })
+
+    remaining = []
+    if not lifetime:
+        remaining.append("尚无寿命 / 风险评估记录")
+    if not diagnosis:
+        remaining.append("尚无运行诊断记录")
+    if not software_behavior:
+        remaining.append("尚未提供当前软件写入 / 日志 / 持久化行为")
+    remaining.extend(skill.get("missing_information") or [])
+
+    return {
+        "device": detail["device"],
+        "current_state": current_state,
+        "engineering_controls": structured.get("engineering_control_options") or [],
+        "potential_risks": structured.get("potential_risk") or [],
+        "validation_actions": structured.get("suggested_validation") or [],
+        "conditions_and_limits": structured.get("conditions_and_limits") or [],
+        "remaining_information": sorted({str(x) for x in remaining if str(x)}),
+        "knowledge_refs": skill.get("knowledge_refs") or [],
+        "evidence_refs": skill.get("evidence_refs") or [],
+        "optimization_assessment": optimization.get("assessment_record"),
+        "skill_result": skill,
+        "decision_boundary": skill.get("decision_boundary") or "ENGINEERING_REVIEW_REQUIRED",
+        "orchestration_only": True,
+        "new_rule_stack": False,
+    }
+
+
 def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
     """Compose coverage + review into one deterministic user-facing state.
 
