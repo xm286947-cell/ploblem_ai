@@ -544,7 +544,8 @@ class HardwareCaseSourceStore:
         """Register exactly one ACTIVE source for a business case.
 
         The product contract intentionally has no source revision semantics.
-        An existing ACTIVE binding is rejected even when the bytes are equal.
+        Re-uploading the exact same bytes is an idempotent reuse; a different
+        payload for the same business case remains fail-closed.
         """
         case_id = self._case_id(business_case_id)
         if len(content) > self.max_upload_bytes:
