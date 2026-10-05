@@ -240,9 +240,12 @@ def product_runtime_snapshots(device_id: str, limit: int = 20):
 
 
 @app.post("/api/product/devices/{device_id}/runtime-trend-lifetime", tags=["Storage Product MVP"])
-def product_runtime_trend_lifetime(device_id: str):
+def product_runtime_trend_lifetime(device_id: str, body: dict | None = None):
     try:
-        return product_api.analyze_runtime_trend(device_id)
+        return product_api.analyze_runtime_trend(
+            device_id,
+            target_service_life=dict((body or {}).get("target_service_life") or {}),
+        )
     except KeyError:
         raise HTTPException(404, "器件不存在")
     except ValueError as exc:
