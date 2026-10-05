@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from quality_knowledge.major_cases.document_parser import ParseResult, ParsedFragment
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from services.major_case_publish import MajorCasePublishAdapter, PublishValidationError
 
@@ -42,27 +43,81 @@ def _entry(
     status: str = "CONFIRMED",
     evidence: list[dict] | None = None,
 ) -> dict:
-    return repo.add_entry(
+    event = repo.event(event_id) if event_id else None
+    link = repo.add_source_link(
+        case_id,
+        event_id,
+        {
+            "record_id": f"TEST-{entry_type}-{event_id or 'SHARED'}",
+            "source_type": "ITR",
+            "source_system": "TEST",
+        },
+        standard_itr=(event or {}).get("standard_itr") or "",
+        role="CURRENT_EVENT",
+        status="LINKED",
+    )
+    evidence_refs = evidence or [{
+        "source_link_id": link["source_link_id"],
+        "locator": entry_type.lower(),
+        "excerpt": content,
+    }]
+    if status == "MISSING":
+        return repo.add_entry(
+            case_id,
+            entry_type,
+            "",
+            assertion_kind="UNKNOWN",
+            origin="SOURCE_FUSION",
+            status="MISSING",
+            event_id=event_id,
+        )
+    pending = repo.add_entry(
         case_id,
         entry_type,
         content,
         assertion_kind="FACT",
-        origin="HUMAN",
-        status=status,
+        origin="SOURCE_FUSION",
+        status="PENDING",
         event_id=event_id,
-        evidence=evidence or [],
+        evidence=evidence_refs,
     )
+    if status in {"CONFIRMED", "CORRECTED"}:
+        return repo.revise_entry(
+            pending["entry_id"], content, status, "test-reviewer", "reviewed"
+        )
+    return pending
 
 
-def test_ac01_ac02_ac06_to_ac09_confirmed_fields_are_mapped(tmp_path: Path) -> None:
+def test_i3_all_typed_fields_are_mapped_and_legacy_types_are_not_authority(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     case, event = _active_case_event(repo, title="控制器异常复盘")
     _entry(repo, case["case_id"], "ISSUE_FACT", "控制器周期性重启", event_id=event["event_id"])
-    _entry(repo, case["case_id"], "ROOT_CAUSE", "CAN 队列缺少流控", event_id=event["event_id"])
-    _entry(repo, case["case_id"], "ACTION", "增加队列水位保护", event_id=event["event_id"])
+    typed_values = {
+        "TRC_OCCURRENCE": "TRC 发生",
+        "TRC_ESCAPE": "TRC 流出",
+        "MRC_OCCURRENCE": "MRC 发生",
+        "MRC_ESCAPE": "MRC 流出",
+        "TECHNICAL_ACTION": "技术措施",
+        "MANAGEMENT_ACTION": "管理措施",
+        "CORRECTIVE_ACTION": "纠正措施",
+        "PREVENTIVE_ACTION": "预防措施",
+    }
+    created = {
+        entry_type: _entry(
+            repo, case["case_id"], entry_type, content, event_id=event["event_id"]
+        )
+        for entry_type, content in typed_values.items()
+    }
+    repo.revise_entry(
+        created["CORRECTIVE_ACTION"]["entry_id"],
+        "已更正的纠正措施",
+        "CORRECTED",
+        "test-reviewer",
+        "更正依据",
+    )
     _entry(repo, case["case_id"], "VERIFICATION", "回归测试通过", event_id=event["event_id"])
-    _entry(repo, case["case_id"], "ROOT_CAUSE", "待确认根因", event_id=event["event_id"], status="PENDING")
-    _entry(repo, case["case_id"], "ACTION", "已更正但本契约不发布", event_id=event["event_id"], status="CORRECTED")
+    _entry(repo, case["case_id"], "ROOT_CAUSE", "不再是发布权威", event_id=event["event_id"])
+    _entry(repo, case["case_id"], "ACTION", "不再是发布权威", event_id=event["event_id"])
     _entry(repo, case["case_id"], "OTHER", "非发布类型", event_id=event["event_id"])
 
     candidate = MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
@@ -74,13 +129,24 @@ def test_ac01_ac02_ac06_to_ac09_confirmed_fields_are_mapped(tmp_path: Path) -> N
     }
     assert candidate["title"] == "控制器异常复盘"
     assert candidate["enriched_case"]["problem"]["standard_description"] == "控制器周期性重启"
-    assert candidate["enriched_case"]["problem"]["phenomenon"] == [{"value": "控制器周期性重启"}]
-    assert candidate["enriched_case"]["analysis"]["root_cause"] == [{"value": "CAN 队列缺少流控"}]
-    assert candidate["enriched_case"]["solution"]["corrective_actions"] == [{"value": "增加队列水位保护"}]
+    assert candidate["enriched_case"]["problem"]["phenomenon"][0]["value"] == "控制器周期性重启"
+    analysis = candidate["enriched_case"]["analysis"]
+    assert analysis["trc"]["occurrence"]["standard"] == "TRC 发生"
+    assert analysis["trc"]["escape"]["standard"] == "TRC 流出"
+    assert analysis["mrc"]["occurrence"]["standard"] == "MRC 发生"
+    assert analysis["mrc"]["escape"]["standard"] == "MRC 流出"
+    solution = candidate["enriched_case"]["solution"]
+    assert solution["technical_actions"][0]["value"] == "技术措施"
+    assert solution["management_actions"][0]["value"] == "管理措施"
+    assert solution["corrective_actions"][0]["value"] == "已更正的纠正措施"
+    assert solution["preventive_actions"][0]["value"] == "预防措施"
+    assert analysis["root_cause"] == [{
+        "value": "TRC occurrence: TRC 发生\nMRC occurrence: MRC 发生"
+    }]
     assert candidate["enriched_case"]["solution"]["verification_result"] == "回归测试通过"
+    assert candidate["enriched_case"]["metadata"]["semantic_projection_contract"] == "major-semantic-publish/v1"
+    assert "不再是发布权威" not in repr(candidate)
     serialized = repr(candidate)
-    assert "待确认根因" not in serialized
-    assert "已更正但本契约不发布" not in serialized
     assert "非发布类型" not in serialized
 
 
@@ -102,12 +168,12 @@ def test_ac03_ac04_ac05_event_isolation_shared_and_unscoped_protection(tmp_path:
     repo.update_case_status(case["case_id"], "ACTIVE")
 
     _entry(repo, case["case_id"], "ISSUE_FACT", "事件A事实", event_id=event_a["event_id"])
-    _entry(repo, case["case_id"], "ROOT_CAUSE", "事件A根因", event_id=event_a["event_id"])
+    _entry(repo, case["case_id"], "TRC_OCCURRENCE", "事件A根因", event_id=event_a["event_id"])
     _entry(repo, case["case_id"], "ISSUE_FACT", "事件B事实", event_id=event_b["event_id"])
-    _entry(repo, case["case_id"], "ROOT_CAUSE", "事件B根因", event_id=event_b["event_id"])
+    _entry(repo, case["case_id"], "TRC_OCCURRENCE", "事件B根因", event_id=event_b["event_id"])
     shared = _entry(repo, case["case_id"], "VERIFICATION", "共享验证结论")
     repo.set_entry_scope(shared["entry_id"], scope="CASE_SHARED")
-    _entry(repo, case["case_id"], "ACTION", "未定域措施")
+    _entry(repo, case["case_id"], "CORRECTIVE_ACTION", "未定域措施")
 
     adapter = MajorCasePublishAdapter(repo)
     candidate_a = adapter.build_candidate(event_a["event_id"])
@@ -138,6 +204,220 @@ def test_ac10_ac11_missing_root_cause_or_action_is_valid_with_warnings(tmp_path:
     assert "ACTION_MISSING" in candidate["validation_warnings"]
 
 
+def test_valid_missing_typed_slot_stays_empty_without_blocking_other_reviewed_slots(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    _entry(repo, case["case_id"], "TRC_OCCURRENCE", "已确认的发生原因", event_id=event["event_id"])
+    _entry(repo, case["case_id"], "TRC_ESCAPE", "", event_id=event["event_id"], status="MISSING")
+
+    candidate = MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+
+    assert candidate["enriched_case"]["analysis"]["trc"]["occurrence"]["standard"] == "已确认的发生原因"
+    assert candidate["enriched_case"]["analysis"]["trc"]["escape"] == {
+        "original": "", "report": "", "standard": "", "confidence": 0.0, "evidence_refs": []
+    }
+    assert "SEMANTIC_SLOT_MISSING:TRC_ESCAPE" in candidate["validation_warnings"]
+
+
+def test_pending_formal_typed_review_blocks_publication(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    _entry(repo, case["case_id"], "ISSUE_FACT", "已审核问题事实", event_id=event["event_id"])
+    _entry(repo, case["case_id"], "TRC_OCCURRENCE", "来源有待裁决", event_id=event["event_id"], status="PENDING")
+
+    with pytest.raises(PublishValidationError, match="PUBLISH_REVIEW_REQUIRED"):
+        MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+
+
+def test_ai_status_cannot_claim_human_authority_and_malformed_missing_fails_closed(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    link = repo.add_source_link(
+        case["case_id"], event["event_id"],
+        {"record_id": "ROW-AI", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr=event["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    repo.add_entry(
+        case["case_id"], "TRC_OCCURRENCE", "AI 不能冒充人工确认",
+        assertion_kind="FACT", origin="AI", status="CONFIRMED", event_id=event["event_id"],
+        evidence=[{"source_link_id": link["source_link_id"], "locator": "row:A", "excerpt": "AI 来源"}],
+    )
+    with pytest.raises(PublishValidationError, match="PUBLISH_REVISION_NOT_HUMAN"):
+        MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+
+    missing_case, missing_event = _active_case_event(repo, itr="ITR-BAD-MISSING")
+    missing_link = repo.add_source_link(
+        missing_case["case_id"], missing_event["event_id"],
+        {"record_id": "ROW-MISSING", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr=missing_event["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    repo.add_entry(
+        missing_case["case_id"], "TRC_ESCAPE", "不合法的 MISSING 内容",
+        assertion_kind="UNKNOWN", origin="SOURCE_FUSION", status="MISSING",
+        event_id=missing_event["event_id"], evidence=[{
+            "source_link_id": missing_link["source_link_id"], "locator": "row:missing", "excerpt": "不得附加"
+        }],
+    )
+    with pytest.raises(PublishValidationError, match="PUBLISH_SEMANTIC_CONTENT_INVALID"):
+        MajorCasePublishAdapter(repo).build_candidate(missing_event["event_id"])
+
+
+def test_rejected_and_unscoped_revisions_never_become_publish_authority(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    unscoped_link = repo.add_source_link(
+        case["case_id"], None,
+        {"record_id": "ROW-UNSCOPED", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr="", role="CURRENT_EVENT", status="LINKED",
+    )
+    repo.add_entry(
+        case["case_id"], "TRC_OCCURRENCE", "未定域结论不能发布",
+        assertion_kind="HUMAN_REVISION", origin="HUMAN", status="CONFIRMED", evidence=[{
+            "source_link_id": unscoped_link["source_link_id"], "locator": "row:shared?", "excerpt": "未定域来源"
+        }],
+    )
+    rejected_link = repo.add_source_link(
+        case["case_id"], event["event_id"],
+        {"record_id": "ROW-REJECTED", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr=event["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    repo.add_entry(
+        case["case_id"], "CORRECTIVE_ACTION", "已驳回措施",
+        assertion_kind="HUMAN_REVISION", origin="HUMAN", status="REJECTED",
+        event_id=event["event_id"], evidence=[{
+            "source_link_id": rejected_link["source_link_id"], "locator": "row:rejected", "excerpt": "驳回来源"
+        }],
+    )
+
+    with pytest.raises(PublishValidationError, match="NO_PUBLISHABLE_HUMAN_REVISION"):
+        MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+
+
+def test_multiple_typed_actions_keep_their_own_evidence_binding(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    first = _entry(repo, case["case_id"], "CORRECTIVE_ACTION", "相同措施", event_id=event["event_id"])
+    second = _entry(repo, case["case_id"], "CORRECTIVE_ACTION", "相同措施", event_id=event["event_id"])
+
+    candidate = MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+    actions = candidate["enriched_case"]["solution"]["corrective_actions"]
+    evidence_by_id = {
+        section["evidence_id"]: section
+        for section in candidate["raw_evidence"]["sections"]
+    }
+
+    assert [item["value"] for item in actions] == ["相同措施", "相同措施"]
+    for action, entry in zip(actions, (first, second), strict=True):
+        ref = action["evidence_refs"][0]
+        raw = evidence_by_id[ref["source_location"].removeprefix("evidence://")]
+        assert raw["entry_id"] == entry["entry_id"]
+        assert ref["quote"] == entry["evidence"][0]["excerpt"]
+
+
+def test_excel_pdf_projection_preserves_both_source_lineages(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event = _active_case_event(repo)
+    excel_link = repo.add_source_link(
+        case["case_id"], None,
+        {
+            "record_id": "KFACT-REV-8",
+            "source_type": "MAJOR_EXCEL_SOURCE_FACT",
+            "source_system": "MAJOR_EXCEL_IMPORT",
+            "source_hash": "excel-hash",
+            "source_ref": "Excel!A8",
+        },
+        standard_itr="", role="CURRENT_EVENT", status="LINKED",
+    )
+    report_path = tmp_path / "report.pdf"
+    report_path.write_bytes(b"test-only-placeholder")
+    document = repo.ingest_file(case["case_id"], report_path)
+    fragment = repo.save_parse_result(
+        document["version_id"],
+        ParseResult("PDF", [ParsedFragment(1, "root-cause", "PAGE", "page:4", "TEXT", "PDF 细化结论")]),
+    )[0]
+    pdf_link = repo.add_source_link(
+        case["case_id"], event["event_id"],
+        {
+            "record_id": document["version_id"],
+            "source_type": "MAJOR_SOURCE_DOCUMENT",
+            "source_system": "MAJOR_SOURCE_INTAKE",
+            "file_name": document["original_filename"],
+            "version_id": document["version_id"],
+            "document_id": document["document_id"],
+        },
+        standard_itr=event["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    pending = repo.add_entry(
+        case["case_id"], "TRC_OCCURRENCE", "人工归一后的发生原因",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=event["event_id"], evidence=[
+            {"source_link_id": excel_link["source_link_id"], "locator": "Excel!F8", "excerpt": "Excel 原文"},
+            {
+                "source_link_id": pdf_link["source_link_id"],
+                "fragment_id": fragment["fragment_id"],
+                "locator": "page:4/section:root-cause",
+                "excerpt": "PDF 细化结论",
+            },
+        ],
+    )
+    reviewed = repo.revise_entry(
+        pending["entry_id"], "人工归一后的发生原因", "CONFIRMED", "reviewer", "已比较两类来源"
+    )
+
+    candidate = MajorCasePublishAdapter(repo).build_candidate(event["event_id"])
+    detail = candidate["enriched_case"]["analysis"]["trc"]["occurrence"]
+    sections = candidate["raw_evidence"]["sections"]
+
+    assert detail["original"] == "Excel 原文"
+    assert detail["report"] == "PDF 细化结论"
+    assert {item["source_type"] for item in detail["evidence_refs"]} == {"EXCEL", "PDF"}
+    assert {item["source_modality"] for item in sections} == {"EXCEL", "PDF"}
+    assert {item["origin_source_id"] for item in sections} == {
+        "KFACT-REV-8", document["version_id"]
+    }
+    assert {item["revision_id"] for item in sections} == {reviewed["current_revision_id"]}
+    assert {item["locator"] for item in sections} == {"Excel!F8", "page:4/section:root-cause"}
+    pdf_section = next(item for item in sections if item["source_modality"] == "PDF")
+    assert pdf_section["fragment_id"] == fragment["fragment_id"]
+    assert pdf_section["origin_source_version"] == document["version_id"]
+    assert pdf_section["page"] == 4
+    assert pdf_section["source_link_id"] == pdf_link["source_link_id"]
+
+
+def test_wrong_event_and_missing_source_lineage_fail_closed(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    case, event_a = _active_case_event(repo, itr="ITR-A")
+    event_b = repo.upsert_event(case["case_id"], standard_itr="ITR-B", internal_event_key="ITR-B")
+    link_b = repo.add_source_link(
+        case["case_id"], event_b["event_id"],
+        {"record_id": "ROW-B", "source_type": "ITR", "source_system": "TEST"},
+        standard_itr=event_b["standard_itr"], role="CURRENT_EVENT", status="LINKED",
+    )
+    pending = repo.add_entry(
+        case["case_id"], "TRC_OCCURRENCE", "事件 A 的人工结论",
+        assertion_kind="FACT", origin="SOURCE_FUSION", status="PENDING",
+        event_id=event_a["event_id"], evidence=[{
+            "source_link_id": link_b["source_link_id"], "locator": "row:B", "excerpt": "事件 B 来源"
+        }],
+    )
+    repo.revise_entry(pending["entry_id"], "事件 A 的人工结论", "CONFIRMED", "reviewer", "审核")
+
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_EVENT_MISMATCH"):
+        MajorCasePublishAdapter(repo).build_candidate(event_a["event_id"])
+
+    missing_case, missing_event = _active_case_event(repo, itr="ITR-MISSING-LINK")
+    missing_entry = _entry(
+        repo, missing_case["case_id"], "TRC_OCCURRENCE", "来源链接不可见",
+        event_id=missing_event["event_id"],
+    )
+    original_source_links = repo.source_links
+    repo.source_links = lambda case_id: (
+        [] if case_id == missing_case["case_id"] else original_source_links(case_id)
+    )
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_SOURCE_NOT_FOUND"):
+        MajorCasePublishAdapter(repo).build_candidate(missing_event["event_id"])
+
+
 def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     case, event = _active_case_event(repo)
@@ -157,7 +437,7 @@ def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> 
     root_entry = _entry(
         repo,
         case["case_id"],
-        "ROOT_CAUSE",
+        "TRC_OCCURRENCE",
         "人工确认根因",
         event_id=event["event_id"],
         evidence=[
@@ -176,12 +456,15 @@ def test_ac12_evidence_preserves_provenance_without_guessing(tmp_path: Path) -> 
     assert sections[0]["raw_text"] == "原始根因段落"
     assert sections[0]["section"] == "root-cause"
     assert sections[0]["source_type"] == "ITR"
+    assert sections[0]["source_modality"] is None
     assert sections[0]["source_id"] == event["standard_itr"]
     assert sections[0]["evidence_id"].startswith("MJR-EVD-")
     assert sections[0]["source_version"] == root_entry["current_revision_id"]
     assert sections[0]["source_ref"] == (
         f"ITR:{event['standard_itr']}@{root_entry['current_revision_id']}"
     )
+    assert sections[0]["source_link_id"] == link["source_link_id"]
+    assert sections[0]["origin_source_id"] == "ITR-ROW-1"
     assert sections[0]["page"] is None
     assert sections[0]["page_numbers"] == []
     assert sections[0]["file_name"] is None
@@ -224,9 +507,9 @@ def test_validation_rejects_missing_inactive_or_empty_event(tmp_path: Path) -> N
         event_id=empty_event["event_id"],
         status="PENDING",
     )
-    with pytest.raises(PublishValidationError, match="NO_PUBLISHABLE_CONFIRMED_FACT") as empty:
+    with pytest.raises(PublishValidationError, match="PUBLISH_REVIEW_REQUIRED") as empty:
         adapter.build_candidate(empty_event["event_id"])
-    assert empty.value.code == "NO_PUBLISHABLE_CONFIRMED_FACT"
+    assert empty.value.code == "PUBLISH_REVIEW_REQUIRED"
 
 
 def test_validation_rejects_event_case_and_publication_identity_conflicts(tmp_path: Path) -> None:

@@ -50,12 +50,12 @@ def _confirmed_major(tmp_path: Path) -> tuple[MajorKnowledgeRepository, dict, di
         ("ACTION", "增加队列水位保护"),
         ("VERIFICATION", "回归测试通过"),
     ):
-        repo.add_entry(
+        entry = repo.add_entry(
             case["case_id"],
             entry_type,
             content,
             assertion_kind="FACT",
-            origin="HUMAN",
+            origin="SOURCE_FUSION" if entry_type in {"ISSUE_FACT", "VERIFICATION"} else "HUMAN",
             status="CONFIRMED",
             event_id=event["event_id"],
             evidence=[
@@ -66,6 +66,10 @@ def _confirmed_major(tmp_path: Path) -> tuple[MajorKnowledgeRepository, dict, di
                 }
             ],
         )
+        if entry_type in {"ISSUE_FACT", "VERIFICATION"}:
+            repo.revise_entry(
+                entry["entry_id"], content, "CONFIRMED", "reviewer", "Evidence reviewed"
+            )
     return repo, case, event
 
 
@@ -87,6 +91,13 @@ def test_p01_contract_shape_and_p02_public_ref_binding(tmp_path: Path) -> None:
     assert publication.source.source_id == event["event_id"]
     assert publication.source.business_ref == "ITR-RCM-R2-001"
     assert publication.major_case_ref == "MAJOR_CASE:ITR-RCM-R2-001"
+    assert {tag for item in publication.knowledge_candidates for tag in item.tags} >= {
+        "ISSUE_FACT", "VERIFICATION"
+    }
+    assert all(
+        "ROOT_CAUSE" not in item.tags and "ACTION" not in item.tags
+        for item in publication.knowledge_candidates
+    )
 
 
 def test_p03_p04_revision_and_common_evidence_traceability(tmp_path: Path) -> None:
@@ -177,11 +188,11 @@ def test_p09_new_major_revision_creates_new_publication_path(tmp_path: Path) -> 
     entry = next(
         item
         for item in repo.entries(case["case_id"])
-        if item["entry_type"] == "ACTION"
+        if item["entry_type"] == "ISSUE_FACT"
     )
     repo.revise_entry(
         entry["entry_id"],
-        "增加队列水位保护并验证异常恢复",
+        "控制器重启问题已由人工复核修订",
         "CONFIRMED",
         "reviewer",
         "new confirmed revision",

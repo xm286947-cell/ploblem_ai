@@ -254,11 +254,25 @@ class HistoricalCaseConsumerService:
             _first_text(((analysis.get("trc") or {}).get("occurrence") or {}).get("standard")),
             _first_text(((analysis.get("mrc") or {}).get("occurrence") or {}).get("standard")),
         )
-        solution_text = _first_text(
-            *(_values(solution.get("corrective_actions"))),
-            *(_values(solution.get("preventive_actions"))),
-            *(_values(solution.get("reusable_actions"))),
-        )
+        solution_groups = [
+            ("纠正措施", _values(solution.get("corrective_actions"))),
+            ("预防措施", _values(solution.get("preventive_actions"))),
+            ("技术措施", _values(solution.get("technical_actions"))),
+            ("管理措施", _values(solution.get("management_actions"))),
+            ("可复用措施", _values(solution.get("reusable_actions"))),
+        ]
+        populated_solution_groups = [
+            (label, values) for label, values in solution_groups if values
+        ]
+        if len(populated_solution_groups) == 1:
+            solution_text = "\n".join(populated_solution_groups[0][1])
+        elif populated_solution_groups:
+            solution_text = "\n".join(
+                f"{label}: {'; '.join(values)}"
+                for label, values in populated_solution_groups
+            )
+        else:
+            solution_text = None
         symptom_values = _values(problem.get("phenomenon"))
         symptom = "\n".join(symptom_values) if symptom_values else None
 

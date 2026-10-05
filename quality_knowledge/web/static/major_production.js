@@ -6,6 +6,11 @@
 
   const api = (window.P0_MAJOR_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '') + '/major-production';
   const state = { caseId: null, eventId: null, analysisMode: null, caseDetail: null };
+  const publishableTypes = new Set([
+    'ISSUE_FACT', 'VERIFICATION', 'TRC_OCCURRENCE', 'TRC_ESCAPE',
+    'MRC_OCCURRENCE', 'MRC_ESCAPE', 'TECHNICAL_ACTION',
+    'MANAGEMENT_ACTION', 'CORRECTIVE_ACTION', 'PREVENTIVE_ACTION'
+  ]);
   const message = root.querySelector('[data-major-message]');
   const excelPreview = root.querySelector('[data-major-excel-preview]');
   const workflow = root.querySelector('[data-major-workflow]');
@@ -30,12 +35,36 @@
       if (eventEntries) eventEntries.innerHTML = '';
       return;
     }
-    const items = (state.caseDetail.entries || []).filter(item => item.event_id === state.eventId);
+    const items = (state.caseDetail.entries || []).filter(item =>
+      item.event_id === state.eventId || item.scope_kind === 'CASE_SHARED');
     const rows = items.map(item => '<li><strong>' + esc(item.entry_type) + ' · ' + esc(item.status) +
       ' · revision ' + esc(item.revision_no) + '</strong><p>' + esc(item.content || '（MISSING）') +
       '</p><small>来源：' + esc(item.origin) + ' · Evidence ' + esc((item.evidence || []).length) + '</small></li>').join('');
     eventEntries.innerHTML = '<h3>所选 Event 的当前 Entries / Human Revisions</h3><ul>' +
       (rows || '<li>该 Event 尚无持久化 Entry。</li>') + '</ul>';
+  }
+
+  function updatePublishReadiness() {
+    const publishButton = root.querySelector('[data-major-publish]');
+    publishButton.disabled = true;
+    if (!state.caseDetail || !state.eventId) return;
+    const scoped = (state.caseDetail.entries || []).filter(item =>
+      publishableTypes.has(item.entry_type) &&
+      (item.event_id === state.eventId || item.scope_kind === 'CASE_SHARED'));
+    const hasPending = scoped.some(item => item.status === 'PENDING');
+    const hasInvalidMissing = scoped.some(item => item.status === 'MISSING' &&
+      (String(item.content || '').trim() || (item.evidence || []).length > 0 ||
+       item.origin !== 'SOURCE_FUSION' || item.assertion_kind !== 'UNKNOWN'));
+    const hasHumanRevision = scoped.some(item =>
+      ['CONFIRMED', 'CORRECTED'].includes(item.status) &&
+      item.assertion_kind === 'HUMAN_REVISION' && item.origin === 'HUMAN' &&
+      String(item.content || '').trim() && (item.evidence || []).length > 0);
+    if (!hasPending && !hasInvalidMissing && hasHumanRevision) {
+      publishButton.disabled = false;
+      root.querySelector('[data-major-state]').textContent = 'READY_TO_PUBLISH';
+    } else if (hasPending || hasInvalidMissing) {
+      root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_REQUIRED';
+    }
   }
 
   function activateCase(detail, identitySuffix) {
@@ -60,6 +89,7 @@
       (detail.title || 'Major Case') + ' · Case ' + detail.case_id + ' · ' + events.length +
       ' Event' + (identitySuffix ? ' · ' + identitySuffix : '');
     renderEventEntries();
+    updatePublishReadiness();
     if (events.length > 1) {
       say('该 Case 有多个 Event。请明确选择本次分析对象；系统不会默认选择第一个。');
     } else if (!events.length) {
@@ -77,7 +107,10 @@
     analyzeButton.disabled = !state.eventId;
     root.querySelector('[data-major-state]').textContent = state.eventId ? 'EVENT_SELECTED' : 'EVENT_SELECTION_REQUIRED';
     renderEventEntries();
-    say(state.eventId ? '已切换分析 Event；候选区已清空，请重新分析。' : '请先选择本次分析的 Event。');
+    updatePublishReadiness();
+    say(state.eventId
+      ? '已切换 Event；仅能发布该 Event 已审核完成的内容，否则请重新分析并审核。'
+      : '请先选择本次分析的 Event。');
   });
 
   function renderPreview(data) {
@@ -269,6 +302,8 @@
       return;
     }
     const requestedEventId = state.eventId;
+    root.querySelector('[data-major-publish]').disabled = true;
+    root.querySelector('[data-major-state]').textContent = 'ANALYSIS_RUNNING';
     try {
       say('正在读取 Source 并生成语义 Review 候选…');
       const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis', {
@@ -302,6 +337,7 @@
           : 'Source Fusion 候选已生成；请逐条核对来源证据，MULTI_SOURCE / CONFLICT 需填写人工结论和理由。');
         state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
         renderEventEntries();
+        updatePublishReadiness();
         return;
       }
       box.innerHTML = data.candidates.map(item =>
@@ -313,6 +349,7 @@
       say('AI 候选已生成，必须逐条人工确认。');
       state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
       renderEventEntries();
+      updatePublishReadiness();
     } catch (error) {
       say(error.message, true);
     }
@@ -354,15 +391,9 @@
       card.querySelector('h3').textContent =
         data.entry_type + ' · ' + data.status + ' · revision ' + data.revision_no;
       card.querySelectorAll('[data-entry]').forEach(item => { item.disabled = true; });
-      const all = [...root.querySelectorAll('[data-entry]')].every(item => item.disabled);
-      if (all && state.analysisMode !== 'SOURCE_FUSION') {
-        root.querySelector('[data-major-publish]').disabled = false;
-        root.querySelector('[data-major-state]').textContent = 'READY_TO_PUBLISH';
-      } else if (all) {
-        root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_COMPLETE_I3_PENDING';
-      }
       state.caseDetail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
       renderEventEntries();
+      updatePublishReadiness();
       say(data.status === 'CORRECTED' ? '已创建人工更正修订。' : '已创建人工确认修订。');
     } catch (error) {
       say(error.message, true);
