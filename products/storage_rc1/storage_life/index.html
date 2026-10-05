@@ -332,12 +332,13 @@ async function loadMvpSummary(){
   try{
     MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
     let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
-    let rt=MVP_SUMMARY.runtime||{};
+    let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{};
     body.innerHTML='<div class="grid4">'+
       '<div class="card"><small>Device Fact</small><div class="metric">'+esc(f.confirmed||0)+'</div><small>适用槽位 '+esc(f.applicable||0)+' · Fact Coverage '+Math.round((f.fact_coverage_ratio||0)*100)+'%</small></div>'+
       '<div class="card"><small>Runtime</small><div class="metric">'+esc(rt.snapshot_count||0)+'</div><small>Snapshots · '+esc(rt.metric_count||0)+' Metrics</small></div>'+
       '<div class="card"><small>Lifecycle</small><p>'+badge(MVP_SUMMARY.lifecycle?.status||'DRAFT')+'</p><small>'+esc(MVP_SUMMARY.lifecycle?.reason||'')+'</small></div>'+
       '<div class="card"><small>Public Knowledge</small><p><span class="badge CONFIRMED">IN CONTEXT</span></p><small>Engineering Context + Citation</small></div>'+
+      '<div class="card"><small>Engineering Actions</small><div class="metric">'+esc(ac.open_count||0)+'</div><small>Open / In Progress</small></div>'+
       '<div class="card"><small>MVP Demo Readiness</small><p>'+badge(MVP_SUMMARY.mvp_ready_for_demo?'READY':'PARTIAL')+'</p><small>'+esc(actions.length?actions.length+' 项待补齐':'当前核心场景已有记录')+'</small></div>'+
       '</div>'+
       '<div class="grid3">'+sc.map(mvpScenarioCard).join('')+'</div>'+
@@ -357,7 +358,8 @@ async function executeIntegratedActionPlan(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         software_behavior:behavior,
-        assessment_author:'Storage MVP Integrated Action Plan'
+        assessment_author:'Storage MVP Integrated Action Plan',
+        persist_actions:true
       })
     });
     let state=r.current_state||[],controls=r.engineering_controls||[],risks=r.potential_risks||[],validation=r.validation_actions||[],limits=r.conditions_and_limits||[],remaining=r.remaining_information||[];
@@ -377,9 +379,66 @@ async function executeIntegratedActionPlan(){
     pkContextSearchInline({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging monitoring lifetime optimization'},'integratedActionPublicContext');
     loadAssessmentHistory();
     loadMvpSummary();
+    loadEngineeringActions();
   }catch(e){
     box.innerHTML='<div class="danger card"><b>工程优化行动方案未完成</b><p>'+esc(e.message)+'</p></div>';
   }
+}
+let ENGINEERING_ACTIONS=[];
+function actionTypeLabel(type){
+  return {
+    SOFTWARE_CONTROL:'软件控制',
+    TEST_VALIDATION:'测试验证',
+    MONITORING:'监控',
+    FOLLOW_UP:'待补充'
+  }[type]||type;
+}
+function actionStatusLabel(status){
+  return {OPEN:'待执行',IN_PROGRESS:'进行中',DONE:'已完成',WAIVED:'已豁免'}[status]||status;
+}
+function renderEngineeringActionsPanel(d){
+  let host=$('#deviceDetail');
+  if(!host||!d?.id)return;
+  host.insertAdjacentHTML('beforeend',
+    '<div id="engineeringActionsPanel" class="card"><div class="pagehead"><div><div class="kicker">ENGINEERING ACTIONS</div><h3>工程执行清单</h3>'+
+    '<div class="muted">把优化建议转成可跟踪的软件 / 测试 / 监控动作；仍属于工程执行草案，不自动成为正式规范。</div></div>'+
+    '<button class="secondary" onclick="loadEngineeringActions()">刷新</button></div><div id="engineeringActionsBody" class="empty">正在读取执行清单…</div></div>'
+  );
+  loadEngineeringActions();
+}
+async function loadEngineeringActions(){
+  let d=CURRENT?.device,body=$('#engineeringActionsBody');
+  if(!d||!body)return;
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/engineering-actions');
+    ENGINEERING_ACTIONS=r.items||[];
+    let sm=r.summary||{},open=(sm.open||0)+(sm.in_progress||0);
+    body.innerHTML='<div class="row" style="margin-bottom:10px">'+
+      '<span class="badge '+(open?'AMBIGUOUS':'CONFIRMED')+'">待处理 '+esc(open)+'</span>'+
+      '<span class="badge CONFIRMED">已完成 '+esc(sm.done||0)+'</span>'+
+      '<span class="badge NOT_CHECKED">已豁免 '+esc(sm.waived||0)+'</span>'+
+      '</div>'+
+      (ENGINEERING_ACTIONS.length?'<div class="tablewrap"><table><tr><th>类型</th><th>执行项</th><th>状态</th><th>来源</th><th>操作</th></tr>'+
+      ENGINEERING_ACTIONS.map(x=>'<tr><td><b>'+esc(actionTypeLabel(x.action_type))+'</b></td><td>'+esc(x.title||'')+(x.detail&&x.detail!==x.title?'<br><small>'+esc(x.detail)+'</small>':'')+'</td><td>'+badge(x.status||'OPEN')+'<br><small>'+esc(actionStatusLabel(x.status))+'</small></td><td><small>Assessment '+esc(x.source_assessment_id||'—')+'<br>Knowledge '+esc((x.knowledge_refs||[]).length)+' · Evidence '+esc((x.evidence_refs||[]).length)+'</small></td><td><div class="row">'+
+      (x.status!=='IN_PROGRESS'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'IN_PROGRESS\')">开始</button>':'')+
+      (x.status!=='DONE'?'<button class="primary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'DONE\')">完成</button>':'')+
+      (x.status!=='OPEN'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'OPEN\')">重开</button>':'')+
+      (x.status!=='WAIVED'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'WAIVED\')">豁免</button>':'')+
+      '</div></td></tr>').join('')+'</table></div>':
+      '<div class="empty"><b>还没有工程执行项</b><p>在综合评估摘要中点击“基于当前状态生成优化方案”，系统会把 Existing Write Governance 的控制建议和验证动作保存成执行清单。</p></div>');
+  }catch(e){body.innerHTML='<div class="danger">工程执行清单暂不可用：'+esc(e.message)+'</div>'}
+}
+async function updateEngineeringAction(id,status){
+  try{
+    await api('/api/product/engineering-actions/'+encodeURIComponent(id),{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status,updated_by:'Storage MVP UI'})
+    });
+    await loadEngineeringActions();
+    await loadMvpSummary();
+    msg('工程执行项已更新为：'+actionStatusLabel(status));
+  }catch(e){msg('执行项更新失败：'+e.message,true)}
 }
 function mvpSummaryMarkdown(){
   let x=MVP_SUMMARY;
@@ -730,6 +789,7 @@ renderDetail=function(){
   renderOptimizationPanel(d);
   renderAssessmentHistoryPanel(d);
   renderMvpSummaryPanel(d);
+  renderEngineeringActionsPanel(d);
 
   let lc=CURRENT.lifecycle||{},co=CURRENT.conclusion||{},el=$('#detailConclusion');
   let cls=co.is_formal?'fact':'warning';
