@@ -468,6 +468,23 @@ class HardwareR1WorkbenchStore:
         else:
             orchestration_status = row["orchestration_status"]
         trace = (result or {}).get("latency_trace") or {}
+        duration_ms = int(trace.get("TOTAL_MS") or 0)
+        if orchestration_status == "RUNNING":
+            try:
+                started = datetime.fromisoformat(str(row["updated_at"]))
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                elapsed = int(
+                    max(
+                        0.0,
+                        (datetime.now(timezone.utc) - started.astimezone(timezone.utc))
+                        .total_seconds()
+                        * 1000,
+                    )
+                )
+                duration_ms = max(duration_ms, elapsed)
+            except (TypeError, ValueError):
+                pass
         return {
             "item_id": row["item_id"],
             "batch_id": row["batch_id"],
@@ -485,7 +502,7 @@ class HardwareR1WorkbenchStore:
             "result": bound["result"],
             "retryable": bound["retryable"],
             "provider_calls": int((result or {}).get("provider_call_count") or 0),
-            "duration_ms": int(trace.get("TOTAL_MS") or 0),
+            "duration_ms": duration_ms,
             "run_ref": (result or {}).get("run_id"),
             "updated_at": row["updated_at"],
             "snapshot": snapshot,
