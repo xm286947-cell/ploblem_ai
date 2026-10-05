@@ -93,7 +93,7 @@ async function runGuidedCompare(){
   if(!oldId)return msg('请选择基准 / 旧器件',true);
   if(oldId===newId)return msg('基准器件不能与分析器件相同',true);
   show('p05');
-  $$$('.cmp').forEach(x=>x.checked=(x.value===oldId||x.value===newId));
+  $$$$('.cmp').forEach(x=>x.checked=(x.value===oldId||x.value===newId));
   await loadCompare({oldId,newId});
   await loadMvpGuidedFlow();
 }
