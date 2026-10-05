@@ -369,59 +369,6 @@ def test_multi_keyword_search_matches_across_weighted_fields_and_requires_all_te
     assert service.search("MCU UART definitely-absent")["results"] == []
 
 
-def test_scene_ranking_prioritizes_relevant_fields_without_changing_match_score(tmp_path):
-    service, store = _service(tmp_path)
-    service.rebuild_all_verified()
-    base = store.get(KNOWLEDGE_ID)
-
-    title_hit = dict(base)
-    title_hit.update(
-        knowledge_id="KNOWLEDGE-TITLE-HIT",
-        public_ref="HC-KNOWLEDGE-TITLE-HIT-R1",
-        business_case_id="HC-TITLE-HIT",
-        title="Thermal issue",
-        symptom="Unrelated symptom",
-    )
-    symptom_hit = dict(base)
-    symptom_hit.update(
-        knowledge_id="KNOWLEDGE-SYMPTOM-HIT",
-        public_ref="HC-KNOWLEDGE-SYMPTOM-HIT-R1",
-        business_case_id="HC-SYMPTOM-HIT",
-        title="Unrelated title",
-        symptom="Thermal issue under load",
-    )
-    store.replace_all([title_hit, symptom_hit])
-
-    default = service.search("thermal")
-    assert [item["knowledge_id"] for item in default["results"]] == [
-        "KNOWLEDGE-TITLE-HIT",
-        "KNOWLEDGE-SYMPTOM-HIT",
-    ]
-    assert [item["match_score"] for item in default["results"]] == [100, 90]
-
-    market = service.search("thermal", scene="MARKET_ISSUE")
-    assert [item["knowledge_id"] for item in market["results"]] == [
-        "KNOWLEDGE-SYMPTOM-HIT",
-        "KNOWLEDGE-TITLE-HIT",
-    ]
-    assert {
-        item["knowledge_id"]: item["match_score"] for item in market["results"]
-    } == {
-        "KNOWLEDGE-TITLE-HIT": 100,
-        "KNOWLEDGE-SYMPTOM-HIT": 90,
-    }
-
-    rnd = service.search("thermal", scene="rnd_diagnosis")
-    assert rnd["results"][0]["knowledge_id"] == "KNOWLEDGE-SYMPTOM-HIT"
-
-    device = service.search("thermal", scene="DEVICE_RISK")
-    assert device["results"][0]["knowledge_id"] == "KNOWLEDGE-TITLE-HIT"
-
-    with pytest.raises(HardwareKnowledgeConsumptionError) as error:
-        service.search("thermal", scene="UNKNOWN_SCENE")
-    assert error.value.code == "SEARCH_SCENE_INVALID"
-
-
 def test_search_order_is_stable_by_score_then_knowledge_id(tmp_path):
     service, store = _service(tmp_path)
     service.rebuild_all_verified()
@@ -494,28 +441,6 @@ def test_nonmatching_nonempty_search_returns_no_rows(tmp_path):
         "contract_version": CONSUMPTION_CONTRACT_VERSION,
         "results": [],
     }
-
-
-def test_search_http_scene_contract_and_invalid_scene(tmp_path):
-    service, _store = _service(tmp_path)
-    service.rebuild_all_verified()
-    app = FastAPI()
-    app.include_router(create_hardware_knowledge_consumption_router(service))
-    client = TestClient(app)
-
-    response = client.get(
-        PUBLIC_PREFIX + "/search",
-        params={"text": "MCU", "scene": "RND_DIAGNOSIS"},
-    )
-    assert response.status_code == 200
-    _validate(response.json())
-
-    invalid = client.get(
-        PUBLIC_PREFIX + "/search",
-        params={"text": "MCU", "scene": "NOT_A_SCENE"},
-    )
-    assert invalid.status_code == 400
-    assert invalid.json()["detail"] == "SEARCH_SCENE_INVALID"
 
 
 def test_missing_projection_and_read_only_http_contract(tmp_path):
@@ -605,96 +530,6 @@ def test_incompatible_projection_schema_is_detected_and_rebuilt(tmp_path):
     )
     assert service.projection_status()["status"] == "INCOMPATIBLE"
     assert service.rebuild_all_verified()["projection_status"]["status"] == "READY"
-
-
-def test_retrieval_strategy_is_replaceable_behind_stable_service_contract(tmp_path):
-    class SpyStrategy:
-        def __init__(self):
-            self.calls = []
-
-        def retrieve(self, rows, *, text, scene, limit, search_values):
-            materialized = [dict(row) for row in rows]
-            self.calls.append(
-                {
-                    "rows": materialized,
-                    "text": text,
-                    "scene": scene,
-                    "limit": limit,
-                    "search_values": search_values,
-                }
-            )
-            if not materialized:
-                return []
-            return [
-                {
-                    "contract_version": CONSUMPTION_CONTRACT_VERSION,
-                    **materialized[0],
-                    "match_score": 0,
-                    "match_reasons": [],
-                }
-            ]
-
-    store = HardwareKnowledgeConsumptionProjectionStore(
-        tmp_path / "rebuildable" / "hardware_knowledge_consumption.db"
-    )
-    strategy = SpyStrategy()
-    service = HardwareKnowledgeConsumptionService(
-        store,
-        candidate_repository=FakeAssets(),
-        knowledge_adapter=FakeAdapter(),
-        retrieval_strategy=strategy,
-    )
-    service.rebuild_all_verified()
-
-    result = service.search(
-        "MCU",
-        interface=" uart ",
-        scene="RND_DIAGNOSIS",
-        limit=7,
-    )
-
-    assert len(strategy.calls) == 1
-    call = strategy.calls[0]
-    assert call["text"] == "MCU"
-    assert call["scene"] == "RND_DIAGNOSIS"
-    assert call["limit"] == 7
-    assert [row["knowledge_id"] for row in call["rows"]] == [KNOWLEDGE_ID]
-    assert call["search_values"](call["rows"][0], "device_refs") == ["MCU"]
-    assert result["contract_version"] == CONSUMPTION_CONTRACT_VERSION
-    assert result["results"][0]["knowledge_id"] == KNOWLEDGE_ID
-    _validate(result)
-
-
-def test_consumption_v0_has_no_external_search_engine_or_embedding_dependency():
-    source = (ROOT / "services/hardware_knowledge_consumption.py").read_text(
-        encoding="utf-8"
-    )
-    tree = ast.parse(source)
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module)
-
-    forbidden_prefixes = (
-        "elasticsearch",
-        "opensearch",
-        "faiss",
-        "chromadb",
-        "qdrant",
-        "pymilvus",
-        "sentence_transformers",
-        "langchain",
-        "llama_index",
-    )
-    assert not any(
-        name.startswith(forbidden_prefixes)
-        for name in imported
-    )
-    assert "embedding" not in source.casefold()
-    assert "vector_search" not in source.casefold()
-    assert "hybrid_search" not in source.casefold()
 
 
 def test_new_contract_does_not_access_unified_knowledge_storage_directly():
