@@ -69,6 +69,18 @@ class BatchReview(BaseModel):
     verified_by: str
 
 
+class ManualDeviceFact(BaseModel):
+    canonical_name: str
+    value: str
+    unit: str = ""
+    condition: str = ""
+    scope: str = ""
+    source_page: int
+    source_section: str = ""
+    source_text: str
+    verified_by: str
+
+
 class Comparison(BaseModel):
     device_ids: list[str]
 
@@ -121,6 +133,18 @@ def product_device_facts(device_id: str):
         return product_api.confirmed_device_facts(device_id)
     except KeyError:
         raise HTTPException(404, "器件不存在")
+
+
+@app.post("/api/product/devices/{device_id}/facts/manual", status_code=201, tags=["Storage Product MVP"])
+def product_add_manual_fact(device_id: str, body: ManualDeviceFact):
+    try:
+        return product_api.add_manual_device_fact(device_id, body.model_dump())
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except core.ConfirmationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/product/devices/{device_id}/review-workbench", tags=["Storage Product MVP"])
