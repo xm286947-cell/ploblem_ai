@@ -1502,9 +1502,17 @@ def dashboard() -> dict[str, Any]:
     }
 
 def compare_devices(device_ids: list[str]) -> dict[str, Any]:
-    if len(set(device_ids)) < 2:
-        raise ValueError("至少选择两个不同器件")
-    details = [device_slots(x) for x in device_ids]
+    ids = [str(x or "").strip() for x in device_ids if str(x or "").strip()]
+    if len(ids) < 2 or len(ids) > 4:
+        raise ValueError("器件对比仅支持 2～4 个器件")
+    if len(set(ids)) != len(ids):
+        raise ValueError("器件对比不能包含重复器件")
+    details = [device_slots(x) for x in ids]
+    normalized_types = {
+        templates.normalize_device_type(x["device"]["device_type"])
+        for x in details
+    }
+    comparable_types = len(normalized_types) == 1
     field_order = []
     by_device = {}
     for detail in details:
@@ -1530,14 +1538,29 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
         missing = any(c.get("review_status") != "CONFIRMED" for c in cells.values())
         exemplar = next((x for x in details[0]["slots"] if x.get("canonical_name") == key), {})
         parameter_name = next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key)
-        knowledge = _formal_knowledge(
-            key,
-            parameter_name,
-            details[0]["device"]["device_type"],
-            context="comparison difference engineering meaning",
+        knowledge = (
+            _formal_knowledge(
+                key,
+                parameter_name,
+                details[0]["device"]["device_type"],
+                context="comparison difference engineering meaning",
+            )
+            if comparable_types
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": "DEVICE_TYPE_MISMATCH_RAW_FACT_COMPARE_ONLY",
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
         )
         rows.append({"canonical_name": key, "parameter_name": parameter_name, "group": exemplar.get("group") or parameter_baseline.COMPREHENSIVE, "group_label": exemplar.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE], "cells": cells, "is_difference": len(values) > 1, "has_missing": missing, "formal_knowledge": knowledge})
-    return {"devices": [x["device"] for x in details], "rows": rows}
+    return {
+        "devices": [x["device"] for x in details],
+        "rows": rows,
+        "comparison_scope": "ENGINEERING_COMPARABLE" if comparable_types else "RAW_FACT_ONLY",
+        "device_types": sorted(normalized_types),
+    }
 
 
 RUNTIME_TEXT_PATTERNS = [
