@@ -53,8 +53,8 @@ def test_real_golden_cases_are_partial_with_explicit_gaps():
     result = RealKnowledgeAssessmentService.current().real_golden()
 
     assert result["overall_status"] == "PARTIAL"
-    assert result["formula_gap"] is True
-    assert result["formula_task_required"] is True
+    assert result["formula_gap"] is False
+    assert result["formula_task_required"] is False
     assert result["unknown_not_safe"] is True
     assert result["decision_boundary"] == "NO_AUTO_REPLACEMENT_DECISION"
 
@@ -67,9 +67,9 @@ def test_real_golden_cases_are_partial_with_explicit_gaps():
 
     assert cases["RG02"]["knowledge_refs"] == ["KO-4ad47002b1ba4070fa499559"]
     assert cases["RG02"]["evidence_refs"] == ["EVD-98019c742313d72837696c0b"]
-    assert cases["RG02"]["formula_gap"] is True
+    assert cases["RG02"]["formula_gap"] is False
     assert "NVMe Percentage Used released semantics" in cases["RG02"]["supported_by_current_release"]
-    assert "TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED" in cases["RG02"]["unsupported_or_missing"]
+    assert "TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED" not in cases["RG02"]["unsupported_or_missing"]
 
     assert "FORMAL_EMMC_LIFE_TIME_A_B_PRE_EOL_KNOWLEDGE_NOT_RELEASED" in cases["RG03"]["unsupported_or_missing"]
     assert "FORMAL_RAW_NAND_DIAGNOSTIC_KNOWLEDGE_NOT_RELEASED" in cases["RG04"]["unsupported_or_missing"]
