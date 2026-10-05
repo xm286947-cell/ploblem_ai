@@ -1205,7 +1205,21 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         skill = result.get("skill_result") or {}
         engineering = result.get("engineering_result") or {}
         structured = skill.get("structured_result") or {}
-        risk_context: dict[str, Any] = {}
+        status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
+        if kind == "LIFETIME":
+            requested_metric = str(recorded_input.get("requested_metric") or "")
+            if requested_metric in {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}:
+                return None
+            if status not in {"ANSWERED", "CALCULATED"}:
+                return None
+            if requested_metric in {"SSD_DWPD_OBSERVED_V1", "ssd.dwpd"}:
+                projection = structured.get("target_service_life_projection") or {}
+                if projection.get("budget_status") not in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}:
+                    return None
+        elif kind == "DIAGNOSIS":
+            if status != "ANSWERED" or not (structured.get("current_observation") or []):
+                return None
+        risk_context: dict[str, Any] = {
         if kind == "LIFETIME":
             risk_context = {
                 "margin_status": structured.get("margin_status"),
@@ -1230,7 +1244,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         })
         return {
             "assessment_id": item.get("id"),
-            "status": item.get("status") or skill.get("status") or "UNKNOWN",
+            "status": status,
             "created_at": item.get("created_at"),
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
             "next_action": engineering.get("next_action"),
@@ -1332,6 +1346,13 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
 
     controls = structured.get("engineering_control_options") or []
     validation_actions = structured.get("suggested_validation") or []
+    upstream_ready = bool(
+        lifetime
+        and diagnosis
+        and software_behavior
+        and str(skill.get("status") or "").upper() == "ANSWERED"
+        and (controls or validation_actions)
+    )
     combined_evidence_refs = sorted({
         str(ref)
         for ref in (
@@ -1356,7 +1377,9 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         if x and x.get("assessment_id")
     ]
     action_checklist = None
-    if request.get("persist_actions") is True:
+    action_persistence_status = "NOT_REQUESTED"
+    if request.get("persist_actions") is True and upstream_ready:
+        action_persistence_status = "PERSISTED"
         source_assessment_id = (optimization.get("assessment_record") or {}).get("id")
         action_rows = [
             {"action_type": "SOFTWARE_CONTROL", "title": str(x), "detail": str(x)}
@@ -1379,6 +1402,8 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             source_assessment_ids=upstream_assessment_ids,
             created_by=str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
         )
+    elif request.get("persist_actions") is True:
+        action_persistence_status = "BLOCKED_INCOMPLETE_CONTEXT"
 
     return {
         "device": detail["device"],
@@ -1392,6 +1417,8 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         "evidence_refs": combined_evidence_refs,
         "upstream_assessment_ids": upstream_assessment_ids,
         "optimization_assessment": optimization.get("assessment_record"),
+        "upstream_ready": upstream_ready,
+        "action_persistence_status": action_persistence_status,
         "action_checklist": action_checklist,
         "skill_result": skill,
         "decision_boundary": skill.get("decision_boundary") or "ENGINEERING_REVIEW_REQUIRED",
