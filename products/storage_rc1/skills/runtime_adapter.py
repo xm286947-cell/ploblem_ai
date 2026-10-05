@@ -626,11 +626,14 @@ class StorageDomainSkillAdapter:
             for x in capabilities
             if isinstance(x, dict) and str(x.get("canonical_name") or "").strip()
         ]
+        # For an actual runtime diagnosis, retrieve semantics for the metrics
+        # that were observed.  Do not let an unrelated supported capability
+        # (for example Percentage Used) make another metric look evidenced.
+        semantic_terms = metric_terms if metric_terms else capability_terms
         knowledge_query = " ".join(
             x for x in [
                 str(target_question or "").strip(),
-                " ".join(metric_terms[:20]),
-                " ".join(capability_terms[:20]),
+                " ".join(semantic_terms[:20]),
             ] if x
         )
         knowledge = self.query_pack(
