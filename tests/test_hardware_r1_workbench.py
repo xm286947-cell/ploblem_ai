@@ -288,6 +288,37 @@ def test_running_stage_b_retry_preserves_stage_a_last_good_status() -> None:
     }
 
 
+def test_running_item_reports_live_elapsed_duration(tmp_path: Path) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot(),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            a_cache=True,
+        ),
+        orchestration_status="RUNNING",
+    )
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at=? WHERE item_id=?",
+            ("2026-10-05T00:00:00+00:00", item_id),
+        )
+
+    running = store.get_item(item_id)
+    assert running["result"] == "RUNNING"
+    assert running["stage_a"] == "CACHE_HIT"
+    assert running["stage_b"] == "RUNNING"
+    assert running["duration_ms"] > 123
+
+
 def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy-workbench.db"
     with sqlite3.connect(db_path) as connection:
