@@ -9,6 +9,7 @@
     item: null,
     promotion: null,
     scrollY: 0,
+    itemAction: {pending: false, action: null, stage: null},
   };
 
   const q = (selector) => root.querySelector(selector);
@@ -31,6 +32,34 @@
   function setMessage(text, bad = false) {
     message.textContent = text;
     message.classList.toggle('hc-error', Boolean(bad));
+  }
+
+  function stageDisplay(stage) {
+    if (stage === 'STAGE_A') return 'Stage A';
+    if (stage === 'STAGE_B') return 'Stage B';
+    return stage || 'Failed Stage';
+  }
+
+  function setItemActionStatus(text = '', bad = false) {
+    const node = q('[data-item-action-status]');
+    node.textContent = text;
+    node.hidden = !text;
+    node.classList.toggle('hc-error', Boolean(bad));
+  }
+
+  function paintItemActionControls(item = state.item) {
+    const pending = Boolean(state.itemAction?.pending);
+    const retry = q('[data-item-retry]');
+    q('[data-item-run]').disabled = pending;
+    q('[data-force-item]').disabled = pending;
+    retry.disabled = pending || !(
+      item?.result === 'FAILED' &&
+      ['STAGE_A', 'STAGE_B'].includes(item?.failed_stage)
+    );
+    retry.textContent =
+      pending && state.itemAction.action === 'retry-failed-stage'
+        ? 'Retrying ' + stageDisplay(state.itemAction.stage) + '…'
+        : 'Retry Failed Stage';
   }
 
   async function request(path, options = {}) {
@@ -57,7 +86,7 @@
   function statusClass(value) {
     const status = String(value || '');
     if (['PASS', 'CACHE_HIT', 'CANDIDATE_READY'].includes(status)) return 'ok';
-    if (['REVIEW', 'QUEUED', 'WAITING', 'RUNTIME_BLOCKED', 'DEPENDENCY_BLOCKED'].includes(status)) return 'warn';
+    if (['REVIEW', 'QUEUED', 'RUNNING', 'WAITING', 'RUNTIME_BLOCKED', 'DEPENDENCY_BLOCKED'].includes(status)) return 'warn';
     if (['FAILED', 'PARSE_FAILED', 'STAGE_A_FAILED', 'STAGE_B_FAILED', 'GATE_FAILED'].includes(status)) return 'bad';
     return '';
   }
@@ -216,6 +245,33 @@
       }
     };
     const timer = window.setInterval(tick, 1500);
+    tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }
+
+
+  function startItemPolling(itemId) {
+    let stopped = false;
+    let running = false;
+    const tick = async () => {
+      if (stopped || running) return;
+      running = true;
+      try {
+        const item = await request('/items/' + encodeURIComponent(itemId));
+        syncItemIntoBatch(item);
+        if (state.item?.item_id === itemId) {
+          renderDetail(item, {scroll: false, refreshPromotionState: false});
+        }
+      } catch (_) {
+        // The foreground POST owns the terminal user-visible error.
+      } finally {
+        running = false;
+      }
+    };
+    const timer = window.setInterval(tick, 1000);
     tick();
     return () => {
       stopped = true;
@@ -428,7 +484,10 @@
     }).join('');
   }
 
-  function renderDetail(item) {
+  function renderDetail(
+    item,
+    {scroll = true, refreshPromotionState = true} = {}
+  ) {
     state.item = item;
     detail.hidden = false;
     debugPanel.hidden = true;
@@ -461,15 +520,18 @@
       JSON.stringify(item.candidate || null, null, 2);
     q('[data-evidence-summary]').textContent =
       JSON.stringify(item.evidence_validation || null, null, 2);
-    q('[data-item-retry]').disabled =
-      !(item.result === 'FAILED' && ['STAGE_A', 'STAGE_B'].includes(item.failed_stage));
+    paintItemActionControls(item);
     updateUrl({batchId: item.batch_id, itemId: item.item_id});
     const promotionPanel = q('[data-e2e-promotion]');
     if (promotionPanel) {
       promotionPanel.hidden = !item.candidate_id && !item.candidate?.candidate_id;
-      if (!promotionPanel.hidden) refreshPromotion(item.item_id);
+      if (!promotionPanel.hidden && refreshPromotionState) {
+        refreshPromotion(item.item_id);
+      }
     }
-    detail.scrollIntoView({block: 'start', behavior: 'smooth'});
+    if (scroll) {
+      detail.scrollIntoView({block: 'start', behavior: 'smooth'});
+    }
   }
 
   function paintPromotion(payload, note = '') {
@@ -565,32 +627,68 @@
   }
 
   async function itemAction(action) {
-    if (!state.item) return;
+    if (!state.item || state.itemAction.pending) return;
     if (action === 'force-full-run') {
       if (!window.confirm('Force Full Run 将绕过 Stage A/B Cache，成本更高。继续？')) {
         return;
       }
     }
+
+    const itemId = state.item.item_id;
+    const batchId = state.item.batch_id;
+    const retryStage =
+      action === 'retry-failed-stage' ? state.item.failed_stage : null;
+    const visibleAction =
+      action === 'retry-failed-stage'
+        ? '重试 ' + stageDisplay(retryStage)
+        : action === 'run-resume'
+        ? 'Run / Resume'
+        : 'Force Full Run';
+
+    state.itemAction = {pending: true, action, stage: retryStage};
+    paintItemActionControls(state.item);
+    setItemActionStatus('正在' + visibleAction + '…');
+    setMessage('正在执行 ' + visibleAction + '…');
+
+    let stopPolling = startItemPolling(itemId);
     try {
-      setMessage('正在执行 ' + action + '…');
-      const batchId = state.item.batch_id;
-      const stopPolling = startBatchPolling(batchId);
-      let item;
-      try {
-        item = await request(
-          '/items/' + encodeURIComponent(state.item.item_id) + '/' + action,
-          {method: 'POST'}
-        );
-      } finally {
-        stopPolling();
-      }
+      const item = await request(
+        '/items/' + encodeURIComponent(itemId) + '/' + action,
+        {method: 'POST'}
+      );
+      stopPolling();
+      stopPolling = () => {};
       syncItemIntoBatch(item);
-      const itemId = item.item_id;
-      await loadBatch(item.batch_id);
-      await openItem(itemId);
-      setMessage('Case 操作完成：' + action);
+      await loadBatch(batchId);
+      renderDetail(item, {scroll: false});
+      const result = displayResult(item);
+      const failed = result === 'FAILED';
+      const suffix = item.error_code ? ' · ' + item.error_code : '';
+      setItemActionStatus(
+        visibleAction + ' 完成：' + result + suffix,
+        failed
+      );
+      setMessage(
+        visibleAction + ' 完成：' + result + suffix,
+        failed
+      );
     } catch (error) {
+      setItemActionStatus(
+        visibleAction + ' 失败：' + error.message,
+        true
+      );
       setMessage('Case 操作失败：' + error.message, true);
+      try {
+        const current = await request('/items/' + encodeURIComponent(itemId));
+        syncItemIntoBatch(current);
+        renderDetail(current, {scroll: false, refreshPromotionState: false});
+      } catch (_) {
+        // Preserve the foreground error if refresh also fails.
+      }
+    } finally {
+      stopPolling();
+      state.itemAction = {pending: false, action: null, stage: null};
+      paintItemActionControls(state.item);
     }
   }
 
