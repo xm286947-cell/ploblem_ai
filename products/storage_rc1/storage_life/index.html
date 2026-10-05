@@ -209,7 +209,66 @@ async function executeRuntimeDiagnosis(){
 }
 loadImpact=async function(){let a=$('#impactOld').value,b=$('#impactNew').value;if(!a||!b||a===b)return msg('请选择两个不同器件',true);try{let r=await api('/api/product/change-impact?old_id='+encodeURIComponent(a)+'&new_id='+encodeURIComponent(b)),sr=r.skill_result||{},er=r.engineering_result||{},html='<div class="card analysis"><b>Engineering Assessment</b> · 系统不输出自动替代结论 · Existing Skill '+esc(r.skill_id||'storage-change-impact')+' '+badge(er.status||sr.status||'UNKNOWN')+(er.direct_answer?'<p>'+esc(er.direct_answer)+'</p>':'')+(er.next_action?'<p><b>Next Action:</b> '+esc(er.next_action)+'</p>':'')+'</div>';for(let x of r.items){let k=x.formal_knowledge||{};html+='<div class="card"><div class="split"><div class="fact card"><b>Confirmed Fact Diff</b><p>'+esc(x.parameter_name)+' '+pkContextButton({focus:'COMPARE',device_type:(DEV.find(d=>d.id===a)?.device_type||''),parameter_name:x.parameter_name},'查公共知识')+'</p><p>旧：'+badge(x.old.status)+' '+esc(x.old.value??'—')+' '+esc(x.old.unit||'')+'<br>新：'+badge(x.new.status)+' '+esc(x.new.value??'—')+' '+esc(x.new.unit||'')+'</p>'+evButton([...(x.old.evidence||[]),...(x.new.evidence||[])])+'</div><div class="analysis card"><b>Knowledge Analysis · '+esc(x.knowledge_analysis_source||'UNKNOWN')+'</b><p>'+esc(x.technical_meaning)+'</p>'+(k.status==='MATCHED'?'<p><span class="badge CONFIRMED">Release '+esc(k.knowledge_release_version||'')+'</span> · '+esc((k.results||[]).map(v=>v.title||v.object_id).join(' · '))+'</p>':'<p><span class="badge NOT_CHECKED">未匹配正式知识；以下为显式 fallback</span></p>')+'<p><b>软件：</b>'+esc(x.software_impact)+'</p><p><b>测试：</b>'+esc(x.test_impact)+'</p><p><b>监控：</b>'+esc(x.monitoring_impact)+'</p><p><b>待验证：</b>'+esc(x.validation_item)+'</p></div></div></div>'}if(r.unknowns.length)html+='<div class="card warning"><b>待验证项</b><ul>'+r.unknowns.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>';$('#impactResult').innerHTML=html}catch(e){msg(e.message,true)}};
 const renderDetailBase=renderDetail;
-renderDetail=function(){renderDetailBase();let d=CURRENT.device||{};$('#deviceDetail')?.insertAdjacentHTML('afterbegin','<div class="card"><div class="row" style="justify-content:space-between"><div><b>公开工程知识</b><br><small>在当前器件页直接检索 Public Knowledge；不会把 Runtime / 客户 / 内部问题数据发送出去。</small></div>'+pkContextButton({focus:'DEVICE',device_type:d.device_type,vendor:d.vendor,model:d.model},'查公共知识')+'</div></div>');renderLifetimePanel(d);renderOptimizationPanel(d);let lc=CURRENT.lifecycle||{},co=CURRENT.conclusion||{},el=$('#detailConclusion');if(!el)return;let cls=co.is_formal?'fact':'warning';let risks=(co.risks||[]).join('；')||'—';let missing=(co.missing_critical_fields||[]).join('；')||'无';el.innerHTML='<div class="card"><b>Device Lifecycle</b> '+badge(lc.status||'DRAFT')+' · '+esc(lc.reason||'')+'</div><div class="card"><div class="group-title">寿命 / 风险结论</div><div class="'+cls+' card"><b>'+(co.is_formal?'Formal Device Conclusion':'Draft / Review Required')+'</b> · '+esc(co.conclusion_status||'UNKNOWN')+'<p><b>寿命：</b>'+esc(co.lifetime_summary||'暂无正式寿命结论')+'</p><p><b>诊断：</b>'+esc(co.diagnostic_summary||'—')+'</p><p><b>软件建议：</b>'+esc(co.software_recommendation||'—')+'</p><p><b>风险：</b>'+esc(risks)+'</p><p><b>缺失关键项：</b>'+esc(missing)+'</p><div class="row" style="margin-top:10px">'+pkContextButton({focus:'LIFETIME',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'endurance lifetime TBW DWPD P/E cycles retention'},'查寿命公共知识')+pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'wear leveling write amplification cache logging monitoring lifetime optimization'},'查优化公共知识')+'</div></div></div>'};
+function renderScenarioLauncher(d){
+  let host=$('#deviceDetail');
+  if(!host||!d?.id)return;
+  let alternatives=DEV.filter(x=>x.id!==d.id);
+  let options=alternatives.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.vendor)+' '+esc(x.model)+' · '+esc(x.device_type)+'</option>').join('');
+  host.insertAdjacentHTML('afterbegin',
+    '<div class="card"><div class="pagehead"><div><div class="kicker">MVP SCENARIO FLOW</div><h3>当前器件分析入口</h3>'+
+    '<div class="muted">围绕同一个器件连续使用规格事实、公共知识、器件对比、寿命评估、运行诊断与优化建议。</div></div>'+
+    pkContextButton({focus:'DEVICE',device_type:d.device_type,vendor:d.vendor,model:d.model},'查当前器件公共知识')+
+    '</div><div class="row">'+
+    '<button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命 / 风险</button>'+
+    '<button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button>'+
+    '<button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button>'+
+    '<label>对比 / 替代器件 <select id="deviceScenarioTarget"><option value="">请选择</option>'+options+'</select></label>'+
+    '<button class="primary" onclick="openCompareFromCurrentDevice()">生成差异与影响</button>'+
+    '</div></div>'
+  );
+}
+function scrollDeviceSection(id){let el=$('#'+id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'})}
+async function openDiagnosisForCurrentDevice(){let d=CURRENT?.device;if(!d)return;show('p06');$('#diagDevice').value=d.id;await loadDiagnostics()}
+async function openCompareFromCurrentDevice(){
+  let d=CURRENT?.device,target=$('#deviceScenarioTarget')?.value;
+  if(!d||!target)return msg('请选择要比较的器件',true);
+  show('p05');
+  $$('.cmp').forEach(x=>x.checked=(x.value===d.id||x.value===target));
+  await loadCompare();
+}
+renderDetail=function(){
+  renderDetailBase();
+  let d=CURRENT.device||{},host=$('#deviceDetail');
+  if(!host)return;
+  renderScenarioLauncher(d);
+  host.insertAdjacentHTML('afterbegin',
+    '<div class="card"><div class="row" style="justify-content:space-between"><div><b>公开工程知识</b><br>'+
+    '<small>在当前器件页直接检索 Public Knowledge；不会把 Runtime / 客户 / 内部问题数据发送出去。</small></div>'+
+    pkContextButton({focus:'DEVICE',device_type:d.device_type,vendor:d.vendor,model:d.model},'查公共知识')+
+    '</div></div>'
+  );
+  host.insertAdjacentHTML('beforeend','<div id="detailConclusion"></div>');
+  renderLifetimePanel(d);
+  renderOptimizationPanel(d);
+
+  let lc=CURRENT.lifecycle||{},co=CURRENT.conclusion||{},el=$('#detailConclusion');
+  let cls=co.is_formal?'fact':'warning';
+  let risks=(co.risks||[]).join('；')||'—';
+  let missing=(co.missing_critical_fields||[]).join('；')||'无';
+  el.innerHTML='<div class="card"><b>Device Lifecycle</b> '+badge(lc.status||'DRAFT')+' · '+esc(lc.reason||'')+'</div>'+
+    '<div class="card"><div class="group-title">寿命 / 风险结论</div><div class="'+cls+' card">'+
+    '<b>'+(co.is_formal?'Formal Device Conclusion':'Draft / Review Required')+'</b> · '+esc(co.conclusion_status||'UNKNOWN')+
+    '<p><b>寿命：</b>'+esc(co.lifetime_summary||'暂无正式寿命结论')+'</p>'+
+    '<p><b>诊断：</b>'+esc(co.diagnostic_summary||'—')+'</p>'+
+    '<p><b>软件建议：</b>'+esc(co.software_recommendation||'—')+'</p>'+
+    '<p><b>风险：</b>'+esc(risks)+'</p>'+
+    '<p><b>缺失关键项：</b>'+esc(missing)+'</p>'+
+    '<div class="row" style="margin-top:10px">'+
+    pkContextButton({focus:'LIFETIME',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'endurance lifetime TBW DWPD P/E cycles retention'},'查寿命公共知识')+
+    pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'wear leveling write amplification cache logging monitoring lifetime optimization'},'查优化公共知识')+
+    '</div></div></div>';
+};
+
 const LIFETIME_METRICS={
   'SSD_TBW_CONSUMPTION_V1':{label:'SSD · TBW 消耗',runtime:'host_written_bytes',unit:'TB'},
   'SSD_DWPD_OBSERVED_V1':{label:'SSD · 实际 DWPD',runtime:'host_written_bytes',unit:'TB',days:true},
