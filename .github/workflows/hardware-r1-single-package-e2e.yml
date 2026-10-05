@@ -42,6 +42,7 @@ jobs:
         run: |
           node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
           node --check quality_knowledge/web/static/hardware_case_e2e_evidence.js
+          node --check quality_knowledge/web/static/hardware_case_knowledge_evidence.js
           node --check quality_knowledge/web/static/hardware_case_knowledge_production.js
           node --test tests/js/test_hardware_r1_retry_visible_state.mjs
       - name: Build the single package
