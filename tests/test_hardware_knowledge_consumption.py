@@ -330,6 +330,45 @@ def test_normalized_substring_weighted_retrieval_and_explainable_reasons(tmp_pat
     assert filtered["results"][0]["match_reasons"] == []
 
 
+def test_multi_keyword_search_matches_across_weighted_fields_and_requires_all_terms(tmp_path):
+    service, _store = _service(tmp_path)
+    service.rebuild_all_verified()
+
+    result = service.search("  ＭＣＵ   UART  ")
+    assert len(result["results"]) == 1
+    item = result["results"][0]
+    assert item["match_score"] == 315  # title 100 + symptom 90 + interface 65 + device 60
+    assert item["match_reasons"] == [
+        {
+            "matched_field": "title",
+            "match_type": "SUBSTRING",
+            "matched_text": "mcu",
+            "weight": 100,
+        },
+        {
+            "matched_field": "symptom",
+            "match_type": "SUBSTRING",
+            "matched_text": "mcu",
+            "weight": 90,
+        },
+        {
+            "matched_field": "interface",
+            "match_type": "SUBSTRING",
+            "matched_text": "uart",
+            "weight": 65,
+        },
+        {
+            "matched_field": "device_refs",
+            "match_type": "SUBSTRING",
+            "matched_text": "mcu",
+            "weight": 60,
+        },
+    ]
+    _validate(result)
+
+    assert service.search("MCU UART definitely-absent")["results"] == []
+
+
 def test_search_order_is_stable_by_score_then_knowledge_id(tmp_path):
     service, store = _service(tmp_path)
     service.rebuild_all_verified()
