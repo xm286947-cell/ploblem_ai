@@ -11,6 +11,9 @@ venv/
 *.db-*
 *.sqlite
 *.sqlite3
+/data/config.local.json
+/public_knowledge_rag/data/
+/public_knowledge_rag/config.local.json
 
 # Runtime diagnostics and generated AI data
 output/logs/

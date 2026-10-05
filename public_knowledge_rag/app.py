@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .config import settings
+from .admin_config import ConfigValidationError, ConfigurationAdmin
+from .config import Settings
 from .contracts import Chunker, Parser, Retriever
 from .parsing import PlainTextParser, WindowChunker
 from .policy import require_public_query, require_public_source
@@ -15,6 +18,8 @@ from .providers import OllamaProvider, ProviderUnavailable, UnconfiguredManualPr
 from .retrieval import SQLiteLexicalRetriever
 from .store import Store
 
+admin_config = ConfigurationAdmin()
+settings = admin_config.effective
 store = Store(settings.data_dir)
 parser: Parser = PlainTextParser()
 chunker: Chunker = WindowChunker(settings.chunk_size, settings.chunk_overlap)
@@ -60,6 +65,107 @@ app = FastAPI(title="Public Knowledge Service", version=__version__, lifespan=li
 @app.get("/health")
 def health() -> dict[str, object]:
     return {"status": "ok", "service": "public-knowledge", "version": __version__, "mode": "LIVE_OR_FIXTURE_REPLAY"}
+
+
+@app.get("/settings", include_in_schema=False)
+def admin_settings_page() -> FileResponse:
+    return FileResponse(Path(__file__).with_name("admin.html"), media_type="text/html; charset=utf-8")
+
+
+def _admin_state() -> dict[str, object]:
+    return admin_config.state(
+        service_version=__version__,
+        embedding_status=embedding_status()["status"],
+        retrieval_adapter="sqlite-lexical-reference",
+    )
+
+
+@app.get("/admin/config")
+def admin_get_config() -> dict[str, object]:
+    return _admin_state()
+
+
+@app.get("/admin/effective-config")
+def admin_get_effective_config() -> dict[str, object]:
+    return {"current_effective_config": _admin_state()["current_effective_config"], "apply_state": admin_config.apply_state()}
+
+
+@app.post("/admin/config/validate")
+def admin_validate_config(body: dict[str, object]) -> dict[str, object]:
+    try:
+        candidate = admin_config.validate(body)
+    except ConfigValidationError as exc:
+        raise HTTPException(422, {"errors": exc.errors}) from exc
+    candidate_settings = Settings.with_overrides(admin_config.base, candidate)
+    return {"valid": True, "config": candidate, "config_hash": candidate_settings.config_hash()}
+
+
+@app.post("/admin/provider/test")
+def admin_test_provider(body: dict[str, object]) -> dict[str, object]:
+    try:
+        candidate = admin_config.validate(body)
+    except ConfigValidationError as exc:
+        raise HTTPException(422, {"errors": exc.errors}) from exc
+    candidate_settings = Settings.with_overrides(admin_config.base, candidate)
+    candidate_provider = OllamaProvider(candidate_settings)
+    try:
+        provider_version = candidate_provider.version()
+        models = candidate_provider.models()
+    except ProviderUnavailable as exc:
+        # Do not return exception text from a provider client to the browser or
+        # logs. It may include deployment-specific endpoint details.
+        raise HTTPException(503, {"message": "Provider could not be reached. Check the base URL and service availability."}) from exc
+
+    matching = next((item for item in models if item.get("name") == candidate_settings.ollama_model), None)
+    if matching is None:
+        return {
+            "ok": False,
+            "provider": candidate_settings.provider_type,
+            "provider_reachable": True,
+            "provider_version": provider_version.get("version"),
+            "model_found": False,
+            "message": "Provider is reachable, but the requested model tag is not installed.",
+        }
+    actual_digest = matching.get("digest")
+    digest_match = not candidate_settings.ollama_model_digest or actual_digest == candidate_settings.ollama_model_digest
+    if not digest_match:
+        return {
+            "ok": False,
+            "provider": candidate_settings.provider_type,
+            "provider_reachable": True,
+            "provider_version": provider_version.get("version"),
+            "model_name": matching.get("name"),
+            "model_digest": actual_digest,
+            "model_found": True,
+            "digest_match": False,
+            "message": "Provider is reachable, but the installed model digest does not match the configured pin.",
+        }
+    test_id = admin_config.record_provider_test(candidate)
+    return {
+        "ok": True,
+        "test_id": test_id,
+        "provider": candidate_settings.provider_type,
+        "provider_reachable": True,
+        "provider_version": provider_version.get("version"),
+        "model_name": matching.get("name"),
+        "model_digest": actual_digest,
+        "model_found": True,
+        "digest_match": digest_match,
+        "message": "Provider and configured model identity verified.",
+    }
+
+
+@app.put("/admin/config")
+def admin_save_config(body: dict[str, object]) -> dict[str, object]:
+    if set(body) != {"config", "test_id"} or not isinstance(body.get("config"), dict) or not isinstance(body.get("test_id"), str):
+        raise HTTPException(422, {"errors": {"config": "Expected config values and a successful provider test ID."}})
+    try:
+        apply_state = admin_config.save(body["config"], body["test_id"])
+    except ConfigValidationError as exc:
+        raise HTTPException(422, {"errors": exc.errors}) from exc
+    state = _admin_state()
+    state["apply_state"] = apply_state
+    return state
 
 
 @app.get("/config")

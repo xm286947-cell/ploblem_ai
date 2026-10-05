@@ -44,7 +44,10 @@ class OllamaProvider:
 
     def generate(self, question: str, contexts: list[SearchHit]) -> tuple[str, dict[str, object]]:
         model_entry = next((m for m in self.models() if m.get("name") == self.settings.ollama_model), None)
-        if model_entry is None or model_entry.get("digest") != self.settings.ollama_model_digest:
+        if model_entry is None or (
+            self.settings.ollama_model_digest
+            and model_entry.get("digest") != self.settings.ollama_model_digest
+        ):
             raise ProviderUnavailable("Pinned Ollama model tag or digest is unavailable; request failed closed.")
         prompt = (
             "Answer using only the public source excerpts below. If they do not answer the question, say so. "
@@ -57,7 +60,7 @@ class OllamaProvider:
             "stream": False,
             "messages": [{"role": "user", "content": prompt}],
             "options": {"temperature": 0, "num_predict": self.settings.max_generate_tokens},
-            "think": False,
+            "think": self.settings.thinking_mode == "enabled",
         })
         message = result.get("message")
         answer = message.get("content") if isinstance(message, dict) else None

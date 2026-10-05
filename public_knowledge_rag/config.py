@@ -3,8 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
+
+
+UI_CONFIG_NAME = "config.local.json"
+UI_CONFIG_FIELDS = (
+    "provider_type",
+    "ollama_url",
+    "ollama_model",
+    "ollama_model_digest",
+    "request_timeout_seconds",
+    "max_generate_tokens",
+    "thinking_mode",
+)
 
 
 @dataclass(frozen=True)
@@ -18,9 +31,11 @@ class Settings:
     max_source_bytes: int
     chunk_size: int
     chunk_overlap: int
+    provider_type: str = "ollama"
+    thinking_mode: str = "disabled"
 
     @classmethod
-    def load(cls) -> "Settings":
+    def load_base(cls) -> "Settings":
         return cls(
             data_dir=Path(os.getenv("PKR_DATA_DIR", "./data")),
             ollama_url=os.getenv("OLLAMA_URL", "http://192.168.1.100:11434").rstrip("/"),
@@ -31,16 +46,50 @@ class Settings:
             max_source_bytes=int(os.getenv("MAX_SOURCE_BYTES", str(8 * 1024 * 1024))),
             chunk_size=int(os.getenv("CHUNK_SIZE", "1200")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "120")),
+            provider_type=os.getenv("GENERATION_PROVIDER", "ollama").strip().lower(),
+            thinking_mode=os.getenv("OLLAMA_THINKING_MODE", "disabled").strip().lower(),
         )
+
+    @classmethod
+    def load(cls) -> "Settings":
+        base = cls.load_base()
+        path = Path(os.getenv("PKR_UI_CONFIG_PATH", str(base.data_dir / UI_CONFIG_NAME)))
+        if not path.exists():
+            return base
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Local Public Knowledge config is unreadable; refusing to start with ambiguous settings.") from exc
+        if not isinstance(payload, dict) or set(payload) - set(UI_CONFIG_FIELDS):
+            raise RuntimeError("Local Public Knowledge config has unsupported fields; refusing to start.")
+        return cls.with_overrides(base, payload)
+
+    @classmethod
+    def with_overrides(cls, base: "Settings", overrides: dict[str, Any]) -> "Settings":
+        return replace(base, **{key: value for key, value in overrides.items() if key in UI_CONFIG_FIELDS})
+
+    def editable_snapshot(self) -> dict[str, object]:
+        return {
+            "provider_type": self.provider_type,
+            "base_url": self.ollama_url,
+            "model": self.ollama_model,
+            "model_digest": self.ollama_model_digest,
+            "timeout_seconds": self.request_timeout_seconds,
+            "max_output_tokens": self.max_generate_tokens,
+            "thinking_mode": self.thinking_mode,
+            "credential_status": "NOT_REQUIRED",
+        }
 
     def public_snapshot(self) -> dict[str, object]:
         return {
             "service_version": "0.1.0",
+            "provider_type": self.provider_type,
             "ollama_url": self.ollama_url,
             "ollama_model": self.ollama_model,
             "ollama_model_digest": self.ollama_model_digest,
             "request_timeout_seconds": self.request_timeout_seconds,
             "max_generate_tokens": self.max_generate_tokens,
+            "thinking_mode": self.thinking_mode,
             "max_source_bytes": self.max_source_bytes,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
@@ -53,4 +102,17 @@ class Settings:
         return hashlib.sha256(payload).hexdigest()
 
 
-settings = Settings.load()
+def env_sources() -> dict[str, str]:
+    env_names = {
+        "provider_type": "GENERATION_PROVIDER",
+        "ollama_url": "OLLAMA_URL",
+        "ollama_model": "OLLAMA_MODEL",
+        "ollama_model_digest": "OLLAMA_MODEL_DIGEST",
+        "request_timeout_seconds": "OLLAMA_TIMEOUT_SECONDS",
+        "max_generate_tokens": "OLLAMA_NUM_PREDICT",
+        "thinking_mode": "OLLAMA_THINKING_MODE",
+        "max_source_bytes": "MAX_SOURCE_BYTES",
+        "chunk_size": "CHUNK_SIZE",
+        "chunk_overlap": "CHUNK_OVERLAP",
+    }
+    return {field: ("ENV" if env_name in os.environ else "DEFAULT") for field, env_name in env_names.items()}
