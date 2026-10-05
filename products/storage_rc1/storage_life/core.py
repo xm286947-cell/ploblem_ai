@@ -2205,6 +2205,7 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
                 continue
             duplicate = con.execute("""SELECT * FROM engineering_actions
               WHERE device_id=? AND action_type=? AND title=?
+                AND status IN ('OPEN','IN_PROGRESS')
               ORDER BY updated_at DESC,id DESC LIMIT 1""",
               (device_id, action_type, title)).fetchone()
             if duplicate:
