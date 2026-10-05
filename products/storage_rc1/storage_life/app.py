@@ -81,6 +81,13 @@ class ManualDeviceFact(BaseModel):
     verified_by: str
 
 
+class CandidateEvidenceEdit(BaseModel):
+    source_page: int
+    source_section: str = ""
+    source_text: str
+    verified_by: str
+
+
 class Comparison(BaseModel):
     device_ids: list[str]
 
@@ -143,6 +150,22 @@ def product_add_manual_fact(device_id: str, body: ManualDeviceFact):
         raise HTTPException(404, "器件不存在")
     except core.ConfirmationConflict as exc:
         raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.patch("/api/product/candidates/{candidate_id}/evidence", tags=["Storage Product MVP"])
+def product_replace_candidate_evidence(candidate_id: str, body: CandidateEvidenceEdit):
+    try:
+        return core.replace_candidate_evidence(
+            candidate_id,
+            body.verified_by,
+            source_page=body.source_page,
+            source_section=body.source_section,
+            source_text=body.source_text,
+        )
+    except KeyError:
+        raise HTTPException(404, "候选参数不存在")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
