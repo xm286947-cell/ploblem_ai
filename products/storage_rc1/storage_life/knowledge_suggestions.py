@@ -367,7 +367,11 @@ class PublicKnowledgeSuggestionService:
             raise SuggestionError("SOURCE_UNAVAILABLE")
         if source.get("source_id") != ref.get("source_id"):
             raise SuggestionError("SOURCE_ID_MISMATCH")
-        if str(source.get("classification") or "").upper() != "PUBLIC":
+        # The Public Knowledge RAG Source API exposes this contract as
+        # ``source_class``. Accept ``classification`` as well for existing
+        # compatible providers and captured fixtures.
+        classification = source.get("classification") or source.get("source_class")
+        if str(classification or "").upper() != "PUBLIC":
             raise SuggestionError("SOURCE_NOT_PUBLIC")
         resolved_uri = source.get("source_uri") or source.get("official_url")
         if ref.get("source_uri") and resolved_uri and ref["source_uri"] != resolved_uri:

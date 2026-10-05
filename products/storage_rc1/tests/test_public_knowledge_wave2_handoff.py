@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -18,6 +19,7 @@ from storage_life.knowledge_suggestions import (
     PublicKnowledgeSuggestionService,
     SuggestionError,
 )
+from storage_life.public_knowledge import _normalize_citation_locator
 
 
 SOURCE_ID = "public-source-001"
@@ -110,6 +112,45 @@ def test_live_suggestion_handoff_reuses_candidate_and_evidence_stores(tmp_path):
     assert evidence["locator"]["value"]["page"] == 4
     assert evidence["excerpt"] == SOURCE_TEXT
     assert repository.list("knowledge/production/published") == []
+
+
+def test_live_handoff_accepts_public_knowledge_source_class_contract(tmp_path):
+    service, repository = _service(tmp_path)
+    resolve_source = service.resolve_source
+    resolve_citation = service.resolve_citation
+
+    def resolve_citation_with_json_locator(citation_id, mode):
+        citation = resolve_citation(citation_id, mode)
+        citation["locator"] = json.dumps(citation["locator"])
+        return _normalize_citation_locator(citation)
+
+    def resolve_source_with_rag_contract(source_id, mode):
+        response = resolve_source(source_id, mode)
+        source = response["source"]
+        source["source_class"] = source.pop("classification", source.get("source_class"))
+        return response
+
+    service.resolve_citation = resolve_citation_with_json_locator
+    service.resolve_source = resolve_source_with_rag_contract
+    suggestion = _create(service)
+
+    ready = service.validate(suggestion["suggestion_id"], mode="LIVE")
+    result = service.handoff(suggestion["suggestion_id"], mode="LIVE")
+
+    assert ready["status"] == "READY_FOR_HANDOFF"
+    assert result["status"] == "ACCEPTED_AS_CANDIDATE"
+    assert result["evidence_status"] == "RESOLVED"
+    candidate = repository.load(
+        f"knowledge/production/candidates/{result['candidate_id']}.json",
+        required=True,
+    )
+    assert candidate["metadata"]["source_refs"][0]["source_id"] == SOURCE_ID
+
+
+def test_public_knowledge_adapter_decodes_source_locator_string():
+    assert _normalize_citation_locator({"locator": json.dumps(LOCATOR)}) == {
+        "locator": LOCATOR,
+    }
 
 
 def test_existing_candidate_detail_displays_public_knowledge_origin(tmp_path):

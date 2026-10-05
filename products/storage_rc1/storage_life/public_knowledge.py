@@ -217,6 +217,18 @@ def citation(citation_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | Non
     return {**_request(mode, "/citations/" + citation_id, base_url=base_url), "mode": mode}
 
 
+def _normalize_citation_locator(citation: dict[str, Any]) -> dict[str, Any]:
+    locator = citation.get("locator")
+    if isinstance(locator, str):
+        try:
+            parsed_locator = json.loads(locator)
+        except (TypeError, ValueError):
+            parsed_locator = locator
+        if isinstance(parsed_locator, dict):
+            return {**citation, "locator": parsed_locator}
+    return citation
+
+
 def _suggestion_service(base_url: str | None = None) -> PublicKnowledgeSuggestionService:
     # This is the same repository root used by Storage's existing Knowledge
     # Production product API and candidate UI.
@@ -226,7 +238,9 @@ def _suggestion_service(base_url: str | None = None) -> PublicKnowledgeSuggestio
     repo = repository()
 
     def resolve_citation(citation_id: str, mode: str):
-        return {**_request(mode, "/citations/" + quote(citation_id, safe=""), base_url=base_url), "mode": mode}
+        citation = _request(mode, "/citations/" + quote(citation_id, safe=""), base_url=base_url)
+        normalized = _normalize_citation_locator(citation)
+        return {**normalized, "mode": mode}
 
     def resolve_source(source_id: str, mode: str):
         return {**_request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url), "mode": mode}
