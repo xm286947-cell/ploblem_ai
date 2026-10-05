@@ -607,6 +607,38 @@ def test_incompatible_projection_schema_is_detected_and_rebuilt(tmp_path):
     assert service.rebuild_all_verified()["projection_status"]["status"] == "READY"
 
 
+def test_consumption_v0_has_no_external_search_engine_or_embedding_dependency():
+    source = (ROOT / "services/hardware_knowledge_consumption.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+
+    forbidden_prefixes = (
+        "elasticsearch",
+        "opensearch",
+        "faiss",
+        "chromadb",
+        "qdrant",
+        "pymilvus",
+        "sentence_transformers",
+        "langchain",
+        "llama_index",
+    )
+    assert not any(
+        name.startswith(forbidden_prefixes)
+        for name in imported
+    )
+    assert "embedding" not in source.casefold()
+    assert "vector_search" not in source.casefold()
+    assert "hybrid_search" not in source.casefold()
+
+
 def test_new_contract_does_not_access_unified_knowledge_storage_directly():
     source = (ROOT / "services/hardware_knowledge_consumption.py").read_text(
         encoding="utf-8"
