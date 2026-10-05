@@ -11,7 +11,7 @@ import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -25,6 +25,23 @@ from .knowledge_suggestions import (
 )
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Never follow redirects from the approved Public Knowledge origin.
+
+    The adapter is a server-side proxy.  Following a 30x would allow a trusted
+    service origin to redirect the Storage process to another network target.
+    Public Knowledge API calls are expected to be direct JSON/file endpoints,
+    so redirects fail closed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler())
+
 DEFAULT_URL = (
     os.getenv("PUBLIC_KNOWLEDGE_SERVICE_URL")
     or os.getenv("PUBLIC_KNOWLEDGE_API_URL")
@@ -137,7 +154,7 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
     data = json.dumps(payload).encode() if payload is not None else None
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
-        with urlopen(req, timeout=8) as response:
+        with _NO_REDIRECT_OPENER.open(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1000]
@@ -164,7 +181,7 @@ def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, c
     req = Request(_url(base_url) + path, data=b"".join(parts),
                   headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
     try:
-        with urlopen(req, timeout=60) as response:
+        with _NO_REDIRECT_OPENER.open(req, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1000]
