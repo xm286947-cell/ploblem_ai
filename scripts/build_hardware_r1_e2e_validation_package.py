@@ -21,6 +21,20 @@ EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".docx", ".do
 SENSITIVE_NAMES = {".env", ".env.local", "model.local.yaml", "model.local.yml", "agent.local.yaml", "agent.local.yml"}
 SENSITIVE_NAMES.add("model.yaml")
 
+ABSOLUTE_MACHINE_PATH = re.compile(
+    rb"(?i)(?:/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/|"
+    rb"[A-Z]:[\\/](?:Users|Documents and Settings)[\\/][^\\/\r\n\"']+[\\/]|"
+    rb"/private/tmp/)"
+)
+SECRET_LITERAL_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
+    ("PRIVATE_KEY", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+    ("OPENAI_STYLE_KEY", re.compile(rb"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("GITHUB_PAT", re.compile(rb"\bgithub_pat_[A-Za-z0-9_]{20,}\b")),
+    ("GITHUB_TOKEN", re.compile(rb"\bgh[opusr]_[A-Za-z0-9]{20,}\b")),
+    ("AWS_ACCESS_KEY", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
+    ("GOOGLE_API_KEY", re.compile(rb"\bAIza[0-9A-Za-z_-]{30,}\b")),
+)
+
 
 def allowed(relative: Path) -> bool:
     name = relative.name.lower()
@@ -95,10 +109,15 @@ def main() -> int:
         files[name] = path
     if any(not allowed(Path(name)) for name in files):
         raise SystemExit("PACKAGE_SECURITY_FILTER_FAILED")
-    forbidden_machine_paths = re.compile(rb"/(?:Users/xiamin|private/tmp)/|[A-Za-z]:[/\\]Users[/\\]|/home/runner/")
     for name, path in files.items():
-        if forbidden_machine_paths.search(package_bytes(path)):
+        data = package_bytes(path)
+        if ABSOLUTE_MACHINE_PATH.search(data):
             raise SystemExit(f"PACKAGE_ABSOLUTE_PATH_FOUND={name}")
+        for secret_name, pattern in SECRET_LITERAL_PATTERNS:
+            if pattern.search(data):
+                raise SystemExit(
+                    f"PACKAGE_SECRET_LITERAL_FOUND={secret_name}:{name}"
+                )
     commit = source_commit()
     inventory = [{"path": name, "sha256": hashlib.sha256(package_bytes(path)).hexdigest(), "size": len(package_bytes(path))} for name, path in sorted(files.items())]
     manifest = {
