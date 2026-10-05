@@ -239,6 +239,16 @@ def product_runtime_snapshots(device_id: str, limit: int = 20):
         raise HTTPException(404, "器件不存在")
 
 
+@app.post("/api/product/devices/{device_id}/runtime-trend-lifetime", tags=["Storage Product MVP"])
+def product_runtime_trend_lifetime(device_id: str):
+    try:
+        return product_api.analyze_runtime_trend(device_id)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/product/devices/{device_id}/assessments", tags=["Storage Product MVP"])
 def product_device_assessments(device_id: str, limit: int = 20):
     try:
