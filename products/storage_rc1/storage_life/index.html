@@ -323,7 +323,7 @@ function mvpScenarioCard(x){
 function renderMvpSummaryPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
-  host.insertAdjacentHTML('beforeend','<div id="mvpSummaryPanel" class="card"><div class="pagehead"><div><div class="kicker">UNIFIED MVP SUMMARY</div><h3>综合评估摘要</h3><div class="muted">汇总 Device Fact、最近一次寿命 / 诊断 / 优化结果；不新建第二套判断逻辑。</div></div><div class="row"><button class="secondary" onclick="loadMvpSummary()">刷新</button><button class="primary" onclick="downloadMvpSummary()">导出 Markdown</button></div></div><div id="mvpSummaryBody" class="empty">正在汇总…</div></div>');
+  host.insertAdjacentHTML('beforeend','<div id="mvpSummaryPanel" class="card"><div class="pagehead"><div><div class="kicker">UNIFIED MVP SUMMARY</div><h3>综合评估摘要</h3><div class="muted">汇总 Device Fact、Runtime、最近一次寿命 / 诊断 / 优化结果；可直接从当前状态生成工程优化行动方案。</div></div><div class="row"><button class="secondary" onclick="loadMvpSummary()">刷新</button><button class="primary" onclick="executeIntegratedActionPlan()">基于当前状态生成优化方案</button><button class="secondary" onclick="downloadMvpSummary()">导出 Markdown</button></div></div><div id="mvpSummaryBody" class="empty">正在汇总…</div><div id="integratedActionPlanResult"></div></div>');
   loadMvpSummary();
 }
 async function loadMvpSummary(){
@@ -344,6 +344,41 @@ async function loadMvpSummary(){
       (actions.length?'<div class="card warning"><b>继续完成</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命评估</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button></div></div>':'<div class="fact card"><b>当前器件 MVP 核心分析链已有记录。</b><p>可导出摘要，或继续使用 Public Knowledge / Compare 做工程追溯。</p></div>');
   }catch(e){
     body.innerHTML='<div class="danger">综合评估摘要暂不可用：'+esc(e.message)+'</div>';
+  }
+}
+async function executeIntegratedActionPlan(){
+  let d=CURRENT?.device,box=$('#integratedActionPlanResult');
+  if(!d||!box)return;
+  let behavior=$('#optimizationBehavior')?.value.trim()||'';
+  box.innerHTML='<div class="card">正在汇总当前寿命 / 诊断 / Runtime 状态，并调用 Existing Write Governance Skill…</div>';
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/integrated-action-plan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        software_behavior:behavior,
+        assessment_author:'Storage MVP Integrated Action Plan'
+      })
+    });
+    let state=r.current_state||[],controls=r.engineering_controls||[],risks=r.potential_risks||[],validation=r.validation_actions||[],limits=r.conditions_and_limits||[],remaining=r.remaining_information||[];
+    let html='<div class="pagehead"><div><div class="kicker">CURRENT STATE → ACTION PLAN</div><h3>工程优化行动方案</h3><div class="muted">当前状态来自已保存 Lifetime / Diagnosis / Runtime；控制建议来自 Existing storage-write-governance Skill。没有新规则栈。</div></div>'+badge(r.skill_result?.status||'UNKNOWN')+'</div>';
+    html+='<div class="card"><b>当前状态依据</b>'+(state.length?'<ul>'+state.map(x=>{
+      if(x.kind==='RUNTIME_TREND')return '<li><b>Runtime Trend</b> · '+esc(x.snapshot_count||0)+' Snapshots · '+esc((x.metric_names||[]).join(' / '))+'</li>';
+      return '<li><b>'+esc(x.kind||'')+'</b> · '+esc(x.status||'UNKNOWN')+(x.direct_answer?' · '+esc(x.direct_answer):'')+'</li>';
+    }).join('')+'</ul>':'<p class="muted">当前还没有寿命 / 诊断 / Runtime 状态可引用。</p>')+'</div>';
+    html+=optimizationList('潜在风险 / 机制',risks);
+    html+=optimizationList('工程控制建议',controls);
+    html+=optimizationList('验证动作',validation);
+    html+=optimizationList('适用条件 / 边界',limits);
+    if(remaining.length)html+=optimizationList('仍需补充',remaining);
+    html+='<div class="card"><b>Decision Boundary</b><p>'+esc(r.decision_boundary||'ENGINEERING_REVIEW_REQUIRED')+'</p><small>该方案是 Existing Storage 能力的编排结果，不自动形成正式软件规范或替代批准。</small></div>';
+    html+='<div class="row"><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">补充软件写入行为</button>'+pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging monitoring lifetime optimization'},'展开公共知识依据')+'</div><div id="integratedActionPublicContext"></div>';
+    box.innerHTML=html;
+    pkContextSearchInline({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging monitoring lifetime optimization'},'integratedActionPublicContext');
+    loadAssessmentHistory();
+    loadMvpSummary();
+  }catch(e){
+    box.innerHTML='<div class="danger card"><b>工程优化行动方案未完成</b><p>'+esc(e.message)+'</p></div>';
   }
 }
 function mvpSummaryMarkdown(){
