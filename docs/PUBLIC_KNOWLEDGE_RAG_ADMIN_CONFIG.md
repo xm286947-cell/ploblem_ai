@@ -1,7 +1,8 @@
 # Public Knowledge RAG local configuration page
 
-Open `http://127.0.0.1:8080/settings` after starting the Public Knowledge service.
-The Docker Compose port remains bound to loopback by default.
+Open `http://127.0.0.1:9000/settings` after starting the Public Knowledge service.
+The operator-facing host port is bound to loopback at 9000. The container listens
+internally on port 8080; Compose maps `127.0.0.1:9000:8080`.
 
 ## Provider configuration
 

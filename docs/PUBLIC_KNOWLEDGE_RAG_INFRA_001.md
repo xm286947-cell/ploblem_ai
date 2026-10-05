@@ -5,7 +5,8 @@ This directory implements the candidate-independent macOS substrate for issue #3
 ## Runtime topology
 
 - macOS hosts Docker Desktop and Docker Compose.
-- The API container binds to `127.0.0.1:8080` and is limited to 4 GiB and four CPUs.
+- The operator-facing API is `http://127.0.0.1:9000`; Compose maps `127.0.0.1:9000:8080`.
+  The service listens on container-internal port `8080` and is limited to 4 GiB and four CPUs.
 - Generation calls the separately hosted Ollama at `192.168.1.100`; Ollama is not installed on this Mac.
 - The configured test model is pinned by the measured Ollama tag and digest. The service refuses inference if either differs.
 - Parser, chunker, retriever, generation provider, and manual-provider contracts are replaceable. The included UTF-8 text parser and simple SQLite lexical adapter are bootstrap references, not final technical selections.
@@ -18,7 +19,7 @@ bash scripts/health.sh
 bash stop.sh
 ```
 
-Defaults use the measured remote Ollama address, pinned model tag and digest, and bounded resource settings. Optional overrides may be placed in `public_knowledge_rag/.env`; that file is ignored by Git. `start.sh` builds and starts the Compose service, then waits for `/health`. The service stores source metadata, version content, chunks, and fixtures in a named Docker volume.
+The operator URL is `http://127.0.0.1:9000`; health is `http://127.0.0.1:9000/health` and settings are `http://127.0.0.1:9000/settings`. Inside the container, Uvicorn and the Compose healthcheck use port `8080`. Defaults use the measured remote Ollama address, pinned model tag and digest, and bounded resource settings. Optional overrides may be placed in `public_knowledge_rag/.env`; that file is ignored by Git. `start.sh` builds and starts the Compose service, then waits for the operator-facing `/health` URL. The service stores source metadata, version content, chunks, and fixtures in a named Docker volume.
 
 ## Contract
 
@@ -34,9 +35,9 @@ Defaults use the measured remote Ollama address, pinned model tag and digest, an
 - `GET /fixtures/{fixture_id}`
 - `POST /fixtures/replay`
 
-Import requires `classification=PUBLIC`. Only UTF-8 `text/plain` and `text/markdown` are accepted by the bootstrap parser; unsupported documents fail closed until an architecture-selected parser adapter is installed. Import requests carry parsed text; the service does not fetch arbitrary URLs. A supplied URL is provenance metadata and must be public HTTP(S).
+Import requires `classification=PUBLIC`. File import supports PDF, DOCX, HTML, Markdown, and TXT through deterministic local format adapters. Original bytes are stored as immutable source snapshots with SHA/revision metadata and format-native locators; parsing does not invoke the generation provider. The JSON text-import endpoint remains available for `text/plain` and `text/markdown`. The service does not fetch arbitrary URLs; a supplied URL is provenance metadata and must be public HTTP(S).
 
-Search uses the replaceable lexical reference adapter. `LIVE` calls the pinned remote model; fixture replay returns the captured response without contacting a provider. Storage receives the same answer/citation shape in either mode.
+Search uses the service's configured lexical retrieval adapter. `LIVE` calls the configured generation provider; fixture replay returns the captured response without contacting a provider. Storage receives the same answer/citation shape in either mode.
 
 Manual evaluation has an explicit adapter slot that remains unconfigured and fails closed. No provider key is required by this service.
 
@@ -56,4 +57,4 @@ The test model above is the currently observed Qwen model on the remote Ollama h
 
 ## Data boundary
 
-Do not place confidential/customer/internal source material or credentials in requests, fixtures, logs, evidence, or this repository. The default listener is loopback-only. Keep `.env` untracked. The application never prints request bodies and disables HTTP access logging.
+Do not place confidential/customer/internal source material or credentials in requests, fixtures, logs, evidence, or this repository. The host-facing default listener is loopback-only at port 9000; container-internal service and healthcheck traffic use port 8080. Keep `.env` untracked. The application never prints request bodies and disables HTTP access logging.

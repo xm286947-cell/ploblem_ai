@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 
-base = os.getenv("PKR_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+base = os.getenv("PKR_BASE_URL", "http://127.0.0.1:9000").rstrip("/")
 
 
 def request(method: str, path: str, payload: dict[str, object] | None = None) -> dict[str, object]:
