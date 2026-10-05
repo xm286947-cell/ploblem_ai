@@ -259,24 +259,6 @@ def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _runtime_trend_fingerprint(device_id: str) -> str:
-    """Stable identity for formally consumable runtime trend points only."""
-    trend = core.runtime_metric_trends(device_id, limit=40)
-    payload = []
-    for metric in trend.get("metrics") or []:
-        for point in metric.get("points") or []:
-            payload.append({
-                "metric_name": metric.get("metric_name"),
-                "batch_id": point.get("batch_id"),
-                "captured_at": point.get("captured_at"),
-                "normalized_value": point.get("normalized_value"),
-                "unit": point.get("unit"),
-                "source_label": point.get("source_label"),
-            })
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    return sha256(raw.encode("utf-8")).hexdigest()
-
-
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
     mapping = {
