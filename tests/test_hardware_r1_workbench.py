@@ -262,6 +262,31 @@ def test_gate_pass_review_required_maps_to_review_not_publish() -> None:
 
 
 
+def test_running_stage_b_retry_preserves_stage_a_last_good_status() -> None:
+    running = bind_case_status(
+        snapshot=_snapshot(),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            a_cache=True,
+        ),
+        orchestration_status="RUNNING",
+        error_code=None,
+    )
+    assert running == {
+        "parse": "PASS",
+        "stage_a": "CACHE_HIT",
+        "stage_b": "RUNNING",
+        "gate": "WAITING",
+        "result": "RUNNING",
+        "failed_stage": "STAGE_B",
+        "error_code": None,
+        "retryable": False,
+    }
+
+
 def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy-workbench.db"
     with sqlite3.connect(db_path) as connection:
