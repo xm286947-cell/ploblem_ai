@@ -1709,6 +1709,13 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
 
 def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
     comparison = compare_devices([old_id, new_id])
+    old_type = templates.normalize_device_type(comparison["devices"][0]["device_type"])
+    new_type = templates.normalize_device_type(comparison["devices"][1]["device_type"])
+    if old_type != new_type:
+        raise ValueError(
+            f"DEVICE_TYPE_MISMATCH_FOR_CHANGE_IMPACT:{old_type}->{new_type};"
+            " raw parameter compare remains available, but engineering impact requires comparable device types"
+        )
     rows = []
     unknowns = []
     for row in comparison["rows"]:
