@@ -11,6 +11,7 @@
     scrollY: 0,
     itemAction: {pending: false, action: null, stage: null},
     reviewDraft: null,
+    reviewEvidenceIds: [],
   };
 
   const q = (selector) => root.querySelector(selector);
@@ -543,16 +544,54 @@
         escapeHtml(editableValue) + '</textarea></label>';
     }).join('');
 
+    const isKeyParameter =
+      path[0] === 'engineering_context' &&
+      path[1] === 'key_parameters' &&
+      typeof path[2] === 'number' &&
+      Object.prototype.hasOwnProperty.call(value, 'name');
+    const isNewParameter = isKeyParameter && value.__review_new === true;
+    const evidenceEditor = isNewParameter
+      ? '<label>Evidence block<select multiple data-human-review-new-evidence="' +
+        escapeHtml(path[2]) + '">' +
+        state.reviewEvidenceIds.map((blockId) =>
+          '<option value="' + escapeHtml(blockId) + '"' +
+          ((value.evidence_block_ids || []).includes(blockId) ? ' selected' : '') +
+          '>' + escapeHtml(blockId) + '</option>'
+        ).join('') +
+        '</select></label>'
+      : '';
+    const removeAction = isKeyParameter
+      ? '<button type="button" class="hc-button secondary" data-human-review-remove-parameter="' +
+        escapeHtml(path[2]) + '">删除参数</button>'
+      : '';
+
     return '<article class="hc-review-fact"><div class="hc-review-fact-head"><h3>' +
       escapeHtml(humanReviewLabel(path)) +
       '</h3><span class="hc-status">' +
-      (semanticKeys.length > 1 ? 'PARAMETER SEMANTICS' : 'VALUE ONLY') +
+      (isNewParameter ? 'HUMAN ADDED' : semanticKeys.length > 1 ? 'PARAMETER SEMANTICS' : 'VALUE ONLY') +
       '</span></div>' +
       '<div class="hc-review-columns"><div class="hc-review-column"><label>AI Candidate</label><p>' +
-      escapeHtml(aiSummary) +
-      '</p><small>' + escapeHtml(metadata || 'Evidence metadata is read-only') +
+      escapeHtml(isNewParameter ? '人工新增参数' : aiSummary) +
+      '</p><small>' + escapeHtml(
+        isNewParameter
+          ? '新增参数必须绑定现有 Evidence'
+          : metadata || 'Evidence metadata is read-only'
+      ) +
       '</small></div><div class="hc-review-column"><label>人工确认值</label>' +
-      editors + '</div></div></article>';
+      editors + evidenceEditor + removeAction + '</div></div></article>';
+  }
+
+  function paintHumanReviewFields() {
+    if (!state.reviewDraft) return;
+    const editable = Object.entries(state.reviewDraft)
+      .filter(([key]) => !humanReviewProtectedTop.has(key))
+      .map(([key, value]) => humanReviewEditor(value, [key]))
+      .join('');
+    q('[data-human-review-fields]').innerHTML =
+      (editable || '<div class="hc-empty">当前 Candidate 没有可编辑业务字段。</div>') +
+      '<div class="hc-workbench-detail-actions">' +
+      '<button type="button" class="hc-button secondary" data-human-review-add-parameter>' +
+      '新增关键参数</button></div>';
   }
 
   function setHumanReviewDraftValue(path, raw, type) {
@@ -586,18 +625,23 @@
       return;
     }
     state.reviewDraft = JSON.parse(JSON.stringify(candidate));
+    const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
+    state.reviewEvidenceIds = evidence
+      .map((entry) => String(entry?.block_id || '').trim())
+      .filter(Boolean);
+    const parameters = state.reviewDraft?.engineering_context?.key_parameters;
+    if (Array.isArray(parameters)) {
+      parameters.forEach((parameter, index) => {
+        if (parameter && typeof parameter === 'object') {
+          parameter.__review_original_index = index;
+        }
+      });
+    }
     const asset = item.candidate_asset || {};
     const reviewStatus = asset.production_review_status || 'NOT_REQUIRED';
     q('[data-human-review-status]').textContent = reviewStatus;
+    paintHumanReviewFields();
 
-    const editable = Object.entries(candidate)
-      .filter(([key]) => !humanReviewProtectedTop.has(key))
-      .map(([key, value]) => humanReviewEditor(value, [key]))
-      .join('');
-    q('[data-human-review-fields]').innerHTML = editable ||
-      '<div class="hc-empty">当前 Candidate 没有可编辑业务字段。</div>';
-
-    const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
     q('[data-human-review-evidence]').innerHTML = evidence.length
       ? evidence.map((entry) =>
           '<article class="hc-evidence-item"><strong>' +
@@ -622,7 +666,9 @@
       : '<div class="hc-empty">暂无人工 Review Audit。</div>';
 
     const locked = String(asset.promotion_status || 'NOT_STARTED') !== 'NOT_STARTED';
-    root.querySelectorAll('[data-human-review-action]').forEach((button) => {
+    root.querySelectorAll(
+      '[data-human-review-action], [data-human-review-add-parameter], [data-human-review-remove-parameter]'
+    ).forEach((button) => {
       button.disabled = locked;
     });
     const reviewMessage = q('[data-human-review-message]');
@@ -772,10 +818,10 @@
       let payload;
       if (action === 'review') {
         const reviewer = q('[data-formal-reviewer]').value.trim();
-        if (!reviewer || !window.confirm('确认将当前 Durable Candidate 提交为人工 Formal Review？')) return;
+        if (!reviewer || !window.confirm('确认将已审核的 Durable Candidate 原样提交为 Formal Review？')) return;
         payload = await request('/items/' + itemId + '/promotion/review', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({reviewer, confirmed_content: state.item.candidate, review_comment: q('[data-formal-review-comment]').value.trim()}),
+          body: JSON.stringify({reviewer, review_comment: q('[data-formal-review-comment]').value.trim()}),
         });
       } else if (action === 'publish') {
         const publisher = q('[data-formal-reviewer]').value.trim();
@@ -994,8 +1040,40 @@
     }
   });
   q('[data-human-review]').addEventListener('click', (event) => {
+    const addButton = event.target.closest('[data-human-review-add-parameter]');
+    if (addButton) {
+      const parameters = state.reviewDraft?.engineering_context?.key_parameters;
+      if (!Array.isArray(parameters)) return;
+      parameters.push({
+        __review_new: true,
+        name: '',
+        value: '',
+        unit: '',
+        evidence_block_ids: [],
+      });
+      paintHumanReviewFields();
+      return;
+    }
+    const removeButton = event.target.closest('[data-human-review-remove-parameter]');
+    if (removeButton) {
+      const parameters = state.reviewDraft?.engineering_context?.key_parameters;
+      const index = Number(removeButton.dataset.humanReviewRemoveParameter);
+      if (!Array.isArray(parameters) || !Number.isInteger(index)) return;
+      parameters.splice(index, 1);
+      paintHumanReviewFields();
+      return;
+    }
     const button = event.target.closest('[data-human-review-action]');
     if (button) humanReviewAction(button.dataset.humanReviewAction);
+  });
+  q('[data-human-review-fields]').addEventListener('change', (event) => {
+    const evidence = event.target.closest('[data-human-review-new-evidence]');
+    if (!evidence) return;
+    const parameters = state.reviewDraft?.engineering_context?.key_parameters;
+    const index = Number(evidence.dataset.humanReviewNewEvidence);
+    if (!Array.isArray(parameters) || !parameters[index]) return;
+    parameters[index].evidence_block_ids = Array.from(evidence.selectedOptions)
+      .map((option) => option.value);
   });
   q('[data-item-run]').addEventListener('click', () => itemAction('run-resume'));
   q('[data-item-retry]').addEventListener('click', () => itemAction('retry-failed-stage'));

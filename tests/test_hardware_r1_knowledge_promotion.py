@@ -452,6 +452,50 @@ def test_legacy_promotion_row_migrates_idempotently_to_asset_ledger(tmp_path: Pa
         )
 
 
+def test_formal_review_uses_exact_durable_candidate_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        promotion,
+        _,
+        _,
+        _,
+        _,
+        transport,
+        _,
+    ) = setup_case(
+        tmp_path,
+        case_id="A0206",
+        item_id="HWI-A0206",
+        batch_id="HWB-DURABLE-ONLY",
+    )
+    promotion.intake_item("HWI-A0206")
+    durable = promotion.assets.get_candidate(
+        promotion.workbench.items["HWI-A0206"]["candidate_id"]
+    )
+    expected = copy.deepcopy(durable["knowledge_object"])
+    observed = {}
+    original = transport.request
+
+    def capture_review(method, path, *, json_body=None, query=None):
+        if method == "POST" and path == "/v1/knowledge/reviews":
+            observed["confirmed_value"] = copy.deepcopy(
+                (json_body or {}).get("confirmed_value")
+            )
+        return original(method, path, json_body=json_body, query=query)
+
+    monkeypatch.setattr(transport, "request", capture_review)
+    reviewed = promotion.review_item(
+        "HWI-A0206",
+        reviewer="durable-only-reviewer",
+        review_time=NOW,
+        review_comment="approval only",
+    )
+    assert reviewed["status"] == "REVIEW_CONFIRMED"
+    assert observed["confirmed_value"] == expected
+
+
 def test_human_review_publish_release_query_back_and_source_lock(
     tmp_path: Path,
 ) -> None:
@@ -471,14 +515,9 @@ def test_human_review_publish_release_query_back_and_source_lock(
     )
 
     intake = promotion.intake_item("HWI-A0207")
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = (
-        "模拟量精度设计必须校核参考源与器件误差预算"
-    )
     reviewed = promotion.review_item(
         "HWI-A0207",
         reviewer="hardware-reviewer",
-        confirmed_content=confirmed,
         review_time=NOW,
         review_comment="R1 formal promotion review",
     )
@@ -677,12 +716,9 @@ class SimulatedPowerLoss(BaseException):
 
 def _prepare_reviewed_promotion(promotion, candidate):
     intake = promotion.intake_item("HWI-RECOVERY")
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "human-confirmed recovery rule"
     promotion.review_item(
         "HWI-RECOVERY",
         reviewer="recovery-reviewer",
-        confirmed_content=confirmed,
         review_time=NOW,
         review_comment="recovery test",
     )
@@ -726,11 +762,8 @@ def test_remote_write_is_journaled_before_send_and_remote_key_is_idempotent(tmp_
     result = promotion.intake_item("HWI-RECOVERY")
     assert result["status"] == "CANDIDATE_INTAKED"
 
-    candidate = promotion.workbench.items["HWI-RECOVERY"]["candidate"]
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "confirmed journal rule"
     promotion.review_item(
-        "HWI-RECOVERY", reviewer="journal-reviewer", confirmed_content=confirmed,
+        "HWI-RECOVERY", reviewer="journal-reviewer",
         review_time=NOW,
     )
     promotion.publish_item(
@@ -1046,7 +1079,7 @@ def test_formal_review_unknown_is_asset_scoped_and_blocks_publish(tmp_path, monk
     monkeypatch.setattr(transport, "request", review_success_then_timeout)
     with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
         promotion.review_item(
-            "HWI-RECOVERY", reviewer="recovery-reviewer", confirmed_content=confirmed,
+            "HWI-RECOVERY", reviewer="recovery-reviewer",
             review_time=NOW, review_comment="unknown review outcome",
         )
     with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):

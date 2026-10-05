@@ -40,6 +40,12 @@ def test_single_active_source_duplicate_delete_reupload(tmp_path: Path) -> None:
     assert first["binding_status"] == "ACTIVE"
     assert first["source_id"] == hashlib.sha256(b"first-source").hexdigest()
 
+    reused = store.register_active_bytes(
+        "A0152", "A0152-repeat.docx", b"first-source"
+    )
+    assert reused["source_id"] == first["source_id"]
+    assert reused["idempotent_reuse"] is True
+
     with pytest.raises(HardwareCaseSourceError) as exc:
         store.register_active_bytes("A0152", "A0152-duplicate.docx", b"second-source")
     assert exc.value.code == "SOURCE_ALREADY_EXISTS"
@@ -187,8 +193,9 @@ def test_r1_word_snapshot_binds_source_and_delete_reupload_api(tmp_path: Path) -
         files={"file": (docx.name, payload)},
         headers=MAINTAINER,
     )
-    assert duplicate.status_code == 409
-    assert duplicate.json()["detail"] == "SOURCE_ALREADY_EXISTS"
+    assert duplicate.status_code == 200
+    assert duplicate.json()["source_binding"]["source_id"] == first.json()["source_binding"]["source_id"]
+    assert duplicate.json()["source_binding"]["idempotent_reuse"] is True
 
     deleted = client.delete(
         "/api/v2/hardware-cases/r1/sources/A0152",
@@ -294,8 +301,8 @@ def test_batch_workbench_source_persistence_gate(tmp_path: Path) -> None:
     )
     assert duplicate.status_code == 201
     duplicate_item = duplicate.json()["items"][0]
-    assert duplicate_item["result"] == "DEPENDENCY_BLOCKED"
-    assert duplicate_item["error_code"] == "SOURCE_ALREADY_EXISTS"
+    assert duplicate_item["result"] == "QUEUED"
+    assert duplicate_item["source_id"] == source_a.json()["source_id"]
 
     deleted = client.delete(
         "/api/v2/hardware-cases/r1/sources/A0152",
