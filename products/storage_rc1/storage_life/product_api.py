@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 from datetime import datetime
+from hashlib import sha256
+import json
 import re
 
 from . import ai, core, templates, parameter_baseline
@@ -221,6 +223,40 @@ def _engineering_result_view(skill_result: dict[str, Any]) -> dict[str, Any]:
         ),
         "decision_boundary": skill_result.get("decision_boundary"),
     }
+
+
+def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
+    """Stable identity for the currently consumable Device Fact set.
+
+    Downstream S2-S5 assessments store this fingerprint so a later S1 fact/evidence
+    change cannot silently leave stale results marked as current.
+    """
+    rows = []
+    for fact in detail.get("device_facts") or []:
+        evidence = [
+            {
+                "evidence_id": e.get("evidence_id"),
+                "source_id": e.get("source_id"),
+                "source_page": e.get("source_page"),
+                "source_section": e.get("source_section"),
+            }
+            for e in (fact.get("evidence") or [])
+        ]
+        rows.append({
+            "canonical_name": fact.get("canonical_name"),
+            "value": fact.get("value"),
+            "unit": fact.get("unit"),
+            "condition": fact.get("condition"),
+            "scope": fact.get("scope"),
+            "evidence": evidence,
+        })
+    payload = json.dumps(
+        sorted(rows, key=lambda x: str(x.get("canonical_name") or "")),
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
@@ -857,11 +893,13 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
             "storage-write-governance": "OPTIMIZATION",
         }.get(skill_id)
         if assessment_type:
+            record_input = dict(request)
+            record_input["_device_fact_fingerprint"] = _device_fact_fingerprint(detail)
             response["assessment_record"] = core.save_device_assessment(
                 device_id,
                 assessment_type,
                 result.get("status") if isinstance(result, dict) else "UNKNOWN",
-                request,
+                record_input,
                 {
                     "skill_id": skill_id,
                     "skill_result": result,
@@ -1859,11 +1897,18 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
 def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "Storage MVP UI") -> dict[str, Any]:
     result = change_impact(old_id, new_id)
     skill = result.get("skill_result") or {}
+    old_detail = device_slots(old_id)
+    new_detail = device_slots(new_id)
     record = core.save_device_assessment(
         new_id,
         "COMPARE",
         skill.get("status") or result.get("status") or "UNKNOWN",
-        {"old_id": old_id, "new_id": new_id},
+        {
+            "old_id": old_id,
+            "new_id": new_id,
+            "_old_device_fact_fingerprint": _device_fact_fingerprint(old_detail),
+            "_new_device_fact_fingerprint": _device_fact_fingerprint(new_detail),
+        },
         result,
         created_by=assessment_author,
     )
