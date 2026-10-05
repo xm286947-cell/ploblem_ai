@@ -29,7 +29,6 @@ jobs:
     env:
       FROZEN_PRODUCT_SHA: 50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c
       PRODUCT_BRANCH: feature/major-mvp-productization-closure
-      ARTIFACT_DIR: ${{ runner.temp }}/major-mvp-ci-artifacts
       REQUESTED_SOURCE_SHA: ${{ inputs.source_sha || '50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c' }}
 
     steps:
@@ -38,7 +37,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$REQUESTED_SOURCE_SHA" = "$FROZEN_PRODUCT_SHA"
-          mkdir -p "$ARTIFACT_DIR"
+          artifact_dir="$RUNNER_TEMP/major-mvp-ci-artifacts"
+          echo "ARTIFACT_DIR=$artifact_dir" >> "$GITHUB_ENV"
+          mkdir -p "$artifact_dir"
           echo "SOURCE_SHA_FIXED=$FROZEN_PRODUCT_SHA"
 
       - name: Checkout CI orchestration branch
@@ -257,14 +258,14 @@ jobs:
           name: major-mvp-product-candidate-50cb839d1dd4
           if-no-files-found: warn
           path: |
-            ${{ runner.temp }}/major-mvp-ci-artifacts/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip
-            ${{ runner.temp }}/major-mvp-ci-artifacts/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip.sha256
-            ${{ runner.temp }}/major-mvp-ci-artifacts/PACKAGE_MANIFEST.json
-            ${{ runner.temp }}/major-mvp-ci-artifacts/regression.log
-            ${{ runner.temp }}/major-mvp-ci-artifacts/package-build.log
-            ${{ runner.temp }}/major-mvp-ci-artifacts/package-gate.log
-            ${{ runner.temp }}/major-mvp-ci-artifacts/fresh-extract-startup.log
-            ${{ runner.temp }}/major-mvp-ci-artifacts/browser-smoke.log
+            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip
+            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip.sha256
+            ${{ env.ARTIFACT_DIR }}/PACKAGE_MANIFEST.json
+            ${{ env.ARTIFACT_DIR }}/regression.log
+            ${{ env.ARTIFACT_DIR }}/package-build.log
+            ${{ env.ARTIFACT_DIR }}/package-gate.log
+            ${{ env.ARTIFACT_DIR }}/fresh-extract-startup.log
+            ${{ env.ARTIFACT_DIR }}/browser-smoke.log
 
       - name: Emit final CI gate decision
         if: always()
