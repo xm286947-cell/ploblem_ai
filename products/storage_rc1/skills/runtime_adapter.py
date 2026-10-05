@@ -206,7 +206,33 @@ class StorageDomainSkillAdapter:
     def execute_write_governance(self, *, device_type: str, user_context: dict[str, Any],
                                  workload_software_facts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         behaviors = list(workload_software_facts or [])
-        question = str(user_context.get("question") or "software write amplification persistence wear controls")
+        assessment_context = dict(user_context.get("assessment_context") or {})
+        query_parts = [
+            str(user_context.get("question") or "software write amplification persistence wear controls")
+        ]
+        for item in behaviors:
+            description = str(item.get("description") or "").strip()
+            if description:
+                query_parts.append(description[:1200])
+        for key in ("latest_lifetime", "latest_diagnosis"):
+            item = assessment_context.get(key)
+            if isinstance(item, dict):
+                query_parts.append(
+                    " ".join(
+                        str(x)
+                        for x in (
+                            key,
+                            item.get("status"),
+                            item.get("direct_answer"),
+                            item.get("next_action"),
+                        )
+                        if str(x or "").strip()
+                    )[:1600]
+                )
+        metrics = assessment_context.get("runtime_metrics")
+        if isinstance(metrics, list) and metrics:
+            query_parts.append("runtime metrics " + " ".join(str(x) for x in metrics[:20]))
+        question = " ".join(x for x in query_parts if x.strip())
         knowledge = self.query_pack("PACK_WRITE_GOVERNANCE", question, device_type=device_type)
         items = knowledge.get("items") or []
         mechanisms = [_text(x) for x in items if _text(x)]
