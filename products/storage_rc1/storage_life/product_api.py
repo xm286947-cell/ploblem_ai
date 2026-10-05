@@ -2377,10 +2377,10 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         b = row["cells"].get(new_id) or {}
         if not row["is_difference"] and not row["has_missing"]:
             continue
-        statuses = {a.get("status"), b.get("status")}
-        if statuses & {"NOT_FOUND", "NOT_CHECKED", "AMBIGUOUS", "UNREVIEWED"}:
+        statuses = {str(a.get("status") or ""), str(b.get("status") or "")}
+        if any(status not in {"CONFIRMED", "NOT_APPLICABLE"} for status in statuses):
             confidence = "LOW"
-            unknowns.append(f"{row['parameter_name']} 存在未确认/缺失事实，必须先验证")
+            unknowns.append(f"{row['parameter_name']} 存在未确认/缺失/已驳回事实，必须先验证")
         else:
             confidence = "EVIDENCED"
         meaning, sw, test, monitor = IMPACT_RULES.get(row["canonical_name"], ("参数能力发生变化或存在事实缺口", "复核相关软件配置、异常处理和持久化策略", "补充该参数相关边界与回归测试", "复核对应运行监控/告警"))
