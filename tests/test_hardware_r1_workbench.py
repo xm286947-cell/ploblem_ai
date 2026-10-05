@@ -1486,6 +1486,13 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     confirmed["engineering_context"]["primary_subject"]["value"] = (
         "人工确认后的 MCU 串口知识"
     )
+    confirmed["engineering_context"]["primary_subject"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
+    confirmed["engineering_context"]["primary_subject"]["extraction_status"] = (
+        "MISSING"
+    )
+    confirmed["schema_extension"] = {"value": "must not be persisted"}
 
     reviewed = service.apply_human_review(
         item_id,
@@ -1501,6 +1508,13 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
         "value"
     ] == "人工确认后的 MCU 串口知识"
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "evidence_block_ids"
+    ] == ["B0001"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "extraction_status"
+    ] == "EXTRACTED"
+    assert "schema_extension" not in durable["knowledge_object"]
     assert durable["knowledge_object"]["source_fact"] == asset["knowledge_object"][
         "source_fact"
     ]
