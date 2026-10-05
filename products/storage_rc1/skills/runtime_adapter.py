@@ -426,7 +426,7 @@ class StorageDomainSkillAdapter:
         cls,
         observations: list[dict[str, Any]],
         *,
-        released_semantics_available: bool,
+        released_semantics: set[str],
     ) -> list[dict[str, Any]]:
         """Evaluate only explicit, fail-closed runtime signals.
 
@@ -488,7 +488,7 @@ class StorageDomainSkillAdapter:
                 "Available Spare 低于同次采集的显式 Threshold。",
             ))
 
-        if released_semantics_available:
+        if "pre_eol_info" in released_semantics:
             pre_eol = number("pre_eol_info")
             if pre_eol is not None and pre_eol >= 3:
                 signals.append(signal(
@@ -505,6 +505,7 @@ class StorageDomainSkillAdapter:
                     "PRE_EOL_INFO 落入已发布语义支持的预警状态。",
                 ))
 
+        if "percentage_used" in released_semantics:
             percentage_used = number("percentage_used")
             if percentage_used is not None and percentage_used >= 100:
                 signals.append(signal(
@@ -538,9 +539,15 @@ class StorageDomainSkillAdapter:
 
         missing = list(knowledge.get("missing_information") or []) + excluded
         methods = [_text(x) for x in items if x.get("canonical_object_type") == "DiagnosticMethod" and _text(x)]
+        semantic_text = " ".join(_text(x).lower() for x in items if _text(x))
+        released_semantics: set[str] = set()
+        if "pre_eol" in semantic_text or "pre eol" in semantic_text:
+            released_semantics.add("pre_eol_info")
+        if "percentage used" in semantic_text or "percentage_used" in semantic_text:
+            released_semantics.add("percentage_used")
         signals = self._deterministic_abnormality_signals(
             current,
-            released_semantics_available=bool(items),
+            released_semantics=released_semantics,
         )
 
         if not current:
