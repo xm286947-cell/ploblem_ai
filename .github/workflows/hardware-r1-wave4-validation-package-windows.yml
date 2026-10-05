@@ -129,8 +129,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "PREPARE_FAILED=$LASTEXITCODE" }
           if (!(Test-Path "$output\DATASET_MANIFEST.json")) { throw "DATASET_MANIFEST_MISSING" }
           if (!(Test-Path "$output\WAVE4_PREPARE_REPORT.json")) { throw "PREPARE_REPORT_MISSING" }
-          $collision = $config.Clone()
-          $collision.normal_product_data_root = $validation
+          $collision = [ordered]@{ source_dir=$fixture; max_cases=30; validation_data_root=$validation; normal_product_data_root=$validation; output_report_dir=(Join-Path $output "collision") }
           $collisionPath = Join-Path $env:RUNNER_TEMP "wave4-collision.json"
           $collision | ConvertTo-Json | Set-Content $collisionPath -Encoding utf8
           & cmd.exe /c "`"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$collisionPath`" --output `"$output\collision`" --prepare" 2>&1 | Tee-Object -Variable collisionOutput
@@ -140,14 +139,6 @@ jobs:
           $report = [ordered]@{ windows_native_runner='PASS'; exact_zip_reproducible='PASS'; windows_bat_fresh_extract='PASS'; python_compile='PASS'; wave4_prepare_smoke='PASS'; data_root_collision_fail_closed='PASS'; real_provider_run_disabled='PASS'; real_docx_included=$false; secret_scan='PASS'; absolute_path_scan='PASS'; product_business_code_changed='NO' }
           $report | ConvertTo-Json | Set-Content "$output\WINDOWS_NATIVE_GATE_REPORT.json" -Encoding utf8
           Copy-Item "$env:GITHUB_WORKSPACE\dist\HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip.sha256" "$output\"
-
-      - name: Preserve Windows package for reproducibility diagnosis
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: HARDWARE_R1_WAVE4_WINDOWS_BUILD_DIAGNOSTIC_${{ github.sha }}
-          path: ${{ github.workspace }}/dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip
-          if-no-files-found: ignore
 
       - name: Upload Windows gate evidence
         uses: actions/upload-artifact@v4
