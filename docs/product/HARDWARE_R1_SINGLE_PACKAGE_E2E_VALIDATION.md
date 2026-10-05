@@ -36,6 +36,8 @@ When a user enters multiple whitespace-separated keywords, every normalized keyw
 
 Wave3B scene tabs now bind to the formal query scenes `RND_DIAGNOSIS`, `DEVICE_RISK`, and `MARKET_ISSUE`. Scene selection does not change substring matching, does not invent new weights, and does not change the returned `match_score`; it only uses the existing matched-field weights to prioritize scene-relevant results before applying the normal global score and stable knowledge-id tie break.
 
+In `DEVICE_RISK`, the UI also derives a read-only risk aggregation from explicit `DeviceRef` values already present in Formal Knowledge results. It groups matched Case/Knowledge counts and shows existing failure-mechanism and design-constraint text. Records without explicit `DeviceRef` are not inferred or assigned to a device group.
+
 Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. E2E Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
 
 Scope is limited to Hardware R1 E2E validation. This ZIP does not certify the whole Hardware Case MVP, a formal product release, or installer packages.
