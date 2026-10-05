@@ -2137,7 +2137,11 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
                 "evidence": cell.get("evidence") if formal else [],
             }
         values = {_comparison_fact_key(key, c) for c in cells.values()}
-        missing = any(c.get("review_status") != "CONFIRMED" for c in cells.values())
+        missing = any(
+            c.get("review_status") != "CONFIRMED"
+            and c.get("status") != "NOT_APPLICABLE"
+            for c in cells.values()
+        )
         exemplar = next((x for x in details[0]["slots"] if x.get("canonical_name") == key), {})
         parameter_name = next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key)
         knowledge = (
