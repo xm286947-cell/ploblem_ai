@@ -156,6 +156,78 @@ def test_source_candidates_can_be_confirmed_and_confirmed_revision_survives_rean
         assert old_pending["archived_at"] is not None
 
 
+def test_corrected_human_revision_survives_reanalysis_and_standardization(tmp_path: Path):
+    provider_calls = []
+
+    def provider(provider_input, pending_specs, _context):
+        provider_calls.append({
+            "input": provider_input,
+            "object_ids": [spec["object_id"] for spec in pending_specs],
+        })
+        source_content = {
+            item["entry_id"]: item["source_content"]
+            for item in provider_input["entries"]
+        }
+        return [
+            {
+                "object_id": spec["object_id"],
+                "data": {"content": "标准化建议：" + source_content[spec["object_id"]]},
+            }
+            for spec in pending_specs
+        ]
+
+    repository, case, service = _excel_only_standardization_service(tmp_path, provider)
+    first = service.analyze(case["case_id"])
+    candidate = next(
+        item for item in first["candidates"] if item["entry_type"] == "TRC_OCCURRENCE"
+    )
+    corrected = service.confirm_entry(
+        candidate["entry_id"],
+        reviewer="reviewer",
+        content="人工修订：增加复位保护时序检查",
+        reason="结合原始 Source Fact 核正表述",
+        action="CORRECT",
+    )
+
+    assert corrected["status"] == "CORRECTED"
+    assert corrected["origin"] == "HUMAN"
+    assert corrected["assertion_kind"] == "HUMAN_REVISION"
+    expected_entry_id = corrected["entry_id"]
+    expected_revision_id = corrected["current_revision_id"]
+    expected_content = corrected["content"]
+    expected_evidence = sorted(
+        (
+            item["evidence_id"], item["fragment_id"], item["source_link_id"],
+            item["locator"], item["excerpt"],
+        )
+        for item in corrected["evidence"]
+    )
+
+    second = service.analyze(case["case_id"])
+    after = repository.entry(expected_entry_id)
+
+    assert second["standardization"]["status"] == "COMPLETED"
+    assert after["entry_id"] == expected_entry_id
+    assert after["current_revision_id"] == expected_revision_id
+    assert after["content"] == expected_content
+    assert sorted(
+        (
+            item["evidence_id"], item["fragment_id"], item["source_link_id"],
+            item["locator"], item["excerpt"],
+        )
+        for item in after["evidence"]
+    ) == expected_evidence
+    assert after["archived_at"] is None
+    assert after["status"] == "CORRECTED"
+    assert after["origin"] == "HUMAN"
+    assert after["assertion_kind"] == "HUMAN_REVISION"
+    assert all(
+        expected_entry_id not in call["object_ids"]
+        for call in provider_calls[1:]
+    )
+    assert all(item["entry_id"] != expected_entry_id for item in second["candidates"])
+
+
 def test_source_fusion_archives_old_pending_ai_but_not_confirmed_human_entries(tmp_path: Path):
     repository, case, event, _, _, _, _, service = _setup(tmp_path)
     stale = repository.add_entry(
@@ -223,6 +295,50 @@ def _excel_only_standardization_service(tmp_path: Path, provider):
     return repository, case, service
 
 
+def _add_pdf_semantic_fragment(
+    repository: MajorKnowledgeRepository,
+    case_id: str,
+    event_id: str,
+    tmp_path: Path,
+    *,
+    name: str,
+    heading: str,
+    content: str,
+):
+    report_path = tmp_path / f"{name}.pdf"
+    report_path.write_bytes(b"test-only-placeholder")
+    document = repository.ingest_file(case_id, report_path)
+    repository.save_parse_result(
+        document["version_id"],
+        ParseResult("PDF", [
+            ParsedFragment(1, "", "PAGE", "page:1", "TEXT", f"{heading}\n{content}")
+        ]),
+    )
+    repository.add_source_link(
+        case_id,
+        event_id,
+        {"record_id": document["version_id"], "source_type": "MAJOR_DOCUMENT_VERSION"},
+        standard_itr="ITR20261006",
+        role="CURRENT_EVENT",
+        status="LINKED",
+    )
+
+
+def _mixed_source_standardization_service(tmp_path: Path, provider):
+    repository, case, service = _excel_only_standardization_service(tmp_path, provider)
+    event = repository.events(case["case_id"])[0]
+    _add_pdf_semantic_fragment(
+        repository,
+        case["case_id"],
+        event["event_id"],
+        tmp_path,
+        name="multisource-report",
+        heading="TRC发生",
+        content="复位保护时序设计不足",
+    )
+    return repository, case, service
+
+
 def test_unified_runtime_adds_only_evidence_bound_standardization_suggestions(tmp_path: Path):
     observed = {}
 
@@ -274,6 +390,113 @@ def test_unified_runtime_failure_leaves_source_candidates_reviewable(tmp_path: P
     assert repository.entries(case["case_id"])
 
 
+def _assert_failed_standardization_preserves_source_candidates(repository, result, case_id):
+    candidates = result["candidates"]
+    assert candidates
+    assert not {item["entry_type"] for item in candidates} & {"ROOT_CAUSE", "ACTION"}
+
+    for candidate in candidates:
+        saved = repository.entry(candidate["entry_id"])
+        assert saved["content"] == candidate["content"]
+        assert saved["status"] == candidate["status"]
+        assert saved["origin"] == "SOURCE_FUSION"
+        assert saved["analysis_metadata"].get("standardization") is None
+        assert sorted(
+            (
+                item["evidence_id"], item["fragment_id"], item["source_link_id"],
+                item["locator"], item["excerpt"],
+            )
+            for item in saved["evidence"]
+        ) == sorted(
+            (
+                item["evidence_id"], item["fragment_id"], item["source_link_id"],
+                item["locator"], item["excerpt"],
+            )
+            for item in candidate["evidence"]
+        )
+
+    missing = [item for item in candidates if item["status"] == "MISSING"]
+    assert missing
+    assert all(item["content"] == "" and item["evidence"] == [] for item in missing)
+    assert all(item["analysis_metadata"].get("standardization") is None for item in missing)
+    ambiguous = [
+        item for item in candidates
+        if item["analysis_metadata"].get("source_status") in {"MULTI_SOURCE", "CONFLICT"}
+    ]
+    assert "MULTI_SOURCE" in {item["analysis_metadata"]["source_status"] for item in ambiguous}
+    assert all(item["analysis_metadata"]["review_status"] == "REVIEW_REQUIRED" for item in ambiguous)
+    assert all(item["analysis_metadata"].get("standardization") is None for item in ambiguous)
+    assert repository.entries(case_id)
+
+
+def test_provider_not_configured_keeps_source_candidates_reviewable(tmp_path: Path):
+    repository, case, service = _mixed_source_standardization_service(tmp_path, None)
+
+    result = service.analyze(case["case_id"])
+
+    assert result["standardization"]["status"] == "SKIPPED_PROVIDER_NOT_CONFIGURED"
+    _assert_failed_standardization_preserves_source_candidates(repository, result, case["case_id"])
+
+
+@pytest.mark.parametrize(
+    "failure_mode",
+    ["timeout", "exception", "invalid_json", "schema_invalid", "incomplete", "runtime_partial"],
+)
+def test_provider_failure_matrix_preserves_source_candidates(tmp_path: Path, failure_mode: str):
+    calls = []
+
+    def provider(provider_input, pending_specs, _context):
+        calls.append((provider_input, pending_specs))
+        first_id = pending_specs[0]["object_id"]
+        valid = {"object_id": first_id, "data": {"content": "不得成为权威内容"}}
+        if failure_mode == "timeout":
+            raise TimeoutError("simulated provider timeout")
+        if failure_mode == "exception":
+            raise RuntimeError("simulated provider exception")
+        if failure_mode == "invalid_json":
+            return ["{not valid JSON"]
+        if failure_mode == "schema_invalid":
+            return [{**valid, "schema_valid": False}]
+        if failure_mode == "incomplete":
+            return [{**valid, "complete_object": False, "finish_reason": "length"}]
+        if failure_mode == "runtime_partial":
+            return [valid]
+        raise AssertionError(f"unknown failure mode: {failure_mode}")
+
+    repository, case, service = _mixed_source_standardization_service(tmp_path, provider)
+    result = service.analyze(case["case_id"])
+
+    assert result["standardization"]["status"] == "FAILED"
+    assert calls
+    _assert_failed_standardization_preserves_source_candidates(repository, result, case["case_id"])
+
+    provider_entries = {
+        item["entry_id"]: item for item in calls[0][0]["entries"]
+    }
+    blocked_ids = {
+        item["entry_id"] for item in result["candidates"]
+        if item["status"] == "MISSING"
+        or item["analysis_metadata"].get("source_status") in {"MULTI_SOURCE", "CONFLICT"}
+    }
+    assert not blocked_ids & set(provider_entries)
+    for entry_id, source_entry in provider_entries.items():
+        candidate = next(item for item in result["candidates"] if item["entry_id"] == entry_id)
+        assert candidate["content"] == source_entry["source_content"]
+        assert sorted(
+            (
+                item["evidence_id"], item["fragment_id"], item["source_link_id"],
+                item["locator"], item["excerpt"],
+            )
+            for item in candidate["evidence"]
+        ) == sorted(
+            (
+                item["evidence_id"], item["fragment_id"], item["source_link_id"],
+                item["locator"], item["excerpt"],
+            )
+            for item in source_entry["evidence"]
+        )
+
+
 def test_multi_source_and_conflict_candidates_are_never_sent_to_runtime(tmp_path: Path):
     calls = []
 
@@ -285,6 +508,13 @@ def test_multi_source_and_conflict_candidates_are_never_sent_to_runtime(tmp_path
     result = service.analyze(case["case_id"])
     assert result["standardization"]["status"] == "SKIPPED_NO_UNAMBIGUOUS_EVIDENCE"
     assert calls == []
+    multi_source = [
+        item for item in result["candidates"]
+        if item["analysis_metadata"].get("source_status") == "MULTI_SOURCE"
+    ]
+    assert multi_source
+    assert all(item["analysis_metadata"]["review_status"] == "REVIEW_REQUIRED" for item in multi_source)
+    assert all(item["analysis_metadata"].get("standardization") is None for item in multi_source)
 
     conflict_dir = tmp_path / "conflict"
     conflict_dir.mkdir()
@@ -294,6 +524,13 @@ def test_multi_source_and_conflict_candidates_are_never_sent_to_runtime(tmp_path
     conflict = conflict_service.analyze(conflict_case["case_id"])
     assert conflict["standardization"]["status"] == "SKIPPED_NO_UNAMBIGUOUS_EVIDENCE"
     assert calls == []
+    conflict_candidates = [
+        item for item in conflict["candidates"]
+        if item["analysis_metadata"].get("source_status") == "CONFLICT"
+    ]
+    assert conflict_candidates
+    assert all(item["analysis_metadata"]["review_status"] == "REVIEW_REQUIRED" for item in conflict_candidates)
+    assert all(item["analysis_metadata"].get("standardization") is None for item in conflict_candidates)
 
 
 def test_confirming_edited_available_candidate_requires_explicit_correct_action(tmp_path: Path):
