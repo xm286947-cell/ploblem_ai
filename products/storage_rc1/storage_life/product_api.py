@@ -60,6 +60,7 @@ DIAGNOSTIC_METHODS = {
     "media_errors": ("SMART / NVMe Health", "读取介质错误计数", "持续增长需结合日志与业务负载分析"),
     "critical_warning": ("NVMe SMART / Health", "读取 Critical Warning 位", "任一关键告警均进入人工诊断"),
     "available_spare": ("NVMe SMART / Health", "读取 Available Spare / Threshold", "低于阈值进入寿命风险关注"),
+    "available_spare_threshold": ("NVMe SMART / Health", "读取 Available Spare Threshold", "仅与同次 Available Spare 观测比较，不单独形成诊断"),
     "ecc_status": ("器件状态寄存器/驱动统计", "读取 ECC corrected/uncorrectable 状态", "观察纠错压力与不可纠正错误趋势"),
     "runtime_bad_block": ("MTD/UBI/驱动统计", "读取运行期坏块数量与增长", "坏块增长需结合擦写分布和 ECC 判断"),
     "read_retry": ("NAND Controller / 驱动统计", "统计 Read Retry 触发", "频繁触发提示读取裕量下降"),
