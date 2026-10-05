@@ -626,7 +626,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             latest[kind] = item
 
     runtime_trend = core.runtime_metric_trends(device_id, limit=40)
-    latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_snapshot_created_at"))
+    latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
     current_fact_fingerprint = _device_fact_fingerprint(detail)
 
@@ -739,13 +739,31 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
 
         if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_runtime_at:
-            assessment_created_at = _iso_datetime(item.get("created_at"))
-            if assessment_created_at and latest_formal_runtime_at > assessment_created_at:
+            recorded_capture_times = []
+            if kind in {"LIFETIME", "DIAGNOSIS"}:
+                recorded_capture_times = [
+                    _iso_datetime(x.get("capture_time"))
+                    for x in (recorded_input.get("runtime_observations") or [])
+                    if isinstance(x, dict) and x.get("capture_time")
+                ]
+            else:
+                recorded_runtime_context = (
+                    ((recorded_input.get("user_context") or {}).get("assessment_context") or {})
+                    .get("runtime_context") or []
+                )
+                recorded_capture_times = [
+                    _iso_datetime(x.get("captured_at"))
+                    for x in recorded_runtime_context
+                    if isinstance(x, dict) and x.get("captured_at")
+                ]
+            recorded_capture_times = [x for x in recorded_capture_times if x is not None]
+            latest_recorded_capture = max(recorded_capture_times) if recorded_capture_times else None
+            if latest_recorded_capture and latest_formal_runtime_at > latest_recorded_capture:
                 complete = False
                 next_action = (
-                    "存在更新的已确认 Runtime Snapshot；请基于最新运行数据重新执行该场景。"
+                    "存在采集时间更新的已确认 Runtime Snapshot；请基于最新运行数据重新执行该场景。"
                     if kind != "OPTIMIZATION"
-                    else "存在更新的已确认 Runtime Snapshot；请先刷新 S3/S4，再重新生成 S5 优化方案。"
+                    else "存在采集时间更新的已确认 Runtime Snapshot；请先刷新 S3/S4，再重新生成 S5 优化方案。"
                 )
         return {
             "type": kind,
@@ -1160,6 +1178,8 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     trend = core.runtime_metric_trends(device_id, limit=40)
     current_fact_fingerprint = _device_fact_fingerprint(detail)
 
+    latest_formal_capture = _iso_datetime(trend.get("latest_formal_capture_time"))
+
     def assessment_view(kind: str) -> dict[str, Any] | None:
         item = latest.get(kind)
         if not item:
@@ -1168,6 +1188,15 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
         if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
             return None
+        if latest_formal_capture and kind in {"LIFETIME", "DIAGNOSIS"}:
+            captures = [
+                _iso_datetime(x.get("capture_time"))
+                for x in (recorded_input.get("runtime_observations") or [])
+                if isinstance(x, dict) and x.get("capture_time")
+            ]
+            captures = [x for x in captures if x is not None]
+            if captures and latest_formal_capture > max(captures):
+                return None
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
         engineering = result.get("engineering_result") or {}
@@ -1229,6 +1258,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "metric_name": x.get("metric_name"),
             "latest_value": (x.get("latest") or {}).get("normalized_value"),
             "unit": (x.get("latest") or {}).get("unit"),
+            "captured_at": (x.get("latest") or {}).get("captured_at"),
             "delta": x.get("delta"),
             "sample_count": x.get("sample_count"),
         }
