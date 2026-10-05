@@ -38,3 +38,22 @@ test('human review editor exposes value only and keeps metadata read-only', () =
   assert.match(source, /evidence_block_ids/);
   assert.match(source, /Evidence metadata is read-only/);
 });
+
+
+test('formal review submits approval only and never resends candidate content', () => {
+  const start = source.indexOf("if (action === 'review')");
+  const end = source.indexOf("} else if (action === 'publish')", start);
+  assert.ok(start >= 0 && end > start);
+  const formalReviewBlock = source.slice(start, end);
+  assert.match(formalReviewBlock, /reviewer/);
+  assert.match(formalReviewBlock, /review_comment/);
+  assert.doesNotMatch(formalReviewBlock, /confirmed_content/);
+});
+
+test('human review supports evidence-bound parameter add and remove', () => {
+  assert.match(source, /data-human-review-add-parameter/);
+  assert.match(source, /data-human-review-remove-parameter/);
+  assert.match(source, /data-human-review-new-evidence/);
+  assert.match(source, /__review_original_index/);
+  assert.match(source, /__review_new/);
+});
