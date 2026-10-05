@@ -319,7 +319,14 @@ def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -
                 "PRAGMA table_info(hardware_r1_batch_item)"
             )
         }
+        batch_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(hardware_r1_batch)"
+            )
+        }
     assert "candidate_id" in columns
+    assert {"dataset_manifest_json", "dataset_frozen_at"}.issubset(batch_columns)
 
 
 @pytest.mark.parametrize("status", ["REVIEW", "CANDIDATE_READY"])
