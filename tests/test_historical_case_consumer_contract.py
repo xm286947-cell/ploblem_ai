@@ -103,18 +103,23 @@ def _save_typed_projection(root: Path, *, missing: set[str] | None = None, corru
             section_sequence += 1
             evidence_id = f"EVD-{entry_type}-{section_sequence}"
             raw_text = f"原文 {entry_type} {index}"
+            raw_source_type = "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT"
+            source_id = f"ITR-H-{entry_type}"
+            source_version = "PUB-REV-1"
+            origin_source_id = f"ORIGIN-{entry_type}-{index}"
+            origin_source_version = f"ORIGIN-REV-{index}"
             refs.append({"source_type": modality, "source_location": f"evidence://{evidence_id}", "quote": raw_text})
             section = {
                 "evidence_id": evidence_id,
                 "entry_type": entry_type,
                 "source_modality": modality,
-                "source_type": "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT",
-                "source_id": f"ITR-H-{entry_type}",
-                "source_version": "PUB-REV-1",
-                "source_ref": f"SOURCE:ITR-H-{entry_type}@PUB-REV-1",
-                "origin_source_id": f"ORIGIN-{entry_type}-{index}",
-                "origin_source_version": f"ORIGIN-REV-{index}",
-                "origin_source_ref": f"ORIGIN:ID@REV-{index}",
+                "source_type": raw_source_type,
+                "source_id": source_id,
+                "source_version": source_version,
+                "source_ref": f"{raw_source_type}:{source_id}@{source_version}",
+                "origin_source_id": origin_source_id,
+                "origin_source_version": origin_source_version,
+                "origin_source_ref": f"{raw_source_type}:{origin_source_id}@{origin_source_version}",
                 "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
                 "page": 3 if modality == "PDF" else None,
                 "section": entry_type,
@@ -125,6 +130,14 @@ def _save_typed_projection(root: Path, *, missing: set[str] | None = None, corru
                 section["entry_type"] = "TRC_ESCAPE"
             if corrupt == "duplicate_id" and entry_type == "TRC_OCCURRENCE":
                 sections.append(dict(section))
+            if corrupt == "source_ref_mismatch" and entry_type == "TRC_OCCURRENCE":
+                section["source_ref"] = f"{raw_source_type}:{source_id}@WRONG-REVISION"
+            if corrupt == "origin_source_ref_mismatch" and entry_type == "TRC_OCCURRENCE":
+                section["origin_source_ref"] = f"{raw_source_type}:{origin_source_id}@WRONG-REVISION"
+            if corrupt == "source_tuple_missing" and entry_type == "TRC_OCCURRENCE":
+                section["source_version"] = None
+            if corrupt == "origin_tuple_missing" and entry_type == "TRC_OCCURRENCE":
+                section["origin_source_id"] = None
             sections.append(section)
         declared = "FUSED" if len(set(modalities)) == 2 else modalities[0]
         return {"value": value, "source_type": declared, "evidence_refs": refs}
@@ -151,6 +164,8 @@ def _save_typed_projection(root: Path, *, missing: set[str] | None = None, corru
             ]
         else:
             solution[field] = [item(entry_type, f"措施 {entry_type}")]
+    if corrupt == "invalid_declared_source_type":
+        solution["corrective_actions"][0]["source_type"] = "DOCX"
     case = {
         "metadata": {
             "case_id": "CASE-H-1",
@@ -282,7 +297,8 @@ def test_repeat_risk_missing_slots_remain_missing_without_inference(tmp_path: Pa
     assert all(item["semantic_type"] != "PREVENTIVE_ACTION" for item in context["typed_actions"])
 
 
-def test_unclassified_source_modality_does_not_invent_excel_pdf_or_fused(tmp_path: Path):
+@pytest.mark.parametrize("modality", ["DOCX", None])
+def test_undefendable_source_modality_fails_closed(tmp_path: Path, modality: str | None):
     service = _save_typed_projection(tmp_path)
     repository = JsonArtifactRepository(tmp_path)
     case = repository.load("knowledge/enriched_case/CASE-H-1.json")
@@ -290,16 +306,17 @@ def test_unclassified_source_modality_does_not_invent_excel_pdf_or_fused(tmp_pat
     ref = case["analysis"]["trc"]["occurrence"]["evidence_refs"][0]
     evidence_id = ref["source_location"].removeprefix("evidence://")
     section = next(item for item in raw["sections"] if item["evidence_id"] == evidence_id)
-    section["source_modality"] = "DOCX"
-    ref["source_type"] = "DOCX"
+    if modality is None:
+        section.pop("source_modality")
+    else:
+        section["source_modality"] = modality
+        ref["source_type"] = modality
     repository.save("knowledge/enriched_case/CASE-H-1.json", case)
     repository.save("knowledge/raw_evidence/CASE-H-1.json", raw)
 
-    context = service.get_repeat_risk_context("CASE-H-1")
-    occurrence = next(item for item in context["typed_causes"] if item["semantic_type"] == "TRC_OCCURRENCE")
-
-    assert occurrence["source_type"] is None
-    assert occurrence["evidence"][0]["source_type"] == "DOCX"
+    with pytest.raises(HistoricalCaseContractError) as error:
+        service.get_repeat_risk_context("CASE-H-1")
+    assert error.value.code == "CASE_SEMANTIC_PROJECTION_INVALID"
 
 
 def test_legacy_case_is_generic_only_and_never_semantically_classified(tmp_path: Path):
@@ -311,7 +328,10 @@ def test_legacy_case_is_generic_only_and_never_semantically_classified(tmp_path:
     assert set(context["semantic_coverage"].values()) == {"LEGACY_GENERIC_ONLY"}
 
 
-@pytest.mark.parametrize("corrupt", ["unknown_contract", "wrong_type", "quote_mismatch", "duplicate_id"])
+@pytest.mark.parametrize("corrupt", [
+    "unknown_contract", "wrong_type", "quote_mismatch", "duplicate_id",
+    "source_ref_mismatch", "origin_source_ref_mismatch", "invalid_declared_source_type",
+])
 def test_invalid_typed_contract_or_evidence_fails_closed(tmp_path: Path, corrupt: str):
     service = _save_typed_projection(tmp_path, corrupt=corrupt)
 
@@ -321,4 +341,18 @@ def test_invalid_typed_contract_or_evidence_fails_closed(tmp_path: Path, corrupt
     assert error.value.code in {
         "CASE_SEMANTIC_CONTRACT_UNSUPPORTED",
         "CASE_SEMANTIC_EVIDENCE_INVALID",
+        "CASE_SEMANTIC_SOURCE_MISMATCH",
+        "CASE_SEMANTIC_PROJECTION_INVALID",
     }
+
+
+@pytest.mark.parametrize("corrupt", [
+    "source_ref_mismatch", "origin_source_ref_mismatch", "source_tuple_missing", "origin_tuple_missing",
+])
+def test_source_lineage_mismatch_returns_stable_error(tmp_path: Path, corrupt: str):
+    service = _save_typed_projection(tmp_path, corrupt=corrupt)
+
+    with pytest.raises(HistoricalCaseContractError) as error:
+        service.get_repeat_risk_context("CASE-H-1")
+
+    assert error.value.code == "CASE_SEMANTIC_SOURCE_MISMATCH"

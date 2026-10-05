@@ -221,17 +221,22 @@ def _install_i4_typed_case(artifacts: JsonArtifactRepository, *, missing=(), cor
         evidence_id = f"I4-EVD-{entry_type}-{sequence}"
         raw_text = f"原始 Evidence {entry_type} {sequence}"
         modality = "PDF" if sequence % 2 else "EXCEL"
+        source_type = "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT"
+        source_id = "ITR-H-1"
+        source_version = "PUB-REV-1"
+        origin_source_id = f"SRC-{sequence}"
+        origin_source_version = f"SRC-REV-{sequence}"
         sections.append({
             "evidence_id": evidence_id,
             "entry_type": entry_type if not (corrupt and entry_type == "TRC_OCCURRENCE") else "TRC_ESCAPE",
             "source_modality": modality,
-            "source_type": "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT",
-            "source_id": "ITR-H-1",
-            "source_version": "PUB-REV-1",
-            "source_ref": "MAJOR_EVENT:ITR-H-1@PUB-REV-1",
-            "origin_source_id": f"SRC-{sequence}",
-            "origin_source_version": f"SRC-REV-{sequence}",
-            "origin_source_ref": f"SOURCE:SRC-{sequence}@SRC-REV-{sequence}",
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_version": source_version,
+            "source_ref": f"{source_type}:{source_id}@{source_version}",
+            "origin_source_id": origin_source_id,
+            "origin_source_version": origin_source_version,
+            "origin_source_ref": f"{source_type}:{origin_source_id}@{origin_source_version}",
             "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
             "page": 7 if modality == "PDF" else None,
             "section": entry_type,
@@ -413,7 +418,7 @@ def test_i4_typed_semantics_are_additive_with_fixed_coverage_and_bound_evidence(
     corrective = [item for item in candidate["typed_actions"] if item["semantic_type"] == "CORRECTIVE_ACTION"]
     assert [item["value"] for item in corrective] == ["Typed CORRECTIVE_ACTION", "Typed CORRECTIVE_ACTION second"]
     assert corrective[0]["evidence"][0]["evidence_id"] != corrective[1]["evidence"][0]["evidence_id"]
-    assert corrective[0]["evidence"][0]["origin_source_ref"].startswith("SOURCE:")
+    assert corrective[0]["evidence"][0]["origin_source_ref"].startswith("MAJOR_EXCEL_SOURCE_FACT:SRC-")
     assert candidate["rank"] == 1 and candidate["retrieval_score"] == 0.87
     assert candidate["why_relevant"][0]["text"] == "问题均发生于掉电恢复场景"
 

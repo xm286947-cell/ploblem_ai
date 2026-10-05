@@ -73,27 +73,30 @@ def _install_case(artifacts: JsonArtifactRepository, mode: str) -> None:
                 sequence += 1
                 evidence_id = f"I4-GOLD-EVD-{sequence}"
                 raw_text = f"BOUND_RAW_EVIDENCE_{entry_type}_{sequence}"
+                raw_source_type = "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT"
+                source_id = "ITR-I4-HISTORY"
+                source_version = "I4-PUB-1"
+                origin_source_id = f"SOURCE-{sequence}"
+                origin_source_version = f"SOURCE-REV-{sequence}"
                 sections.append({
                     "evidence_id": evidence_id,
-                    "entry_type": (
-                        "TRC_ESCAPE"
-                        if mode == "corrupt" and entry_type == "TRC_OCCURRENCE"
-                        else entry_type
-                    ),
+                    "entry_type": entry_type,
                     "source_modality": modality,
-                    "source_type": "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT",
-                    "source_id": "ITR-I4-HISTORY",
-                    "source_version": "I4-PUB-1",
-                    "source_ref": "MAJOR_EVENT:ITR-I4-HISTORY@I4-PUB-1",
-                    "origin_source_id": f"SOURCE-{sequence}",
-                    "origin_source_version": f"SOURCE-REV-{sequence}",
-                    "origin_source_ref": f"SOURCE:SOURCE-{sequence}@SOURCE-REV-{sequence}",
+                    "source_type": raw_source_type,
+                    "source_id": source_id,
+                    "source_version": source_version,
+                    "source_ref": f"{raw_source_type}:{source_id}@{source_version}",
+                    "origin_source_id": origin_source_id,
+                    "origin_source_version": origin_source_version,
+                    "origin_source_ref": f"{raw_source_type}:{origin_source_id}@{origin_source_version}",
                     "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
                     "page": 7 if modality == "PDF" else None,
                     "section": entry_type,
                     "raw_text": raw_text,
                     "url": None,
                 })
+                if mode == "corrupt" and entry_type == "TRC_OCCURRENCE":
+                    sections[-1]["origin_source_ref"] = f"{raw_source_type}:{origin_source_id}@WRONG-REVISION"
                 refs.append({
                     "source_type": modality,
                     "source_location": f"evidence://{evidence_id}",
@@ -280,12 +283,12 @@ def main() -> int:
             assert "LEGACY_ACTION_MUST_NOT_DISPLAY" in page.locator("[data-repeat-risk]").inner_text()
             print("G4_BROWSER=PASS")
 
-            # G5: corrupt evidence is incomplete; no generic fallback or decision.
+            # G5: mismatched source lineage is incomplete; no generic fallback or decision.
             _install_case(artifacts, "corrupt")
             page.click("[data-repeat-query]")
             page.get_by_text("查询结果不完整").wait_for()
             restored_state = page.evaluate("async () => (await fetch('/api/v2/issues/K-I4-GOLDEN/repeat-risk')).json()")
-            assert restored_state["latest_result"]["candidates"][0]["detail_error"] == "CASE_SEMANTIC_EVIDENCE_INVALID"
+            assert restored_state["latest_result"]["candidates"][0]["detail_error"] == "CASE_SEMANTIC_SOURCE_MISMATCH"
             assert restored_state["latest_result"]["human_decision"]["decision"] == "PENDING"
             assert "GENERIC_FALLBACK_MUST_NOT_DISPLAY" not in page.locator("[data-repeat-risk]").inner_text()
             assert page.locator("[data-repeat-state='incomplete'] [data-repeat-decision]").input_value() == ""

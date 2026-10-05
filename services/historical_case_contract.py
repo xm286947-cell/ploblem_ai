@@ -396,7 +396,6 @@ class HistoricalCaseConsumerService:
             raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
         evidence: list[dict[str, Any]] = []
         modalities: set[str] = set()
-        all_modalities_defensible = True
         for reference in refs:
             if not isinstance(reference, dict):
                 raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
@@ -423,6 +422,9 @@ class HistoricalCaseConsumerService:
                 or quote != raw_text
             ):
                 raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            modality = section.get("source_modality")
+            if not isinstance(modality, str) or modality not in {"EXCEL", "PDF"}:
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
             reference_source_type = _text(reference.get("source_type"))
             section_source_types = {
                 _text(section.get("source_modality")),
@@ -435,21 +437,42 @@ class HistoricalCaseConsumerService:
             ):
                 raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
 
-            modality = _text(section.get("source_modality"))
-            if modality in {"EXCEL", "PDF"}:
-                modalities.add(modality)
-            else:
-                all_modalities_defensible = False
-            public_source_type = modality or _text(section.get("source_type"))
+            modalities.add(modality)
+            raw_source_type = section.get("source_type")
+            source_id = section.get("source_id")
+            source_version = section.get("source_version")
+            source_ref = section.get("source_ref")
+            origin_source_id = section.get("origin_source_id")
+            origin_source_version = section.get("origin_source_version")
+            origin_source_ref = section.get("origin_source_ref")
+            lineage_fields = (
+                raw_source_type,
+                source_id,
+                source_version,
+                source_ref,
+                origin_source_id,
+                origin_source_version,
+                origin_source_ref,
+            )
+            if any(
+                not isinstance(field, str) or not field or field != field.strip()
+                for field in lineage_fields
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_SOURCE_MISMATCH")
+            if (
+                source_ref != f"{raw_source_type}:{source_id}@{source_version}"
+                or origin_source_ref != f"{raw_source_type}:{origin_source_id}@{origin_source_version}"
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_SOURCE_MISMATCH")
             evidence.append({
                 "evidence_id": evidence_id,
-                "source_type": public_source_type,
-                "source_id": section.get("source_id"),
-                "source_version": section.get("source_version"),
-                "source_ref": section.get("source_ref"),
-                "origin_source_id": section.get("origin_source_id"),
-                "origin_source_version": section.get("origin_source_version"),
-                "origin_source_ref": section.get("origin_source_ref"),
+                "source_type": modality,
+                "source_id": source_id,
+                "source_version": source_version,
+                "source_ref": source_ref,
+                "origin_source_id": origin_source_id,
+                "origin_source_version": origin_source_version,
+                "origin_source_ref": origin_source_ref,
                 "file_name": section.get("file_name"),
                 "page": section.get("page"),
                 "section": section.get("section"),
@@ -457,15 +480,18 @@ class HistoricalCaseConsumerService:
                 "url": section.get("url"),
             })
 
-        projected_source_type = None
-        if all_modalities_defensible:
-            projected_source_type = (
-                "FUSED" if modalities == {"EXCEL", "PDF"}
-                else next(iter(modalities)) if len(modalities) == 1
-                else None
-            )
-        declared = _text(declared_source_type)
-        if declared in {"EXCEL", "PDF", "FUSED"} and declared != projected_source_type:
+        projected_source_type = (
+            "FUSED" if modalities == {"EXCEL", "PDF"}
+            else next(iter(modalities)) if len(modalities) == 1
+            else None
+        )
+        if projected_source_type not in {"EXCEL", "PDF", "FUSED"}:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if declared_source_type is not None and (
+            not isinstance(declared_source_type, str)
+            or declared_source_type not in {"EXCEL", "PDF", "FUSED"}
+            or declared_source_type != projected_source_type
+        ):
             raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
         return {
             "semantic_type": entry_type,

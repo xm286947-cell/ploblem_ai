@@ -11,6 +11,7 @@ from quality_knowledge.repeat_risk import (
     SEARCH_UNAVAILABLE,
     RepeatHistoricalCaseSearchService,
     RepeatQueryTraceRepository,
+    RepeatResultService,
     RepeatSearchContractError,
 )
 from services.historical_case_contract import HistoricalCaseContractError
@@ -330,6 +331,7 @@ def test_typed_context_is_additive_and_does_not_change_retrieval_identity(tmp_pa
     "CASE_SEMANTIC_CONTRACT_UNSUPPORTED",
     "CASE_SEMANTIC_EVIDENCE_INVALID",
     "CASE_SEMANTIC_PROJECTION_INVALID",
+    "CASE_SEMANTIC_SOURCE_MISMATCH",
 ])
 def test_typed_context_error_preserves_candidate_but_never_falls_back_to_generic(tmp_path, error_code):
     repository = _repository(tmp_path)
@@ -351,3 +353,8 @@ def test_typed_context_error_preserves_candidate_but_never_falls_back_to_generic
     assert "measures" not in candidate
     assert candidate["typed_causes"] == []
     assert candidate["semantic_mode"] == "INCOMPLETE"
+    saved_result = RepeatResultService(repository).build(result)
+    assert saved_result["result_status"] == "INCOMPLETE"
+    assert saved_result["human_decision"]["decision"] == "PENDING"
+    assert saved_result["candidates"][0]["root_causes"] == []
+    assert saved_result["candidates"][0]["measures"] == []
