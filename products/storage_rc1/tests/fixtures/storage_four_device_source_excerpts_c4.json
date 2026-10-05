@@ -1,0 +1,152 @@
+{
+  "schema_version": "storage-four-device-source-excerpts-c4/v1",
+  "excerpts": [
+    {
+      "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "page": 1,
+      "section": "Cover / Document Identity",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "SkyHigh Memory Limited\nDocument Number: 002-01118 Rev. D\nRevised Apr. 29, 2025\ne.MMC 5.1 Specification Compatible"
+    },
+    {
+      "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "page": 4,
+      "section": "General Description / SkyHigh Product Offering",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "SkyHigh e.MMC is a managed NAND memory solution designed for embedded applications. SkyHigh e.MMC includes a flash controller and a standard MLC NAND flash memory, and is compatible with the JEDEC JESD84-B51\nThe SkyHigh e.MMC product offering includes: 4/8/16 GB in 153-FBGA (11.5 mm x 13 mm) packages.\n16 GB: S40FC016"
+    },
+    {
+      "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "page": 8,
+      "section": "Table 5.1 Partition Type",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Table 5.1 Partition Type\nPartition NAND Mode\nBoot Area 1 SLC Mode\nBoot Area 2 SLC Mode\nRPMB Area SLC Mode\nGeneral Purpose Partition MLC or SLC Mode\nEnhanced SLC Mode\nDefault MLC Mode"
+    },
+    {
+      "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "page": 10,
+      "section": "5.10 Health Monitoring",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Health Monitoring is a proprietary feature of the SkyHigh e.MMC product that provides useful information about the life span of the NAND flash component. The host can query for the device’s health by using the CMD60 command to get information such as the number of bad blocks and the number of erase cycles for each block. EXT_CSD registers [269:254] also contain valuable device health information."
+    },
+    {
+      "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978",
+      "page": 13,
+      "section": "6.5 Extended CSD Register (EXT_CSD)",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Vendor proprietary health report VENDOR_PROPRIETARY_HEALTH_REPORT 32 R [301:270]\nDevice Life Time Estimation Type B DEVICE_LIFE_TIME_EST_TYP_B 1 R [269]\nDevice Life Time Estimation Type A DEVICE_LIFE_TIME_EST_TYP_A 1 R [268]\nPre-EOL Information PRE_EOL_INFO 1 R [267]\nBackground Operations Status BKOPS_STATUS 1 R [246]"
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 4,
+      "section": "1 FEATURE",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "SPI-NAND GD5F1GQ5xExxG\n◆ 1Gb SLC NAND Flash\n◆ Organization\n- Internal ECC On (ECC_EN=1, default)\nPage Size：2048-Byte+64-Byte\n◆ Reliability\n- P/E cycles with ECC: 100K\n- Data retention: 10 Years\n- Internal ECC\n4bits /528byte\nNote: (1) ECC is on default, which can be disable by user."
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 10,
+      "section": "4 ARRAY ORGANIZATION",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "1 block = (2K + 128) bytes x 64 pages.\n1G: 1024 blocks."
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 44,
+      "section": "Status Register / ECC Status",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Status C0H Reserved Reserved ECCS1 ECCS0 P_FAIL E_FAIL WEL OIP\nP_FAIL Program Fail indicates a program failure has occurred\nE_FAIL Erase Fail indicates an erase failure has occurred"
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 46,
+      "section": "12.3 Status Register / ECC Status",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Table 12-3. ECC Error Bits Descriptions\nECCS1 ECCS0 ECCSE1 ECCSE0 Description\n0 0 x x No bit errors were detected during the previous read algorithm\n0 1 0 0 Bit errors(=1) were detected and corrected\n0 1 0 1 Bit errors (=2) were detected and corrected.\n0 1 1 0 Bit errors (=3) were detected and corrected.\n0 1 1 1 Bit errors (=4) were detected and corrected.\n1 1 x x Reserved\n1 0 x x Bit errors greater than ECC capability(4 bits) and not corrected"
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 48,
+      "section": "12.4 Bad Block Management",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "The factory identifies invalid blocks before shipping by programming the Bad Block Mark (00h) to the first spare area location in each bad block. System software should initially check the first spare area location for non-FFH data on the first page of each block prior to performing any program or erase operations. A bad-block table can then be created."
+    },
+    {
+      "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a",
+      "page": 65,
+      "section": "Important Notice / Document Owner",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "This document is the property of GigaDevice Semiconductor (Beijing) Inc. and its subsidiaries"
+    },
+    {
+      "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "page": 1,
+      "section": "Title / Document Identity",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "GD25Q64E-Rev1.6 1 April 2024\nGD25Q64E\nDATASHEET"
+    },
+    {
+      "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "page": 4,
+      "section": "1 FEATURES / Endurance and Data Retention",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "◆ Endurance and Data Retention\n- Minimum 100,000 Program/Erase Cycles\n- 20-year data retention typical"
+    },
+    {
+      "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "page": 14,
+      "section": "6 STATUS REGISTER / Tables 7-8",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Table 7. Status Register-SR No.1\nS1 WEL Write Enable Latch Volatile, read only\nS0 WIP Erase/Write In Progress Volatile, read only\nTable 8. Status Register-SR No.2\nS15 SUS1 Erase Suspend Bit Volatile, read only\nS10 SUS2 Program Suspend Bit Volatile, read only"
+    },
+    {
+      "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "page": 65,
+      "section": "11 REVISION HISTORY",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "1.6 Add VPWD and tPWD P39 2024-4-28"
+    },
+    {
+      "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602",
+      "page": 66,
+      "section": "Important Notice / Document Owner",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "This document is the property of GigaDevice Semiconductor Inc. and its subsidiaries"
+    },
+    {
+      "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a",
+      "page": 2,
+      "section": "Specifications / Endurance / Environment",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Capacity 256GB/512GB/1TB/2TB\nPCIe Gen 4 16Gb/s interface with up to 4 lanes.\nCompliant with NVMe Revision 2.0.\nSupporting host memory buffer.\nSupporting PLP (Optional).\nTBW* - 256GB: 768TB - 512GB: 1500TB - 1TB: 3000TB - 2TB: 6000TB *(WAF=1)\nOperating : A97M8-Y/A97M8-PY: -40°C~+85°C K97M8-Y/K97M8-PY: -25°C~+85°C S97M8-Y/S97M8-PY: -10°C~+70°C\nMTBF - 3,000,000 hours\nUBER - < 1 sector per 10^15 bits read"
+    },
+    {
+      "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a",
+      "page": 5,
+      "section": "General Description",
+      "method": "frozen_source_pdf_text_excerpt",
+      "text": "Industrial SSDs use NAND Flash Memory and provide high reliability in a small form factor."
+    },
+    {
+      "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c",
+      "page": 1,
+      "section": "K97M8-Y Product Specification / Flash Type",
+      "method": "frozen_html_snapshot_excerpt",
+      "text": "<td>Flash Type</td>\n<td>3D TLC</td>\n<td>Capacity</td>"
+    },
+    {
+      "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c",
+      "page": 1,
+      "section": "K97M8-Y Product Specification / S.M.A.R.T.",
+      "method": "frozen_html_snapshot_excerpt",
+      "text": "<td>S.M.A.R.T.</td>\n<td>YES</td>"
+    },
+    {
+      "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c",
+      "page": 1,
+      "section": "K97M8-Y Product Specification / MTBF",
+      "method": "frozen_html_snapshot_excerpt",
+      "text": "<td>MTBF(hours)</td>\n<td>3000000</td>"
+    }
+  ]
+}

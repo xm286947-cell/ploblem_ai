@@ -1,0 +1,176 @@
+{
+  "schema_version": "storage-four-device-automated-golden-c4/v1",
+  "baseline": "integration/storage@fe4846b2183f2ff5349d201de842377afb81dd87",
+  "legacy_regression_fixtures_are_not_device_golden": true,
+  "cases": [
+    {
+      "golden_id": "G-S40FC016",
+      "device_type": "eMMC",
+      "vendor": "SkyHigh Memory",
+      "sample": "S40FC016",
+      "historical_baseline_ref": "eMMC Schema & GoldenSample V0.2 2026-09-18",
+      "source_refs": [
+        {"source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "sha256": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "source_kind": "datasheet_pdf", "file_name": "STDL-PM-001_skyhigh_s40fc016.pdf", "drive_id": "1jObAf9vbwsHzu9X-sLM5kW9Gz4L8jjId"}
+      ],
+      "positive_assertions": [
+        {"field_key": "manufacturer", "value": "SkyHigh Memory", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Cover / Document Identity", "quote": "SkyHigh Memory Limited"},
+        {"field_key": "product_family", "value": "S40FC016", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 4, "section": "SkyHigh Product Offering", "quote": "16 GB: S40FC016"},
+        {"field_key": "covered_part_numbers", "value": "S40FC016", "scope_values": ["S40FC016"], "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 4, "section": "SkyHigh Product Offering", "quote": "16 GB: S40FC016"},
+        {"field_key": "document_number", "value": "002-01118", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Cover / Document Identity", "quote": "Document Number: 002-01118 Rev. D"},
+        {"field_key": "revision", "value": "D", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Cover / Document Identity", "quote": "Document Number: 002-01118 Rev. D"},
+        {"field_key": "revision_date", "value": "2025-04-29", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Cover / Document Identity", "quote": "Revised Apr. 29, 2025"},
+        {"field_key": "capacity", "value": "16", "unit": "GB", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 4, "section": "SkyHigh Product Offering", "quote": "16 GB: S40FC016"},
+        {"field_key": "emmc_version", "value": "eMMC 5.1 / JESD84-B51", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Features", "quote": "e.MMC 5.1 Specification Compatible", "supporting_evidence": [
+          {"claim": "emmc_5_1", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 1, "section": "Cover / Document Identity", "quote": "e.MMC 5.1 Specification Compatible"},
+          {"claim": "jesd84_b51", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 4, "section": "General Description / SkyHigh Product Offering", "quote": "is compatible with the JEDEC JESD84-B51"}
+        ]},
+        {"field_key": "native_nand_type", "value": "MLC", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 4, "section": "General Description", "quote": "a standard MLC NAND flash memory"},
+        {"field_key": "boot_area_1", "value": "SLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "Boot Area 1 SLC Mode"},
+        {"field_key": "boot_area_2", "value": "SLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "Boot Area 2 SLC Mode"},
+        {"field_key": "rpmb", "value": "SLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "RPMB Area SLC Mode"},
+        {"field_key": "general_purpose_partition", "value": "MLC or SLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "General Purpose Partition MLC or SLC Mode"},
+        {"field_key": "enhanced_user_data_area", "value": "SLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "Enhanced SLC Mode"},
+        {"field_key": "default_user_data_area", "value": "MLC Mode", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "Default MLC Mode"},
+        {"field_key": "enhanced_area_supported", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 8, "section": "Table 5.1 Partition Type", "quote": "Enhanced SLC Mode"},
+        {"field_key": "device_life_time_est_typ_a", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 13, "section": "EXT_CSD", "quote": "DEVICE_LIFE_TIME_EST_TYP_A 1 R [268]"},
+        {"field_key": "device_life_time_est_typ_b", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 13, "section": "EXT_CSD", "quote": "DEVICE_LIFE_TIME_EST_TYP_B 1 R [269]"},
+        {"field_key": "pre_eol_info", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 13, "section": "EXT_CSD", "quote": "PRE_EOL_INFO 1 R [267]"},
+        {"field_key": "bkops_status", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 13, "section": "EXT_CSD", "quote": "BKOPS_STATUS 1 R [246]"},
+        {"field_key": "vendor_proprietary_health_report", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 13, "section": "EXT_CSD", "quote": "VENDOR_PROPRIETARY_HEALTH_REPORT 32 R [301:270]"},
+        {"field_key": "vendor_health_monitoring", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 10, "section": "5.10 Health Monitoring", "quote": "Health Monitoring is a proprietary feature"},
+        {"field_key": "access_method", "value": "CMD60", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 10, "section": "5.10 Health Monitoring", "quote": "using the CMD60 command"},
+        {"field_key": "bad_block_count", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 10, "section": "5.10 Health Monitoring", "quote": "number of bad blocks"},
+        {"field_key": "erase_cycle_count", "value": "Supported", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 10, "section": "5.10 Health Monitoring", "quote": "number of erase cycles for each block"},
+        {"field_key": "erase_cycle_granularity", "value": "per block", "source_id": "a40b2ecc44c89184dbcaed3f8d48e7615e4daefaf7732076a40f7bc73751e978", "page": 10, "section": "5.10 Health Monitoring", "quote": "erase cycles for each block"}
+      ],
+      "negative_assertions": [
+        {"field_key": "pe_cycle", "status": "missing"},
+        {"field_key": "data_retention", "status": "missing"}
+      ],
+      "scope_assertions": [
+        {"field_key": "native_nand_type", "value": "MLC", "scope_type": "product_family"},
+        {"field_key": "enhanced_user_data_area", "value": "SLC Mode", "scope_type": "product_family"},
+        {"field_key": "default_user_data_area", "value": "MLC Mode", "scope_type": "product_family"},
+        {"rule": "enhanced SLC partition does not imply whole-device SLC"}
+      ],
+      "condition_assertions": [],
+      "source_binding_assertions": []
+    },
+    {
+      "golden_id": "G-GD5F1GQ5",
+      "device_type": "NAND Flash",
+      "vendor": "GigaDevice",
+      "sample": "GD5F1GQ5UExxG / GD5F1GQ5xExxG",
+      "historical_baseline_ref": "NAND validation baseline V0.1 2026-09-18",
+      "source_refs": [
+        {"source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "sha256": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "source_kind": "datasheet_pdf", "file_name": "STDL-PM-009_gd5f1gq5.pdf", "drive_id": "1vjSqdrafib7z6Wl2bIKnQZ7lzRIHayKz"}
+      ],
+      "positive_assertions": [
+        {"field_key": "manufacturer", "value": "GigaDevice", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 65, "section": "Important Notice / Document Owner", "quote": "GigaDevice Semiconductor (Beijing) Inc."},
+        {"field_key": "product_family", "value": "GD5F1GQ5xExxG", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "GD5F1GQ5xExxG"},
+        {"field_key": "cell_type", "value": "SLC", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "1Gb SLC NAND Flash"},
+        {"field_key": "pe_cycles", "value": "100000", "unit": "cycles", "condition": "With ECC", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "P/E cycles with ECC: 100K"},
+        {"field_key": "retention", "value": "10 Years", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "Data retention: 10 Years"},
+        {"field_key": "page_size", "value": "2048-Byte+64-Byte", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "Page Size：2048-Byte+64-Byte"},
+        {"field_key": "pages_per_block", "value": "64", "unit": "pages", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 10, "section": "4 ARRAY ORGANIZATION", "quote": "1 block = (2K + 128) bytes x 64 pages."},
+        {"field_key": "block_count", "value": "1024", "unit": "blocks/die", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 10, "section": "4 ARRAY ORGANIZATION", "quote": "1G: 1024 blocks."},
+        {"field_key": "ecc_capability", "value": "4", "unit": "bits/528byte", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "4bits /528byte"},
+        {"field_key": "internal_ecc", "value": "Supported / default on", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 4, "section": "1 FEATURE", "quote": "Internal ECC On (ECC_EN=1, default)"},
+        {"field_key": "status_register", "value": "C0H", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 44, "section": "Status Register", "quote": "Status C0H Reserved Reserved ECCS1 ECCS0 P_FAIL E_FAIL WEL OIP"},
+        {"field_key": "program_fail", "value": "P_FAIL", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 44, "section": "Status Register", "quote": "P_FAIL Program Fail"},
+        {"field_key": "erase_fail", "value": "E_FAIL", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 44, "section": "Status Register", "quote": "E_FAIL Erase Fail"},
+        {"field_key": "ecc_status", "value": "No error / corrected 1-4 bits / uncorrectable", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "ECC Error Bits Descriptions", "quote": "0 1 1 1 Bit errors (=4) were detected and corrected.", "supporting_evidence": [
+          {"claim": "no_error", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "0 0 x x No bit errors were detected during the previous read algorithm"},
+          {"claim": "corrected_1_bit", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "0 1 0 0 Bit errors(=1) were detected and corrected"},
+          {"claim": "corrected_2_bit", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "0 1 0 1 Bit errors (=2) were detected and corrected."},
+          {"claim": "corrected_3_bit", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "0 1 1 0 Bit errors (=3) were detected and corrected."},
+          {"claim": "corrected_4_bit", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "0 1 1 1 Bit errors (=4) were detected and corrected."},
+          {"claim": "uncorrectable", "source_id": "99e7833a64c2bf9b85272218e66b911ca33fb3504e89af539104edf617cf6c1a", "page": 46, "section": "12.3 Status Register / ECC Status", "quote": "1 0 x x Bit errors greater than ECC capability(4 bits) and not corrected"}
+        ]}
+      ],
+      "negative_assertions": [
+        {"field_key": "runtime_bad_block", "status": "missing", "rule": "descriptive bad-block management text is not runtime count observability"}
+      ],
+      "scope_assertions": [],
+      "condition_assertions": [
+        {"field_key": "pe_cycles", "condition": "With ECC"}
+      ],
+      "source_binding_assertions": []
+    },
+    {
+      "golden_id": "G-GD25Q64E",
+      "device_type": "NOR Flash",
+      "vendor": "GigaDevice",
+      "sample": "GD25Q64E",
+      "historical_baseline_ref": "NOR Schema & GoldenSample V0.2 2026-09-18",
+      "source_refs": [
+        {"source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "sha256": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "source_kind": "datasheet_pdf", "file_name": "STDL-PM-008_gd25q64e.pdf", "drive_id": "1IEGloojrNGb247kqPri86KZt1VKUk1B2"}
+      ],
+      "positive_assertions": [
+        {"field_key": "manufacturer", "value": "GigaDevice", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 66, "section": "Important Notice / Document Owner", "quote": "GigaDevice Semiconductor Inc."},
+        {"field_key": "product_family", "value": "GD25Q64E", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 1, "section": "Title / Document Identity", "quote": "GD25Q64E"},
+        {"field_key": "revision", "value": "1.6", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 1, "section": "Title / Document Identity", "quote": "GD25Q64E-Rev1.6 1 April 2024"},
+        {"field_key": "revision_date", "value": "2024-04-28", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 65, "section": "11 REVISION HISTORY", "quote": "1.6 Add VPWD and tPWD P39 2024-4-28"},
+        {"field_key": "pe_cycles", "value": "100000", "unit": "cycles", "condition": "Minimum", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 4, "section": "Endurance and Data Retention", "quote": "Minimum 100,000 Program/Erase Cycles"},
+        {"field_key": "retention", "value": "20 years", "condition": "Typical", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 4, "section": "Endurance and Data Retention", "quote": "20-year data retention typical"},
+        {"field_key": "status_register", "value": "WIP / WEL / SUS1 / SUS2", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 14, "section": "6 STATUS REGISTER / Tables 7-8", "quote": "S1 WEL Write Enable Latch Volatile, read only", "supporting_evidence": [
+          {"claim": "wel", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 14, "section": "6 STATUS REGISTER / Tables 7-8", "quote": "S1 WEL Write Enable Latch Volatile, read only"},
+          {"claim": "wip", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 14, "section": "6 STATUS REGISTER / Tables 7-8", "quote": "S0 WIP Erase/Write In Progress Volatile, read only"},
+          {"claim": "sus1", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 14, "section": "6 STATUS REGISTER / Tables 7-8", "quote": "S15 SUS1 Erase Suspend Bit Volatile, read only"},
+          {"claim": "sus2", "source_id": "1330342a7dd6d123bde0486fb2381a359f6a8890a647d4f7d2a282a963938602", "page": 14, "section": "6 STATUS REGISTER / Tables 7-8", "quote": "S10 SUS2 Program Suspend Bit Volatile, read only"}
+        ]}
+      ],
+      "negative_assertions": [
+        {"field_key": "program_fail", "status": "missing"},
+        {"field_key": "erase_fail", "status": "missing"},
+        {"field_key": "error_flag", "status": "missing"},
+        {"field_key": "ecc_status", "status": "missing"}
+      ],
+      "scope_assertions": [],
+      "condition_assertions": [
+        {"field_key": "pe_cycles", "condition": "Minimum"},
+        {"field_key": "retention", "condition": "Typical"}
+      ],
+      "source_binding_assertions": []
+    },
+    {
+      "golden_id": "G-TIMAR-97",
+      "device_type": "SSD",
+      "vendor": "TIMAR",
+      "sample": "97 Series / K97M8-Y",
+      "historical_baseline_ref": "SSD Schema & GoldenSample V0.2 2026-09-18",
+      "source_refs": [
+        {"source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "sha256": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "source_kind": "datasheet_pdf", "file_name": "STDL-PM-010_timar_97_series.pdf", "drive_id": "1vI0QRmrbooYAN0mFvZSvQA6_Idt-o4mP"},
+        {"source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "sha256": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "source_kind": "official_html_snapshot", "file_name": "STDL-PM-011_timar_k97m8.html", "drive_id": "19lCC_0eVfGDQ4quwYRl0xPpszrxB6d6l"}
+      ],
+      "positive_assertions": [
+        {"field_key": "capacity", "value": "256GB/512GB/1TB/2TB", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "Capacity 256GB/512GB/1TB/2TB"},
+        {"field_key": "interface", "value": "PCIe Gen4 x4", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "PCIe Gen 4 16Gb/s interface with up to 4 lanes."},
+        {"field_key": "protocol", "value": "NVMe 2.0", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "Compliant with NVMe Revision 2.0."},
+        {"field_key": "host_memory_buffer", "value": "Supported", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "Supporting host memory buffer."},
+        {"field_key": "tbw", "value": "768/1500/3000/6000", "unit": "TB", "condition": "WAF=1", "scope_type": "part_number", "scope_values": ["256GB", "512GB", "1TB", "2TB"], "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications / TBW", "quote": "TBW* - 256GB: 768TB - 512GB: 1500TB - 1TB: 3000TB - 2TB: 6000TB *(WAF=1)"},
+        {"field_key": "operating_temperature", "value": "family-specific", "unit": "°C", "scope_type": "part_number", "scope_values": ["A97M8-Y/A97M8-PY", "K97M8-Y/K97M8-PY", "S97M8-Y/S97M8-PY"], "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications / Temperatures", "quote": "A97M8-Y/A97M8-PY: -40°C~+85°C K97M8-Y/K97M8-PY: -25°C~+85°C S97M8-Y/S97M8-PY: -10°C~+70°C"},
+        {"field_key": "plp", "value": "Optional", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "Supporting PLP (Optional)."},
+        {"field_key": "mtbf", "value": "3000000", "unit": "hours", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "MTBF - 3,000,000 hours"},
+        {"field_key": "uber", "value": "< 1 sector per 10^15 bits read", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 2, "section": "Specifications", "quote": "UBER - < 1 sector per 10^15 bits read"},
+        {"field_key": "nand_type", "value": "NAND Flash", "source_id": "7242c29244f17e25ce31330dd6b97412a64e193c28e2e18599f759679dac5e1a", "page": 5, "section": "General Description", "quote": "Industrial SSDs use NAND Flash Memory"},
+        {"field_key": "cell_type", "value": "TLC", "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "page": 1, "section": "K97M8-Y Product Specification / Flash Type", "quote": "3D TLC"},
+        {"field_key": "smart_health", "value": "YES", "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "page": 1, "section": "K97M8-Y Product Specification / S.M.A.R.T.", "quote": "YES"}
+      ],
+      "negative_assertions": [
+        {"field_key": "cell_type", "status": "missing", "source_mode": "pdf_only"}
+      ],
+      "scope_assertions": [
+        {"field_key": "tbw", "scope_type": "part_number", "scope_values": ["256GB", "512GB", "1TB", "2TB"]},
+        {"field_key": "operating_temperature", "scope_type": "part_number"}
+      ],
+      "condition_assertions": [
+        {"field_key": "tbw", "condition": "WAF=1"}
+      ],
+      "source_binding_assertions": [
+        {"field_key": "cell_type", "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "source_mode": "pdf_and_html"},
+        {"field_key": "smart_health", "source_id": "dbc95e45dfcea8694f17d2e1951d7a95647a139d0ed104a4bde5edc10e2ba29c", "source_mode": "pdf_and_html"}
+      ]
+    }
+  ]
+}
