@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -24,7 +25,11 @@ from .knowledge_suggestions import (
 )
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
-DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:9000")
+DEFAULT_URL = (
+    os.getenv("PUBLIC_KNOWLEDGE_SERVICE_URL")
+    or os.getenv("PUBLIC_KNOWLEDGE_API_URL")
+    or "http://127.0.0.1:9000"
+)
 
 FIXTURE_SOURCES = [
     {"source_id": "fixture-gd25q64e", "title": "GD25Q64E Datasheet · 演示资料", "publisher": "GigaDevice", "classification": "PUBLIC", "media_type": "text/markdown", "version": "Rev1.6", "revision": "Rev1.6", "updated_at": "2026-10-05", "summary": "演示资料，仅用于验证 Public Knowledge 页面操作。", "content": "# GD25Q64E\n\nPublic demonstration record. Program page size: 256 bytes. Sector erase size: 4 KB. This synthetic example is not a product specification.", "structure": [{"type": "heading", "text": "GD25Q64E"}, {"type": "paragraph", "text": "演示记录；不得作为正式规格事实。"}]},
@@ -40,6 +45,22 @@ class SearchBody(BaseModel):
 
 class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+
+
+class ContextSearchBody(BaseModel):
+    """PUBLIC-safe context from Storage business pages.
+
+    The contract intentionally excludes runtime observations, customer/project
+    identifiers, internal incidents, logs and diagnosis text. Only public
+    device identity and the parameter/indicator name may be forwarded.
+    """
+
+    device_type: str | None = Field(default=None, max_length=100)
+    vendor: str | None = Field(default=None, max_length=160)
+    model: str | None = Field(default=None, max_length=200)
+    parameter_name: str | None = Field(default=None, max_length=200)
+    focus: str = Field(default="PARAMETER", max_length=32)
+    top_k: int = Field(default=6, ge=1, le=12)
 
 
 class ImportBody(BaseModel):
@@ -199,6 +220,120 @@ def search(body: SearchBody, mode: str = "FIXTURE_REPLAY", base_url: str | None 
         hits = FIXTURE_HITS if any(x in body.query.lower() for x in ("gd25", "page", "sector", "引用", "演示")) else []
         return {"hits": hits[:body.top_k], "retrieval_snapshot": {"adapter": "fixture-replay", "top_k": body.top_k}, "mode": mode}
     return {**_request(mode, "/search", {"query": body.query, "top_k": body.top_k}, base_url), "mode": mode}
+
+
+def _clean_public_context(value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = " ".join(str(value).replace("\x00", " ").split()).strip()
+    return cleaned[:limit] or None
+
+
+def _context_query(body: ContextSearchBody) -> tuple[str, str]:
+    focus = (body.focus or "PARAMETER").strip().upper()
+    if focus not in {"DEVICE", "PARAMETER", "COMPARE", "DIAGNOSIS", "OPTIMIZATION"}:
+        raise HTTPException(422, "未知的公共知识查询场景。")
+    # Deliberately whitelist only public device identity + the public
+    # parameter/indicator name. There is no generic 'context' field here, so
+    # Storage runtime/customer/internal problem data cannot be forwarded by
+    # this integration contract.
+    tokens = [
+        _clean_public_context(body.vendor, 160),
+        _clean_public_context(body.model, 200),
+        _clean_public_context(body.device_type, 100),
+        _clean_public_context(body.parameter_name, 200),
+    ]
+    query = " ".join(x for x in tokens if x)
+    if not query:
+        raise HTTPException(422, "缺少可公开检索的器件或参数上下文。")
+    return query, focus
+
+
+def _source_for_context(mode: str, source_id: str, base_url: str | None) -> dict[str, Any]:
+    if mode == "FIXTURE_REPLAY":
+        return next((dict(x) for x in FIXTURE_SOURCES if x["source_id"] == source_id), {})
+    raw = _request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url)
+    source = raw.get("source") if isinstance(raw, dict) else None
+    return dict(source) if isinstance(source, dict) else {}
+
+
+def _publisher_from_source(source: dict[str, Any]) -> str:
+    publisher = source.get("publisher")
+    if isinstance(publisher, str) and publisher.strip():
+        return publisher.strip()
+    uri = source.get("source_uri") or source.get("official_url")
+    if isinstance(uri, str) and uri.strip():
+        try:
+            host = urlparse(uri).hostname
+        except ValueError:
+            host = None
+        if host:
+            return host
+    return "Not provided"
+
+
+@router.post("/context-search")
+def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | None = None):
+    """Search Public Knowledge from a Storage business page.
+
+    This endpoint is retrieval-only. It does not call the generation provider
+    and it never turns RAG output into Storage diagnosis or Formal Evidence.
+    """
+    query, focus = _context_query(body)
+    search_result = search(SearchBody(query=query, top_k=body.top_k), mode=mode, base_url=base_url)
+    hits = search_result.get("hits") if isinstance(search_result, dict) else []
+    source_cache: dict[str, dict[str, Any]] = {}
+    enriched: list[dict[str, Any]] = []
+    subject = _clean_public_context(body.parameter_name, 200) or "当前器件"
+
+    for hit in hits or []:
+        source_id = str(hit.get("source_id") or "")
+        revision = str(hit.get("source_revision") or "")
+        if not source_id:
+            continue
+        source = source_cache.setdefault(source_id, _source_for_context(mode, source_id, base_url))
+        title = str(source.get("title") or source_id)
+        source_uri = source.get("source_uri") or source.get("official_url")
+        locator = hit.get("locator")
+        locator_text = json.dumps(locator or {}, ensure_ascii=False, separators=(",", ":"))
+        citation_id = str(hit.get("hit_id") or hit.get("citation_id") or "")
+        snapshot_url = None
+        if mode == "LIVE" and revision:
+            snapshot_url = (
+                f"/api/public-knowledge/sources/{quote(source_id, safe='')}/revisions/"
+                f"{quote(revision, safe='')}/snapshot?mode=LIVE"
+            )
+        engineering_meaning = (
+            f"公开资料用于理解“{subject}”的定义、规格约束与工程背景；"
+            "Storage 的寿命、风险和诊断判断仍由 Device Fact / Runtime Observation / Rule / Skill 决定。"
+        )
+        applicability_boundary = (
+            f"适用边界以 {title} / Revision {revision or 'Not provided'} / Locator {locator_text} 为准；"
+            "该内容属于 Engineering Context，不等同于 Storage 诊断结论或 Formal Evidence。"
+        )
+        enriched.append({
+            "citation_id": citation_id,
+            "source_id": source_id,
+            "source_title": title,
+            "publisher": _publisher_from_source(source),
+            "source_uri": source_uri,
+            "source_revision": revision,
+            "original_snippet": hit.get("text") or "",
+            "locator": locator,
+            "score": hit.get("score"),
+            "snapshot_url": snapshot_url,
+            "engineering_meaning": engineering_meaning,
+            "applicability_boundary": applicability_boundary,
+        })
+
+    return {
+        "query": query,
+        "focus": focus,
+        "mode": mode,
+        "generation_provider_used": False,
+        "hits": enriched,
+        "retrieval_snapshot": search_result.get("retrieval_snapshot") if isinstance(search_result, dict) else None,
+    }
 
 
 @router.post("/ask")
