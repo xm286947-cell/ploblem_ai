@@ -590,12 +590,19 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
         complete = status in completed_statuses
         next_action = engineering.get("next_action")
+        structured = skill.get("structured_result") or {}
         if kind == "LIFETIME":
             requested_metric = str((item.get("input") or {}).get("requested_metric") or "")
             supporting_only = {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}
             if requested_metric in supporting_only:
                 complete = False
                 next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
+        elif kind == "OPTIMIZATION":
+            controls = structured.get("engineering_control_options") or []
+            validation = structured.get("suggested_validation") or []
+            if status in completed_statuses and not controls and not validation:
+                complete = False
+                next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
         return {
             "type": kind,
             "label": label,
