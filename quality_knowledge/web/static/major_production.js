@@ -145,6 +145,13 @@
       ).join('');
       const heading = esc(item.entry_type) + ' · ' + esc(item.status) +
         (metadata.source_status ? ' · ' + esc(metadata.source_status) : '');
+      const reviewRequiredAttribute = metadata.review_status === 'REVIEW_REQUIRED' ? 'true' : 'false';
+      const standardization = metadata.standardization || {};
+      const standardizationPanel = standardization.status === 'PROPOSED'
+        ? '<details class="major-standardization"><summary>Unified Runtime 标准化建议</summary><p data-standardized-content>' +
+          esc(standardization.content || '') + '</p><small>仅为建议；来源正文与原 Evidence 保持不变。</small>' +
+          '<button type="button" class="case-button secondary" data-use-standardization>填入更正框</button></details>'
+        : '';
       const editor = item.status === 'MISSING'
         ? '<p class="major-blocked">MISSING：当前来源没有该语义，不生成内容。</p>'
         : '<label>人工确认后的内容<textarea data-candidate-content ' +
@@ -154,10 +161,10 @@
           (reviewRequired ? 'required' : '') + '></label>' +
           '<button class="case-button primary" data-review-action="CONFIRM" data-entry="' + esc(item.entry_id) + '">人工确认</button>' +
           '<button class="case-button secondary" data-review-action="CORRECT" data-entry="' + esc(item.entry_id) + '">更正并确认</button>';
-      return '<article class="major-candidate" data-typed-candidate><h3>' + heading + '</h3>' +
+      return '<article class="major-candidate" data-typed-candidate data-review-required="' + reviewRequiredAttribute + '"><h3>' + heading + '</h3>' +
         (reviewRequired ? '<p class="major-blocked">需人工比较来源并作出明确决定；系统不会择边。</p>' : '') +
         (sourceValues ? '<details open><summary>来源值与对应证据</summary>' + sourceValues + '</details>' : '') +
-        '<details><summary>Repository Evidence</summary><ul>' + evidence + '</ul></details>' + editor + '</article>';
+        '<details><summary>Repository Evidence</summary><ul>' + evidence + '</ul></details>' + standardizationPanel + editor + '</article>';
     }).join('');
   }
 
@@ -206,8 +213,18 @@
         box.innerHTML = renderTypedCandidates(data.candidates || []);
         box.querySelectorAll('[data-review-action]').forEach(button =>
           button.addEventListener('click', () => confirmEntry(button)));
+        box.querySelectorAll('[data-use-standardization]').forEach(button =>
+          button.addEventListener('click', () => {
+            const card = button.closest('.major-candidate');
+            const suggestion = card.querySelector('[data-standardized-content]');
+            const editor = card.querySelector('[data-candidate-content]');
+            if (suggestion && editor) editor.value = suggestion.textContent;
+          }));
         root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_REQUIRED';
-        say('Source Fusion 候选已生成；请逐条核对来源证据，MULTI_SOURCE / CONFLICT 需填写人工结论和理由。');
+        const runtimeStatus = data.standardization && data.standardization.status;
+        say(runtimeStatus === 'FAILED'
+          ? 'Runtime 标准化未完成；原始 Source Typed 候选仍可审核。'
+          : 'Source Fusion 候选已生成；请逐条核对来源证据，MULTI_SOURCE / CONFLICT 需填写人工结论和理由。');
         return;
       }
       box.innerHTML = data.candidates.map(item =>
@@ -229,6 +246,17 @@
       const reasonInput = card.querySelector('[data-review-reason]');
       const legacyContent = card.querySelector('p');
       const content = textarea ? textarea.value : (legacyContent ? legacyContent.textContent : '');
+      const requiresReason = card.dataset.reviewRequired === 'true' || button.dataset.reviewAction === 'CORRECT';
+      if (card.dataset.reviewRequired === 'true' && !content.trim()) {
+        say('请填写人工决定后的结论。', true);
+        if (textarea) textarea.focus();
+        return;
+      }
+      if (requiresReason && reasonInput && !reasonInput.value.trim()) {
+        say('请填写审核或更正理由。', true);
+        reasonInput.focus();
+        return;
+      }
       const data = await read(await fetch(api + '/entries/' + encodeURIComponent(button.dataset.entry) + '/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

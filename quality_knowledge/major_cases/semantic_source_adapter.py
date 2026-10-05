@@ -96,9 +96,105 @@ class MajorSemanticSourceAdapter:
             "semantic_slots": self._semantic_slots(
                 standard_case, fragment_refs, source_fact, version_ids, source_links
             ),
+            "compatibility_slots": self._compatibility_slots(
+                standard_case, fragment_refs, source_fact, source_links
+            ),
             "source_fact_revision_id": source_fact.get("source_fact_revision_id") if source_fact else None,
             "document_version_ids": version_ids,
             "fusion_version": "EvidenceFusion",
+        }
+
+    @staticmethod
+    def _compatibility_slots(
+        standard_case: dict[str, Any],
+        fragment_refs: dict[str, list[dict]],
+        source_fact: dict[str, Any] | None,
+        source_links: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        source_links_by_record: dict[str, list[dict[str, Any]]] = {}
+        for link in source_links:
+            record_id = str(link.get("record_id") or "")
+            if record_id:
+                source_links_by_record.setdefault(record_id, []).append(link)
+
+        issue_items: list[dict[str, Any]] = []
+        description = str(standard_case.get("problem", {}).get("original_description") or "").strip()
+        if description and source_fact:
+            revision_id = str(source_fact.get("source_fact_revision_id") or "")
+            links = source_links_by_record.get(revision_id, [])
+            issue_items.append({
+                "value": description,
+                "source_type": "EXCEL",
+                "evidence_refs": [{
+                    "source_type": "EXCEL",
+                    "source_fact_revision_id": revision_id,
+                    "source_link_ids": [str(link.get("source_link_id")) for link in links if link.get("source_link_id")],
+                    "locator": f"{source_fact.get('source_ref', '')};field=original_description",
+                    "excerpt": description,
+                }],
+            })
+        for ref in fragment_refs.get("problem_description", []):
+            issue_items.append({"value": str(ref.get("excerpt") or "").strip(), "source_type": "PDF", "evidence_refs": [{"source_type": "PDF", **ref}]})
+
+        issue_record_ids = {
+            str(source_fact.get("source_fact_revision_id") or "") if item["source_type"] == "EXCEL"
+            else str(next((ref.get("version_id") for ref in item["evidence_refs"]), "") or "")
+            for item in issue_items
+        }
+        issue_conflicts = [
+            link for record_id in issue_record_ids if record_id
+            for link in source_links_by_record.get(record_id, [])
+            if str(link.get("match_status") or "").upper() == "CONFLICT"
+        ]
+        issue_values = list(dict.fromkeys(item["value"] for item in issue_items if item["value"]))
+        if issue_conflicts:
+            issue_status, issue_review = "CONFLICT", "REVIEW_REQUIRED"
+        elif not issue_items:
+            issue_status, issue_review = "MISSING", "NOT_APPLICABLE"
+        elif len(issue_values) > 1:
+            issue_status, issue_review = "MULTI_SOURCE", "REVIEW_REQUIRED"
+        else:
+            issue_status, issue_review = "AVAILABLE", "NOT_REQUIRED"
+
+        verification_items = [
+            {
+                "value": str(ref.get("excerpt") or "").strip(),
+                "source_type": "PDF",
+                "evidence_refs": [{"source_type": "PDF", **ref}],
+            }
+            for ref in fragment_refs.get("verification_result", [])
+            if str(ref.get("excerpt") or "").strip()
+        ]
+        verification_record_ids = {
+            str(ref.get("version_id") or "")
+            for item in verification_items
+            for ref in item["evidence_refs"]
+            if ref.get("version_id")
+        }
+        verification_conflicts = [
+            link for record_id in verification_record_ids
+            for link in source_links_by_record.get(record_id, [])
+            if str(link.get("match_status") or "").upper() == "CONFLICT"
+        ]
+        return {
+            "ISSUE_FACT": {
+                "semantic_slot": "problem.original_description",
+                "items": issue_items,
+                "values": issue_values,
+                "effective_value": issue_items[0]["value"] if len(issue_values) == 1 and issue_items else "",
+                "status": issue_status,
+                "review_status": issue_review,
+                "source_relation_conflicts": [str(link.get("source_link_id") or "") for link in issue_conflicts],
+            },
+            "VERIFICATION": {
+                "semantic_slot": "verification.result",
+                "items": verification_items,
+                "values": list(dict.fromkeys(item["value"] for item in verification_items)),
+                "effective_value": "\n\n".join(item["value"] for item in verification_items),
+                "status": "CONFLICT" if verification_conflicts else "AVAILABLE" if verification_items else "MISSING",
+                "review_status": "REVIEW_REQUIRED" if verification_conflicts else "NOT_REQUIRED" if verification_items else "NOT_APPLICABLE",
+                "source_relation_conflicts": [str(link.get("source_link_id") or "") for link in verification_conflicts],
+            },
         }
 
     def _document_projection(self, case_id: str) -> tuple[dict[str, Any], dict[str, list[dict]], list[str]]:

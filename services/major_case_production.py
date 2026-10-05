@@ -6,6 +6,8 @@ callers a shortcut around human review.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -194,15 +196,236 @@ class MajorCaseProductionService:
                 "explanation": "SOURCE_FUSION_CAUSE_SLOT",
             })
 
+        for entry_type, slot in draft.get("compatibility_slots", {}).items():
+            slot_items = list(slot.get("items") or [])
+            metadata = self._semantic_metadata(draft, slot)
+            if not slot_items:
+                candidates.append({
+                    "entry_type": entry_type,
+                    "content": "",
+                    "status": "MISSING",
+                    "evidence": [],
+                    "analysis_metadata": metadata,
+                    "explanation": "SOURCE_COMPATIBILITY_SEMANTIC_MISSING",
+                })
+                continue
+            if entry_type == "VERIFICATION":
+                for index, source_item in enumerate(slot_items, start=1):
+                    candidates.append({
+                        "entry_type": entry_type,
+                        "content": str(source_item.get("value") or "").strip(),
+                        "status": "PENDING",
+                        "evidence": self._semantic_evidence(source_item, links_by_id, event["event_id"]),
+                        "analysis_metadata": {
+                            **metadata,
+                            "verification_item_index": index,
+                            "source_values": [self._source_value_metadata(source_item)],
+                        },
+                        "explanation": "SOURCE_FUSION_VERIFICATION",
+                    })
+                continue
+            status = str(slot.get("status") or "AVAILABLE")
+            if status in {"MULTI_SOURCE", "CONFLICT"}:
+                content = "\n".join(
+                    f"[{item.get('source_type') or 'SOURCE'}] {str(item.get('value') or '').strip()}"
+                    for item in slot_items
+                    if str(item.get("value") or "").strip()
+                )
+            else:
+                content = str(slot.get("effective_value") or slot_items[0].get("value") or "").strip()
+            evidence = [
+                ref
+                for source_item in slot_items
+                for ref in self._semantic_evidence(source_item, links_by_id, event["event_id"])
+            ]
+            candidates.append({
+                "entry_type": entry_type,
+                "content": content,
+                "status": "PENDING",
+                "evidence": evidence,
+                "analysis_metadata": {
+                    **metadata,
+                    "source_values": [self._source_value_metadata(item) for item in slot_items],
+                },
+                "explanation": "SOURCE_FUSION_ISSUE_FACT",
+            })
+
         created = self.repository.replace_pending_source_fusion_entries(
             case_id, event["event_id"], candidates
         )
+        standardization = self._standardize_source_candidates(
+            case_id, event["event_id"], created, draft
+        )
+        created = [self.repository.entry(item["entry_id"]) or item for item in created]
         return {
             "mode": "SOURCE_FUSION",
             "case_id": case_id,
             "event_id": event["event_id"],
             "candidates": created,
+            "standardization": standardization,
         }
+
+    def _standardize_source_candidates(
+        self,
+        case_id: str,
+        event_id: str,
+        candidates: list[dict[str, Any]],
+        draft: dict[str, Any],
+    ) -> dict[str, Any]:
+        allowed_types = {"TRC_OCCURRENCE", "TRC_ESCAPE", "MRC_OCCURRENCE", "MRC_ESCAPE"}
+        eligible = [
+            item for item in candidates
+            if item.get("origin") == "SOURCE_FUSION"
+            and item.get("entry_type") in allowed_types
+            and item.get("status") == "PENDING"
+            and item.get("analysis_metadata", {}).get("source_status") == "AVAILABLE"
+            and item.get("analysis_metadata", {}).get("review_status") == "NOT_REQUIRED"
+            and item.get("evidence")
+        ]
+        if not eligible:
+            return {"status": "SKIPPED_NO_UNAMBIGUOUS_EVIDENCE", "candidate_count": 0}
+        if self.provider is None:
+            return {"status": "SKIPPED_PROVIDER_NOT_CONFIGURED", "candidate_count": len(eligible)}
+
+        identity = {
+            "case_id": case_id,
+            "event_id": event_id,
+            "source_fact_revision_id": draft.get("source_fact_revision_id"),
+            "document_version_ids": list(draft.get("document_version_ids") or []),
+            "entries": [
+                {
+                    "entry_id": item["entry_id"],
+                    "revision_id": item["current_revision_id"],
+                    "content": item["content"],
+                    "evidence": [
+                        {
+                            "fragment_id": evidence.get("fragment_id"),
+                            "source_link_id": evidence.get("source_link_id"),
+                            "locator": evidence.get("locator"),
+                            "excerpt": evidence.get("excerpt"),
+                        }
+                        for evidence in item.get("evidence") or []
+                    ],
+                }
+                for item in eligible
+            ],
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        source_id = str(draft.get("source_fact_revision_id") or next(
+            iter(draft.get("document_version_ids") or []), f"{case_id}:{event_id}"
+        ))
+        source = SourceRef(
+            source_id=source_id,
+            source_type="MAJOR_SEMANTIC_SOURCE",
+            revision=fingerprint[:16],
+            content_hash=fingerprint,
+            fingerprint=fingerprint,
+            uri=f"major-semantic://{case_id}/{event_id}/{fingerprint[:16]}",
+            metadata={"business_domain": "MAJOR_CASE", "event_id": event_id},
+        )
+        specs = [
+            MajorIssueObjectSpec(
+                object_id=str(item["entry_id"]),
+                unit_id=str(item["entry_id"]),
+                locator={
+                    "entry_type": item["entry_type"],
+                    "semantic_slot": item.get("analysis_metadata", {}).get("semantic_slot"),
+                    "source_entry_id": item["entry_id"],
+                },
+                metadata={
+                    "business_domain": "MAJOR_CASE",
+                    "operation": "EVIDENCE_BOUND_STANDARDIZATION",
+                    "source_status": "AVAILABLE",
+                },
+            )
+            for item in eligible
+        ]
+        provider_input = {
+            "operation": "EVIDENCE_BOUND_STANDARDIZATION",
+            "case_id": case_id,
+            "event_id": event_id,
+            "entries": [
+                {
+                    "entry_id": item["entry_id"],
+                    "entry_type": item["entry_type"],
+                    "source_content": item["content"],
+                    "source_values": item.get("analysis_metadata", {}).get("source_values", []),
+                    "evidence": [
+                        {
+                            "evidence_id": evidence.get("evidence_id"),
+                            "fragment_id": evidence.get("fragment_id"),
+                            "source_link_id": evidence.get("source_link_id"),
+                            "locator": evidence.get("locator"),
+                            "excerpt": evidence.get("excerpt"),
+                        }
+                        for evidence in item.get("evidence") or []
+                    ],
+                }
+                for item in eligible
+            ],
+            "rules": {
+                "standardize_terms_only": True,
+                "must_preserve_source_meaning": True,
+                "must_not_add_facts_or_causes": True,
+                "must_not_complete_missing_values": True,
+                "must_not_choose_between_sources": True,
+                "output_is_suggestion_only": True,
+                "use_only_requested_entry_ids": True,
+            },
+        }
+        request_id = f"major-standardize:{case_id}:{event_id}:{fingerprint[:20]}"
+        try:
+            adapter = MajorIssueD01RuntimeAdapter(self.runtime, self.store, self.provider)
+            outcome = adapter.execute_partition(
+                case_id=case_id,
+                issue_version_id=source_id,
+                partition_key=event_id,
+                source=source,
+                expected_objects=specs,
+                provider_input=provider_input,
+                request_id=request_id,
+            )
+            if not outcome.business_consumable:
+                return {
+                    "status": "FAILED",
+                    "candidate_count": len(eligible),
+                    "runtime_task_id": outcome.task_id,
+                    "provider_calls": outcome.provider_calls,
+                }
+            outputs = {str(item["object_id"]): item for item in outcome.committed_objects}
+            proposals = []
+            for item in eligible:
+                output = outputs.get(str(item["entry_id"]), {})
+                data = output.get("data")
+                content = data.get("content") if isinstance(data, dict) else data
+                if not str(content or "").strip():
+                    return {
+                        "status": "FAILED",
+                        "candidate_count": len(eligible),
+                        "runtime_task_id": outcome.task_id,
+                        "provider_calls": outcome.provider_calls,
+                    }
+                proposals.append({
+                    "entry_id": item["entry_id"],
+                    "content": str(content).strip(),
+                    "runtime_task_id": outcome.task_id,
+                    "provider_calls": outcome.provider_calls,
+                })
+            self.repository.save_semantic_standardization_proposals(case_id, event_id, proposals)
+            return {
+                "status": "COMPLETED",
+                "candidate_count": len(eligible),
+                "runtime_task_id": outcome.task_id,
+                "provider_calls": outcome.provider_calls,
+            }
+        except Exception as error:
+            return {
+                "status": "FAILED",
+                "candidate_count": len(eligible),
+                "error_code": str(getattr(error, "code", "UNIFIED_RUNTIME_STANDARDIZATION_FAILED")),
+            }
 
     @staticmethod
     def _source_value_metadata(item: dict[str, Any]) -> dict[str, Any]:
@@ -362,6 +585,8 @@ class MajorCaseProductionService:
             raise MajorProductionError("INVALID_MAJOR_REVIEW_ACTION")
         if review_required and (not content.strip() or not reason.strip()):
             raise MajorProductionError("MAJOR_SEMANTIC_REVIEW_DECISION_REQUIRED")
+        if entry.get("origin") == "SOURCE_FUSION" and review_action == "CORRECT" and not reason.strip():
+            raise MajorProductionError("MAJOR_SEMANTIC_CORRECTION_REASON_REQUIRED")
         revised_content = content.strip() or str(entry.get("content") or "")
         if review_action == "CORRECT" and revised_content == str(entry.get("content") or ""):
             raise MajorProductionError("MAJOR_CORRECTION_MUST_CHANGE_CONTENT")

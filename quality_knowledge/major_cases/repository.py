@@ -577,6 +577,67 @@ class MajorKnowledgeRepository:
                 entry_ids.append(entry_id)
         return [self.entry(entry_id) or {} for entry_id in entry_ids]
 
+    def save_semantic_standardization_proposals(
+        self,
+        case_id: str,
+        event_id: str,
+        proposals: Iterable[dict],
+    ) -> list[dict]:
+        """Attach Unified Runtime suggestions to eligible source candidates only."""
+        event = self.event(event_id)
+        if not event or event.get("case_id") != case_id:
+            raise ValueError("SOURCE_FUSION_EVENT_CASE_MISMATCH")
+        proposal_items = list(proposals)
+        updated_ids: list[str] = []
+        allowed_types = {"TRC_OCCURRENCE", "TRC_ESCAPE", "MRC_OCCURRENCE", "MRC_ESCAPE"}
+        with self.transaction() as connection:
+            for proposal in proposal_items:
+                entry_id = str(proposal.get("entry_id") or "")
+                content = str(proposal.get("content") or "").strip()
+                row = connection.execute(
+                    """SELECT e.entry_id,e.entry_type,e.status,e.archived_at,e.current_revision_id,
+                              r.origin,m.metadata_json
+                       FROM kb_entry e
+                       JOIN kb_entry_revision r ON r.revision_id=e.current_revision_id
+                       JOIN kb_entry_analysis_meta m ON m.revision_id=e.current_revision_id
+                       WHERE e.entry_id=? AND e.case_id=? AND e.event_id=?""",
+                    (entry_id, case_id, event_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("SEMANTIC_STANDARDIZATION_ENTRY_NOT_FOUND")
+                metadata = json.loads(row["metadata_json"] or "{}")
+                if (
+                    row["archived_at"] is not None
+                    or row["status"] != "PENDING"
+                    or row["origin"] != "SOURCE_FUSION"
+                    or row["entry_type"] not in allowed_types
+                    or metadata.get("source_status") != "AVAILABLE"
+                    or metadata.get("review_status") != "NOT_REQUIRED"
+                ):
+                    raise ValueError("SEMANTIC_STANDARDIZATION_NOT_ALLOWED")
+                evidence_ids = [
+                    str(item[0]) for item in connection.execute(
+                        "SELECT evidence_id FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id",
+                        (row["current_revision_id"],),
+                    )
+                ]
+                if not content or not evidence_ids:
+                    raise ValueError("SEMANTIC_STANDARDIZATION_REQUIRES_SOURCE_EVIDENCE")
+                metadata["standardization"] = {
+                    "status": "PROPOSED",
+                    "content": content,
+                    "runtime_task_id": str(proposal.get("runtime_task_id") or ""),
+                    "provider_calls": int(proposal.get("provider_calls") or 0),
+                    "source_revision_id": str(row["current_revision_id"]),
+                    "evidence_ids": evidence_ids,
+                }
+                connection.execute(
+                    "UPDATE kb_entry_analysis_meta SET metadata_json=? WHERE revision_id=?",
+                    (_json(metadata), row["current_revision_id"]),
+                )
+                updated_ids.append(entry_id)
+        return [self.entry(entry_id) or {} for entry_id in updated_ids]
+
     def _entry_scope_kind(self, connection: sqlite3.Connection, entry: dict) -> str:
         if entry.get("event_id"):
             return "EVENT"
