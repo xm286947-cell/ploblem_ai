@@ -29,6 +29,11 @@
     ['可复用知识', ['engineering_rule', 'design_constraint', 'diagnostic_clue', 'verification_method', 'applicability', 'conclusion']],
     ['器件与参数', ['device_refs', 'key_parameters']]
   ];
+  const sceneMap = {
+    research: 'RND_DIAGNOSIS',
+    risk: 'DEVICE_RISK',
+    market: 'MARKET_ISSUE'
+  };
   let activeScenario = 'research';
   let results = [];
   let query = { text: '', interface: '', signal: '', device: '' };
@@ -110,6 +115,7 @@
   function searchParams() {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => { if (value) params.set(key, value); });
+    params.set('scene', sceneMap[activeScenario] || 'RND_DIAGNOSIS');
     params.set('limit', '100');
     return `?${params.toString()}`;
   }
@@ -167,7 +173,7 @@
       item.classList.toggle('active', active);
       item.setAttribute('aria-selected', active ? 'true' : 'false');
     });
-    renderResults();
+    runSearch();
   }));
   q('[data-knowledge-form]').addEventListener('submit', event => {
     event.preventDefault();
