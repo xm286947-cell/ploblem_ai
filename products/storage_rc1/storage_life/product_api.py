@@ -2446,10 +2446,23 @@ def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "
     skill = result.get("skill_result") or {}
     old_detail = device_slots(old_id)
     new_detail = device_slots(new_id)
+    rows = list(result.get("items") or [])
+    unknowns = list(result.get("unknowns") or [])
+    facts_evidenced = all(
+        str(x.get("confidence") or "").upper() == "EVIDENCED"
+        for x in rows
+    )
+    # S2 may legitimately finish from deterministic Storage impact rules even
+    # when the current Formal Knowledge Release has no matching object.  This
+    # is still a DRAFT_FOR_ENGINEERING_REVIEW and never an auto replacement decision.
+    product_status = "ANSWERED" if facts_evidenced and not unknowns else (
+        skill.get("status") or result.get("status") or "UNKNOWN"
+    )
+    result["product_assessment_status"] = product_status
     record = core.save_device_assessment(
         new_id,
         "COMPARE",
-        skill.get("status") or result.get("status") or "UNKNOWN",
+        product_status,
         {
             "old_id": old_id,
             "new_id": new_id,
