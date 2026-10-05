@@ -413,10 +413,89 @@ async function parseRuntimeImport(){
     RUNTIME_PARSE_RESULT=await api('/api/product/runtime-observations/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_type:d.device_type,text,source_label:source})});
     let items=RUNTIME_PARSE_RESULT.observations||[];
     let diagCount=items.filter(x=>x.diagnostic_supported).length,lifeCount=items.filter(x=>x.suggested_lifetime_metric).length;
-    box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+(diagCount?'<button class="primary" onclick="executeParsedBatchDiagnosis()">一键诊断本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
+    box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+((diagCount||lifeCount)?'<button class="primary" onclick="executeParsedHealthAnalysis()">一键分析本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
   }catch(e){box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
 }
 function parsedObservation(index){return (RUNTIME_PARSE_RESULT?.observations||[])[index]||null}
+function parsedRuntimeObservationPayload(x,d,index){
+  let source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT';
+  return {
+    observation_id:'runtime-import-'+Date.now()+'-'+index,
+    device_id:d.id,
+    device_type:d.device_type,
+    metric_name:x.metric_name,
+    raw_value:x.raw_value,
+    normalized_value:x.normalized_value,
+    unit:x.unit||'',
+    capture_time:new Date().toISOString(),
+    source_command_or_interface:source,
+    raw_output_ref:x.source_line||source,
+    evidence_ref:x.source_line||source,
+    collector:'STORAGE_MVP_RUNTIME_IMPORT',
+    is_formally_consumable:true,
+    quality_status:'VALID',
+    availability_status:'AVAILABLE'
+  };
+}
+async function executeParsedHealthAnalysis(){
+  let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],box=$('#runtimeBatchDiagnosisResult');
+  if(!d||!box)return;
+  let diagItems=items.filter(x=>x.diagnostic_supported),lifeItems=items.filter(x=>x.suggested_lifetime_metric);
+  if(!diagItems.length&&!lifeItems.length)return msg('当前运行数据没有可进入寿命或诊断场景的指标',true);
+  box.innerHTML='<div class="card">正在执行本次运行数据健康分析：寿命 '+lifeItems.length+' 项 · 诊断 '+diagItems.length+' 项…</div>';
+  let diagnosis=null,lifeResults=[];
+  if(diagItems.length){
+    try{
+      let observations=diagItems.map((x,i)=>parsedRuntimeObservationPayload(x,d,'D'+i));
+      diagnosis=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/skills/storage-diagnostic-validation/execute',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          target_question:'基于本次运行健康数据，识别寿命退化、介质健康和可观测性风险，并明确仍缺什么信息。',
+          runtime_observations:observations,
+          record_assessment:true,
+          assessment_author:'Storage MVP Runtime Import'
+        })
+      });
+    }catch(e){diagnosis={error:e.message}}
+  }
+  for(let i=0;i<lifeItems.length;i++){
+    let x=lifeItems[i],metric=x.suggested_lifetime_metric,obs=parsedRuntimeObservationPayload(x,d,'L'+i);
+    try{
+      let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/skills/storage-lifetime-budget/execute',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          requested_metric:metric,
+          runtime_observations:[obs],
+          assessment_request:{assumptions:[]},
+          target_service_life:{},
+          record_assessment:true,
+          assessment_author:'Storage MVP Runtime Import'
+        })
+      });
+      lifeResults.push({metric,item:x,result:r});
+    }catch(e){lifeResults.push({metric,item:x,error:e.message})}
+  }
+  let html='<div class="pagehead"><div><div class="kicker">RUN HEALTH ANALYSIS</div><h3>本次运行数据健康分析</h3><div class="muted">Runtime Observation → Existing Lifetime / Diagnostic Skills；Public Knowledge 只提供公开背景。</div></div></div>';
+  if(diagnosis){
+    if(diagnosis.error)html+='<div class="danger card"><b>运行诊断未完成</b><p>'+esc(diagnosis.error)+'</p></div>';
+    else{
+      let sr=diagnosis.skill_result||{},er=diagnosis.engineering_result||{},st=sr.structured_result||{},missing=sr.missing_information||st.missing_information||[];
+      html+='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'"><b>运行诊断 · '+esc(sr.status||'UNKNOWN')+'</b><p>'+esc(sr.direct_answer||er.direct_answer||'')+'</p><small>消费 '+esc((st.current_observation||[]).length)+' 个运行观测。</small></div>';
+      if(missing.length)html+=compareImpactList('诊断仍缺信息',missing,'');
+    }
+  }
+  if(lifeResults.length){
+    html+='<div class="tablewrap"><table><tr><th>寿命指标</th><th>状态</th><th>结果</th><th>缺失信息</th></tr>'+lifeResults.map(x=>{
+      if(x.error)return '<tr><td><b>'+esc(LIFETIME_METRICS[x.metric]?.label||x.metric)+'</b></td><td>'+badge('FAIL')+'</td><td>'+esc(x.error)+'</td><td>—</td></tr>';
+      let sr=x.result.skill_result||{},st=sr.structured_result||{},mr=st.measured_vs_budget;
+      return '<tr><td><b>'+esc(LIFETIME_METRICS[x.metric]?.label||x.metric)+'</b></td><td>'+badge(sr.status||'UNKNOWN')+'</td><td>'+esc(mr==null?'—':(typeof mr==='object'?JSON.stringify(mr):mr))+'</td><td>'+esc((sr.missing_information||st.missing_information||[]).join('；')||'—')+'</td></tr>';
+    }).join('')+'</table></div>';
+  }
+  html+='<div class="row">'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:items.map(x=>x.metric_name).join(' ')},'查本次健康数据相关公共知识')+'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看综合评估摘要</button></div>';
+  box.innerHTML=html;
+  loadAssessmentHistory();
+  loadMvpSummary();
+}
 async function executeParsedBatchDiagnosis(){
   let d=CURRENT?.device,items=(RUNTIME_PARSE_RESULT?.observations||[]).filter(x=>x.diagnostic_supported),box=$('#runtimeBatchDiagnosisResult');
   if(!d||!box)return;
