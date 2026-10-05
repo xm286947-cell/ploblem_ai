@@ -750,6 +750,9 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 class HardwareR1WorkbenchService:
+    # Temporary canonical binding for MVP closure; implementation is moved/cleaned below.
+    apply_human_review = HardwareR1WorkbenchStore.apply_human_review
+
     def __init__(
         self,
         store: HardwareR1WorkbenchStore,
