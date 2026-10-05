@@ -503,7 +503,8 @@ def test_projection_can_rebuild_corrupt_or_incompatible_files(tmp_path):
 def test_incompatible_projection_schema_is_detected_and_rebuilt(tmp_path):
     db = tmp_path / "rebuildable" / "projection.db"
     db.parent.mkdir(parents=True)
-    with sqlite3.connect(db) as connection:
+    connection = sqlite3.connect(db)
+    try:
         connection.execute(
             "CREATE TABLE hardware_knowledge_consumption_projection "
             "(knowledge_id TEXT PRIMARY KEY)"
@@ -517,6 +518,11 @@ def test_incompatible_projection_schema_is_detected_and_rebuilt(tmp_path):
             "INSERT INTO hardware_knowledge_consumption_meta "
             "VALUES(1,1,0,'2026-10-04T00:00:00Z')"
         )
+        connection.commit()
+    finally:
+        # sqlite3.Connection's context manager commits/rolls back but does not
+        # close the handle. Windows cannot os.replace() an open SQLite file.
+        connection.close()
     service = HardwareKnowledgeConsumptionService(
         HardwareKnowledgeConsumptionProjectionStore(db),
         candidate_repository=FakeAssets(),
