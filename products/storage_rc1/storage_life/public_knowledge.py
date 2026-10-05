@@ -71,12 +71,61 @@ class ImportBody(BaseModel):
     media_type: str = "text/plain"
 
 
-def _url(value: str | None) -> str:
-    base = (value or DEFAULT_URL).rstrip("/")
+def _canonical_service_url(value: str) -> str:
+    base = str(value or "").strip().rstrip("/")
     parsed = urlparse(base)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
-        raise HTTPException(422, "Public Knowledge API 地址必须是有效的 HTTP(S) 地址，且不能包含凭证。")
-    return base
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise HTTPException(
+            422,
+            "Public Knowledge API 地址必须是服务端批准的 HTTP(S) 根地址，且不能包含凭证、路径、查询或片段。",
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(422, "Public Knowledge API 端口无效。") from exc
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(422, "Public Knowledge API 主机无效。")
+    default_port = 443 if parsed.scheme == "https" else 80
+    effective_port = port or default_port
+    host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"{parsed.scheme}://{host_text}:{effective_port}"
+
+
+def _allowed_service_urls() -> set[str]:
+    configured = [DEFAULT_URL]
+    configured.extend(
+        item.strip()
+        for item in os.getenv("PUBLIC_KNOWLEDGE_ALLOWED_URLS", "").split(",")
+        if item.strip()
+    )
+    allowed: set[str] = set()
+    for item in configured:
+        try:
+            allowed.add(_canonical_service_url(item))
+        except HTTPException:
+            # Invalid server configuration must never broaden browser access.
+            continue
+    return allowed
+
+
+def _url(value: str | None) -> str:
+    requested = _canonical_service_url(value or DEFAULT_URL)
+    allowed = _allowed_service_urls()
+    if requested not in allowed:
+        raise HTTPException(
+            403,
+            "Public Knowledge API 地址未被服务端批准；请使用部署配置中的 Public Knowledge 服务地址。",
+        )
+    return requested
 
 
 def _request(mode: str, path: str, payload: dict | None = None, base_url: str | None = None):
