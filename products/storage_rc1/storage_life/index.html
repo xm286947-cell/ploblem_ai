@@ -421,6 +421,11 @@ async function executeIntegratedActionPlan(){
     html+=optimizationList('验证动作',validation);
     html+=optimizationList('适用条件 / 边界',limits);
     if(remaining.length)html+=optimizationList('仍需补充',remaining);
+    if(r.action_persistence_status==='PERSISTED'){
+      html+='<div class="fact card"><b>工程执行项已保存</b><p>当前 S3 / S4 / 软件行为上下文完整，控制建议与验证动作已进入 Engineering Action Checklist。</p></div>';
+    }else if(r.action_persistence_status==='BLOCKED_INCOMPLETE_CONTEXT'){
+      html+='<div class="warning card"><b>未写入工程执行清单</b><p>当前 S3 / S4 / 软件行为上下文不完整、过期或尚未形成可执行结果。当前内容仅作为草案展示，补齐上游状态后重新生成。</p></div>';
+    }
     html+='<div class="card"><b>Decision Boundary</b><p>'+esc(r.decision_boundary||'ENGINEERING_REVIEW_REQUIRED')+'</p><small>该方案是 Existing Storage 能力的编排结果，不自动形成正式软件规范或替代批准。</small></div>';
     html+='<div class="row"><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">补充软件写入行为</button>'+pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging monitoring lifetime optimization'},'展开公共知识依据')+'</div><div id="integratedActionPublicContext"></div>';
     box.innerHTML=html;
