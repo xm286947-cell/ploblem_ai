@@ -568,6 +568,8 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         if kind and kind not in latest:
             latest[kind] = item
 
+    completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
+
     def scenario(kind: str, label: str) -> dict[str, Any]:
         item = latest.get(kind)
         if not item:
@@ -575,6 +577,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 "type": kind,
                 "label": label,
                 "status": "NOT_RUN",
+                "complete": False,
                 "assessment_id": None,
                 "created_at": None,
                 "direct_answer": None,
@@ -583,10 +586,12 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
         engineering = result.get("engineering_result") or {}
+        status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
         return {
             "type": kind,
             "label": label,
-            "status": item.get("status") or skill.get("status") or "UNKNOWN",
+            "status": status,
+            "complete": status in completed_statuses,
             "assessment_id": item.get("id"),
             "created_at": item.get("created_at"),
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
@@ -602,6 +607,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         "type": "FACT",
         "label": "S1 参数事实",
         "status": fact_status,
+        "complete": fact_status == "READY",
         "assessment_id": None,
         "created_at": None,
         "direct_answer": (
@@ -624,8 +630,11 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     for item in scenario_items:
         if item["type"] == "FACT":
             continue
-        if item["status"] == "NOT_RUN":
-            remaining.append(f"执行{item['label']}")
+        if not item.get("complete"):
+            if item["status"] == "NOT_RUN":
+                remaining.append(f"执行{item['label']}")
+            else:
+                remaining.append(f"{item['label']} 尚未形成可完成结果：{item['status']}")
     action_items = core.list_engineering_actions(device_id)
     return {
         "device": detail["device"],
@@ -667,7 +676,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             "storage_diagnosis": False,
         },
         "remaining_actions": remaining,
-        "mvp_ready_for_demo": not remaining,
+        "mvp_ready_for_demo": all(bool(x.get("complete")) for x in scenario_items),
     }
 
 
