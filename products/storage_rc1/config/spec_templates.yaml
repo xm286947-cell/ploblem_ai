@@ -67,6 +67,7 @@ device_types:
       ecc_capability: ECC能力（ECC Capability）
       internal_ecc: 内部ECC（Internal ECC）
       ecc_status: ECC状态（ECC Status）
+      bit_flip_threshold: Bit Flip / ECC 告警阈值（Bit Flip / ECC Alarm Threshold）
       factory_bad_block: 初始坏块（Factory Bad Block）
       runtime_bad_block: 运行坏块（Runtime Bad Block）
       minimum_valid_blocks: 最少有效块（Minimum Valid Blocks）
@@ -88,6 +89,7 @@ device_types:
     - ecc_capability
     - internal_ecc
     - ecc_status
+    - bit_flip_threshold
     - factory_bad_block
     - runtime_bad_block
     - minimum_valid_blocks
@@ -298,6 +300,7 @@ generic_section_groups:
     - ecc_capability
     - internal_ecc
     - ecc_status
+    - bit_flip_threshold
     - factory_bad_block
     - runtime_bad_block
     - minimum_valid_blocks
