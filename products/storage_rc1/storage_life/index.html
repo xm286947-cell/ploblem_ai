@@ -635,7 +635,7 @@ function runtimeDeltaText(x){
 function renderRuntimeTrendPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
-  host.insertAdjacentHTML('beforeend','<div id="runtimeTrendPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME TREND</div><h3>运行健康趋势</h3><div class="muted">比较多次已保存运行快照；趋势本身只展示显式数值变化，寿命解释继续复用 Existing Lifetime Engine。</div></div><div class="row"><button class="secondary" onclick="loadRuntimeTrend()">刷新</button><button class="primary" onclick="executeRuntimeTrendLifetime()">按趋势评估寿命</button></div></div><div id="runtimeTrendBody" class="empty">正在读取历史运行快照…</div><div id="runtimeTrendLifetimeResult"></div></div>');
+  host.insertAdjacentHTML('beforeend','<div id="runtimeTrendPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME TREND</div><h3>运行健康趋势</h3><div class="muted">比较多次已保存运行快照；趋势本身只展示显式数值变化，寿命解释继续复用 Existing Lifetime Engine。</div></div><div class="row"><label>目标寿命（年，可选）<br><input id="trendTargetYears" type="number" min="0" step="0.1" placeholder="SSD DWPD，例如 10"></label><button class="secondary" onclick="loadRuntimeTrend()">刷新</button><button class="primary" onclick="executeRuntimeTrendLifetime()">按趋势评估寿命</button></div></div><div id="runtimeTrendBody" class="empty">正在读取历史运行快照…</div><div id="runtimeTrendLifetimeResult"></div></div>');
   loadRuntimeTrend();
 }
 async function executeRuntimeTrendLifetime(){
@@ -643,16 +643,19 @@ async function executeRuntimeTrendLifetime(){
   if(!d||!box)return;
   box.innerHTML='<div class="card">正在根据已保存运行趋势执行 Existing Lifetime Engine…</div>';
   try{
-    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/runtime-trend-lifetime',{method:'POST'}),items=r.results||[];
+    let years=$('#trendTargetYears')?.value.trim()||'',target=years?{value:Number(years),unit:'years'}:{};
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/runtime-trend-lifetime',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_service_life:target})}),items=r.results||[];
     let html='<div class="pagehead"><div><div class="kicker">TREND → LIFETIME</div><h3>运行趋势寿命评估</h3><div class="muted">只使用已保存快照的显式数值、时间间隔和现有确定性 Lifetime Engine；没有新公式栈。</div></div><span class="badge CONFIRMED">'+esc(items.length)+' 项结果</span></div>';
     if(!items.length){
       html+='<div class="warning card"><b>当前趋势不足以形成寿命评估</b><p>至少需要一个现有 Lifetime Engine 支持的运行指标；NVMe DWPD 需要两次 Data Units Written 快照形成时间窗口。</p></div>';
     }else{
       html+='<div class="tablewrap"><table><tr><th>来源指标</th><th>类型</th><th>趋势</th><th>评估状态</th><th>结果</th></tr>'+items.map(x=>{
         if(x.error)return '<tr><td><b>'+esc(x.metric_name||'')+'</b></td><td>'+esc(x.kind||'')+'</td><td>'+esc(x.delta??'—')+'</td><td>'+badge('FAIL')+'</td><td>'+esc(x.error)+'</td></tr>';
-        let sr=x.assessment?.skill_result||{},st=sr.structured_result||{},mr=st.measured_vs_budget;
+        let sr=x.assessment?.skill_result||{},st=sr.structured_result||{},mr=st.measured_vs_budget,tp=st.target_service_life_projection||{};
         let trend=x.kind==='TREND_DWPD'?(esc(x.delta)+' '+esc(x.delta_unit||'')+' / '+esc(Math.round((x.elapsed_days||0)*100)/100)+' 天'):esc(x.delta??'—');
-        return '<tr><td><b>'+esc(x.metric_name||x.formal_metric||'')+'</b></td><td>'+esc(x.kind||'')+'</td><td>'+trend+'</td><td>'+badge(sr.status||'UNKNOWN')+'</td><td>'+esc(mr==null?'—':(typeof mr==='object'?JSON.stringify(mr):mr))+'</td></tr>';
+        let resultText=mr==null?'—':(typeof mr==='object'?JSON.stringify(mr):mr);
+        if(tp.budget_status)resultText+=' · 目标寿命 '+esc(tp.budget_status);
+        return '<tr><td><b>'+esc(x.metric_name||x.formal_metric||'')+'</b></td><td>'+esc(x.kind||'')+'</td><td>'+trend+'</td><td>'+badge(sr.status||'UNKNOWN')+'</td><td>'+esc(resultText)+'</td></tr>';
       }).join('')+'</table></div>';
     }
     html+='<div class="row"><button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">基于趋势生成优化方案</button></div><div id="runtimeTrendPublicContext"></div>';
