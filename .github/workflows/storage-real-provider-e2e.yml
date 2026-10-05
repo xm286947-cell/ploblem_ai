@@ -38,6 +38,24 @@ jobs:
           python -m pip install -r requirements-runtime-p0-test.txt
           python -m pip install -r products/storage_rc1/requirements.txt
 
+      - name: Checkout canonical Unified Agent Runtime pin for C6
+        uses: actions/checkout@v4
+        with:
+          ref: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+          path: .runtime-pinned
+          fetch-depth: 1
+
+      - name: Verify canonical Unified Agent Runtime pin
+        shell: bash
+        run: |
+          actual="$(git -C .runtime-pinned rev-parse HEAD)"
+          expected="9e36eeb0237459b884ee0d3e663ccf5833bfc685"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Pinned Runtime checkout mismatch: expected=$expected actual=$actual"
+            exit 1
+          fi
+          echo "RUNTIME_PIN_CHECKOUT=PASS"
+
       - name: Run STORAGE-REAL-E2E-01
         run: python -m pytest tests/test_agent_runtime_p0_storage_real_provider_e2e.py -q
 
@@ -60,7 +78,7 @@ jobs:
         env:
           STORAGE_C6_REAL_E2E: "1"
           STORAGE_LIFE_EXECUTION_MODE: runtime
-          UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}
+          UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}/.runtime-pinned
           STORAGE_MODEL_CONFIG: ${{ github.workspace }}/config/runtime/model.yaml
           STORAGE_LIFE_RUNTIME_DB: ${{ runner.temp }}/storage_c6_runtime.sqlite3
         run: python -m pytest -q -s products/storage_rc1/tests/test_storage_four_device_real_provider_c6.py

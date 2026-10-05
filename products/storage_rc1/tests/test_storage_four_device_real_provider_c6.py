@@ -86,42 +86,57 @@ def _classify_runtime_failure(exc: Exception) -> str:
     return "RUNTIME_CONTRACT_FAIL"
 
 
-def _evidence_records(value) -> list[dict]:
-    if isinstance(value, dict):
-        return [value]
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, dict)]
-    return []
-
-
-def _assert_actual_supporting_evidence(
-    expected: dict, fact: dict, golden_id: str = "test", mode: str = "test"
+def _assert_compound_assertion(
+    expected: dict,
+    fact: dict,
+    golden_id: str = "test",
+    mode: str = "test",
+    source_excerpts: dict[str, list[dict]] | None = None,
 ) -> None:
     supporting_claims = expected.get("supporting_evidence") or []
     if not supporting_claims:
         return
-    actual_records = (
-        _evidence_records(fact.get("resolved_evidence"))
-        + _evidence_records(fact.get("evidence"))
-    )
     key = expected.get("field_key", "<unknown>")
-    assert actual_records, (
-        f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} actual compound evidence absent for {key}"
+    primary = fact.get("resolved_evidence") or {}
+    primary_locators = fact.get("evidence") or []
+    assert isinstance(primary, dict) and primary, (
+        f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} primary evidence absent for {key}"
     )
+    assert isinstance(primary_locators, list) and len(primary_locators) == 1, (
+        f"RUNTIME_CONTRACT_FAIL: {golden_id}/{mode} expected the current single-locator "
+        f"evidence contract for {key}; count={len(primary_locators) if isinstance(primary_locators, list) else 'invalid'}"
+    )
+    primary_locator = primary_locators[0]
+    for locator in (primary, primary_locator):
+        assert str(locator.get("source_id") or "") == str(expected["source_id"]), (
+            f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} primary source mismatch for {key}: {locator}"
+        )
+        assert int(locator.get("page") or locator.get("source_page") or 0) == int(expected["page"]), (
+            f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} primary page mismatch for {key}: {locator}"
+        )
+        quote = locator.get("quote") or locator.get("source_text") or ""
+        assert str(expected["quote"]).casefold() in str(quote).casefold(), (
+            f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} primary quote mismatch for {key}: {locator}"
+        )
+
+    assert str(fact.get("value")) == str(expected["value"]), (
+        f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} compound value mismatch for {key}: {fact}"
+    )
+
+    source_excerpts = source_excerpts or _source_excerpts()
     for supporting in supporting_claims:
         source_id = str(supporting["source_id"])
         page = int(supporting["page"])
-        quote = str(supporting["quote"])
-        matches = [
-            item for item in actual_records
-            if str(item.get("source_id") or "") == source_id
-            and int(item.get("page") or 0) == page
-            and quote.casefold() in str(item.get("quote") or "").casefold()
-        ]
-        assert matches, (
-            f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} actual evidence does not support "
-            f"compound claim {supporting.get('claim')} from {source_id} page {page}; "
-            f"actual={actual_records}"
+        excerpt = next(
+            (
+                item for item in source_excerpts.get(source_id, [])
+                if int(item["page"]) == page
+            ),
+            None,
+        )
+        assert excerpt and str(supporting["quote"]) in str(excerpt["text"]), (
+            f"TEST_HARNESS_FAIL: frozen compound source truth missing for "
+            f"{key}/{supporting['claim']} source={source_id} page={page}"
         )
 
 
@@ -143,6 +158,7 @@ def _assert_golden(case: dict, mode: str, source_ids: list[str], result: dict) -
         f"REAL_PROVIDER_GOLDEN_FAIL: {golden_id}/{mode} unresolved required evidence: {unresolved}"
     )
 
+    compound_assertions = 0
     for expected in selected_positive:
         key = expected["field_key"]
         fact = facts.get(key) or {}
@@ -177,18 +193,16 @@ def _assert_golden(case: dict, mode: str, source_ids: list[str], result: dict) -
                     f"for {key}: {fact}"
                 )
 
-        for supporting in expected.get("supporting_evidence") or []:
-            excerpt = next(
-                (
-                    item for item in _source_excerpts().get(str(supporting["source_id"]), [])
-                    if int(item["page"]) == int(supporting["page"])
-                ),
-                None,
-            )
-            assert excerpt and supporting["quote"] in excerpt["text"], (
-                f"TEST_HARNESS_FAIL: frozen supporting evidence is not present for {key}/{supporting['claim']}"
-            )
-        _assert_actual_supporting_evidence(expected, fact, golden_id, mode)
+        if expected.get("supporting_evidence"):
+            _assert_compound_assertion(expected, fact, golden_id, mode)
+            compound_assertions += 1
+
+    if compound_assertions:
+        print("COMPOUND_PRIMARY_EVIDENCE=PASS")
+        print("COMPOUND_SOURCE_TRUTH=PASS")
+        print("COMPOUND_VALUE_SEMANTICS=PASS")
+        print("PRODUCTION_EVIDENCE_CARDINALITY=1")
+        print("MULTI_LOCATOR_TRACEABILITY=NOT_SUPPORTED_BY_CURRENT_EXTRACTION_CONTRACT")
 
     for expected in case["negative_assertions"]:
         if expected.get("source_mode") and expected["source_mode"] != mode:
@@ -399,39 +413,70 @@ def test_c6_harness_reuses_frozen_golden_and_source_assets_without_copying_asser
             }
 
 
-def _compound_expected():
-    return {
-        "field_key": "compound",
-        "supporting_evidence": [
-            {"claim": "claim_a", "source_id": "source-a", "page": 1, "quote": "claim A"},
-            {"claim": "claim_b", "source_id": "source-b", "page": 2, "quote": "claim B"},
-        ],
+def _first_compound_golden():
+    for case in _golden_cases():
+        for expected in case["positive_assertions"]:
+            if expected.get("supporting_evidence"):
+                return case, expected
+    raise AssertionError("TEST_HARNESS_FAIL: no frozen compound assertion found")
+
+
+def test_c6_compound_single_primary_locator_passes_with_frozen_source_truth():
+    case, expected = _first_compound_golden()
+    primary = {
+        "source_id": expected["source_id"],
+        "page": expected["page"],
+        "quote": expected["quote"],
     }
-
-
-def test_c6_compound_partial_actual_evidence_fails():
-    expected = _compound_expected()
-    partial_fact = {
-        "resolved_evidence": {"source_id": "source-a", "page": 1, "quote": "claim A"},
-        "evidence": [{"source_id": "source-a", "page": 1, "quote": "claim A"}],
+    fact = {
+        "value": expected["value"],
+        "resolved_evidence": primary,
+        "evidence": [primary],
     }
-    with pytest.raises(AssertionError, match="claim_b"):
-        _assert_actual_supporting_evidence(expected, partial_fact)
-    print("COMPOUND_PARTIAL_SUPPORT=REJECTED")
-
-
-def test_c6_compound_full_actual_evidence_passes():
-    expected = _compound_expected()
-    complete_fact = {
-        "resolved_evidence": {"source_id": "source-a", "page": 1, "quote": "claim A"},
-        "evidence": [
-            {"source_id": "source-a", "page": 1, "quote": "claim A"},
-            {"source_id": "source-b", "page": 2, "quote": "claim B, explicitly stated"},
-        ],
-    }
-    _assert_actual_supporting_evidence(expected, complete_fact)
-    print("COMPOUND_ACTUAL_EVIDENCE_SUPPORT=PASS")
+    _assert_compound_assertion(expected, fact, case["golden_id"], "single_primary_locator")
+    print("COMPOUND_PRIMARY_EVIDENCE=PASS")
+    print("COMPOUND_SOURCE_TRUTH=PASS")
+    print("COMPOUND_VALUE_SEMANTICS=PASS")
+    print("PRODUCTION_EVIDENCE_CARDINALITY=1")
+    print("MULTI_LOCATOR_TRACEABILITY=NOT_SUPPORTED_BY_CURRENT_EXTRACTION_CONTRACT")
     print("UNDER_SUPPORTED_COMPOUND_ASSERTION=0")
+
+
+def test_c6_compound_fails_when_frozen_source_truth_is_incomplete():
+    case, expected = _first_compound_golden()
+    primary = {
+        "source_id": expected["source_id"],
+        "page": expected["page"],
+        "quote": expected["quote"],
+    }
+    fact = {"value": expected["value"], "resolved_evidence": primary, "evidence": [primary]}
+    first = expected["supporting_evidence"][0]
+    with pytest.raises(AssertionError, match="frozen compound source truth"):
+        _assert_compound_assertion(
+            expected,
+            fact,
+            case["golden_id"],
+            "incomplete_frozen_source",
+            source_excerpts={
+                str(first["source_id"]): [{"page": first["page"], "text": first["quote"]}]
+            },
+        )
+
+
+def test_c6_compound_value_must_match_frozen_golden_exactly():
+    case, expected = _first_compound_golden()
+    primary = {
+        "source_id": expected["source_id"],
+        "page": expected["page"],
+        "quote": expected["quote"],
+    }
+    fact = {
+        "value": f"{expected['value']} partial",
+        "resolved_evidence": primary,
+        "evidence": [primary],
+    }
+    with pytest.raises(AssertionError, match="compound value mismatch"):
+        _assert_compound_assertion(expected, fact, case["golden_id"], "incorrect_compound_value")
 
 
 def test_c6_emmc_primary_only_event_model():
