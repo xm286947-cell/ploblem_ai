@@ -391,6 +391,60 @@ function downloadMvpSummary(){
   a.href=url;a.download='STORAGE_MVP_'+String(d.vendor||'DEVICE').replace(/[^A-Za-z0-9_-]+/g,'_')+'_'+String(d.model||'SUMMARY').replace(/[^A-Za-z0-9_-]+/g,'_')+'.md';
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
+let RUNTIME_PARSE_RESULT=null;
+function renderRuntimeImportPanel(d){
+  let host=$('#deviceDetail');
+  if(!host||!d?.id)return;
+  host.insertAdjacentHTML('beforeend',
+    '<div id="runtimeImportPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME DATA INPUT</div><h3>运行数据快速导入</h3>'+
+    '<div class="muted">粘贴 SMART / NVMe Health / EXT_CSD / ECC / Bad Block / MTD 输出；只提取显式字段，不做诊断推测。</div></div></div>'+
+    '<label>来源 / 命令<br><input id="runtimeImportSource" style="width:100%" placeholder="例如 nvme smart-log / mmc extcsd read / driver health log"></label>'+
+    '<label style="display:block;margin-top:8px">原始运行数据<br><textarea id="runtimeImportText" style="width:100%;min-height:150px" placeholder="粘贴原始命令输出或健康日志…"></textarea></label>'+
+    '<div class="row" style="margin-top:10px"><button class="primary" onclick="parseRuntimeImport()">识别运行指标</button><small>运行数据只留在 Storage；不会发送给 Public Knowledge。</small></div>'+
+    '<div id="runtimeImportResult" style="margin-top:10px"><div class="empty">等待输入运行数据。</div></div></div>'
+  );
+}
+async function parseRuntimeImport(){
+  let d=CURRENT?.device,text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||'PASTED_RUNTIME_OUTPUT',box=$('#runtimeImportResult');
+  if(!d||!box)return;
+  if(!text.trim())return msg('请先粘贴运行数据',true);
+  box.innerHTML='<div class="card">正在识别显式运行指标…</div>';
+  try{
+    RUNTIME_PARSE_RESULT=await api('/api/product/runtime-observations/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_type:d.device_type,text,source_label:source})});
+    let items=RUNTIME_PARSE_RESULT.observations||[];
+    box.innerHTML=items.length?'<div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
+  }catch(e){box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
+}
+function parsedObservation(index){return (RUNTIME_PARSE_RESULT?.observations||[])[index]||null}
+function applyParsedToLifetime(index){
+  let x=parsedObservation(index);
+  if(!x?.suggested_lifetime_metric)return;
+  let metric=x.suggested_lifetime_metric;
+  if($('#lifeMetric')){$('#lifeMetric').value=metric;lifeMetricChanged()}
+  if($('#lifeRuntimeValue'))$('#lifeRuntimeValue').value=x.normalized_value??x.raw_value??'';
+  if($('#lifeRuntimeUnit'))$('#lifeRuntimeUnit').value=x.unit||'';
+  if($('#lifeRuntimeSource'))$('#lifeRuntimeSource').value=x.source_label||$('#runtimeImportSource')?.value||'PASTED_RUNTIME_OUTPUT';
+  if($('#lifeRuntimeEvidence'))$('#lifeRuntimeEvidence').value=x.source_line||'Parsed runtime source line';
+  scrollDeviceSection('lifetimePanel');
+  msg('已把运行指标带入寿命评估，请补充观测窗口 / 目标寿命后计算。');
+}
+async function applyParsedToDiagnosis(index){
+  let x=parsedObservation(index),d=CURRENT?.device;
+  if(!x||!d)return;
+  await openDiagnosisForCurrentDevice();
+  let alias={ecc_corrected:'ecc_status',ecc_uncorrectable:'ecc_status',erase_count:'runtime_bad_block',pe_cycle:'lifetime_counter'};
+  let metric=x.metric_name,select=$('#diagMetric');
+  if(select){
+    let values=[...select.options].map(o=>o.value);
+    if(values.includes(metric))select.value=metric;
+    else if(alias[metric]&&values.includes(alias[metric]))select.value=alias[metric];
+  }
+  if($('#diagRuntimeValue'))$('#diagRuntimeValue').value=x.normalized_value??x.raw_value??'';
+  if($('#diagRuntimeUnit'))$('#diagRuntimeUnit').value=x.unit||'';
+  if($('#diagRuntimeSource'))$('#diagRuntimeSource').value=x.source_label||'PASTED_RUNTIME_OUTPUT';
+  if($('#diagRuntimeEvidence'))$('#diagRuntimeEvidence').value=x.source_line||'Parsed runtime source line';
+  msg('已把识别到的运行指标带入诊断页面。');
+}
 function renderScenarioLauncher(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
@@ -430,6 +484,7 @@ renderDetail=function(){
     '</div></div>'
   );
   host.insertAdjacentHTML('beforeend','<div id="detailConclusion"></div>');
+  renderRuntimeImportPanel(d);
   renderLifetimePanel(d);
   renderOptimizationPanel(d);
   renderAssessmentHistoryPanel(d);
