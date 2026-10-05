@@ -291,7 +291,9 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
         revision = str(hit.get("source_revision") or "")
         if not source_id:
             continue
-        source = source_cache.setdefault(source_id, _source_for_context(mode, source_id, base_url))
+        if source_id not in source_cache:
+            source_cache[source_id] = _source_for_context(mode, source_id, base_url)
+        source = source_cache[source_id]
         title = str(source.get("title") or source_id)
         source_uri = source.get("source_uri") or source.get("official_url")
         locator = _normalize_citation_locator({"locator": hit.get("locator")}).get("locator")
@@ -328,11 +330,47 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
             "applicability_boundary": applicability_boundary,
         })
 
+    engineering_context = None
+    generation_status = "NOT_REQUESTED"
+    generation_citations: list[dict[str, Any]] = []
+    if mode == "LIVE" and enriched:
+        # Generation is best-effort enrichment only. Retrieval/Citation is the
+        # product baseline and must remain usable when the generation provider
+        # is unavailable.
+        public_question = (
+            f"{query}。请只基于公开资料说明工程含义、适用条件和边界；"
+            "不要给出 Storage 寿命、风险或诊断结论。"
+        )
+        try:
+            generated = _request(
+                mode,
+                "/ask",
+                {"question": public_question, "mode": "LIVE"},
+                base_url,
+            )
+            answer = generated.get("answer") if isinstance(generated, dict) else None
+            if isinstance(answer, str) and answer.strip():
+                engineering_context = answer.strip()
+                generation_status = "AVAILABLE"
+            generation_citations = (
+                generated.get("citations") if isinstance(generated, dict)
+                and isinstance(generated.get("citations"), list) else []
+            )
+        except HTTPException as exc:
+            if exc.status_code in {502, 503, 504}:
+                generation_status = "UNAVAILABLE"
+            else:
+                # Generation enrichment must never take down public Search.
+                generation_status = "DEGRADED"
+
     return {
         "query": query,
         "focus": focus,
         "mode": mode,
-        "generation_provider_used": False,
+        "generation_provider_used": generation_status == "AVAILABLE",
+        "generation_status": generation_status,
+        "engineering_context": engineering_context,
+        "generation_citations": generation_citations,
         "hits": enriched,
         "retrieval_snapshot": search_result.get("retrieval_snapshot") if isinstance(search_result, dict) else None,
     }
