@@ -1454,3 +1454,114 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     )
     assert batches.status_code == 200
     assert batches.json()["items"] == []
+
+
+def test_human_review_can_correct_candidate_without_machine_conflict(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS")
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0201", source_id="c" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0201.docx",
+        business_case_id="A0201",
+        source_id="c" * 64,
+        snapshot=_snapshot("A0201"),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["primary_subject"]["value"] = (
+        "人工确认后的 MCU 串口知识"
+    )
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision="CONFIRM",
+        reviewer="reviewer-product",
+        reason="真实业务复核后修正 AI 主体描述",
+        confirmed_content=confirmed,
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "RESOLVED"
+    assert durable["candidate_hash"] != asset["candidate_hash"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert durable["knowledge_object"]["source_fact"] == asset["knowledge_object"][
+        "source_fact"
+    ]
+    assert durable["knowledge_object"]["evidence"] == asset["knowledge_object"][
+        "evidence"
+    ]
+    assert reviewed["result"] == "CANDIDATE_READY"
+    assert reviewed["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert reviewed["pipeline_result"]["knowledge_object"]["engineering_context"][
+        "primary_subject"
+    ]["value"] == "MCU串口输出配置"
+    assert reviewed["review_history"][-1]["reviewer"] == "reviewer-product"
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_disposition"),
+    [("DEFER", "DEFERRED"), ("REJECT", "REJECTED")],
+)
+def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
+    tmp_path: Path,
+    decision: str,
+    expected_disposition: str,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / f"workbench-{decision}.db")
+    repository = _candidate_repository(tmp_path / f"hardware-asset-{decision}.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS")
+    asset = _commit_fixture_asset(
+        repository, result, case_id=f"A02{decision[:1]}1", source_id="d" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file=f"{decision}.docx",
+        business_case_id=f"A02{decision[:1]}1",
+        source_id="d" * 64,
+        snapshot=_snapshot(f"A02{decision[:1]}1"),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision=decision,
+        reviewer="reviewer-product",
+        reason=f"{decision} pending engineering confirmation",
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "REQUIRED"
+    assert durable["candidate_hash"] == asset["candidate_hash"]
+    assert reviewed["result"] == "REVIEW"
+    history = reviewed["review_history"]
+    assert history[-1]["review_record"]["disposition"] == expected_disposition
+    assert history[-1]["before_candidate_hash"] == asset["candidate_hash"]
+    assert history[-1]["after_candidate_hash"] == asset["candidate_hash"]
