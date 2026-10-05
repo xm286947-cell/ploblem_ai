@@ -897,9 +897,32 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 complete = False
                 next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
         elif kind == "DIAGNOSIS":
-            if not structured.get("current_observation"):
+            current_observation = structured.get("current_observation") or []
+            diagnosis_status = str(structured.get("diagnosis_status") or "")
+            signals = structured.get("abnormality_signal") or []
+            missing_information = list(skill.get("missing_information") or structured.get("missing_information") or [])
+            if not current_observation:
                 complete = False
                 next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
+            elif diagnosis_status == "ABNORMAL_SIGNAL_PRESENT" and signals:
+                # Explicit deterministic signals are a valid S4 diagnosis even
+                # when richer mechanism knowledge is still missing.
+                complete = status == "ANSWERED"
+            elif diagnosis_status == "NO_REGISTERED_SIGNAL":
+                semantic_gaps = [
+                    str(x) for x in missing_information
+                    if any(token in str(x) for token in (
+                        "NO_MATCHING_RELEASED_KNOWLEDGE",
+                        "FORMAL_DIAGNOSTIC_KNOWLEDGE",
+                        "INSUFFICIENT_KNOWLEDGE",
+                    ))
+                ]
+                if semantic_gaps:
+                    complete = False
+                    next_action = "当前观测未触发确定性异常，但相关正式诊断语义仍不完整；补齐 Formal Knowledge 后重新判读。"
+            else:
+                complete = False
+                next_action = "当前运行观测尚未形成可完成的 S4 诊断结果。"
 
         if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_snapshot_created_at:
             assessment_created_at = _iso_datetime(item.get("created_at"))
