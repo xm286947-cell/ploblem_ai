@@ -315,17 +315,34 @@ class StorageDomainSkillAdapter:
                             "budget_status": "BUDGET_UNAVAILABLE",
                         }
                     else:
-                        rated_tbw_bytes, _ = self.lifetime_engine._normalize(
-                            rated_fact.value,
-                            rated_fact.unit,
-                            "bytes",
-                            "rated_tbw_bytes",
-                        )
-                        if rated_tbw_bytes <= 0:
+                        try:
+                            rated_tbw_bytes, _ = self.lifetime_engine._normalize(
+                                rated_fact.value,
+                                rated_fact.unit,
+                                "bytes",
+                                "rated_tbw_bytes",
+                            )
+                        except Exception as exc:
+                            details = getattr(exc, "details", None)
+                            if details:
+                                missing.extend(str(x) for x in details)
+                            else:
+                                missing.append("RATED_TBW_NORMALIZATION_FAILED")
+                            rated_tbw_bytes = None
+                        if rated_tbw_bytes is None:
+                            target_projection = {
+                                "target_service_life": {"value": target_value, "unit": "years"},
+                                "target_days": target_days,
+                                "observed_dwpd": observed_dwpd,
+                                "projected_host_written_bytes": projected_host_bytes,
+                                "budget_status": "BUDGET_UNAVAILABLE",
+                            }
+                        elif rated_tbw_bytes <= 0:
                             raise ValueError("RATED_TBW_OUT_OF_RANGE")
-                        consumed_ratio_at_target = projected_host_bytes / rated_tbw_bytes
-                        remaining_bytes_at_target = rated_tbw_bytes - projected_host_bytes
-                        target_projection = {
+                        else:
+                            consumed_ratio_at_target = projected_host_bytes / rated_tbw_bytes
+                            remaining_bytes_at_target = rated_tbw_bytes - projected_host_bytes
+                            target_projection = {
                             "target_service_life": {"value": target_value, "unit": "years"},
                             "target_days": target_days,
                             "observed_dwpd": observed_dwpd,
@@ -339,11 +356,11 @@ class StorageDomainSkillAdapter:
                                 if projected_host_bytes <= rated_tbw_bytes
                                 else "EXCEEDS_BUDGET"
                             ),
-                            "evidence_refs": sorted(
-                                set(list(result.evidence_refs) + list(rated_fact.evidence_refs))
-                            ),
-                        }
-                        target_supported = True
+                                "evidence_refs": sorted(
+                                    set(list(result.evidence_refs) + list(rated_fact.evidence_refs))
+                                ),
+                            }
+                            target_supported = True
                 except (TypeError, ValueError, KeyError) as exc:
                     missing.append(str(exc))
             else:
