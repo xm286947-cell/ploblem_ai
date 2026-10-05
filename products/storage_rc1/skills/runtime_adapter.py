@@ -592,12 +592,16 @@ class StorageDomainSkillAdapter:
             status = "INSUFFICIENT_DATA"
             missing.append("FORMALLY_CONSUMABLE_RUNTIME_OBSERVATION_REQUIRED")
             answer = "当前没有可正式消费的 Runtime Observation，不能形成运行诊断结果。"
-        elif not items:
-            status = "INSUFFICIENT_KNOWLEDGE"
-            answer = "已有当前运行观测，但缺少可发布、可追溯的诊断知识，无法完成语义判读。"
         elif signals:
             status = "ANSWERED"
-            answer = f"检测到 {len(signals)} 个确定性异常/退化信号；需结合 Evidence、趋势和工程边界处理。"
+            if not items:
+                missing.append("FORMAL_DIAGNOSTIC_KNOWLEDGE_REQUIRED_FOR_FULL_INTERPRETATION")
+            answer = (
+                f"检测到 {len(signals)} 个确定性异常/退化信号；详细机理与处置边界仍需结合 Evidence、趋势和正式知识。"
+            )
+        elif not items:
+            status = "INSUFFICIENT_KNOWLEDGE"
+            answer = "已有当前运行观测，但没有触发无需协议语义即可判定的显式异常信号，且缺少正式诊断知识，保持 Fail-Closed。"
         else:
             status = "ANSWERED"
             answer = "当前可正式消费观测未触发已注册的确定性异常信号；这不等同于证明介质无风险。"
