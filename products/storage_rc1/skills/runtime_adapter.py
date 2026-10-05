@@ -17,6 +17,7 @@ from storage_life.software_impact import (
     SoftwareImpactAnalysisStatus,
     SoftwareImpactEngine,
 )
+from runtime.contracts import RuntimeObservation
 
 
 SKILLS_ROOT = Path(__file__).resolve().parent
@@ -382,30 +383,172 @@ class StorageDomainSkillAdapter:
             },
         )
 
+    @staticmethod
+    def _runtime_number(value: Any) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        raw = str(value).strip().replace(",", "").rstrip("%")
+        try:
+            if raw.lower().startswith("0x"):
+                return float(int(raw, 16))
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _deterministic_abnormality_signals(
+        cls,
+        observations: list[dict[str, Any]],
+        *,
+        released_semantics_available: bool,
+    ) -> list[dict[str, Any]]:
+        """Evaluate only explicit, fail-closed runtime signals.
+
+        No vendor threshold is invented here.  Signals either use explicit
+        counter/flag semantics or a threshold supplied in the same observation
+        set.  Protocol-tier interpretations that require released semantics are
+        gated by the diagnostic knowledge release.
+        """
+        by_name = {str(x.get("metric_name") or ""): x for x in observations}
+
+        def number(name: str) -> float | None:
+            item = by_name.get(name) or {}
+            return cls._runtime_number(item.get("normalized_value", item.get("raw_value")))
+
+        def signal(name: str, code: str, severity: str, rationale: str) -> dict[str, Any]:
+            item = by_name.get(name) or {}
+            return {
+                "metric_name": name,
+                "code": code,
+                "severity": severity,
+                "observed_value": item.get("normalized_value", item.get("raw_value")),
+                "unit": item.get("unit"),
+                "evidence_ref": item.get("evidence_ref") or item.get("raw_output_ref"),
+                "rationale": rationale,
+            }
+
+        signals: list[dict[str, Any]] = []
+        critical_warning = number("critical_warning")
+        if critical_warning is not None and critical_warning != 0:
+            signals.append(signal(
+                "critical_warning",
+                "NVME_CRITICAL_WARNING_NONZERO",
+                "CRITICAL",
+                "Critical Warning 为非零显式告警位；需进入人工诊断。",
+            ))
+
+        for metric, code, severity in (
+            ("media_errors", "MEDIA_ERROR_PRESENT", "WARNING"),
+            ("ecc_uncorrectable", "UNCORRECTABLE_ECC_PRESENT", "CRITICAL"),
+            ("program_fail", "PROGRAM_FAIL_PRESENT", "WARNING"),
+            ("erase_fail", "ERASE_FAIL_PRESENT", "WARNING"),
+        ):
+            value = number(metric)
+            if value is not None and value > 0:
+                signals.append(signal(
+                    metric,
+                    code,
+                    severity,
+                    f"{metric} 显式计数大于 0；需要结合时间趋势、负载和原始日志继续判定。",
+                ))
+
+        spare = number("available_spare")
+        spare_threshold = number("available_spare_threshold")
+        if spare is not None and spare_threshold is not None and spare < spare_threshold:
+            signals.append(signal(
+                "available_spare",
+                "AVAILABLE_SPARE_BELOW_THRESHOLD",
+                "CRITICAL",
+                "Available Spare 低于同次采集的显式 Threshold。",
+            ))
+
+        if released_semantics_available:
+            pre_eol = number("pre_eol_info")
+            if pre_eol is not None and pre_eol >= 3:
+                signals.append(signal(
+                    "pre_eol_info",
+                    "EMMC_PRE_EOL_URGENT",
+                    "CRITICAL",
+                    "PRE_EOL_INFO 落入已发布语义支持的紧急状态。",
+                ))
+            elif pre_eol is not None and pre_eol >= 2:
+                signals.append(signal(
+                    "pre_eol_info",
+                    "EMMC_PRE_EOL_WARNING",
+                    "WARNING",
+                    "PRE_EOL_INFO 落入已发布语义支持的预警状态。",
+                ))
+
+            percentage_used = number("percentage_used")
+            if percentage_used is not None and percentage_used >= 100:
+                signals.append(signal(
+                    "percentage_used",
+                    "NVME_PERCENTAGE_USED_AT_OR_ABOVE_100",
+                    "WARNING",
+                    "Percentage Used 已达到或超过已发布语义中的额定耐久消耗边界；仍需结合厂商规格与工作负载判断。",
+                ))
+
+        return signals
+
     def execute_diagnostic_validation(self, *, device_type: str, target_question: str,
                                       diagnostic_capabilities: list[dict[str, Any]] | None = None,
                                       runtime_observations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         knowledge = self.query_pack("PACK_DIAGNOSTIC_VALIDATION", target_question, device_type=device_type)
         items = knowledge.get("items") or []
         observations = list(runtime_observations or [])
-        current = [x for x in observations if x.get("is_formally_consumable") is True]
-        stale = [x for x in observations if x.get("is_formally_consumable") is not True]
-        missing = list(knowledge.get("missing_information") or [])
-        if stale:
-            missing.append("STALE_OR_NONCONSUMABLE_RUNTIME_OBSERVATION_EXCLUDED")
+        current: list[dict[str, Any]] = []
+        excluded: list[str] = []
+
+        for raw in observations:
+            try:
+                observation = RuntimeObservation(**dict(raw))
+            except Exception:
+                excluded.append("INVALID_RUNTIME_OBSERVATION_CONTRACT")
+                continue
+            if observation.is_formally_consumable:
+                current.append(observation.model_dump(mode="json"))
+            else:
+                excluded.append("STALE_OR_NONCONSUMABLE_RUNTIME_OBSERVATION_EXCLUDED")
+
+        missing = list(knowledge.get("missing_information") or []) + excluded
         methods = [_text(x) for x in items if x.get("canonical_object_type") == "DiagnosticMethod" and _text(x)]
-        status = "ANSWERED" if items else "INSUFFICIENT_KNOWLEDGE"
+        signals = self._deterministic_abnormality_signals(
+            current,
+            released_semantics_available=bool(items),
+        )
+
+        if not current:
+            status = "INSUFFICIENT_DATA"
+            missing.append("FORMALLY_CONSUMABLE_RUNTIME_OBSERVATION_REQUIRED")
+            answer = "当前没有可正式消费的 Runtime Observation，不能形成运行诊断结果。"
+        elif not items:
+            status = "INSUFFICIENT_KNOWLEDGE"
+            answer = "已有当前运行观测，但缺少可发布、可追溯的诊断知识，无法完成语义判读。"
+        elif signals:
+            status = "ANSWERED"
+            answer = f"检测到 {len(signals)} 个确定性异常/退化信号；需结合 Evidence、趋势和工程边界处理。"
+        else:
+            status = "ANSWERED"
+            answer = "当前可正式消费观测未触发已注册的确定性异常信号；这不等同于证明介质无风险。"
+
+        diagnosis_status = (
+            "ABNORMAL_SIGNAL_PRESENT"
+            if signals else
+            "NO_REGISTERED_SIGNAL"
+            if current and items else
+            "INCOMPLETE"
+        )
         return self._base_result(
             "storage-diagnostic-validation", status,
-            "已区分诊断能力与当前观测；只使用可正式消费的 Runtime Observation。"
-            if items else "缺少可发布、可追溯的诊断知识，无法解释字段语义。",
+            answer,
             {
                 "supported_metrics": list(diagnostic_capabilities or []),
                 "acquisition_method": methods,
                 "data_source": [x.get("source_refs") or [] for x in items],
                 "current_observation": current,
+                "diagnosis_status": diagnosis_status,
                 "interpretation_boundary": [_text(x) for x in items if _text(x)],
-                "abnormality_signal": [],
+                "abnormality_signal": signals,
                 "validation_method": methods,
                 "missing_information": sorted(set(missing)),
                 "evidence_refs": knowledge.get("evidence_refs") or [],
@@ -413,7 +556,12 @@ class StorageDomainSkillAdapter:
             knowledge_refs=knowledge.get("knowledge_refs") or [],
             evidence_refs=knowledge.get("evidence_refs") or [],
             missing=missing,
-            separation={"facts": current, "derived": [], "hypotheses": [], "unknowns": missing},
+            separation={
+                "facts": current,
+                "derived": signals,
+                "hypotheses": [],
+                "unknowns": sorted(set(missing)),
+            },
         )
 
     def execute_change_impact(self, *, device_type: str, parameter_delta: list[dict[str, Any]],
