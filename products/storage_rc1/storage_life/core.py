@@ -2124,7 +2124,9 @@ def runtime_metric_trends(device_id, limit=40):
     """Return validated per-metric history and simple deltas without interpreting risk."""
     snapshots = list_runtime_snapshots(device_id, limit=limit)
     series = {}
+    latest_formal_snapshot_created_at = None
     for batch in reversed(snapshots):
+        batch_has_formal = False
         for obs in batch.get("observations") or []:
             metric = obs["metric_name"]
             formally_consumable = bool(
@@ -2132,9 +2134,12 @@ def runtime_metric_trends(device_id, limit=40):
                 and str(obs.get("availability_status") or "").upper() == "AVAILABLE"
                 and int(obs.get("confirmed_by_user") or 0) == 1
             )
+            if formally_consumable:
+                batch_has_formal = True
             point = {
                 "batch_id": batch["id"],
                 "captured_at": batch["captured_at"],
+                "snapshot_created_at": batch.get("created_at"),
                 "normalized_value": obs.get("normalized_value"),
                 "raw_value": obs.get("raw_value"),
                 "unit": obs.get("unit") or "",
@@ -2150,6 +2155,10 @@ def runtime_metric_trends(device_id, limit=40):
             except (TypeError, ValueError):
                 point["numeric_value"] = None
             series.setdefault(metric, []).append(point)
+        if batch_has_formal:
+            created_at = str(batch.get("created_at") or "")
+            if created_at and (latest_formal_snapshot_created_at is None or created_at > latest_formal_snapshot_created_at):
+                latest_formal_snapshot_created_at = created_at
 
     result = []
     for metric, all_points in sorted(series.items()):
@@ -2172,6 +2181,7 @@ def runtime_metric_trends(device_id, limit=40):
     return {
         "device_id": device_id,
         "snapshot_count": len(snapshots),
+        "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
         "metrics": result,
         "interpretation_performed": False,
         "formal_trend_only": True,
