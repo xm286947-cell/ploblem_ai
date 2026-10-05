@@ -850,7 +850,11 @@ def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
             "raw_output_ref": point.get("source_line") or point.get("batch_id"),
             "evidence_ref": point.get("source_line") or point.get("batch_id"),
             "collector": "STORAGE_MVP_RUNTIME_TREND",
-            "is_formally_consumable": True,
+            # runtime_metric_trends() already filters to user-confirmed VALID/AVAILABLE
+            # snapshot points. Re-assert the canonical RuntimeObservation contract
+            # here so LifetimeEngine does not silently downgrade the derived point.
+            "quality_status": "VALID",
+            "availability_status": "AVAILABLE",
         }
 
     by_metric = {x["metric_name"]: x for x in trend.get("metrics") or []}
