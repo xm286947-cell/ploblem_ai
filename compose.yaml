@@ -12,7 +12,7 @@ services:
       PKR_DATA_DIR: /var/lib/public-knowledge
       PKR_RESTART_STRATEGY: supervised_process_exit
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9000:8080"
     volumes:
       - public_knowledge_data:/var/lib/public-knowledge
     mem_limit: 4g
