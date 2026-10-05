@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from copy import deepcopy
 from pathlib import Path
@@ -1240,6 +1241,125 @@ def test_batch_upload_is_file_isolated_and_source_binding_dependency_visible(
     assert results["A0152-demo.docx"]["result"] == "QUEUED"
     assert results["bad.pdf"]["result"] == "FAILED"
     assert results["bad.pdf"]["failed_stage"] == "PARSE"
+
+
+def test_web_upload_freezes_dataset_identity_with_sha_size_and_order(
+    tmp_path: Path,
+) -> None:
+    class SourceBindingStub:
+        def register_active_bytes(self, case_id, filename, content, *, mime_type=None):
+            digest = hashlib.sha256(content).hexdigest()
+            return {
+                "business_case_id": case_id,
+                "binding_status": "ACTIVE",
+                "source_id": digest,
+                "sha256": digest,
+                "size_bytes": len(content),
+            }
+
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=SourceBindingStub(),
+        structurer_factory=lambda: object(),
+    )
+    first = _docx(tmp_path / "A0152-demo.docx")
+    second = _docx(tmp_path / "A0153-demo.docx")
+    batch = service.upload_batch(
+        [
+            (
+                "A0152-demo.docx",
+                first,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "A0153-demo.docx",
+                second,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        ]
+    )
+
+    identity = batch["dataset_identity"]
+    assert identity["version"] == "hardware-r1-dataset-identity/v1"
+    assert identity["batch_id"] == batch["batch_id"]
+    assert [entry["order"] for entry in identity["entries"]] == [1, 2]
+    assert [entry["source_file"] for entry in identity["entries"]] == [
+        "A0152-demo.docx",
+        "A0153-demo.docx",
+    ]
+    assert [entry["size_bytes"] for entry in identity["entries"]] == [
+        len(first),
+        len(second),
+    ]
+    assert [entry["sha256"] for entry in identity["entries"]] == [
+        hashlib.sha256(first).hexdigest(),
+        hashlib.sha256(second).hexdigest(),
+    ]
+    assert all(entry["binding_status"] == "BOUND" for entry in identity["entries"])
+    assert all(entry["item_id"] for entry in identity["entries"])
+
+    with pytest.raises(HardwareR1WorkbenchError) as frozen:
+        store.freeze_dataset_identity(
+            batch["batch_id"],
+            [{**identity["entries"][0], "size_bytes": len(first) + 1}],
+        )
+    assert frozen.value.code == "DATASET_IDENTITY_ALREADY_FROZEN"
+
+
+def test_source_substitution_is_blocked_before_provider_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class MutableSourceBindingStub:
+        def __init__(self):
+            self.active = {}
+
+        def register_active_bytes(self, case_id, filename, content, *, mime_type=None):
+            digest = hashlib.sha256(content).hexdigest()
+            self.active[case_id] = {
+                "business_case_id": case_id,
+                "binding_status": "ACTIVE",
+                "source_id": digest,
+                "sha256": digest,
+                "size_bytes": len(content),
+            }
+            return dict(self.active[case_id])
+
+        def get_active_source(self, case_id):
+            return dict(self.active[case_id])
+
+    source_store = MutableSourceBindingStub()
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=source_store,
+        structurer_factory=lambda: object(),
+    )
+    raw = _docx(tmp_path / "A0152-demo.docx")
+    batch = service.upload_batch(
+        [
+            (
+                "A0152-demo.docx",
+                raw,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        ]
+    )
+    calls = {"provider": 0}
+
+    def fake_pipeline(*_args, **_kwargs):
+        calls["provider"] += 1
+        return _result()
+
+    monkeypatch.setattr(workbench_module, "run_r1_agent_extraction", fake_pipeline)
+    source_store.active["A0152"]["sha256"] = "f" * 64
+
+    result = service.run_batch(batch["batch_id"])
+    item = result["items"][0]
+    assert calls["provider"] == 0
+    assert item["result"] == "DEPENDENCY_BLOCKED"
+    assert item["orchestration_status"] == "DEPENDENCY_BLOCKED"
+    assert item["error_code"] == "DATASET_SOURCE_IDENTITY_MISMATCH"
 
 
 def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
