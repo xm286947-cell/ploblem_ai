@@ -14,7 +14,7 @@ permissions:
 
 env:
   OLD_SOURCE_COMMIT: 87fcfaede66f4565eb3fba12330f7b8fba51187a
-  NEW_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+  NEW_SOURCE_COMMIT: ${{ github.sha }}
 
 jobs:
   build-packages:
