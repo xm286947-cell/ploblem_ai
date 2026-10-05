@@ -5,11 +5,21 @@ from typing import Protocol
 
 
 @dataclass(frozen=True)
+class DocumentElement:
+    text: str
+    locator: str
+    element_type: str = "text"
+
+
+@dataclass(frozen=True)
 class ParsedDocument:
     text: str
     locators: tuple[str, ...]
     parser_id: str
     parser_version: str
+    elements: tuple[DocumentElement, ...] = ()
+    locator_ready: bool = True
+    element_counts: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)

@@ -47,20 +47,38 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS idx_revisions_source ON source_revisions(source_id, created_at);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(source_revisions)")}
+            migrations = {
+                "raw_sha256": "TEXT", "snapshot_bytes": "BLOB", "locator_ready": "INTEGER NOT NULL DEFAULT 1",
+                "element_counts": "TEXT NOT NULL DEFAULT '{}'", "original_filename": "TEXT",
+            }
+            for name, sql_type in migrations.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE source_revisions ADD COLUMN {name} {sql_type}")
+            db.execute("UPDATE source_revisions SET raw_sha256=content_sha256 WHERE raw_sha256 IS NULL")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_revision_raw_unique ON source_revisions(source_id,raw_sha256) WHERE raw_sha256 IS NOT NULL")
 
     def import_source(self, title: str, source_uri: str | None, content: str, media_type: str, parser_id: str,
-                      parser_version: str, chunks: list[Chunk]) -> tuple[str, str, bool]:
+                      parser_version: str, chunks: list[Chunk], *, raw_bytes: bytes | None = None,
+                      locator_ready: bool = True, element_counts: dict[str, int] | None = None,
+                      original_filename: str | None = None) -> tuple[str, str, bool]:
         source_key = (source_uri or title.strip()).lower().encode("utf-8")
         source_id = "src_" + hashlib.sha256(source_key).hexdigest()[:24]
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        revision_id = "rev_" + content_hash[:24]
+        raw_hash = hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else content_hash
+        revision_id = "rev_" + raw_hash[:24]
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self.connect() as db:
-            existing = db.execute("SELECT 1 FROM source_revisions WHERE source_id=? AND content_sha256=?", (source_id, content_hash)).fetchone()
+            existing = db.execute("SELECT 1 FROM source_revisions WHERE source_id=? AND raw_sha256=?", (source_id, raw_hash)).fetchone()
             if existing:
                 return source_id, revision_id, False
             db.execute("INSERT OR IGNORE INTO sources VALUES(?,?,?,?,?)", (source_id, title, source_uri, "PUBLIC", now))
-            db.execute("INSERT INTO source_revisions VALUES(?,?,?,?,?,?,?,?)", (source_id, revision_id, content_hash, content, media_type, parser_id, parser_version, now))
+            db.execute("""INSERT INTO source_revisions
+                (source_id,revision_id,content_sha256,content,media_type,parser_id,parser_version,created_at,
+                 raw_sha256,snapshot_bytes,locator_ready,element_counts,original_filename)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (source_id, revision_id, content_hash, content, media_type, parser_id, parser_version, now,
+                 raw_hash, raw_bytes, int(locator_ready), json.dumps(element_counts or {}, sort_keys=True), original_filename))
             for chunk in chunks:
                 hit_id = "hit_" + hashlib.sha256(f"{source_id}:{revision_id}:{chunk.ordinal}".encode()).hexdigest()[:24]
                 db.execute("INSERT INTO chunks VALUES(?,?,?,?,?,?)", (hit_id, source_id, revision_id, chunk.ordinal, chunk.locator, chunk.text))
@@ -68,19 +86,43 @@ class Store:
 
     def list_sources(self) -> list[dict[str, object]]:
         with self.connect() as db:
-            rows = db.execute("""SELECT s.source_id,s.title,s.source_uri,s.created_at,r.revision_id,r.content_sha256,r.parser_id,r.parser_version,r.created_at revision_created_at
+            rows = db.execute("""SELECT s.source_id,s.title,s.source_uri,s.created_at,r.revision_id,r.content_sha256,
+                r.raw_sha256 source_sha256,r.media_type,r.parser_id,r.parser_version,r.locator_ready,r.element_counts,
+                r.created_at revision_created_at
                 FROM sources s JOIN source_revisions r ON r.source_id=s.source_id
                 WHERE r.created_at=(SELECT MAX(r2.created_at) FROM source_revisions r2 WHERE r2.source_id=s.source_id)
                 ORDER BY s.created_at DESC""").fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["locator_ready"] = bool(item["locator_ready"])
+            item["element_counts"] = json.loads(item["element_counts"] or "{}")
+            result.append(item)
+        return result
 
     def get_source(self, source_id: str) -> dict[str, object] | None:
         with self.connect() as db:
             src = db.execute("SELECT * FROM sources WHERE source_id=?", (source_id,)).fetchone()
             if not src:
                 return None
-            revisions = db.execute("SELECT revision_id,content_sha256,media_type,parser_id,parser_version,created_at FROM source_revisions WHERE source_id=? ORDER BY created_at DESC", (source_id,)).fetchall()
-        return {"source": dict(src), "revisions": [dict(row) for row in revisions]}
+            revisions = db.execute("""SELECT revision_id,content_sha256,raw_sha256,media_type,parser_id,parser_version,
+                created_at,locator_ready,element_counts,original_filename,LENGTH(snapshot_bytes) snapshot_size
+                FROM source_revisions WHERE source_id=? ORDER BY created_at DESC""", (source_id,)).fetchall()
+        revision_data = []
+        for row in revisions:
+            value = dict(row)
+            value["element_counts"] = json.loads(value["element_counts"] or "{}")
+            value["locator_ready"] = bool(value["locator_ready"])
+            revision_data.append(value)
+        return {"source": dict(src), "revisions": revision_data}
+
+    def get_snapshot(self, source_id: str, revision_id: str) -> tuple[bytes, str, str, str] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT snapshot_bytes,media_type,original_filename,raw_sha256 FROM source_revisions WHERE source_id=? AND revision_id=?",
+                             (source_id, revision_id)).fetchone()
+        if not row or row["snapshot_bytes"] is None:
+            return None
+        return bytes(row["snapshot_bytes"]), row["media_type"], row["original_filename"] or "source", row["raw_sha256"]
 
     def search(self, query: str, top_k: int, source_ids: list[str] | None = None) -> list[SearchHit]:
         tokens = [token for token in query.replace("\n", " ").split() if len(token) >= 2]
@@ -119,6 +161,13 @@ class Store:
 
     def resolve(self, citation_id: str) -> dict[str, object] | None:
         with self.connect() as db:
-            row = db.execute("""SELECT c.hit_id citation_id,c.source_id,c.revision_id source_revision,c.locator,c.text,r.content_sha256
+            row = db.execute("""SELECT c.hit_id citation_id,c.source_id,c.revision_id source_revision,c.locator,c.text,
+                r.content_sha256,r.raw_sha256 source_sha256,r.media_type,r.original_filename,r.locator_ready,
+                r.element_counts,LENGTH(r.snapshot_bytes) snapshot_size
                 FROM chunks c JOIN source_revisions r ON r.source_id=c.source_id AND r.revision_id=c.revision_id WHERE c.hit_id=?""", (citation_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        result["locator_ready"] = bool(result["locator_ready"])
+        result["element_counts"] = json.loads(result["element_counts"] or "{}")
+        return result
