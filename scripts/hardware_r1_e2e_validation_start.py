@@ -67,6 +67,14 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["HARDWARE_DATA_ROOT"] = str(data_root)
     os.environ["HARDWARE_CASE_RUNTIME_DB"] = str(data_root / "audit/runtime/hardware_case_runtime.db")
     os.environ["HARDWARE_R1_E2E_PROFILE"] = "1"
+    # The validation profile owns a dedicated, isolated NON_PROD Unified
+    # Knowledge repository by default.  Publish is still an explicit human
+    # action; these defaults only remove external service stitching.
+    os.environ.setdefault("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "NON_PROD")
+    os.environ.setdefault("HARDWARE_R1_E2E_KNOWLEDGE_MODE", "LOCAL_NON_PROD")
+    os.environ.setdefault(
+        "HARDWARE_KNOWLEDGE_RELEASE_VERSION", "HARDWARE-R1-E2E"
+    )
     resolution = resolver.resolve()
     print(f"DATA_ROOT_CLASSIFICATION={resolution.classification}")
     print(f"E2E_DATA_ROOT={data_root}")
