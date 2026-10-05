@@ -133,6 +133,13 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
     assert "hardware_case_knowledge_consumption.js?v=wave4-stage4-v1" in e2e_knowledge.text
     assert client.get("/p0/static/hardware_case_e2e.js").status_code == 200
 
+    consumption_js = client.get("/p0/static/hardware_case_knowledge_consumption.js")
+    evidence_js = client.get("/p0/static/hardware_case_e2e_evidence.js")
+    assert consumption_js.status_code == evidence_js.status_code == 200
+    assert "detail.dataset.businessCaseId = item.business_case_id" in consumption_js.text
+    assert "detail.dataset.businessCaseId" in evidence_js.text
+    assert ".split('·')" not in evidence_js.text
+
 
 def _synthetic_docx(path: Path) -> bytes:
     document = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
