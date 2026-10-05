@@ -348,7 +348,11 @@ def create_p0_app(
     historical_case_service: Any | None = None
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
-        from quality_knowledge.web.major_production_api import create_major_production_router
+        from quality_knowledge.web.major_production_api import (
+            MajorMutationGuard,
+            create_major_production_router,
+        )
+        from quality_knowledge.major_cases.restore import MajorCaseRestoreService
         from repositories import JsonArtifactRepository
         from services.historical_case_contract import HistoricalCaseConsumerService
         from services.major_case_production import MajorCaseProductionService
@@ -375,6 +379,8 @@ def create_p0_app(
             major_runtime_db,
             provider=major_provider,
         )
+        major_case_restore_service = MajorCaseRestoreService(major_repository, root)
+        major_mutation_guard = MajorMutationGuard()
         ensure_major_runtime_schema = getattr(
             major_case_service.store, "_init_schema", None
         )
@@ -387,8 +393,16 @@ def create_p0_app(
         )
         app.state.major_case_repository = major_repository
         app.state.major_case_production_service = major_case_service
+        app.state.major_case_restore_service = major_case_restore_service
+        app.state.major_mutation_guard = major_mutation_guard
         app.state.historical_case_service = historical_case_service
-        app.include_router(create_major_production_router(major_case_service))
+        app.include_router(
+            create_major_production_router(
+                major_case_service,
+                restore_service=major_case_restore_service,
+                mutation_guard=major_mutation_guard,
+            )
+        )
 
     if "REPEAT_RISK" in domains:
         from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
