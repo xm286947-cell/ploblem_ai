@@ -294,8 +294,10 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
         source = source_cache.setdefault(source_id, _source_for_context(mode, source_id, base_url))
         title = str(source.get("title") or source_id)
         source_uri = source.get("source_uri") or source.get("official_url")
-        locator = hit.get("locator")
-        locator_text = json.dumps(locator or {}, ensure_ascii=False, separators=(",", ":"))
+        locator = _normalize_citation_locator({"locator": hit.get("locator")}).get("locator")
+        if not isinstance(locator, dict):
+            locator = {"raw": str(locator or "")}
+        locator_text = json.dumps(locator, ensure_ascii=False, separators=(",", ":"))
         citation_id = str(hit.get("hit_id") or hit.get("citation_id") or "")
         snapshot_url = None
         if mode == "LIVE" and revision:
