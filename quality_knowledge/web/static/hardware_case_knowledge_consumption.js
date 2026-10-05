@@ -71,9 +71,87 @@
     }).join('')}</div>`;
   }
 
+  function deviceLabel(ref) {
+    if (!ref || typeof ref !== 'object' || ref.status === 'MISSING') return '';
+    return [
+      ref.generic_name_or_series,
+      ref.manufacturer_part_no,
+      ref.internal_material_no,
+      ref.manufacturer,
+      ref.category
+    ].filter(Boolean).join(' / ');
+  }
+
+  function renderDeviceRiskSummary() {
+    const panel = q('[data-device-risk-summary]');
+    if (activeScenario !== 'risk') {
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
+
+    panel.hidden = false;
+    const groups = new Map();
+    results.forEach(item => {
+      const labels = Array.from(new Set(
+        (Array.isArray(item.device_refs) ? item.device_refs : [])
+          .map(deviceLabel)
+          .filter(Boolean)
+      ));
+      labels.forEach(label => {
+        if (!groups.has(label)) {
+          groups.set(label, {
+            knowledgeIds: new Set(),
+            caseIds: new Set(),
+            mechanisms: new Set(),
+            constraints: new Set()
+          });
+        }
+        const group = groups.get(label);
+        group.knowledgeIds.add(item.knowledge_id);
+        group.caseIds.add(item.business_case_id);
+        if (item.failure_mechanism) group.mechanisms.add(item.failure_mechanism);
+        if (item.design_constraint) group.constraints.add(item.design_constraint);
+      });
+    });
+
+    if (!groups.size) {
+      panel.innerHTML = '<h3>器件风险聚合</h3><p>当前结果没有显式 DeviceRef，不做器件推断。</p>';
+      return;
+    }
+
+    const cards = Array.from(groups.entries())
+      .map(([label, group]) => ({
+        label,
+        knowledgeCount: group.knowledgeIds.size,
+        caseCount: group.caseIds.size,
+        mechanisms: Array.from(group.mechanisms).slice(0, 3),
+        constraints: Array.from(group.constraints).slice(0, 3)
+      }))
+      .sort((a, b) =>
+        b.caseCount - a.caseCount ||
+        b.knowledgeCount - a.knowledgeCount ||
+        a.label.localeCompare(b.label)
+      );
+
+    panel.innerHTML =
+      '<h3>器件风险聚合</h3>' +
+      '<div class="hc-device-risk-grid">' +
+      cards.map(card =>
+        '<article class="hc-device-risk-card">' +
+        '<strong>' + esc(card.label) + '</strong>' +
+        '<small>' + card.caseCount + ' 个 Case · ' + card.knowledgeCount + ' 条正式知识</small>' +
+        '<span>失效机理：' + esc(card.mechanisms.length ? card.mechanisms.join('；') : '—') + '</span>' +
+        '<span>设计约束：' + esc(card.constraints.length ? card.constraints.join('；') : '—') + '</span>' +
+        '</article>'
+      ).join('') +
+      '</div>';
+  }
+
   function renderResults() {
     const box = q('[data-knowledge-results]');
     q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'}`;
+    renderDeviceRiskSummary();
     if (!results.length) {
       box.innerHTML = '<div class="hc-knowledge-empty">未检索到已发布的正式硬件知识</div>';
       return;
@@ -96,6 +174,9 @@
   function setUnavailable(message = '正式知识消费索引当前不可用，请先重建 Consumption Projection。') {
     q('[data-knowledge-unavailable]').hidden = false;
     q('[data-knowledge-unavailable]').textContent = message;
+    const riskPanel = q('[data-device-risk-summary]');
+    riskPanel.hidden = true;
+    riskPanel.innerHTML = '';
     q('[data-knowledge-results]').innerHTML = '';
     q('[data-knowledge-summary]').textContent = '消费索引不可用';
   }
