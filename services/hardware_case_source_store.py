@@ -547,12 +547,27 @@ class HardwareCaseSourceStore:
         An existing ACTIVE binding is rejected even when the bytes are equal.
         """
         case_id = self._case_id(business_case_id)
-        if self._binding_row(case_id) is not None:
-            raise HardwareCaseSourceError("SOURCE_ALREADY_EXISTS")
-        digest = hashlib.sha256(content).hexdigest()
-        source_ref = f"r1:{case_id}:{digest}"
         if len(content) > self.max_upload_bytes:
             raise HardwareCaseSourceError("SOURCE_TOO_LARGE")
+        digest = hashlib.sha256(content).hexdigest()
+        existing = self._binding_row(case_id)
+        if existing is not None:
+            current = self.get_active_source(case_id)
+            if (
+                str(current.get("source_id") or "") == digest
+                and str(current.get("sha256") or "") == digest
+                and int(current.get("size_bytes") or -1) == len(content)
+                and str(current.get("binding_status") or "").upper() == "ACTIVE"
+                and str(current.get("source_status") or "").upper() == "AVAILABLE"
+            ):
+                return {
+                    **current,
+                    "business_case_id": case_id,
+                    "binding_status": "ACTIVE",
+                    "idempotent_reuse": True,
+                }
+            raise HardwareCaseSourceError("SOURCE_ALREADY_EXISTS")
+        source_ref = f"r1:{case_id}:{digest}"
         name = _safe_name(filename)
         metadata = self._stage_and_register(
             source_ref=source_ref,
