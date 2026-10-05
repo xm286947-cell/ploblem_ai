@@ -63,6 +63,10 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
 )
+from services.hardware_r1_e2e_nonprod_knowledge import (
+    HardwareR1ManagedNonProdError,
+    create_managed_nonprod_environment,
+)
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
@@ -576,12 +580,94 @@ def create_p0_app(
                 or os.getenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION")
                 or ""
             ).strip()
+            e2e_profile = os.getenv("HARDWARE_R1_E2E_PROFILE") == "1"
+            e2e_knowledge_environment = os.getenv(
+                "HARDWARE_R1_E2E_KNOWLEDGE_ENV", ""
+            ).strip().upper()
+            e2e_knowledge_mode = os.getenv(
+                "HARDWARE_R1_E2E_KNOWLEDGE_MODE", "EXTERNAL"
+            ).strip().upper()
+            managed_nonprod_release_controller = None
+            managed_nonprod_status: dict[str, Any] | None = None
             hardware_r1_promotion_service = None
-            if effective_knowledge_adapter is None and knowledge_base_url and knowledge_release_version:
+
+            if (
+                effective_knowledge_adapter is None
+                and e2e_profile
+                and e2e_knowledge_environment == "NON_PROD"
+                and e2e_knowledge_mode == "LOCAL_NON_PROD"
+                and knowledge_release_version
+            ):
+                try:
+                    (
+                        effective_knowledge_adapter,
+                        managed_nonprod_release_controller,
+                        managed_nonprod_status,
+                    ) = create_managed_nonprod_environment(
+                        hardware_data_root / "nonprod_unified_knowledge",
+                        release_prefix=knowledge_release_version,
+                    )
+                except HardwareR1ManagedNonProdError as error:
+                    effective_knowledge_adapter = None
+                    managed_nonprod_release_controller = None
+                    managed_nonprod_status = {
+                        "mode": "LOCAL_NON_PROD",
+                        "managed_release": True,
+                        "ready": False,
+                        "code": error.code,
+                    }
+            elif effective_knowledge_adapter is None and knowledge_base_url and knowledge_release_version:
                 effective_knowledge_adapter = HardwareCaseKnowledgeAdapter(
                     KnowledgeHttpTransport(knowledge_base_url),
                     knowledge_release_version=knowledge_release_version,
                 )
+
+            local_nonprod_ready = managed_nonprod_release_controller is not None
+            external_nonprod_ready = bool(
+                e2e_knowledge_environment == "NON_PROD"
+                and knowledge_base_url
+                and knowledge_release_version
+            )
+            if e2e_profile:
+                if local_nonprod_ready:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": True,
+                        "environment": "NON_PROD",
+                        **(managed_nonprod_status or {}),
+                    }
+                elif external_nonprod_ready:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": True,
+                        "environment": "NON_PROD",
+                        "mode": "EXTERNAL",
+                        "managed_release": False,
+                        "release_version": knowledge_release_version,
+                    }
+                else:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": False,
+                        "environment": (
+                            e2e_knowledge_environment or "UNCONFIGURED"
+                        ),
+                        "mode": e2e_knowledge_mode or "UNCONFIGURED",
+                        "managed_release": e2e_knowledge_mode == "LOCAL_NON_PROD",
+                        "release_version": None,
+                        "code": (
+                            (managed_nonprod_status or {}).get("code")
+                            or "BLOCKED_BY_ENVIRONMENT"
+                        ),
+                    }
+            else:
+                hardware_r1_knowledge_environment_status = {
+                    "ready": effective_knowledge_adapter is not None,
+                    "environment": "STANDARD",
+                    "mode": "EXTERNAL_OR_INJECTED",
+                    "managed_release": False,
+                    "release_version": knowledge_release_version or None,
+                }
+            app.state.hardware_r1_knowledge_environment_status = (
+                hardware_r1_knowledge_environment_status
+            )
             if effective_knowledge_adapter is not None:
                 hardware_r1_promotion_store = HardwareR1KnowledgePromotionStore(
                     hardware_r1_workbench_db, read_only=True
@@ -738,13 +824,19 @@ def create_p0_app(
                     promotion_service=hardware_r1_promotion_service,
                     consumption_service=hardware_knowledge_consumption_service,
                     publish_allowed=(
-                        os.getenv("HARDWARE_R1_E2E_PROFILE") != "1"
+                        not e2e_profile
                         or (
-                            os.getenv("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "").strip().upper() == "NON_PROD"
-                            and bool(os.getenv("HARDWARE_KNOWLEDGE_BASE_URL", "").strip())
-                            and bool(os.getenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION", "").strip())
+                            e2e_knowledge_environment == "NON_PROD"
+                            and (
+                                managed_nonprod_release_controller is not None
+                                or (
+                                    bool(knowledge_base_url)
+                                    and bool(knowledge_release_version)
+                                )
+                            )
                         )
                     ),
+                    release_controller=managed_nonprod_release_controller,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
@@ -762,6 +854,7 @@ def create_p0_app(
                         data_root=hardware_data_root,
                         normal_data_root=HardwareDataRootResolver(root).default_data_root,
                         promotion_status=app.state.hardware_r1_promotion_status,
+                        knowledge_status=hardware_r1_knowledge_environment_status,
                     )
                 )
             testability_restore_hooks.append(hardware_data.ensure_ready)
