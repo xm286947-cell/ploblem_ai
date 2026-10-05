@@ -112,6 +112,11 @@ def connect():
       facts_json TEXT DEFAULT '[]', expected_fields_json TEXT DEFAULT '[]', searched_pages_json TEXT DEFAULT '[]',
       searched_sections_json TEXT DEFAULT '[]', searched_fields_json TEXT DEFAULT '{}', coverage_json TEXT DEFAULT '{}',
       coverage_layers_json TEXT DEFAULT '{}', document_analysis_json TEXT DEFAULT '{}', created_at TEXT);
+    CREATE TABLE IF NOT EXISTS device_assessments(id TEXT PRIMARY KEY, device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      assessment_type TEXT, status TEXT, input_json TEXT DEFAULT '{}', result_json TEXT DEFAULT '{}',
+      created_by TEXT DEFAULT 'Storage MVP', created_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_device_assessments_device_time
+      ON device_assessments(device_id,created_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -1968,6 +1973,60 @@ def compare(device_ids):
         matrix.setdefault(spec["canonical_name"], {})[spec["device_id"]] = spec
     return {"devices": list(devices.values()), "fields": matrix,
             "missing": {field: [d for d in device_ids if d not in values] for field, values in matrix.items()}}
+
+
+def save_device_assessment(device_id, assessment_type, status, input_payload, result_payload, created_by="Storage MVP"):
+    """Persist one user-visible Storage assessment for later review/reuse."""
+    import json
+    assessment_type = str(assessment_type or "").strip().upper()
+    if assessment_type not in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+        raise ValueError("assessment_type 仅支持 LIFETIME / DIAGNOSIS / OPTIMIZATION")
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        assessment_id = uuid4().hex
+        con.execute("""INSERT INTO device_assessments
+          (id,device_id,assessment_type,status,input_json,result_json,created_by,created_at)
+          VALUES (?,?,?,?,?,?,?,?)""", (
+            assessment_id,
+            device_id,
+            assessment_type,
+            str(status or "UNKNOWN"),
+            json.dumps(input_payload or {}, ensure_ascii=False, default=str),
+            json.dumps(result_payload or {}, ensure_ascii=False, default=str),
+            str(created_by or "Storage MVP"),
+            now(),
+        ))
+    return get_device_assessment(assessment_id)
+
+
+def get_device_assessment(assessment_id):
+    import json
+    with connect() as con:
+        row = con.execute("SELECT * FROM device_assessments WHERE id=?", (assessment_id,)).fetchone()
+    if not row:
+        raise KeyError(assessment_id)
+    item = dict(row)
+    item["input"] = json.loads(item.pop("input_json") or "{}")
+    item["result"] = json.loads(item.pop("result_json") or "{}")
+    return item
+
+
+def list_device_assessments(device_id, limit=20):
+    import json
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 20
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        items = rows(con, """SELECT * FROM device_assessments WHERE device_id=?
+          ORDER BY created_at DESC,id DESC LIMIT ?""", (device_id, limit))
+    for item in items:
+        item["input"] = json.loads(item.pop("input_json") or "{}")
+        item["result"] = json.loads(item.pop("result_json") or "{}")
+    return items
 
 
 def query_knowledge(q):
