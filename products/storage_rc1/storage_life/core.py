@@ -2289,8 +2289,11 @@ def list_engineering_actions(device_id, include_closed=True):
             item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
             item["history"] = rows(con, """SELECT prior_status,new_status,updated_by,updated_at
               FROM engineering_action_history WHERE action_id=? ORDER BY updated_at,id""", (item["id"],))
-            item["sources"] = rows(con, """SELECT source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at
-              FROM engineering_action_sources WHERE action_id=? ORDER BY linked_at,id""", (item["id"],))
+            item["sources"] = rows(con, """SELECT s.source_assessment_id,s.evidence_refs_json,s.knowledge_refs_json,s.linked_at,
+                     a.assessment_type,a.status AS assessment_status,a.created_at AS assessment_created_at
+              FROM engineering_action_sources s
+              LEFT JOIN device_assessments a ON a.id=s.source_assessment_id
+              WHERE s.action_id=? ORDER BY s.linked_at,s.id""", (item["id"],))
             for source in item["sources"]:
                 source["evidence_refs"] = json.loads(source.pop("evidence_refs_json") or "[]")
                 source["knowledge_refs"] = json.loads(source.pop("knowledge_refs_json") or "[]")
