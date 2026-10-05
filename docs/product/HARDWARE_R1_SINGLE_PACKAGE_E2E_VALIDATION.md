@@ -15,10 +15,10 @@ The safe defaults are `HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD`, `HARDWARE_R1_E2E
 ## Manual path
 
 1. Import the current 4 representative real Word documents from the Workbench page and run the batch. The earlier 20–30 document target remains a later scale/stability validation target, not a prerequisite for the current E2E retrieval demonstration.
-2. Inspect Evidence Gate and Candidate status; resolve conflicts manually. If Stage A or Stage B fails with a retryable error, use Retry Failed Stage. The Case Detail shows the in-flight retry stage, locks duplicate action buttons, polls the current Case while the Provider call is pending, and preserves selective retry semantics.
-3. Use Promotion precheck and Candidate Intake, then perform Formal Review explicitly.
+2. Inspect Evidence Gate and Candidate status in the Human Review panel. Compare AI Candidate fields with Evidence, correct business knowledge fields when needed, then Confirm; or use Deferred / Reject to keep the Candidate blocked without deleting it. Source identity, provenance and Evidence are immutable in this review path. If Stage A or Stage B fails with a retryable error, use Retry Failed Stage. The Case Detail shows the in-flight retry stage, locks duplicate action buttons, polls the current Case while the Provider call is pending, and preserves selective retry semantics.
+3. After Human Review is resolved, use Promotion precheck and Candidate Intake, then perform Formal Review explicitly.
 4. Publish explicitly to NON_PROD Unified Knowledge. In the default local validation mode, the package advances the immutable NON_PROD release snapshot after that explicit Publish.
-5. Verify and Query Back, update the rebuildable Consumption Projection, search, open the correct knowledge detail, and use E2E-mode Evidence controls to inspect the source passage or open the original Word.
+5. Verify and Query Back, update the rebuildable Consumption Projection, search, open the correct Formal Knowledge detail, and use the Evidence controls to inspect the source passage or open the original Word. Evidence drill-back remains identity-bound to `business_case_id` + exact `evidence_id` and fails closed on mismatch.
 
 No step auto-reviews or auto-publishes. CI uses synthetic DOCX and fake providers only; it never includes real corpus files or makes real provider calls. Earlier Prepare and Execution packages remain internal engineering tools and are not part of this package or its user path.
 
@@ -34,6 +34,6 @@ Search remains a rebuildable read model over verified Formal Knowledge. It uses 
 
 When a user enters multiple whitespace-separated keywords, every normalized keyword must be supported somewhere in the projected Formal Knowledge record. Keywords may match across different weighted fields (for example device + interface + symptom). Each field contributes its configured weight at most once, and the UI shows the matched field, matched keyword(s), actual Formal Knowledge field value, and weight as the Match Reason.
 
-Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. E2E Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
+Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. Formal Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
 
 Scope is limited to Hardware R1 E2E validation. This ZIP does not certify the whole Hardware Case MVP, a formal product release, or installer packages.
