@@ -117,6 +117,19 @@ def connect():
       created_by TEXT DEFAULT 'Storage MVP', created_at TEXT);
     CREATE INDEX IF NOT EXISTS idx_device_assessments_device_time
       ON device_assessments(device_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS runtime_snapshot_batches(id TEXT PRIMARY KEY,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      source_label TEXT DEFAULT '', raw_text TEXT DEFAULT '', captured_at TEXT,
+      created_by TEXT DEFAULT 'Storage MVP', created_at TEXT);
+    CREATE TABLE IF NOT EXISTS runtime_snapshot_observations(id TEXT PRIMARY KEY,
+      batch_id TEXT REFERENCES runtime_snapshot_batches(id) ON DELETE CASCADE,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      metric_name TEXT, raw_value TEXT, normalized_value TEXT, unit TEXT DEFAULT '',
+      source_line TEXT DEFAULT '', created_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_device_time
+      ON runtime_snapshot_batches(device_id,captured_at DESC,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_metric_time
+      ON runtime_snapshot_observations(device_id,metric_name,created_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -1973,6 +1986,131 @@ def compare(device_ids):
         matrix.setdefault(spec["canonical_name"], {})[spec["device_id"]] = spec
     return {"devices": list(devices.values()), "fields": matrix,
             "missing": {field: [d for d in device_ids if d not in values] for field, values in matrix.items()}}
+
+
+def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text="", captured_at=None, created_by="Storage MVP"):
+    """Persist one explicit runtime-health snapshot for trend review.
+
+    This store records only values the parser/user explicitly supplied. It does
+    not infer diagnosis, remaining life or missing metrics.
+    """
+    import json
+    batch_id = uuid4().hex
+    created_at = now()
+    captured_at = str(captured_at or created_at)
+    source_label = str(source_label or "").strip()[:500]
+    raw_text = str(raw_text or "")
+    if len(raw_text) > 200_000:
+        raise ValueError("RUNTIME_TEXT_TOO_LARGE")
+    rows_to_save = []
+    for index, item in enumerate(observations or []):
+        metric_name = str(item.get("metric_name") or "").strip()
+        if not metric_name:
+            continue
+        raw_value = item.get("raw_value")
+        normalized = item.get("normalized_value", raw_value)
+        rows_to_save.append({
+            "id": uuid4().hex,
+            "metric_name": metric_name,
+            "raw_value": "" if raw_value is None else str(raw_value),
+            "normalized_value": "" if normalized is None else str(normalized),
+            "unit": str(item.get("unit") or ""),
+            "source_line": str(item.get("source_line") or item.get("evidence_ref") or "")[:4000],
+            "ordinal": index,
+        })
+    if not rows_to_save:
+        raise ValueError("NO_RUNTIME_OBSERVATIONS")
+
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        con.execute("""INSERT INTO runtime_snapshot_batches
+          (id,device_id,source_label,raw_text,captured_at,created_by,created_at)
+          VALUES (?,?,?,?,?,?,?)""",
+          (batch_id, device_id, source_label, raw_text, captured_at, str(created_by or "Storage MVP"), created_at))
+        for item in rows_to_save:
+            con.execute("""INSERT INTO runtime_snapshot_observations
+              (id,batch_id,device_id,metric_name,raw_value,normalized_value,unit,source_line,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?)""",
+              (item["id"], batch_id, device_id, item["metric_name"], item["raw_value"],
+               item["normalized_value"], item["unit"], item["source_line"], created_at))
+
+    return get_runtime_snapshot(batch_id)
+
+
+def get_runtime_snapshot(batch_id):
+    with connect() as con:
+        batch = con.execute("SELECT * FROM runtime_snapshot_batches WHERE id=?", (batch_id,)).fetchone()
+        if not batch:
+            raise KeyError(batch_id)
+        observations = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,created_at
+          FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch_id,))
+    item = dict(batch)
+    item["observations"] = observations
+    item["observation_count"] = len(observations)
+    return item
+
+
+def list_runtime_snapshots(device_id, limit=20):
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 20
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        batches = rows(con, """SELECT * FROM runtime_snapshot_batches WHERE device_id=?
+          ORDER BY captured_at DESC,created_at DESC,id DESC LIMIT ?""", (device_id, limit))
+        for batch in batches:
+            batch["observations"] = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,created_at
+              FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch["id"],))
+            batch["observation_count"] = len(batch["observations"])
+    return batches
+
+
+def runtime_metric_trends(device_id, limit=40):
+    """Return per-metric history and simple deltas without interpreting risk."""
+    snapshots = list_runtime_snapshots(device_id, limit=limit)
+    series = {}
+    for batch in reversed(snapshots):
+        for obs in batch.get("observations") or []:
+            metric = obs["metric_name"]
+            point = {
+                "batch_id": batch["id"],
+                "captured_at": batch["captured_at"],
+                "normalized_value": obs.get("normalized_value"),
+                "raw_value": obs.get("raw_value"),
+                "unit": obs.get("unit") or "",
+                "source_label": batch.get("source_label") or "",
+                "source_line": obs.get("source_line") or "",
+            }
+            try:
+                point["numeric_value"] = float(str(obs.get("normalized_value")).replace(",", "").rstrip("%"))
+            except (TypeError, ValueError):
+                point["numeric_value"] = None
+            series.setdefault(metric, []).append(point)
+
+    result = []
+    for metric, points in sorted(series.items()):
+        latest = points[-1]
+        previous = points[-2] if len(points) > 1 else None
+        delta = None
+        if previous and latest.get("numeric_value") is not None and previous.get("numeric_value") is not None:
+            delta = latest["numeric_value"] - previous["numeric_value"]
+        result.append({
+            "metric_name": metric,
+            "sample_count": len(points),
+            "latest": latest,
+            "previous": previous,
+            "delta": delta,
+            "points": points[-12:],
+        })
+    return {
+        "device_id": device_id,
+        "snapshot_count": len(snapshots),
+        "metrics": result,
+        "interpretation_performed": False,
+    }
 
 
 def save_device_assessment(device_id, assessment_type, status, input_payload, result_payload, created_by="Storage MVP"):
