@@ -608,6 +608,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             latest[kind] = item
 
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
+    current_fact_fingerprint = _device_fact_fingerprint(detail)
 
     def scenario(kind: str, label: str) -> dict[str, Any]:
         item = latest.get(kind)
@@ -629,6 +630,33 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         complete = status in completed_statuses
         next_action = engineering.get("next_action")
         structured = skill.get("structured_result") or {}
+        recorded_input = item.get("input") or {}
+
+        if kind == "COMPARE":
+            current_new = current_fact_fingerprint
+            recorded_new = str(recorded_input.get("_new_device_fact_fingerprint") or "")
+            old_id = str(recorded_input.get("old_id") or "")
+            recorded_old = str(recorded_input.get("_old_device_fact_fingerprint") or "")
+            old_current = ""
+            if old_id:
+                try:
+                    old_current = _device_fact_fingerprint(device_slots(old_id))
+                except KeyError:
+                    old_current = ""
+            if (
+                not recorded_new
+                or not recorded_old
+                or recorded_new != current_new
+                or recorded_old != old_current
+            ):
+                complete = False
+                next_action = "S1 Device Fact 已变化或基准器件不可用；请基于当前事实重新执行 S2 参数差异与影响。"
+        else:
+            recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
+            if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
+                complete = False
+                next_action = "S1 Device Fact 已变化；请基于当前正式事实重新执行该场景。"
+
         if kind == "LIFETIME":
             requested_metric = str((item.get("input") or {}).get("requested_metric") or "")
             supporting_only = {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}
@@ -636,7 +664,6 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 complete = False
                 next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
         elif kind == "OPTIMIZATION":
-            recorded_input = item.get("input") or {}
             workload = recorded_input.get("workload_software_facts") or []
             has_behavior = any(
                 str(x.get("description") or "").strip()
