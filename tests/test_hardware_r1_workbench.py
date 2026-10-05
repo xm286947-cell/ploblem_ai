@@ -1126,6 +1126,64 @@ def test_retry_failed_only_selects_failed_cases_and_preserves_ready(tmp_path: Pa
     assert review_id not in {item[0] for item in calls}
 
 
+def test_retry_failed_stage_item_preserves_stage_a_last_good_on_stage_b_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A4.docx",
+        business_case_id="A4",
+        source_id="d" * 64,
+        snapshot=_snapshot("A4", "d" * 64),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            case_id="A4",
+            source_id="d" * 64,
+            a_cache=True,
+        ),
+        orchestration_status="FAILED",
+    )
+    calls: list[dict] = []
+
+    def fake_pipeline(snapshot, structurer, **kwargs):
+        calls.append(dict(kwargs))
+        return _result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            case_id="A4",
+            source_id="d" * 64,
+            a_cache=True,
+        )
+
+    monkeypatch.setattr(workbench_module, "run_r1_agent_extraction", fake_pipeline)
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+    )
+
+    item = service.retry_failed_stage_item(item_id)
+
+    assert calls == [
+        {
+            "force_retry": False,
+            "retry_failed_stage": "STAGE_B",
+        }
+    ]
+    assert item["result"] == "FAILED"
+    assert item["failed_stage"] == "STAGE_B"
+    assert item["stage_a"] == "CACHE_HIT"
+    assert item["stage_b"] == "FAILED"
+    assert item["error_code"] == "PROVIDER_TIMEOUT"
+
+
 def test_advanced_debug_reuses_frozen_trace_and_unknown_tokens(tmp_path: Path) -> None:
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
     batch_id = store.create_batch()
