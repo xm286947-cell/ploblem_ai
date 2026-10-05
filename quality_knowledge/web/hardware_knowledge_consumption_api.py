@@ -19,7 +19,7 @@ def _http_error(error: HardwareKnowledgeConsumptionError) -> HTTPException:
     code = error.code
     if code == "KNOWLEDGE_NOT_FOUND":
         status = 404
-    elif code == "SEARCH_LIMIT_INVALID":
+    elif code in {"SEARCH_LIMIT_INVALID", "SEARCH_SCENE_INVALID"}:
         status = 400
     elif code.startswith("CONSUMPTION_PROJECTION_"):
         status = 503
@@ -49,6 +49,7 @@ def create_hardware_knowledge_consumption_router(
         interface: str | None = None,
         signal: str | None = None,
         device: str | None = None,
+        scene: str | None = None,
         limit: int = Query(default=100, ge=1, le=500),
     ) -> dict[str, Any]:
         try:
@@ -61,6 +62,7 @@ def create_hardware_knowledge_consumption_router(
                 interface=interface,
                 signal=signal,
                 device=device,
+                scene=scene,
                 limit=limit,
             )
         except HardwareKnowledgeConsumptionError as error:
