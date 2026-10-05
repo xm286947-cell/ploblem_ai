@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "HARDWARE_R1_E2E_VALIDATION_ca310a5062c8"
-INCLUDE_ROOTS = ("services", "repositories", "runtime", "models", "parser", "contracts", "quality_knowledge", "schema", "prompts", "config/runtime")
+INCLUDE_ROOTS = ("services", "repositories", "runtime", "models", "parser", "contracts", "quality_knowledge", "knowledge_production", "schema", "prompts", "config/runtime")
 INCLUDE_FILES = (
     "requirements.txt", "scripts/hardware_case_web_start.py", "scripts/hardware_r1_e2e_validation_start.py",
     "START_HARDWARE_R1_E2E_VALIDATION.command", "START_HARDWARE_R1_E2E_VALIDATION.bat",
