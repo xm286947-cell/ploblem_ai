@@ -1140,6 +1140,8 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
             "next_action": engineering.get("next_action"),
             "missing_information": skill.get("missing_information") or [],
+            "evidence_refs": skill.get("evidence_refs") or [],
+            "knowledge_refs": skill.get("knowledge_refs") or [],
             "risk_context": risk_context,
         }
 
@@ -1234,6 +1236,29 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
 
     controls = structured.get("engineering_control_options") or []
     validation_actions = structured.get("suggested_validation") or []
+    combined_evidence_refs = sorted({
+        str(ref)
+        for ref in (
+            list(skill.get("evidence_refs") or [])
+            + list((lifetime or {}).get("evidence_refs") or [])
+            + list((diagnosis or {}).get("evidence_refs") or [])
+        )
+        if str(ref)
+    })
+    combined_knowledge_refs = sorted({
+        str(ref)
+        for ref in (
+            list(skill.get("knowledge_refs") or [])
+            + list((lifetime or {}).get("knowledge_refs") or [])
+            + list((diagnosis or {}).get("knowledge_refs") or [])
+        )
+        if str(ref)
+    })
+    upstream_assessment_ids = [
+        str(x.get("assessment_id"))
+        for x in (lifetime, diagnosis)
+        if x and x.get("assessment_id")
+    ]
     action_checklist = None
     if request.get("persist_actions") is True:
         source_assessment_id = (optimization.get("assessment_record") or {}).get("id")
@@ -1253,8 +1278,9 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             device_id,
             source_assessment_id,
             action_rows,
-            evidence_refs=skill.get("evidence_refs") or [],
-            knowledge_refs=skill.get("knowledge_refs") or [],
+            evidence_refs=combined_evidence_refs,
+            knowledge_refs=combined_knowledge_refs,
+            source_assessment_ids=upstream_assessment_ids,
             created_by=str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
         )
 
@@ -1266,8 +1292,9 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         "validation_actions": validation_actions,
         "conditions_and_limits": structured.get("conditions_and_limits") or [],
         "remaining_information": sorted({str(x) for x in remaining if str(x)}),
-        "knowledge_refs": skill.get("knowledge_refs") or [],
-        "evidence_refs": skill.get("evidence_refs") or [],
+        "knowledge_refs": combined_knowledge_refs,
+        "evidence_refs": combined_evidence_refs,
+        "upstream_assessment_ids": upstream_assessment_ids,
         "optimization_assessment": optimization.get("assessment_record"),
         "action_checklist": action_checklist,
         "skill_result": skill,
