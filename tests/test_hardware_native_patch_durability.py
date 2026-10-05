@@ -23,24 +23,27 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _package_manifest() -> dict[str, Any]:
+def _package_manifest(
+    old_source: str = OLD_SOURCE,
+    new_source: str = NEW_SOURCE,
+) -> dict[str, Any]:
     return {
         "task": "HARDWARE-R1-NATIVE-PATCH-DURABILITY-GATE-001",
         "package_type": "ZIP",
         "installer_type": "NONE",
         "test_package_not_release": True,
-        "old_source_commit": OLD_SOURCE,
-        "new_source_commit": NEW_SOURCE,
+        "old_source_commit": old_source,
+        "new_source_commit": new_source,
         "packages": {
             "old": {
                 "package_id": "old-test.zip",
-                "source_commit": OLD_SOURCE,
+                "source_commit": old_source,
                 "sha256": "old-hash",
                 "size_bytes": 10,
             },
             "new": {
                 "package_id": "new-test.zip",
-                "source_commit": NEW_SOURCE,
+                "source_commit": new_source,
                 "sha256": "new-hash",
                 "size_bytes": 11,
             },
@@ -203,6 +206,86 @@ def test_verify_package_manifest_binds_exact_zip_hash_and_commit(tmp_path: Path)
 
     assert verified["old_source_commit"] == OLD_SOURCE
     assert verified["new_source_commit"] == NEW_SOURCE
+
+
+def test_frozen_default_source_binding_remains_backward_compatible(tmp_path: Path) -> None:
+    package_manifest = _package_manifest()
+    manifest_path = tmp_path / "package_manifest.json"
+    _write_json(manifest_path, package_manifest)
+    windows = tmp_path / "windows"
+    macos = tmp_path / "macos"
+    _write_pass_evidence(windows, package_manifest, "windows-install")
+    _write_pass_evidence(macos, package_manifest, "macos-install")
+
+    result = summarize(
+        windows,
+        macos,
+        manifest_path,
+        tmp_path / "summary.json",
+    )
+
+    assert result["result"] == "PASS"
+    assert result["old_source"] == OLD_SOURCE
+    assert result["new_source"] == NEW_SOURCE
+
+
+def test_explicit_source_binding_flows_through_verify_and_summary(tmp_path: Path) -> None:
+    old_source = "1" * 40
+    new_source = "2" * 40
+    manifest = _package_manifest(old_source, new_source)
+    package_dir = tmp_path / "packages"
+    package_dir.mkdir()
+    for role in ("old", "new"):
+        item = manifest["packages"][role]
+        path = package_dir / item["package_id"]
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(
+                "application/services/hardware_startup_coordinator.py", "pass\n"
+            )
+            archive.writestr(
+                "application/services/hardware_case_r1_workbench.py", "pass\n"
+            )
+            if role == "new":
+                archive.writestr(
+                    "application/tests/test_hardware_patch_durability.py", "pass\n"
+                )
+        item["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        item["size_bytes"] = path.stat().st_size
+    manifest_path = tmp_path / "package_manifest.json"
+    _write_json(manifest_path, manifest)
+
+    verified = verify_package_manifest(
+        manifest_path,
+        package_dir,
+        expected_old_source=old_source,
+        expected_new_source=new_source,
+    )
+    assert verified["old_source_commit"] == old_source
+    assert verified["new_source_commit"] == new_source
+
+    windows = tmp_path / "windows"
+    macos = tmp_path / "macos"
+    _write_pass_evidence(windows, manifest, "windows-install")
+    _write_pass_evidence(macos, manifest, "macos-install")
+    # The fixture uses the manifest source identities in the gate evidence.
+    for root in (windows, macos):
+        gate_path = root / "gate_manifest.json"
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        gate["old_source_commit"] = old_source
+        gate["new_source_commit"] = new_source
+        _write_json(gate_path, gate)
+
+    result = summarize(
+        windows,
+        macos,
+        manifest_path,
+        tmp_path / "parameterized-summary.json",
+        expected_old_source=old_source,
+        expected_new_source=new_source,
+    )
+    assert result["result"] == "PASS"
+    assert result["old_source"] == old_source
+    assert result["new_source"] == new_source
 
 
 def test_verify_package_manifest_rejects_a_mutated_package(tmp_path: Path) -> None:
