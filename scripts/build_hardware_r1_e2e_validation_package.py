@@ -44,10 +44,19 @@ def sha256(path: Path) -> str:
 
 def package_bytes(path: Path) -> bytes:
     data = path.read_bytes()
-    if path.suffix.lower() in {".py", ".js", ".html", ".css", ".md", ".yaml", ".yml", ".json", ".txt", ".bat", ".command", ".toml", ".ini"}:
-        data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        if path.suffix.lower() == ".bat":
-            data = data.replace(b"\n", b"\r\n")
+    # Git may check out text assets with platform-specific CRLF conversion.
+    # Canonicalize every UTF-8 text file (not only known source extensions) so
+    # the same source commit yields byte-identical ZIPs on Windows and macOS.
+    if b"\x00" not in data:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            if b"\r" in data:
+                data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            if path.suffix.lower() == ".bat":
+                data = data.replace(b"\n", b"\r\n")
     return data
 
 
