@@ -663,6 +663,11 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             if requested_metric in supporting_only:
                 complete = False
                 next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
+            elif requested_metric in {"SSD_DWPD_OBSERVED_V1", "ssd.dwpd"}:
+                projection = structured.get("target_service_life_projection") or {}
+                if projection.get("budget_status") not in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}:
+                    complete = False
+                    next_action = "补充目标服役寿命和已确认 TBW，使实际 DWPD 能形成目标寿命预算判断。"
         elif kind == "OPTIMIZATION":
             workload = recorded_input.get("workload_software_facts") or []
             has_behavior = any(
