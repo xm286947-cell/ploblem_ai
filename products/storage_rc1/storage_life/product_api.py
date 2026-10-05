@@ -1066,7 +1066,7 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
 
 RUNTIME_TEXT_PATTERNS = [
     ("percentage_used", r"\bpercentage[ _-]*used\b\s*[:=]\s*([^\s]+)", "%", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"),
-    ("data_units_written", r"\bdata[ _-]*units[ _-]*written\b\s*[:=]\s*([^\s]+)", "data_units", None),
+    ("data_units_written", r"\bdata[ _-]*units[ _-]*written\b\s*[:=]\s*([^\s]+)", "data_units", "NVME_DATA_UNITS_WRITTEN_V1"),
     ("critical_warning", r"\bcritical[ _-]*warning\b\s*[:=]\s*([^\s]+)", "code", None),
     ("media_errors", r"\bmedia[ _-]*(?:and[ _-]*data[ _-]*integrity[ _-]*)?errors?\b\s*[:=]\s*([^\s]+)", "count", None),
     ("available_spare", r"\bavailable[ _-]*spare\b\s*[:=]\s*([^\s]+)", "%", None),
