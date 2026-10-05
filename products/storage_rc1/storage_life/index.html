@@ -472,6 +472,14 @@ function mvpSummaryMarkdown(){
     if(sc.next_action)lines.push('- Next Action: '+sc.next_action);
     lines.push('');
   }
+  let checklist=x.action_checklist?.items||[];
+  if(checklist.length){
+    lines.push('## Engineering Actions');
+    for(let a of checklist){
+      lines.push('- ['+(a.status==='DONE'?'x':' ')+'] '+actionTypeLabel(a.action_type)+' · '+(a.title||'')+' · '+actionStatusLabel(a.status));
+    }
+    lines.push('');
+  }
   if((x.remaining_actions||[]).length){
     lines.push('## Remaining Actions');
     for(let a of x.remaining_actions)lines.push('- '+a);
