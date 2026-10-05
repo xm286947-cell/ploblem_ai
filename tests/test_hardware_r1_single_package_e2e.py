@@ -129,7 +129,8 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
     e2e_knowledge = client.get("/p0/hardware-cases/knowledge?e2e=1")
     assert normal_knowledge.status_code == e2e_knowledge.status_code == 200
     assert "hardware_case_e2e_evidence.js" not in normal_knowledge.text
-    assert "hardware_case_e2e_evidence.js" in e2e_knowledge.text
+    assert "hardware_case_e2e_evidence.js?v=wave4-e2e-v2" in e2e_knowledge.text
+    assert "hardware_case_knowledge_consumption.js?v=wave4-stage4-v1" in e2e_knowledge.text
     assert client.get("/p0/static/hardware_case_e2e.js").status_code == 200
 
 
