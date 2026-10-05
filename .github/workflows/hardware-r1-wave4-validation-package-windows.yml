@@ -140,6 +140,14 @@ jobs:
           $report | ConvertTo-Json | Set-Content "$output\WINDOWS_NATIVE_GATE_REPORT.json" -Encoding utf8
           Copy-Item "$env:GITHUB_WORKSPACE\dist\HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip.sha256" "$output\"
 
+      - name: Preserve Windows package for reproducibility diagnosis
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_WAVE4_WINDOWS_BUILD_DIAGNOSTIC_${{ github.sha }}
+          path: ${{ github.workspace }}/dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip
+          if-no-files-found: ignore
+
       - name: Upload Windows gate evidence
         uses: actions/upload-artifact@v4
         with:
