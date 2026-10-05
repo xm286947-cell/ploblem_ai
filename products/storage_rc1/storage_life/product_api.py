@@ -598,6 +598,22 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 complete = False
                 next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
         elif kind == "OPTIMIZATION":
+            recorded_input = item.get("input") or {}
+            workload = recorded_input.get("workload_software_facts") or []
+            has_behavior = any(
+                str(x.get("description") or "").strip()
+                for x in workload
+                if isinstance(x, dict)
+            )
+            if not has_behavior:
+                complete = False
+                next_action = "补充当前软件写入 / 日志 / 持久化行为后重新生成针对性优化建议。"
+        elif kind == "DIAGNOSIS":
+            structured = skill.get("structured_result") or {}
+            if not structured.get("current_observation"):
+                complete = False
+                next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
+        elif kind == "OPTIMIZATION":
             controls = structured.get("engineering_control_options") or []
             validation = structured.get("suggested_validation") or []
             if status in completed_statuses and not controls and not validation:
