@@ -5,6 +5,7 @@ on:
     paths:
       - "quality_knowledge/web/**"
       - "services/hardware_knowledge_consumption.py"
+      - "services/hardware_r1_e2e_nonprod_knowledge.py"
       - "scripts/hardware_r1_e2e_validation_start.py"
       - "scripts/build_hardware_r1_e2e_validation_package.py"
       - "tests/test_hardware_r1_single_package_e2e.py"
@@ -52,7 +53,7 @@ jobs:
                   assert not forbidden, forbidden
                   package.extractall(temp)
               root = next(pathlib.Path(temp).iterdir())
-              subprocess.run([sys.executable, "-m", "compileall", "-q", str(root / "scripts"), str(root / "quality_knowledge"), str(root / "services")], check=True)
+              subprocess.run([sys.executable, "-m", "compileall", "-q", str(root / "scripts"), str(root / "quality_knowledge"), str(root / "services"), str(root / "knowledge_production")], check=True)
               launcher = root / ("START_HARDWARE_R1_E2E_VALIDATION.bat" if sys.platform == "win32" else "START_HARDWARE_R1_E2E_VALIDATION.command")
               assert launcher.is_file()
               subprocess.run([sys.executable, str(root / "scripts/hardware_r1_e2e_validation_start.py"), "--help"], cwd=root, check=True)
