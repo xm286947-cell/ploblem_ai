@@ -450,6 +450,7 @@ class StorageDomainSkillAdapter:
         observations: list[dict[str, Any]],
         *,
         released_semantics: set[str],
+        diagnostic_capabilities: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Evaluate only explicit, fail-closed runtime signals.
 
@@ -463,6 +464,21 @@ class StorageDomainSkillAdapter:
         def number(name: str) -> float | None:
             item = by_name.get(name) or {}
             return cls._runtime_number(item.get("normalized_value", item.get("raw_value")))
+
+        def confirmed_fact_threshold(*names: str) -> tuple[float | None, dict[str, Any] | None]:
+            wanted = {str(x) for x in names}
+            for capability in diagnostic_capabilities or []:
+                if str(capability.get("canonical_name") or "") not in wanted:
+                    continue
+                if str(capability.get("review_status") or "").upper() != "CONFIRMED":
+                    continue
+                refs = [str(x) for x in (capability.get("evidence_refs") or []) if str(x)]
+                if not refs:
+                    continue
+                value = cls._runtime_number(capability.get("datasheet_fact"))
+                if value is not None:
+                    return value, capability
+            return None, None
 
         def signal(name: str, code: str, severity: str, rationale: str) -> dict[str, Any]:
             item = by_name.get(name) or {}
@@ -504,27 +520,67 @@ class StorageDomainSkillAdapter:
 
         spare = number("available_spare")
         spare_threshold = number("available_spare_threshold")
+        spare_threshold_source = "RUNTIME_OBSERVATION"
+        spare_threshold_refs: list[str] = []
+        if spare_threshold is not None:
+            threshold_obs = by_name.get("available_spare_threshold") or {}
+            ref = threshold_obs.get("evidence_ref") or threshold_obs.get("raw_output_ref")
+            if ref:
+                spare_threshold_refs.append(str(ref))
+        else:
+            spare_threshold, spare_capability = confirmed_fact_threshold("spare_threshold")
+            if spare_threshold is not None and spare_capability is not None:
+                spare_threshold_source = "CONFIRMED_DEVICE_FACT"
+                spare_threshold_refs = [
+                    str(x) for x in (spare_capability.get("evidence_refs") or []) if str(x)
+                ]
         if spare is not None and spare_threshold is not None and spare < spare_threshold:
-            signals.append(signal(
+            item = signal(
                 "available_spare",
                 "AVAILABLE_SPARE_BELOW_THRESHOLD",
                 "CRITICAL",
-                "Available Spare 低于同次采集的显式 Threshold。",
-            ))
+                "Available Spare 低于显式阈值；阈值来自同次运行观测或已确认 Device Fact。",
+            )
+            item.update({
+                "threshold_value": spare_threshold,
+                "threshold_source": spare_threshold_source,
+                "threshold_evidence_refs": spare_threshold_refs,
+            })
+            signals.append(item)
 
         bit_flips = number("bit_flip_count")
         bit_flip_threshold = number("bit_flip_threshold")
+        bit_flip_threshold_source = "RUNTIME_OBSERVATION"
+        bit_flip_threshold_refs: list[str] = []
+        if bit_flip_threshold is not None:
+            threshold_obs = by_name.get("bit_flip_threshold") or {}
+            ref = threshold_obs.get("evidence_ref") or threshold_obs.get("raw_output_ref")
+            if ref:
+                bit_flip_threshold_refs.append(str(ref))
+        else:
+            bit_flip_threshold, bit_flip_capability = confirmed_fact_threshold("bit_flip_threshold")
+            if bit_flip_threshold is not None and bit_flip_capability is not None:
+                bit_flip_threshold_source = "CONFIRMED_DEVICE_FACT"
+                bit_flip_threshold_refs = [
+                    str(x) for x in (bit_flip_capability.get("evidence_refs") or []) if str(x)
+                ]
         if (
             bit_flips is not None
             and bit_flip_threshold is not None
             and bit_flips >= bit_flip_threshold
         ):
-            signals.append(signal(
+            item = signal(
                 "bit_flip_count",
                 "BIT_FLIP_AT_OR_ABOVE_EXPLICIT_THRESHOLD",
                 "WARNING",
-                "Bit Flip 数量达到或超过同次采集提供的显式阈值；需结合 ECC 裕量和趋势继续诊断。",
-            ))
+                "Bit Flip 数量达到或超过显式阈值；需结合 ECC 裕量和趋势继续诊断。",
+            )
+            item.update({
+                "threshold_value": bit_flip_threshold,
+                "threshold_source": bit_flip_threshold_source,
+                "threshold_evidence_refs": bit_flip_threshold_refs,
+            })
+            signals.append(item)
 
         if "pre_eol_info" in released_semantics:
             pre_eol = number("pre_eol_info")
@@ -586,6 +642,7 @@ class StorageDomainSkillAdapter:
         signals = self._deterministic_abnormality_signals(
             current,
             released_semantics=released_semantics,
+            diagnostic_capabilities=list(diagnostic_capabilities or []),
         )
 
         if not current:
