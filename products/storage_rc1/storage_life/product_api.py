@@ -1559,7 +1559,11 @@ def parse_runtime_observation_text(
             "unit": unit,
             "source_line": source_line,
             "source_label": source_label,
-            "diagnostic_supported": metric_name in DIAGNOSTIC_METHODS or metric_name.startswith("ecc_"),
+            "diagnostic_supported": (
+                metric_name in DIAGNOSTIC_METHODS
+                or metric_name.startswith("ecc_")
+                or metric_name == "available_spare_threshold"
+            ),
             "suggested_lifetime_metric": lifetime_metric,
         })
 
