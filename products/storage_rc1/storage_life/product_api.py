@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 import re
 
 from . import ai, core, templates, parameter_baseline
@@ -759,6 +760,151 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
                 created_by=str(request.get("assessment_author") or "Storage MVP"),
             )
     return response
+
+
+def _iso_datetime(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
+    """Turn saved runtime snapshots into existing Lifetime Skill calls.
+
+    No new lifetime formula is introduced here.  The function only derives
+    explicit deltas/time windows from saved snapshots and feeds them into the
+    already-registered Lifetime Engine metrics.
+    """
+    trend = core.runtime_metric_trends(device_id, limit=40)
+    device = {x["id"]: x for x in core.list_devices()}.get(device_id)
+    if not device:
+        raise KeyError(device_id)
+    dtype = templates.normalize_device_type(device["device_type"])
+    results: list[dict[str, Any]] = []
+
+    def observation(metric_name: str, point: dict[str, Any], value: Any | None = None, unit: str | None = None):
+        return {
+            "observation_id": f"trend-{point.get('batch_id')}-{metric_name}",
+            "device_id": device_id,
+            "device_type": dtype,
+            "metric_name": metric_name,
+            "raw_value": point.get("raw_value") if value is None else value,
+            "normalized_value": point.get("normalized_value") if value is None else value,
+            "unit": unit or point.get("unit") or "",
+            "capture_time": point.get("captured_at"),
+            "source_command_or_interface": point.get("source_label") or "SAVED_RUNTIME_SNAPSHOT",
+            "raw_output_ref": point.get("source_line") or point.get("batch_id"),
+            "evidence_ref": point.get("source_line") or point.get("batch_id"),
+            "collector": "STORAGE_MVP_RUNTIME_TREND",
+            "is_formally_consumable": True,
+        }
+
+    by_metric = {x["metric_name"]: x for x in trend.get("metrics") or []}
+
+    # NVMe cumulative Data Units Written -> delta bytes -> observed DWPD.
+    duw = by_metric.get("data_units_written")
+    if dtype == "SSD" and duw and duw.get("previous") and duw.get("delta") is not None:
+        latest, previous = duw["latest"], duw["previous"]
+        start, end = _iso_datetime(previous.get("captured_at")), _iso_datetime(latest.get("captured_at"))
+        elapsed_days = (end - start).total_seconds() / 86400 if start and end else None
+        delta_units = float(duw["delta"])
+        if elapsed_days and elapsed_days > 0 and delta_units >= 0:
+            conversion = execute_device_skill(device_id, "storage-lifetime-budget", {
+                "requested_metric": "NVME_DATA_UNITS_WRITTEN_V1",
+                "runtime_observations": [
+                    observation("data_units_written", latest, value=delta_units, unit=latest.get("unit") or "data_units")
+                ],
+                "assessment_request": {"assumptions": []},
+                "target_service_life": {},
+                "record_assessment": True,
+                "assessment_author": "Storage MVP Runtime Trend",
+            })
+            structured = (conversion.get("skill_result") or {}).get("structured_result") or {}
+            converted = structured.get("measured_vs_budget") or {}
+            host_bytes = converted.get("value") if isinstance(converted, dict) else None
+            if host_bytes is not None:
+                dwpd = execute_device_skill(device_id, "storage-lifetime-budget", {
+                    "requested_metric": "SSD_DWPD_OBSERVED_V1",
+                    "runtime_observations": [
+                        observation("host_written_bytes", latest, value=host_bytes, unit="bytes")
+                    ],
+                    "assessment_request": {
+                        "assumptions": [{
+                            "name": "time_window_days",
+                            "value": elapsed_days,
+                            "unit": "days",
+                            "rationale": "Derived from two saved runtime snapshot timestamps",
+                            "evidence_refs": [previous.get("batch_id"), latest.get("batch_id")],
+                        }]
+                    },
+                    "target_service_life": {},
+                    "record_assessment": True,
+                    "assessment_author": "Storage MVP Runtime Trend",
+                })
+                results.append({
+                    "kind": "TREND_DWPD",
+                    "metric_name": "data_units_written",
+                    "sample_count": duw.get("sample_count"),
+                    "elapsed_days": elapsed_days,
+                    "delta": delta_units,
+                    "delta_unit": latest.get("unit") or "data_units",
+                    "conversion": conversion,
+                    "assessment": dwpd,
+                })
+
+    direct_metrics = {
+        "percentage_used": ("NVME_PERCENTAGE_USED_INTERPRETATION_V1", "percentage_used", "%"),
+        "device_life_time_est_typ_a": ("EMMC_DEVICE_LIFE_TIME_A_V1", "device_life_time_a", "code"),
+        "device_life_time_est_typ_b": ("EMMC_DEVICE_LIFE_TIME_B_V1", "device_life_time_b", "code"),
+        "pre_eol_info": ("EMMC_PRE_EOL_V1", "pre_eol_info", "code"),
+        "erase_count": ("NAND_ERASE_COUNT_MARGIN_V1", "erase_count", "cycles"),
+        "pe_cycle": ("NAND_PE_MARGIN_V1", "pe_cycle", "cycles"),
+    }
+    for source_metric, (formal_metric, runtime_metric, default_unit) in direct_metrics.items():
+        series = by_metric.get(source_metric)
+        if not series or not series.get("latest"):
+            continue
+        point = series["latest"]
+        try:
+            assessment = execute_device_skill(device_id, "storage-lifetime-budget", {
+                "requested_metric": formal_metric,
+                "runtime_observations": [
+                    observation(runtime_metric, point, unit=point.get("unit") or default_unit)
+                ],
+                "assessment_request": {"assumptions": []},
+                "target_service_life": {},
+                "record_assessment": True,
+                "assessment_author": "Storage MVP Runtime Trend",
+            })
+        except Exception as exc:
+            results.append({
+                "kind": "LATEST_SNAPSHOT",
+                "metric_name": source_metric,
+                "formal_metric": formal_metric,
+                "error": str(exc),
+            })
+            continue
+        results.append({
+            "kind": "LATEST_SNAPSHOT",
+            "metric_name": source_metric,
+            "formal_metric": formal_metric,
+            "sample_count": series.get("sample_count"),
+            "delta": series.get("delta"),
+            "assessment": assessment,
+        })
+
+    return {
+        "device": device,
+        "trend": trend,
+        "results": results,
+        "supported_result_count": len(results),
+        "new_formula_stack": False,
+        "public_knowledge_used": False,
+    }
 
 
 def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
