@@ -740,7 +740,14 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 ]
             recorded_capture_times = [x for x in recorded_capture_times if x is not None]
             latest_recorded_capture = max(recorded_capture_times) if recorded_capture_times else None
-            if latest_recorded_capture and latest_formal_runtime_at > latest_recorded_capture:
+            if latest_recorded_capture is None:
+                complete = False
+                next_action = (
+                    "当前历史评估没有绑定可追溯的运行采集时间；请基于当前 Runtime Snapshot 重新执行。"
+                    if kind != "OPTIMIZATION"
+                    else "当前历史优化没有绑定可追溯的 Runtime 上下文；请先刷新 S3/S4，再重新生成 S5。"
+                )
+            elif latest_formal_runtime_at > latest_recorded_capture:
                 complete = False
                 next_action = (
                     "存在采集时间更新的已确认 Runtime Snapshot；请基于最新运行数据重新执行该场景。"
@@ -1177,7 +1184,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
                 if isinstance(x, dict) and x.get("capture_time")
             ]
             captures = [x for x in captures if x is not None]
-            if captures and latest_formal_capture > max(captures):
+            if not captures or latest_formal_capture > max(captures):
                 return None
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
