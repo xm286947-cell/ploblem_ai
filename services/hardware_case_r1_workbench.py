@@ -685,7 +685,14 @@ class HardwareR1WorkbenchService:
         # Only business field values are editable. Evidence bindings,
         # extraction status/confidence, derived-from metadata and every
         # Source/identity/provenance field remain server-owned.
-        for key in ("engineering_context", "facts", "reusable_knowledge"):
+        for key in (
+            "engineering_context",
+            "observed_problem",
+            "engineering_analysis",
+            "engineering_resolution",
+            "reusable_knowledge",
+            "facts",  # compatibility with earlier Candidate fixtures
+        ):
             if key in reviewed and key in confirmed_content:
                 merge_review_values(reviewed[key], confirmed_content[key])
 
