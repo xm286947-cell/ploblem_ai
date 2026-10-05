@@ -513,7 +513,7 @@ async function executeRuntimeTrendLifetime(){
         return '<tr><td><b>'+esc(x.metric_name||x.formal_metric||'')+'</b></td><td>'+esc(x.kind||'')+'</td><td>'+trend+'</td><td>'+badge(sr.status||'UNKNOWN')+'</td><td>'+esc(mr==null?'—':(typeof mr==='object'?JSON.stringify(mr):mr))+'</td></tr>';
       }).join('')+'</table></div>';
     }
-    html+='<div id="runtimeTrendPublicContext"></div>';
+    html+='<div class="row"><button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">基于趋势生成优化方案</button></div><div id="runtimeTrendPublicContext"></div>';
     box.innerHTML=html;
     pkContextSearchInline({focus:'LIFETIME',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'runtime trend endurance DWPD percentage used erase count P/E lifetime'},'runtimeTrendPublicContext');
     loadAssessmentHistory();
@@ -608,7 +608,7 @@ async function executeParsedHealthAnalysis(){
       return '<tr><td><b>'+esc(LIFETIME_METRICS[x.metric]?.label||x.metric)+'</b></td><td>'+badge(sr.status||'UNKNOWN')+'</td><td>'+esc(mr==null?'—':(typeof mr==='object'?JSON.stringify(mr):mr))+'</td><td>'+esc((sr.missing_information||st.missing_information||[]).join('；')||'—')+'</td></tr>';
     }).join('')+'</table></div>';
   }
-  html+='<div class="row">'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:items.map(x=>x.metric_name).join(' ')},'展开更多公共知识')+'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看综合评估摘要</button></div><div id="runtimeHealthPublicContext"></div>';
+  html+='<div class="row">'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:items.map(x=>x.metric_name).join(' ')},'展开更多公共知识')+'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看综合评估摘要</button><button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">生成优化行动方案</button></div><div id="runtimeHealthPublicContext"></div>';
   box.innerHTML=html;
   pkContextSearchInline({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:items.map(x=>x.metric_name).join(' ')},'runtimeHealthPublicContext');
   loadAssessmentHistory();
