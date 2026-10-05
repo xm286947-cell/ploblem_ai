@@ -1048,7 +1048,7 @@ class CandidateAssetRepository:
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_LOCKED_BY_PROMOTION"
                     )
-                if row["production_review_status"] not in {"REQUIRED", "NOT_REQUIRED"}:
+                if row["production_review_status"] not in {"REQUIRED", "NOT_REQUIRED", "RESOLVED"}:
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_REVIEW_TRANSITION_INVALID"
                     )
