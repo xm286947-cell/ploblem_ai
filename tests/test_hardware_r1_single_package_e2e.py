@@ -244,7 +244,7 @@ def test_single_package_fake_provider_golden_path_through_search_and_evidence(tm
     for endpoint, body in [
         ("precheck", None),
         ("intake", None),
-        ("review", {"reviewer": "synthetic-reviewer", "confirmed_content": item["candidate"], "review_comment": "CI fake review"}),
+        ("review", {"reviewer": "synthetic-reviewer", "review_comment": "CI fake review"}),
         ("publish", {"publisher": "synthetic-publisher"}),
         ("verify", None),
     ]:
