@@ -2029,6 +2029,22 @@ def list_device_assessments(device_id, limit=20):
     return items
 
 
+def list_recent_device_assessments(limit=12):
+    import json
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 12
+    with connect() as con:
+        items = rows(con, """SELECT a.*,d.vendor,d.model,d.device_type
+          FROM device_assessments a JOIN devices d ON d.id=a.device_id
+          ORDER BY a.created_at DESC,a.id DESC LIMIT ?""", (limit,))
+    for item in items:
+        item["input"] = json.loads(item.pop("input_json") or "{}")
+        item["result"] = json.loads(item.pop("result_json") or "{}")
+    return items
+
+
 def query_knowledge(q):
     terms = [t.lower() for t in re.findall(r"[A-Za-z_0-9]+|[\u4e00-\u9fff]{2,}", q)]
     if not terms:
