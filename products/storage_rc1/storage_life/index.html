@@ -236,15 +236,18 @@ function renderDiagnosticRuntimePanel(){
   let d=DEV.find(x=>x.id===$('#diagDevice').value),items=DIAG_CONTEXT?.items||[];
   if(!d)return;
   let options=items.map(x=>'<option value="'+esc(x.canonical_name)+'">'+esc(x.indicator)+' · '+esc(x.data_source||'')+'</option>').join('');
-  $('#diagnosticRuntimePanel').innerHTML='<div class="pagehead"><div><div class="kicker">S4 · RUNTIME DIAGNOSIS</div><h3>运行观测诊断</h3><div class="muted">把现场读取值作为 Runtime Observation 送入既有 storage-diagnostic-validation Skill；不会把运行数据发送给 Public Knowledge。</div></div>'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'health SMART EXT_CSD ECC bad block program erase fail diagnostic'},'查诊断公共知识')+'</div><div class="row"><label>诊断指标<br><select id="diagMetric">'+(options||'<option value="">当前没有诊断指标</option>')+'</select></label><label>运行值<br><input id="diagRuntimeValue" placeholder="例如 0x02 / 87 / 15"></label><label>单位<br><input id="diagRuntimeUnit" placeholder="% / code / count / cycles"></label></div><div class="row" style="margin-top:10px"><label>读取接口 / 命令<br><input id="diagRuntimeSource" placeholder="nvme smart-log / EXT_CSD / MTD stats"></label><label>运行证据引用<br><input id="diagRuntimeEvidence" placeholder="日志文件 / 采集记录 / 截图编号"></label><label>诊断问题<br><input id="diagQuestion" value="当前观测是否提示寿命退化、介质健康或可观测性风险？"></label><button class="primary" onclick="executeRuntimeDiagnosis()">执行运行诊断</button></div>';
+  $('#diagnosticRuntimePanel').innerHTML='<div class="pagehead"><div><div class="kicker">S4 · RUNTIME DIAGNOSIS</div><h3>运行观测诊断</h3><div class="muted">把现场读取值作为 Runtime Observation 送入既有 storage-diagnostic-validation Skill；不会把运行数据发送给 Public Knowledge。</div></div>'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'health SMART EXT_CSD ECC bad block program erase fail diagnostic'},'查诊断公共知识')+'</div><div class="row"><label>诊断指标<br><select id="diagMetric">'+(options||'<option value="">当前没有诊断指标</option>')+'</select></label><label>运行值<br><input id="diagRuntimeValue" placeholder="例如 0x02 / 87 / 15"></label><label>单位<br><input id="diagRuntimeUnit" placeholder="% / code / count / cycles"></label><label>实际采集时间<br><input id="diagCapturedAt" type="datetime-local"></label></div><div class="row" style="margin-top:10px"><label>读取接口 / 命令<br><input id="diagRuntimeSource" placeholder="nvme smart-log / EXT_CSD / MTD stats"></label><label>运行证据引用<br><input id="diagRuntimeEvidence" placeholder="日志文件 / 采集记录 / 截图编号"></label><label>诊断问题<br><input id="diagQuestion" value="当前观测是否提示寿命退化、介质健康或可观测性风险？"></label></div><label style="display:block;margin-top:8px"><input id="diagObservationConfirmed" type="checkbox"> 我确认该观测来自当前器件/所填读取接口，且实际采集时间准确。</label><div class="row" style="margin-top:10px"><button class="primary" onclick="executeRuntimeDiagnosis()">执行运行诊断</button><small>未确认的手工观测不会进入正式运行诊断。</small></div>';
+  if($('#diagCapturedAt'))$('#diagCapturedAt').value=runtimeLocalInputValue(new Date());
 }
 async function executeRuntimeDiagnosis(){
   let id=$('#diagDevice')?.value||'',d=DEV.find(x=>x.id===id),metric=$('#diagMetric')?.value||'',item=(DIAG_CONTEXT?.items||[]).find(x=>x.canonical_name===metric);
   if(!id||!d)return msg('请选择具体器件',true);
   if(!metric)return msg('请选择诊断指标',true);
-  let raw=$('#diagRuntimeValue')?.value.trim()||'',unit=$('#diagRuntimeUnit')?.value.trim()||'',source=$('#diagRuntimeSource')?.value.trim()||'',evidence=$('#diagRuntimeEvidence')?.value.trim()||'',question=$('#diagQuestion')?.value.trim()||'runtime diagnostic validation';
+  let raw=$('#diagRuntimeValue')?.value.trim()||'',unit=$('#diagRuntimeUnit')?.value.trim()||'',source=$('#diagRuntimeSource')?.value.trim()||'',evidence=$('#diagRuntimeEvidence')?.value.trim()||'',question=$('#diagQuestion')?.value.trim()||'runtime diagnostic validation',capturedAt=localInputIso('diagCapturedAt'),confirmed=!!$('#diagObservationConfirmed')?.checked;
   if(!raw)return msg('请输入运行观测值',true);
   if(!source||!evidence)return msg('运行诊断必须提供读取接口和证据引用',true);
+  if(!capturedAt)return msg('请填写有效的实际采集时间',true);
+  if(!confirmed)return msg('请确认运行观测来源与实际采集时间后再执行正式诊断',true);
   let n=Number(raw),value=Number.isFinite(n)?n:raw,observation={
     observation_id:'diag-ui-'+Date.now(),
     device_id:id,
@@ -253,7 +256,7 @@ async function executeRuntimeDiagnosis(){
     raw_value:value,
     normalized_value:value,
     unit:unit,
-    capture_time:new Date().toISOString(),
+    capture_time:capturedAt,
     source_command_or_interface:source,
     raw_output_ref:evidence,
     evidence_ref:evidence,
