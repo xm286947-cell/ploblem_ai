@@ -526,6 +526,84 @@ def device_assessment_history(device_id: str, limit: int = 20) -> dict[str, Any]
     }
 
 
+def device_mvp_summary(device_id: str) -> dict[str, Any]:
+    """Compose the current Storage MVP state into one user-facing device summary.
+
+    This function does not create a new conclusion engine. It only assembles
+    confirmed Device Facts, the existing device conclusion, and the latest
+    persisted Lifetime / Diagnosis / Optimization assessments.
+    """
+    detail = device_slots(device_id)
+    assessments = core.list_device_assessments(device_id, limit=50)
+    latest: dict[str, dict[str, Any]] = {}
+    for item in assessments:
+        kind = str(item.get("assessment_type") or "").upper()
+        if kind and kind not in latest:
+            latest[kind] = item
+
+    def scenario(kind: str, label: str) -> dict[str, Any]:
+        item = latest.get(kind)
+        if not item:
+            return {
+                "type": kind,
+                "label": label,
+                "status": "NOT_RUN",
+                "assessment_id": None,
+                "created_at": None,
+                "direct_answer": None,
+                "next_action": None,
+            }
+        result = item.get("result") or {}
+        skill = result.get("skill_result") or {}
+        engineering = result.get("engineering_result") or {}
+        return {
+            "type": kind,
+            "label": label,
+            "status": item.get("status") or skill.get("status") or "UNKNOWN",
+            "assessment_id": item.get("id"),
+            "created_at": item.get("created_at"),
+            "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
+            "next_action": engineering.get("next_action"),
+        }
+
+    facts = detail.get("device_facts") or []
+    slots = detail.get("slots") or []
+    applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
+    missing_critical = list((detail.get("conclusion") or {}).get("missing_critical_fields") or [])
+    scenario_items = [
+        scenario("LIFETIME", "寿命 / 风险"),
+        scenario("DIAGNOSIS", "运行诊断"),
+        scenario("OPTIMIZATION", "软件优化"),
+    ]
+    remaining = []
+    if missing_critical:
+        remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
+    for item in scenario_items:
+        if item["status"] == "NOT_RUN":
+            remaining.append(f"执行{item['label']}")
+    return {
+        "device": detail["device"],
+        "lifecycle": detail["lifecycle"],
+        "conclusion": detail["conclusion"],
+        "facts": {
+            "confirmed": len(facts),
+            "applicable": len(applicable),
+            "fact_coverage_ratio": detail.get("fact_coverage_ratio") or 0,
+            "search_coverage_ratio": detail.get("search_coverage_ratio") or 0,
+            "missing_critical_fields": missing_critical,
+        },
+        "scenarios": scenario_items,
+        "public_knowledge": {
+            "integration": "IN_CONTEXT",
+            "role": "ENGINEERING_CONTEXT_AND_CITATION",
+            "formal_evidence": False,
+            "storage_diagnosis": False,
+        },
+        "remaining_actions": remaining,
+        "mvp_ready_for_demo": not remaining,
+    }
+
+
 def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     detail = device_slots(device_id)
     return {
