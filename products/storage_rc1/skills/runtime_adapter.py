@@ -512,6 +512,20 @@ class StorageDomainSkillAdapter:
                 "Available Spare 低于同次采集的显式 Threshold。",
             ))
 
+        bit_flips = number("bit_flip_count")
+        bit_flip_threshold = number("bit_flip_threshold")
+        if (
+            bit_flips is not None
+            and bit_flip_threshold is not None
+            and bit_flips >= bit_flip_threshold
+        ):
+            signals.append(signal(
+                "bit_flip_count",
+                "BIT_FLIP_AT_OR_ABOVE_EXPLICIT_THRESHOLD",
+                "WARNING",
+                "Bit Flip 数量达到或超过同次采集提供的显式阈值；需结合 ECC 裕量和趋势继续诊断。",
+            ))
+
         if "pre_eol_info" in released_semantics:
             pre_eol = number("pre_eol_info")
             if pre_eol == 3:
