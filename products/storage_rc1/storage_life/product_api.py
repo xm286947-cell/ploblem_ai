@@ -620,6 +620,42 @@ def device_assessment_history(device_id: str, limit: int = 20) -> dict[str, Any]
     }
 
 
+def _is_supporting_lifetime_assessment(item: dict[str, Any] | None) -> bool:
+    if not item:
+        return False
+    request = item.get("input") or {}
+    metric = str(request.get("requested_metric") or "")
+    return metric in {
+        "NVME_DATA_UNITS_WRITTEN_V1",
+        "nvme.data_units_written",
+        "GENERIC_WAF_V1",
+        "generic.waf",
+    }
+
+
+def _latest_product_assessments(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Select the newest product assessment per scenario.
+
+    A conversion-only Lifetime record must not hide an earlier user-facing
+    lifetime/risk assessment created in the same workflow.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    for item in items:
+        kind = str(item.get("assessment_type") or "").upper()
+        if not kind:
+            continue
+        if kind not in latest:
+            latest[kind] = item
+            continue
+        if (
+            kind == "LIFETIME"
+            and _is_supporting_lifetime_assessment(latest[kind])
+            and not _is_supporting_lifetime_assessment(item)
+        ):
+            latest[kind] = item
+    return latest
+
+
 def device_mvp_summary(device_id: str) -> dict[str, Any]:
     """Compose the current Storage MVP state into one user-facing device summary.
 
@@ -629,11 +665,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     """
     detail = device_slots(device_id)
     assessments = core.list_device_assessments(device_id, limit=50)
-    latest: dict[str, dict[str, Any]] = {}
-    for item in assessments:
-        kind = str(item.get("assessment_type") or "").upper()
-        if kind and kind not in latest:
-            latest[kind] = item
+    latest = _latest_product_assessments(assessments)
 
     runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
@@ -1218,11 +1250,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     request = dict(payload or {})
     detail = device_slots(device_id)
     assessments = core.list_device_assessments(device_id, limit=50)
-    latest: dict[str, dict[str, Any]] = {}
-    for item in assessments:
-        kind = str(item.get("assessment_type") or "").upper()
-        if kind and kind not in latest:
-            latest[kind] = item
+    latest = _latest_product_assessments(assessments)
 
     trend = core.runtime_metric_trends(device_id, limit=40)
     current_fact_fingerprint = _device_fact_fingerprint(detail)
