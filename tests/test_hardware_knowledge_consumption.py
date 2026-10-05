@@ -369,6 +369,59 @@ def test_multi_keyword_search_matches_across_weighted_fields_and_requires_all_te
     assert service.search("MCU UART definitely-absent")["results"] == []
 
 
+def test_scene_ranking_prioritizes_relevant_fields_without_changing_match_score(tmp_path):
+    service, store = _service(tmp_path)
+    service.rebuild_all_verified()
+    base = store.get(KNOWLEDGE_ID)
+
+    title_hit = dict(base)
+    title_hit.update(
+        knowledge_id="KNOWLEDGE-TITLE-HIT",
+        public_ref="HC-KNOWLEDGE-TITLE-HIT-R1",
+        business_case_id="HC-TITLE-HIT",
+        title="Thermal issue",
+        symptom="Unrelated symptom",
+    )
+    symptom_hit = dict(base)
+    symptom_hit.update(
+        knowledge_id="KNOWLEDGE-SYMPTOM-HIT",
+        public_ref="HC-KNOWLEDGE-SYMPTOM-HIT-R1",
+        business_case_id="HC-SYMPTOM-HIT",
+        title="Unrelated title",
+        symptom="Thermal issue under load",
+    )
+    store.replace_all([title_hit, symptom_hit])
+
+    default = service.search("thermal")
+    assert [item["knowledge_id"] for item in default["results"]] == [
+        "KNOWLEDGE-TITLE-HIT",
+        "KNOWLEDGE-SYMPTOM-HIT",
+    ]
+    assert [item["match_score"] for item in default["results"]] == [100, 90]
+
+    market = service.search("thermal", scene="MARKET_ISSUE")
+    assert [item["knowledge_id"] for item in market["results"]] == [
+        "KNOWLEDGE-SYMPTOM-HIT",
+        "KNOWLEDGE-TITLE-HIT",
+    ]
+    assert {
+        item["knowledge_id"]: item["match_score"] for item in market["results"]
+    } == {
+        "KNOWLEDGE-TITLE-HIT": 100,
+        "KNOWLEDGE-SYMPTOM-HIT": 90,
+    }
+
+    rnd = service.search("thermal", scene="rnd_diagnosis")
+    assert rnd["results"][0]["knowledge_id"] == "KNOWLEDGE-SYMPTOM-HIT"
+
+    device = service.search("thermal", scene="DEVICE_RISK")
+    assert device["results"][0]["knowledge_id"] == "KNOWLEDGE-TITLE-HIT"
+
+    with pytest.raises(HardwareKnowledgeConsumptionError) as error:
+        service.search("thermal", scene="UNKNOWN_SCENE")
+    assert error.value.code == "SEARCH_SCENE_INVALID"
+
+
 def test_search_order_is_stable_by_score_then_knowledge_id(tmp_path):
     service, store = _service(tmp_path)
     service.rebuild_all_verified()
@@ -441,6 +494,28 @@ def test_nonmatching_nonempty_search_returns_no_rows(tmp_path):
         "contract_version": CONSUMPTION_CONTRACT_VERSION,
         "results": [],
     }
+
+
+def test_search_http_scene_contract_and_invalid_scene(tmp_path):
+    service, _store = _service(tmp_path)
+    service.rebuild_all_verified()
+    app = FastAPI()
+    app.include_router(create_hardware_knowledge_consumption_router(service))
+    client = TestClient(app)
+
+    response = client.get(
+        PUBLIC_PREFIX + "/search",
+        params={"text": "MCU", "scene": "RND_DIAGNOSIS"},
+    )
+    assert response.status_code == 200
+    _validate(response.json())
+
+    invalid = client.get(
+        PUBLIC_PREFIX + "/search",
+        params={"text": "MCU", "scene": "NOT_A_SCENE"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "SEARCH_SCENE_INVALID"
 
 
 def test_missing_projection_and_read_only_http_contract(tmp_path):
