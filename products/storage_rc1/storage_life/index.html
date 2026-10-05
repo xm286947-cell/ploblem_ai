@@ -332,8 +332,10 @@ async function loadMvpSummary(){
   try{
     MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
     let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
+    let rt=MVP_SUMMARY.runtime||{};
     body.innerHTML='<div class="grid4">'+
       '<div class="card"><small>Device Fact</small><div class="metric">'+esc(f.confirmed||0)+'</div><small>适用槽位 '+esc(f.applicable||0)+' · Fact Coverage '+Math.round((f.fact_coverage_ratio||0)*100)+'%</small></div>'+
+      '<div class="card"><small>Runtime</small><div class="metric">'+esc(rt.snapshot_count||0)+'</div><small>Snapshots · '+esc(rt.metric_count||0)+' Metrics</small></div>'+
       '<div class="card"><small>Lifecycle</small><p>'+badge(MVP_SUMMARY.lifecycle?.status||'DRAFT')+'</p><small>'+esc(MVP_SUMMARY.lifecycle?.reason||'')+'</small></div>'+
       '<div class="card"><small>Public Knowledge</small><p><span class="badge CONFIRMED">IN CONTEXT</span></p><small>Engineering Context + Citation</small></div>'+
       '<div class="card"><small>MVP Demo Readiness</small><p>'+badge(MVP_SUMMARY.mvp_ready_for_demo?'READY':'PARTIAL')+'</p><small>'+esc(actions.length?actions.length+' 项待补齐':'当前核心场景已有记录')+'</small></div>'+
