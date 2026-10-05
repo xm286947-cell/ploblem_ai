@@ -30,6 +30,23 @@ The page displays the effective configuration and its source (`DEFAULT`, `ENV`,
 or `LOCAL_UI_OVERRIDE`). Embedding and retrieval values are read-only. The
 `PUBLIC_ONLY` source-class gate is read-only and enforced by the service.
 
+## Safe restart
+
+The Compose service sets `PKR_RESTART_STRATEGY=supervised_process_exit` and is
+published only on the host loopback address. When a save requires a restart,
+the page offers **Restart Service**. The service returns a restart ID first,
+then exits its own Uvicorn process gracefully; Compose's existing
+`restart: unless-stopped` policy starts it again. The page waits up to 60
+seconds, reconnects to `/health`, reloads configuration, and reports success
+only after the saved provider, model, endpoint, protocol, credential status,
+and apply state match.
+
+Direct or otherwise unsupervised starts default to `RESTART_UNAVAILABLE` and
+cannot call the restart endpoint. The endpoint accepts no command or process
+identifier, only works on a loopback Host, and sends SIGTERM to the current
+service process. The application never calls Docker or executes a shell
+command. Do not expose this unauthenticated admin page outside loopback.
+
 ## Save and apply
 
 The settings page requires successful validation and a successful provider/model
@@ -37,8 +54,8 @@ identity test for the exact edited values before accepting a save. Values are
 written atomically to `PKR_UI_CONFIG_PATH`, or by default to
 `$PKR_DATA_DIR/config.local.json`. The local file is ignored by Git. It contains
 only non-secret settings. If the service's startup-bound provider instance does
-not match the saved values, the page reports `RESTART_REQUIRED`; it never claims
-that the live provider has already changed.
+not match the saved values, the page reports `RESTART_REQUIRED` and offers the
+supervised one-click restart when available.
 
 Environment configuration remains supported. Local UI overrides take
 precedence over environment and defaults. Removing a value from the local

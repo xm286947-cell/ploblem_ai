@@ -6,7 +6,7 @@
   <title>Public Knowledge · Service settings</title>
   <style>
     :root { color-scheme: light; --ink:#16212d; --muted:#617182; --line:#dbe3e9; --panel:#fff; --canvas:#f4f7f9; --blue:#1769aa; --green:#157347; --amber:#8a5a00; --red:#b42318; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    * { box-sizing:border-box; } body { margin:0; color:var(--ink); background:var(--canvas); }
+    * { box-sizing:border-box; } [hidden] { display:none !important; } body { margin:0; color:var(--ink); background:var(--canvas); }
     header { background:#12304a; color:#fff; padding:22px max(24px,calc((100vw - 1080px)/2)); }
     header a { color:#d7eaff; margin-right:20px; text-decoration:none; } header h1 { margin:15px 0 2px; font-size:25px; } header p { margin:0; color:#c4d7e6; }
     main { max-width:1080px; margin:24px auto; padding:0 20px 48px; display:grid; gap:16px; }
@@ -43,7 +43,7 @@
         <div class="field openai-only"><label for="openai_model">Model</label><input id="openai_model" autocomplete="off"><span class="source" data-source="openai_model"></span></div>
         <div class="field openai-only"><label for="temperature">Temperature</label><input id="temperature" type="number" min="0" max="2" step="0.1"><span class="source" data-source="temperature"></span></div>
         <div class="field openai-only"><label for="api_key">API Key (write-only)</label><input id="api_key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key"><span class="source" id="credential-status">Credential: MISSING</span></div>
-        <div class="field openai-only"><label>Saved credential</label><button type="button" id="clear-credential" class="secondary">Clear saved credential…</button><span class="hint">Requires confirmation and a successful connection test.</span></div>
+        <div class="field openai-only"><label>Saved credential</label><button type="button" id="clear-credential" class="secondary">Clear saved credential…</button><span class="hint">Clears the local key only; an environment key remains available.</span></div>
         <div class="field"><label for="request_timeout_seconds">Request timeout (seconds)</label><input id="request_timeout_seconds" type="number" min="1" max="600" step="1"><span class="source" data-source="request_timeout_seconds"></span></div>
         <div class="field"><label for="max_generate_tokens">Max output tokens</label><input id="max_generate_tokens" type="number" min="1" max="32768" step="1"><span class="source" data-source="max_generate_tokens"></span></div>
         <div class="field"><label for="thinking_mode">Thinking / reasoning</label><select id="thinking_mode"><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select><span class="source" data-source="thinking_mode"></span></div>
@@ -54,7 +54,9 @@
         <button id="test" class="secondary">Test Connection</button>
         <button id="save" disabled>Save</button>
         <button id="reload" class="secondary">Reload Effective State</button>
+        <button id="restart" hidden>Restart Service</button>
       </div>
+      <p id="restart-note" class="hint" hidden></p>
       <p class="hint openai-only">Test Connection sends a small real generation request and may incur a small provider usage charge.</p>
       <div id="feedback" class="notice" role="status" aria-live="polite" style="margin-top:14px">Loading effective configuration…</div>
     </section>
@@ -94,6 +96,7 @@
     let validationHash = null;
     let connectionTestId = null;
     let testedHash = null;
+    let restarting = false;
     const canonical = (obj) => JSON.stringify(Object.keys(obj).sort().reduce((o,k)=>(o[k]=obj[k],o),{}));
     const configFromForm = () => ({
       provider_type: $("provider_type").value,
@@ -145,7 +148,13 @@
       $("retrieval-view").innerHTML=kv([["Mode",conf.retrieval.mode],["Adapter",conf.retrieval.adapter],["Top K",conf.retrieval.top_k],["Chunk size (characters)",conf.retrieval.chunk_size],["Chunk overlap (characters)",conf.retrieval.chunk_overlap],["Vector backend",conf.retrieval.vector_backend],["Reranker",conf.retrieval.reranker]]);
       $("service-view").innerHTML=kv([["Version",conf.service.service_version],["Data directory ID",conf.service.data_directory_id],["Source class gate",conf.service.source_class_gate],["Capabilities",conf.service.capabilities.join(", ")],["Health",conf.service.health],["Config hash",conf.service.config_hash]]);
       const banner=$("apply-banner");
-      if (state.apply_state === "RESTART_REQUIRED") { banner.textContent="Saved configuration differs from the running effective configuration. RESTART_REQUIRED — restart the Public Knowledge service to apply it."; banner.className="notice warn"; }
+      const required=state.apply_state === "RESTART_REQUIRED";
+      const capability=state.restart_capability || {available:false,strategy:"UNAVAILABLE"};
+      $("restart").hidden=!required;
+      $("restart").disabled=!required || !capability.available || restarting;
+      $("restart-note").hidden=!required;
+      $("restart-note").textContent=required&&!capability.available?"RESTART_UNAVAILABLE — this service was not started under a safe local supervisor. Restart it through its configured service manager.":"The service will briefly disconnect and this page will reconnect automatically.";
+      if (required) { banner.textContent="Saved configuration differs from the running effective configuration. RESTART_REQUIRED"; banner.className="notice warn"; }
       else { banner.textContent="Saved configuration is active. Current configuration source is shown beside each editable value."; banner.className="notice good"; }
     }
     async function loadState() {
@@ -153,6 +162,53 @@
       try { const response=await fetch("/admin/config",{cache:"no-store"}); const body=await response.json(); if(!response.ok) throw Error(body.detail||"Could not load settings."); renderState(body); show("Configuration loaded. Secrets are not returned by this API.","good"); }
       catch(error) { show(error.message,"bad"); }
     }
+    function setRestarting(value) {
+      restarting=value;
+      ["validate","test","save","reload"].forEach(id=>$(id).disabled=value || (id==="save" && !connectionTestId));
+      fieldIds.concat(["api_key","clear-credential"]).forEach(id=>{const node=$(id);if(node)node.disabled=value;});
+      if(value){$("restart").disabled=true;$("restart").hidden=false;}
+    }
+    function effectiveMatchesSaved(state) {
+      const gen=state.current_effective_config?.generation||{};
+      const saved=state.saved_config||{};
+      const openai=saved.provider_type==="openai_compatible";
+      return state.apply_state==="APPLIED" && gen.provider_type===saved.provider_type &&
+        gen.base_url===(openai?saved.openai_base_url:saved.ollama_url) &&
+        gen.model===(openai?saved.openai_model:saved.ollama_model) &&
+        (!openai || (gen.openai_protocol===saved.openai_protocol && gen.credential_status===state.saved_credential_status));
+    }
+    async function waitForRestart(previousInstanceId) {
+      const deadline=Date.now()+60000; let sawDisconnect=false;
+      while(Date.now()<deadline){
+        await new Promise(resolve=>setTimeout(resolve,1000));
+        let healthy=false;
+        let healthState=null;
+        try { const health=await fetch("/health?restart_probe="+Date.now(),{cache:"no-store"}); healthy=health.ok;if(healthy)healthState=await health.json(); }
+        catch(_) { healthy=false; }
+        if(!healthy){sawDisconnect=true;continue;}
+        const instanceChanged=previousInstanceId&&healthState?.instance_id&&healthState.instance_id!==previousInstanceId;
+        if(!sawDisconnect&&!instanceChanged)continue;
+        try {
+          const response=await fetch("/admin/config?restart_probe="+Date.now(),{cache:"no-store"});
+          if(!response.ok)continue;
+          const state=await response.json();
+          if(effectiveMatchesSaved(state)){renderState(state);setRestarting(false);show("Restart complete · configuration is active.","good");return true;}
+        } catch(_) { /* service may still be starting; continue within the bounded wait */ }
+      }
+      setRestarting(false);show("Service did not return. Restart manually and reload this page.","bad");return false;
+    }
+    $("restart").addEventListener("click",async()=>{
+      if($("restart").disabled)return;
+      if(!window.confirm("Restart Public Knowledge Service now? The page will reconnect automatically."))return;
+      try {
+        let previousInstanceId=null;
+        try { const health=await fetch("/health?restart_probe="+Date.now(),{cache:"no-store"});if(health.ok)previousInstanceId=(await health.json()).instance_id||null; } catch(_) { /* the restart request will still report a clear error if unavailable */ }
+        const response=await fetch("/admin/restart",{method:"POST",cache:"no-store"});
+        const body=await response.json();
+        if(!response.ok)throw Error(body.detail?.code==="RESTART_UNAVAILABLE"?"RESTART_UNAVAILABLE — safe supervised restart is unavailable.":body.detail?.message||"Restart request failed.");
+        setRestarting(true);show("RESTARTING… Waiting for the service to restart.","warn");await waitForRestart(previousInstanceId);
+      } catch(error){setRestarting(false);show(error.message,"bad");}
+    });
     async function validateForm() {
       markDirty(); const config=configFromForm();
       try {
