@@ -225,6 +225,15 @@ def _engineering_result_view(skill_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _knowledge_release_identity() -> dict[str, Any]:
+    status = KnowledgeReleaseConsumer.current().status()
+    return {
+        "available": bool(status.get("available")),
+        "knowledge_release_version": str(status.get("knowledge_release_version") or ""),
+        "snapshot_hash": str(status.get("snapshot_hash") or ""),
+    }
+
+
 def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
     """Stable identity for the currently consumable Device Fact set.
 
@@ -609,6 +618,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
 
     runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
+    current_knowledge_release = _knowledge_release_identity()
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
     current_fact_fingerprint = _device_fact_fingerprint(detail)
 
@@ -633,6 +643,10 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         next_action = engineering.get("next_action")
         structured = skill.get("structured_result") or {}
         recorded_input = item.get("input") or {}
+        recorded_knowledge_release = dict(recorded_input.get("_knowledge_release_identity") or {})
+        if recorded_knowledge_release != current_knowledge_release:
+            complete = False
+            next_action = "Formal Knowledge Release 已变化；请基于当前发布知识重新执行该场景。"
 
         if kind == "COMPARE":
             current_new = current_fact_fingerprint
@@ -980,6 +994,7 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         if assessment_type:
             record_input = dict(request)
             record_input["_device_fact_fingerprint"] = _device_fact_fingerprint(detail)
+            record_input["_knowledge_release_identity"] = _knowledge_release_identity()
             response["assessment_record"] = core.save_device_assessment(
                 device_id,
                 assessment_type,
@@ -2048,6 +2063,7 @@ def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "
             "new_id": new_id,
             "_old_device_fact_fingerprint": _device_fact_fingerprint(old_detail),
             "_new_device_fact_fingerprint": _device_fact_fingerprint(new_detail),
+            "_knowledge_release_identity": _knowledge_release_identity(),
         },
         result,
         created_by=assessment_author,
