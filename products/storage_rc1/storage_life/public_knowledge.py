@@ -8,11 +8,18 @@ from __future__ import annotations
 import json
 import os
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+from .knowledge_suggestions import (
+    PublicKnowledgeSuggestionService,
+    SuggestionCreate,
+    SuggestionEdit,
+    SuggestionError,
+)
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
 DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:8080")
@@ -138,3 +145,92 @@ def citation(citation_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | Non
             raise HTTPException(404, "演示引用不存在")
         return {"citation_id": citation_id, "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"], "mode": mode}
     return {**_request(mode, "/citations/" + citation_id, base_url=base_url), "mode": mode}
+
+
+def _suggestion_service(base_url: str | None = None) -> PublicKnowledgeSuggestionService:
+    # This is the same repository root used by Storage's existing Knowledge
+    # Production product API and candidate UI.
+    from .knowledge_product import repository
+    from knowledge_production import BusinessCandidateIntakeService, BusinessEvidenceIntakeService
+
+    repo = repository()
+
+    def resolve_citation(citation_id: str, mode: str):
+        return {**_request(mode, "/citations/" + quote(citation_id, safe=""), base_url=base_url), "mode": mode}
+
+    def resolve_source(source_id: str, mode: str):
+        return {**_request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url), "mode": mode}
+
+    return PublicKnowledgeSuggestionService(
+        repo,
+        evidence_intake=BusinessEvidenceIntakeService(repo),
+        candidate_intake=BusinessCandidateIntakeService(repo),
+        resolve_citation=resolve_citation,
+        resolve_source=resolve_source,
+    )
+
+
+def _suggestion_error(exc: SuggestionError) -> HTTPException:
+    blocked = {
+        "DEMO_ONLY_CANNOT_HANDOFF", "DEMO_ONLY_BLOCKED", "SUGGESTION_STATE_INVALID",
+        "SUGGESTION_NOT_READY_FOR_HANDOFF", "HANDED_OFF_SUGGESTION_IMMUTABLE",
+        "SOURCE_NOT_PUBLIC", "SOURCE_UNAVAILABLE", "SOURCE_REVISION_MISMATCH",
+        "SOURCE_LOCATOR_REQUIRED", "SOURCE_LOCATOR_MISMATCH", "CITATION_UNRESOLVED",
+        "SOURCE_IDENTITY_MISMATCH", "SOURCE_ID_MISMATCH", "EVIDENCE_TEXT_UNAVAILABLE",
+    }
+    status_code = 404 if exc.code == "SUGGESTION_NOT_FOUND" else 409 if exc.code in blocked or "STATE" in exc.code else 422
+    return HTTPException(status_code, detail={"code": exc.code, "message": exc.code})
+
+
+@router.get("/suggestions")
+def list_suggestions():
+    return {"suggestions": _suggestion_service().list()}
+
+
+@router.post("/suggestions", status_code=201)
+def create_suggestion(body: SuggestionCreate):
+    try:
+        return _suggestion_service().create(body)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.get("/suggestions/{suggestion_id}")
+def get_suggestion(suggestion_id: str):
+    try:
+        return _suggestion_service().get(suggestion_id)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.put("/suggestions/{suggestion_id}")
+def edit_suggestion(suggestion_id: str, body: SuggestionEdit):
+    try:
+        return _suggestion_service().edit(suggestion_id, body)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.delete("/suggestions/{suggestion_id}", status_code=204)
+def delete_suggestion(suggestion_id: str):
+    try:
+        _suggestion_service().delete(suggestion_id)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+    return None
+
+
+@router.post("/suggestions/{suggestion_id}/validate")
+def validate_suggestion(suggestion_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    try:
+        return _suggestion_service(base_url).validate(suggestion_id, mode=mode)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.post("/suggestions/{suggestion_id}/handoff")
+def handoff_suggestion(suggestion_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    try:
+        return _suggestion_service(base_url).handoff(suggestion_id, mode=mode)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc

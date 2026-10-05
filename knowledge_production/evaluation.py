@@ -237,6 +237,60 @@ class KnowledgeEvaluationService:
                 continue
             valid += 1
 
+        # Public Knowledge candidates carry a second, adapter-level citation
+        # identity. Keep the shared publish gate fail-closed if that immutable
+        # source/revision/locator/citation binding no longer matches its stored
+        # EvidenceReference. The original LIVE resolver already rechecks the
+        # upstream citation before handoff; this protects review/publish from
+        # later missing or altered Evidence artifacts.
+        if candidate.metadata.get("origin_workspace") == "public-knowledge":
+            refs = candidate.metadata.get("source_refs")
+            if not isinstance(refs, list) or not refs:
+                return EvidenceValidationStatus.INVALID, ["PUBLIC_EVIDENCE_TRACE_INVALID"]
+            evidence_by_id = {}
+            for evidence_id in candidate.evidence_refs:
+                payload = self.repository.load(
+                    f"knowledge/production/evidence/{evidence_id}.json"
+                )
+                if isinstance(payload, dict):
+                    evidence_by_id[evidence_id] = payload
+            for ref in refs:
+                if not isinstance(ref, dict):
+                    return EvidenceValidationStatus.INVALID, ["PUBLIC_EVIDENCE_TRACE_INVALID"]
+                matched = False
+                for evidence in evidence_by_id.values():
+                    source = evidence.get("source") or {}
+                    locator = evidence.get("locator") or {}
+                    location = locator.get("value") or {}
+                    metadata = source.get("metadata") or {}
+                    if (
+                        source.get("source_id") == ref.get("source_id")
+                        and source.get("revision") == ref.get("revision")
+                        and metadata.get("citation_id") == ref.get("citation_id")
+                        and metadata.get("classification") == "PUBLIC"
+                        and metadata.get("locator") == ref.get("locator")
+                        and (
+                            not ref.get("source_uri")
+                            or metadata.get("source_uri") == ref.get("source_uri")
+                        )
+                        and location.get("page") == ref.get("locator", {}).get("page")
+                        and location.get("section") == ref.get("locator", {}).get("section")
+                        and (location.get("paragraph") or location.get("chunk_id"))
+                        == (ref.get("locator", {}).get("chunk_id") or ref.get("locator", {}).get("paragraph"))
+                    ):
+                        expected_identity = ref.get("immutable_identity")
+                        recorded_identity = metadata.get("immutable_identity")
+                        if expected_identity and recorded_identity != expected_identity:
+                            continue
+                        excerpt = evidence.get("excerpt")
+                        excerpt_hash = hashlib.sha256(str(excerpt or "").encode("utf-8")).hexdigest()
+                        if not excerpt or source.get("content_hash") != excerpt_hash:
+                            continue
+                        matched = True
+                        break
+                if not matched:
+                    return EvidenceValidationStatus.INVALID, ["PUBLIC_EVIDENCE_TRACE_INVALID"]
+
         if valid == len(candidate.evidence_refs):
             return EvidenceValidationStatus.VALID, []
         if valid:
