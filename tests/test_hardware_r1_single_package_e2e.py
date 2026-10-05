@@ -135,6 +135,8 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
     assert "hardware_case_e2e_evidence.js" not in normal_knowledge.text
     assert "hardware_case_e2e_evidence.js?v=wave4-e2e-v2" in e2e_knowledge.text
     assert "hardware_case_knowledge_consumption.js?v=wave4-stage4-v2" in e2e_knowledge.text
+    assert "hardware_case_knowledge_consumption.css?v=wave3b-v2" in e2e_knowledge.text
+    assert "data-device-risk-summary" in e2e_knowledge.text
     assert client.get("/p0/static/hardware_case_e2e.js").status_code == 200
 
     consumption_js = client.get("/p0/static/hardware_case_knowledge_consumption.js")
@@ -144,6 +146,8 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
     assert "RND_DIAGNOSIS" in consumption_js.text
     assert "DEVICE_RISK" in consumption_js.text
     assert "MARKET_ISSUE" in consumption_js.text
+    assert "当前结果没有显式 DeviceRef，不做器件推断。" in consumption_js.text
+    assert "group.caseIds.add(item.business_case_id)" in consumption_js.text
     assert "detail.dataset.businessCaseId" in evidence_js.text
     assert ".split('·')" not in evidence_js.text
 
