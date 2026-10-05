@@ -134,13 +134,16 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
     assert normal_knowledge.status_code == e2e_knowledge.status_code == 200
     assert "hardware_case_e2e_evidence.js" not in normal_knowledge.text
     assert "hardware_case_e2e_evidence.js?v=wave4-e2e-v2" in e2e_knowledge.text
-    assert "hardware_case_knowledge_consumption.js?v=wave4-stage4-v1" in e2e_knowledge.text
+    assert "hardware_case_knowledge_consumption.js?v=wave4-stage4-v2" in e2e_knowledge.text
     assert client.get("/p0/static/hardware_case_e2e.js").status_code == 200
 
     consumption_js = client.get("/p0/static/hardware_case_knowledge_consumption.js")
     evidence_js = client.get("/p0/static/hardware_case_e2e_evidence.js")
     assert consumption_js.status_code == evidence_js.status_code == 200
     assert "detail.dataset.businessCaseId = item.business_case_id" in consumption_js.text
+    assert "RND_DIAGNOSIS" in consumption_js.text
+    assert "DEVICE_RISK" in consumption_js.text
+    assert "MARKET_ISSUE" in consumption_js.text
     assert "detail.dataset.businessCaseId" in evidence_js.text
     assert ".split('·')" not in evidence_js.text
 
