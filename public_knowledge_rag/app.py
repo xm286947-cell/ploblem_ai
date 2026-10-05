@@ -6,18 +6,22 @@ import os
 import secrets
 import signal
 from contextlib import asynccontextmanager
+import hashlib
 from pathlib import Path
+from pathlib import PurePath
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Request
 from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse, Response
 
 from . import __version__
 from .admin_config import ConfigValidationError, ConfigurationAdmin
 from .config import Settings
 from .contracts import Chunker, Parser, Retriever
-from .parsing import PlainTextParser, WindowChunker
+from .parsing import FileParser, PlainTextParser, WindowChunker
 from .policy import require_public_query, require_public_source
 from .providers import OpenAICompatibleProvider, OllamaProvider, ProviderUnavailable, UnconfiguredManualProvider
 from .retrieval import SQLiteLexicalRetriever
@@ -27,6 +31,7 @@ admin_config = ConfigurationAdmin()
 settings = admin_config.effective
 store = Store(settings.data_dir)
 parser: Parser = PlainTextParser()
+file_parser = FileParser()
 chunker: Chunker = WindowChunker(settings.chunk_size, settings.chunk_overlap)
 retriever: Retriever = SQLiteLexicalRetriever(store)
 ollama = OllamaProvider(settings)
@@ -326,10 +331,54 @@ def import_source(body: ImportRequest) -> dict[str, object]:
         raise HTTPException(422, str(exc)) from exc
     chunks = chunker.chunk(parsed)
     source_id, revision_id, created = store.import_source(
-        body.title, body.source_uri, parsed.text, body.media_type, parsed.parser_id, parsed.parser_version, chunks
+        body.title, body.source_uri, parsed.text, body.media_type, parsed.parser_id, parsed.parser_version, chunks,
+        raw_bytes=content_bytes, locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
     )
     return {"source_id": source_id, "source_revision": revision_id, "created": created,
-            "parser_snapshot": {"id": parsed.parser_id, "version": parsed.parser_version}, "chunk_count": len(chunks)}
+            "source_sha256": hashlib.sha256(content_bytes).hexdigest(),
+            "parser_snapshot": {"id": parsed.parser_id, "version": parsed.parser_version},
+            "element_counts": parsed.element_counts or {}, "locator_status": "READY" if parsed.locator_ready else "PARTIAL_NOT_EVIDENCE_READY",
+            "chunk_count": len(chunks)}
+
+
+@app.post("/sources/import-file")
+async def import_file(title: str = Form(..., min_length=1, max_length=300),
+                      classification: str = Form(...), file: UploadFile = File(...),
+                      source_uri: str | None = Form(default=None)) -> dict[str, object]:
+    # Gate metadata before selecting or invoking any parser or provider.
+    require_public_source(classification, "", source_uri)
+    filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not filename or any(ord(char) < 32 for char in filename):
+        raise HTTPException(422, "Uploaded file must have a filename.")
+    if not title.strip():
+        raise HTTPException(422, "Source title must not be blank.")
+    content_bytes = await file.read(settings.max_source_bytes + 1)
+    if len(content_bytes) > settings.max_source_bytes:
+        raise HTTPException(413, "Source exceeds the configured size limit.")
+    try:
+        file_text = content_bytes.decode("utf-8", "replace")
+        require_public_source(classification, file_text, source_uri)
+        media_type = file.content_type or FileParser.MEDIA_TYPES.get(PurePath(filename).suffix.lower(), "")
+        parsed = file_parser.parse(content_bytes, media_type, filename)
+        media_type = FileParser.MEDIA_TYPES[PurePath(filename).suffix.lower()]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Parser and decoder errors must fail closed, including encrypted/corrupt documents.
+        raise HTTPException(422, f"Document parsing failed closed: {exc}") from exc
+    chunks = chunker.chunk(parsed) if parsed.locator_ready else []
+    source_id, revision_id, created = store.import_source(
+        title, source_uri, parsed.text, media_type, parsed.parser_id, parsed.parser_version, chunks,
+        raw_bytes=content_bytes, locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
+        original_filename=filename,
+    )
+    return {"source_id": source_id, "source_revision": revision_id, "created": created,
+            "source_sha256": hashlib.sha256(content_bytes).hexdigest(),
+            "original_filename": filename, "media_type": media_type,
+            "parser_snapshot": {"id": parsed.parser_id, "version": parsed.parser_version},
+            "element_counts": parsed.element_counts or {},
+            "locator_status": "READY" if parsed.locator_ready else "PARTIAL_NOT_EVIDENCE_READY",
+            "chunk_count": len(chunks), "snapshot_url": f"/sources/{source_id}/revisions/{revision_id}/snapshot"}
 
 
 @app.get("/sources")
@@ -343,6 +392,21 @@ def get_source(source_id: str) -> dict[str, object]:
     if result is None:
         raise HTTPException(404, "Source not found.")
     return result
+
+
+@app.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
+def source_snapshot(source_id: str, revision_id: str) -> Response:
+    snapshot = store.get_snapshot(source_id, revision_id)
+    if snapshot is None:
+        raise HTTPException(404, "Original source snapshot not found.")
+    content, media_type, filename, raw_sha256 = snapshot
+    if hashlib.sha256(content).hexdigest() != raw_sha256:
+        raise HTTPException(500, "Original source snapshot integrity check failed.")
+    safe_name = filename.replace('"', "").replace("\\", "_").replace("/", "_") or "source"
+    disposition = f"inline; filename=\"source\"; filename*=UTF-8''{quote(safe_name, safe='')}"
+    return Response(content, media_type=media_type, headers={"Content-Disposition": disposition,
+                                                             "X-Source-Snapshot": "immutable",
+                                                             "X-Source-SHA256": raw_sha256})
 
 
 def _search(query: str, top_k: int, source_ids: list[str] | None = None) -> list[dict[str, object]]:
