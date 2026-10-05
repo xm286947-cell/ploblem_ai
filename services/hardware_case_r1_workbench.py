@@ -91,6 +91,31 @@ def bind_case_status(
             "error_code": error_code,
             "retryable": orchestration_status == "PARSE_FAILED",
         }
+    if orchestration_status == "RUNNING":
+        trace = (result or {}).get("latency_trace") or {}
+        previous_failed_stage = str(
+            (result or {}).get("failed_stage") or ""
+        ).upper() or None
+        if previous_failed_stage == "STAGE_B":
+            stage_a = _stage_status(trace, "A", True)
+            stage_b = "RUNNING"
+        else:
+            stage_a = "RUNNING"
+            stage_b = "WAITING"
+        return {
+            "parse": "PASS",
+            "stage_a": stage_a,
+            "stage_b": stage_b,
+            "gate": "WAITING",
+            "result": "RUNNING",
+            "failed_stage": (
+                previous_failed_stage
+                if previous_failed_stage in {"STAGE_A", "STAGE_B"}
+                else None
+            ),
+            "error_code": error_code,
+            "retryable": False,
+        }
     if result is None:
         return {
             "parse": "PASS",
