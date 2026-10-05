@@ -1453,6 +1453,7 @@ RUNTIME_TEXT_PATTERNS = [
     ("critical_warning", r"\bcritical[ _-]*warning\b\s*[:=]\s*([^\s]+)", "code", None),
     ("media_errors", r"\bmedia[ _-]*(?:and[ _-]*data[ _-]*integrity[ _-]*)?errors?\b\s*[:=]\s*([^\s]+)", "count", None),
     ("available_spare", r"\bavailable[ _-]*spare\b\s*[:=]\s*([^\s]+)", "%", None),
+    ("available_spare_threshold", r"\bavailable[ _-]*spare[ _-]*threshold\b\s*[:=]\s*([^\s]+)", "%", None),
     ("device_life_time_est_typ_a", r"\b(?:device[ _-]*)?life[ _-]*time(?:[ _-]*est)?[ _-]*typ[ _-]*a\b\s*[:=]\s*([^\s]+)", "code", "EMMC_DEVICE_LIFE_TIME_A_V1"),
     ("device_life_time_est_typ_b", r"\b(?:device[ _-]*)?life[ _-]*time(?:[ _-]*est)?[ _-]*typ[ _-]*b\b\s*[:=]\s*([^\s]+)", "code", "EMMC_DEVICE_LIFE_TIME_B_V1"),
     ("pre_eol_info", r"\bpre[ _-]*eol(?:[ _-]*info)?\b\s*[:=]\s*([^\s]+)", "code", "EMMC_PRE_EOL_V1"),
