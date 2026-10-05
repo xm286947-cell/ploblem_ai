@@ -882,7 +882,10 @@ def _iso_datetime(value: Any) -> datetime | None:
         return None
 
 
-def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
+def analyze_runtime_trend(
+    device_id: str,
+    target_service_life: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Turn saved runtime snapshots into existing Lifetime Skill calls.
 
     No new lifetime formula is introduced here.  The function only derives
@@ -955,7 +958,7 @@ def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
                             "evidence_refs": [previous.get("batch_id"), latest.get("batch_id")],
                         }]
                     },
-                    "target_service_life": {},
+                    "target_service_life": dict(target_service_life or {}),
                     "record_assessment": True,
                     "assessment_author": "Storage MVP Runtime Trend",
                 })
@@ -1016,6 +1019,7 @@ def analyze_runtime_trend(device_id: str) -> dict[str, Any]:
         "trend": trend,
         "results": results,
         "supported_result_count": len(results),
+        "target_service_life": dict(target_service_life or {}),
         "new_formula_stack": False,
         "public_knowledge_used": False,
     }
