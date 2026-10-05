@@ -1476,6 +1476,16 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
                 "evidence_block_ids": ["B0001"],
             }
         }
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "baud_rate",
+            "value": 115200,
+            "unit": "bps",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "warnings": [],
+        }
+    ]
     asset = _commit_fixture_asset(
         repository, result, case_id="A0201", source_id="c" * 64
     )
@@ -1505,6 +1515,12 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     confirmed["engineering_context"]["primary_subject"]["extraction_status"] = (
         "MISSING"
     )
+    parameter = confirmed["engineering_context"]["key_parameters"][0]
+    parameter["name"] = "uart_baud_rate"
+    parameter["value"] = 921600
+    parameter["unit"] = "bit/s"
+    parameter["evidence_block_ids"] = ["FORGED-EVIDENCE"]
+    parameter["extraction_status"] = "MISSING"
     confirmed["observed_problem"]["symptom"]["value"] = "人工确认现象"
     confirmed["engineering_analysis"]["root_cause"]["value"] = "人工确认根因"
     confirmed["engineering_resolution"]["actions"]["value"] = "人工确认措施"
@@ -1534,6 +1550,14 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
         "extraction_status"
     ] == "EXTRACTED"
+    durable_parameter = durable["knowledge_object"]["engineering_context"][
+        "key_parameters"
+    ][0]
+    assert durable_parameter["name"] == "uart_baud_rate"
+    assert durable_parameter["value"] == 921600
+    assert durable_parameter["unit"] == "bit/s"
+    assert durable_parameter["evidence_block_ids"] == ["B0001"]
+    assert durable_parameter["extraction_status"] == "EXTRACTED"
     assert "schema_extension" not in durable["knowledge_object"]
     assert durable["knowledge_object"]["observed_problem"]["symptom"]["value"] == (
         "人工确认现象"
