@@ -466,6 +466,54 @@ def device_slots(device_id: str) -> dict[str, Any]:
     }
 
 
+def add_manual_device_fact(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    device = devices[device_id]
+    requested = str(payload.get("canonical_name") or "").strip()
+    if not requested:
+        raise ValueError("CANONICAL_NAME_REQUIRED")
+
+    fields = parameter_baseline.product_fields(
+        device["device_type"], ai.expected_fields(device["device_type"], device.get("vendor", ""))
+    )
+    target = None
+    for field in fields:
+        aliases = [field.get("canonical_name"), *(field.get("aliases") or [])]
+        if requested in {str(x) for x in aliases if x}:
+            target = field
+            break
+    if target is None:
+        raise ValueError(f"UNKNOWN_DEVICE_FIELD:{requested}")
+
+    fact = core.add_manual_fact(
+        device_id,
+        target["canonical_name"],
+        target.get("parameter_name") or target["canonical_name"],
+        payload.get("value"),
+        payload.get("unit"),
+        payload.get("verified_by"),
+        source_page=payload.get("source_page"),
+        source_text=payload.get("source_text"),
+        source_section=payload.get("source_section") or "",
+        condition=payload.get("condition") or "",
+        scope=payload.get("scope") or "",
+    )
+    detail = device_slots(device_id)
+    slot = next(
+        (x for x in detail["slots"] if x.get("canonical_name") == target["canonical_name"]),
+        None,
+    )
+    return {
+        "fact": fact,
+        "slot": slot,
+        "workflow": detail["workflow"],
+        "lifecycle": detail["lifecycle"],
+        "conclusion": detail["conclusion"],
+    }
+
+
 def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     detail = device_slots(device_id)
     return {
@@ -596,7 +644,12 @@ def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
     evidence_valid = bool(row.get("persistent_evidence"))
     reasons: list[str] = []
 
-    if coverage_status == "NOT_APPLICABLE":
+    if review_status == "CONFIRMED" and has_value and evidence_valid:
+        # Human-confirmed facts are formal even when the extraction/search layer
+        # originally reported NOT_FOUND. Keep SEARCH_COVERAGE unchanged, but do
+        # not let it hide a later manual confirmation from the product workflow.
+        state = UX_CONFIRMED
+    elif coverage_status == "NOT_APPLICABLE":
         state = UX_NOT_APPLICABLE
         reasons.append("outside_device_profile")
     elif coverage_status == "NOT_FOUND":
