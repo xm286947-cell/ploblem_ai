@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -17,9 +16,6 @@ from services.hardware_knowledge_consumption import (
     HardwareKnowledgeConsumptionProjectionStore,
     HardwareKnowledgeConsumptionService,
 )
-from knowledge_production import KnowledgeReleaseService, create_knowledge_api_app
-from repositories import JsonArtifactRepository
-from services.hardware_case_knowledge_adapter import HardwareCaseKnowledgeAdapter
 from services.hardware_data_root import HardwareDataRootResolver
 from services.hardware_startup_coordinator import HardwareStartupCoordinator
 from scripts.hardware_case_web_start import ROOT as PRODUCT_ROOT
@@ -152,18 +148,10 @@ def test_single_package_fake_provider_golden_path_through_search_and_evidence(tm
     """Exercise the UI-facing product APIs; the only extraction result is deterministic fake data."""
     monkeypatch.setenv("HARDWARE_R1_E2E_PROFILE", "1")
     monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "NON_PROD")
-    monkeypatch.setenv("HARDWARE_KNOWLEDGE_BASE_URL", "https://fake-nonprod.invalid")
+    monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_MODE", "LOCAL_NON_PROD")
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_BASE_URL", raising=False)
     monkeypatch.setenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION", "SYNTHETIC-E2E")
     calls = {"provider": 0, "fake_pipeline": 0}
-    knowledge_app = create_knowledge_api_app(str(tmp_path / "formal"), knowledge_release_version="SYNTHETIC-E2E", service_id="hardware_r1_e2e_fake")
-    knowledge_client = TestClient(knowledge_app)
-
-    class Transport:
-        def request(self, method, path, *, json_body=None, query=None):
-            response = knowledge_client.request(method, path, json=json_body, params=query)
-            return response.status_code, response.json()
-
-    adapter = HardwareCaseKnowledgeAdapter(Transport(), knowledge_release_version="SYNTHETIC-E2E")
 
     def fake_pipeline(snapshot, _structurer, **_kwargs):
         calls["fake_pipeline"] += 1
@@ -223,7 +211,6 @@ def test_single_package_fake_provider_golden_path_through_search_and_evidence(tm
         hardware_r1_workbench_db_path=data_root / "db" / "workbench.db",
         hardware_r1_preview_db_path=data_root / "rebuildable" / "preview.db",
         hardware_case_r1_structurer=object(),
-        hardware_knowledge_adapter=adapter,
         hardware_startup_status=startup_status,
         enabled_domains={"HARDWARE_CASE"},
     )
@@ -252,7 +239,11 @@ def test_single_package_fake_provider_golden_path_through_search_and_evidence(tm
         response = client.post(f"/api/v2/hardware-cases/r1/workbench/items/{item_id}/promotion/{endpoint}", headers=MAINTAINER, json=body)
         assert response.status_code == 200, f"{endpoint}: {response.status_code} {response.text}"
         if endpoint == "publish":
-            KnowledgeReleaseService(JsonArtifactRepository(tmp_path / "formal")).build("SYNTHETIC-E2E", created_at=datetime.now(timezone.utc))
+            release = response.json().get("knowledge_release") or {}
+            assert release.get("mode") == "LOCAL_NON_PROD", response.json()
+            assert str(release.get("release_version") or "").startswith(
+                "SYNTHETIC-E2E-R"
+            )
         if endpoint == "verify":
             assert response.json().get("status") == "VERIFIED", {key: response.json().get(key) for key in ("status", "error_code", "knowledge_id", "public_ref")}
     project = client.post(f"/api/v2/hardware-cases/r1/workbench/consumption/project/{item['candidate_id']}", headers=MAINTAINER)
