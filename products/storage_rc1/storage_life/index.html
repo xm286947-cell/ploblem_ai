@@ -484,7 +484,7 @@ function openEngineeringActionHistory(id){
   $('#drawer').classList.add('open');
   let sources=x.sources||[],history=x.history||[];
   $('#drawerBody').innerHTML='<div class="card"><b>'+esc(x.title||'')+'</b><p>'+badge(x.status||'OPEN')+' · '+esc(actionStatusLabel(x.status))+'</p><small>Created by '+esc(x.created_by||'—')+' · Updated by '+esc(x.updated_by||'—')+'</small></div>'+
-    '<div class="card"><b>来源 Assessment</b>'+(sources.length?'<ul>'+sources.map(v=>'<li>'+esc(v.source_assessment_id||'—')+' · '+esc(v.linked_at||'')+' · Knowledge '+esc((v.knowledge_refs||[]).length)+' · Evidence '+esc((v.evidence_refs||[]).length)+'</li>').join('')+'</ul>':'<p class="muted">'+esc(x.source_assessment_id||'—')+'</p>')+'</div>'+
+    '<div class="card"><b>来源 Assessment</b>'+(sources.length?'<ul>'+sources.map(v=>'<li><b>'+esc(assessmentTypeLabel(v.assessment_type||'UNKNOWN'))+'</b> · '+badge(v.assessment_status||'UNKNOWN')+'<br><small>'+esc(v.source_assessment_id||'—')+' · Assessment '+esc(v.assessment_created_at||'')+' · Linked '+esc(v.linked_at||'')+' · Knowledge '+esc((v.knowledge_refs||[]).length)+' · Evidence '+esc((v.evidence_refs||[]).length)+'</small></li>').join('')+'</ul>':'<p class="muted">'+esc(x.source_assessment_id||'—')+'</p>')+'</div>'+
     '<div class="card"><b>状态历史</b>'+(history.length?'<ul>'+history.map(v=>'<li>'+esc(v.prior_status||'')+' → '+esc(v.new_status||'')+' · '+esc(v.updated_by||'')+' · '+esc(v.updated_at||'')+'</li>').join('')+'</ul>':'<p class="muted">尚无状态变更。</p>')+'</div>';
 }
 async function updateEngineeringAction(id,status){
@@ -536,6 +536,8 @@ function mvpSummaryMarkdown(){
     lines.push('## Engineering Actions');
     for(let a of checklist){
       lines.push('- ['+(a.status==='DONE'?'x':' ')+'] '+actionTypeLabel(a.action_type)+' · '+(a.title||'')+' · '+actionStatusLabel(a.status));
+      let sources=a.sources||[];
+      if(sources.length)lines.push('  - Source Assessments: '+sources.map(v=>assessmentTypeLabel(v.assessment_type||'UNKNOWN')+' '+(v.source_assessment_id||'')).join('；'));
     }
     lines.push('');
   }
