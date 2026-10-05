@@ -2008,7 +2008,14 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
     import json
     batch_id = uuid4().hex
     created_at = now()
-    captured_at = str(captured_at or created_at)
+    captured_raw = str(captured_at or created_at).strip()
+    try:
+        captured_dt = datetime.fromisoformat(captured_raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("RUNTIME_CAPTURE_TIME_INVALID") from exc
+    if captured_dt.tzinfo is None:
+        raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
+    captured_at = captured_dt.astimezone(timezone.utc).isoformat()
     source_label = str(source_label or "").strip()[:500]
     raw_text = str(raw_text or "")
     if len(raw_text) > 200_000:
