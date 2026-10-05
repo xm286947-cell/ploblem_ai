@@ -55,3 +55,12 @@ jobs:
           echo "GD_REAL_GOLDEN=PASS"
           echo "DIRECT_FACT_FALSE_NEGATIVE=0"
           echo "DIRECT_FACT_FALSE_POSITIVE=0"
+
+      - name: Run Storage C6 four-device Real Provider Golden
+        env:
+          STORAGE_C6_REAL_E2E: "1"
+          STORAGE_LIFE_EXECUTION_MODE: runtime
+          UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}
+          STORAGE_MODEL_CONFIG: ${{ github.workspace }}/config/runtime/model.yaml
+          STORAGE_LIFE_RUNTIME_DB: ${{ runner.temp }}/storage_c6_runtime.sqlite3
+        run: python -m pytest -q -s products/storage_rc1/tests/test_storage_four_device_real_provider_c6.py
