@@ -1,0 +1,293 @@
+name: MAJOR MVP CI Gate
+
+on:
+  push:
+    branches:
+      - ci/major-mvp-gate-001
+    paths:
+      - .github/workflows/major-mvp-ci-gate.yml
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Frozen product source commit
+        required: true
+        type: string
+        default: 50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c
+
+permissions:
+  contents: read
+
+concurrency:
+  group: major-mvp-ci-gate-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  product-candidate-gate:
+    name: Clean-checkout product candidate gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FROZEN_PRODUCT_SHA: 50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c
+      PRODUCT_BRANCH: feature/major-mvp-productization-closure
+      ARTIFACT_DIR: ${{ runner.temp }}/major-mvp-ci-artifacts
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha || '50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c' }}
+
+    steps:
+      - name: Validate requested frozen source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REQUESTED_SOURCE_SHA" = "$FROZEN_PRODUCT_SHA"
+          mkdir -p "$ARTIFACT_DIR"
+          echo "SOURCE_SHA_FIXED=$FROZEN_PRODUCT_SHA"
+
+      - name: Checkout CI orchestration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout frozen product source cleanly
+        uses: actions/checkout@v4
+        with:
+          ref: feature/major-mvp-productization-closure
+          path: product-source
+          fetch-depth: 0
+
+      - name: Verify exact clean source identity
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C product-source rev-parse HEAD)"
+          test "$actual" = "$FROZEN_PRODUCT_SHA"
+          test "$(git -C product-source branch --show-current)" = "$PRODUCT_BRANCH"
+          test -z "$(git -C product-source status --porcelain)"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_SHA_FIXED=YES"
+          echo "WORKTREE_CLEAN=YES"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: product-source/requirements-major-mvp-dev.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install focused regression and browser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -r product-source/requirements-major-mvp-dev.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product-source
+          python -m compileall -q quality_knowledge services scripts/major_mvp_product_start.py
+          echo "PYTHON_COMPILE=PASS"
+          node --check quality_knowledge/web/static/major_production.js
+          node --check quality_knowledge/web/static/p0_issue_detail.js
+          node --check quality_knowledge/web/static/p0_case_detail.js
+          echo "JS_SYNTAX=PASS"
+          git diff --check "${FROZEN_PRODUCT_SHA}^" "$FROZEN_PRODUCT_SHA"
+          echo "DIFF_CHECK=PASS"
+          bash -n START_MAJOR_MVP.sh
+          sh -n START_MAJOR_MVP.command
+          echo "POSIX_LAUNCHER_STATIC=PASS"
+          python - <<'PY'
+          from pathlib import Path
+
+          batch = Path("START_MAJOR_MVP.bat").read_text(encoding="utf-8")
+          for marker in (
+              'set "APP_DIR=%~dp0"',
+              'pushd "%APP_DIR%"',
+              '".venv\\Scripts\\python.exe"',
+              '-r "requirements-major-mvp-product.txt"',
+              '"scripts\\major_mvp_product_start.py"',
+          ):
+              if marker not in batch:
+                  raise SystemExit(f"WINDOWS_LAUNCHER_STATIC_CHECK_FAILED={marker}")
+          command = Path("START_MAJOR_MVP.command").read_text(encoding="utf-8")
+          for marker in ('dirname -- "$0"', 'exec "$APP_DIR/START_MAJOR_MVP.sh"'):
+              if marker not in command:
+                  raise SystemExit(f"MACOS_COMMAND_STRUCTURE_CHECK_FAILED={marker}")
+          print("WINDOWS_LAUNCHER_CI=STATIC_PASS")
+          print("MACOS_LAUNCHER_CI=STATIC_PASS")
+          PY
+
+      - name: Run I1-I4 and productization regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd product-source
+          set -o pipefail
+          python -m pytest -q \
+            tests/test_major_excel_import_restore.py \
+            tests/test_major_semantic_source_adapter.py \
+            tests/test_major_typed_review_entries.py \
+            tests/test_major_provider_wiring.py \
+            tests/test_case_publish_adapter.py \
+            tests/test_case_publish_service.py \
+            tests/test_historical_case_consumer_contract.py \
+            tests/test_major_knowledge_publication_contract.py \
+            tests/test_repeat_search_contract.py \
+            tests/test_repeat_result_contract.py \
+            tests/test_repeat_web_mvp.py \
+            tests/test_major_mvp_product_candidate.py \
+            2>&1 | tee "$ARTIFACT_DIR/regression.log"
+
+      - name: Rebuild candidate from clean product checkout
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          python product-source/scripts/build_major_mvp_product_candidate.py \
+            --output-dir "$ARTIFACT_DIR/candidate" \
+            2>&1 | tee "$ARTIFACT_DIR/package-build.log"
+          archive="$ARTIFACT_DIR/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip"
+          test -f "$archive"
+          digest="$(sha256sum "$archive" | awk '{print $1}')"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+          echo "CI_PACKAGE_SHA256=$digest"
+          echo "PACKAGE_BUILD=PASS"
+
+      - name: Verify package integrity and security exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          python product-source/scripts/major_mvp_product_candidate_gate.py \
+            "${{ steps.build.outputs.archive }}" \
+            2>&1 | tee "$ARTIFACT_DIR/package-gate.log"
+
+      - name: Fresh extract candidate and export package manifest
+        id: extract
+        shell: bash
+        env:
+          CANDIDATE_ARCHIVE: ${{ steps.build.outputs.archive }}
+        run: |
+          set -euo pipefail
+          extract_root="$RUNNER_TEMP/major-mvp-fresh-extract"
+          rm -rf "$extract_root"
+          mkdir -p "$extract_root"
+          python - "$CANDIDATE_ARCHIVE" "$extract_root" "$ARTIFACT_DIR" <<'PY'
+          import json
+          import sys
+          import zipfile
+          from pathlib import PurePosixPath
+
+          archive, destination, artifacts = sys.argv[1:]
+          with zipfile.ZipFile(archive) as package:
+              bad = package.testzip()
+              if bad:
+                  raise SystemExit(f"ZIP_CRC_FAILURE={bad}")
+              for name in package.namelist():
+                  path = PurePosixPath(name)
+                  if path.is_absolute() or ".." in path.parts:
+                      raise SystemExit(f"UNSAFE_ZIP_PATH={name}")
+              package.extractall(destination)
+          roots = [item for item in __import__("pathlib").Path(destination).iterdir() if item.is_dir()]
+          if len(roots) != 1:
+              raise SystemExit("FRESH_EXTRACT_ROOT_INVALID")
+          manifest = roots[0] / "PACKAGE_MANIFEST.json"
+          if not manifest.is_file():
+              raise SystemExit("PACKAGE_MANIFEST_MISSING_AFTER_EXTRACT")
+          parsed = json.loads(manifest.read_text(encoding="utf-8"))
+          if parsed.get("source_commit") != "50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c":
+              raise SystemExit("PACKAGE_SOURCE_SHA_MISMATCH")
+          __import__("shutil").copy2(manifest, __import__("pathlib").Path(artifacts) / "PACKAGE_MANIFEST.json")
+          print(f"FRESH_EXTRACT=PASS\nPACKAGE_MANIFEST=PASS\nEXTRACTED_ROOT={roots[0]}")
+          PY
+          echo "root=$extract_root/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4" >> "$GITHUB_OUTPUT"
+
+      - name: Verify fresh package import and launch through POSIX launcher
+        shell: bash
+        env:
+          CANDIDATE_ROOT: ${{ steps.extract.outputs.root }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          cd "$CANDIDATE_ROOT"
+          PYTHON=python timeout 15m ./START_MAJOR_MVP.sh --check \
+            2>&1 | tee "$ARTIFACT_DIR/fresh-extract-startup.log"
+          echo "PACKAGE_IMPORT=PASS"
+          echo "SERVER_START=PASS"
+          echo "POSIX_LAUNCHER_CI=PASS"
+          echo "MAJOR_PRODUCTION_ENTRY=PASS"
+          echo "HISTORICAL_CASE_ENTRY=PASS"
+          echo "REPEAT_RISK_ENTRY=PASS"
+
+      - name: Run real Chromium browser smoke against fresh extract
+        shell: bash
+        env:
+          MAJOR_MVP_SMOKE_ROOT: ${{ steps.extract.outputs.root }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          python product-source/scripts/major_mvp_product_smoke.py \
+            2>&1 | tee "$ARTIFACT_DIR/browser-smoke.log"
+          echo "CI_BROWSER_SMOKE=PASS"
+
+      - name: Report explicit non-CI acceptance items
+        if: always()
+        shell: bash
+        run: |
+          echo "FULL_REGRESSION=NOT_RUN"
+          echo "REAL_PROVIDER=NOT_RUN"
+          echo "REAL_DATA_VALIDATION=NOT_RUN"
+          echo "PRODUCT_TEST=NOT_RUN"
+          echo "USER_ACCEPTANCE=NOT_RUN"
+          echo "WINDOWS_LAUNCHER_CI=STATIC_PASS; NATIVE_EXECUTION=NOT_RUN"
+          echo "MACOS_LAUNCHER_CI=STATIC_PASS; NATIVE_EXECUTION=NOT_RUN"
+
+      - name: Upload candidate and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-mvp-product-candidate-50cb839d1dd4
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/major-mvp-ci-artifacts/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip
+            ${{ runner.temp }}/major-mvp-ci-artifacts/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip.sha256
+            ${{ runner.temp }}/major-mvp-ci-artifacts/PACKAGE_MANIFEST.json
+            ${{ runner.temp }}/major-mvp-ci-artifacts/regression.log
+            ${{ runner.temp }}/major-mvp-ci-artifacts/package-build.log
+            ${{ runner.temp }}/major-mvp-ci-artifacts/package-gate.log
+            ${{ runner.temp }}/major-mvp-ci-artifacts/fresh-extract-startup.log
+            ${{ runner.temp }}/major-mvp-ci-artifacts/browser-smoke.log
+
+      - name: Emit final CI gate decision
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PRODUCT_SOURCE_SHA=$FROZEN_PRODUCT_SHA"
+          echo "CI_WORKFLOW_SHA=$GITHUB_SHA"
+          echo "CI_RUN_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "FULL_REGRESSION=NOT_RUN"
+          echo "REAL_PROVIDER=NOT_RUN"
+          echo "REAL_DATA_VALIDATION=NOT_RUN"
+          echo "PRODUCT_TEST=NOT_RUN"
+          echo "USER_ACCEPTANCE=NOT_RUN"
+          echo "PRODUCT_CODE_CHANGE=NO"
+          echo "PR=NOT_CREATED"
+          echo "MERGE=NO"
+          echo "MAIN_CHANGE=NO"
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "MAJOR_MVP_CI_GATE=PASS"
+            echo "READY_FOR_PRODUCT_TEST=YES"
+          else
+            echo "MAJOR_MVP_CI_GATE=FAIL"
+            echo "READY_FOR_PRODUCT_TEST=NO"
+            exit 1
+          fi
