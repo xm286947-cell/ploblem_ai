@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
-DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:8080")
+DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:9000")
 
 FIXTURE_SOURCES = [
     {"source_id": "fixture-gd25q64e", "title": "GD25Q64E Datasheet · 演示资料", "publisher": "GigaDevice", "classification": "PUBLIC", "media_type": "text/markdown", "version": "Rev1.6", "revision": "Rev1.6", "updated_at": "2026-10-05", "summary": "演示资料，仅用于验证 Public Knowledge 页面操作。", "content": "# GD25Q64E\n\nPublic demonstration record. Program page size: 256 bytes. Sector erase size: 4 KB. This synthetic example is not a product specification.", "structure": [{"type": "heading", "text": "GD25Q64E"}, {"type": "paragraph", "text": "演示记录；不得作为正式规格事实。"}]},
@@ -59,6 +61,33 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
         with urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:1000]
+        raise HTTPException(exc.code, detail or f"Public Knowledge API 返回 HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+
+
+def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, content: bytes,
+                  media_type: str, base_url: str | None = None):
+    if mode != "LIVE":
+        raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
+    boundary = "----StoragePublicKnowledge" + uuid.uuid4().hex
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.extend([f"--{boundary}\r\n".encode(),
+                      f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                      value.encode("utf-8"), b"\r\n"])
+    safe_filename = filename.replace('"', "").replace("\r", "").replace("\n", "")
+    parts.extend([f"--{boundary}\r\n".encode(),
+                  f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'.encode(),
+                  f"Content-Type: {media_type}\r\n\r\n".encode(), content, b"\r\n",
+                  f"--{boundary}--\r\n".encode()])
+    req = Request(_url(base_url) + path, data=b"".join(parts),
+                  headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
+    try:
+        with urlopen(req, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1000]
@@ -114,6 +143,47 @@ def import_source(body: ImportBody, mode: str = "FIXTURE_REPLAY", base_url: str 
     if mode == "FIXTURE_REPLAY":
         raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
     return _request(mode, "/sources/import", body.model_dump(), base_url)
+
+
+@router.post("/sources/import-file")
+async def import_file(title: str = Form(...), classification: str = Form(...), file: UploadFile = File(...),
+                      source_uri: str | None = Form(default=None), mode: str = "FIXTURE_REPLAY",
+                      base_url: str | None = None):
+    # Enforce the PUBLIC boundary before reading or forwarding file bytes.
+    if classification.strip().upper() != "PUBLIC":
+        raise HTTPException(422, "仅允许导入明确标记为 PUBLIC 的资料。")
+    if mode == "FIXTURE_REPLAY":
+        raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
+    filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if not filename:
+        raise HTTPException(422, "请选择有文件名的资料。")
+    content = await file.read(25 * 1024 * 1024 + 1)
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(413, "资料超过 Storage 导入上限 25 MiB。")
+    media_type = file.content_type or "application/octet-stream"
+    return _request_file(mode, "/sources/import-file",
+                         {"title": title.strip(), "classification": classification.strip().upper(),
+                          "source_uri": source_uri or ""}, filename, content, media_type, base_url)
+
+
+@router.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
+def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    if mode == "FIXTURE_REPLAY":
+        raise HTTPException(404, "演示资料没有原始文件快照。")
+    url = _url(base_url) + f"/sources/{source_id}/revisions/{revision_id}/snapshot"
+    try:
+        with urlopen(Request(url, method="GET"), timeout=20) as upstream:
+            content = upstream.read(25 * 1024 * 1024 + 1)
+            if len(content) > 25 * 1024 * 1024:
+                raise HTTPException(413, "原始快照超过 Storage 下载上限 25 MiB。")
+            return Response(content, media_type=upstream.headers.get_content_type(),
+                            headers={"Content-Disposition": upstream.headers.get("Content-Disposition", "inline"),
+                                     "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
+                                     "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", "")})
+    except HTTPError as exc:
+        raise HTTPException(exc.code, "Public Knowledge 原始快照不可用。") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
 
 
 @router.post("/search")

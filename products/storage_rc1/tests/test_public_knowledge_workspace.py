@@ -62,6 +62,44 @@ def test_import_rejects_non_public_before_forwarding(monkeypatch):
     assert response.status_code == 422
 
 
+def test_file_import_rejects_non_public_before_forwarding(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("non-public upload must not reach the service")
+
+    monkeypatch.setattr(public_knowledge, "_request_file", forbidden)
+    response = client.post("/api/public-knowledge/sources/import-file?mode=LIVE", data={
+        "title": "private", "classification": "INTERNAL"
+    }, files={"file": ("private.pdf", b"private bytes", "application/pdf")})
+    assert response.status_code == 422
+
+
+def test_file_import_forwards_original_bytes_as_multipart_only_in_live(monkeypatch):
+    seen = {}
+
+    def capture(mode, path, fields, filename, content, media_type, base_url=None):
+        seen.update(mode=mode, path=path, fields=fields, filename=filename, content=content, media_type=media_type)
+        return {"source_id": "s1", "source_sha256": "sha"}
+
+    monkeypatch.setattr(public_knowledge, "_request_file", capture)
+    payload = b"%PDF original"
+    response = client.post("/api/public-knowledge/sources/import-file?mode=LIVE", data={
+        "title": "public datasheet", "classification": "PUBLIC", "source_uri": "https://vendor.example/doc.pdf"
+    }, files={"file": ("doc.pdf", payload, "application/pdf")})
+    assert response.status_code == 200
+    assert seen == {"mode": "LIVE", "path": "/sources/import-file",
+                    "fields": {"title": "public datasheet", "classification": "PUBLIC",
+                               "source_uri": "https://vendor.example/doc.pdf"},
+                    "filename": "doc.pdf", "content": payload, "media_type": "application/pdf"}
+
+
+def test_fixture_file_import_stays_read_only():
+    response = client.post("/api/public-knowledge/sources/import-file", data={
+        "title": "demo", "classification": "PUBLIC"
+    }, files={"file": ("doc.pdf", b"%PDF", "application/pdf")})
+    assert response.status_code == 409
+    assert "只读" in response.text
+
+
 def test_live_search_does_not_require_qa_provider(monkeypatch):
     monkeypatch.setattr(public_knowledge, "_request", lambda mode, path, payload=None, base_url=None: {
         "hits": [{"hit_id": "h1", "source_id": "s1", "source_revision": "r1", "locator": "page 1", "text": "match", "score": 1.0}],
