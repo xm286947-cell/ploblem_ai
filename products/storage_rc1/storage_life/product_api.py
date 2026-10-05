@@ -618,6 +618,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
 
     runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
+    latest_formal_snapshot_created_at = _iso_datetime(runtime_trend.get("latest_formal_snapshot_created_at"))
     current_knowledge_release = _knowledge_release_identity()
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
     current_fact_fingerprint = _device_fact_fingerprint(detail)
@@ -733,6 +734,16 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             if not structured.get("current_observation"):
                 complete = False
                 next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
+
+        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_snapshot_created_at:
+            assessment_created_at = _iso_datetime(item.get("created_at"))
+            if assessment_created_at is None or latest_formal_snapshot_created_at > assessment_created_at:
+                complete = False
+                next_action = (
+                    "已确认 Runtime Snapshot 集合在本次分析后发生变化；请基于当前快照重新执行该场景。"
+                    if kind != "OPTIMIZATION"
+                    else "已确认 Runtime Snapshot 集合在本次优化后发生变化；请先刷新 S3/S4，再重新生成 S5。"
+                )
 
         if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_runtime_at:
             recorded_capture_times = []
@@ -1184,6 +1195,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     current_knowledge_release = _knowledge_release_identity()
 
     latest_formal_capture = _iso_datetime(trend.get("latest_formal_capture_time"))
+    latest_formal_snapshot_created_at = _iso_datetime(trend.get("latest_formal_snapshot_created_at"))
 
     def assessment_view(kind: str) -> dict[str, Any] | None:
         item = latest.get(kind)
@@ -1196,6 +1208,10 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             return None
         if recorded_knowledge_release != current_knowledge_release:
             return None
+        if latest_formal_snapshot_created_at and kind in {"LIFETIME", "DIAGNOSIS"}:
+            assessment_created_at = _iso_datetime(item.get("created_at"))
+            if assessment_created_at is None or latest_formal_snapshot_created_at > assessment_created_at:
+                return None
         if latest_formal_capture and kind in {"LIFETIME", "DIAGNOSIS"}:
             captures = [
                 _iso_datetime(x.get("capture_time"))
