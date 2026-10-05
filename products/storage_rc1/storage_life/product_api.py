@@ -1181,6 +1181,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
 
     trend = core.runtime_metric_trends(device_id, limit=40)
     current_fact_fingerprint = _device_fact_fingerprint(detail)
+    current_knowledge_release = _knowledge_release_identity()
 
     latest_formal_capture = _iso_datetime(trend.get("latest_formal_capture_time"))
 
@@ -1190,7 +1191,10 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             return None
         recorded_input = item.get("input") or {}
         recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
+        recorded_knowledge_release = dict(recorded_input.get("_knowledge_release_identity") or {})
         if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
+            return None
+        if recorded_knowledge_release != current_knowledge_release:
             return None
         if latest_formal_capture and kind in {"LIFETIME", "DIAGNOSIS"}:
             captures = [
@@ -1219,7 +1223,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         elif kind == "DIAGNOSIS":
             if status != "ANSWERED" or not (structured.get("current_observation") or []):
                 return None
-        risk_context: dict[str, Any] = {
+        risk_context: dict[str, Any] = {}
         if kind == "LIFETIME":
             risk_context = {
                 "margin_status": structured.get("margin_status"),
