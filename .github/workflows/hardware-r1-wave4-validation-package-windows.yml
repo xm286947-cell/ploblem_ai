@@ -32,6 +32,20 @@ jobs:
           git config core.autocrlf false
           git config core.eol lf
           git checkout --force HEAD -- .
+          $roots = @("services", "repositories", "runtime", "models", "parser", "contracts", "quality_knowledge", "schema", "tools", "scripts", "config", "docs", "README_WAVE4_VALIDATION.md", "WAVE4_FIELD_AUDIT_TEMPLATE.md", "START_HARDWARE_R1_WAVE4_VALIDATION.bat", "START_HARDWARE_R1_WAVE4_VALIDATION.command", "requirements.txt", "requirements-runtime-p0-test.txt")
+          $extensions = @(".py", ".md", ".json", ".yaml", ".yml", ".txt", ".bat", ".command", ".css", ".js", ".html", ".sql")
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          foreach ($root in $roots) {
+            $target = Join-Path $PWD $root
+            if (!(Test-Path $target)) { continue }
+            $items = if ((Get-Item $target).PSIsContainer) { Get-ChildItem $target -Recurse -File } else { Get-Item $target }
+            foreach ($item in $items) {
+              if ($extensions -notcontains $item.Extension.ToLowerInvariant()) { continue }
+              $text = [System.IO.File]::ReadAllText($item.FullName)
+              $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              [System.IO.File]::WriteAllText($item.FullName, $normalized, $utf8)
+            }
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -89,14 +103,6 @@ jobs:
           "@
           $scan | Set-Content "$env:RUNNER_TEMP\scan.py" -Encoding utf8
           python "$env:RUNNER_TEMP\scan.py" $extract
-
-      - name: Preserve failed-build diagnostic package
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: HARDWARE_R1_WAVE4_WINDOWS_BUILD_DIAGNOSTIC_${{ github.sha }}
-          path: ${{ github.workspace }}/dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip
-          if-no-files-found: ignore
 
       - name: Synthetic prepare, isolation, and disabled-run gate
         shell: pwsh
