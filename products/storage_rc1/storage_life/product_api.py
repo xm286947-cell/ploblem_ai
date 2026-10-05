@@ -588,15 +588,23 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         skill = result.get("skill_result") or {}
         engineering = result.get("engineering_result") or {}
         status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
+        complete = status in completed_statuses
+        next_action = engineering.get("next_action")
+        if kind == "LIFETIME":
+            requested_metric = str((item.get("input") or {}).get("requested_metric") or "")
+            supporting_only = {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}
+            if requested_metric in supporting_only:
+                complete = False
+                next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
         return {
             "type": kind,
             "label": label,
             "status": status,
-            "complete": status in completed_statuses,
+            "complete": complete,
             "assessment_id": item.get("id"),
             "created_at": item.get("created_at"),
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
-            "next_action": engineering.get("next_action"),
+            "next_action": next_action,
         }
 
     facts = detail.get("device_facts") or []
