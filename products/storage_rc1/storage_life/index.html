@@ -399,6 +399,10 @@ async function executeIntegratedActionPlan(){
   let d=CURRENT?.device,box=$('#integratedActionPlanResult');
   if(!d||!box)return;
   let behavior=$('#optimizationBehavior')?.value.trim()||'';
+  if(!behavior){
+    scrollDeviceSection('optimizationPanel');
+    return msg('请先描述当前写入 / 日志 / 持久化行为，再生成工程优化行动方案。',true);
+  }
   box.innerHTML='<div class="card">正在汇总当前寿命 / 诊断 / Runtime 状态，并调用 Existing Write Governance Skill…</div>';
   try{
     let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/integrated-action-plan',{
@@ -955,7 +959,7 @@ async function executeOptimizationAssessment(){
       })
     });
     let sr=r.skill_result||{},st=sr.structured_result||{},missing=r.remaining_information||sr.missing_information||st.missing_information||[],state=r.current_state||[];
-    let html='<div class="card '+(sr.status==='ANSWERED'?'fact':'warning')+'">'+
+    let html='<div class="card '+(sr.status==='ANSWERED'&&r.upstream_ready?'fact':'warning')+'">'+
       '<b>'+esc(sr.status||'UNKNOWN')+' · S5 Integrated Write Governance</b>'+
       '<p>'+esc(sr.direct_answer||'')+'</p>'+
       '<p><b>Decision Boundary：</b>'+esc(r.decision_boundary||sr.decision_boundary||'ENGINEERING_REVIEW_REQUIRED')+'</p>'+
@@ -969,7 +973,9 @@ async function executeOptimizationAssessment(){
     html+=optimizationList('验证要求',r.validation_actions||st.suggested_validation);
     html+=optimizationList('适用条件 / 边界',r.conditions_and_limits||st.conditions_and_limits);
     if(missing.length)html+=optimizationList('仍缺信息',missing);
-    html+='<div class="row"><button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">保存为工程执行清单</button>'+
+    if(!r.upstream_ready)html+='<div class="warning card"><b>S5 尚不能形成可执行清单</b><p>请先让最新 S3 寿命 / 风险和 S4 运行诊断形成可完成结果；当前优化内容仅作为草案。</p></div>';
+    html+='<div class="row">'+
+      (r.upstream_ready?'<button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">保存为工程执行清单</button>':'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看 S1～S5 缺口</button>')+
       pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging wear leveling monitoring lifetime optimization'},'展开更多公共知识')+
       '</div><div id="optimizationPublicContext"></div>';
     $('#optimizationResult').innerHTML=html;
