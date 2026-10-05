@@ -287,6 +287,114 @@ def _runtime_trend_fingerprint(device_id: str) -> str:
     return sha256(raw.encode("utf-8")).hexdigest()
 
 
+LIFETIME_FORMAL_KNOWLEDGE_QUERIES = {
+    "NVME_PERCENTAGE_USED_INTERPRETATION_V1": {
+        "query": "NVMe Percentage Used",
+        "semantic_tokens": ("percentage used", "percentage_used"),
+    },
+    "NVME_DATA_UNITS_WRITTEN_V1": {
+        "query": "NVMe Data Units Written bytes per data unit",
+        "semantic_tokens": ("data units written", "data_units_written", "bytes_per_data_unit"),
+    },
+    "EMMC_DEVICE_LIFE_TIME_A_V1": {
+        "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_A",
+        "semantic_tokens": ("device_life_time_est_typ_a", "life time a", "life_time_a"),
+    },
+    "EMMC_DEVICE_LIFE_TIME_B_V1": {
+        "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_B",
+        "semantic_tokens": ("device_life_time_est_typ_b", "life time b", "life_time_b"),
+    },
+    "EMMC_PRE_EOL_V1": {
+        "query": "eMMC PRE_EOL_INFO",
+        "semantic_tokens": ("pre_eol_info", "pre eol", "pre_eol"),
+    },
+}
+
+
+def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[dict[str, Any]]:
+    """Map only the current Formal Knowledge Release into LifetimeEngine input.
+
+    Public Knowledge/RAG is deliberately excluded.  Parameters are copied only
+    when they are explicit structured fields in a released Knowledge Object;
+    prose is never parsed into protocol constants.
+    """
+    from .lifetime_engine import FormulaRegistry
+
+    formal_metric = FormulaRegistry.canonicalize(requested_metric)
+    config = LIFETIME_FORMAL_KNOWLEDGE_QUERIES.get(formal_metric)
+    if not config:
+        return []
+
+    consumer = KnowledgeReleaseConsumer.current()
+    status = consumer.status()
+    if not status.get("available") or status.get("status") != "READY":
+        return []
+
+    try:
+        result = consumer.query(
+            config["query"],
+            device_type=device_type,
+            top_k=8,
+            knowledge_release_version=status.get("knowledge_release_version"),
+        )
+    except Exception:
+        return []
+
+    refs: list[dict[str, Any]] = []
+    for obj in result.get("results") or []:
+        evidence_refs = [
+            str(x).strip()
+            for x in (obj.get("evidence_refs") or [])
+            if str(x).strip()
+        ]
+        if not evidence_refs:
+            continue
+
+        semantic_text = " ".join([
+            str(obj.get("title") or ""),
+            str(obj.get("summary") or ""),
+            str(obj.get("content") or ""),
+            " ".join(str(x) for x in (obj.get("tags") or [])),
+            " ".join(str(x) for x in (obj.get("scope") or [])),
+        ]).lower()
+        if not any(token in semantic_text for token in config["semantic_tokens"]):
+            continue
+
+        parameters: dict[str, Any] = {}
+        explicit_parameters = obj.get("parameters")
+        if isinstance(explicit_parameters, dict):
+            parameters.update(explicit_parameters)
+        structured_content = obj.get("content")
+        if isinstance(structured_content, dict):
+            nested_parameters = structured_content.get("parameters")
+            if isinstance(nested_parameters, dict):
+                parameters.update(nested_parameters)
+
+        semantic_scope = " ".join(
+            str(x).strip()
+            for x in [
+                obj.get("title"),
+                *(obj.get("scope") or []),
+                *(obj.get("tags") or []),
+            ]
+            if str(x or "").strip()
+        )
+        refs.append({
+            "knowledge_id": str(obj.get("object_id") or ""),
+            "release_version": str(
+                obj.get("knowledge_release_version")
+                or result.get("knowledge_release_version")
+                or status.get("knowledge_release_version")
+                or ""
+            ),
+            "release_status": "RELEASED",
+            "semantic_scope": semantic_scope or formal_metric,
+            "evidence_refs": evidence_refs,
+            "parameters": parameters,
+        })
+    return [x for x in refs if x["knowledge_id"] and x["release_version"]]
+
+
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
     mapping = {
@@ -1036,6 +1144,10 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
             raise ValueError("REQUESTED_METRIC_REQUIRED")
         assessment = dict(request.get("assessment_request") or {})
         assessment["device_id"] = device_id
+        # Product-side formal semantics are always rebound to the current
+        # server-validated Knowledge Release.  Client-supplied RELEASED flags or
+        # protocol parameters are not trusted across this boundary.
+        assessment["formal_knowledge"] = _formal_lifetime_knowledge(requested_metric, dtype)
         existing = list(assessment.get("confirmed_facts") or [])
         existing_names = {str(x.get("metric_name") or "") for x in existing if isinstance(x, dict)}
         assessment["confirmed_facts"] = existing + [
