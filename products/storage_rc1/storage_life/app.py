@@ -221,6 +221,14 @@ def product_compare(body: ProductCompareRequest):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.get("/api/product/devices/{device_id}/assessments", tags=["Storage Product MVP"])
+def product_device_assessments(device_id: str, limit: int = 20):
+    try:
+        return product_api.device_assessment_history(device_id, limit=limit)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+
 @app.post("/api/product/devices/{device_id}/skills/{skill_id}/execute", tags=["Storage Product MVP"])
 def product_execute_device_skill(device_id: str, skill_id: str, payload: dict):
     try:
