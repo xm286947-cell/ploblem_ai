@@ -982,6 +982,19 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
         engineering = result.get("engineering_result") or {}
+        structured = skill.get("structured_result") or {}
+        risk_context: dict[str, Any] = {}
+        if kind == "LIFETIME":
+            risk_context = {
+                "margin_status": structured.get("margin_status"),
+                "measured_vs_budget": structured.get("measured_vs_budget"),
+                "target_service_life_projection": structured.get("target_service_life_projection"),
+            }
+        elif kind == "DIAGNOSIS":
+            risk_context = {
+                "diagnosis_status": structured.get("diagnosis_status"),
+                "abnormality_signal": structured.get("abnormality_signal") or [],
+            }
         return {
             "assessment_id": item.get("id"),
             "status": item.get("status") or skill.get("status") or "UNKNOWN",
@@ -989,6 +1002,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
             "next_action": engineering.get("next_action"),
             "missing_information": skill.get("missing_information") or [],
+            "risk_context": risk_context,
         }
 
     lifetime = assessment_view("LIFETIME")
@@ -1004,6 +1018,17 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     if diagnosis:
         context_terms.append(f"diagnosis assessment status {diagnosis['status']}")
     metric_names = [x.get("metric_name") for x in (trend.get("metrics") or []) if x.get("metric_name")]
+    runtime_context = [
+        {
+            "metric_name": x.get("metric_name"),
+            "latest_value": (x.get("latest") or {}).get("normalized_value"),
+            "unit": (x.get("latest") or {}).get("unit"),
+            "delta": x.get("delta"),
+            "sample_count": x.get("sample_count"),
+        }
+        for x in (trend.get("metrics") or [])
+        if x.get("metric_name") and x.get("latest")
+    ][:12]
     if metric_names:
         context_terms.append("runtime metrics " + " ".join(metric_names[:12]))
 
@@ -1022,6 +1047,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
                 "latest_diagnosis": diagnosis,
                 "runtime_snapshot_count": trend.get("snapshot_count") or 0,
                 "runtime_metrics": metric_names[:12],
+                "runtime_context": runtime_context,
             },
         },
         "workload_software_facts": workload_facts,
@@ -1041,6 +1067,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "kind": "RUNTIME_TREND",
             "snapshot_count": trend.get("snapshot_count") or 0,
             "metric_names": metric_names[:12],
+            "runtime_context": runtime_context,
             "interpretation": "EXPLICIT_VALUE_TREND_ONLY",
         })
 
