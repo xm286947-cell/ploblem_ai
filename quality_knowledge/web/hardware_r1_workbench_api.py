@@ -29,6 +29,13 @@ class ReviewConflictDecisionRequest(BaseModel):
     reviewer: str = Field(default="MAINTAINER", min_length=1)
 
 
+class HumanReviewRequest(BaseModel):
+    decision: str = Field(min_length=1)
+    reviewer: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    confirmed_content: dict[str, Any] | None = None
+
+
 class PromotionReviewRequest(BaseModel):
     reviewer: str = Field(min_length=1)
     confirmed_content: dict[str, Any]
@@ -242,6 +249,27 @@ def create_hardware_r1_workbench_router(
                 conflict_id=conflict_id,
                 decision_source=request.decision_source,
                 reviewer=request.reviewer,
+            )
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
+    @router.post("/items/{item_id}/human-review")
+    def human_review_item(
+        item_id: str,
+        request: HumanReviewRequest,
+        x_hardware_case_role: str | None = Header(
+            default=None,
+            alias="X-Hardware-Case-Role",
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.apply_human_review(
+                item_id,
+                decision=request.decision,
+                reviewer=request.reviewer,
+                reason=request.reason,
+                confirmed_content=request.confirmed_content,
             )
         except HardwareR1WorkbenchError as error:
             raise _workbench_error(error) from error
