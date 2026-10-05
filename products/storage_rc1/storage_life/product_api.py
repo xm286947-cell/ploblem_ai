@@ -62,6 +62,8 @@ DIAGNOSTIC_METHODS = {
     "available_spare": ("NVMe SMART / Health", "读取 Available Spare / Threshold", "低于阈值进入寿命风险关注"),
     "available_spare_threshold": ("NVMe SMART / Health", "读取 Available Spare Threshold", "仅与同次 Available Spare 观测比较，不单独形成诊断"),
     "ecc_status": ("器件状态寄存器/驱动统计", "读取 ECC corrected/uncorrectable 状态", "观察纠错压力与不可纠正错误趋势"),
+    "bit_flip_count": ("NAND Controller / ECC 统计", "读取检测到的 Bit Flip / Corrected Bit 数量", "单次非零不直接判故障；结合 ECC 能力、阈值和时间趋势判断裕量变化"),
+    "bit_flip_threshold": ("Datasheet / Controller 阈值", "读取同次采集提供的 Bit Flip / ECC 告警阈值", "仅与同次 Bit Flip 观测比较，不单独形成诊断"),
     "runtime_bad_block": ("MTD/UBI/驱动统计", "读取运行期坏块数量与增长", "坏块增长需结合擦写分布和 ECC 判断"),
     "read_retry": ("NAND Controller / 驱动统计", "统计 Read Retry 触发", "频繁触发提示读取裕量下降"),
     "program_fail": ("状态寄存器/驱动日志", "统计 Program Fail", "重复失败进入介质/电源/时序诊断"),
@@ -1545,6 +1547,8 @@ RUNTIME_TEXT_PATTERNS = [
     ("pe_cycle", r"\b(?:p[ _-]*/?[ _-]*e|pe)[ _-]*(?:cycle|count)s?\b\s*[:=]\s*([^\s]+)", "cycles", "NAND_PE_MARGIN_V1"),
     ("ecc_corrected", r"\becc[ _-]*corrected\b\s*[:=]\s*([^\s]+)", "count", None),
     ("ecc_uncorrectable", r"\becc[ _-]*(?:uncorrectable|uncorrected)\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("bit_flip_count", r"\b(?:bit[ _-]*flips?|bitflip(?:[ _-]*count)?|corrected[ _-]*bits?)\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("bit_flip_threshold", r"\b(?:bit[ _-]*flip|bitflip)[ _-]*(?:threshold|limit)\b\s*[:=]\s*([^\s]+)", "count", None),
 ]
 
 
