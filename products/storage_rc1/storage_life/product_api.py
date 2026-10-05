@@ -872,14 +872,20 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             chain_context = dict((recorded_input.get("user_context") or {}).get("assessment_context") or {})
             chain_lifetime = dict(chain_context.get("latest_lifetime") or {})
             chain_diagnosis = dict(chain_context.get("latest_diagnosis") or {})
-            current_lifetime_id = (latest.get("LIFETIME") or {}).get("id")
-            current_diagnosis_id = (latest.get("DIAGNOSIS") or {}).get("id")
+            current_lifetime = latest.get("LIFETIME") or {}
+            current_diagnosis = latest.get("DIAGNOSIS") or {}
+            current_lifetime_id = current_lifetime.get("id")
+            current_diagnosis_id = current_diagnosis.get("id")
+            current_lifetime_status = str(current_lifetime.get("status") or "").upper()
+            current_diagnosis_status = str(current_diagnosis.get("status") or "").upper()
             chain_current = bool(
                 current_lifetime_id and current_diagnosis_id
                 and chain_lifetime.get("assessment_id") == current_lifetime_id
                 and chain_diagnosis.get("assessment_id") == current_diagnosis_id
-                and str(chain_lifetime.get("status") or "").upper() in {"ANSWERED", "CALCULATED"}
-                and str(chain_diagnosis.get("status") or "").upper() == "ANSWERED"
+                and current_lifetime_status in {"ANSWERED", "CALCULATED"}
+                and current_diagnosis_status == "ANSWERED"
+                and str(chain_lifetime.get("status") or "").upper() == current_lifetime_status
+                and str(chain_diagnosis.get("status") or "").upper() == current_diagnosis_status
             )
             if not has_behavior:
                 complete = False
@@ -1148,12 +1154,9 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         # server-validated Knowledge Release.  Client-supplied RELEASED flags or
         # protocol parameters are not trusted across this boundary.
         assessment["formal_knowledge"] = _formal_lifetime_knowledge(requested_metric, dtype)
-        existing = list(assessment.get("confirmed_facts") or [])
-        existing_names = {str(x.get("metric_name") or "") for x in existing if isinstance(x, dict)}
-        assessment["confirmed_facts"] = existing + [
-            x for x in _safe_lifetime_facts(detail)
-            if x["metric_name"] not in existing_names
-        ]
+        # Confirmed Device Facts are a server-owned boundary.  Do not merge
+        # caller-provided objects that merely claim source_type=CONFIRMED_DEVICE_FACT.
+        assessment["confirmed_facts"] = _safe_lifetime_facts(detail)
         if "runtime_observations" not in assessment:
             assessment["runtime_observations"] = list(request.get("runtime_observations") or [])
         skill_payload = {
