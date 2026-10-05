@@ -245,12 +245,77 @@ class StorageDomainSkillAdapter:
         result = self.lifetime_engine.assess(request, requested_metric)
         missing = list(result.missing_inputs) + list(result.error_details)
         target = dict(target_service_life or {})
-        # The UI and newer product adapters use the frozen formal metric id,
-        # while older callers may still use the compatibility alias.
+        # Target service-life projection is only defined for observed SSD DWPD.
+        # It reuses the existing DWPD result plus the confirmed rated TBW Device Fact;
+        # no second lifetime formula/engine is introduced.
         target_supported_metrics = {"ssd.dwpd", "SSD_DWPD_OBSERVED_V1"}
-        target_supported = not bool(target) or requested_metric in target_supported_metrics
-        if target and requested_metric not in target_supported_metrics:
-            missing.append("TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED")
+        target_projection: dict[str, Any] = {}
+        target_supported = not bool(target)
+
+        if target:
+            if requested_metric not in target_supported_metrics:
+                missing.append("TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED")
+            elif result.status == LifetimeAssessmentStatus.CALCULATED:
+                try:
+                    target_value = float(target.get("value"))
+                    target_unit = str(target.get("unit") or "").strip().lower()
+                    if target_unit not in {"year", "years", "yr", "yrs"}:
+                        raise ValueError("TARGET_SERVICE_LIFE_UNIT_UNSUPPORTED")
+                    if target_value <= 0:
+                        raise ValueError("TARGET_SERVICE_LIFE_OUT_OF_RANGE")
+                    observed_dwpd = float(result.result)
+                    capacity_bytes = float(result.inputs["capacity_bytes"])
+                    target_days = target_value * 365.25
+                    projected_host_bytes = observed_dwpd * capacity_bytes * target_days
+
+                    rated_fact = next(
+                        (fact for fact in request.confirmed_facts if fact.metric_name == "rated_tbw_bytes"),
+                        None,
+                    )
+                    if rated_fact is None:
+                        missing.append("rated_tbw_bytes:CONFIRMED_DEVICE_FACT_REQUIRED_FOR_TARGET_LIFE")
+                        target_projection = {
+                            "target_service_life": {"value": target_value, "unit": "years"},
+                            "target_days": target_days,
+                            "observed_dwpd": observed_dwpd,
+                            "projected_host_written_bytes": projected_host_bytes,
+                            "budget_status": "BUDGET_UNAVAILABLE",
+                        }
+                    else:
+                        rated_tbw_bytes, _ = self.lifetime_engine._normalize(
+                            rated_fact.value,
+                            rated_fact.unit,
+                            "bytes",
+                            "rated_tbw_bytes",
+                        )
+                        if rated_tbw_bytes <= 0:
+                            raise ValueError("RATED_TBW_OUT_OF_RANGE")
+                        consumed_ratio_at_target = projected_host_bytes / rated_tbw_bytes
+                        remaining_bytes_at_target = rated_tbw_bytes - projected_host_bytes
+                        target_projection = {
+                            "target_service_life": {"value": target_value, "unit": "years"},
+                            "target_days": target_days,
+                            "observed_dwpd": observed_dwpd,
+                            "capacity_bytes": capacity_bytes,
+                            "projected_host_written_bytes": projected_host_bytes,
+                            "rated_tbw_bytes": rated_tbw_bytes,
+                            "consumed_ratio_at_target": consumed_ratio_at_target,
+                            "remaining_bytes_at_target": remaining_bytes_at_target,
+                            "budget_status": (
+                                "WITHIN_BUDGET"
+                                if projected_host_bytes <= rated_tbw_bytes
+                                else "EXCEEDS_BUDGET"
+                            ),
+                            "evidence_refs": sorted(
+                                set(list(result.evidence_refs) + list(rated_fact.evidence_refs))
+                            ),
+                        }
+                        target_supported = True
+                except (TypeError, ValueError, KeyError) as exc:
+                    missing.append(str(exc))
+            else:
+                missing.append("TARGET_SERVICE_LIFE_REQUIRES_CALCULATED_DWPD")
+
         status_map = {
             LifetimeAssessmentStatus.CALCULATED: "ANSWERED" if target_supported else "PARTIAL",
             LifetimeAssessmentStatus.INSUFFICIENT_DATA: "INSUFFICIENT_DATA",
@@ -261,11 +326,21 @@ class StorageDomainSkillAdapter:
         write_budget = {}
         if "rated_tbw_bytes" in result.inputs:
             write_budget["rated_tbw_bytes"] = result.inputs["rated_tbw_bytes"]
-        answer = (
-            "已通过现有确定性 Lifetime Engine 计算；目标服役期若无已注册公式则不自行外推。"
-            if result.status == LifetimeAssessmentStatus.CALCULATED
-            else "现有 Lifetime Engine 无法在当前输入下形成确定性结果，保持 Fail-Closed。"
-        )
+        if target_projection.get("rated_tbw_bytes") is not None:
+            write_budget["rated_tbw_bytes"] = target_projection["rated_tbw_bytes"]
+
+        if result.status == LifetimeAssessmentStatus.CALCULATED:
+            if target and target_projection.get("budget_status") == "WITHIN_BUDGET":
+                answer = "已按当前观测 DWPD 投影到目标服役期，预计累计写入未超过已确认 TBW 预算。"
+            elif target and target_projection.get("budget_status") == "EXCEEDS_BUDGET":
+                answer = "已按当前观测 DWPD 投影到目标服役期，预计累计写入将超过已确认 TBW 预算。"
+            elif target:
+                answer = "已计算当前 DWPD，但目标服役期预算仍缺少已确认 TBW 或有效目标寿命输入。"
+            else:
+                answer = "已通过现有确定性 Lifetime Engine 计算；未提供目标服役期时不自行外推剩余寿命年限。"
+        else:
+            answer = "现有 Lifetime Engine 无法在当前输入下形成确定性结果，保持 Fail-Closed。"
+
         return self._base_result(
             "storage-lifetime-budget", status, answer,
             {
@@ -273,18 +348,35 @@ class StorageDomainSkillAdapter:
                 "endurance_basis": [result.inputs],
                 "write_budget": write_budget,
                 "measured_vs_budget": result.result if isinstance(result.result, dict) else {"value": result.result, "unit": result.unit},
-                "margin_status": result.status.value,
+                "target_service_life_projection": target_projection,
+                "margin_status": (
+                    target_projection.get("budget_status")
+                    or result.status.value
+                ),
                 "assumptions": [x.model_dump(mode="json") for x in result.assumptions],
                 "missing_information": sorted(set(missing)),
-                "evidence_refs": list(result.evidence_refs),
+                "evidence_refs": sorted(
+                    set(
+                        list(result.evidence_refs)
+                        + list(target_projection.get("evidence_refs") or [])
+                    )
+                ),
                 "formula_replay_refs": [result.replay_trace],
             },
             knowledge_refs=result.knowledge_refs,
-            evidence_refs=result.evidence_refs,
+            evidence_refs=sorted(
+                set(
+                    list(result.evidence_refs)
+                    + list(target_projection.get("evidence_refs") or [])
+                )
+            ),
             missing=missing,
             separation={
                 "facts": [result.inputs],
-                "derived": [result.result] if result.result is not None else [],
+                "derived": [
+                    x for x in (result.result, target_projection or None)
+                    if x is not None
+                ],
                 "hypotheses": [],
                 "unknowns": sorted(set(missing)),
             },
