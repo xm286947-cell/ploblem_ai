@@ -340,7 +340,6 @@ class RealKnowledgeAssessmentService:
                 additional_missing=[
                     "CONFIRMED_DEVICE_ENDURANCE_FACTS_REQUIRED",
                     "RUNTIME_WRITE_OBSERVATIONS_REQUIRED",
-                    "TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED",
                     "FORMAL_TBW_DWPD_DUW_KNOWLEDGE_NOT_RELEASED",
                 ],
                 supported=["NVMe Percentage Used released semantics"] if rg02.get("items") else [],
@@ -348,7 +347,7 @@ class RealKnowledgeAssessmentService:
                     "TBW/DWPD/Data Units Written full evidence-backed assessment",
                     "target-service-life daily write budget",
                 ],
-                formula_gap=True,
+                formula_gap=False,
             ),
             "RG03": result(
                 "RG03", rg03,
@@ -389,8 +388,8 @@ class RealKnowledgeAssessmentService:
             "cases": cases,
             "formal_knowledge_object_count": readiness["formal_knowledge_object_count"],
             "evidence_drilldown": readiness["evidence_drilldown"],
-            "formula_gap": True,
-            "formula_task_required": True,
+            "formula_gap": False,
+            "formula_task_required": False,
             "decision_boundary": "NO_AUTO_REPLACEMENT_DECISION",
             "unknown_not_safe": True,
         }
