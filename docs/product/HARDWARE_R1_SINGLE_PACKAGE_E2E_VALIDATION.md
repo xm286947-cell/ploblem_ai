@@ -22,6 +22,12 @@ The safe defaults are `HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD`, `HARDWARE_R1_E2E
 
 No step auto-reviews or auto-publishes. CI uses synthetic DOCX and fake providers only; it never includes real corpus files or makes real provider calls. Earlier Prepare and Execution packages remain internal engineering tools and are not part of this package or its user path.
 
+## Frozen dataset identity
+
+The Web upload path freezes a Batch Dataset Identity before any Provider execution. The frozen record contains upload order, item identity, source filename, business case identity, Source ID / SHA256 and byte size. The Batch identity is immutable once frozen.
+
+Immediately before Stage A/B execution, the Workbench re-resolves the ACTIVE source and verifies its Source ID, SHA256 and byte size against the frozen Batch identity. A missing or substituted source fails closed before the Provider is called. This is orchestration audit metadata only; the Hardware Case Source Store remains the original-Word source of truth.
+
 ## Stage4 search behavior
 
 Search remains a rebuildable read model over verified Formal Knowledge. It uses Unicode NFKC normalization, normalized substring matching, the frozen field weights, and deterministic structured filters; no vector database, embedding, semantic retrieval, query rewrite, or RAG is introduced.
