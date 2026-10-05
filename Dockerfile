@@ -7,7 +7,7 @@ WORKDIR /app
 COPY public_knowledge_rag/requirements-runtime.txt ./requirements-runtime.txt
 RUN pip install --no-cache-dir -r requirements-runtime.txt
 RUN mkdir -p /app/public_knowledge_rag
-COPY public_knowledge_rag/*.py ./public_knowledge_rag/
+COPY public_knowledge_rag/*.py public_knowledge_rag/*.html ./public_knowledge_rag/
 RUN useradd --system --uid 10001 --create-home appuser \
     && mkdir -p /var/lib/public-knowledge \
     && chown -R appuser:appuser /app /var/lib/public-knowledge

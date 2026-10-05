@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Public Knowledge · Service settings</title>
+  <style>
+    :root { color-scheme: light; --ink:#16212d; --muted:#617182; --line:#dbe3e9; --panel:#fff; --canvas:#f4f7f9; --blue:#1769aa; --green:#157347; --amber:#8a5a00; --red:#b42318; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    * { box-sizing:border-box; } body { margin:0; color:var(--ink); background:var(--canvas); }
+    header { background:#12304a; color:#fff; padding:22px max(24px,calc((100vw - 1080px)/2)); }
+    header a { color:#d7eaff; margin-right:20px; text-decoration:none; } header h1 { margin:15px 0 2px; font-size:25px; } header p { margin:0; color:#c4d7e6; }
+    main { max-width:1080px; margin:24px auto; padding:0 20px 48px; display:grid; gap:16px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; box-shadow:0 2px 8px #1020300b; }
+    h2 { margin:0 0 14px; font-size:18px; } h3 { font-size:15px; margin:0 0 8px; } .muted,.hint { color:var(--muted); font-size:13px; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; } .field { display:grid; gap:5px; } label { font-weight:600; font-size:13px; }
+    input,select { width:100%; border:1px solid #b8c5ce; border-radius:7px; padding:10px 11px; color:var(--ink); background:#fff; font:inherit; }
+    input:focus,select:focus { outline:2px solid #94c8f3; border-color:var(--blue); } input[readonly] { background:#f3f6f8; }
+    .source { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:9px; margin-top:18px; } button { border:0; border-radius:7px; padding:10px 15px; font:600 14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; cursor:pointer; background:var(--blue); color:#fff; } button.secondary { color:#1e3446; background:#e7eef3; } button:disabled { cursor:not-allowed; opacity:.48; }
+    .notice { padding:12px 14px; border-radius:8px; background:#edf4f8; color:#25465d; white-space:pre-wrap; } .notice.good { background:#eaf6ef; color:var(--green); } .notice.bad { background:#fff0ef; color:var(--red); } .notice.warn { background:#fff6e4; color:var(--amber); }
+    .status { display:inline-flex; align-items:center; gap:7px; border-radius:20px; padding:4px 9px; background:#eaf6ef; color:var(--green); font-size:12px; font-weight:700; }
+    .kv { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; } .kv div { padding:12px; background:#f5f8fa; border-radius:8px; overflow-wrap:anywhere; } .kv span { display:block; color:var(--muted); font-size:12px; } .kv strong { display:block; margin-top:3px; }
+    details summary { cursor:pointer; font-weight:650; } details .kv { margin-top:15px; } .locked { color:var(--green); font-weight:700; }
+    @media(max-width:700px) { .grid,.kv { grid-template-columns:1fr; } header { padding:18px 20px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <nav><a href="/">Public Knowledge</a><a href="/settings" aria-current="page">Settings / Agent Config</a></nav>
+    <h1>Service configuration</h1>
+    <p>Inspect the effective provider and local service settings. Credentials are never displayed.</p>
+  </header>
+  <main>
+    <section class="card" aria-labelledby="generation-title">
+      <h2 id="generation-title">Generation</h2>
+      <div class="grid">
+        <div class="field"><label for="provider_type">Provider</label><select id="provider_type"><option value="ollama">Ollama (currently supported)</option></select><span class="source" data-source="provider_type"></span></div>
+        <div class="field"><label for="ollama_url">Base URL</label><input id="ollama_url" type="url" autocomplete="url"><span class="source" data-source="ollama_url"></span></div>
+        <div class="field"><label for="ollama_model">Model / tag</label><input id="ollama_model" autocomplete="off"><span class="source" data-source="ollama_model"></span></div>
+        <div class="field"><label for="ollama_model_digest">Model digest (optional pin)</label><input id="ollama_model_digest" autocomplete="off"><span class="source" data-source="ollama_model_digest"></span></div>
+        <div class="field"><label for="request_timeout_seconds">Request timeout (seconds)</label><input id="request_timeout_seconds" type="number" min="1" max="600" step="1"><span class="source" data-source="request_timeout_seconds"></span></div>
+        <div class="field"><label for="max_generate_tokens">Max output tokens</label><input id="max_generate_tokens" type="number" min="1" max="32768" step="1"><span class="source" data-source="max_generate_tokens"></span></div>
+        <div class="field"><label for="thinking_mode">Thinking / reasoning</label><select id="thinking_mode"><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select><span class="source" data-source="thinking_mode"></span></div>
+        <div class="field"><label>Credential status</label><input readonly value="Not Required (LAN Ollama)" aria-label="Credential status: not required"></div>
+      </div>
+      <div class="toolbar">
+        <button id="validate" class="secondary">Validate</button>
+        <button id="test" class="secondary">Test Connection</button>
+        <button id="save" disabled>Save</button>
+        <button id="reload" class="secondary">Reload Effective State</button>
+      </div>
+      <div id="feedback" class="notice" role="status" aria-live="polite" style="margin-top:14px">Loading effective configuration…</div>
+    </section>
+
+    <section class="card" aria-labelledby="effective-title">
+      <h2 id="effective-title">Current effective configuration</h2>
+      <div id="apply-banner" class="notice" style="margin-bottom:14px">Loading…</div>
+      <div id="generation-effective" class="kv"></div>
+      <h3 style="margin-top:20px">Saved configuration</h3>
+      <div id="saved-generation" class="kv"></div>
+    </section>
+
+    <section class="card" aria-labelledby="embedding-title">
+      <h2 id="embedding-title">Embedding</h2>
+      <p class="muted">Read-only in this task. No embedding selection or tuning is performed here.</p>
+      <div id="embedding-view" class="kv"></div>
+    </section>
+
+    <section class="card">
+      <details>
+        <summary>Advanced retrieval configuration</summary>
+        <p class="muted">Effective values from the running service. Retrieval baselines are not editable here.</p>
+        <div id="retrieval-view" class="kv"></div>
+      </details>
+    </section>
+
+    <section class="card" aria-labelledby="service-title">
+      <h2 id="service-title">Service</h2>
+      <div id="service-view" class="kv"></div>
+      <p class="locked">PUBLIC_ONLY is enforced by the service and cannot be changed here.</p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fieldIds = ["provider_type","ollama_url","ollama_model","ollama_model_digest","request_timeout_seconds","max_generate_tokens","thinking_mode"];
+    let currentState = null;
+    let validationHash = null;
+    let connectionTestId = null;
+    let testedHash = null;
+    const canonical = (obj) => JSON.stringify(Object.keys(obj).sort().reduce((o,k)=>(o[k]=obj[k],o),{}));
+    const configFromForm = () => ({
+      provider_type: $("provider_type").value,
+      ollama_url: $("ollama_url").value.trim(),
+      ollama_model: $("ollama_model").value.trim(),
+      ollama_model_digest: $("ollama_model_digest").value.trim(),
+      request_timeout_seconds: Number($("request_timeout_seconds").value),
+      max_generate_tokens: Number($("max_generate_tokens").value),
+      thinking_mode: $("thinking_mode").value
+    });
+    const show = (message, kind="") => { const node=$("feedback"); node.textContent=message; node.className="notice"+(kind?" "+kind:""); };
+    const kv = (pairs) => pairs.map(([label,value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "Not configured")}</strong></div>`).join("");
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch])); }
+    function markDirty() { validationHash=null; connectionTestId=null; testedHash=null; $("save").disabled=true; }
+    function fillForm(config, sources={}) {
+      fieldIds.forEach(id => { if (config[id] !== undefined && config[id] !== null) $(id).value=config[id]; });
+      fieldIds.forEach(id => { const node=document.querySelector(`[data-source="${id}"]`); if(node) node.textContent=`Source: ${sources[id] || "DEFAULT"}`; });
+    }
+    function renderState(state) {
+      currentState=state;
+      const conf=state.current_effective_config;
+      const saved=state.saved_config || {};
+      const sources=conf.sources || {};
+      fillForm(saved, sources);
+      $("generation-effective").innerHTML=kv([
+        ["Provider",conf.generation.provider_type], ["Endpoint",conf.generation.base_url], ["Model",conf.generation.model],
+        ["Model digest",conf.generation.model_digest || "Not pinned"], ["Timeout",`${conf.generation.timeout_seconds} seconds`],
+        ["Max output tokens",conf.generation.max_output_tokens], ["Thinking mode",conf.generation.thinking_mode],
+        ["Credential",conf.generation.credential_status], ["Config hash",conf.service.config_hash]
+      ]);
+      $("saved-generation").innerHTML=kv([
+        ["Provider",saved.provider_type], ["Endpoint",saved.ollama_url], ["Model",saved.ollama_model],
+        ["Model digest",saved.ollama_model_digest || "Not pinned"], ["Timeout",`${saved.request_timeout_seconds} seconds`],
+        ["Max output tokens",saved.max_generate_tokens], ["Thinking mode",saved.thinking_mode]
+      ]);
+      $("embedding-view").innerHTML=kv([["Provider",conf.embedding.provider],["Model",conf.embedding.model],["Runtime",conf.embedding.runtime],["Endpoint",conf.embedding.endpoint],["Status",conf.embedding.status]]);
+      $("retrieval-view").innerHTML=kv([["Mode",conf.retrieval.mode],["Adapter",conf.retrieval.adapter],["Top K",conf.retrieval.top_k],["Chunk size (characters)",conf.retrieval.chunk_size],["Chunk overlap (characters)",conf.retrieval.chunk_overlap],["Vector backend",conf.retrieval.vector_backend],["Reranker",conf.retrieval.reranker]]);
+      $("service-view").innerHTML=kv([["Version",conf.service.service_version],["Data directory ID",conf.service.data_directory_id],["Source class gate",conf.service.source_class_gate],["Capabilities",conf.service.capabilities.join(", ")],["Health",conf.service.health],["Config hash",conf.service.config_hash]]);
+      const banner=$("apply-banner");
+      if (state.apply_state === "RESTART_REQUIRED") { banner.textContent="Saved configuration differs from the running effective configuration. RESTART_REQUIRED — restart the Public Knowledge service to apply it."; banner.className="notice warn"; }
+      else { banner.textContent="Saved configuration is active. Current configuration source is shown beside each editable value."; banner.className="notice good"; }
+    }
+    async function loadState() {
+      $("save").disabled=true;
+      try { const response=await fetch("/admin/config",{cache:"no-store"}); const body=await response.json(); if(!response.ok) throw Error(body.detail||"Could not load settings."); renderState(body); show("Configuration loaded. Secrets are not returned by this API.","good"); }
+      catch(error) { show(error.message,"bad"); }
+    }
+    async function validateForm() {
+      markDirty(); const config=configFromForm();
+      try {
+        const response=await fetch("/admin/config/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(config)});
+        const body=await response.json(); if(!response.ok) { const errors=body.detail?.errors || body.detail || {}; throw Error(typeof errors === "string" ? errors : Object.entries(errors).map(([k,v])=>`${k}: ${v}`).join("\n")); }
+        validationHash=canonical(config); show("Configuration is valid. Test the provider connection before saving.","good"); return true;
+      } catch(error) { show(error.message,"bad"); return false; }
+    }
+    $("validate").addEventListener("click",validateForm);
+    $("test").addEventListener("click",async()=>{
+      if(validationHash!==canonical(configFromForm()) && !(await validateForm())) return;
+      const config=configFromForm();
+      try {
+        const response=await fetch("/admin/provider/test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(config)});
+        const body=await response.json(); if(!response.ok) throw Error(body.detail?.message || body.detail || "Provider test failed.");
+        if(!body.ok) { connectionTestId=null; testedHash=null; $("save").disabled=true; show(body.message || "Provider test failed.","bad"); return; }
+        connectionTestId=body.test_id; testedHash=canonical(config); $("save").disabled=false;
+        show(`Connection successful · ${body.provider_version || "provider reachable"}\nModel: ${body.model_name}\nModel identity: ${body.model_digest || "not pinned"}${body.digest_match===false?" (digest mismatch)":""}`,"good");
+      } catch(error) { connectionTestId=null; testedHash=null; $("save").disabled=true; show(error.message,"bad"); }
+    });
+    $("save").addEventListener("click",async()=>{
+      const config=configFromForm();
+      if(!connectionTestId || testedHash!==canonical(config)) { show("Validate and successfully test this exact configuration before saving.","bad"); return; }
+      $("save").disabled=true;
+      try {
+        const response=await fetch("/admin/config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({config,test_id:connectionTestId})});
+        const body=await response.json(); if(!response.ok) { const detail=body.detail?.errors || body.detail || "Configuration was not saved."; throw Error(typeof detail === "string" ? detail : Object.values(detail).join("\n")); }
+        renderState(body); show(body.apply_state==="RESTART_REQUIRED"?"Saved. Restart is required before the new values become effective.":"Saved; the requested values are already active.",body.apply_state==="RESTART_REQUIRED"?"warn":"good");
+        connectionTestId=null; testedHash=null;
+      } catch(error) { show(error.message,"bad"); $("save").disabled=false; }
+    });
+    $("reload").addEventListener("click",loadState);
+    fieldIds.forEach(id=>$(id).addEventListener("input",markDirty));
+    fieldIds.forEach(id=>$(id).addEventListener("change",markDirty));
+    loadState();
+  </script>
+</body>
+</html>
