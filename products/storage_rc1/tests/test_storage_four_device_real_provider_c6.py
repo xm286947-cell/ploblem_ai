@@ -6,12 +6,14 @@ from collections import defaultdict
 from pathlib import Path
 
 import pytest
+import yaml
 
 from storage_life import ai, runtime_bridge
 from storage_life.runtime_domain_strategy import EMMC_FIELD_ORDER
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+WORKFLOW_PATH = Path(__file__).parents[3] / ".github" / "workflows" / "storage-real-provider-e2e.yml"
 GOLDEN_PATH = FIXTURES / "storage_four_device_automated_golden_c4.json"
 EXCERPT_PATH = FIXTURES / "storage_four_device_source_excerpts_c4.json"
 REAL_E2E_ENABLED = os.environ.get("STORAGE_C6_REAL_E2E", "").strip().lower() in {
@@ -389,6 +391,18 @@ def test_c6_fixture_contract_is_four_devices_and_five_execution_modes():
     assert len(source_refs) == 5
     assert all(ref["source_id"] == ref["sha256"] for ref in source_refs)
     assert len({ref["source_id"] for ref in source_refs}) == 5
+
+
+def test_c6_workflow_timeout_budget_guard():
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["storage-real-provider-smoke"]
+    timeout_minutes = int(job.get("timeout-minutes") or 0)
+    assert timeout_minutes >= 120, (
+        f"TEST_HARNESS_FAIL: C6 workflow timeout budget must be >=120 minutes; "
+        f"actual={timeout_minutes}"
+    )
+    print("C6_WORKFLOW_TIMEOUT_BUDGET=PASS")
+    print(f"C6_WORKFLOW_TIMEOUT_MINUTES={timeout_minutes}")
 
 
 def test_c6_harness_reuses_frozen_golden_and_source_assets_without_copying_assertion_values():
