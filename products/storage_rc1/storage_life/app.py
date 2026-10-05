@@ -221,6 +221,24 @@ def product_compare(body: ProductCompareRequest):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/product/devices/{device_id}/runtime-snapshots", status_code=201, tags=["Storage Product MVP"])
+def product_save_runtime_snapshot(device_id: str, body: dict):
+    try:
+        return product_api.save_runtime_snapshot(device_id, body)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/product/devices/{device_id}/runtime-snapshots", tags=["Storage Product MVP"])
+def product_runtime_snapshots(device_id: str, limit: int = 20):
+    try:
+        return product_api.runtime_snapshot_history(device_id, limit=limit)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+
 @app.get("/api/product/devices/{device_id}/assessments", tags=["Storage Product MVP"])
 def product_device_assessments(device_id: str, limit: int = 20):
     try:
