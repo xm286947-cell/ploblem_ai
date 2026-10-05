@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from . import ai, core, templates, parameter_baseline
 from .knowledge_release import KnowledgeReleaseConsumer
@@ -1061,6 +1062,92 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
         )
         rows.append({"canonical_name": key, "parameter_name": parameter_name, "group": exemplar.get("group") or parameter_baseline.COMPREHENSIVE, "group_label": exemplar.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE], "cells": cells, "is_difference": len(values) > 1, "has_missing": missing, "formal_knowledge": knowledge})
     return {"devices": [x["device"] for x in details], "rows": rows}
+
+
+RUNTIME_TEXT_PATTERNS = [
+    ("percentage_used", r"\bpercentage[ _-]*used\b\s*[:=]\s*([^\s]+)", "%", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"),
+    ("data_units_written", r"\bdata[ _-]*units[ _-]*written\b\s*[:=]\s*([^\s]+)", "data_units", None),
+    ("critical_warning", r"\bcritical[ _-]*warning\b\s*[:=]\s*([^\s]+)", "code", None),
+    ("media_errors", r"\bmedia[ _-]*(?:and[ _-]*data[ _-]*integrity[ _-]*)?errors?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("available_spare", r"\bavailable[ _-]*spare\b\s*[:=]\s*([^\s]+)", "%", None),
+    ("device_life_time_est_typ_a", r"\b(?:device[ _-]*)?life[ _-]*time(?:[ _-]*est)?[ _-]*typ[ _-]*a\b\s*[:=]\s*([^\s]+)", "code", "EMMC_DEVICE_LIFE_TIME_A_V1"),
+    ("device_life_time_est_typ_b", r"\b(?:device[ _-]*)?life[ _-]*time(?:[ _-]*est)?[ _-]*typ[ _-]*b\b\s*[:=]\s*([^\s]+)", "code", "EMMC_DEVICE_LIFE_TIME_B_V1"),
+    ("pre_eol_info", r"\bpre[ _-]*eol(?:[ _-]*info)?\b\s*[:=]\s*([^\s]+)", "code", "EMMC_PRE_EOL_V1"),
+    ("runtime_bad_block", r"\b(?:runtime[ _-]*)?bad[ _-]*blocks?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("program_fail", r"\bprogram[ _-]*fails?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("erase_fail", r"\berase[ _-]*fails?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("erase_count", r"\berase[ _-]*count\b\s*[:=]\s*([^\s]+)", "cycles", "NAND_ERASE_COUNT_MARGIN_V1"),
+    ("pe_cycle", r"\b(?:p[ _-]*/?[ _-]*e|pe)[ _-]*(?:cycle|count)s?\b\s*[:=]\s*([^\s]+)", "cycles", "NAND_PE_MARGIN_V1"),
+    ("ecc_corrected", r"\becc[ _-]*corrected\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("ecc_uncorrectable", r"\becc[ _-]*(?:uncorrectable|uncorrected)\b\s*[:=]\s*([^\s]+)", "count", None),
+]
+
+
+def _runtime_text_value(raw: str) -> Any:
+    value = str(raw or "").strip().rstrip(",;")
+    clean = value.replace(",", "").rstrip("%")
+    try:
+        if clean.lower().startswith("0x"):
+            return int(clean, 16)
+        if "." in clean:
+            return float(clean)
+        return int(clean)
+    except ValueError:
+        return value
+
+
+def parse_runtime_observation_text(
+    device_type: str,
+    text: str,
+    source_label: str = "PASTED_RUNTIME_OUTPUT",
+) -> dict[str, Any]:
+    """Parse common runtime-health text without making a diagnosis.
+
+    The parser only extracts explicit named values from pasted tool output.
+    It does not infer missing metrics or convert vendor-specific semantics.
+    """
+    raw_text = str(text or "")
+    if not raw_text.strip():
+        raise ValueError("RUNTIME_TEXT_REQUIRED")
+    if len(raw_text) > 200_000:
+        raise ValueError("RUNTIME_TEXT_TOO_LARGE")
+
+    observations = []
+    seen = set()
+    for metric_name, pattern, unit, lifetime_metric in RUNTIME_TEXT_PATTERNS:
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE | re.MULTILINE)
+        if not match:
+            continue
+        raw_value = match.group(1).strip()
+        key = (metric_name, raw_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        line_start = raw_text.rfind("\n", 0, match.start()) + 1
+        line_end = raw_text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(raw_text)
+        source_line = raw_text[line_start:line_end].strip()
+        observations.append({
+            "metric_name": metric_name,
+            "raw_value": raw_value,
+            "normalized_value": _runtime_text_value(raw_value),
+            "unit": unit,
+            "source_line": source_line,
+            "source_label": source_label,
+            "diagnostic_supported": metric_name in DIAGNOSTIC_METHODS or metric_name.startswith("ecc_"),
+            "suggested_lifetime_metric": lifetime_metric,
+        })
+
+    return {
+        "device_type": templates.normalize_device_type(device_type) if device_type else "",
+        "source_label": source_label,
+        "observation_count": len(observations),
+        "observations": observations,
+        "parser_scope": "EXPLICIT_NAMED_RUNTIME_VALUES_ONLY",
+        "diagnosis_performed": False,
+        "public_knowledge_used": False,
+    }
 
 
 def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
