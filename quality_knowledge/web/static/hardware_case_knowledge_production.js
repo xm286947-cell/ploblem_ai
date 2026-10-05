@@ -772,10 +772,10 @@
       let payload;
       if (action === 'review') {
         const reviewer = q('[data-formal-reviewer]').value.trim();
-        if (!reviewer || !window.confirm('确认将当前 Durable Candidate 提交为人工 Formal Review？')) return;
+        if (!reviewer || !window.confirm('确认将已审核的 Durable Candidate 原样提交为 Formal Review？')) return;
         payload = await request('/items/' + itemId + '/promotion/review', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({reviewer, confirmed_content: state.item.candidate, review_comment: q('[data-formal-review-comment]').value.trim()}),
+          body: JSON.stringify({reviewer, review_comment: q('[data-formal-review-comment]').value.trim()}),
         });
       } else if (action === 'publish') {
         const publisher = q('[data-formal-reviewer]').value.trim();
