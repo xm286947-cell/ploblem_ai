@@ -7,15 +7,24 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .knowledge_suggestions import (
+    PublicKnowledgeSuggestionService,
+    SuggestionCreate,
+    SuggestionEdit,
+    SuggestionError,
+)
+
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
-DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:8080")
+DEFAULT_URL = os.getenv("PUBLIC_KNOWLEDGE_API_URL", "http://127.0.0.1:9000")
 
 FIXTURE_SOURCES = [
     {"source_id": "fixture-gd25q64e", "title": "GD25Q64E Datasheet · 演示资料", "publisher": "GigaDevice", "classification": "PUBLIC", "media_type": "text/markdown", "version": "Rev1.6", "revision": "Rev1.6", "updated_at": "2026-10-05", "summary": "演示资料，仅用于验证 Public Knowledge 页面操作。", "content": "# GD25Q64E\n\nPublic demonstration record. Program page size: 256 bytes. Sector erase size: 4 KB. This synthetic example is not a product specification.", "structure": [{"type": "heading", "text": "GD25Q64E"}, {"type": "paragraph", "text": "演示记录；不得作为正式规格事实。"}]},
@@ -59,6 +68,33 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
         with urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:1000]
+        raise HTTPException(exc.code, detail or f"Public Knowledge API 返回 HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+
+
+def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, content: bytes,
+                  media_type: str, base_url: str | None = None):
+    if mode != "LIVE":
+        raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
+    boundary = "----StoragePublicKnowledge" + uuid.uuid4().hex
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.extend([f"--{boundary}\r\n".encode(),
+                      f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                      value.encode("utf-8"), b"\r\n"])
+    safe_filename = filename.replace('"', "").replace("\r", "").replace("\n", "")
+    parts.extend([f"--{boundary}\r\n".encode(),
+                  f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'.encode(),
+                  f"Content-Type: {media_type}\r\n\r\n".encode(), content, b"\r\n",
+                  f"--{boundary}--\r\n".encode()])
+    req = Request(_url(base_url) + path, data=b"".join(parts),
+                  headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
+    try:
+        with urlopen(req, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1000]
@@ -116,6 +152,47 @@ def import_source(body: ImportBody, mode: str = "FIXTURE_REPLAY", base_url: str 
     return _request(mode, "/sources/import", body.model_dump(), base_url)
 
 
+@router.post("/sources/import-file")
+async def import_file(title: str = Form(...), classification: str = Form(...), file: UploadFile = File(...),
+                      source_uri: str | None = Form(default=None), mode: str = "FIXTURE_REPLAY",
+                      base_url: str | None = None):
+    # Enforce the PUBLIC boundary before reading or forwarding file bytes.
+    if classification.strip().upper() != "PUBLIC":
+        raise HTTPException(422, "仅允许导入明确标记为 PUBLIC 的资料。")
+    if mode == "FIXTURE_REPLAY":
+        raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
+    filename = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if not filename:
+        raise HTTPException(422, "请选择有文件名的资料。")
+    content = await file.read(25 * 1024 * 1024 + 1)
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(413, "资料超过 Storage 导入上限 25 MiB。")
+    media_type = file.content_type or "application/octet-stream"
+    return _request_file(mode, "/sources/import-file",
+                         {"title": title.strip(), "classification": classification.strip().upper(),
+                          "source_uri": source_uri or ""}, filename, content, media_type, base_url)
+
+
+@router.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
+def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    if mode == "FIXTURE_REPLAY":
+        raise HTTPException(404, "演示资料没有原始文件快照。")
+    url = _url(base_url) + f"/sources/{source_id}/revisions/{revision_id}/snapshot"
+    try:
+        with urlopen(Request(url, method="GET"), timeout=20) as upstream:
+            content = upstream.read(25 * 1024 * 1024 + 1)
+            if len(content) > 25 * 1024 * 1024:
+                raise HTTPException(413, "原始快照超过 Storage 下载上限 25 MiB。")
+            return Response(content, media_type=upstream.headers.get_content_type(),
+                            headers={"Content-Disposition": upstream.headers.get("Content-Disposition", "inline"),
+                                     "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
+                                     "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", "")})
+    except HTTPError as exc:
+        raise HTTPException(exc.code, "Public Knowledge 原始快照不可用。") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+
+
 @router.post("/search")
 def search(body: SearchBody, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
@@ -138,3 +215,106 @@ def citation(citation_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | Non
             raise HTTPException(404, "演示引用不存在")
         return {"citation_id": citation_id, "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"], "mode": mode}
     return {**_request(mode, "/citations/" + citation_id, base_url=base_url), "mode": mode}
+
+
+def _normalize_citation_locator(citation: dict[str, Any]) -> dict[str, Any]:
+    locator = citation.get("locator")
+    if isinstance(locator, str):
+        try:
+            parsed_locator = json.loads(locator)
+        except (TypeError, ValueError):
+            parsed_locator = locator
+        if isinstance(parsed_locator, dict):
+            return {**citation, "locator": parsed_locator}
+    return citation
+
+
+def _suggestion_service(base_url: str | None = None) -> PublicKnowledgeSuggestionService:
+    # This is the same repository root used by Storage's existing Knowledge
+    # Production product API and candidate UI.
+    from .knowledge_product import repository
+    from knowledge_production import BusinessCandidateIntakeService, BusinessEvidenceIntakeService
+
+    repo = repository()
+
+    def resolve_citation(citation_id: str, mode: str):
+        citation = _request(mode, "/citations/" + quote(citation_id, safe=""), base_url=base_url)
+        normalized = _normalize_citation_locator(citation)
+        return {**normalized, "mode": mode}
+
+    def resolve_source(source_id: str, mode: str):
+        return {**_request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url), "mode": mode}
+
+    return PublicKnowledgeSuggestionService(
+        repo,
+        evidence_intake=BusinessEvidenceIntakeService(repo),
+        candidate_intake=BusinessCandidateIntakeService(repo),
+        resolve_citation=resolve_citation,
+        resolve_source=resolve_source,
+    )
+
+
+def _suggestion_error(exc: SuggestionError) -> HTTPException:
+    blocked = {
+        "DEMO_ONLY_CANNOT_HANDOFF", "DEMO_ONLY_BLOCKED", "SUGGESTION_STATE_INVALID",
+        "SUGGESTION_NOT_READY_FOR_HANDOFF", "HANDED_OFF_SUGGESTION_IMMUTABLE",
+        "SOURCE_NOT_PUBLIC", "SOURCE_UNAVAILABLE", "SOURCE_REVISION_MISMATCH",
+        "SOURCE_LOCATOR_REQUIRED", "SOURCE_LOCATOR_MISMATCH", "CITATION_UNRESOLVED",
+        "SOURCE_IDENTITY_MISMATCH", "SOURCE_ID_MISMATCH", "EVIDENCE_TEXT_UNAVAILABLE",
+    }
+    status_code = 404 if exc.code == "SUGGESTION_NOT_FOUND" else 409 if exc.code in blocked or "STATE" in exc.code else 422
+    return HTTPException(status_code, detail={"code": exc.code, "message": exc.code})
+
+
+@router.get("/suggestions")
+def list_suggestions():
+    return {"suggestions": _suggestion_service().list()}
+
+
+@router.post("/suggestions", status_code=201)
+def create_suggestion(body: SuggestionCreate):
+    try:
+        return _suggestion_service().create(body)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.get("/suggestions/{suggestion_id}")
+def get_suggestion(suggestion_id: str):
+    try:
+        return _suggestion_service().get(suggestion_id)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.put("/suggestions/{suggestion_id}")
+def edit_suggestion(suggestion_id: str, body: SuggestionEdit):
+    try:
+        return _suggestion_service().edit(suggestion_id, body)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.delete("/suggestions/{suggestion_id}", status_code=204)
+def delete_suggestion(suggestion_id: str):
+    try:
+        _suggestion_service().delete(suggestion_id)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+    return None
+
+
+@router.post("/suggestions/{suggestion_id}/validate")
+def validate_suggestion(suggestion_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    try:
+        return _suggestion_service(base_url).validate(suggestion_id, mode=mode)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
+
+
+@router.post("/suggestions/{suggestion_id}/handoff")
+def handoff_suggestion(suggestion_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    try:
+        return _suggestion_service(base_url).handoff(suggestion_id, mode=mode)
+    except SuggestionError as exc:
+        raise _suggestion_error(exc) from exc
