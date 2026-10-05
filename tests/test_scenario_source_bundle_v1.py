@@ -17,6 +17,7 @@ from quality_knowledge.scenario_source_bundle_v1 import (
 )
 from quality_knowledge.reverse_quality_bundle_adapter import reverse_quality_facts_from_bundle
 from quality_knowledge.reverse_quality_bundle_bridge import ReverseQualityBundleBridge
+from quality_knowledge.scenario_sources import _effective_missed_test_refs
 
 
 def _add(repo: MaterialRepository, group: str, business_key: str, raw: dict):
@@ -273,6 +274,27 @@ def test_bundle_adapter_fails_closed_on_duplicate_effective_analysis_stage(tmp_p
 
     with pytest.raises(ValueError, match="MULTIPLE_EFFECTIVE_ANALYSIS_REFS:escape"):
         reverse_quality_facts_from_bundle(bundle)
+
+
+def test_only_effective_escape_analysis_is_a_missed_test_source_ref():
+    issue = {"knowledge_id": "ISSUE-ESCAPE", "business_issue_id": "ITR-ESCAPE"}
+    provenance = {
+        "occurrence": {"status": "COMPLETED", "analysis_run_id": "RUN-OCC"},
+        "escape": {"status": "MISSING"},
+        "recurrence": {"status": "COMPLETED", "analysis_run_id": "RUN-REC"},
+        "capability_gap": {"status": "COMPLETED", "analysis_run_id": "RUN-GAP"},
+    }
+
+    assert _effective_missed_test_refs(issue, provenance) == []
+
+    provenance["escape"] = {
+        "status": "COMPLETED", "analysis_run_id": "RUN-ESC", "analysis_revision": "ESC-R1",
+    }
+    refs = _effective_missed_test_refs(issue, provenance)
+    assert len(refs) == 1
+    assert refs[0]["source_id"] == "RUN-ESC"
+    assert refs[0]["analysis_type"] == "escape"
+    assert refs[0]["evidence_kind"] == "EFFECTIVE_ANALYSIS"
 
 
 def test_bundle_bridge_does_not_invoke_runtime_for_conflict_blocker(tmp_path):

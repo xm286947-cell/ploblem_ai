@@ -279,8 +279,9 @@ class ReverseQualityService:
                 legacy_ids=[x for x in ids if x.startswith('structured.') and x.split('.',1)[1] in {'product_type','product_model','product_series','product_line','product_code','equipment_code','equipment_name','terminal_name'}]
                 bundle_ids=[x for x in raw.get('evidence_ids', [])
                             if x in valid_evidence
-                            and valid_evidence[x].get('target_field') in {'product_type','product_model','product_series','product_line','product_code','equipment_code','equipment_name','terminal_name'}
-                            and valid_evidence[x].get('source_type') in {'SOFTWARE_ASSESSMENT','RESOLUTION','ITR'}
+                            and bool(facts.get('bundle_provenance'))
+                            and valid_evidence[x].get('target_field') in {'product_model','product_code'}
+                            and valid_evidence[x].get('source_type') in {'RESOLUTION','SOFTWARE_ASSESSMENT','ITR'}
                             and valid_evidence[x].get('provenance')=='SOURCE_FACT']
                 ids=list(dict.fromkeys([*legacy_ids, *bundle_ids]))[:8]
                 if value and not ids:raise ValueError('参与系统/设备只能引用结构化产品或设备字段')

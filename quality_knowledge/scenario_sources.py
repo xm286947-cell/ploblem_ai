@@ -177,6 +177,22 @@ def _material_ref(source_type,row,*,binding_status='BOUND'):
         'binding_status':binding_status,'evidence_kind':'SOURCE_MATERIAL',
     }
 
+def _effective_missed_test_refs(issue, analysis_provenance):
+    """Only an effective escape analysis represents the frozen missed-test source."""
+    if not issue:
+        return []
+    metadata=(analysis_provenance or {}).get('escape') or {}
+    if metadata.get('status')=='MISSING':
+        return []
+    stage='escape'
+    return [{
+        'source_type':'MISSED_TEST','source_id':metadata.get('analysis_run_id') or f"{issue['knowledge_id']}:{stage}",
+        'source_revision':metadata.get('analysis_revision') or '', 'version_no':0,
+        'business_key':issue.get('business_issue_id') or '', 'group_code':'QUALITY_ISSUE_ANALYSIS',
+        'relation_type':'EFFECTIVE_ANALYSIS','binding_status':'BOUND','evidence_kind':'EFFECTIVE_ANALYSIS',
+        'analysis_type':stage,
+    }]
+
 def material_scene_records(service, filters=None, selected_ids=None, metadata_only=False, include_analysis=True):
     """One controlled scene input per canonical ITR; CS facts win, ITR only fills gaps."""
     filters=filters or {};selected=set(selected_ids or [])
@@ -331,15 +347,7 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
             linked_materials=[]
         missed_materials=[row for row in linked_materials if row.get('material_type')=='ESCAPE_ANALYSIS']
         source_refs.extend(_material_ref('MISSED_TEST',row) for row in missed_materials)
-        for stage,metadata in analysis_provenance.items():
-            if metadata.get('status')!='MISSING':
-                source_refs.append({
-                    'source_type':'MISSED_TEST','source_id':metadata.get('analysis_run_id') or f"{issue['knowledge_id']}:{stage}",
-                    'source_revision':metadata.get('analysis_revision') or '', 'version_no':0,
-                    'business_key':issue.get('business_issue_id') or '', 'group_code':'QUALITY_ISSUE_ANALYSIS',
-                    'relation_type':'EFFECTIVE_ANALYSIS','binding_status':'BOUND','evidence_kind':'EFFECTIVE_ANALYSIS',
-                    'analysis_type':stage,
-                })
+        source_refs.extend(_effective_missed_test_refs(issue,analysis_provenance))
         if len(missed_materials)>1:warnings.append('关联到多个漏测源材料，均保留为证据，不据此选择分析结论')
         selected_issue={
             'knowledge_id':issue.get('knowledge_id') if issue else '',

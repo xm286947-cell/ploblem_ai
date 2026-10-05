@@ -299,6 +299,15 @@ def test_reverse_quality_service_uses_runtime_and_preserves_result_contract(tmp_
         assert any(item["code"]=="MISSED_TEST_EFFECTIVE_ANALYSIS_MISSING" for item in saved["bundle_provenance"]["missing_information"])
         assert SECRET.encode("utf-8") not in raw_runtime_bytes(tmp_path)
 
+        from types import SimpleNamespace
+        service._runtime_executor=SimpleNamespace(execute=lambda *_args, **_kwargs: SimpleNamespace(
+            data={"fields":{"related_objects":{"value":"PLC AM600","evidence_ids":[description_evidence]}},
+                  "lifecycle_code":"","activity_code":"","questions":[]},
+            model="mock-gpt",
+        ))
+        with pytest.raises(ValueError, match="参与系统/设备只能引用结构化产品或设备字段"):
+            service._analyse_run(saved["input"],{"lifecycles":[],"activities":[]},"invalid-evidence","RQRUN-INVALID","PLC")
+
 
 def test_rcfg03_business_code_has_no_direct_provider_or_retry_path():
     service_source=(ROOT/"quality_knowledge"/"reverse_quality.py").read_text(encoding="utf-8")
