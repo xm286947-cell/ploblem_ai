@@ -97,7 +97,8 @@ def main() -> int:
             # Stored entries avoid platform-specific compressor output so the
             # release identity can be compared byte-for-byte across native gates.
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
-                for path in sorted(item for item in stage.rglob("*") if item.is_file()):
+                files = (item for item in stage.rglob("*") if item.is_file())
+                for path in sorted(files, key=lambda item: item.relative_to(stage).as_posix()):
                     info = zipfile.ZipInfo(path.relative_to(stage).as_posix())
                     info.create_system = 3
                     info.date_time = (2026, 1, 1, 0, 0, 0)
