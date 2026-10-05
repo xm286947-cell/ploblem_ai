@@ -1139,8 +1139,18 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     remaining = []
     if not lifetime:
         remaining.append("尚无寿命 / 风险评估记录")
+    else:
+        lifetime_status = str(lifetime.get("status") or "UNKNOWN").upper()
+        if lifetime_status not in {"ANSWERED", "CALCULATED"}:
+            remaining.append(f"寿命 / 风险评估尚未形成可执行结果：{lifetime_status}")
+        remaining.extend(lifetime.get("missing_information") or [])
     if not diagnosis:
         remaining.append("尚无运行诊断记录")
+    else:
+        diagnosis_status = str(diagnosis.get("status") or "UNKNOWN").upper()
+        if diagnosis_status != "ANSWERED":
+            remaining.append(f"运行诊断尚未形成可执行结果：{diagnosis_status}")
+        remaining.extend(diagnosis.get("missing_information") or [])
     if not software_behavior:
         remaining.append("尚未提供当前软件写入 / 日志 / 持久化行为")
     remaining.extend(skill.get("missing_information") or [])
