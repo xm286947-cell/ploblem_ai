@@ -139,10 +139,15 @@ def connect():
       status TEXT DEFAULT 'OPEN',
       evidence_refs_json TEXT DEFAULT '[]',
       knowledge_refs_json TEXT DEFAULT '[]',
-      created_by TEXT DEFAULT 'Storage MVP',
+      created_by TEXT DEFAULT 'Storage MVP', updated_by TEXT DEFAULT '',
       created_at TEXT, updated_at TEXT);
     CREATE INDEX IF NOT EXISTS idx_engineering_actions_device_status
       ON engineering_actions(device_id,status,updated_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_action_history(id TEXT PRIMARY KEY,
+      action_id TEXT REFERENCES engineering_actions(id) ON DELETE CASCADE,
+      prior_status TEXT, new_status TEXT, updated_by TEXT DEFAULT '', updated_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_engineering_action_history_action
+      ON engineering_action_history(action_id,updated_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -175,6 +180,9 @@ def connect():
     ):
         if column not in runtime_obs_columns:
             con.execute(f"ALTER TABLE runtime_snapshot_observations ADD COLUMN {column} {declaration}")
+    engineering_action_columns = {row[1] for row in con.execute("PRAGMA table_info(engineering_actions)")}
+    if "updated_by" not in engineering_action_columns:
+        con.execute("ALTER TABLE engineering_actions ADD COLUMN updated_by TEXT DEFAULT ''")
         # Older V0.5.x databases allowed only SSD/eMMC/Raw NAND. Rebuild the three dependent
     # tables once so NOR Flash and the user-facing NAND Flash name can coexist with legacy data.
     device_sql = (con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='devices'").fetchone() or [""])[0] or ""
@@ -2181,20 +2189,21 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
             if not title:
                 continue
             duplicate = con.execute("""SELECT id FROM engineering_actions
-              WHERE device_id=? AND source_assessment_id=? AND action_type=? AND title=?
+              WHERE device_id=? AND action_type=? AND title=?
                 AND status IN ('OPEN','IN_PROGRESS') LIMIT 1""",
-              (device_id, source_assessment_id, action_type, title)).fetchone()
+              (device_id, action_type, title)).fetchone()
             if duplicate:
                 continue
             action_id = uuid4().hex
+            actor = str(created_by or "Storage MVP")
             con.execute("""INSERT INTO engineering_actions(
               id,device_id,source_assessment_id,action_type,title,detail,status,
-              evidence_refs_json,knowledge_refs_json,created_by,created_at,updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+              evidence_refs_json,knowledge_refs_json,created_by,updated_by,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 action_id, device_id, source_assessment_id, action_type, title, detail, "OPEN",
                 json.dumps(list(evidence_refs or []), ensure_ascii=False),
                 json.dumps(list(knowledge_refs or []), ensure_ascii=False),
-                str(created_by or "Storage MVP"), timestamp, timestamp,
+                actor, actor, timestamp, timestamp,
             ))
             created.append(action_id)
     return list_engineering_actions(device_id)
@@ -2211,9 +2220,12 @@ def list_engineering_actions(device_id, include_closed=True):
             sql += " AND status IN ('OPEN','IN_PROGRESS')"
         sql += " ORDER BY CASE status WHEN 'IN_PROGRESS' THEN 0 WHEN 'OPEN' THEN 1 WHEN 'DONE' THEN 2 ELSE 3 END, updated_at DESC,id"
         items = rows(con, sql, tuple(params))
-    for item in items:
-        item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
-        item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
+    with connect() as con:
+        for item in items:
+            item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
+            item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
+            item["history"] = rows(con, """SELECT prior_status,new_status,updated_by,updated_at
+              FROM engineering_action_history WHERE action_id=? ORDER BY updated_at,id""", (item["id"],))
     return items
 
 
@@ -2223,13 +2235,20 @@ def update_engineering_action(action_id, status, *, updated_by="Storage MVP"):
     if status not in allowed:
         raise ValueError("ACTION_STATUS_INVALID")
     timestamp = now()
+    actor = str(updated_by or "Storage MVP")
     with connect() as con:
         row = con.execute("SELECT * FROM engineering_actions WHERE id=?", (action_id,)).fetchone()
         if not row:
             raise KeyError(action_id)
+        prior_status = str(row["status"] or "OPEN")
+        if prior_status != status:
+            con.execute("""INSERT INTO engineering_action_history
+              (id,action_id,prior_status,new_status,updated_by,updated_at)
+              VALUES (?,?,?,?,?,?)""",
+              (uuid4().hex, action_id, prior_status, status, actor, timestamp))
         con.execute("""UPDATE engineering_actions
-          SET status=?,updated_at=?,created_by=CASE WHEN ?='' THEN created_by ELSE ? END
-          WHERE id=?""", (status, timestamp, str(updated_by or ""), str(updated_by or ""), action_id))
+          SET status=?,updated_at=?,updated_by=?
+          WHERE id=?""", (status, timestamp, actor, action_id))
         device_id = row["device_id"]
     return {
         "action": next(x for x in list_engineering_actions(device_id) if x["id"] == action_id),
