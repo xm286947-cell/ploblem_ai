@@ -1255,6 +1255,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     trend = core.runtime_metric_trends(device_id, limit=40)
     current_fact_fingerprint = _device_fact_fingerprint(detail)
     current_knowledge_release = _knowledge_release_identity()
+    current_runtime_trend_fingerprint = _runtime_trend_fingerprint(device_id)
 
     latest_formal_capture = _iso_datetime(trend.get("latest_formal_capture_time"))
     latest_formal_snapshot_created_at = _iso_datetime(trend.get("latest_formal_snapshot_created_at"))
@@ -1269,6 +1270,15 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
             return None
         if recorded_knowledge_release != current_knowledge_release:
+            return None
+        recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
+        if (
+            kind in {"LIFETIME", "DIAGNOSIS"}
+            and (
+                not recorded_runtime_fingerprint
+                or recorded_runtime_fingerprint != current_runtime_trend_fingerprint
+            )
+        ):
             return None
         if latest_formal_snapshot_created_at and kind in {"LIFETIME", "DIAGNOSIS"}:
             assessment_created_at = _iso_datetime(item.get("created_at"))
@@ -1375,6 +1385,64 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "description": software_behavior,
         })
 
+    current_state = []
+    if lifetime:
+        current_state.append({"kind": "LIFETIME", **lifetime})
+    if diagnosis:
+        current_state.append({"kind": "DIAGNOSIS", **diagnosis})
+    if metric_names:
+        current_state.append({
+            "kind": "RUNTIME_TREND",
+            "snapshot_count": trend.get("snapshot_count") or 0,
+            "metric_names": metric_names[:12],
+            "runtime_context": runtime_context,
+            "interpretation": "EXPLICIT_VALUE_TREND_ONLY",
+        })
+
+    blockers = []
+    if not lifetime:
+        blockers.append("S3 寿命 / 风险结果缺失、未完成或已过期")
+    if not diagnosis:
+        blockers.append("S4 运行诊断结果缺失、未完成或已过期")
+    if not software_behavior:
+        blockers.append("尚未提供当前软件写入 / 日志 / 持久化行为")
+    if blockers:
+        return {
+            "device": detail["device"],
+            "current_state": current_state,
+            "engineering_controls": [],
+            "potential_risks": [],
+            "validation_actions": [],
+            "conditions_and_limits": [],
+            "remaining_information": blockers,
+            "knowledge_refs": [],
+            "evidence_refs": sorted({
+                str(ref)
+                for item in (lifetime, diagnosis)
+                if item
+                for ref in (item.get("evidence_refs") or [])
+                if str(ref)
+            }),
+            "upstream_assessment_ids": [
+                str(item.get("assessment_id"))
+                for item in (lifetime, diagnosis)
+                if item and item.get("assessment_id")
+            ],
+            "optimization_assessment": None,
+            "action_checklist": None,
+            "action_persistence_status": "BLOCKED_INCOMPLETE_CONTEXT",
+            "skill_result": {
+                "skill_id": "storage-write-governance",
+                "status": "INSUFFICIENT_DATA",
+                "direct_answer": "S5 需要当前有效的 S3、S4 结果和真实软件行为；当前上下文不足，未生成优化建议。",
+                "missing_information": blockers,
+                "structured_result": {},
+            },
+            "decision_boundary": "ENGINEERING_REVIEW_REQUIRED",
+            "orchestration_only": True,
+            "new_rule_stack": False,
+        }
+
     optimization = execute_device_skill(device_id, "storage-write-governance", {
         "user_context": {
             "question": " ".join(context_terms),
@@ -1392,20 +1460,6 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     })
     skill = optimization.get("skill_result") or {}
     structured = skill.get("structured_result") or {}
-
-    current_state = []
-    if lifetime:
-        current_state.append({"kind": "LIFETIME", **lifetime})
-    if diagnosis:
-        current_state.append({"kind": "DIAGNOSIS", **diagnosis})
-    if metric_names:
-        current_state.append({
-            "kind": "RUNTIME_TREND",
-            "snapshot_count": trend.get("snapshot_count") or 0,
-            "metric_names": metric_names[:12],
-            "runtime_context": runtime_context,
-            "interpretation": "EXPLICIT_VALUE_TREND_ONLY",
-        })
 
     remaining = []
     if not lifetime:
