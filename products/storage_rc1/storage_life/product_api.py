@@ -1133,6 +1133,17 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
                 "diagnosis_status": structured.get("diagnosis_status"),
                 "abnormality_signal": structured.get("abnormality_signal") or [],
             }
+        runtime_evidence_refs = [
+            str(x.get("evidence_ref") or x.get("raw_output_ref") or "").strip()
+            for x in (structured.get("current_observation") or [])
+            if isinstance(x, dict)
+            and str(x.get("evidence_ref") or x.get("raw_output_ref") or "").strip()
+        ]
+        evidence_refs = sorted({
+            str(ref)
+            for ref in list(skill.get("evidence_refs") or []) + runtime_evidence_refs
+            if str(ref)
+        })
         return {
             "assessment_id": item.get("id"),
             "status": item.get("status") or skill.get("status") or "UNKNOWN",
@@ -1140,7 +1151,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
             "next_action": engineering.get("next_action"),
             "missing_information": skill.get("missing_information") or [],
-            "evidence_refs": skill.get("evidence_refs") or [],
+            "evidence_refs": evidence_refs,
             "knowledge_refs": skill.get("knowledge_refs") or [],
             "risk_context": risk_context,
         }
