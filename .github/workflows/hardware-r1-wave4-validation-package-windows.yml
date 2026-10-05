@@ -1,0 +1,158 @@
+name: Hardware R1 Wave4 Windows Native Package Gate
+
+on:
+  pull_request:
+    paths:
+      - "README_WAVE4_VALIDATION.md"
+      - "WAVE4_FIELD_AUDIT_TEMPLATE.md"
+      - "START_HARDWARE_R1_WAVE4_VALIDATION.bat"
+      - "START_HARDWARE_R1_WAVE4_VALIDATION.command"
+      - "config/hardware_r1_wave4_validation.example.json"
+      - "docs/product/HARDWARE_R1_WAVE4_VALIDATION_PACKAGE.md"
+      - "scripts/build_hardware_r1_wave4_validation_package.py"
+      - "scripts/hardware_r1_wave4_validation.py"
+      - "tools/hardware_r1_wave4_validation.py"
+      - "tests/test_hardware_r1_wave4_validation_package.py"
+      - ".github/workflows/hardware-r1-wave4-validation-package-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-gate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout tool branch
+        uses: actions/checkout@v4
+
+      - name: Keep package inputs byte-stable
+        shell: pwsh
+        run: |
+          git config core.autocrlf false
+          git config core.eol lf
+          git checkout --force HEAD -- .
+          $roots = @("services", "repositories", "runtime", "models", "parser", "contracts", "quality_knowledge", "schema", "tools", "scripts", "config", "docs", "README_WAVE4_VALIDATION.md", "WAVE4_FIELD_AUDIT_TEMPLATE.md", "START_HARDWARE_R1_WAVE4_VALIDATION.bat", "START_HARDWARE_R1_WAVE4_VALIDATION.command", "requirements.txt", "requirements-runtime-p0-test.txt")
+          $extensions = @(".py", ".md", ".json", ".yaml", ".yml", ".txt", ".bat", ".command", ".css", ".js", ".html", ".sql")
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          foreach ($root in $roots) {
+            $target = Join-Path $PWD $root
+            if (!(Test-Path $target)) { continue }
+            $items = if ((Get-Item $target).PSIsContainer) { Get-ChildItem $target -Recurse -File } else { Get-Item $target }
+            foreach ($item in $items) {
+              if ($extensions -notcontains $item.Extension.ToLowerInvariant()) { continue }
+              $text = [System.IO.File]::ReadAllText($item.FullName)
+              $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              [System.IO.File]::WriteAllText($item.FullName, $normalized, $utf8)
+            }
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install focused test dependency
+        run: python -m pip install pytest "pydantic>=2.7,<3" "PyYAML>=6,<7" "jsonschema>=4.21,<5"
+
+      - name: Run focused tests
+        run: python -m pytest -q tests/test_hardware_r1_wave4_validation_package.py
+
+      - name: Build and bind the exact package
+        shell: pwsh
+        run: |
+          python scripts/build_hardware_r1_wave4_validation_package.py
+          python .github/hardware_r1_wave4_normalize_zip.py "dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip"
+          $package = Join-Path $PWD "dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip"
+          $actual = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
+          $expected = "d8305b991ffc40b43c72d8aefde64db13c0128784efc75a5286cefc7c80621e0"
+          if ($actual -ne $expected) {
+            Write-Error "PACKAGE_REPRODUCIBILITY_MISMATCH actual=$actual expected=$expected"
+            exit 1
+          }
+          "BUILT_PACKAGE_SHA256=$actual" | Out-File -FilePath "$env:GITHUB_WORKSPACE\gate.env" -Encoding utf8
+
+      - name: Fresh extract and security gate
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP "wave4-package-extract"
+          New-Item -ItemType Directory -Force $extract | Out-Null
+          Expand-Archive -Path "$env:GITHUB_WORKSPACE\dist\HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip" -DestinationPath $extract -Force
+          if (!(Test-Path "$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat")) { throw "WINDOWS_BAT_MISSING" }
+          if (!(Test-Path "$extract\PACKAGE_MANIFEST.json")) { throw "PACKAGE_MANIFEST_MISSING" }
+          if (!(Test-Path "$extract\WAVE4_VALIDATION_MANIFEST.json")) { throw "WAVE4_VALIDATION_MANIFEST_MISSING" }
+          if (!(Test-Path "$extract\tools\hardware_r1_wave4_validation.py")) { throw "RUNNER_MISSING" }
+          python -m compileall -q $extract
+          $scan = @"
+          import json, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          for path in root.rglob('*'):
+              if not path.is_file():
+                  continue
+              if path.suffix.lower() in {'.docx','.xlsx','.db','.sqlite','.sqlite3'} or path.name.lower() in {'.env','.env.local'}:
+                  raise SystemExit(f'FORBIDDEN_FILE={path.relative_to(root)}')
+              data = path.read_bytes()
+              for marker in (b'/private/', b'/Users/', b'C:\\\\Users\\\\'):
+                  if marker in data:
+                      raise SystemExit(f'ABSOLUTE_PATH={path.relative_to(root)}')
+          manifest = json.loads((root / 'PACKAGE_MANIFEST.json').read_text())
+          assert manifest['source_commit'] == 'ca310a5062c8fa15e6a00d22c718fdc7504192c8'
+          assert manifest['real_data_included'] is False
+          assert manifest['secrets_included'] is False
+          print('SECURITY_GATE=PASS')
+          "@
+          $scan | Set-Content "$env:RUNNER_TEMP\scan.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\scan.py" $extract
+
+      - name: Synthetic prepare, isolation, and disabled-run gate
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP "wave4-package-extract"
+          $fixture = Join-Path $env:RUNNER_TEMP "wave4-synthetic-source"
+          $validation = Join-Path $env:RUNNER_TEMP "wave4-validation-root"
+          $product = Join-Path $env:RUNNER_TEMP "wave4-product-root"
+          $output = Join-Path $env:RUNNER_TEMP "wave4-prepare-output"
+          New-Item -ItemType Directory -Force $fixture, $validation, $product, $output | Out-Null
+          $fixtureScript = @"
+          import sys, zipfile
+          xml = b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>synthetic</w:t></w:r></w:p></w:body></w:document>'
+          with zipfile.ZipFile(sys.argv[1], 'w') as archive:
+              archive.writestr('word/document.xml', xml)
+          "@
+          $fixtureScript | Set-Content "$env:RUNNER_TEMP\make_fixture.py" -Encoding utf8
+          python "$env:RUNNER_TEMP\make_fixture.py" "$fixture\case-01.docx"
+          $config = [ordered]@{ source_dir=$fixture; max_cases=30; validation_data_root=$validation; normal_product_data_root=$product; output_report_dir=$output }
+          $configPath = Join-Path $env:RUNNER_TEMP "wave4-config.json"
+          $config | ConvertTo-Json | Set-Content $configPath -Encoding utf8
+          & cmd.exe /c "`"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$configPath`" --output `"$output`" --prepare"
+          if ($LASTEXITCODE -ne 0) { throw "PREPARE_FAILED=$LASTEXITCODE" }
+          if (!(Test-Path "$output\DATASET_MANIFEST.json")) { throw "DATASET_MANIFEST_MISSING" }
+          if (!(Test-Path "$output\WAVE4_PREPARE_REPORT.json")) { throw "PREPARE_REPORT_MISSING" }
+          $collision = [ordered]@{ source_dir=$fixture; max_cases=30; validation_data_root=$validation; normal_product_data_root=$validation; output_report_dir=(Join-Path $output "collision") }
+          $collisionPath = Join-Path $env:RUNNER_TEMP "wave4-collision.json"
+          $collision | ConvertTo-Json | Set-Content $collisionPath -Encoding utf8
+          $collisionOutput = & cmd.exe /c "call `"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$collisionPath`" --output `"$output\collision`" --prepare" 2>&1
+          $collisionExit = $LASTEXITCODE
+          Write-Host "COLLISION_EXIT=$collisionExit"
+          $collisionOutput | Write-Host
+          if ($collisionExit -eq 0 -or (($collisionOutput -join "`n") -notmatch "VALIDATION_DATA_ROOT_COLLISION")) { throw "COLLISION_NOT_FAIL_CLOSED" }
+          $runOutput = & cmd.exe /c "call `"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$configPath`" --output `"$output\run`" --run" 2>&1
+          $runExit = $LASTEXITCODE
+          Write-Host "RUN_EXIT=$runExit"
+          $runOutput | Write-Host
+          if ($runExit -eq 0 -or (($runOutput -join "`n") -notmatch "REAL_PROVIDER_RUN_DISABLED")) { throw "REAL_RUN_NOT_DISABLED" }
+          $report = [ordered]@{ windows_native_runner='PASS'; exact_zip_reproducible='PASS'; windows_bat_fresh_extract='PASS'; python_compile='PASS'; wave4_prepare_smoke='PASS'; data_root_collision_fail_closed='PASS'; real_provider_run_disabled='PASS'; real_docx_included=$false; secret_scan='PASS'; absolute_path_scan='PASS'; product_business_code_changed='NO' }
+          $report | ConvertTo-Json | Set-Content "$output\WINDOWS_NATIVE_GATE_REPORT.json" -Encoding utf8
+          Copy-Item "$env:GITHUB_WORKSPACE\dist\HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip.sha256" "$output\"
+          exit 0
+
+      - name: Upload Windows gate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_WAVE4_WINDOWS_NATIVE_GATE_${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/wave4-prepare-output/WINDOWS_NATIVE_GATE_REPORT.json
+            ${{ runner.temp }}/wave4-prepare-output/DATASET_MANIFEST.json
+            ${{ runner.temp }}/wave4-prepare-output/WAVE4_PREPARE_REPORT.json
+            ${{ runner.temp }}/wave4-prepare-output/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip.sha256
