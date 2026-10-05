@@ -602,6 +602,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         scenario("DIAGNOSIS", "运行诊断"),
         scenario("OPTIMIZATION", "软件优化"),
     ]
+    runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     remaining = []
     if missing_critical:
         remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
@@ -620,6 +621,20 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             "missing_critical_fields": missing_critical,
         },
         "scenarios": scenario_items,
+        "runtime": {
+            "snapshot_count": runtime_trend.get("snapshot_count") or 0,
+            "metric_count": len(runtime_trend.get("metrics") or []),
+            "latest_metrics": [
+                {
+                    "metric_name": x.get("metric_name"),
+                    "sample_count": x.get("sample_count"),
+                    "latest": x.get("latest"),
+                    "delta": x.get("delta"),
+                }
+                for x in (runtime_trend.get("metrics") or [])[:12]
+            ],
+            "interpretation_performed": False,
+        },
         "public_knowledge": {
             "integration": "IN_CONTEXT",
             "role": "ENGINEERING_CONTEXT_AND_CITATION",
