@@ -464,14 +464,25 @@ async function loadEngineeringActions(){
       '<span class="badge NOT_CHECKED">已豁免 '+esc(sm.waived||0)+'</span>'+
       '</div>'+
       (ENGINEERING_ACTIONS.length?'<div class="tablewrap"><table><tr><th>类型</th><th>执行项</th><th>状态</th><th>来源</th><th>操作</th></tr>'+
-      ENGINEERING_ACTIONS.map(x=>'<tr><td><b>'+esc(actionTypeLabel(x.action_type))+'</b></td><td>'+esc(x.title||'')+(x.detail&&x.detail!==x.title?'<br><small>'+esc(x.detail)+'</small>':'')+'</td><td>'+badge(x.status||'OPEN')+'<br><small>'+esc(actionStatusLabel(x.status))+'</small></td><td><small>Assessment '+esc(x.source_assessment_id||'—')+'<br>Knowledge '+esc((x.knowledge_refs||[]).length)+' · Evidence '+esc((x.evidence_refs||[]).length)+'</small></td><td><div class="row">'+
+      ENGINEERING_ACTIONS.map(x=>'<tr><td><b>'+esc(actionTypeLabel(x.action_type))+'</b></td><td>'+esc(x.title||'')+(x.detail&&x.detail!==x.title?'<br><small>'+esc(x.detail)+'</small>':'')+'</td><td>'+badge(x.status||'OPEN')+'<br><small>'+esc(actionStatusLabel(x.status))+'</small></td><td><small>Assessments '+esc((x.sources||[]).length||1)+' · Knowledge '+esc((x.knowledge_refs||[]).length)+' · Evidence '+esc((x.evidence_refs||[]).length)+'</small></td><td><div class="row">'+
       (x.status!=='IN_PROGRESS'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'IN_PROGRESS\')">开始</button>':'')+
       (x.status!=='DONE'?'<button class="primary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'DONE\')">完成</button>':'')+
       (x.status!=='OPEN'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'OPEN\')">重开</button>':'')+
       (x.status!=='WAIVED'?'<button class="secondary" onclick="updateEngineeringAction(\''+esc(x.id)+'\',\'WAIVED\')">豁免</button>':'')+
+      '<button class="secondary" onclick="openEngineeringActionHistory(\''+esc(x.id)+'\')">来源/历史</button>'+
       '</div></td></tr>').join('')+'</table></div>':
       '<div class="empty"><b>还没有工程执行项</b><p>在综合评估摘要中点击“基于当前状态生成优化方案”，系统会把 Existing Write Governance 的控制建议和验证动作保存成执行清单。</p></div>');
   }catch(e){body.innerHTML='<div class="danger">工程执行清单暂不可用：'+esc(e.message)+'</div>'}
+}
+function openEngineeringActionHistory(id){
+  let x=ENGINEERING_ACTIONS.find(a=>a.id===id);
+  if(!x)return;
+  if($('#drawerTitle'))$('#drawerTitle').textContent='工程执行项 · 来源与历史';
+  $('#drawer').classList.add('open');
+  let sources=x.sources||[],history=x.history||[];
+  $('#drawerBody').innerHTML='<div class="card"><b>'+esc(x.title||'')+'</b><p>'+badge(x.status||'OPEN')+' · '+esc(actionStatusLabel(x.status))+'</p><small>Created by '+esc(x.created_by||'—')+' · Updated by '+esc(x.updated_by||'—')+'</small></div>'+
+    '<div class="card"><b>来源 Assessment</b>'+(sources.length?'<ul>'+sources.map(v=>'<li>'+esc(v.source_assessment_id||'—')+' · '+esc(v.linked_at||'')+' · Knowledge '+esc((v.knowledge_refs||[]).length)+' · Evidence '+esc((v.evidence_refs||[]).length)+'</li>').join('')+'</ul>':'<p class="muted">'+esc(x.source_assessment_id||'—')+'</p>')+'</div>'+
+    '<div class="card"><b>状态历史</b>'+(history.length?'<ul>'+history.map(v=>'<li>'+esc(v.prior_status||'')+' → '+esc(v.new_status||'')+' · '+esc(v.updated_by||'')+' · '+esc(v.updated_at||'')+'</li>').join('')+'</ul>':'<p class="muted">尚无状态变更。</p>')+'</div>';
 }
 async function updateEngineeringAction(id,status){
   try{
