@@ -5,7 +5,7 @@ This task reuses the already-passed D1 Patch Durability Harness and D2 native wr
 ## Binding
 
 - OLD baseline: `87fcfaede66f4565eb3fba12330f7b8fba51187a`
-- NEW: exact pull-request head SHA supplied by GitHub Actions
+- NEW: exact GitHub Actions checked-out candidate SHA (`github.sha`); for pull requests this is the source-bound synthetic merge commit containing the latest stacked base plus this PR
 - Platforms: Windows + macOS
 - Package type: exact-source ZIP
 - Installer certification: NOT_RUN
