@@ -132,12 +132,14 @@ jobs:
           $collision = [ordered]@{ source_dir=$fixture; max_cases=30; validation_data_root=$validation; normal_product_data_root=$validation; output_report_dir=(Join-Path $output "collision") }
           $collisionPath = Join-Path $env:RUNNER_TEMP "wave4-collision.json"
           $collision | ConvertTo-Json | Set-Content $collisionPath -Encoding utf8
-          $collisionOutput = & cmd.exe /c "`"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$collisionPath`" --output `"$output\collision`" --prepare" 2>&1
+          $collisionOutput = & cmd.exe /c "call `"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$collisionPath`" --output `"$output\collision`" --prepare" 2>&1
           $collisionExit = $LASTEXITCODE
+          Write-Host "COLLISION_EXIT=$collisionExit"
           $collisionOutput | Write-Host
           if ($collisionExit -eq 0 -or (($collisionOutput -join "`n") -notmatch "VALIDATION_DATA_ROOT_COLLISION")) { throw "COLLISION_NOT_FAIL_CLOSED" }
-          $runOutput = & cmd.exe /c "`"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$configPath`" --output `"$output\run`" --run" 2>&1
+          $runOutput = & cmd.exe /c "call `"$extract\START_HARDWARE_R1_WAVE4_VALIDATION.bat`" --config `"$configPath`" --output `"$output\run`" --run" 2>&1
           $runExit = $LASTEXITCODE
+          Write-Host "RUN_EXIT=$runExit"
           $runOutput | Write-Host
           if ($runExit -eq 0 -or (($runOutput -join "`n") -notmatch "REAL_PROVIDER_RUN_DISABLED")) { throw "REAL_RUN_NOT_DISABLED" }
           $report = [ordered]@{ windows_native_runner='PASS'; exact_zip_reproducible='PASS'; windows_bat_fresh_extract='PASS'; python_compile='PASS'; wave4_prepare_smoke='PASS'; data_root_collision_fail_closed='PASS'; real_provider_run_disabled='PASS'; real_docx_included=$false; secret_scan='PASS'; absolute_path_scan='PASS'; product_business_code_changed='NO' }
