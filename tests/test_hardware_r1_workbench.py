@@ -8,8 +8,10 @@ from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from quality_knowledge.web.p0_app import create_p0_app
+from quality_knowledge.web.hardware_r1_workbench_api import PromotionReviewRequest
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_runtime import (
@@ -1639,6 +1641,153 @@ def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
     assert history[-1]["review_record"]["disposition"] == expected_disposition
     assert history[-1]["before_candidate_hash"] == asset["candidate_hash"]
     assert history[-1]["after_candidate_hash"] == asset["candidate_hash"]
+
+
+def test_promotion_review_request_rejects_editable_content() -> None:
+    with pytest.raises(ValidationError):
+        PromotionReviewRequest(
+            reviewer="formal-reviewer",
+            review_comment="approval only",
+            confirmed_content={"should": "be rejected"},
+        )
+
+
+def test_human_review_can_add_and_remove_evidence_bound_key_parameters(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-params.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-params.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0210", source_id="1" * 64)
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "old_parameter",
+            "value": "1",
+            "unit": "V",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.8,
+            "warnings": [],
+        },
+        {
+            "name": "keep_parameter",
+            "value": "2",
+            "unit": "A",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.9,
+            "warnings": [],
+        },
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0210", source_id="1" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0210.docx",
+        business_case_id="A0210",
+        source_id="1" * 64,
+        snapshot=_snapshot("A0210", "1" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            **deepcopy(
+                result["knowledge_object"]["engineering_context"]["key_parameters"][1]
+            ),
+            "__review_original_index": 1,
+            "name": "kept_and_renamed",
+        },
+        {
+            "__review_new": True,
+            "name": "human_added_parameter",
+            "value": "3.3",
+            "unit": "V",
+            "evidence_block_ids": ["B0001"],
+        },
+    ]
+
+    service.apply_human_review(
+        item_id,
+        decision="CONFIRM",
+        reviewer="reviewer-params",
+        reason="remove one parameter and add an evidence-backed parameter",
+        confirmed_content=confirmed,
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    parameters = durable["knowledge_object"]["engineering_context"][
+        "key_parameters"
+    ]
+    assert [item["name"] for item in parameters] == [
+        "kept_and_renamed",
+        "human_added_parameter",
+    ]
+    assert parameters[0]["evidence_block_ids"] == ["B0001"]
+    assert parameters[0]["confidence"] == 0.9
+    assert parameters[1]["value"] == "3.3"
+    assert parameters[1]["evidence_block_ids"] == ["B0001"]
+    assert parameters[1]["extraction_status"] == "EXTRACTED"
+    assert parameters[1]["warnings"] == ["HUMAN_REVIEW_ADDED"]
+
+
+def test_human_review_rejects_new_parameter_with_forged_evidence(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-forged-param.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-forged-param.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0211", source_id="2" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0211", source_id="2" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0211.docx",
+        business_case_id="A0211",
+        source_id="2" * 64,
+        snapshot=_snapshot("A0211", "2" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            "__review_new": True,
+            "name": "forged_parameter",
+            "value": "9.9",
+            "unit": "V",
+            "evidence_block_ids": ["FORGED-EVIDENCE"],
+        }
+    ]
+
+    with pytest.raises(
+        HardwareR1WorkbenchError,
+        match="REVIEW_KEY_PARAMETER_EVIDENCE_INVALID",
+    ):
+        service.apply_human_review(
+            item_id,
+            decision="CONFIRM",
+            reviewer="reviewer-params",
+            reason="must fail closed",
+            confirmed_content=confirmed,
+        )
 
 
 def test_human_review_api_corrects_candidate_and_blocks_rejected_candidate(
