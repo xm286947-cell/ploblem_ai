@@ -313,6 +313,83 @@ async function reuseAssessmentHistory(id){
     return msg('已恢复本次软件写入行为，可继续修改后重新生成优化建议。');
   }
 }
+let MVP_SUMMARY=null;
+function mvpScenarioCard(x){
+  let status=x?.status||'NOT_RUN',body=x?.direct_answer||'尚未执行';
+  return '<div class="card"><div class="pagehead"><div><b>'+esc(x?.label||'场景')+'</b><p>'+esc(body)+'</p></div>'+badge(status)+'</div>'+(x?.created_at?'<small>'+esc(x.created_at)+'</small>':'')+(x?.next_action?'<p><b>Next Action：</b>'+esc(x.next_action)+'</p>':'')+'</div>';
+}
+function renderMvpSummaryPanel(d){
+  let host=$('#deviceDetail');
+  if(!host||!d?.id)return;
+  host.insertAdjacentHTML('beforeend','<div id="mvpSummaryPanel" class="card"><div class="pagehead"><div><div class="kicker">UNIFIED MVP SUMMARY</div><h3>综合评估摘要</h3><div class="muted">汇总 Device Fact、最近一次寿命 / 诊断 / 优化结果；不新建第二套判断逻辑。</div></div><div class="row"><button class="secondary" onclick="loadMvpSummary()">刷新</button><button class="primary" onclick="downloadMvpSummary()">导出 Markdown</button></div></div><div id="mvpSummaryBody" class="empty">正在汇总…</div></div>');
+  loadMvpSummary();
+}
+async function loadMvpSummary(){
+  let d=CURRENT?.device,body=$('#mvpSummaryBody');
+  if(!d||!body)return;
+  try{
+    MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
+    let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
+    body.innerHTML='<div class="grid4">'+
+      '<div class="card"><small>Device Fact</small><div class="metric">'+esc(f.confirmed||0)+'</div><small>适用槽位 '+esc(f.applicable||0)+' · Fact Coverage '+Math.round((f.fact_coverage_ratio||0)*100)+'%</small></div>'+
+      '<div class="card"><small>Lifecycle</small><p>'+badge(MVP_SUMMARY.lifecycle?.status||'DRAFT')+'</p><small>'+esc(MVP_SUMMARY.lifecycle?.reason||'')+'</small></div>'+
+      '<div class="card"><small>Public Knowledge</small><p><span class="badge CONFIRMED">IN CONTEXT</span></p><small>Engineering Context + Citation</small></div>'+
+      '<div class="card"><small>MVP Demo Readiness</small><p>'+badge(MVP_SUMMARY.mvp_ready_for_demo?'READY':'PARTIAL')+'</p><small>'+esc(actions.length?actions.length+' 项待补齐':'当前核心场景已有记录')+'</small></div>'+
+      '</div>'+
+      '<div class="grid3">'+sc.map(mvpScenarioCard).join('')+'</div>'+
+      (actions.length?'<div class="card warning"><b>继续完成</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命评估</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button></div></div>':'<div class="fact card"><b>当前器件 MVP 核心分析链已有记录。</b><p>可导出摘要，或继续使用 Public Knowledge / Compare 做工程追溯。</p></div>');
+  }catch(e){
+    body.innerHTML='<div class="danger">综合评估摘要暂不可用：'+esc(e.message)+'</div>';
+  }
+}
+function mvpSummaryMarkdown(){
+  let x=MVP_SUMMARY;
+  if(!x)return '';
+  let d=x.device||{},f=x.facts||{},lines=[
+    '# Storage 器件寿命综合评估',
+    '',
+    '## 器件',
+    '- Vendor: '+(d.vendor||''),
+    '- Model: '+(d.model||''),
+    '- Device Type: '+(d.device_type||''),
+    '- Source: '+(d.filename||''),
+    '- Revision: '+(d.revision||''),
+    '',
+    '## Device Fact',
+    '- Confirmed: '+(f.confirmed||0)+' / '+(f.applicable||0),
+    '- Fact Coverage: '+Math.round((f.fact_coverage_ratio||0)*100)+'%',
+    '- Lifecycle: '+(x.lifecycle?.status||'DRAFT'),
+    '',
+    '## Public Knowledge',
+    '- Role: Engineering Context + Citation',
+    '- RAG Answer != Storage Diagnosis',
+    '- Public Knowledge != Formal Evidence',
+    ''
+  ];
+  for(let sc of x.scenarios||[]){
+    lines.push('## '+(sc.label||sc.type));
+    lines.push('- Status: '+(sc.status||'NOT_RUN'));
+    if(sc.created_at)lines.push('- Time: '+sc.created_at);
+    if(sc.direct_answer)lines.push('- Result: '+sc.direct_answer);
+    if(sc.next_action)lines.push('- Next Action: '+sc.next_action);
+    lines.push('');
+  }
+  if((x.remaining_actions||[]).length){
+    lines.push('## Remaining Actions');
+    for(let a of x.remaining_actions)lines.push('- '+a);
+    lines.push('');
+  }
+  lines.push('## Boundary');
+  lines.push('- This report assembles existing Device Fact / Skill results / assessment history.');
+  lines.push('- It does not create a new diagnosis or approval decision.');
+  return lines.join('\n');
+}
+function downloadMvpSummary(){
+  if(!MVP_SUMMARY)return msg('综合评估摘要尚未加载',true);
+  let text=mvpSummaryMarkdown(),blob=new Blob([text],{type:'text/markdown;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a'),d=MVP_SUMMARY.device||{};
+  a.href=url;a.download='STORAGE_MVP_'+String(d.vendor||'DEVICE').replace(/[^A-Za-z0-9_-]+/g,'_')+'_'+String(d.model||'SUMMARY').replace(/[^A-Za-z0-9_-]+/g,'_')+'.md';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
 function renderScenarioLauncher(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
@@ -355,6 +432,7 @@ renderDetail=function(){
   renderLifetimePanel(d);
   renderOptimizationPanel(d);
   renderAssessmentHistoryPanel(d);
+  renderMvpSummaryPanel(d);
 
   let lc=CURRENT.lifecycle||{},co=CURRENT.conclusion||{},el=$('#detailConclusion');
   let cls=co.is_formal?'fact':'warning';
