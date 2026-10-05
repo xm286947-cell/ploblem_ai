@@ -1757,6 +1757,93 @@ def add_manual_fact(device_id, canonical_name, parameter_name, value, unit, by, 
     }
 
 
+def replace_candidate_evidence(candidate_id, by, *, source_page, source_text, source_section=""):
+    """Human correction of the Evidence bound to an existing candidate/fact."""
+    import json
+
+    reviewer = str(by or "").strip()
+    source_text = str(source_text or "").strip()
+    source_section = str(source_section or "").strip()
+    if not reviewer:
+        raise ValueError("请填写核对人")
+    if not source_text:
+        raise ValueError("Evidence 原文不能为空")
+    try:
+        source_page = int(source_page)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("证据页码必须是正整数") from exc
+    if source_page < 1:
+        raise ValueError("证据页码必须从 1 开始")
+
+    changed_at = now()
+    with connect() as con:
+        candidate = con.execute("""SELECT c.*,d.source_id,s.page_count
+            FROM candidates c JOIN devices d ON d.id=c.device_id
+            JOIN sources s ON s.id=d.source_id WHERE c.id=?""", (candidate_id,)).fetchone()
+        if not candidate:
+            raise KeyError(candidate_id)
+        if candidate["page_count"] and source_page > int(candidate["page_count"]):
+            raise ValueError(f"证据页码超出规格书范围：1-{candidate['page_count']}")
+
+        old_evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,
+            e.source_text,e.confidence,e.extraction_method,e.scope
+            FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
+            WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (candidate_id,))
+        version = int(con.execute(
+            "SELECT COUNT(*) FROM candidate_review_history WHERE candidate_id=?", (candidate_id,)
+        ).fetchone()[0]) + 1
+
+        con.execute("DELETE FROM candidate_evidence WHERE candidate_id=?", (candidate_id,))
+        evidence_id = uuid4().hex
+        con.execute("""INSERT INTO candidate_evidence
+            (id,candidate_id,source_page,source_section,source_text,confidence,extraction_method,scope)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (evidence_id, candidate_id, source_page, source_section, source_text, 1.0,
+             "manual_evidence_rebind", candidate["scope"] or ""))
+        con.execute("""INSERT INTO candidate_evidence_provenance(evidence_id,source_id)
+            VALUES (?,?)""", (evidence_id, candidate["source_id"]))
+
+        new_evidence = {
+            "evidence_id": evidence_id,
+            "source_id": candidate["source_id"],
+            "source_page": source_page,
+            "source_section": source_section,
+            "source_text": source_text,
+            "confidence": 1.0,
+            "extraction_method": "manual_evidence_rebind",
+        }
+        history_evidence = [
+            *[{"change": "OLD", **item} for item in old_evidence],
+            {"change": "NEW", **new_evidence},
+        ]
+        current_value = candidate["final_value"] if candidate["final_value"] is not None else candidate["ai_value"]
+        current_unit = candidate["final_unit"] if candidate["final_unit"] is not None else candidate["ai_unit"]
+        con.execute("""INSERT INTO candidate_review_history(
+            id,candidate_id,device_id,version,action,prior_status,new_status,ai_value,ai_unit,
+            old_final_value,old_final_unit,old_condition,old_scope,new_final_value,new_final_unit,
+            new_condition,new_scope,evidence_refs_json,confirm_mode,reviewed_by,reviewed_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (uuid4().hex, candidate_id, candidate["device_id"], version, "evidence_rebind",
+         candidate["verify_status"], candidate["verify_status"], candidate["ai_value"], candidate["ai_unit"],
+         current_value, current_unit, candidate["condition"], candidate["scope"],
+         current_value, current_unit, candidate["condition"], candidate["scope"],
+         json.dumps(history_evidence, ensure_ascii=False), "single", reviewer, changed_at))
+
+        con.execute("""UPDATE candidates SET source_page=?,source_section=?,source_text=?
+            WHERE id=?""", (source_page, source_section, source_text, candidate_id))
+
+    rebuild_reviewed_specifications(candidate["device_id"])
+    return {
+        "candidate_id": candidate_id,
+        "device_id": candidate["device_id"],
+        "evidence": [new_evidence],
+        "review_action": "evidence_rebind",
+        "review_version": version,
+        "reviewed_by": reviewer,
+        "reviewed_at": changed_at,
+    }
+
+
 def verify(candidate_id, status, value, unit, by, condition=None, scope=None, confirm_mode="single"):
     """Human review of one extracted candidate.
 
