@@ -713,7 +713,9 @@ class HardwareKnowledgeConsumptionProjectionStore:
                     raise HardwareKnowledgeConsumptionError("PROJECTION_STAGE_INVALID")
                 connection.close()
                 connection = None
-                with stage.open("rb") as stream:
+                # Windows FlushFileBuffers requires a writable file handle even
+                # though the staged SQLite payload is not modified here.
+                with stage.open("rb+") as stream:
                     os.fsync(stream.fileno())
                 os.replace(stage, self.db_path)
                 try:

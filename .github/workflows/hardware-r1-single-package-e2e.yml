@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "quality_knowledge/web/**"
+      - "services/hardware_knowledge_consumption.py"
       - "scripts/hardware_r1_e2e_validation_start.py"
       - "scripts/build_hardware_r1_e2e_validation_package.py"
       - "tests/test_hardware_r1_single_package_e2e.py"
