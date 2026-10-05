@@ -148,6 +148,15 @@ def connect():
       prior_status TEXT, new_status TEXT, updated_by TEXT DEFAULT '', updated_at TEXT);
     CREATE INDEX IF NOT EXISTS idx_engineering_action_history_action
       ON engineering_action_history(action_id,updated_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_action_sources(id TEXT PRIMARY KEY,
+      action_id TEXT REFERENCES engineering_actions(id) ON DELETE CASCADE,
+      source_assessment_id TEXT,
+      evidence_refs_json TEXT DEFAULT '[]',
+      knowledge_refs_json TEXT DEFAULT '[]',
+      linked_at TEXT,
+      UNIQUE(action_id,source_assessment_id));
+    CREATE INDEX IF NOT EXISTS idx_engineering_action_sources_action
+      ON engineering_action_sources(action_id,linked_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -2188,11 +2197,34 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
             detail = str(item.get("detail") or title).strip()
             if not title:
                 continue
-            duplicate = con.execute("""SELECT id FROM engineering_actions
+            duplicate = con.execute("""SELECT * FROM engineering_actions
               WHERE device_id=? AND action_type=? AND title=?
                 AND status IN ('OPEN','IN_PROGRESS') LIMIT 1""",
               (device_id, action_type, title)).fetchone()
             if duplicate:
+                action_id = duplicate["id"]
+                old_evidence = set(json.loads(duplicate["evidence_refs_json"] or "[]"))
+                old_knowledge = set(json.loads(duplicate["knowledge_refs_json"] or "[]"))
+                merged_evidence = sorted(old_evidence | {str(x) for x in (evidence_refs or []) if str(x)})
+                merged_knowledge = sorted(old_knowledge | {str(x) for x in (knowledge_refs or []) if str(x)})
+                con.execute("""UPDATE engineering_actions
+                  SET evidence_refs_json=?,knowledge_refs_json=?,updated_at=?,updated_by=?
+                  WHERE id=?""", (
+                    json.dumps(merged_evidence, ensure_ascii=False),
+                    json.dumps(merged_knowledge, ensure_ascii=False),
+                    timestamp,
+                    str(created_by or "Storage MVP"),
+                    action_id,
+                ))
+                if source_assessment_id:
+                    con.execute("""INSERT OR IGNORE INTO engineering_action_sources
+                      (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
+                      VALUES (?,?,?,?,?,?)""", (
+                        uuid4().hex, action_id, source_assessment_id,
+                        json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                        json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                        timestamp,
+                    ))
                 continue
             action_id = uuid4().hex
             actor = str(created_by or "Storage MVP")
@@ -2205,6 +2237,15 @@ def create_engineering_actions(device_id, source_assessment_id, actions, *,
                 json.dumps(list(knowledge_refs or []), ensure_ascii=False),
                 actor, actor, timestamp, timestamp,
             ))
+            if source_assessment_id:
+                con.execute("""INSERT OR IGNORE INTO engineering_action_sources
+                  (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
+                  VALUES (?,?,?,?,?,?)""", (
+                    uuid4().hex, action_id, source_assessment_id,
+                    json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                    json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                    timestamp,
+                ))
             created.append(action_id)
     return list_engineering_actions(device_id)
 
@@ -2226,6 +2267,11 @@ def list_engineering_actions(device_id, include_closed=True):
             item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
             item["history"] = rows(con, """SELECT prior_status,new_status,updated_by,updated_at
               FROM engineering_action_history WHERE action_id=? ORDER BY updated_at,id""", (item["id"],))
+            item["sources"] = rows(con, """SELECT source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at
+              FROM engineering_action_sources WHERE action_id=? ORDER BY linked_at,id""", (item["id"],))
+            for source in item["sources"]:
+                source["evidence_refs"] = json.loads(source.pop("evidence_refs_json") or "[]")
+                source["knowledge_refs"] = json.loads(source.pop("knowledge_refs_json") or "[]")
     return items
 
 
