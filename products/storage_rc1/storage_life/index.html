@@ -233,10 +233,47 @@ function openAssessmentHistory(id){
   if($('#drawerTitle'))$('#drawerTitle').textContent='分析记录 · '+assessmentTypeLabel(x.assessment_type);
   $('#drawer').classList.add('open');
   let result=x.result||{},skill=result.skill_result||{},eng=result.engineering_result||{};
-  $('#drawerBody').innerHTML='<div class="card fact"><b>'+esc(assessmentTypeLabel(x.assessment_type))+' · '+esc(x.status||'UNKNOWN')+'</b><p>'+esc(x.created_at||'')+'</p><small>'+esc(x.id)+'</small></div>'+
+  $('#drawerBody').innerHTML='<div class="card fact"><b>'+esc(assessmentTypeLabel(x.assessment_type))+' · '+esc(x.status||'UNKNOWN')+'</b><p>'+esc(x.created_at||'')+'</p><small>'+esc(x.id)+'</small><div class="row" style="margin-top:10px"><button class="primary" onclick="reuseAssessmentHistory(\''+esc(x.id)+'\')">复用本次输入</button></div></div>'+
     '<div class="card analysis"><b>Engineering Result</b><p>'+esc(eng.direct_answer||skill.direct_answer||'')+'</p><p><b>Next Action：</b>'+esc(eng.next_action||'—')+'</p></div>'+
     '<details open><summary>结构化结果</summary><pre style="white-space:pre-wrap">'+esc(JSON.stringify(skill.structured_result||{},null,2))+'</pre></details>'+
     '<details><summary>当时输入</summary><pre style="white-space:pre-wrap">'+esc(JSON.stringify(x.input||{},null,2))+'</pre></details>';
+}
+async function reuseAssessmentHistory(id){
+  let x=ASSESSMENT_HISTORY.get(id);
+  if(!x)return;
+  closeDrawer();
+  let input=x.input||{},obs=(input.runtime_observations||[])[0]||{};
+  if(x.assessment_type==='DIAGNOSIS'){
+    show('p06');
+    $('#diagDevice').value=x.device_id;
+    await loadDiagnostics();
+    if($('#diagMetric'))$('#diagMetric').value=obs.metric_name||'';
+    if($('#diagRuntimeValue'))$('#diagRuntimeValue').value=obs.raw_value??obs.normalized_value??'';
+    if($('#diagRuntimeUnit'))$('#diagRuntimeUnit').value=obs.unit||'';
+    if($('#diagRuntimeSource'))$('#diagRuntimeSource').value=obs.source_command_or_interface||'';
+    if($('#diagRuntimeEvidence'))$('#diagRuntimeEvidence').value=obs.evidence_ref||obs.raw_output_ref||'';
+    if($('#diagQuestion'))$('#diagQuestion').value=input.target_question||'当前观测是否提示寿命退化、介质健康或可观测性风险？';
+    return msg('已恢复本次运行诊断输入，可继续修改后重新分析。');
+  }
+  await openDevice(x.device_id);
+  if(x.assessment_type==='LIFETIME'){
+    if($('#lifeMetric')){$('#lifeMetric').value=input.requested_metric||'';lifeMetricChanged()}
+    if($('#lifeRuntimeValue'))$('#lifeRuntimeValue').value=obs.raw_value??obs.normalized_value??'';
+    if($('#lifeRuntimeUnit'))$('#lifeRuntimeUnit').value=obs.unit||'';
+    if($('#lifeRuntimeSource'))$('#lifeRuntimeSource').value=obs.source_command_or_interface||'';
+    if($('#lifeRuntimeEvidence'))$('#lifeRuntimeEvidence').value=obs.evidence_ref||obs.raw_output_ref||'';
+    let assumptions=input.assessment_request?.assumptions||[],days=assumptions.find(a=>a.name==='time_window_days');
+    if($('#lifeTimeWindow'))$('#lifeTimeWindow').value=days?.value??'';
+    if($('#lifeTargetYears'))$('#lifeTargetYears').value=input.target_service_life?.value??'';
+    scrollDeviceSection('lifetimePanel');
+    return msg('已恢复本次寿命评估输入，可继续修改后重新计算。');
+  }
+  if(x.assessment_type==='OPTIMIZATION'){
+    let behavior=(input.workload_software_facts||[])[0]?.description||'';
+    if($('#optimizationBehavior'))$('#optimizationBehavior').value=behavior;
+    scrollDeviceSection('optimizationPanel');
+    return msg('已恢复本次软件写入行为，可继续修改后重新生成优化建议。');
+  }
 }
 function renderScenarioLauncher(d){
   let host=$('#deviceDetail');
