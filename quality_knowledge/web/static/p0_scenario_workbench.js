@@ -27,7 +27,7 @@ async function refreshPending(){try{const x=await request('/quality-scenarios?st
 async function loadList(preserve=false){
  state.loading=true;status(els.global,'正在读取场景…');els.queue.innerHTML='<div class="qs-loading">正在加载…</div>';els.empty.hidden=true;
  try{const x=await request('/quality-scenarios?'+paramsFromForm().toString());state.items=x.items||[];renderQueue();els.summary.textContent='共 '+state.items.length+' 条';status(els.global,'');
-   if(!preserve){if(state.items.length)await selectScenario(state.items[0].scenario_id,true);else clearEditor()}
+   if(!preserve){const requested=new URLSearchParams(window.location.search).get('scenario_id');const selected=requested&&state.items.some(i=>i.scenario_id===requested)?requested:(state.items[0]||{}).scenario_id;if(selected)await selectScenario(selected,true);else clearEditor()}
  }catch(e){els.queue.innerHTML='';els.empty.hidden=false;els.empty.querySelector('strong').textContent='场景列表读取失败';els.empty.querySelector('span').textContent=e.message;status(els.global,'读取失败：'+e.message,'error')}
  finally{state.loading=false}
 }

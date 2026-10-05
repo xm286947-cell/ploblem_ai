@@ -1,0 +1,20 @@
+.sa-qsv1{margin:18px 0;border:1px solid #bdd8f5;background:linear-gradient(140deg,#f8fbff,#fff)}
+.sa-qsv1-controls{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:16px 0}
+.sa-qsv1-controls label{display:grid;gap:6px;font-size:13px;font-weight:650;color:#34445b}
+.sa-qsv1-controls input,.sa-qsv1-controls select{min-width:190px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font:inherit}
+.sa-qsv1-controls .sa-qsv1-reason{flex:1;min-width:250px}
+.sa-qsv1-controls .sa-qsv1-reason input{width:100%;box-sizing:border-box}
+.sa-qsv1-status{min-height:22px;color:#475569;font-size:14px}
+.sa-qsv1-status[data-kind="error"]{color:#b42318}.sa-qsv1-status[data-kind="success"]{color:#067647}
+.sa-qsv1-results{display:grid;gap:10px;margin-top:12px}
+.sa-qsv1-result{padding:12px 14px;border:1px solid #d8e0ea;border-radius:10px;background:#fff}
+.sa-qsv1-result h3{margin:0 0 7px;font-size:15px}.sa-qsv1-result p{margin:5px 0;color:#475569;font-size:13px}
+.sa-qsv1-chip{display:inline-block;margin-right:7px;padding:3px 8px;border-radius:99px;background:#eef2f7;color:#34445b;font-size:11px;font-weight:700}
+.sa-qsv1-chip[data-state="READY"],.sa-qsv1-chip[data-state="CANDIDATE_CREATED"]{background:#e8f7ef;color:#067647}
+.sa-qsv1-chip[data-state="EXISTING_CANDIDATE"]{background:#e9f2ff;color:#175cd3}
+.sa-qsv1-chip[data-state="INFORMATION_REQUIRED"],.sa-qsv1-chip[data-state="SOURCE_BINDING_FAILED"],.sa-qsv1-chip[data-state="PROVIDER_FAILED"]{background:#fff1f0;color:#b42318}
+.sa-qsv1-details{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 14px;margin:8px 0;font-size:12px;color:#475569}
+.sa-qsv1-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.sa-qsv1-notice{padding:7px 9px;border-left:3px solid #f79009;background:#fffaeb;color:#7a2e0e;font-size:12px}
+.sa-qsv1-blocker{padding:7px 9px;border-left:3px solid #d92d20;background:#fff1f0;color:#912018;font-size:12px}
+.sa-qsv1-progress{height:5px;overflow:hidden;border-radius:8px;background:#e7edf4}.sa-qsv1-progress span{display:block;height:100%;background:#1570ef;transition:width .2s}

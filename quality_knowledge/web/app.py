@@ -1644,6 +1644,7 @@ def create_app(db_path):
     from quality_knowledge.p04.service import P04InsightService
     from quality_knowledge.web.p0_pages import create_p0_insights_router
     from quality_knowledge.web.quality_scenario_v1_api import create_quality_scenario_v1_router
+    from quality_knowledge.web.software_assessment_qsv1 import create_software_assessment_qsv1_router
 
     qsv1_provider = QualityScenarioV1P04Provider(qsv1_db)
     p04_service = P04InsightService(qsv1_provider)
@@ -1652,6 +1653,13 @@ def create_app(db_path):
     standalone.state.quality_scenario_v1_db_path = str(qsv1_db)
 
     standalone.include_router(create_quality_scenario_v1_router(str(qsv1_db)))
+    standalone.include_router(
+        create_software_assessment_qsv1_router(
+            state.scenario_generation_service,
+            state.scenario_repository,
+            str(qsv1_db),
+        )
+    )
     standalone.include_router(create_p04_router(p04_service))
     standalone.include_router(create_public_scenario_router(p04_service))
     standalone.include_router(

@@ -5,7 +5,7 @@
   <div>
     <span class="eyebrow">SOFTWARE ASSESSMENT · EXISTING CAPABILITY</span>
     <h1>软件考核工作台</h1>
-    <p>恢复原有用户入口。当前 R2 只承接已导入的软件运营 / 考核 Source Fact 与现有问题关联；原页面状态机、保存、提交和流转动作在权威实现绑定前不由 Overall 重建。</p>
+    <p>从成熟软件考核来源选题，核对冻结来源后生成质量场景；软件考核仍是唯一生产入口，Review、确认与发布沿用现有 QSV1 工作台。</p>
   </div>
   <div class="page-actions">
     <a class="btn btn-secondary" href="/issues">返回问题工作台</a>
@@ -20,12 +20,29 @@
   <div class="metric-card"><span>含源考核状态 / 结果</span><strong>{{ source_state }}</strong><small>仅展示 Source 明确提供字段</small></div>
 </div>
 
-<div class="data-card">
+<section class="data-card sa-qsv1" data-sa-qsv1 data-api-prefix="/api/v2/software-assessment/quality-scenario">
   <div class="compact-card">
-    <strong>Existing Capability Binding</strong>
-    <p>ENTRY_RESTORED · SOURCE_OWNED_READ_ONLY · SOURCE_ACTION_BINDING_PENDING · NO_SECOND_ASSESSMENT_STATE_MACHINE</p>
+    <strong>从软件考核生成质量场景</strong>
+    <p>复用当前考核来源 → 冻结 Source Snapshot → QSV1 Candidate。不会建立第二套考核状态机。</p>
   </div>
-</div>
+  <div class="sa-qsv1-controls">
+    <label>触发类型
+      <select data-trigger-source>
+        <option value="">请选择触发类型</option>
+        <option value="HIGH_PERCEPTION">高感知问题</option>
+        <option value="RND_VALUE">研发价值</option>
+      </select>
+    </label>
+    <label class="sa-qsv1-reason">触发原因
+      <input data-trigger-reason maxlength="1000" placeholder="说明为什么从软件考核记录生成质量场景">
+    </label>
+    <span data-selection-count>已选 0 条</span>
+    <button class="btn btn-secondary" type="button" data-preview disabled>预览来源完整性</button>
+    <button class="btn btn-primary" type="button" data-generate disabled>生成质量场景</button>
+  </div>
+  <div class="sa-qsv1-status" data-flow-status role="status" aria-live="polite"></div>
+  <div class="sa-qsv1-results" data-flow-results></div>
+</section>
 
 <form class="filter-bar" method="get" action="/software-assessment">
   <div class="search-field">
@@ -41,6 +58,7 @@
     <table class="data-table issue-table">
       <thead>
         <tr>
+          <th>选择</th>
           <th>考核来源 / ITR</th>
           <th>问题</th>
           <th>责任部门 / 人</th>
@@ -54,6 +72,7 @@
       <tbody>
       {% for item in items %}
         <tr>
+          <td>{% if item.linked_issue_id %}<input type="checkbox" data-assessment-select value="{{item.material_id}}" aria-label="选择 {{item.business_key}}">{% else %}<span title="未唯一关联现有问题">—</span>{% endif %}</td>
           <td>
             <strong>{{ item.business_key }}</strong>
             <small>{{ item.linked_issue_id or '未匹配现有问题' }} · {{ item.link_status }}</small>
@@ -74,12 +93,14 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="8"><div class="empty-state"><b>当前没有软件考核 Source Fact</b><span>入口已恢复；系统不会因为 Source 缺失而补造考核状态、责任人或分值。</span><a class="btn btn-primary" href="/materials/software-operations">导入软件运营数据</a></div></td></tr>
+        <tr><td colspan="9"><div class="empty-state"><b>当前没有软件考核 Source Fact</b><span>系统不会因为 Source 缺失而补造考核状态、责任人或分值。</span><a class="btn btn-primary" href="/materials/software-operations">导入软件运营数据</a></div></td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<p class="muted">用户入口按 Existing Capability 基线恢复；原历史 Route / 状态机仍以 Targeted Verification 绑定，不在 R2 猜测。</p>
+<p class="muted">考核来源数据保持只读；质量场景走现有 QSV1 Candidate → Review / Confirm → Publish。</p>
 {% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/static/software_assessment_qsv1.css?v=w4-1">{% endblock %}
+{% block page_scripts %}<script src="/static/software_assessment_qsv1.js?v=w4-1" defer></script>{% endblock %}
