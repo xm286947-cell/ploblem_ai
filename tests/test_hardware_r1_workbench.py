@@ -1462,7 +1462,7 @@ def test_human_review_can_correct_candidate_without_machine_conflict(
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
     repository = _candidate_repository(tmp_path / "hardware_asset.db")
     batch_id = store.create_batch()
-    result = _result(status="PASS")
+    result = _result(status="PASS", case_id="A0201", source_id="c" * 64)
     asset = _commit_fixture_asset(
         repository, result, case_id="A0201", source_id="c" * 64
     )
@@ -1529,16 +1529,17 @@ def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
     store = HardwareR1WorkbenchStore(tmp_path / f"workbench-{decision}.db")
     repository = _candidate_repository(tmp_path / f"hardware-asset-{decision}.db")
     batch_id = store.create_batch()
-    result = _result(status="PASS")
+    case_id = f"A02{decision[:1]}1"
+    result = _result(status="PASS", case_id=case_id, source_id="d" * 64)
     asset = _commit_fixture_asset(
-        repository, result, case_id=f"A02{decision[:1]}1", source_id="d" * 64
+        repository, result, case_id=case_id, source_id="d" * 64
     )
     item_id = store.add_item(
         batch_id,
         source_file=f"{decision}.docx",
-        business_case_id=f"A02{decision[:1]}1",
+        business_case_id=case_id,
         source_id="d" * 64,
-        snapshot=_snapshot(f"A02{decision[:1]}1"),
+        snapshot=_snapshot(case_id),
         result=result,
         orchestration_status="CANDIDATE_READY",
         candidate_id=asset["candidate_id"],
