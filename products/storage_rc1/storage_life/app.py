@@ -247,6 +247,18 @@ def product_execute_device_skill(device_id: str, skill_id: str, payload: dict):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/product/runtime-observations/parse", tags=["Storage Product MVP"])
+def product_parse_runtime_observations(body: dict):
+    try:
+        return product_api.parse_runtime_observation_text(
+            str(body.get("device_type") or ""),
+            str(body.get("text") or ""),
+            str(body.get("source_label") or "PASTED_RUNTIME_OUTPUT"),
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/product/diagnostics", tags=["Storage Product MVP"])
 def product_diagnostics(device_type: str = "", device_id: str = ""):
     try:
