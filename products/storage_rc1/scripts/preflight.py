@@ -8,8 +8,12 @@ from urllib.parse import urlsplit
 
 import yaml
 
-EXPECTED = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+EXPECTED = "9e36eeb0237459b884ee0d3e663ccf5833bfc685"
 MODEL_REF = "qwen_prod"
+AGENT_CONFIG_RELATIVE_PATHS = (
+    Path("config/runtime/agents/storage.ai.json_call.yaml"),
+    Path("config/runtime/agents/storage.emmc.parameter_extract.yaml"),
+)
 PLACEHOLDER_TOKENS = {
     "__SET_YOUR_DASHSCOPE_API_KEY__",
     "__REPLACE_IN_YOUR_LOCAL_COPY_ONLY__",
@@ -17,6 +21,14 @@ PLACEHOLDER_TOKENS = {
     "__SET_ME__",
     "__SET_YOUR_AGENT_API_KEY__",
 }
+
+
+def agent_config_paths(project_root: Path) -> tuple[Path, ...]:
+    """Return the canonical Storage Agent Config paths consumed by RuntimeBridge."""
+    return tuple(
+        (project_root / relative).resolve()
+        for relative in AGENT_CONFIG_RELATIVE_PATHS
+    )
 
 
 def _safe_model_config(path: Path) -> dict:
@@ -109,13 +121,14 @@ def main() -> None:
     for rel in [
         "storage_life/app.py",
         "storage_life/runtime_bridge.py",
-        "config/runtime/storage.ai.json_call.yaml",
-        "config/runtime/storage.emmc.parameter_extract.yaml",
         "prompts/runtime/storage/emmc_parameter_extract.md",
         "examples/synthetic_emmc.pdf",
     ]:
         if not (project / rel).exists():
             errors.append(f"Storage 包缺少 {rel}")
+    for path in agent_config_paths(project):
+        if not path.is_file():
+            errors.append(f"Storage 包缺少 {path.relative_to(project)}")
 
     if args.mode == "real" and root is not None:
         explicit = os.environ.get("STORAGE_MODEL_CONFIG", "").strip()
