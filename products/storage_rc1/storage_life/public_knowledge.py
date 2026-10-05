@@ -264,16 +264,29 @@ async def import_file(title: str = Form(...), classification: str = Form(...), f
 def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         raise HTTPException(404, "演示资料没有原始文件快照。")
-    url = _url(base_url) + f"/sources/{source_id}/revisions/{revision_id}/snapshot"
+    path = (
+        "/sources/" + quote(source_id, safe="")
+        + "/revisions/" + quote(revision_id, safe="")
+        + "/snapshot"
+    )
+    url = _url(base_url) + path
     try:
-        with urlopen(Request(url, method="GET"), timeout=20) as upstream:
+        with _NO_REDIRECT_OPENER.open(Request(url, method="GET"), timeout=20) as upstream:
             content = upstream.read(25 * 1024 * 1024 + 1)
             if len(content) > 25 * 1024 * 1024:
                 raise HTTPException(413, "原始快照超过 Storage 下载上限 25 MiB。")
-            return Response(content, media_type=upstream.headers.get_content_type(),
-                            headers={"Content-Disposition": upstream.headers.get("Content-Disposition", "inline"),
-                                     "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
-                                     "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", "")})
+            disposition = upstream.headers.get("Content-Disposition", "inline")
+            if "\r" in disposition or "\n" in disposition:
+                disposition = "inline"
+            return Response(
+                content,
+                media_type=upstream.headers.get_content_type(),
+                headers={
+                    "Content-Disposition": disposition,
+                    "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
+                    "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", ""),
+                },
+            )
     except HTTPError as exc:
         raise HTTPException(exc.code, "Public Knowledge 原始快照不可用。") from exc
     except (URLError, TimeoutError, OSError) as exc:
