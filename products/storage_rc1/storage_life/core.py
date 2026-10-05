@@ -1651,6 +1651,112 @@ def list_candidates(device_id):
         return out
 
 
+
+def add_manual_fact(device_id, canonical_name, parameter_name, value, unit, by, *,
+                    source_page, source_text, source_section="", condition="", scope=""):
+    """Create one human-confirmed Device Fact when AI did not produce a usable candidate.
+
+    The manual fact still enters through the existing candidate/evidence/reviewed-specification
+    data model so downstream compare, lifetime, diagnostics and change-impact consume the same
+    Formal Device Fact surface. Search coverage is intentionally not rewritten.
+    """
+    import json
+
+    canonical_name = str(canonical_name or "").strip()
+    parameter_name = str(parameter_name or canonical_name).strip()
+    value = str(value or "").strip()
+    unit = str(unit or "").strip()
+    reviewer = str(by or "").strip()
+    source_text = str(source_text or "").strip()
+    source_section = str(source_section or "").strip()
+    condition = str(condition or "").strip()
+    scope = str(scope or "").strip()
+
+    if not canonical_name or not parameter_name:
+        raise ValueError("参数名不能为空")
+    if not value:
+        raise ValueError("人工补充的事实值不能为空")
+    if not reviewer:
+        raise ValueError("请填写核对人")
+    if not source_text:
+        raise ValueError("人工补充事实必须绑定规格书原文证据")
+    try:
+        source_page = int(source_page)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("证据页码必须是正整数") from exc
+    if source_page < 1:
+        raise ValueError("证据页码必须从 1 开始")
+
+    reviewed_at = now()
+    candidate_id = uuid4().hex
+    evidence_id = uuid4().hex
+    history_id = uuid4().hex
+
+    with connect() as con:
+        row = con.execute("""SELECT d.*,s.id AS source_id,s.page_count,s.filename
+            FROM devices d JOIN sources s ON s.id=d.source_id WHERE d.id=?""", (device_id,)).fetchone()
+        if not row:
+            raise KeyError(device_id)
+        if row["page_count"] and source_page > int(row["page_count"]):
+            raise ValueError(f"证据页码超出规格书范围：1-{row['page_count']}")
+        conflict = con.execute("""SELECT id FROM candidates
+            WHERE device_id=? AND canonical_name=? AND condition=? AND scope=?
+              AND verify_status='confirmed' LIMIT 1""",
+            (device_id, canonical_name, condition, scope)).fetchone()
+        if conflict:
+            raise ConfirmationConflict("该字段在相同条件/范围下已有已确认事实；请先修改或驳回原记录")
+
+        con.execute("""INSERT INTO candidates(
+            id,device_id,canonical_name,parameter_name,ai_value,ai_unit,
+            final_value,final_unit,condition,scope,source_page,source_section,source_text,
+            confidence,extraction_method,verify_status,verified_by,verified_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (candidate_id, device_id, canonical_name, parameter_name, "", "",
+         value, unit, condition, scope, source_page, source_section, source_text,
+         1.0, "manual_user", "confirmed", reviewer, reviewed_at))
+
+        con.execute("""INSERT INTO candidate_evidence
+            (id,candidate_id,source_page,source_section,source_text,confidence,extraction_method,scope)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (evidence_id, candidate_id, source_page, source_section, source_text, 1.0, "manual_user", scope))
+        con.execute("""INSERT INTO candidate_evidence_provenance(evidence_id,source_id)
+            VALUES (?,?)""", (evidence_id, row["source_id"]))
+
+        evidence_ref = {
+            "evidence_id": evidence_id,
+            "source_id": row["source_id"],
+            "source_page": source_page,
+            "source_section": source_section,
+            "source_text": source_text,
+        }
+        con.execute("""INSERT INTO candidate_review_history(
+            id,candidate_id,device_id,version,action,prior_status,new_status,ai_value,ai_unit,
+            old_final_value,old_final_unit,old_condition,old_scope,new_final_value,new_final_unit,
+            new_condition,new_scope,evidence_refs_json,confirm_mode,reviewed_by,reviewed_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (history_id, candidate_id, device_id, 1, "manual_add_confirm", "none", "confirmed", "", "",
+         "", "", "", "", value, unit, condition, scope, json.dumps([evidence_ref], ensure_ascii=False),
+         "single", reviewer, reviewed_at))
+
+    rebuild_reviewed_specifications(device_id)
+    return {
+        "id": candidate_id,
+        "device_id": device_id,
+        "canonical_name": canonical_name,
+        "parameter_name": parameter_name,
+        "value": value,
+        "unit": unit,
+        "condition": condition,
+        "scope": scope,
+        "verify_status": "confirmed",
+        "verified_by": reviewer,
+        "verified_at": reviewed_at,
+        "evidence": [evidence_ref],
+        "extraction_method": "manual_user",
+        "manual_fact": True,
+    }
+
+
 def verify(candidate_id, status, value, unit, by, condition=None, scope=None, confirm_mode="single"):
     """Human review of one extracted candidate.
 
