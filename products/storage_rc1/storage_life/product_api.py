@@ -514,6 +514,18 @@ def add_manual_device_fact(device_id: str, payload: dict[str, Any]) -> dict[str,
     }
 
 
+def device_assessment_history(device_id: str, limit: int = 20) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    items = core.list_device_assessments(device_id, limit=limit)
+    return {
+        "device": devices[device_id],
+        "count": len(items),
+        "items": items,
+    }
+
+
 def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     detail = device_slots(device_id)
     return {
@@ -613,7 +625,7 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         }
 
     result = service.execute_skill(skill_id, skill_payload)
-    return {
+    response = {
         "device": detail["device"],
         "context": context,
         "skill_payload": skill_payload,
@@ -623,6 +635,26 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         "second_skill_stack": False,
         "second_knowledge_stack": False,
     }
+    if request.get("record_assessment") is True:
+        assessment_type = {
+            "storage-lifetime-budget": "LIFETIME",
+            "storage-diagnostic-validation": "DIAGNOSIS",
+            "storage-write-governance": "OPTIMIZATION",
+        }.get(skill_id)
+        if assessment_type:
+            response["assessment_record"] = core.save_device_assessment(
+                device_id,
+                assessment_type,
+                result.get("status") if isinstance(result, dict) else "UNKNOWN",
+                request,
+                {
+                    "skill_id": skill_id,
+                    "skill_result": result,
+                    "engineering_result": response["engineering_result"],
+                },
+                created_by=str(request.get("assessment_author") or "Storage MVP"),
+            )
+    return response
 
 
 def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
