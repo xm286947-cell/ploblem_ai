@@ -611,12 +611,13 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     slots = detail.get("slots") or []
     applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
     missing_critical = list((detail.get("conclusion") or {}).get("missing_critical_fields") or [])
-    fact_status = "READY" if facts and not missing_critical else ("PARTIAL" if facts else "NOT_RUN")
+    lifecycle_ready = bool((detail.get("lifecycle") or {}).get("formal_ready"))
+    fact_status = "READY" if lifecycle_ready else ("PARTIAL" if facts else "NOT_RUN")
     fact_scenario = {
         "type": "FACT",
         "label": "S1 参数事实",
         "status": fact_status,
-        "complete": fact_status == "READY",
+        "complete": lifecycle_ready,
         "assessment_id": None,
         "created_at": None,
         "direct_answer": (
