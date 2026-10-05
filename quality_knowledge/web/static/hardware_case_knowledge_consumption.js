@@ -59,9 +59,11 @@
   function renderReasons(item) {
     const reasons = Array.isArray(item.match_reasons) ? item.match_reasons : [];
     if (!reasons.length) return '';
-    return `<div class="hc-knowledge-reasons" aria-label="可解释匹配原因">${reasons.map(reason =>
-      `<span class="hc-knowledge-reason">${esc(reason.matched_field)} · ${esc(reason.match_type)} · ${esc(reason.matched_text)} · 权重 ${esc(reason.weight)}</span>`
-    ).join('')}</div>`;
+    return `<div class="hc-knowledge-reasons" aria-label="可解释匹配原因">${reasons.map(reason => {
+      const field = reason.matched_field;
+      const actual = valueText(item[field]);
+      return `<span class="hc-knowledge-reason"><strong>${esc(labels[field] || field)}</strong> 命中 ${esc(reason.matched_text)} · ${esc(actual)} · 权重 ${esc(reason.weight)}</span>`;
+    }).join('')}</div>`;
   }
 
   function renderResults() {
@@ -127,6 +129,9 @@
   }
 
   function renderDetail(item) {
+    const detail = q('[data-knowledge-detail]');
+    detail.dataset.knowledgeId = item.knowledge_id || '';
+    detail.dataset.businessCaseId = item.business_case_id || '';
     const body = q('[data-detail-body]');
     const meta = [['knowledge_id', item.knowledge_id], ['public_ref', item.public_ref], ['business_case_id', item.business_case_id], ['source_domain', item.source_domain], ['source_object_type', item.source_object_type], ['formal_revision', item.formal_revision], ['formal_status', item.formal_status]];
     const metadata = `<section class="hc-knowledge-detail-section"><h3>正式知识身份</h3><div class="hc-knowledge-detail-grid">${meta.map(([key, value]) => `<div class="hc-knowledge-detail-item"><strong>${esc(key)}</strong><span>${esc(text(value))}</span></div>`).join('')}</div></section>`;
@@ -184,6 +189,11 @@
     const button = event.target.closest('[data-open-knowledge]');
     if (button) openDetail(button.dataset.openKnowledge);
   });
-  q('[data-detail-close]').addEventListener('click', () => { q('[data-knowledge-detail]').hidden = true; });
+  q('[data-detail-close]').addEventListener('click', () => {
+    const detail = q('[data-knowledge-detail]');
+    detail.hidden = true;
+    delete detail.dataset.knowledgeId;
+    delete detail.dataset.businessCaseId;
+  });
   runSearch();
 })();
