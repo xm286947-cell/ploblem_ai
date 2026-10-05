@@ -11,7 +11,7 @@ from public_knowledge_rag.config import Settings, UI_CONFIG_FIELDS
 
 
 def setup_admin_client(monkeypatch, tmp_path):
-    manager = ConfigurationAdmin(base=Settings.load_base(), config_path=tmp_path / "config.local.json")
+    manager = ConfigurationAdmin(base=Settings.load_base(), config_path=tmp_path / "config.local.json", secret_path=tmp_path / "secrets.local.json")
     monkeypatch.setattr(service, "admin_config", manager)
     return TestClient(service.app), manager
 
@@ -22,8 +22,12 @@ def draft_config():
         "ollama_url": "http://127.0.0.1:11434",
         "ollama_model": "qwen-test:latest",
         "ollama_model_digest": "a" * 64,
+        "openai_base_url": "https://api.openai.com/v1",
+        "openai_protocol": "chat_completions",
+        "openai_model": "gpt-test",
         "request_timeout_seconds": 20,
         "max_generate_tokens": 700,
+        "temperature": 0,
         "thinking_mode": "disabled",
     }
 
@@ -52,7 +56,8 @@ def test_invalid_config_does_not_replace_last_known_good(monkeypatch, tmp_path):
     previous = {"ollama_model": "known-good:tag", "ollama_url": "http://192.168.1.100:11434"}
     config_path.write_text(json.dumps(previous), encoding="utf-8")
     client, manager = setup_admin_client(monkeypatch, tmp_path)
-    assert manager.saved == previous
+    assert manager.saved["ollama_model"] == previous["ollama_model"]
+    assert manager.saved["ollama_url"] == previous["ollama_url"]
 
     invalid = {**draft_config(), "ollama_url": "http://user:password@example.com/?token=unsafe"}
     response = client.post("/admin/config/validate", json=invalid)
@@ -103,6 +108,7 @@ def test_config_save_requires_successful_test_and_reports_restart(monkeypatch, t
     assert persisted["ollama_model"] == candidate["ollama_model"]
     assert not (set(persisted) - set(UI_CONFIG_FIELDS))
     assert "secret" not in json.dumps(persisted).lower()
+    assert "api_key" not in json.dumps(persisted).lower()
 
     # A fresh process consumes the local override as the effective config.
     restarted = ConfigurationAdmin(base=manager.base, config_path=manager.config_path)
@@ -143,7 +149,7 @@ def test_provider_failure_is_redacted_and_preserves_saved_config(monkeypatch, tm
     assert secret_marker not in response.text
     assert secret_marker not in caplog.text
     assert config_path.read_text(encoding="utf-8") == json.dumps(previous)
-    assert manager.saved == previous
+    assert manager.saved["ollama_model"] == previous["ollama_model"]
 
 
 def test_admin_config_does_not_accept_disabling_public_only(monkeypatch, tmp_path):

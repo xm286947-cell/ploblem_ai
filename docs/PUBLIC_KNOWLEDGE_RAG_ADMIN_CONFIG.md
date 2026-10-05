@@ -5,7 +5,7 @@ The Docker Compose port remains bound to loopback by default.
 
 ## Provider configuration
 
-The page edits only the currently supported Ollama generation provider:
+The page supports Ollama and a real OpenAI-compatible generation provider:
 
 - `GENERATION_PROVIDER`
 - `OLLAMA_URL`
@@ -14,6 +14,17 @@ The page edits only the currently supported Ollama generation provider:
 - `OLLAMA_TIMEOUT_SECONDS`
 - `OLLAMA_NUM_PREDICT`
 - `OLLAMA_THINKING_MODE`
+- `OPENAI_COMPATIBLE_BASE_URL`
+- `OPENAI_COMPATIBLE_PROTOCOL` (`chat_completions` or `responses`)
+- `OPENAI_COMPATIBLE_MODEL`
+- `GENERATION_TEMPERATURE`
+- `OPENAI_COMPATIBLE_API_KEY` (optional environment secret)
+
+The OpenAI-compatible protocol is selected explicitly. Chat Completions sends
+`POST {base_url}/chat/completions`; Responses sends `POST {base_url}/responses`.
+The selected provider is used by `/ask`; provider errors fail closed and never
+fall back to Ollama. `Test Connection` sends a minimal real generation request
+for the selected model and protocol and may incur a small provider usage charge.
 
 The page displays the effective configuration and its source (`DEFAULT`, `ENV`,
 or `LOCAL_UI_OVERRIDE`). Embedding and retrieval values are read-only. The
@@ -35,8 +46,10 @@ override file lets the environment/default layer take effect again.
 
 ## Secret handling
 
-This service's current LAN Ollama provider does not require a credential. No
-secret field is accepted or returned by the admin API. Provider URLs containing
-userinfo, query strings, or fragments are rejected to prevent credentials from
-being stored in the local override file. Provider connection failures are
-returned as generic redacted messages.
+Ollama does not require a credential. The OpenAI-compatible API key is write-only:
+GET returns only `CONFIGURED` / `MISSING`, and the key never enters
+`config.local.json`, the configuration hash, logs, fixtures, evidence, or Git.
+The Settings page stores a supplied key in a separate `secrets.local.json` file
+with mode `0600`; `OPENAI_COMPATIBLE_API_KEY` remains supported as an environment
+fallback. Provider URLs containing userinfo, query strings, or fragments are
+rejected. Provider connection failures return redacted messages.

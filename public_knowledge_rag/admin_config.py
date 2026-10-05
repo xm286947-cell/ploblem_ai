@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
-import re
 import secrets
 import time
 from pathlib import Path
@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .config import UI_CONFIG_FIELDS, Settings, env_sources
+from .secret_store import SecretStore
 
 
 class ConfigValidationError(ValueError):
@@ -20,16 +21,19 @@ class ConfigValidationError(ValueError):
 
 
 class ConfigurationAdmin:
-    """Local, non-secret configuration persistence and last-known-good handling."""
+    """Local UI settings and test-token management; provider keys live separately."""
 
-    def __init__(self, base: Settings | None = None, config_path: Path | None = None):
+    def __init__(self, base: Settings | None = None, config_path: Path | None = None, secret_path: Path | None = None):
         self.base = base or Settings.load_base()
-        self.validate({key: getattr(self.base, key) for key in UI_CONFIG_FIELDS})
+        self.validate({key: getattr(self.base, key) for key in UI_CONFIG_FIELDS}, partial=True)
         configured_path = os.getenv("PKR_UI_CONFIG_PATH")
         self.config_path = config_path or Path(configured_path or (self.base.data_dir / "config.local.json"))
+        self.secret_store = SecretStore(self.base.data_dir) if secret_path is None else SecretStore(secret_path.parent)
+        if secret_path is not None:
+            self.secret_store.path = secret_path
         self.saved = self._read_saved()
         self.effective = Settings.with_overrides(self.base, self.saved)
-        self._tested: dict[str, tuple[str, float]] = {}
+        self._tested: dict[str, tuple[str, str, bool, float]] = {}
 
     def _read_saved(self) -> dict[str, Any]:
         if not self.config_path.exists():
@@ -40,8 +44,21 @@ class ConfigurationAdmin:
             raise RuntimeError("Local Public Knowledge config is unreadable; last-known-good settings cannot be loaded.") from exc
         if not isinstance(value, dict) or set(value) - set(UI_CONFIG_FIELDS):
             raise RuntimeError("Local Public Knowledge config contains unsupported fields.")
-        normalized = self.validate(value, partial=True)
-        return normalized
+        return self.validate(value, partial=True)
+
+    @staticmethod
+    def _validate_url(value: Any, field: str, errors: dict[str, str], *, required: bool) -> str:
+        raw = str(value or "").strip().rstrip("/")
+        if not raw and not required:
+            return ""
+        parts = urlsplit(raw)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            errors[field] = "Enter a complete http:// or https:// provider URL."
+        elif parts.username or parts.password or parts.query or parts.fragment:
+            errors[field] = "Provider URLs cannot contain credentials, query strings, or fragments."
+        elif len(raw) > 500:
+            errors[field] = "Provider URL is too long."
+        return raw
 
     @staticmethod
     def validate(payload: dict[str, Any], *, partial: bool = False) -> dict[str, Any]:
@@ -55,39 +72,44 @@ class ConfigurationAdmin:
             errors["config"] = "The configuration is incomplete. Reload current values and try again."
         result = dict(payload)
 
-        if "provider_type" in payload:
-            provider_type = str(payload["provider_type"]).strip().lower()
-            if provider_type != "ollama":
-                errors["provider_type"] = "Only the currently supported Ollama provider can be configured."
-            result["provider_type"] = provider_type
+        provider_type = str(payload.get("provider_type", "ollama")).strip().lower()
+        if provider_type not in {"ollama", "openai_compatible"}:
+            errors["provider_type"] = "Choose a supported provider type."
+        result["provider_type"] = provider_type
 
         if "ollama_url" in payload:
-            raw_url = str(payload["ollama_url"]).strip().rstrip("/")
-            parts = urlsplit(raw_url)
-            if parts.scheme not in {"http", "https"} or not parts.hostname:
-                errors["ollama_url"] = "Enter a complete http:// or https:// provider URL."
-            elif parts.username or parts.password or parts.query or parts.fragment:
-                errors["ollama_url"] = "Provider URLs cannot contain credentials, query strings, or fragments."
-            elif len(raw_url) > 500:
-                errors["ollama_url"] = "Provider URL is too long."
-            result["ollama_url"] = raw_url
-
+            result["ollama_url"] = ConfigurationAdmin._validate_url(payload["ollama_url"], "ollama_url", errors, required=provider_type == "ollama")
         if "ollama_model" in payload:
-            model = str(payload["ollama_model"]).strip()
-            if not model or len(model) > 200 or any(ord(ch) < 32 for ch in model):
+            model = str(payload["ollama_model"] or "").strip()
+            if provider_type == "ollama" and (not model or len(model) > 200 or any(ord(ch) < 32 for ch in model)):
                 errors["ollama_model"] = "Enter a valid model name or tag."
             result["ollama_model"] = model
 
         if "ollama_model_digest" in payload:
-            digest = str(payload["ollama_model_digest"]).strip().lower()
-            if digest and not re.fullmatch(r"[0-9a-f]{64}", digest):
+            digest = str(payload["ollama_model_digest"] or "").strip().lower()
+            if digest and (len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest)):
                 errors["ollama_model_digest"] = "Model digest must be empty or a 64-character hexadecimal identity."
+            if provider_type == "ollama" and not partial and not digest:
+                errors["ollama_model_digest"] = "Ollama requires the configured pinned model digest."
             result["ollama_model_digest"] = digest
+
+        if "openai_base_url" in payload:
+            result["openai_base_url"] = ConfigurationAdmin._validate_url(payload["openai_base_url"], "openai_base_url", errors, required=provider_type == "openai_compatible")
+        if "openai_protocol" in payload:
+            protocol = str(payload["openai_protocol"] or "").strip().lower()
+            if protocol not in {"chat_completions", "responses"}:
+                errors["openai_protocol"] = "Choose chat_completions or responses explicitly."
+            result["openai_protocol"] = protocol
+        if "openai_model" in payload:
+            model = str(payload["openai_model"] or "").strip()
+            if provider_type == "openai_compatible" and (not model or len(model) > 200 or any(ord(ch) < 32 for ch in model)):
+                errors["openai_model"] = "Enter the model name required by the compatible provider."
+            result["openai_model"] = model
 
         if "request_timeout_seconds" in payload:
             try:
                 timeout = float(payload["request_timeout_seconds"])
-                if not 1 <= timeout <= 600:
+                if not math.isfinite(timeout) or not 1 <= timeout <= 600:
                     raise ValueError
                 result["request_timeout_seconds"] = timeout
             except (ValueError, TypeError):
@@ -102,8 +124,17 @@ class ConfigurationAdmin:
             except (ValueError, TypeError):
                 errors["max_generate_tokens"] = "Max output tokens must be between 1 and 32768."
 
+        if "temperature" in payload:
+            try:
+                temperature = float(payload["temperature"])
+                if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+                    raise ValueError
+                result["temperature"] = temperature
+            except (ValueError, TypeError):
+                errors["temperature"] = "Temperature must be between 0 and 2."
+
         if "thinking_mode" in payload:
-            thinking = str(payload["thinking_mode"]).strip().lower()
+            thinking = str(payload["thinking_mode"] or "").strip().lower()
             if thinking not in {"disabled", "enabled"}:
                 errors["thinking_mode"] = "Thinking mode must be disabled or enabled."
             result["thinking_mode"] = thinking
@@ -121,24 +152,70 @@ class ConfigurationAdmin:
         canonical = json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
 
-    def record_provider_test(self, candidate: dict[str, Any]) -> str:
+    def effective_credential(self, *, candidate_key: str = "", clear_local: bool = False) -> str | None:
+        return self.secret_store.effective_key(candidate_key=candidate_key, clear_local=clear_local)
+
+    def record_provider_test(self, candidate: dict[str, Any], credential: str | None, clear_local: bool = False) -> str:
         test_id = secrets.token_urlsafe(24)
-        self._tested[test_id] = (self.candidate_hash(candidate), time.monotonic() + 600)
+        fingerprint = self.secret_store.fingerprint(credential)
+        self._tested[test_id] = (self.candidate_hash(candidate), fingerprint, clear_local, time.monotonic() + 600)
         return test_id
 
-    def save(self, payload: dict[str, Any], test_id: str) -> str:
+    def save(
+        self,
+        payload: dict[str, Any],
+        test_id: str,
+        *,
+        candidate_key: str = "",
+        clear_local: bool = False,
+    ) -> str:
         candidate = self.validate(payload)
-        tested = self._tested.pop(test_id, None)
-        if tested is None or tested[1] < time.monotonic() or tested[0] != self.candidate_hash(candidate):
-            raise ConfigValidationError({"provider_test": "Run Test Connection successfully for these exact values before saving."})
+        if clear_local and candidate_key:
+            raise ConfigValidationError({"api_key": "Enter a replacement key or clear the saved key, not both."})
+        if clear_local and candidate["provider_type"] != "openai_compatible":
+            raise ConfigValidationError({"clear_credential": "Credential clearing is available only for OpenAI Compatible."})
+        if candidate_key and candidate["provider_type"] != "openai_compatible":
+            raise ConfigValidationError({"api_key": "API Key is accepted only for OpenAI Compatible."})
+        credential = self.effective_credential(candidate_key=candidate_key, clear_local=clear_local)
+        if candidate["provider_type"] == "openai_compatible" and not credential:
+            raise ConfigValidationError({"credential": "CREDENTIAL_MISSING: enter a key or configure OPENAI_COMPATIBLE_API_KEY."})
 
-        # Persist only values that differ from the environment/default layer. This
-        # lets updated environment settings take effect after a local override is removed.
+        tested = self._tested.pop(test_id, None)
+        fingerprint = self.secret_store.fingerprint(credential)
+        if (
+            tested is None
+            or tested[3] < time.monotonic()
+            or tested[0] != self.candidate_hash(candidate)
+            or tested[1] != fingerprint
+            or tested[2] != clear_local
+        ):
+            raise ConfigValidationError({"provider_test": "Run Test Connection again for these exact settings and credential."})
+
+        # Apply the credential/config pair with rollback if either file write
+        # fails. The key remains in its independent mode-0600 secret store.
         persisted: dict[str, Any] = {}
         for key, value in candidate.items():
-            base_value = getattr(self.base, key)
-            if value != base_value:
+            if value != getattr(self.base, key):
                 persisted[key] = value
+        previous_local_key = self.secret_store.local_key()
+        try:
+            if clear_local:
+                self.secret_store.clear()
+            elif candidate_key:
+                self.secret_store.write(candidate_key)
+            self._write_config(persisted)
+        except OSError:
+            if previous_local_key:
+                self.secret_store.write(previous_local_key)
+            else:
+                self.secret_store.clear()
+            raise
+
+        was_applied = all(getattr(self.effective, key) == value for key, value in candidate.items())
+        self.saved = persisted
+        return "APPLIED" if was_applied else "RESTART_REQUIRED"
+
+    def _write_config(self, persisted: dict[str, Any]) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.config_path.with_name(self.config_path.name + ".tmp-" + secrets.token_hex(8))
         try:
@@ -153,24 +230,24 @@ class ConfigurationAdmin:
             if tmp_path.exists():
                 tmp_path.unlink()
 
-        was_applied = all(getattr(self.effective, key) == value for key, value in candidate.items())
-        self.saved = persisted
-        return "APPLIED" if was_applied else "RESTART_REQUIRED"
-
-    def state(self, *, service_version: str, embedding_status: str, retrieval_adapter: str) -> dict[str, Any]:
+    def state(self, *, service_version: str, embedding_status: str, retrieval_adapter: str, active_credential: str | None = None) -> dict[str, Any]:
         env = env_sources()
         sources: dict[str, str] = {}
         for key in UI_CONFIG_FIELDS:
-            if key in self.saved:
-                sources[key] = "LOCAL_UI_OVERRIDE"
-            else:
-                sources[key] = env.get(key, "DEFAULT")
+            sources[key] = "LOCAL_UI_OVERRIDE" if key in self.saved else env.get(key, "DEFAULT")
+        sources["credential"] = self.secret_store.source()
         for key in ("chunk_size", "chunk_overlap"):
             sources[key] = env.get(key, "DEFAULT")
 
         resolved_data = self.effective.data_dir.expanduser().resolve()
         safe_data_identity = hashlib.sha256(str(resolved_data).encode("utf-8")).hexdigest()[:16]
         generation = self.effective.editable_snapshot()
+        generation["credential_status"] = self._credential_status(self.effective.provider_type, active_credential)
+        desired_credential = self.effective_credential()
+        desired_status = self._credential_status(self.editable_values()["provider_type"], desired_credential)
+        apply_state = self.apply_state()
+        if self.effective.provider_type == "openai_compatible" and self.secret_store.fingerprint(desired_credential) != self.secret_store.fingerprint(active_credential):
+            apply_state = "RESTART_REQUIRED"
         return {
             "current_effective_config": {
                 "generation": generation,
@@ -201,8 +278,15 @@ class ConfigurationAdmin:
                 "sources": sources,
             },
             "saved_config": self.editable_values(),
-            "apply_state": self.apply_state(),
+            "saved_credential_status": desired_status,
+            "apply_state": apply_state,
         }
+
+    @staticmethod
+    def _credential_status(provider_type: str, credential: str | None) -> str:
+        if provider_type == "ollama":
+            return "NOT_REQUIRED"
+        return "CONFIGURED" if credential else "MISSING"
 
     def editable_values(self) -> dict[str, Any]:
         desired = Settings.with_overrides(self.base, self.saved)

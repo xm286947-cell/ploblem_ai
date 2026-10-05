@@ -14,7 +14,7 @@ from .config import Settings
 from .contracts import Chunker, Parser, Retriever
 from .parsing import PlainTextParser, WindowChunker
 from .policy import require_public_query, require_public_source
-from .providers import OllamaProvider, ProviderUnavailable, UnconfiguredManualProvider
+from .providers import OpenAICompatibleProvider, OllamaProvider, ProviderUnavailable, UnconfiguredManualProvider
 from .retrieval import SQLiteLexicalRetriever
 from .store import Store
 
@@ -25,7 +25,18 @@ parser: Parser = PlainTextParser()
 chunker: Chunker = WindowChunker(settings.chunk_size, settings.chunk_overlap)
 retriever: Retriever = SQLiteLexicalRetriever(store)
 ollama = OllamaProvider(settings)
+active_api_key = admin_config.secret_store.effective_key()
+openai_compatible = OpenAICompatibleProvider(settings, active_api_key)
 manual_provider = UnconfiguredManualProvider()
+
+
+def active_generation_provider():
+    """Select exactly the configured generation provider; never fall back."""
+    if settings.provider_type == "ollama":
+        return ollama
+    if settings.provider_type == "openai_compatible":
+        return openai_compatible
+    raise ProviderUnavailable("Configured generation provider is unavailable.", "PROVIDER_UNREACHABLE")
 
 
 class ImportRequest(BaseModel):
@@ -77,6 +88,7 @@ def _admin_state() -> dict[str, object]:
         service_version=__version__,
         embedding_status=embedding_status()["status"],
         retrieval_adapter="sqlite-lexical-reference",
+        active_credential=active_api_key,
     )
 
 
@@ -92,6 +104,9 @@ def admin_get_effective_config() -> dict[str, object]:
 
 @app.post("/admin/config/validate")
 def admin_validate_config(body: dict[str, object]) -> dict[str, object]:
+    # Credentials are accepted only by Test/Save and never enter validation
+    # output, persisted configuration, or the non-secret config hash.
+    body = {key: value for key, value in body.items() if key not in {"api_key", "openai_api_key", "clear_credential"}}
     try:
         candidate = admin_config.validate(body)
     except ConfigValidationError as exc:
@@ -102,11 +117,36 @@ def admin_validate_config(body: dict[str, object]) -> dict[str, object]:
 
 @app.post("/admin/provider/test")
 def admin_test_provider(body: dict[str, object]) -> dict[str, object]:
+    candidate_key = str(body.get("api_key") or body.get("openai_api_key") or "")
+    clear_local = body.get("clear_credential") is True
+    config_payload = body.get("config") if isinstance(body.get("config"), dict) else body
+    candidate_payload = {key: value for key, value in config_payload.items() if key not in {"api_key", "openai_api_key", "clear_credential"}}
     try:
-        candidate = admin_config.validate(body)
+        candidate = admin_config.validate(candidate_payload)
     except ConfigValidationError as exc:
         raise HTTPException(422, {"errors": exc.errors}) from exc
     candidate_settings = Settings.with_overrides(admin_config.base, candidate)
+    if candidate_settings.provider_type == "openai_compatible":
+        credential = admin_config.effective_credential(candidate_key=candidate_key, clear_local=clear_local)
+        if not credential:
+            raise HTTPException(503, {"code": "CREDENTIAL_MISSING", "message": "API credential is missing. Enter a key or configure OPENAI_COMPATIBLE_API_KEY."})
+        candidate_provider = OpenAICompatibleProvider(candidate_settings, credential)
+        try:
+            result = candidate_provider.test_connection()
+        except ProviderUnavailable as exc:
+            raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from exc
+        test_id = admin_config.record_provider_test(candidate, credential, clear_local)
+        return {
+            "ok": True,
+            "test_id": test_id,
+            "provider": candidate_settings.provider_type,
+            "protocol": candidate_settings.openai_protocol,
+            "model_name": candidate_settings.openai_model,
+            "test_response_received": result["test_response_received"],
+            "message": "A minimal generation request succeeded using the selected protocol and model.",
+        }
+    if candidate_key or clear_local:
+        raise HTTPException(422, {"errors": {"api_key": "Credentials are available only for OpenAI Compatible."}})
     candidate_provider = OllamaProvider(candidate_settings)
     try:
         provider_version = candidate_provider.version()
@@ -140,7 +180,7 @@ def admin_test_provider(body: dict[str, object]) -> dict[str, object]:
             "digest_match": False,
             "message": "Provider is reachable, but the installed model digest does not match the configured pin.",
         }
-    test_id = admin_config.record_provider_test(candidate)
+    test_id = admin_config.record_provider_test(candidate, None)
     return {
         "ok": True,
         "test_id": test_id,
@@ -157,10 +197,15 @@ def admin_test_provider(body: dict[str, object]) -> dict[str, object]:
 
 @app.put("/admin/config")
 def admin_save_config(body: dict[str, object]) -> dict[str, object]:
-    if set(body) != {"config", "test_id"} or not isinstance(body.get("config"), dict) or not isinstance(body.get("test_id"), str):
+    allowed = {"config", "test_id", "api_key", "openai_api_key", "clear_credential"}
+    if set(body) - allowed or not isinstance(body.get("config"), dict) or not isinstance(body.get("test_id"), str):
         raise HTTPException(422, {"errors": {"config": "Expected config values and a successful provider test ID."}})
     try:
-        apply_state = admin_config.save(body["config"], body["test_id"])
+        apply_state = admin_config.save(
+            body["config"], body["test_id"],
+            candidate_key=str(body.get("api_key") or body.get("openai_api_key") or ""),
+            clear_local=body.get("clear_credential") is True,
+        )
     except ConfigValidationError as exc:
         raise HTTPException(422, {"errors": exc.errors}) from exc
     state = _admin_state()
@@ -189,6 +234,28 @@ def ollama_models() -> dict[str, object]:
     except ProviderUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     return {"provider": ollama.provider_id, "models": [{"name": x.get("name"), "digest": x.get("digest"), "size": x.get("size")} for x in models]}
+
+
+@app.get("/providers/openai-compatible/status")
+def openai_compatible_status() -> dict[str, object]:
+    return {
+        "provider": "openai_compatible",
+        "protocol": settings.openai_protocol,
+        "endpoint": settings.openai_base_url,
+        "model": settings.openai_model,
+        "credential_status": "CONFIGURED" if active_api_key else "MISSING",
+        "status": "configured" if settings.provider_type == "openai_compatible" and active_api_key else "not-active-or-missing-credential",
+    }
+
+
+@app.post("/admin/provider/credential/clear")
+def admin_clear_provider_credential(body: dict[str, object]) -> dict[str, object]:
+    if body != {"confirm": True}:
+        raise HTTPException(422, {"message": "Explicit confirmation is required to clear the locally saved credential."})
+    admin_config.secret_store.clear()
+    return {"credential_status": "CONFIGURED" if admin_config.secret_store.environment_key() else "MISSING",
+            "credential_source": admin_config.secret_store.source(),
+            "apply_state": "RESTART_REQUIRED" if settings.provider_type == "openai_compatible" else admin_config.apply_state()}
 
 
 @app.get("/providers/manual/status")
@@ -255,7 +322,7 @@ def ask(body: AskRequest) -> dict[str, object]:
     if body.mode == "FIXTURE_REPLAY":
         raise HTTPException(422, "FIXTURE_REPLAY requires POST /fixtures/replay with a fixture_id.")
     try:
-        answer, model_snapshot = ollama.generate(body.question, hits)
+        answer, model_snapshot = active_generation_provider().generate(body.question, hits)
     except ProviderUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     citations = [{"citation_id": h.hit_id, "source_id": h.source_id, "source_revision": h.source_revision,
