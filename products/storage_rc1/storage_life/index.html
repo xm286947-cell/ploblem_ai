@@ -393,6 +393,8 @@ function downloadMvpSummary(){
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
 let RUNTIME_PARSE_RESULT=null;
+let RUNTIME_SNAPSHOT_ID=null;
+let RUNTIME_TREND=null;
 function renderRuntimeImportPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
@@ -401,12 +403,13 @@ function renderRuntimeImportPanel(d){
     '<div class="muted">粘贴 SMART / NVMe Health / EXT_CSD / ECC / Bad Block / MTD 输出；只提取显式字段，不做诊断推测。</div></div></div>'+
     '<label>来源 / 命令<br><input id="runtimeImportSource" style="width:100%" placeholder="例如 nvme smart-log / mmc extcsd read / driver health log"></label>'+
     '<label style="display:block;margin-top:8px">原始运行数据<br><textarea id="runtimeImportText" style="width:100%;min-height:150px" placeholder="粘贴原始命令输出或健康日志…"></textarea></label>'+
-    '<div class="row" style="margin-top:10px"><button class="primary" onclick="parseRuntimeImport()">识别运行指标</button><small>运行数据只留在 Storage；不会发送给 Public Knowledge。</small></div>'+
+    '<div class="row" style="margin-top:10px"><button class="primary" onclick="parseRuntimeImport()">识别运行指标</button><button class="secondary" onclick="saveRuntimeSnapshot()">保存运行快照</button><small>运行数据只留在 Storage；不会发送给 Public Knowledge。</small></div>'+
     '<div id="runtimeImportResult" style="margin-top:10px"><div class="empty">等待输入运行数据。</div></div></div>'
   );
 }
 async function parseRuntimeImport(){
   let d=CURRENT?.device,text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||'PASTED_RUNTIME_OUTPUT',box=$('#runtimeImportResult');
+  RUNTIME_SNAPSHOT_ID=null;
   if(!d||!box)return;
   if(!text.trim())return msg('请先粘贴运行数据',true);
   box.innerHTML='<div class="card">正在识别显式运行指标…</div>';
@@ -416,6 +419,55 @@ async function parseRuntimeImport(){
     let diagCount=items.filter(x=>x.diagnostic_supported).length,lifeCount=items.filter(x=>x.suggested_lifetime_metric).length;
     box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+((diagCount||lifeCount)?'<button class="primary" onclick="executeParsedHealthAnalysis()">一键分析本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
   }catch(e){box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
+}
+async function saveRuntimeSnapshot(){
+  let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT';
+  if(!d)return;
+  if(!items.length)return msg('请先识别运行指标',true);
+  if(RUNTIME_SNAPSHOT_ID)return msg('本次运行快照已保存：'+RUNTIME_SNAPSHOT_ID);
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/runtime-snapshots',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        source_label:source,
+        raw_text:text,
+        captured_at:new Date().toISOString(),
+        observations:items,
+        created_by:'Storage MVP UI'
+      })
+    });
+    RUNTIME_SNAPSHOT_ID=r.id||null;
+    msg('运行快照已保存：'+(RUNTIME_SNAPSHOT_ID||'OK'));
+    await loadRuntimeTrend();
+    return r;
+  }catch(e){
+    msg('运行快照保存失败：'+e.message,true);
+    throw e;
+  }
+}
+function runtimeDeltaText(x){
+  if(x?.delta==null)return '—';
+  let n=Number(x.delta);
+  if(!Number.isFinite(n))return '—';
+  if(n===0)return '0';
+  return (n>0?'+':'')+String(Math.round(n*10000)/10000);
+}
+function renderRuntimeTrendPanel(d){
+  let host=$('#deviceDetail');
+  if(!host||!d?.id)return;
+  host.insertAdjacentHTML('beforeend','<div id="runtimeTrendPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME TREND</div><h3>运行健康趋势</h3><div class="muted">比较多次已保存运行快照；只展示显式数值变化，不自动把上升/下降解释成风险。</div></div><button class="secondary" onclick="loadRuntimeTrend()">刷新</button></div><div id="runtimeTrendBody" class="empty">正在读取历史运行快照…</div></div>');
+  loadRuntimeTrend();
+}
+async function loadRuntimeTrend(){
+  let d=CURRENT?.device,body=$('#runtimeTrendBody');
+  if(!d||!body)return;
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/runtime-snapshots?limit=20');
+    RUNTIME_TREND=r.trend||null;
+    let items=RUNTIME_TREND?.metrics||[],count=RUNTIME_TREND?.snapshot_count||0;
+    body.innerHTML=items.length?'<div class="row" style="margin-bottom:8px"><span class="badge CONFIRMED">Snapshots '+esc(count)+'</span><small>Delta = 最新值 - 上一次值；没有进行风险解释。</small></div><div class="tablewrap"><table><tr><th>指标</th><th>最新值</th><th>上一次</th><th>Δ</th><th>样本</th><th>来源</th></tr>'+items.map(x=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.latest?.normalized_value??'—')+' '+esc(x.latest?.unit||'')+'<br><small>'+esc(x.latest?.captured_at||'')+'</small></td><td>'+esc(x.previous?.normalized_value??'—')+' '+esc(x.previous?.unit||'')+'</td><td><b>'+esc(runtimeDeltaText(x))+'</b></td><td>'+esc(x.sample_count||0)+'</td><td><small>'+esc(x.latest?.source_label||'')+'</small></td></tr>').join('')+'</table></div>':'<div class="empty">还没有保存过运行快照。识别 SMART / EXT_CSD / ECC 等运行数据后点击“保存运行快照”，或直接执行一键健康分析。</div>';
+  }catch(e){body.innerHTML='<div class="danger">运行趋势暂不可用：'+esc(e.message)+'</div>'}
 }
 function parsedObservation(index){return (RUNTIME_PARSE_RESULT?.observations||[])[index]||null}
 function parsedRuntimeObservationPayload(x,d,index){
@@ -443,7 +495,10 @@ async function executeParsedHealthAnalysis(){
   if(!d||!box)return;
   let diagItems=items.filter(x=>x.diagnostic_supported),lifeItems=items.filter(x=>x.suggested_lifetime_metric);
   if(!diagItems.length&&!lifeItems.length)return msg('当前运行数据没有可进入寿命或诊断场景的指标',true);
-  box.innerHTML='<div class="card">正在执行本次运行数据健康分析：寿命 '+lifeItems.length+' 项 · 诊断 '+diagItems.length+' 项…</div>';
+  box.innerHTML='<div class="card">正在保存运行快照并执行健康分析：寿命 '+lifeItems.length+' 项 · 诊断 '+diagItems.length+' 项…</div>';
+  if(!RUNTIME_SNAPSHOT_ID){
+    try{await saveRuntimeSnapshot()}catch(e){box.insertAdjacentHTML('beforeend','<div class="warning card"><b>快照未保存</b><p>'+esc(e.message)+'</p><small>本次分析仍继续，但不会进入运行趋势。</small></div>')}
+  }
   let diagnosis=null,lifeResults=[];
   if(diagItems.length){
     try{
@@ -609,6 +664,7 @@ renderDetail=function(){
   );
   host.insertAdjacentHTML('beforeend','<div id="detailConclusion"></div>');
   renderRuntimeImportPanel(d);
+  renderRuntimeTrendPanel(d);
   renderLifetimePanel(d);
   renderOptimizationPanel(d);
   renderAssessmentHistoryPanel(d);
