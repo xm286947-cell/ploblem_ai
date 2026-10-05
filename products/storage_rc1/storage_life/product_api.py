@@ -515,6 +515,31 @@ def add_manual_device_fact(device_id: str, payload: dict[str, Any]) -> dict[str,
     }
 
 
+def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    return core.save_runtime_snapshot(
+        device_id,
+        list(payload.get("observations") or []),
+        source_label=str(payload.get("source_label") or "PASTED_RUNTIME_OUTPUT"),
+        raw_text=str(payload.get("raw_text") or ""),
+        captured_at=payload.get("captured_at"),
+        created_by=str(payload.get("created_by") or "Storage MVP UI"),
+    )
+
+
+def runtime_snapshot_history(device_id: str, limit: int = 20) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    return {
+        "device": devices[device_id],
+        "items": core.list_runtime_snapshots(device_id, limit=limit),
+        "trend": core.runtime_metric_trends(device_id, limit=max(limit, 40)),
+    }
+
+
 def device_assessment_history(device_id: str, limit: int = 20) -> dict[str, Any]:
     devices = {x["id"]: x for x in core.list_devices()}
     if device_id not in devices:
