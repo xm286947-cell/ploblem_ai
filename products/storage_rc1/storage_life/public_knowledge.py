@@ -276,8 +276,9 @@ def _publisher_from_source(source: dict[str, Any]) -> str:
 def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | None = None):
     """Search Public Knowledge from a Storage business page.
 
-    This endpoint is retrieval-only. It does not call the generation provider
-    and it never turns RAG output into Storage diagnosis or Formal Evidence.
+    Retrieval/Citation is the required path. Generation is optional,
+    best-effort Engineering Context only, and can never turn a RAG answer into
+    Storage diagnosis or Formal Evidence.
     """
     query, focus = _context_query(body)
     search_result = search(SearchBody(query=query, top_k=body.top_k), mode=mode, base_url=base_url)
