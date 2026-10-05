@@ -480,8 +480,8 @@ def test_formal_review_uses_exact_durable_candidate_content(
 
     def capture_review(method, path, *, json_body=None, query=None):
         if method == "POST" and path == "/v1/knowledge/reviews":
-            observed["confirmed_content"] = copy.deepcopy(
-                (json_body or {}).get("confirmed_content")
+            observed["confirmed_value"] = copy.deepcopy(
+                (json_body or {}).get("confirmed_value")
             )
         return original(method, path, json_body=json_body, query=query)
 
@@ -493,7 +493,7 @@ def test_formal_review_uses_exact_durable_candidate_content(
         review_comment="approval only",
     )
     assert reviewed["status"] == "REVIEW_CONFIRMED"
-    assert observed["confirmed_content"] == expected
+    assert observed["confirmed_value"] == expected
 
 
 def test_human_review_publish_release_query_back_and_source_lock(
