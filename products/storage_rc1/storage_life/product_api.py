@@ -605,20 +605,18 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 for x in workload
                 if isinstance(x, dict)
             )
+            controls = structured.get("engineering_control_options") or []
+            validation = structured.get("suggested_validation") or []
             if not has_behavior:
                 complete = False
                 next_action = "补充当前软件写入 / 日志 / 持久化行为后重新生成针对性优化建议。"
+            elif status in completed_statuses and not controls and not validation:
+                complete = False
+                next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
         elif kind == "DIAGNOSIS":
-            structured = skill.get("structured_result") or {}
             if not structured.get("current_observation"):
                 complete = False
                 next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
-        elif kind == "OPTIMIZATION":
-            controls = structured.get("engineering_control_options") or []
-            validation = structured.get("suggested_validation") or []
-            if status in completed_statuses and not controls and not validation:
-                complete = False
-                next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
         return {
             "type": kind,
             "label": label,
@@ -647,7 +645,13 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             f"已确认 {len(facts)} 项 Device Fact"
             if facts else "尚无已确认 Device Fact"
         ),
-        "next_action": "补齐关键 Device Fact" if missing_critical else None,
+        "next_action": (
+            "补齐关键 Device Fact"
+            if missing_critical else
+            "完成剩余 P0/P1 参数确认并达到 FORMAL_READY"
+            if facts and not lifecycle_ready else
+            None
+        ),
     }
     scenario_items = [
         fact_scenario,
@@ -660,6 +664,8 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     remaining = []
     if missing_critical:
         remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
+    elif facts and not lifecycle_ready:
+        remaining.append("完成剩余 P0/P1 参数确认，使 S1 达到 FORMAL_READY")
     for item in scenario_items:
         if item["type"] == "FACT":
             continue
