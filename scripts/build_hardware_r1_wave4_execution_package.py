@@ -90,11 +90,13 @@ def main() -> int:
             "auto_review": False,
             "auto_publish": False,
         }
-        (stage / "EXECUTION_PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        (stage / "EXECUTION_PACKAGE_GATE_REPORT.json").write_text(json.dumps(gate_report, indent=2) + "\n", encoding="utf-8")
+        (stage / "EXECUTION_PACKAGE_MANIFEST.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+        (stage / "EXECUTION_PACKAGE_GATE_REPORT.json").write_bytes((json.dumps(gate_report, indent=2) + "\n").encode("utf-8"))
 
         def write_zip() -> None:
-            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            # Stored entries avoid platform-specific compressor output so the
+            # release identity can be compared byte-for-byte across native gates.
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
                 for path in sorted(item for item in stage.rglob("*") if item.is_file()):
                     info = zipfile.ZipInfo(path.relative_to(stage).as_posix())
                     info.create_system = 3
@@ -106,7 +108,7 @@ def main() -> int:
         write_zip()
         for _ in range(3):
             manifest["package_size"] = archive.stat().st_size
-            (stage / "EXECUTION_PACKAGE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            (stage / "EXECUTION_PACKAGE_MANIFEST.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
             write_zip()
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         archive.with_suffix(".zip.sha256").write_text(f"{digest}  {archive.name}\n", encoding="utf-8")

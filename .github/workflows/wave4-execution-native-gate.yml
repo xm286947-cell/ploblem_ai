@@ -131,3 +131,26 @@ jobs:
           path: |
             ${{ runner.temp }}/WAVE4_EXECUTION_NATIVE_GATE_REPORT.json
             dist/HARDWARE_R1_WAVE4_REAL_EXECUTION_ca310a5062c8.zip.sha256
+
+  package-identity:
+    needs: native-package-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: HARDWARE_R1_WAVE4_EXECUTION_NATIVE_GATE_*
+          path: native-artifacts
+      - name: Require identical Windows and macOS package hashes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          reports = sorted(Path("native-artifacts").rglob("*.sha256"))
+          if len(reports) != 2:
+              raise SystemExit(f"EXPECTED_TWO_NATIVE_PACKAGE_HASHES={len(reports)}")
+          hashes = [report.read_text(encoding="utf-8").split()[0] for report in reports]
+          print(f"WINDOWS_MACOS_PACKAGE_SHA256={hashes}")
+          if hashes[0] != hashes[1]:
+              raise SystemExit("CROSS_PLATFORM_PACKAGE_HASH_MISMATCH")
+          print("CROSS_PLATFORM_PACKAGE_IDENTITY=PASS")
+          PY
