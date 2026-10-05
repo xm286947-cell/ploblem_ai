@@ -6,6 +6,7 @@ publishes Formal Knowledge and never becomes a second Knowledge store.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 import sqlite3
@@ -222,6 +223,8 @@ class HardwareR1WorkbenchStore:
                 """
                 CREATE TABLE IF NOT EXISTS hardware_r1_batch (
                     batch_id TEXT PRIMARY KEY,
+                    dataset_manifest_json TEXT,
+                    dataset_frozen_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -245,6 +248,20 @@ class HardwareR1WorkbenchStore:
                 ON hardware_r1_batch_item(batch_id, created_at);
                 """
             )
+            batch_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(hardware_r1_batch)"
+                ).fetchall()
+            }
+            if "dataset_manifest_json" not in batch_columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch ADD COLUMN dataset_manifest_json TEXT"
+                )
+            if "dataset_frozen_at" not in batch_columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch ADD COLUMN dataset_frozen_at TEXT"
+                )
             columns = {
                 str(row["name"])
                 for row in connection.execute(
@@ -269,6 +286,77 @@ class HardwareR1WorkbenchStore:
                 (batch_id, now, now),
             )
         return batch_id
+
+    def freeze_dataset_identity(
+        self,
+        batch_id: str,
+        entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Persist the immutable upload identity before any Provider call."""
+        now = _utc_now()
+        manifest = {
+            "version": "hardware-r1-dataset-identity/v1",
+            "batch_id": str(batch_id),
+            "frozen_at": now,
+            "entries": [dict(entry) for entry in entries],
+        }
+        encoded = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT dataset_manifest_json FROM hardware_r1_batch WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            if row is None:
+                raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+            existing = row["dataset_manifest_json"]
+            if existing:
+                current = json.loads(existing)
+                # A frozen Batch identity is immutable. Repeating the freeze is
+                # allowed only when the exact entry list is unchanged.
+                if current.get("entries") != manifest["entries"]:
+                    raise HardwareR1WorkbenchError("DATASET_IDENTITY_ALREADY_FROZEN")
+                return current
+            connection.execute(
+                """
+                UPDATE hardware_r1_batch
+                SET dataset_manifest_json=?,dataset_frozen_at=?,updated_at=?
+                WHERE batch_id=?
+                """,
+                (encoded, now, now, batch_id),
+            )
+        return manifest
+
+    def get_dataset_identity(self, batch_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT dataset_manifest_json
+                FROM hardware_r1_batch
+                WHERE batch_id=?
+                """,
+                (batch_id,),
+            ).fetchone()
+        if row is None:
+            raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+        if not row["dataset_manifest_json"]:
+            return None
+        try:
+            value = json.loads(row["dataset_manifest_json"])
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_CORRUPT") from error
+        if (
+            not isinstance(value, dict)
+            or value.get("version") != "hardware-r1-dataset-identity/v1"
+            or value.get("batch_id") != batch_id
+            or not isinstance(value.get("entries"), list)
+        ):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_CORRUPT")
+        return value
 
     def add_item(
         self,
@@ -487,10 +575,23 @@ class HardwareR1WorkbenchService:
 
     def upload_batch(self, files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
         batch_id = self.store.create_batch()
-        for filename, payload, mime_type in files:
+        dataset_entries: list[dict[str, Any]] = []
+        for source_order, (filename, payload, mime_type) in enumerate(files, start=1):
             name = Path(str(filename or "").replace("\\", "/")).name
+            dataset_entry: dict[str, Any] = {
+                "order": source_order,
+                "item_id": None,
+                "source_file": name or "unknown",
+                "business_case_id": None,
+                "source_id": None,
+                "sha256": hashlib.sha256(payload).hexdigest() if payload else None,
+                "size_bytes": len(payload),
+                "binding_status": "UNBOUND",
+            }
+            dataset_entries.append(dataset_entry)
             if not name.lower().endswith(".docx") or not payload:
-                self.store.add_item(
+                dataset_entry["binding_status"] = "PARSE_FAILED"
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name or "unknown",
                     orchestration_status="PARSE_FAILED",
@@ -512,7 +613,11 @@ class HardwareR1WorkbenchService:
                     or ""
                 )
                 if not case_id:
-                    self.store.add_item(
+                    dataset_entry.update(
+                        source_id=source_id or None,
+                        binding_status="PARSE_FAILED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         source_id=source_id or None,
@@ -524,7 +629,12 @@ class HardwareR1WorkbenchService:
                     continue
                 register = getattr(self.source_store, "register_active_bytes", None)
                 if not callable(register):
-                    self.store.add_item(
+                    dataset_entry.update(
+                        business_case_id=case_id,
+                        source_id=source_id or None,
+                        binding_status="DEPENDENCY_BLOCKED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         business_case_id=case_id,
@@ -538,7 +648,12 @@ class HardwareR1WorkbenchService:
                     binding = register(case_id, name, payload, mime_type=mime_type)
                 except Exception as error:
                     code = str(getattr(error, "code", None) or "SOURCE_BINDING_FAILED")
-                    self.store.add_item(
+                    dataset_entry.update(
+                        business_case_id=case_id,
+                        source_id=source_id or None,
+                        binding_status="DEPENDENCY_BLOCKED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         business_case_id=case_id,
@@ -548,22 +663,32 @@ class HardwareR1WorkbenchService:
                         snapshot=snapshot,
                     )
                     continue
-                self.store.add_item(
+                bound_source_id = str(binding.get("source_id") or source_id)
+                dataset_entry.update(
+                    business_case_id=case_id,
+                    source_id=bound_source_id,
+                    sha256=str(binding.get("sha256") or dataset_entry["sha256"] or ""),
+                    size_bytes=int(binding.get("size_bytes") or len(payload)),
+                    binding_status="BOUND",
+                )
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name,
                     business_case_id=case_id,
-                    source_id=str(binding.get("source_id") or source_id),
+                    source_id=bound_source_id,
                     orchestration_status="QUEUED",
                     snapshot=snapshot,
                 )
             except Exception as error:
-                self.store.add_item(
+                dataset_entry["binding_status"] = "PARSE_FAILED"
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name,
                     orchestration_status="PARSE_FAILED",
                     failed_stage="PARSE",
                     error_code=str(getattr(error, "code", None) or "PARSE_FAILED"),
                 )
+        self.store.freeze_dataset_identity(batch_id, dataset_entries)
         return self.get_batch(batch_id)
 
     def run_batch(self, batch_id: str) -> dict[str, Any]:
@@ -635,6 +760,52 @@ class HardwareR1WorkbenchService:
         self._run_item(item, retry_stage=None, force_full_run=True)
         return self.get_item(item_id)
 
+    def _verify_frozen_source_identity(self, item: dict[str, Any]) -> None:
+        """Fail closed before Provider work if an uploaded source was substituted."""
+        manifest = self.store.get_dataset_identity(str(item["batch_id"]))
+        # Legacy/unit-created batches may predate the E2E manifest. The formal
+        # Web upload path always freezes one before returning from upload_batch.
+        if manifest is None:
+            return
+        entry = next(
+            (
+                value
+                for value in manifest["entries"]
+                if isinstance(value, dict)
+                and value.get("item_id") == item.get("item_id")
+            ),
+            None,
+        )
+        if not isinstance(entry, dict):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_MISMATCH")
+        expected = {
+            "source_file": str(item.get("source_file") or ""),
+            "business_case_id": item.get("business_case_id"),
+            "source_id": item.get("source_id"),
+        }
+        if any(entry.get(key) != value for key, value in expected.items()):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_MISMATCH")
+        if entry.get("binding_status") != "BOUND":
+            return
+        get_active_source = getattr(self.source_store, "get_active_source", None)
+        if not callable(get_active_source):
+            raise HardwareR1WorkbenchError("SOURCE_BINDING_CLOSURE_REQUIRED")
+        try:
+            source = get_active_source(str(item.get("business_case_id") or ""))
+        except Exception as error:
+            code = str(
+                getattr(error, "code", None)
+                or "ACTIVE_SOURCE_BINDING_REQUIRED"
+            )
+            raise HardwareR1WorkbenchError(code) from error
+        if (
+            str(source.get("binding_status") or "").upper() != "ACTIVE"
+            or str(source.get("source_id") or "") != str(entry.get("source_id") or "")
+            or str(source.get("sha256") or "") != str(entry.get("sha256") or "")
+            or int(source.get("size_bytes") or -1) != int(entry.get("size_bytes") or -2)
+        ):
+            raise HardwareR1WorkbenchError("DATASET_SOURCE_IDENTITY_MISMATCH")
+
     def _run_item(
         self,
         item: dict[str, Any],
@@ -650,6 +821,17 @@ class HardwareR1WorkbenchService:
                 failed_stage="PARSE",
                 error_code="SNAPSHOT_REQUIRED",
                 result=None,
+            )
+            return
+        try:
+            self._verify_frozen_source_identity(item)
+        except HardwareR1WorkbenchError as error:
+            self.store.update_item(
+                item["item_id"],
+                orchestration_status="DEPENDENCY_BLOCKED",
+                failed_stage=item.get("failed_stage"),
+                error_code=error.code,
+                result=item.get("pipeline_result"),
             )
             return
         self.store.update_item(
@@ -1088,6 +1270,7 @@ class HardwareR1WorkbenchService:
             "batch_id": batch_id,
             "status": aggregate_batch_status(items),
             "summary": _summary(items),
+            "dataset_identity": self.store.get_dataset_identity(batch_id),
             "items": items,
         }
 
