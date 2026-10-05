@@ -5,7 +5,7 @@
   if (!root) return;
 
   const api = (window.P0_MAJOR_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '') + '/major-production';
-  const state = { caseId: null, eventId: null };
+  const state = { caseId: null, eventId: null, analysisMode: null };
   const message = root.querySelector('[data-major-message]');
   const excelPreview = root.querySelector('[data-major-excel-preview]');
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
@@ -127,6 +127,40 @@
     }
   }
 
+  function renderTypedCandidates(candidates) {
+    return candidates.map(item => {
+      const metadata = item.analysis_metadata || {};
+      const reviewRequired = metadata.review_status === 'REVIEW_REQUIRED';
+      const sourceValues = (metadata.source_values || []).map(source => {
+        const evidence = (source.evidence_refs || []).map(ref =>
+          '<li><small>' + esc(ref.locator || ref.fragment_id || ref.source_fact_revision_id || '') +
+          '</small><blockquote>' + esc(ref.excerpt || '') + '</blockquote></li>'
+        ).join('');
+        return '<div class="major-source-value"><strong>' + esc(source.source_type || 'SOURCE') +
+          '</strong><p>' + esc(source.value || '') + '</p><ul>' + evidence + '</ul></div>';
+      }).join('');
+      const evidence = (item.evidence || []).map(ref =>
+        '<li><small>' + esc(ref.locator || ref.fragment_id || ref.source_link_id || '') +
+        '</small><blockquote>' + esc(ref.excerpt || '') + '</blockquote></li>'
+      ).join('');
+      const heading = esc(item.entry_type) + ' · ' + esc(item.status) +
+        (metadata.source_status ? ' · ' + esc(metadata.source_status) : '');
+      const editor = item.status === 'MISSING'
+        ? '<p class="major-blocked">MISSING：当前来源没有该语义，不生成内容。</p>'
+        : '<label>人工确认后的内容<textarea data-candidate-content ' +
+          (reviewRequired ? 'placeholder="请比较全部来源，填写人工确认的结论"' : '') + '>' +
+          esc(reviewRequired ? '' : item.content || '') + '</textarea></label>' +
+          '<label>审核理由<input data-review-reason placeholder="说明确认或更正依据" ' +
+          (reviewRequired ? 'required' : '') + '></label>' +
+          '<button class="case-button primary" data-review-action="CONFIRM" data-entry="' + esc(item.entry_id) + '">人工确认</button>' +
+          '<button class="case-button secondary" data-review-action="CORRECT" data-entry="' + esc(item.entry_id) + '">更正并确认</button>';
+      return '<article class="major-candidate" data-typed-candidate><h3>' + heading + '</h3>' +
+        (reviewRequired ? '<p class="major-blocked">需人工比较来源并作出明确决定；系统不会择边。</p>' : '') +
+        (sourceValues ? '<details open><summary>来源值与对应证据</summary>' + sourceValues + '</details>' : '') +
+        '<details><summary>Repository Evidence</summary><ul>' + evidence + '</ul></details>' + editor + '</article>';
+    }).join('');
+  }
+
   const excelForm = root.querySelector('[data-major-excel]');
   if (excelForm) {
     excelForm.addEventListener('submit', async event => {
@@ -164,9 +198,18 @@
   root.querySelector('[data-major-analyze]').addEventListener('click', async () => {
     if (!state.caseId) return;
     try {
-      say('正在调用已配置的 AI Provider…');
+      say('正在读取 Source 并生成语义 Review 候选…');
       const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis', { method: 'POST' }));
+      state.analysisMode = data.mode || 'LEGACY_AI';
       const box = root.querySelector('[data-major-candidates]');
+      if (state.analysisMode === 'SOURCE_FUSION') {
+        box.innerHTML = renderTypedCandidates(data.candidates || []);
+        box.querySelectorAll('[data-review-action]').forEach(button =>
+          button.addEventListener('click', () => confirmEntry(button)));
+        root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_REQUIRED';
+        say('Source Fusion 候选已生成；请逐条核对来源证据，MULTI_SOURCE / CONFLICT 需填写人工结论和理由。');
+        return;
+      }
       box.innerHTML = data.candidates.map(item =>
         '<article class="major-candidate"><h3>' + esc(item.entry_type) + ' · PENDING</h3><p>' +
         esc(item.content) + '</p><button class="case-button secondary" data-entry="' + esc(item.entry_id) +
@@ -181,21 +224,32 @@
 
   async function confirmEntry(button) {
     try {
-      const content = button.closest('.major-candidate').querySelector('p').textContent;
+      const card = button.closest('.major-candidate');
+      const textarea = card.querySelector('[data-candidate-content]');
+      const reasonInput = card.querySelector('[data-review-reason]');
+      const legacyContent = card.querySelector('p');
+      const content = textarea ? textarea.value : (legacyContent ? legacyContent.textContent : '');
       const data = await read(await fetch(api + '/entries/' + encodeURIComponent(button.dataset.entry) + '/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewer: 'web-reviewer', content, reason: 'Web human review' })
+        body: JSON.stringify({
+          reviewer: 'web-reviewer',
+          content,
+          reason: reasonInput ? reasonInput.value : 'Web human review',
+          action: button.dataset.reviewAction || 'CONFIRM'
+        })
       }));
-      button.closest('.major-candidate').querySelector('h3').textContent =
-        data.entry_type + ' · CONFIRMED · revision ' + data.revision_no;
-      button.disabled = true;
+      card.querySelector('h3').textContent =
+        data.entry_type + ' · ' + data.status + ' · revision ' + data.revision_no;
+      card.querySelectorAll('[data-entry]').forEach(item => { item.disabled = true; });
       const all = [...root.querySelectorAll('[data-entry]')].every(item => item.disabled);
-      if (all) {
+      if (all && state.analysisMode !== 'SOURCE_FUSION') {
         root.querySelector('[data-major-publish]').disabled = false;
         root.querySelector('[data-major-state]').textContent = 'READY_TO_PUBLISH';
+      } else if (all) {
+        root.querySelector('[data-major-state]').textContent = 'TYPED_REVIEW_COMPLETE_I3_PENDING';
       }
-      say('已创建人工确认修订。');
+      say(data.status === 'CORRECTED' ? '已创建人工更正修订。' : '已创建人工确认修订。');
     } catch (error) {
       say(error.message, true);
     }

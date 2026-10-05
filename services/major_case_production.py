@@ -13,6 +13,7 @@ from typing import Any
 from runtime import EvidenceLocator, EvidenceReference, LightweightExecutionEngine, SourceRef, SqliteTaskStore
 from runtime.adapters import MajorIssueD01RuntimeAdapter, MajorIssueObjectSpec
 from quality_knowledge.major_cases.document_parser import parse_document
+from quality_knowledge.major_cases.semantic_source_adapter import MajorSemanticSourceAdapter
 from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from repositories import JsonArtifactRepository
@@ -40,11 +41,16 @@ class MajorCaseProductionService:
         artifact_repository: JsonArtifactRepository,
         runtime_db_path: str | Path,
         provider: Any | None = None,
+        project_root: str | Path | None = None,
     ) -> None:
         self.repository = repository
         self.artifact_repository = artifact_repository
         self.publisher = MajorCasePublisher(repository, artifact_repository)
         self.provider = provider
+        self.semantic_adapter = MajorSemanticSourceAdapter(
+            repository,
+            project_root or Path(__file__).resolve().parents[1],
+        )
         self.store = SqliteTaskStore(runtime_db_path)
         self.runtime = LightweightExecutionEngine(self.store)
 
@@ -113,11 +119,144 @@ class MajorCaseProductionService:
         }
 
     def analyze(self, case_id: str) -> dict[str, Any]:
-        if self.provider is None:
-            raise MajorProductionError("MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED")
         detail = self.repository.case_detail(case_id)
         if not detail:
             raise MajorProductionError("MAJOR_CASE_NOT_FOUND")
+        draft = self.semantic_adapter.build_draft(case_id)
+        has_typed_source = bool(draft.get("source_fact_revision_id")) or any(
+            slot.get("items") for slot in draft.get("semantic_slots", {}).values()
+        )
+        if has_typed_source:
+            return self._analyze_source_fusion(case_id, draft)
+        return self._analyze_legacy(case_id, detail)
+
+    def _analyze_source_fusion(self, case_id: str, draft: dict[str, Any]) -> dict[str, Any]:
+        events = self.repository.events(case_id)
+        if len(events) != 1:
+            raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_ONE_EVENT")
+        event = events[0]
+        source_links = self.repository.source_links(case_id)
+        links_by_id = {str(link.get("source_link_id")): link for link in source_links}
+        candidates: list[dict[str, Any]] = []
+        for entry_type, slot in draft["semantic_slots"].items():
+            slot_items = list(slot.get("items") or [])
+            if not slot_items:
+                candidates.append({
+                    "entry_type": entry_type,
+                    "content": "",
+                    "status": "MISSING",
+                    "evidence": [],
+                    "analysis_metadata": self._semantic_metadata(draft, slot),
+                    "explanation": "SOURCE_SEMANTIC_MISSING",
+                })
+                continue
+
+            if entry_type.endswith("_ACTION"):
+                for index, source_item in enumerate(slot_items, start=1):
+                    evidence = self._semantic_evidence(source_item, links_by_id, event["event_id"])
+                    candidates.append({
+                        "entry_type": entry_type,
+                        "content": str(source_item.get("value") or "").strip(),
+                        "status": "PENDING",
+                        "evidence": evidence,
+                        "analysis_metadata": {
+                            **self._semantic_metadata(draft, slot),
+                            "action_item_index": index,
+                            "source_values": [self._source_value_metadata(source_item)],
+                        },
+                        "explanation": "SOURCE_FUSION_ACTION_ITEM",
+                    })
+                continue
+
+            status = str(slot.get("status") or "AVAILABLE")
+            if status in {"MULTI_SOURCE", "CONFLICT"}:
+                content = "\n".join(
+                    f"[{item.get('source_type') or 'SOURCE'}] {str(item.get('value') or '').strip()}"
+                    for item in slot_items
+                    if str(item.get("value") or "").strip()
+                )
+            else:
+                content = str(slot.get("effective_value") or slot_items[0].get("value") or "").strip()
+            evidence = [
+                ref
+                for source_item in slot_items
+                for ref in self._semantic_evidence(source_item, links_by_id, event["event_id"])
+            ]
+            candidates.append({
+                "entry_type": entry_type,
+                "content": content,
+                "status": "PENDING",
+                "evidence": evidence,
+                "analysis_metadata": {
+                    **self._semantic_metadata(draft, slot),
+                    "source_values": [self._source_value_metadata(item) for item in slot_items],
+                },
+                "explanation": "SOURCE_FUSION_CAUSE_SLOT",
+            })
+
+        created = self.repository.replace_pending_source_fusion_entries(
+            case_id, event["event_id"], candidates
+        )
+        return {
+            "mode": "SOURCE_FUSION",
+            "case_id": case_id,
+            "event_id": event["event_id"],
+            "candidates": created,
+        }
+
+    @staticmethod
+    def _source_value_metadata(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "value": str(item.get("value") or ""),
+            "source_type": str(item.get("source_type") or ""),
+            "evidence_refs": list(item.get("evidence_refs") or []),
+        }
+
+    @classmethod
+    def _semantic_metadata(cls, draft: dict[str, Any], slot: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "semantic_slot": slot.get("semantic_slot"),
+            "source_status": slot.get("status"),
+            "review_status": slot.get("review_status"),
+            "source_fact_revision_id": draft.get("source_fact_revision_id"),
+            "document_version_ids": list(draft.get("document_version_ids") or []),
+            "fusion_version": draft.get("fusion_version"),
+            "source_relation_conflicts": list(slot.get("source_relation_conflicts") or []),
+        }
+
+    @staticmethod
+    def _semantic_evidence(
+        source_item: dict[str, Any],
+        links_by_id: dict[str, dict[str, Any]],
+        event_id: str,
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for reference in source_item.get("evidence_refs") or []:
+            link_ids = [str(value) for value in reference.get("source_link_ids") or [] if value]
+            matching_links = [links_by_id[item] for item in link_ids if item in links_by_id]
+            event_links = [
+                link for link in matching_links
+                if link.get("event_id") in {event_id, None}
+            ]
+            source_link_id = str(event_links[0].get("source_link_id")) if event_links else ""
+            fragment_id = str(reference.get("fragment_id") or "")
+            if source_item.get("source_type") == "EXCEL" and not source_link_id:
+                raise MajorProductionError("MAJOR_SEMANTIC_SOURCE_LINK_MISSING")
+            if not fragment_id and not source_link_id:
+                raise MajorProductionError("MAJOR_SEMANTIC_EVIDENCE_REFERENCE_MISSING")
+            result.append({
+                "fragment_id": fragment_id or None,
+                "source_link_id": source_link_id or None,
+                "locator": str(reference.get("locator") or ""),
+                "excerpt": str(reference.get("excerpt") or ""),
+            })
+        if not result:
+            raise MajorProductionError("MAJOR_SEMANTIC_EVIDENCE_REFERENCE_MISSING")
+        return result
+
+    def _analyze_legacy(self, case_id: str, detail: dict[str, Any]) -> dict[str, Any]:
+        if self.provider is None:
+            raise MajorProductionError("MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED")
         events = self.repository.events(case_id)
         if len(events) != 1:
             raise MajorProductionError("MAJOR_ANALYSIS_REQUIRES_ONE_EVENT")
@@ -200,18 +339,42 @@ class MajorCaseProductionService:
             ))
         return {"case_id": case_id, "event_id": event["event_id"], "runtime_task_id": outcome.task_id, "candidates": created}
 
-    def confirm_entry(self, entry_id: str, *, reviewer: str, content: str = "", reason: str = "") -> dict[str, Any]:
+    def confirm_entry(
+        self,
+        entry_id: str,
+        *,
+        reviewer: str,
+        content: str = "",
+        reason: str = "",
+        action: str = "",
+    ) -> dict[str, Any]:
         entry = self.repository.entry(entry_id)
         if not entry:
             raise MajorProductionError("MAJOR_ENTRY_NOT_FOUND")
-        if entry.get("status") != "PENDING" or entry.get("origin") != "AI":
+        if entry.get("status") != "PENDING" or entry.get("origin") not in {"AI", "SOURCE_FUSION"}:
             raise MajorProductionError("MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE")
         if not reviewer.strip():
             raise MajorProductionError("MAJOR_REVIEWER_REQUIRED")
+        metadata = entry.get("analysis_metadata") or {}
+        review_required = entry.get("origin") == "SOURCE_FUSION" and metadata.get("review_status") == "REVIEW_REQUIRED"
+        review_action = str(action or "CONFIRM").strip().upper()
+        if review_action not in {"CONFIRM", "CORRECT"}:
+            raise MajorProductionError("INVALID_MAJOR_REVIEW_ACTION")
+        if review_required and (not content.strip() or not reason.strip()):
+            raise MajorProductionError("MAJOR_SEMANTIC_REVIEW_DECISION_REQUIRED")
+        revised_content = content.strip() or str(entry.get("content") or "")
+        if review_action == "CORRECT" and revised_content == str(entry.get("content") or ""):
+            raise MajorProductionError("MAJOR_CORRECTION_MUST_CHANGE_CONTENT")
+        if (
+            review_action == "CONFIRM"
+            and not review_required
+            and revised_content != str(entry.get("content") or "")
+        ):
+            raise MajorProductionError("MAJOR_EDIT_REQUIRES_CORRECT_ACTION")
         return self.repository.revise_entry(
             entry_id,
-            content.strip() or str(entry.get("content") or ""),
-            "CONFIRMED",
+            revised_content,
+            "CORRECTED" if review_action == "CORRECT" else "CONFIRMED",
             reviewer=reviewer.strip(),
             reason=reason.strip() or "HUMAN_CONFIRMED",
         )

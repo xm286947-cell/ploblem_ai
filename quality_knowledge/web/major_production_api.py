@@ -18,7 +18,14 @@ from services.major_case_production import MajorCaseProductionService, MajorProd
 
 
 def _error(error: MajorProductionError) -> HTTPException:
-    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
+    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND"} else 409 if error.code in {
+        "NO_PUBLISHABLE_CONFIRMED_FACT",
+        "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE",
+        "MAJOR_SEMANTIC_REVIEW_DECISION_REQUIRED",
+        "MAJOR_CORRECTION_MUST_CHANGE_CONTENT",
+        "MAJOR_SEMANTIC_SOURCE_LINK_MISSING",
+        "MAJOR_SEMANTIC_EVIDENCE_REFERENCE_MISSING",
+    } else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
     return HTTPException(status, error.code)
 
 
@@ -207,6 +214,7 @@ def create_major_production_router(
                     reviewer=str(payload.get("reviewer") or ""),
                     content=str(payload.get("content") or ""),
                     reason=str(payload.get("reason") or ""),
+                    action=str(payload.get("action") or ""),
                 )
             )
         except MajorProductionError as error:

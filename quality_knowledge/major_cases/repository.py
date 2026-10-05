@@ -504,6 +504,79 @@ class MajorKnowledgeRepository:
                 )
         return self.entry(entry_id) or {}
 
+    def replace_pending_source_fusion_entries(
+        self,
+        case_id: str,
+        event_id: str,
+        candidates: Iterable[dict],
+    ) -> list[dict]:
+        """Atomically replace pending machine candidates for an event."""
+        event = self.event(event_id)
+        if not event or event.get("case_id") != case_id:
+            raise ValueError("SOURCE_FUSION_EVENT_CASE_MISMATCH")
+        candidate_items = list(candidates)
+        for candidate in candidate_items:
+            status = str(candidate.get("status") or "")
+            content = str(candidate.get("content") or "")
+            evidence = list(candidate.get("evidence") or [])
+            if status == "MISSING":
+                if content.strip() or evidence:
+                    raise ValueError("SOURCE_FUSION_MISSING_MUST_BE_EMPTY")
+            elif status == "PENDING":
+                if not content.strip() or not evidence:
+                    raise ValueError("SOURCE_FUSION_CANDIDATE_REQUIRES_CONTENT_AND_EVIDENCE")
+            else:
+                raise ValueError("INVALID_SOURCE_FUSION_CANDIDATE_STATUS")
+
+        entry_ids: list[str] = []
+        with self.transaction() as connection:
+            connection.execute(
+                """UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP
+                   WHERE case_id=? AND event_id=? AND archived_at IS NULL
+                     AND status IN ('PENDING','MISSING')
+                     AND current_revision_id IN (
+                       SELECT revision_id FROM kb_entry_revision WHERE origin IN ('SOURCE_FUSION','AI')
+                     )""",
+                (case_id, event_id),
+            )
+            for candidate in candidate_items:
+                entry_id, revision_id = _id("KENTRY"), _id("KREV")
+                status = str(candidate["status"])
+                content = str(candidate.get("content") or "")
+                assertion_kind = "FACT" if status == "PENDING" else "UNKNOWN"
+                metadata = candidate.get("analysis_metadata") or {}
+                connection.execute(
+                    "INSERT INTO kb_entry(entry_id,case_id,event_id,entry_type,status) VALUES(?,?,?,?,?)",
+                    (entry_id, case_id, event_id, str(candidate["entry_type"]), status),
+                )
+                connection.execute(
+                    """INSERT INTO kb_entry_revision(
+                         revision_id,entry_id,revision_no,content,applicability,limitations,
+                         assertion_kind,origin,created_by)
+                       VALUES(?,?,1,?,'','',?,'SOURCE_FUSION','SOURCE_FUSION')""",
+                    (revision_id, entry_id, content, assertion_kind),
+                )
+                connection.execute(
+                    "UPDATE kb_entry SET current_revision_id=? WHERE entry_id=?",
+                    (revision_id, entry_id),
+                )
+                connection.execute(
+                    """INSERT INTO kb_entry_analysis_meta(
+                         revision_id,confidence,explanation,mechanism,metadata_json)
+                       VALUES(?,NULL,?,'',?)""",
+                    (revision_id, str(candidate.get("explanation") or ""), _json(metadata)),
+                )
+                for item in candidate.get("evidence") or []:
+                    connection.execute(
+                        """INSERT INTO kb_evidence(
+                             evidence_id,revision_id,fragment_id,source_link_id,locator,excerpt)
+                           VALUES(?,?,?,?,?,?)""",
+                        (_id("KEV"), revision_id, item.get("fragment_id"), item.get("source_link_id"),
+                         str(item.get("locator") or ""), str(item.get("excerpt") or "")),
+                    )
+                entry_ids.append(entry_id)
+        return [self.entry(entry_id) or {} for entry_id in entry_ids]
+
     def _entry_scope_kind(self, connection: sqlite3.Connection, entry: dict) -> str:
         if entry.get("event_id"):
             return "EVENT"

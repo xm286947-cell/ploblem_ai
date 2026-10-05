@@ -18,7 +18,7 @@
   <section class="case-card"><div class="case-card-head"><div><h2>1B. 单份 Major Source Intake 与 ITR 身份</h2><p>保留现有 PDF / DOCX / DOC 入口，建立 Event、ITR 与版本化 Source。</p></div></div>
     <form data-major-intake class="major-form"><label>案例标题<input name="title" required></label><label>Group Code<input name="group_code" value="MAJOR" required></label><label>Standard ITR<input name="standard_itr" required></label><label>领域<input name="domain" value="QUALITY"></label><label class="major-file">Major Source（PDF / DOCX / DOC）<input name="file" type="file" accept=".pdf,.docx,.doc" required></label><button class="case-button primary" type="submit">导入并建立候选上下文</button></form>
   </section>
-  <section class="case-card" data-major-workflow hidden><div class="case-card-head"><div><h2>2. AI Analysis → Human Review → Publish</h2><p data-major-identity></p></div><span class="case-status" data-major-state>INTAKED</span></div><div class="major-actions"><button class="case-button primary" data-major-analyze>运行 AI 分析</button><button class="case-button secondary" data-major-publish disabled>正式发布</button></div><div data-major-candidates class="major-candidates"></div></section>
+  <section class="case-card" data-major-workflow hidden><div class="case-card-head"><div><h2>2. Semantic Review → Human Confirmation</h2><p data-major-identity></p></div><span class="case-status" data-major-state>INTAKED</span></div><div class="major-actions"><button class="case-button primary" data-major-analyze>生成语义候选</button><button class="case-button secondary" data-major-publish disabled>正式发布</button></div><div data-major-candidates class="major-candidates"></div></section>
   <p data-major-message class="major-message" role="status"></p>
 </main>
 {% endblock %}

@@ -378,6 +378,7 @@ def create_p0_app(
             artifacts,
             major_runtime_db,
             provider=major_provider,
+            project_root=root,
         )
         major_case_restore_service = MajorCaseRestoreService(major_repository, root)
         major_mutation_guard = MajorMutationGuard()
