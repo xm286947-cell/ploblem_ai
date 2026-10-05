@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from services.hardware_case_r1_workbench import (
     HardwareR1WorkbenchError,
@@ -37,8 +37,9 @@ class HumanReviewRequest(BaseModel):
 
 
 class PromotionReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     reviewer: str = Field(min_length=1)
-    confirmed_content: dict[str, Any]
     review_comment: str | None = None
 
 
@@ -375,7 +376,6 @@ def create_hardware_r1_workbench_router(
             return promotion.review_item(
                 item_id,
                 reviewer=request.reviewer,
-                confirmed_content=request.confirmed_content,
                 review_time=datetime.now(timezone.utc),
                 review_comment=request.review_comment,
             )
