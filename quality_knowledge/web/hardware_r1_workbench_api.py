@@ -21,6 +21,7 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1PromotionError,
 )
 from services.hardware_knowledge_consumption import HardwareKnowledgeConsumptionError, HardwareKnowledgeConsumptionService
+from services.hardware_r1_e2e_nonprod_knowledge import HardwareR1ManagedNonProdError
 
 
 class ReviewConflictDecisionRequest(BaseModel):
@@ -108,6 +109,7 @@ def create_hardware_r1_workbench_router(
     promotion_service: HardwareR1KnowledgePromotionService | None = None,
     consumption_service: HardwareKnowledgeConsumptionService | None = None,
     publish_allowed: bool = True,
+    release_controller: Any | None = None,
     prefix: str = "/api/v2/hardware-cases/r1/workbench",
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-r1-workbench"])
@@ -366,13 +368,20 @@ def create_hardware_r1_workbench_router(
             raise HTTPException(status_code=503, detail="BLOCKED_BY_ENVIRONMENT")
         promotion = require_promotion_service()
         try:
-            return promotion.publish_item(
+            result = promotion.publish_item(
                 item_id,
                 publisher=request.publisher,
                 published_at=datetime.now(timezone.utc),
             )
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
+        if release_controller is None:
+            return result
+        try:
+            release = release_controller.ensure_queryable_release()
+        except HardwareR1ManagedNonProdError as error:
+            raise HTTPException(status_code=503, detail=error.code) from error
+        return {**result, "knowledge_release": release}
 
     @router.post("/items/{item_id}/promotion/verify")
     def promotion_verify(
@@ -384,6 +393,11 @@ def create_hardware_r1_workbench_router(
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
         promotion = require_promotion_service()
+        if release_controller is not None:
+            try:
+                release_controller.ensure_queryable_release()
+            except HardwareR1ManagedNonProdError as error:
+                raise HTTPException(status_code=503, detail=error.code) from error
         try:
             return promotion.verify_item(item_id)
         except HardwareR1PromotionError as error:
