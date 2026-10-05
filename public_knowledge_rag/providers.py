@@ -190,13 +190,13 @@ class OpenAICompatibleProvider:
 
     def _model_payload(self, question: str, contexts: list[SearchHit], *, test: bool = False) -> dict[str, object]:
         system, user = self._prompt(question, contexts)
-        limit = min(self.settings.max_generate_tokens, 8) if test else self.settings.max_generate_tokens
+        limit = min(self.settings.max_generate_tokens, 32) if test else self.settings.max_generate_tokens
         if self.settings.openai_protocol == "chat_completions":
             return {
                 "model": self.settings.openai_model,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 "temperature": self.settings.temperature,
-                "max_tokens": limit,
+                "max_completion_tokens": limit,
             }
         return {
             "model": self.settings.openai_model,

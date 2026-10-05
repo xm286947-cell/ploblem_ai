@@ -90,7 +90,7 @@ def test_test_connection_is_real_small_generation_request(monkeypatch):
     assert result["test_response_received"] is True
     assert seen["url"].endswith("/chat/completions")
     assert seen["payload"]["model"] == "provider-model"
-    assert seen["payload"]["max_tokens"] == 8
+    assert seen["payload"]["max_completion_tokens"] == 32
 
 
 def test_openai_settings_key_is_write_only_local_mode_0600(monkeypatch, tmp_path):
