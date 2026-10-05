@@ -258,7 +258,8 @@ async function executeRuntimeDiagnosis(){
     raw_output_ref:evidence,
     evidence_ref:evidence,
     collector:'STORAGE_MVP_USER_INPUT',
-    is_formally_consumable:true
+    quality_status:'VALID',
+    availability_status:'AVAILABLE'
   };
   $('#diagnosticRuntimeResult').innerHTML='<div class="card">正在执行 Existing Diagnostic Skill…</div>';
   try{
@@ -531,17 +532,30 @@ function downloadMvpSummary(){
 let RUNTIME_PARSE_RESULT=null;
 let RUNTIME_SNAPSHOT_ID=null;
 let RUNTIME_TREND=null;
+function runtimeLocalInputValue(date){
+  let d=date||new Date(),pad=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function runtimeCaptureIso(){
+  let raw=$('#runtimeCapturedAt')?.value||'';
+  if(!raw)return null;
+  let d=new Date(raw);
+  return Number.isNaN(d.getTime())?null:d.toISOString();
+}
+function runtimeImportConfirmed(){return !!$('#runtimeObservationConfirmed')?.checked}
 function renderRuntimeImportPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
   host.insertAdjacentHTML('beforeend',
     '<div id="runtimeImportPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME DATA INPUT</div><h3>运行数据快速导入</h3>'+
     '<div class="muted">粘贴 SMART / NVMe Health / EXT_CSD / ECC / Bad Block / MTD 输出；只提取显式字段，不做诊断推测。</div></div></div>'+
-    '<label>来源 / 命令<br><input id="runtimeImportSource" style="width:100%" placeholder="例如 nvme smart-log / mmc extcsd read / driver health log"></label>'+
+    '<div class="row"><label>来源 / 命令<br><input id="runtimeImportSource" style="min-width:320px" placeholder="例如 nvme smart-log / mmc extcsd read / driver health log"></label><label>实际采集时间<br><input id="runtimeCapturedAt" type="datetime-local"></label></div>'+
     '<label style="display:block;margin-top:8px">原始运行数据<br><textarea id="runtimeImportText" style="width:100%;min-height:150px" placeholder="粘贴原始命令输出或健康日志…"></textarea></label>'+
+    '<label style="display:block;margin-top:8px"><input id="runtimeObservationConfirmed" type="checkbox"> 我确认该输出来自所填器件/命令，且“实际采集时间”准确。未确认数据可保存，但不会进入正式寿命趋势或运行诊断。</label>'+
     '<div class="row" style="margin-top:10px"><button class="primary" onclick="parseRuntimeImport()">识别运行指标</button><button class="secondary" onclick="saveRuntimeSnapshot()">保存运行快照</button><small>运行数据只留在 Storage；不会发送给 Public Knowledge。</small></div>'+
     '<div id="runtimeImportResult" style="margin-top:10px"><div class="empty">等待输入运行数据。</div></div></div>'
   );
+  if($('#runtimeCapturedAt'))$('#runtimeCapturedAt').value=runtimeLocalInputValue(new Date());
 }
 async function parseRuntimeImport(){
   let d=CURRENT?.device,text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||'PASTED_RUNTIME_OUTPUT',box=$('#runtimeImportResult');
@@ -557,10 +571,12 @@ async function parseRuntimeImport(){
   }catch(e){box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
 }
 async function saveRuntimeSnapshot(){
-  let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT';
+  let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT',capturedAt=runtimeCaptureIso(),confirmed=runtimeImportConfirmed();
   if(!d)return;
   if(!items.length)return msg('请先识别运行指标',true);
+  if(!capturedAt)return msg('请填写有效的实际采集时间',true);
   if(RUNTIME_SNAPSHOT_ID)return msg('本次运行快照已保存：'+RUNTIME_SNAPSHOT_ID);
+  let snapshotItems=items.map(x=>({...x,quality_status:confirmed?'VALID':'UNKNOWN',availability_status:'AVAILABLE',confirmed_by_user:confirmed}));
   try{
     let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/runtime-snapshots',{
       method:'POST',
@@ -568,8 +584,8 @@ async function saveRuntimeSnapshot(){
       body:JSON.stringify({
         source_label:source,
         raw_text:text,
-        captured_at:new Date().toISOString(),
-        observations:items,
+        captured_at:capturedAt,
+        observations:snapshotItems,
         created_by:'Storage MVP UI'
       })
     });
@@ -631,7 +647,7 @@ async function loadRuntimeTrend(){
 }
 function parsedObservation(index){return (RUNTIME_PARSE_RESULT?.observations||[])[index]||null}
 function parsedRuntimeObservationPayload(x,d,index){
-  let source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT';
+  let source=$('#runtimeImportSource')?.value.trim()||'',capturedAt=runtimeCaptureIso(),confirmed=runtimeImportConfirmed();
   return {
     observation_id:'runtime-import-'+Date.now()+'-'+index,
     device_id:d.id,
@@ -640,14 +656,13 @@ function parsedRuntimeObservationPayload(x,d,index){
     raw_value:x.raw_value,
     normalized_value:x.normalized_value,
     unit:x.unit||'',
-    capture_time:new Date().toISOString(),
-    source_command_or_interface:source,
-    raw_output_ref:x.source_line||source,
-    evidence_ref:x.source_line||source,
+    capture_time:capturedAt,
+    source_command_or_interface:source||null,
+    raw_output_ref:x.source_line||source||null,
+    evidence_ref:x.source_line||null,
     collector:'STORAGE_MVP_RUNTIME_IMPORT',
-    is_formally_consumable:true,
-    quality_status:'VALID',
-    availability_status:'AVAILABLE'
+    quality_status:confirmed?'VALID':'UNKNOWN',
+    availability_status:capturedAt?'AVAILABLE':'NOT_AVAILABLE'
   };
 }
 async function executeParsedHealthAnalysis(){
@@ -655,6 +670,9 @@ async function executeParsedHealthAnalysis(){
   if(!d||!box)return;
   let diagItems=items.filter(x=>x.diagnostic_supported),lifeItems=items.filter(x=>x.suggested_lifetime_metric);
   if(!diagItems.length&&!lifeItems.length)return msg('当前运行数据没有可进入寿命或诊断场景的指标',true);
+  if(!runtimeImportConfirmed())return msg('请先确认运行数据来源和实际采集时间，再执行正式健康分析',true);
+  if(!$('#runtimeImportSource')?.value.trim())return msg('请填写真实读取接口 / 命令',true);
+  if(!runtimeCaptureIso())return msg('请填写有效的实际采集时间',true);
   box.innerHTML='<div class="card">正在保存运行快照并执行健康分析：寿命 '+lifeItems.length+' 项 · 诊断 '+diagItems.length+' 项…</div>';
   if(!RUNTIME_SNAPSHOT_ID){
     try{await saveRuntimeSnapshot()}catch(e){box.insertAdjacentHTML('beforeend','<div class="warning card"><b>快照未保存</b><p>'+esc(e.message)+'</p><small>本次分析仍继续，但不会进入运行趋势。</small></div>')}
@@ -717,22 +735,8 @@ async function executeParsedBatchDiagnosis(){
   let d=CURRENT?.device,items=(RUNTIME_PARSE_RESULT?.observations||[]).filter(x=>x.diagnostic_supported),box=$('#runtimeBatchDiagnosisResult');
   if(!d||!box)return;
   if(!items.length)return msg('当前运行数据没有可诊断指标',true);
-  let source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT',now=new Date().toISOString();
-  let observations=items.map((x,i)=>({
-    observation_id:'runtime-batch-'+Date.now()+'-'+i,
-    device_id:d.id,
-    device_type:d.device_type,
-    metric_name:x.metric_name,
-    raw_value:x.raw_value,
-    normalized_value:x.normalized_value,
-    unit:x.unit||'',
-    capture_time:now,
-    source_command_or_interface:source,
-    raw_output_ref:x.source_line||source,
-    evidence_ref:x.source_line||source,
-    collector:'STORAGE_MVP_RUNTIME_IMPORT',
-    is_formally_consumable:true
-  }));
+  if(!runtimeImportConfirmed())return msg('请先确认运行数据来源和实际采集时间',true);
+  let observations=items.map((x,i)=>parsedRuntimeObservationPayload(x,d,'B'+i));
   box.innerHTML='<div class="card">正在用 Existing Diagnostic Skill 分析 '+items.length+' 个运行指标…</div>';
   try{
     let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/skills/storage-diagnostic-validation/execute',{
