@@ -497,19 +497,19 @@ class StorageDomainSkillAdapter:
 
         if "pre_eol_info" in released_semantics:
             pre_eol = number("pre_eol_info")
-            if pre_eol is not None and pre_eol >= 3:
+            if pre_eol == 3:
                 signals.append(signal(
                     "pre_eol_info",
                     "EMMC_PRE_EOL_URGENT",
                     "CRITICAL",
-                    "PRE_EOL_INFO 落入已发布语义支持的紧急状态。",
+                    "PRE_EOL_INFO 精确匹配已发布语义中的紧急状态。",
                 ))
-            elif pre_eol is not None and pre_eol >= 2:
+            elif pre_eol == 2:
                 signals.append(signal(
                     "pre_eol_info",
                     "EMMC_PRE_EOL_WARNING",
                     "WARNING",
-                    "PRE_EOL_INFO 落入已发布语义支持的预警状态。",
+                    "PRE_EOL_INFO 精确匹配已发布语义中的预警状态。",
                 ))
 
         if "percentage_used" in released_semantics:
