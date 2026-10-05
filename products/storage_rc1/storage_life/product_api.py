@@ -609,6 +609,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     for item in scenario_items:
         if item["status"] == "NOT_RUN":
             remaining.append(f"执行{item['label']}")
+    action_items = core.list_engineering_actions(device_id)
     return {
         "device": detail["device"],
         "lifecycle": detail["lifecycle"],
@@ -636,9 +637,9 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             "interpretation_performed": False,
         },
         "action_checklist": {
-            "items": core.list_engineering_actions(device_id),
+            "items": action_items,
             "open_count": sum(
-                1 for x in core.list_engineering_actions(device_id)
+                1 for x in action_items
                 if x.get("status") in {"OPEN", "IN_PROGRESS"}
             ),
         },
