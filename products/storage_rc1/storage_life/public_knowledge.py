@@ -231,7 +231,7 @@ def _clean_public_context(value: str | None, limit: int) -> str | None:
 
 def _context_query(body: ContextSearchBody) -> tuple[str, str]:
     focus = (body.focus or "PARAMETER").strip().upper()
-    if focus not in {"DEVICE", "PARAMETER", "COMPARE", "DIAGNOSIS", "OPTIMIZATION"}:
+    if focus not in {"DEVICE", "PARAMETER", "COMPARE", "LIFETIME", "RISK", "DIAGNOSIS", "OPTIMIZATION"}:
         raise HTTPException(422, "未知的公共知识查询场景。")
     # Deliberately whitelist only public device identity + the public
     # parameter/indicator name. There is no generic 'context' field here, so
