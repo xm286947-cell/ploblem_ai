@@ -664,18 +664,30 @@ class HardwareR1WorkbenchService:
         # source/evidence/provenance, conflicts and review metadata are
         # reconstructed from the authoritative Durable Candidate.
         reviewed = deepcopy(original)
-        protected = {
-            "contract_version",
-            "identity",
-            "source_fact",
-            "evidence",
-            "conflicts",
-            "review",
-            "provenance",
-        }
-        for key, value in confirmed_content.items():
-            if key not in protected:
-                reviewed[key] = deepcopy(value)
+
+        def merge_review_values(target: Any, incoming: Any) -> None:
+            if isinstance(target, dict):
+                if "value" in target:
+                    if isinstance(incoming, dict) and "value" in incoming:
+                        target["value"] = deepcopy(incoming["value"])
+                    return
+                if not isinstance(incoming, dict):
+                    return
+                for key, child in target.items():
+                    if key in incoming:
+                        merge_review_values(child, incoming[key])
+                return
+            if isinstance(target, list) and isinstance(incoming, list):
+                for index, child in enumerate(target):
+                    if index < len(incoming):
+                        merge_review_values(child, incoming[index])
+
+        # Only business field values are editable. Evidence bindings,
+        # extraction status/confidence, derived-from metadata and every
+        # Source/identity/provenance field remain server-owned.
+        for key in ("engineering_context", "facts", "reusable_knowledge"):
+            if key in reviewed and key in confirmed_content:
+                merge_review_values(reviewed[key], confirmed_content[key])
 
         reviewed_at = _utc_now()
         conflicts = reviewed.get("conflicts")
