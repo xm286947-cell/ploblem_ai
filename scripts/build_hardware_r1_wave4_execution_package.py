@@ -43,7 +43,14 @@ def copy_file(source: Path, stage: Path) -> None:
         raise SystemExit(f"MISSING_REQUIRED_FILE={source.relative_to(ROOT)}")
     target = stage / source.relative_to(ROOT)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target)
+    payload = source.read_bytes()
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        target.write_bytes(payload)
+    else:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        target.write_bytes(normalized.encode("utf-8"))
 
 
 def main() -> int:
