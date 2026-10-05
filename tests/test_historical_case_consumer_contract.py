@@ -12,6 +12,7 @@ from services import (
     HistoricalCaseConsumerService,
     HistoricalCaseContractError,
 )
+from services.historical_case_contract import REPEAT_RISK_CONTEXT_CONTRACT_VERSION
 
 
 def _save_case(
@@ -74,6 +75,99 @@ def _save_case(
         }]}
 
     return HistoricalCaseConsumerService(repository, repeat_search=search)
+
+
+def _save_typed_projection(root: Path, *, missing: set[str] | None = None, corrupt: str | None = None):
+    service = _save_case(root)
+    repository = JsonArtifactRepository(root)
+    missing = missing or set()
+    cause_paths = {
+        "TRC_OCCURRENCE": ("trc", "occurrence"),
+        "TRC_ESCAPE": ("trc", "escape"),
+        "MRC_OCCURRENCE": ("mrc", "occurrence"),
+        "MRC_ESCAPE": ("mrc", "escape"),
+    }
+    action_paths = {
+        "TECHNICAL_ACTION": "technical_actions",
+        "MANAGEMENT_ACTION": "management_actions",
+        "CORRECTIVE_ACTION": "corrective_actions",
+        "PREVENTIVE_ACTION": "preventive_actions",
+    }
+    sections = []
+    section_sequence = 0
+
+    def item(entry_type: str, value: str, modalities=("PDF",)):
+        nonlocal section_sequence
+        refs = []
+        for index, modality in enumerate(modalities, start=1):
+            section_sequence += 1
+            evidence_id = f"EVD-{entry_type}-{section_sequence}"
+            raw_text = f"原文 {entry_type} {index}"
+            refs.append({"source_type": modality, "source_location": f"evidence://{evidence_id}", "quote": raw_text})
+            section = {
+                "evidence_id": evidence_id,
+                "entry_type": entry_type,
+                "source_modality": modality,
+                "source_type": "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT",
+                "source_id": f"ITR-H-{entry_type}",
+                "source_version": "PUB-REV-1",
+                "source_ref": f"SOURCE:ITR-H-{entry_type}@PUB-REV-1",
+                "origin_source_id": f"ORIGIN-{entry_type}-{index}",
+                "origin_source_version": f"ORIGIN-REV-{index}",
+                "origin_source_ref": f"ORIGIN:ID@REV-{index}",
+                "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
+                "page": 3 if modality == "PDF" else None,
+                "section": entry_type,
+                "raw_text": raw_text,
+                "url": None,
+            }
+            if corrupt == "wrong_type" and entry_type == "TRC_OCCURRENCE":
+                section["entry_type"] = "TRC_ESCAPE"
+            if corrupt == "duplicate_id" and entry_type == "TRC_OCCURRENCE":
+                sections.append(dict(section))
+            sections.append(section)
+        declared = "FUSED" if len(set(modalities)) == 2 else modalities[0]
+        return {"value": value, "source_type": declared, "evidence_refs": refs}
+
+    analysis = {"trc": {}, "mrc": {}}
+    for entry_type, (family, side) in cause_paths.items():
+        if entry_type in missing:
+            analysis[family][side] = {"standard": "", "evidence_refs": []}
+        else:
+            mods = ("EXCEL", "PDF") if entry_type == "TRC_OCCURRENCE" else ("PDF",)
+            projected = item(entry_type, f"标准 {entry_type}", mods)
+            analysis[family][side] = {
+                "standard": projected["value"],
+                "evidence_refs": projected["evidence_refs"],
+            }
+    solution = {}
+    for entry_type, field in action_paths.items():
+        if entry_type in missing:
+            solution[field] = []
+        elif entry_type == "CORRECTIVE_ACTION":
+            solution[field] = [
+                item(entry_type, "纠正措施 A"),
+                item(entry_type, "纠正措施 B"),
+            ]
+        else:
+            solution[field] = [item(entry_type, f"措施 {entry_type}")]
+    case = {
+        "metadata": {
+            "case_id": "CASE-H-1",
+            "itr_id": "ITR-H-1",
+            "semantic_projection_contract": "major-semantic-publish/v1" if corrupt != "unknown_contract" else "major-semantic-publish/v9",
+        },
+        "business_context": {"product": "控制器"},
+        "problem": {"standard_description": "历史问题", "phenomenon": []},
+        "analysis": analysis,
+        "solution": solution,
+        "status": "ACTIVE",
+    }
+    if corrupt == "quote_mismatch":
+        analysis["trc"]["occurrence"]["evidence_refs"][0]["quote"] = "并非原始 Evidence"
+    repository.save("knowledge/enriched_case/CASE-H-1.json", case)
+    repository.save("knowledge/raw_evidence/CASE-H-1.json", {"case_id": "CASE-H-1", "sections": sections})
+    return service
 
 
 def test_case_01_search_returns_stable_case_id(tmp_path: Path) -> None:
@@ -152,3 +246,79 @@ def test_case_10_consumer_never_needs_internal_path(tmp_path: Path) -> None:
     assert "internal_path" not in public_payload
     assert "retrieval_doc_path" not in public_payload
     assert "source_case_path" not in public_payload
+
+
+def test_repeat_risk_context_is_separate_and_preserves_typed_slots_and_lineage(tmp_path: Path):
+    service = _save_typed_projection(tmp_path)
+    context = service.get_repeat_risk_context("CASE-H-1")
+
+    assert context["contract_version"] == REPEAT_RISK_CONTEXT_CONTRACT_VERSION
+    assert context["semantic_mode"] == "TYPED"
+    assert {item["semantic_type"] for item in context["typed_causes"]} == {
+        "TRC_OCCURRENCE", "TRC_ESCAPE", "MRC_OCCURRENCE", "MRC_ESCAPE"
+    }
+    actions = context["typed_actions"]
+    assert len(actions) == 5
+    correction = [item for item in actions if item["semantic_type"] == "CORRECTIVE_ACTION"]
+    assert [item["value"] for item in correction] == ["纠正措施 A", "纠正措施 B"]
+    assert correction[0]["evidence"][0]["evidence_id"] != correction[1]["evidence"][0]["evidence_id"]
+    fused = next(item for item in context["typed_causes"] if item["semantic_type"] == "TRC_OCCURRENCE")
+    assert fused["source_type"] == "FUSED"
+    assert {evidence["source_type"] for evidence in fused["evidence"]} == {"EXCEL", "PDF"}
+    assert fused["evidence"][0]["origin_source_version"] == "ORIGIN-REV-1"
+    historical_v1 = service.get_case("CASE-H-1")
+    assert historical_v1["contract_version"] == CONTRACT_VERSION
+    assert "typed_causes" not in historical_v1
+    assert "semantic_mode" not in historical_v1
+
+
+def test_repeat_risk_missing_slots_remain_missing_without_inference(tmp_path: Path):
+    service = _save_typed_projection(tmp_path, missing={"TRC_ESCAPE", "PREVENTIVE_ACTION"})
+    context = service.get_repeat_risk_context("CASE-H-1")
+
+    assert context["semantic_coverage"]["TRC_ESCAPE"] == "MISSING"
+    assert context["semantic_coverage"]["PREVENTIVE_ACTION"] == "MISSING"
+    assert all(item["semantic_type"] != "TRC_ESCAPE" for item in context["typed_causes"])
+    assert all(item["semantic_type"] != "PREVENTIVE_ACTION" for item in context["typed_actions"])
+
+
+def test_unclassified_source_modality_does_not_invent_excel_pdf_or_fused(tmp_path: Path):
+    service = _save_typed_projection(tmp_path)
+    repository = JsonArtifactRepository(tmp_path)
+    case = repository.load("knowledge/enriched_case/CASE-H-1.json")
+    raw = repository.load("knowledge/raw_evidence/CASE-H-1.json")
+    ref = case["analysis"]["trc"]["occurrence"]["evidence_refs"][0]
+    evidence_id = ref["source_location"].removeprefix("evidence://")
+    section = next(item for item in raw["sections"] if item["evidence_id"] == evidence_id)
+    section["source_modality"] = "DOCX"
+    ref["source_type"] = "DOCX"
+    repository.save("knowledge/enriched_case/CASE-H-1.json", case)
+    repository.save("knowledge/raw_evidence/CASE-H-1.json", raw)
+
+    context = service.get_repeat_risk_context("CASE-H-1")
+    occurrence = next(item for item in context["typed_causes"] if item["semantic_type"] == "TRC_OCCURRENCE")
+
+    assert occurrence["source_type"] is None
+    assert occurrence["evidence"][0]["source_type"] == "DOCX"
+
+
+def test_legacy_case_is_generic_only_and_never_semantically_classified(tmp_path: Path):
+    context = _save_case(tmp_path).get_repeat_risk_context("CASE-H-1")
+
+    assert context["semantic_mode"] == "LEGACY_GENERIC_ONLY"
+    assert context["typed_causes"] == []
+    assert context["typed_actions"] == []
+    assert set(context["semantic_coverage"].values()) == {"LEGACY_GENERIC_ONLY"}
+
+
+@pytest.mark.parametrize("corrupt", ["unknown_contract", "wrong_type", "quote_mismatch", "duplicate_id"])
+def test_invalid_typed_contract_or_evidence_fails_closed(tmp_path: Path, corrupt: str):
+    service = _save_typed_projection(tmp_path, corrupt=corrupt)
+
+    with pytest.raises(HistoricalCaseContractError) as error:
+        service.get_repeat_risk_context("CASE-H-1")
+
+    assert error.value.code in {
+        "CASE_SEMANTIC_CONTRACT_UNSUPPORTED",
+        "CASE_SEMANTIC_EVIDENCE_INVALID",
+    }

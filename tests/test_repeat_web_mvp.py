@@ -193,7 +193,82 @@ def _client(tmp_path: Path):
         case_service=case_service,
     )
     app = create_p0_app(db, stage_runner=None, repeat_web=facade)
+    mode["artifacts"] = artifacts
     return TestClient(app), mode
+
+
+def _install_i4_typed_case(artifacts: JsonArtifactRepository, *, missing=(), corrupt=False):
+    case = artifacts.load("knowledge/enriched_case/HCASE-1.json")
+    case["metadata"]["semantic_projection_contract"] = "major-semantic-publish/v1"
+    analysis = case["analysis"]
+    analysis["trc"] = {}
+    analysis["mrc"] = {}
+    sections = []
+    cause_types = {
+        "TRC_OCCURRENCE": ("trc", "occurrence"),
+        "TRC_ESCAPE": ("trc", "escape"),
+        "MRC_OCCURRENCE": ("mrc", "occurrence"),
+        "MRC_ESCAPE": ("mrc", "escape"),
+    }
+    action_types = {
+        "TECHNICAL_ACTION": "technical_actions",
+        "MANAGEMENT_ACTION": "management_actions",
+        "CORRECTIVE_ACTION": "corrective_actions",
+        "PREVENTIVE_ACTION": "preventive_actions",
+    }
+
+    def projected(entry_type, value, sequence):
+        evidence_id = f"I4-EVD-{entry_type}-{sequence}"
+        raw_text = f"原始 Evidence {entry_type} {sequence}"
+        modality = "PDF" if sequence % 2 else "EXCEL"
+        sections.append({
+            "evidence_id": evidence_id,
+            "entry_type": entry_type if not (corrupt and entry_type == "TRC_OCCURRENCE") else "TRC_ESCAPE",
+            "source_modality": modality,
+            "source_type": "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT",
+            "source_id": "ITR-H-1",
+            "source_version": "PUB-REV-1",
+            "source_ref": "MAJOR_EVENT:ITR-H-1@PUB-REV-1",
+            "origin_source_id": f"SRC-{sequence}",
+            "origin_source_version": f"SRC-REV-{sequence}",
+            "origin_source_ref": f"SOURCE:SRC-{sequence}@SRC-REV-{sequence}",
+            "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
+            "page": 7 if modality == "PDF" else None,
+            "section": entry_type,
+            "raw_text": raw_text,
+            "url": None,
+        })
+        return {"value": value, "source_type": modality, "evidence_refs": [{
+            "source_type": modality,
+            "source_location": f"evidence://{evidence_id}",
+            "quote": raw_text,
+        }]}
+
+    sequence = 0
+    for entry_type, (family, side) in cause_types.items():
+        if entry_type in missing:
+            analysis[family][side] = {"standard": "", "evidence_refs": []}
+        else:
+            sequence += 1
+            entry = projected(entry_type, f"Typed {entry_type}", sequence)
+            analysis[family][side] = {"standard": entry["value"], "evidence_refs": entry["evidence_refs"]}
+
+    for entry_type, field in action_types.items():
+        if entry_type in missing:
+            case["solution"][field] = []
+            continue
+        sequence += 1
+        values = [projected(entry_type, f"Typed {entry_type}", sequence)]
+        if entry_type == "CORRECTIVE_ACTION":
+            sequence += 1
+            values.append(projected(entry_type, "Typed CORRECTIVE_ACTION second", sequence))
+        case["solution"][field] = values
+
+    artifacts.save("knowledge/enriched_case/HCASE-1.json", case)
+    artifacts.save("knowledge/raw_evidence/HCASE-1.json", {
+        "case_id": "HCASE-1",
+        "sections": sections,
+    })
 
 
 def _query(client: TestClient, knowledge_id: str, include: bool = False):
@@ -254,6 +329,8 @@ def test_success_candidate_evidence_roundtrip(tmp_path: Path):
     assert candidate["root_causes"] == ["保存路径在掉电窗口存在未完成写入"]
     assert candidate["measures"] == ["增加原子保存与恢复校验"]
     assert candidate["evidence"][0]["raw_text"] == "掉电窗口存在未完成写入。"
+    assert candidate["semantic_mode"] == "LEGACY_GENERIC_ONLY"
+    assert candidate["typed_causes"] == []
     detail = client.get("/api/v2/historical-cases/HCASE-1").json()
     assert detail["evidence"][0]["page"] == 7
 
@@ -317,6 +394,46 @@ def test_refresh_restores_existing_query_without_rerun(tmp_path: Path):
     assert restored.status_code == 200
     assert restored.json()["result"]["query_id"] == first["query_id"]
     assert mode["calls"] == calls_after_query
+
+
+def test_i4_typed_semantics_are_additive_with_fixed_coverage_and_bound_evidence(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    _install_i4_typed_case(mode["artifacts"], missing={"TRC_ESCAPE", "PREVENTIVE_ACTION"})
+
+    result = _query(client, "K-ITR-1").json()["result"]
+    candidate = result["candidates"][0]
+
+    assert result["result_status"] == "READY_FOR_REVIEW"
+    assert candidate["semantic_mode"] == "TYPED"
+    assert {item["semantic_type"] for item in candidate["typed_causes"]} == {
+        "TRC_OCCURRENCE", "MRC_OCCURRENCE", "MRC_ESCAPE"
+    }
+    assert candidate["semantic_coverage"]["TRC_ESCAPE"] == "MISSING"
+    assert candidate["semantic_coverage"]["PREVENTIVE_ACTION"] == "MISSING"
+    corrective = [item for item in candidate["typed_actions"] if item["semantic_type"] == "CORRECTIVE_ACTION"]
+    assert [item["value"] for item in corrective] == ["Typed CORRECTIVE_ACTION", "Typed CORRECTIVE_ACTION second"]
+    assert corrective[0]["evidence"][0]["evidence_id"] != corrective[1]["evidence"][0]["evidence_id"]
+    assert corrective[0]["evidence"][0]["origin_source_ref"].startswith("SOURCE:")
+    assert candidate["rank"] == 1 and candidate["retrieval_score"] == 0.87
+    assert candidate["why_relevant"][0]["text"] == "问题均发生于掉电恢复场景"
+
+
+def test_i4_corrupt_typed_evidence_keeps_ranked_candidate_incomplete_no_legacy_fallback(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    _install_i4_typed_case(mode["artifacts"], corrupt=True)
+
+    result = _query(client, "K-ITR-1").json()["result"]
+    candidate = result["candidates"][0]
+
+    assert result["result_status"] == "INCOMPLETE"
+    assert result["search_status"] == "INCOMPLETE"
+    assert candidate["case_id"] == "HCASE-1"
+    assert candidate["rank"] == 1
+    assert candidate["detail_status"] == "INCOMPLETE"
+    assert candidate["detail_error"] == "CASE_SEMANTIC_EVIDENCE_INVALID"
+    assert candidate["root_causes"] == []
+    assert candidate["measures"] == []
+    assert result["human_decision"]["decision"] == "PENDING"
 
 
 def test_case_list_defaults_to_published_only(tmp_path: Path):

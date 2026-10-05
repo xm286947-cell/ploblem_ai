@@ -287,3 +287,53 @@ def test_result_preserves_query_trace_for_optional_context_audit(tmp_path):
         "missed_test_ref": "MISS-9",
         "algorithm_version": "repeat-risk/v1",
     }
+
+
+def test_typed_semantic_snapshot_and_decision_restore_without_reprojection(tmp_path):
+    repository = _repository(tmp_path)
+    _save_trace(repository)
+    service = RepeatResultService(repository)
+    semantic_item = {
+        "semantic_type": "CORRECTIVE_ACTION",
+        "value": "增加掉电恢复校验",
+        "source_type": "PDF",
+        "evidence": [{
+            "evidence_id": "EVD-1",
+            "source_type": "PDF",
+            "source_id": "ITR-H-1",
+            "source_version": "REV-2",
+            "source_ref": "PDF:ITR-H-1@REV-2",
+            "origin_source_id": "DOC-V2",
+            "origin_source_version": "DOC-V2",
+            "origin_source_ref": "PDF:DOC-V2@DOC-V2",
+            "file_name": "report.pdf",
+            "page": 4,
+            "section": "actions",
+            "raw_text": "增加掉电恢复校验",
+            "url": None,
+        }],
+    }
+    coverage = {entry_type: "MISSING" for entry_type in (
+        "TRC_OCCURRENCE", "TRC_ESCAPE", "MRC_OCCURRENCE", "MRC_ESCAPE",
+        "TECHNICAL_ACTION", "MANAGEMENT_ACTION", "CORRECTIVE_ACTION", "PREVENTIVE_ACTION",
+    )}
+    coverage["CORRECTIVE_ACTION"] = "PRESENT"
+    candidate = _search_candidate()
+    candidate.update({
+        "semantic_mode": "TYPED",
+        "semantic_contract_version": "major-semantic-publish/v1",
+        "typed_causes": [],
+        "typed_actions": [semantic_item],
+        "semantic_coverage": coverage,
+        "semantic_evidence_status": "COMPLETE",
+    })
+
+    first = service.build(_search_result(candidates=[candidate]))
+    saved = service.decide("RQ-1", "SIMILAR", decided_by="reviewer", reason="证据部分相似")
+    restored = service.get("RQ-1")
+
+    assert first["candidates"][0]["typed_actions"] == [semantic_item]
+    assert restored["candidates"][0]["typed_actions"] == [semantic_item]
+    assert restored["candidates"][0]["semantic_coverage"] == coverage
+    assert restored["human_decision"] == saved["human_decision"]
+    assert restored["generated_at"] == first["generated_at"]
