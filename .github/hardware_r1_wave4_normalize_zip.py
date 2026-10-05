@@ -43,6 +43,7 @@ def write_archive() -> None:
     with zipfile.ZipFile(ARCHIVE, "w", compression=zipfile.ZIP_DEFLATED) as output:
         for name in sorted(entries):
             info = zipfile.ZipInfo(name)
+            info.create_system = 3
             info.date_time = (2026, 1, 1, 0, 0, 0)
             mode = 0o755 if name.endswith(".command") else 0o644
             info.external_attr = (stat.S_IFREG | mode) << 16
