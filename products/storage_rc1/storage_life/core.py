@@ -130,6 +130,17 @@ def connect():
       ON runtime_snapshot_batches(device_id,captured_at DESC,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_metric_time
       ON runtime_snapshot_observations(device_id,metric_name,created_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_actions(id TEXT PRIMARY KEY,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      source_assessment_id TEXT,
+      action_type TEXT, title TEXT, detail TEXT DEFAULT '',
+      status TEXT DEFAULT 'OPEN',
+      evidence_refs_json TEXT DEFAULT '[]',
+      knowledge_refs_json TEXT DEFAULT '[]',
+      created_by TEXT DEFAULT 'Storage MVP',
+      created_at TEXT, updated_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_engineering_actions_device_status
+      ON engineering_actions(device_id,status,updated_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -2110,6 +2121,82 @@ def runtime_metric_trends(device_id, limit=40):
         "snapshot_count": len(snapshots),
         "metrics": result,
         "interpretation_performed": False,
+    }
+
+
+def create_engineering_actions(device_id, source_assessment_id, actions, *,
+                               evidence_refs=None, knowledge_refs=None,
+                               created_by="Storage MVP"):
+    """Persist user-facing engineering actions from an existing assessment result."""
+    import json
+    allowed_types = {"SOFTWARE_CONTROL", "TEST_VALIDATION", "MONITORING", "FOLLOW_UP"}
+    created = []
+    timestamp = now()
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        for item in actions or []:
+            action_type = str(item.get("action_type") or "FOLLOW_UP").upper()
+            if action_type not in allowed_types:
+                action_type = "FOLLOW_UP"
+            title = str(item.get("title") or item.get("detail") or "").strip()
+            detail = str(item.get("detail") or title).strip()
+            if not title:
+                continue
+            duplicate = con.execute("""SELECT id FROM engineering_actions
+              WHERE device_id=? AND source_assessment_id=? AND action_type=? AND title=?
+                AND status IN ('OPEN','IN_PROGRESS') LIMIT 1""",
+              (device_id, source_assessment_id, action_type, title)).fetchone()
+            if duplicate:
+                continue
+            action_id = uuid4().hex
+            con.execute("""INSERT INTO engineering_actions(
+              id,device_id,source_assessment_id,action_type,title,detail,status,
+              evidence_refs_json,knowledge_refs_json,created_by,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                action_id, device_id, source_assessment_id, action_type, title, detail, "OPEN",
+                json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                str(created_by or "Storage MVP"), timestamp, timestamp,
+            ))
+            created.append(action_id)
+    return list_engineering_actions(device_id)
+
+
+def list_engineering_actions(device_id, include_closed=True):
+    import json
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        sql = """SELECT * FROM engineering_actions WHERE device_id=?"""
+        params = [device_id]
+        if not include_closed:
+            sql += " AND status IN ('OPEN','IN_PROGRESS')"
+        sql += " ORDER BY CASE status WHEN 'IN_PROGRESS' THEN 0 WHEN 'OPEN' THEN 1 WHEN 'DONE' THEN 2 ELSE 3 END, updated_at DESC,id"
+        items = rows(con, sql, tuple(params))
+    for item in items:
+        item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
+        item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
+    return items
+
+
+def update_engineering_action(action_id, status, *, updated_by="Storage MVP"):
+    allowed = {"OPEN", "IN_PROGRESS", "DONE", "WAIVED"}
+    status = str(status or "").upper()
+    if status not in allowed:
+        raise ValueError("ACTION_STATUS_INVALID")
+    timestamp = now()
+    with connect() as con:
+        row = con.execute("SELECT * FROM engineering_actions WHERE id=?", (action_id,)).fetchone()
+        if not row:
+            raise KeyError(action_id)
+        con.execute("""UPDATE engineering_actions
+          SET status=?,updated_at=?,created_by=CASE WHEN ?='' THEN created_by ELSE ? END
+          WHERE id=?""", (status, timestamp, str(updated_by or ""), str(updated_by or ""), action_id))
+        device_id = row["device_id"]
+    return {
+        "action": next(x for x in list_engineering_actions(device_id) if x["id"] == action_id),
+        "device_id": device_id,
     }
 
 
