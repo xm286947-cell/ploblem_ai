@@ -125,7 +125,9 @@ def connect():
       batch_id TEXT REFERENCES runtime_snapshot_batches(id) ON DELETE CASCADE,
       device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
       metric_name TEXT, raw_value TEXT, normalized_value TEXT, unit TEXT DEFAULT '',
-      source_line TEXT DEFAULT '', created_at TEXT);
+      source_line TEXT DEFAULT '', quality_status TEXT DEFAULT 'UNKNOWN',
+      availability_status TEXT DEFAULT 'NOT_AVAILABLE', confirmed_by_user INTEGER DEFAULT 0,
+      created_at TEXT);
     CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_device_time
       ON runtime_snapshot_batches(device_id,captured_at DESC,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_metric_time
@@ -165,6 +167,14 @@ def connect():
     history_columns = {row[1] for row in con.execute("PRAGMA table_info(candidate_review_history)")}
     if "confirm_mode" not in history_columns:
         con.execute("ALTER TABLE candidate_review_history ADD COLUMN confirm_mode TEXT DEFAULT 'single'")
+    runtime_obs_columns = {row[1] for row in con.execute("PRAGMA table_info(runtime_snapshot_observations)")}
+    for column, declaration in (
+        ("quality_status", "TEXT DEFAULT 'UNKNOWN'"),
+        ("availability_status", "TEXT DEFAULT 'NOT_AVAILABLE'"),
+        ("confirmed_by_user", "INTEGER DEFAULT 0"),
+    ):
+        if column not in runtime_obs_columns:
+            con.execute(f"ALTER TABLE runtime_snapshot_observations ADD COLUMN {column} {declaration}")
         # Older V0.5.x databases allowed only SSD/eMMC/Raw NAND. Rebuild the three dependent
     # tables once so NOR Flash and the user-facing NAND Flash name can coexist with legacy data.
     device_sql = (con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='devices'").fetchone() or [""])[0] or ""
@@ -2034,6 +2044,9 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
             "normalized_value": "" if normalized is None else str(normalized),
             "unit": str(item.get("unit") or ""),
             "source_line": str(item.get("source_line") or item.get("evidence_ref") or "")[:4000],
+            "quality_status": str(item.get("quality_status") or "UNKNOWN").upper(),
+            "availability_status": str(item.get("availability_status") or "NOT_AVAILABLE").upper(),
+            "confirmed_by_user": 1 if item.get("confirmed_by_user") is True else 0,
             "ordinal": index,
         })
     if not rows_to_save:
@@ -2048,10 +2061,12 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
           (batch_id, device_id, source_label, raw_text, captured_at, str(created_by or "Storage MVP"), created_at))
         for item in rows_to_save:
             con.execute("""INSERT INTO runtime_snapshot_observations
-              (id,batch_id,device_id,metric_name,raw_value,normalized_value,unit,source_line,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?)""",
+              (id,batch_id,device_id,metric_name,raw_value,normalized_value,unit,source_line,
+               quality_status,availability_status,confirmed_by_user,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
               (item["id"], batch_id, device_id, item["metric_name"], item["raw_value"],
-               item["normalized_value"], item["unit"], item["source_line"], created_at))
+               item["normalized_value"], item["unit"], item["source_line"],
+               item["quality_status"], item["availability_status"], item["confirmed_by_user"], created_at))
 
     return get_runtime_snapshot(batch_id)
 
@@ -2061,7 +2076,8 @@ def get_runtime_snapshot(batch_id):
         batch = con.execute("SELECT * FROM runtime_snapshot_batches WHERE id=?", (batch_id,)).fetchone()
         if not batch:
             raise KeyError(batch_id)
-        observations = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,created_at
+        observations = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,
+          quality_status,availability_status,confirmed_by_user,created_at
           FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch_id,))
     item = dict(batch)
     item["observations"] = observations
@@ -2080,19 +2096,25 @@ def list_runtime_snapshots(device_id, limit=20):
         batches = rows(con, """SELECT * FROM runtime_snapshot_batches WHERE device_id=?
           ORDER BY captured_at DESC,created_at DESC,id DESC LIMIT ?""", (device_id, limit))
         for batch in batches:
-            batch["observations"] = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,created_at
+            batch["observations"] = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,
+              quality_status,availability_status,confirmed_by_user,created_at
               FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch["id"],))
             batch["observation_count"] = len(batch["observations"])
     return batches
 
 
 def runtime_metric_trends(device_id, limit=40):
-    """Return per-metric history and simple deltas without interpreting risk."""
+    """Return validated per-metric history and simple deltas without interpreting risk."""
     snapshots = list_runtime_snapshots(device_id, limit=limit)
     series = {}
     for batch in reversed(snapshots):
         for obs in batch.get("observations") or []:
             metric = obs["metric_name"]
+            formally_consumable = bool(
+                str(obs.get("quality_status") or "").upper() == "VALID"
+                and str(obs.get("availability_status") or "").upper() == "AVAILABLE"
+                and int(obs.get("confirmed_by_user") or 0) == 1
+            )
             point = {
                 "batch_id": batch["id"],
                 "captured_at": batch["captured_at"],
@@ -2101,6 +2123,10 @@ def runtime_metric_trends(device_id, limit=40):
                 "unit": obs.get("unit") or "",
                 "source_label": batch.get("source_label") or "",
                 "source_line": obs.get("source_line") or "",
+                "quality_status": obs.get("quality_status") or "UNKNOWN",
+                "availability_status": obs.get("availability_status") or "NOT_AVAILABLE",
+                "confirmed_by_user": bool(obs.get("confirmed_by_user")),
+                "formally_consumable": formally_consumable,
             }
             try:
                 point["numeric_value"] = float(str(obs.get("normalized_value")).replace(",", "").rstrip("%"))
@@ -2109,15 +2135,18 @@ def runtime_metric_trends(device_id, limit=40):
             series.setdefault(metric, []).append(point)
 
     result = []
-    for metric, points in sorted(series.items()):
-        latest = points[-1]
+    for metric, all_points in sorted(series.items()):
+        points = [x for x in all_points if x.get("formally_consumable")]
+        latest = points[-1] if points else None
         previous = points[-2] if len(points) > 1 else None
         delta = None
-        if previous and latest.get("numeric_value") is not None and previous.get("numeric_value") is not None:
+        if previous and latest and latest.get("numeric_value") is not None and previous.get("numeric_value") is not None:
             delta = latest["numeric_value"] - previous["numeric_value"]
         result.append({
             "metric_name": metric,
             "sample_count": len(points),
+            "raw_sample_count": len(all_points),
+            "unverified_count": len(all_points) - len(points),
             "latest": latest,
             "previous": previous,
             "delta": delta,
@@ -2128,6 +2157,7 @@ def runtime_metric_trends(device_id, limit=40):
         "snapshot_count": len(snapshots),
         "metrics": result,
         "interpretation_performed": False,
+        "formal_trend_only": True,
     }
 
 
