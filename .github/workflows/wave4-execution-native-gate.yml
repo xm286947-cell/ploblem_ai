@@ -118,10 +118,12 @@ jobs:
         shell: pwsh
         run: |
           $bat = Join-Path $env:RUNNER_TEMP "wave4-execution-extract\RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat"
-          $output = & $bat 2>&1
-          $exitCode = $LASTEXITCODE
-          $output | Write-Host
-          if ($exitCode -eq 0 -or (($output -join "`n") -notmatch "usage:")) { throw "WINDOWS_LAUNCHER_DID_NOT_FAIL_CLOSED" }
+          $stdout = Join-Path $env:RUNNER_TEMP "wave4-launcher.stdout"
+          $stderr = Join-Path $env:RUNNER_TEMP "wave4-launcher.stderr"
+          $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /c call `"$bat`"" -PassThru -Wait -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $output = (Get-Content $stdout -Raw) + (Get-Content $stderr -Raw)
+          Write-Host $output
+          if ($process.ExitCode -eq 0 -or $output -notmatch "usage:") { throw "WINDOWS_LAUNCHER_DID_NOT_FAIL_CLOSED" }
 
       - uses: actions/upload-artifact@v4
         with:
