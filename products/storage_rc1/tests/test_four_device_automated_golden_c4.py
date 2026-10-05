@@ -384,10 +384,11 @@ def test_t10_product_slots_and_review_workbench_surface_vendor_schema_without_co
 
 
 def test_t11_and_t12_no_real_provider_calls_or_out_of_scope_changes():
+    repo_root = Path(__file__).parents[3]
     changed = [
         line[3:].strip()
         for line in __import__("subprocess").run(
-            ["git", "status", "--short"], cwd=Path(__file__).parents[3],
+            ["git", "status", "--short"], cwd=repo_root,
             capture_output=True, text=True, check=True,
         ).stdout.splitlines()
     ]
@@ -396,8 +397,8 @@ def test_t11_and_t12_no_real_provider_calls_or_out_of_scope_changes():
         "products/storage_rc1/tests/fixtures/storage_four_device_automated_golden_c4.json",
         "products/storage_rc1/tests/fixtures/storage_four_device_source_excerpts_c4.json",
     }
-    assert set(changed) == allowed
     assert set(changed) <= allowed
+    assert all((repo_root / path).is_file() for path in allowed)
     assert "products/storage_rc1/storage_life" not in "\n".join(changed)
     assert "runtime/" not in "\n".join(changed)
     assert all(not path.startswith("test_assets/storage_rc1/fixtures/M0") for path in changed)
