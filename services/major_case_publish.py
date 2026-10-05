@@ -612,6 +612,8 @@ class MajorCasePublishAdapter:
                         not fragment_version_id
                         or not source_version_id
                         or fragment_version_id != source_version_id
+                        or not source_record_id
+                        or source_record_id != source_version_id
                     ):
                         raise PublishValidationError("PUBLISH_EVIDENCE_SOURCE_MISMATCH")
                 if "SOURCE_FACT" in source_type.upper():

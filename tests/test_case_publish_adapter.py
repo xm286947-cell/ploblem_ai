@@ -481,6 +481,20 @@ def test_fragment_requires_resolvable_source_link_and_exact_document_version(tmp
     with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_SOURCE_MISMATCH"):
         MajorCasePublishAdapter(repo).build_candidate(mismatch_event["event_id"])
 
+    repo.add_source_link(
+        mismatch_case["case_id"], mismatch_event["event_id"],
+        {
+            "record_id": linked_document["version_id"],
+            "source_type": "MAJOR_SOURCE_DOCUMENT",
+            "source_system": "TEST",
+            "version_id": foreign_document["version_id"],
+        },
+        standard_itr=mismatch_event["standard_itr"],
+        role="CURRENT_EVENT", status="LINKED",
+    )
+    with pytest.raises(PublishValidationError, match="PUBLISH_EVIDENCE_SOURCE_MISMATCH"):
+        MajorCasePublishAdapter(repo).build_candidate(mismatch_event["event_id"])
+
     resolved_case, resolved_event = _active_case_event(repo, itr="ITR-EXACT-LINK")
     resolved_pdf = tmp_path / "resolvable.pdf"
     resolved_pdf.write_bytes(b"resolvable-placeholder")
