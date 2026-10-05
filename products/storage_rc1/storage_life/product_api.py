@@ -607,6 +607,8 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         if kind and kind not in latest:
             latest[kind] = item
 
+    runtime_trend = core.runtime_metric_trends(device_id, limit=40)
+    latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_snapshot_created_at"))
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
     current_fact_fingerprint = _device_fact_fingerprint(detail)
 
@@ -702,6 +704,16 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             if not structured.get("current_observation"):
                 complete = False
                 next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
+
+        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_runtime_at:
+            assessment_created_at = _iso_datetime(item.get("created_at"))
+            if assessment_created_at and latest_formal_runtime_at > assessment_created_at:
+                complete = False
+                next_action = (
+                    "存在更新的已确认 Runtime Snapshot；请基于最新运行数据重新执行该场景。"
+                    if kind != "OPTIMIZATION"
+                    else "存在更新的已确认 Runtime Snapshot；请先刷新 S3/S4，再重新生成 S5 优化方案。"
+                )
         return {
             "type": kind,
             "label": label,
@@ -745,7 +757,6 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         scenario("DIAGNOSIS", "S4 运行诊断"),
         scenario("OPTIMIZATION", "S5 软件优化"),
     ]
-    runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     remaining = []
     if missing_critical:
         remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
