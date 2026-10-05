@@ -34,6 +34,8 @@ Search remains a rebuildable read model over verified Formal Knowledge. It uses 
 
 When a user enters multiple whitespace-separated keywords, every normalized keyword must be supported somewhere in the projected Formal Knowledge record. Keywords may match across different weighted fields (for example device + interface + symptom). Each field contributes its configured weight at most once, and the UI shows the matched field, matched keyword(s), actual Formal Knowledge field value, and weight as the Match Reason.
 
+Wave3B scene tabs now bind to the formal query scenes `RND_DIAGNOSIS`, `DEVICE_RISK`, and `MARKET_ISSUE`. Scene selection does not change substring matching, does not invent new weights, and does not change the returned `match_score`; it only uses the existing matched-field weights to prioritize scene-relevant results before applying the normal global score and stable knowledge-id tie break.
+
 Knowledge Detail binds the immutable `knowledge_id` and `business_case_id` directly into the detail view. E2E Evidence drill-back uses that bound identity rather than parsing display text before resolving Evidence → source locator → original Word.
 
 Scope is limited to Hardware R1 E2E validation. This ZIP does not certify the whole Hardware Case MVP, a formal product release, or installer packages.
