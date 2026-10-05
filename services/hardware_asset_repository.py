@@ -1048,7 +1048,7 @@ class CandidateAssetRepository:
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_LOCKED_BY_PROMOTION"
                     )
-                if row["production_review_status"] != "REQUIRED":
+                if row["production_review_status"] not in {"REQUIRED", "NOT_REQUIRED"}:
                     raise CandidateAssetRepositoryError(
                         "CANDIDATE_REVIEW_TRANSITION_INVALID"
                     )
@@ -1117,6 +1117,152 @@ class CandidateAssetRepository:
         except CandidateAssetRepositoryError:
             raise
         except sqlite3.Error as error:
+            raise CandidateAssetRepositoryError(
+                "CANDIDATE_DATA_INTEGRITY_ERROR"
+            ) from error
+
+    def record_production_review_decision(
+        self,
+        candidate_id: str,
+        *,
+        expected_row_version: int,
+        reviewer: str,
+        disposition: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Persist a blocking human review decision without mutating knowledge content.
+
+        DEFERRED and REJECTED both keep the Candidate available for later correction,
+        but force production_review_status=REQUIRED so Promotion remains fail-closed.
+        """
+        candidate_key = str(candidate_id or "").strip()
+        reviewer_name = str(reviewer or "").strip()
+        disposition_name = str(disposition or "").strip().upper()
+        reason_text = str(reason or "").strip()
+        if (
+            not candidate_key
+            or not reviewer_name
+            or disposition_name not in {"DEFERRED", "REJECTED"}
+            or not reason_text
+        ):
+            raise CandidateAssetRepositoryError("CANDIDATE_INPUT_INVALID")
+        now = _utc_now()
+        try:
+            with self._write_transaction() as connection:
+                row = connection.execute(
+                    "SELECT * FROM hardware_candidate_asset WHERE candidate_id=?",
+                    (candidate_key,),
+                ).fetchone()
+                if row is None:
+                    raise CandidateAssetRepositoryError("CANDIDATE_NOT_FOUND")
+                if int(row["row_version"]) != int(expected_row_version):
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_CONCURRENT_UPDATE"
+                    )
+                if row["asset_status"] != "ACTIVE":
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_ASSET_INVALIDATED"
+                    )
+                if row["promotion_status"] != "NOT_STARTED":
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_LOCKED_BY_PROMOTION"
+                    )
+                if row["production_review_status"] not in REVIEW_STATUSES:
+                    raise CandidateAssetRepositoryError(
+                        "CANDIDATE_REVIEW_TRANSITION_INVALID"
+                    )
+                current_hash = str(row["candidate_hash"])
+                review_record = {
+                    "reviewer": reviewer_name,
+                    "reason": reason_text,
+                    "disposition": disposition_name,
+                    "reviewed_at": now,
+                }
+                connection.execute(
+                    """
+                    UPDATE hardware_candidate_asset
+                    SET production_review_status='REQUIRED',
+                        row_version=row_version+1,updated_at=?
+                    WHERE candidate_id=?
+                    """,
+                    (now, candidate_key),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO hardware_candidate_review(
+                        review_id,candidate_id,before_candidate_hash,
+                        after_candidate_hash,reviewer,reason,review_record_json,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        "HCRV-" + uuid4().hex,
+                        candidate_key,
+                        current_hash,
+                        current_hash,
+                        reviewer_name,
+                        reason_text,
+                        _canonical_json(review_record),
+                        now,
+                    ),
+                )
+                self._insert_event(
+                    connection,
+                    candidate_id=candidate_key,
+                    event_type="PRODUCTION_REVIEWED",
+                    old_hash=current_hash,
+                    new_hash=current_hash,
+                    run_id=row["generation_run_id"],
+                    actor=reviewer_name,
+                    reason=f"{disposition_name}: {reason_text}",
+                    created_at=now,
+                )
+                updated = connection.execute(
+                    "SELECT * FROM hardware_candidate_asset WHERE candidate_id=?",
+                    (candidate_key,),
+                ).fetchone()
+                return self._public_candidate(connection, updated)
+        except CandidateAssetRepositoryError:
+            raise
+        except sqlite3.Error as error:
+            raise CandidateAssetRepositoryError(
+                "CANDIDATE_DATA_INTEGRITY_ERROR"
+            ) from error
+
+    def list_production_reviews(self, candidate_id: str) -> list[dict[str, Any]]:
+        candidate_key = str(candidate_id or "").strip()
+        if not candidate_key:
+            raise CandidateAssetRepositoryError("CANDIDATE_INPUT_INVALID")
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT review_id,before_candidate_hash,after_candidate_hash,
+                           reviewer,reason,review_record_json,created_at
+                    FROM hardware_candidate_review
+                    WHERE candidate_id=?
+                    ORDER BY created_at ASC, review_id ASC
+                    """,
+                    (candidate_key,),
+                ).fetchall()
+                result = []
+                for row in rows:
+                    record = json.loads(row["review_record_json"])
+                    result.append(
+                        {
+                            "review_id": row["review_id"],
+                            "candidate_id": candidate_key,
+                            "before_candidate_hash": row["before_candidate_hash"],
+                            "after_candidate_hash": row["after_candidate_hash"],
+                            "reviewer": row["reviewer"],
+                            "reason": row["reason"],
+                            "review_record": record,
+                            "created_at": row["created_at"],
+                        }
+                    )
+                return result
+        except CandidateAssetRepositoryError:
+            raise
+        except (sqlite3.Error, json.JSONDecodeError, TypeError) as error:
             raise CandidateAssetRepositoryError(
                 "CANDIDATE_DATA_INTEGRITY_ERROR"
             ) from error
