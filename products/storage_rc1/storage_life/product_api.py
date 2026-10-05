@@ -1447,7 +1447,25 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
                 if projection.get("budget_status") not in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}:
                     return None
         elif kind == "DIAGNOSIS":
-            if status != "ANSWERED" or not (structured.get("current_observation") or []):
+            current_observation = structured.get("current_observation") or []
+            diagnosis_status = str(structured.get("diagnosis_status") or "")
+            signals = structured.get("abnormality_signal") or []
+            missing_information = list(skill.get("missing_information") or structured.get("missing_information") or [])
+            if status != "ANSWERED" or not current_observation:
+                return None
+            if diagnosis_status == "ABNORMAL_SIGNAL_PRESENT" and signals:
+                pass
+            elif diagnosis_status == "NO_REGISTERED_SIGNAL":
+                if any(
+                    any(token in str(value) for token in (
+                        "NO_MATCHING_RELEASED_KNOWLEDGE",
+                        "FORMAL_DIAGNOSTIC_KNOWLEDGE",
+                        "INSUFFICIENT_KNOWLEDGE",
+                    ))
+                    for value in missing_information
+                ):
+                    return None
+            else:
                 return None
         risk_context: dict[str, Any] = {}
         if kind == "LIFETIME":
