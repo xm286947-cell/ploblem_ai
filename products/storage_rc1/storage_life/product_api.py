@@ -269,6 +269,24 @@ def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _runtime_trend_fingerprint(device_id: str) -> str:
+    """Stable identity for the formally consumable runtime trend state."""
+    trend = core.runtime_metric_trends(device_id, limit=40)
+    payload = []
+    for metric in trend.get("metrics") or []:
+        for point in metric.get("points") or []:
+            payload.append({
+                "metric_name": metric.get("metric_name"),
+                "batch_id": point.get("batch_id"),
+                "captured_at": point.get("captured_at"),
+                "normalized_value": point.get("normalized_value"),
+                "unit": point.get("unit"),
+                "source_label": point.get("source_label"),
+            })
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
     mapping = {
@@ -621,6 +639,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
     latest_formal_snapshot_created_at = _iso_datetime(runtime_trend.get("latest_formal_snapshot_created_at"))
     current_knowledge_release = _knowledge_release_identity()
+    current_runtime_trend_fingerprint = _runtime_trend_fingerprint(device_id)
     completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
     current_fact_fingerprint = _device_fact_fingerprint(detail)
 
@@ -744,6 +763,19 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                     "已确认 Runtime Snapshot 集合在本次分析后发生变化；请基于当前快照重新执行该场景。"
                     if kind != "OPTIMIZATION"
                     else "已确认 Runtime Snapshot 集合在本次优化后发生变化；请先刷新 S3/S4，再重新生成 S5。"
+                )
+
+        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+            recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
+            if (
+                not recorded_runtime_fingerprint
+                or recorded_runtime_fingerprint != current_runtime_trend_fingerprint
+            ):
+                complete = False
+                next_action = (
+                    "已确认 Runtime Snapshot / Trend 已变化；请基于当前运行数据重新执行该场景。"
+                    if kind != "OPTIMIZATION"
+                    else "已确认 Runtime Snapshot / Trend 已变化；请先刷新 S3/S4，再重新生成 S5 优化方案。"
                 )
 
         if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_runtime_at:
@@ -1007,6 +1039,7 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
             record_input = dict(request)
             record_input["_device_fact_fingerprint"] = _device_fact_fingerprint(detail)
             record_input["_knowledge_release_identity"] = _knowledge_release_identity()
+            record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(device_id)
             response["assessment_record"] = core.save_device_assessment(
                 device_id,
                 assessment_type,
