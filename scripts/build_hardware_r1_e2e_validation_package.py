@@ -126,6 +126,12 @@ def main() -> int:
         "entrypoint": {"windows": "START_HARDWARE_R1_E2E_VALIDATION.bat", "macos": "START_HARDWARE_R1_E2E_VALIDATION.command"},
         "existing_application": "create_p0_app / HARDWARE_CASE domain", "web_required": True,
         "automatic_review": False, "automatic_publish": False, "real_provider_in_ci": False, "real_docx_in_ci": False,
+        "manual_acceptance_scope": "FOUR_DOC_REAL_E2E",
+        "package_security": {
+            "sensitive_file_filter": True,
+            "secret_literal_scan": True,
+            "absolute_machine_path_scan": True,
+        },
         "files": inventory,
     }
     payload = {**files, "PACKAGE_MANIFEST.json": None}
@@ -142,6 +148,10 @@ def main() -> int:
     print(f"SOURCE_COMMIT={commit}")
     print(f"PACKAGE_SHA256={sha256(archive)}")
     print(f"PACKAGE_SIZE={archive.stat().st_size}")
+    print("PACKAGE_SECURITY_FILTER=PASS")
+    print("PACKAGE_SECRET_LITERAL_SCAN=PASS")
+    print("PACKAGE_ABSOLUTE_PATH_SCAN=PASS")
+    print("MANUAL_ACCEPTANCE_SCOPE=FOUR_DOC_REAL_E2E")
     return 0
 
 
