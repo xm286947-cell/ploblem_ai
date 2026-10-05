@@ -597,16 +597,33 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     slots = detail.get("slots") or []
     applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
     missing_critical = list((detail.get("conclusion") or {}).get("missing_critical_fields") or [])
+    fact_status = "READY" if facts and not missing_critical else ("PARTIAL" if facts else "NOT_RUN")
+    fact_scenario = {
+        "type": "FACT",
+        "label": "S1 参数事实",
+        "status": fact_status,
+        "assessment_id": None,
+        "created_at": None,
+        "direct_answer": (
+            f"已确认 {len(facts)} 项 Device Fact"
+            if facts else "尚无已确认 Device Fact"
+        ),
+        "next_action": "补齐关键 Device Fact" if missing_critical else None,
+    }
     scenario_items = [
-        scenario("LIFETIME", "寿命 / 风险"),
-        scenario("DIAGNOSIS", "运行诊断"),
-        scenario("OPTIMIZATION", "软件优化"),
+        fact_scenario,
+        scenario("COMPARE", "S2 参数差异与影响"),
+        scenario("LIFETIME", "S3 寿命 / 风险"),
+        scenario("DIAGNOSIS", "S4 运行诊断"),
+        scenario("OPTIMIZATION", "S5 软件优化"),
     ]
     runtime_trend = core.runtime_metric_trends(device_id, limit=40)
     remaining = []
     if missing_critical:
         remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
     for item in scenario_items:
+        if item["type"] == "FACT":
+            continue
         if item["status"] == "NOT_RUN":
             remaining.append(f"执行{item['label']}")
     action_items = core.list_engineering_actions(device_id)
@@ -1681,6 +1698,21 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         "skill_result": skill_result,
         "engineering_result": _engineering_result_view(skill_result),
     }
+
+
+def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "Storage MVP UI") -> dict[str, Any]:
+    result = change_impact(old_id, new_id)
+    skill = result.get("skill_result") or {}
+    record = core.save_device_assessment(
+        new_id,
+        "COMPARE",
+        skill.get("status") or result.get("status") or "UNKNOWN",
+        {"old_id": old_id, "new_id": new_id},
+        result,
+        created_by=assessment_author,
+    )
+    result["assessment_record"] = record
+    return result
 
 
 def maintenance() -> dict[str, Any]:
