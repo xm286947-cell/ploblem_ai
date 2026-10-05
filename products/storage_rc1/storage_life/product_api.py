@@ -640,11 +640,20 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             old_id = str(recorded_input.get("old_id") or "")
             recorded_old = str(recorded_input.get("_old_device_fact_fingerprint") or "")
             old_current = ""
+            old_formal_ready = False
             if old_id:
                 try:
-                    old_current = _device_fact_fingerprint(device_slots(old_id))
+                    old_detail = device_slots(old_id)
+                    old_current = _device_fact_fingerprint(old_detail)
+                    old_formal_ready = bool((old_detail.get("lifecycle") or {}).get("formal_ready"))
                 except KeyError:
                     old_current = ""
+            new_formal_ready = bool((detail.get("lifecycle") or {}).get("formal_ready"))
+            compare_unknowns = list(result.get("unknowns") or [])
+            low_confidence = any(
+                str(x.get("confidence") or "").upper() != "EVIDENCED"
+                for x in (result.get("items") or [])
+            )
             if (
                 not recorded_new
                 or not recorded_old
@@ -653,6 +662,12 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             ):
                 complete = False
                 next_action = "S1 Device Fact 已变化或基准器件不可用；请基于当前事实重新执行 S2 参数差异与影响。"
+            elif not old_formal_ready or not new_formal_ready:
+                complete = False
+                next_action = "S2 需要新旧器件都达到 FORMAL_READY；请先完成两侧 S1 参数事实确认。"
+            elif compare_unknowns or low_confidence:
+                complete = False
+                next_action = "S2 仍存在未确认/缺失事实；请消除待验证项后重新执行参数差异与影响。"
         else:
             recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
             if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
@@ -1125,10 +1140,15 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
             latest[kind] = item
 
     trend = core.runtime_metric_trends(device_id, limit=40)
+    current_fact_fingerprint = _device_fact_fingerprint(detail)
 
     def assessment_view(kind: str) -> dict[str, Any] | None:
         item = latest.get(kind)
         if not item:
+            return None
+        recorded_input = item.get("input") or {}
+        recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
+        if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
             return None
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
