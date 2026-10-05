@@ -56,6 +56,18 @@ FIELD_WEIGHTS: tuple[tuple[str, int], ...] = (
     ("applicability", 45),
 )
 
+SCENE_PRIORITY_FIELDS: dict[str, frozenset[str]] = {
+    "MARKET_ISSUE": frozenset(
+        {"symptom", "occurrence_condition", "failure_mode"}
+    ),
+    "RND_DIAGNOSIS": frozenset(
+        {"symptom", "diagnostic_clue", "failure_mechanism", "verification_method"}
+    ),
+    "DEVICE_RISK": frozenset(
+        {"device_refs", "interface", "signal", "key_parameters"}
+    ),
+}
+
 _TEXT_FIELDS = (
     "title",
     "symptom",
@@ -884,10 +896,14 @@ class HardwareKnowledgeConsumptionService:
         interface: str | None = None,
         signal: str | None = None,
         device: str | None = None,
+        scene: str | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
         if int(limit) < 1 or int(limit) > 500:
             raise HardwareKnowledgeConsumptionError("SEARCH_LIMIT_INVALID")
+        scene_key = str(scene or "").strip().upper()
+        if scene_key and scene_key not in SCENE_PRIORITY_FIELDS:
+            raise HardwareKnowledgeConsumptionError("SEARCH_SCENE_INVALID")
         query_text = normalize_search_text(text)
         query_terms = list(dict.fromkeys(
             term for term in query_text.split(" ") if term
@@ -940,15 +956,30 @@ class HardwareKnowledgeConsumptionService:
                 # configured weight at most once, even when several terms hit.
                 if len(matched_terms) != len(query_terms):
                     continue
+            scene_fields = SCENE_PRIORITY_FIELDS.get(scene_key, frozenset())
+            scene_priority_score = sum(
+                int(reason["weight"])
+                for reason in reasons
+                if reason["matched_field"] in scene_fields
+            )
             results.append(
                 {
                     "contract_version": CONSUMPTION_CONTRACT_VERSION,
                     **row,
                     "match_score": score,
                     "match_reasons": reasons,
+                    "_scene_priority_score": scene_priority_score,
                 }
             )
-        results.sort(key=lambda item: (-int(item["match_score"]), str(item["knowledge_id"])))
+        results.sort(
+            key=lambda item: (
+                -int(item["_scene_priority_score"]),
+                -int(item["match_score"]),
+                str(item["knowledge_id"]),
+            )
+        )
+        for item in results:
+            item.pop("_scene_priority_score", None)
         return {
             "contract_version": CONSUMPTION_CONTRACT_VERSION,
             "results": results[: int(limit)],
@@ -1055,6 +1086,7 @@ __all__ = [
     "FORMAL_KNOWLEDGE_OBJECT_VERSION",
     "PROJECTION_FILENAME",
     "PROJECTION_SCHEMA_VERSION",
+    "SCENE_PRIORITY_FIELDS",
     "HardwareKnowledgeConsumptionError",
     "HardwareKnowledgeConsumptionProjectionStore",
     "HardwareKnowledgeConsumptionService",
