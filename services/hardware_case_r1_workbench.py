@@ -689,6 +689,114 @@ class HardwareR1WorkbenchService:
                     if index < len(incoming):
                         merge_review_values(child, incoming[index])
 
+        def merge_key_parameters(
+            original_parameters: Any,
+            incoming_parameters: Any,
+        ) -> list[dict[str, Any]]:
+            original_list = (
+                list(original_parameters)
+                if isinstance(original_parameters, list)
+                else []
+            )
+            if not isinstance(incoming_parameters, list):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETERS_INVALID"
+                )
+            evidence_ids = {
+                str(item.get("block_id") or "")
+                for item in original.get("evidence") or []
+                if isinstance(item, dict) and item.get("block_id")
+            }
+            result: list[dict[str, Any]] = []
+            used_origins: set[int] = set()
+            legacy_mode = all(
+                not isinstance(item, dict)
+                or (
+                    "__review_original_index" not in item
+                    and not item.get("__review_new")
+                )
+                for item in incoming_parameters
+            )
+            if legacy_mode and len(incoming_parameters) != len(original_list):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETER_IDENTITY_REQUIRED"
+                )
+
+            for index, incoming in enumerate(incoming_parameters):
+                if not isinstance(incoming, dict):
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETERS_INVALID"
+                    )
+                origin = (
+                    index
+                    if legacy_mode
+                    else incoming.get("__review_original_index")
+                )
+                if isinstance(origin, bool):
+                    origin = None
+                if isinstance(origin, int):
+                    if (
+                        origin < 0
+                        or origin >= len(original_list)
+                        or origin in used_origins
+                        or not isinstance(original_list[origin], dict)
+                    ):
+                        raise HardwareR1WorkbenchError(
+                            "REVIEW_KEY_PARAMETER_IDENTITY_INVALID"
+                        )
+                    used_origins.add(origin)
+                    parameter = deepcopy(original_list[origin])
+                    for key in ("name", "value", "unit"):
+                        if key in incoming:
+                            parameter[key] = deepcopy(incoming[key])
+                    result.append(parameter)
+                    continue
+
+                if incoming.get("__review_new") is not True:
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETER_IDENTITY_REQUIRED"
+                    )
+                name = str(incoming.get("name") or "").strip()
+                value = incoming.get("value")
+                unit = incoming.get("unit")
+                refs = [
+                    str(item)
+                    for item in incoming.get("evidence_block_ids") or []
+                    if str(item).strip()
+                ]
+                if (
+                    not name
+                    or value in (None, "")
+                    or not refs
+                    or len(set(refs)) != len(refs)
+                    or any(ref not in evidence_ids for ref in refs)
+                ):
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETER_EVIDENCE_INVALID"
+                    )
+                result.append(
+                    {
+                        "name": name,
+                        "value": deepcopy(value),
+                        "unit": deepcopy(unit),
+                        "extraction_status": "EXTRACTED",
+                        "evidence_block_ids": refs,
+                        "confidence": None,
+                        "warnings": ["HUMAN_REVIEW_ADDED"],
+                    }
+                )
+
+            names = [
+                str(item.get("name") or "").strip()
+                for item in result
+                if isinstance(item, dict)
+            ]
+            if any(not name for name in names) or len(set(names)) != len(names):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETER_NAME_INVALID"
+                )
+            return result
+
         # Only business field values are editable. Evidence bindings,
         # extraction status/confidence, derived-from metadata and every
         # Source/identity/provenance field remain server-owned.
@@ -702,6 +810,20 @@ class HardwareR1WorkbenchService:
         ):
             if key in reviewed and key in confirmed_content:
                 merge_review_values(reviewed[key], confirmed_content[key])
+
+        reviewed_context = reviewed.get("engineering_context")
+        confirmed_context = confirmed_content.get("engineering_context")
+        if (
+            isinstance(reviewed_context, dict)
+            and isinstance(confirmed_context, dict)
+            and "key_parameters" in confirmed_context
+        ):
+            reviewed_context["key_parameters"] = merge_key_parameters(
+                (original.get("engineering_context") or {}).get(
+                    "key_parameters"
+                ),
+                confirmed_context["key_parameters"],
+            )
 
         reviewed_at = _utc_now()
         conflicts = reviewed.get("conflicts")
