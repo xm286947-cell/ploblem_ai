@@ -545,12 +545,13 @@ function runtimeLocalInputValue(date){
   let d=date||new Date(),pad=n=>String(n).padStart(2,'0');
   return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
 }
-function runtimeCaptureIso(){
-  let raw=$('#runtimeCapturedAt')?.value||'';
+function localInputIso(id){
+  let raw=$('#'+id)?.value||'';
   if(!raw)return null;
   let d=new Date(raw);
   return Number.isNaN(d.getTime())?null:d.toISOString();
 }
+function runtimeCaptureIso(){return localInputIso('runtimeCapturedAt')}
 function runtimeImportConfirmed(){return !!$('#runtimeObservationConfirmed')?.checked}
 function renderRuntimeImportPanel(d){
   let host=$('#deviceDetail');
