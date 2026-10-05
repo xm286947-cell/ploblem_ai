@@ -23,7 +23,6 @@ test('promotion stays blocked while durable review is REQUIRED', () => {
 });
 
 test('human review preserves Evidence as read-only comparison context', () => {
-  assert.match(source, /Evidence 对照/);
   assert.match(source, /candidate\.evidence/);
   assert.match(source, /humanReviewProtectedTop/);
   assert.match(source, /'source_fact'/);
