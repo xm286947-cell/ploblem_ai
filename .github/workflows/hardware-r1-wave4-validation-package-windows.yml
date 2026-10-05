@@ -62,6 +62,7 @@ jobs:
         shell: pwsh
         run: |
           python scripts/build_hardware_r1_wave4_validation_package.py
+          python .github/hardware_r1_wave4_normalize_zip.py "dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip"
           $package = Join-Path $PWD "dist/HARDWARE_R1_WAVE4_REAL_VALIDATION_ca310a5062c8.zip"
           $actual = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
           $expected = "d8305b991ffc40b43c72d8aefde64db13c0128784efc75a5286cefc7c80621e0"
