@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 import re
@@ -1758,6 +1759,79 @@ def dashboard() -> dict[str, Any]:
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
     }
 
+_COMPARE_SIZE_FACTORS = {
+    "B": Decimal(1),
+    "byte": Decimal(1),
+    "bytes": Decimal(1),
+    "KB": Decimal(1000),
+    "MB": Decimal(1000) ** 2,
+    "GB": Decimal(1000) ** 3,
+    "TB": Decimal(1000) ** 4,
+    "PB": Decimal(1000) ** 5,
+    "KiB": Decimal(1024),
+    "MiB": Decimal(1024) ** 2,
+    "GiB": Decimal(1024) ** 3,
+    "TiB": Decimal(1024) ** 4,
+    "Kb": Decimal(1000) / Decimal(8),
+    "Mb": (Decimal(1000) ** 2) / Decimal(8),
+    "Gb": (Decimal(1000) ** 3) / Decimal(8),
+    "Tb": (Decimal(1000) ** 4) / Decimal(8),
+}
+_COMPARE_TIME_FACTORS = {
+    "ns": Decimal("0.000000001"),
+    "us": Decimal("0.000001"),
+    "µs": Decimal("0.000001"),
+    "μs": Decimal("0.000001"),
+    "ms": Decimal("0.001"),
+    "s": Decimal(1),
+}
+
+
+def _compare_decimal(value: Any) -> Decimal | None:
+    try:
+        return Decimal(str(value).strip().replace(",", ""))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _comparison_fact_key(canonical_name: str, cell: dict[str, Any]) -> tuple[Any, ...]:
+    """Compare formal facts by engineering-equivalent value plus condition/scope.
+
+    Only explicit unit families are normalized. Unknown units stay literal so
+    the comparison never guesses a conversion.
+    """
+    value = cell.get("value")
+    unit = str(cell.get("unit") or "").strip()
+    number = _compare_decimal(value)
+    normalized_value: Any = str(value or "").strip()
+    normalized_unit = unit
+
+    if number is not None and canonical_name in {
+        "capacity", "tbw", "page_size", "block_size", "erase_granularity",
+    } and unit in _COMPARE_SIZE_FACTORS:
+        normalized_value = number * _COMPARE_SIZE_FACTORS[unit]
+        normalized_unit = "bytes"
+    elif number is not None and canonical_name in {"program_time", "erase_time"} and unit in _COMPARE_TIME_FACTORS:
+        normalized_value = number * _COMPARE_TIME_FACTORS[unit]
+        normalized_unit = "seconds"
+    elif number is not None and canonical_name in {"pe_cycles", "pages_per_block", "dwpd"}:
+        normalized_value = number
+        normalized_unit = "" if unit.lower() in {"", "cycle", "cycles", "x"} else unit
+
+    if isinstance(normalized_value, Decimal):
+        normalized_value = normalized_value.normalize()
+
+    condition = " ".join(str(cell.get("condition") or "").split())
+    scope = " ".join(str(cell.get("scope") or "").split())
+    return (
+        normalized_value,
+        normalized_unit,
+        condition,
+        scope,
+        str(cell.get("status") or ""),
+    )
+
+
 def compare_devices(device_ids: list[str]) -> dict[str, Any]:
     ids = [str(x or "").strip() for x in device_ids if str(x or "").strip()]
     if len(ids) < 2 or len(ids) > 4:
@@ -1791,7 +1865,7 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
                 "condition": cell.get("condition") if formal else "", "scope": cell.get("scope") if formal else "",
                 "evidence": cell.get("evidence") if formal else [],
             }
-        values = {(str(c.get("value") or ""), str(c.get("unit") or ""), c.get("status")) for c in cells.values()}
+        values = {_comparison_fact_key(key, c) for c in cells.values()}
         missing = any(c.get("review_status") != "CONFIRMED" for c in cells.values())
         exemplar = next((x for x in details[0]["slots"] if x.get("canonical_name") == key), {})
         parameter_name = next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key)
