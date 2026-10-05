@@ -668,8 +668,15 @@ class HardwareR1WorkbenchService:
         def merge_review_values(target: Any, incoming: Any) -> None:
             if isinstance(target, dict):
                 if "value" in target:
-                    if isinstance(incoming, dict) and "value" in incoming:
-                        target["value"] = deepcopy(incoming["value"])
+                    if isinstance(incoming, dict):
+                        if "value" in incoming:
+                            target["value"] = deepcopy(incoming["value"])
+                        # Key-parameter business semantics are editable, but
+                        # Evidence/status/confidence/warnings remain server-owned.
+                        if "name" in target and "name" in incoming:
+                            target["name"] = deepcopy(incoming["name"])
+                        if "unit" in target and "unit" in incoming:
+                            target["unit"] = deepcopy(incoming["unit"])
                     return
                 if not isinstance(incoming, dict):
                     return
