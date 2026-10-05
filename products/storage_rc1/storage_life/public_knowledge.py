@@ -227,7 +227,7 @@ def source_detail(source_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | 
         if item is None:
             raise HTTPException(404, "演示资料不存在")
         return {"source": item, "revisions": [{"source_revision": item["version"], "media_type": item["media_type"]}], "mode": mode}
-    return {**_request(mode, "/sources/" + source_id, base_url=base_url), "mode": mode}
+    return {**_request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url), "mode": mode}
 
 
 @router.post("/sources/import")
@@ -456,7 +456,7 @@ def citation(citation_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | Non
         if citation_id != "fixture-citation-page1":
             raise HTTPException(404, "演示引用不存在")
         return {"citation_id": citation_id, "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"], "mode": mode}
-    return {**_request(mode, "/citations/" + citation_id, base_url=base_url), "mode": mode}
+    return {**_request(mode, "/citations/" + quote(citation_id, safe=""), base_url=base_url), "mode": mode}
 
 
 def _normalize_citation_locator(citation: dict[str, Any]) -> dict[str, Any]:
