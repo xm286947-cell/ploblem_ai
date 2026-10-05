@@ -56,6 +56,23 @@ def _terms(text: str) -> list[str]:
     return [x for x in re.split(r"[^a-zA-Z0-9_./+\-\u4e00-\u9fff]+", text.lower()) if len(x) >= 2]
 
 
+def _device_type_aliases(value: str) -> set[str]:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return set()
+    groups = [
+        {"ssd", "nvme", "nvme ssd"},
+        {"emmc", "e-mmc"},
+        {"nand", "nand flash", "raw nand"},
+        {"nor", "nor flash"},
+        {"generic"},
+    ]
+    for group in groups:
+        if raw in group:
+            return group
+    return {raw}
+
+
 @dataclass
 class KnowledgeReleaseConsumer:
     root: Path
@@ -150,8 +167,11 @@ class KnowledgeReleaseConsumer:
         for obj in objects:
             if str(obj.get("status") or "ACTIVE") != "ACTIVE":
                 continue
-            if device_type and str(obj.get("device_type") or "").lower() not in {device_type.lower(), "generic", ""}:
-                continue
+            if device_type:
+                requested_types = _device_type_aliases(device_type)
+                object_types = _device_type_aliases(str(obj.get("device_type") or ""))
+                if object_types and "generic" not in object_types and requested_types.isdisjoint(object_types):
+                    continue
             hay = " ".join(str(obj.get(k) or "") for k in ("title", "summary", "content", "device_type"))
             hay += " " + " ".join(map(str, obj.get("tags") or [])) + " " + " ".join(map(str, obj.get("scope") or []))
             lower = hay.lower()
