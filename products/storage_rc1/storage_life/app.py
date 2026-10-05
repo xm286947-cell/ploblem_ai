@@ -265,6 +265,16 @@ def product_device_mvp_summary(device_id: str):
         raise HTTPException(404, "器件不存在")
 
 
+@app.post("/api/product/devices/{device_id}/integrated-action-plan", tags=["Storage Product MVP"])
+def product_integrated_action_plan(device_id: str, body: dict):
+    try:
+        return product_api.integrated_action_plan(device_id, body)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/product/devices/{device_id}/skills/{skill_id}/execute", tags=["Storage Product MVP"])
 def product_execute_device_skill(device_id: str, skill_id: str, payload: dict):
     try:
