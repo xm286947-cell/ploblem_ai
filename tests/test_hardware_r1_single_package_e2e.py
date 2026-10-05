@@ -124,7 +124,11 @@ def test_single_package_pages_are_existing_hardware_case_web(tmp_path, monkeypat
         enabled_domains={"HARDWARE_CASE"},
     )
     client = TestClient(app)
-    assert client.get("/p0/hardware-cases/e2e").status_code == 200
+    e2e_landing = client.get("/p0/hardware-cases/e2e")
+    assert e2e_landing.status_code == 200
+    assert "当前 4 篇代表性真实 Word" in e2e_landing.text
+    assert "20–30 篇规模验证保留到后续稳定性阶段" in e2e_landing.text
+    assert "hardware_case_e2e.js?v=hardware-r1-e2e-v2" in e2e_landing.text
     normal_knowledge = client.get("/p0/hardware-cases/knowledge")
     e2e_knowledge = client.get("/p0/hardware-cases/knowledge?e2e=1")
     assert normal_knowledge.status_code == e2e_knowledge.status_code == 200
