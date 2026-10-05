@@ -98,15 +98,12 @@ jobs:
           python -m compileall -q "$extract"
           cd "$extract"
           python -c "from services.hardware_data_root import HardwareDataRootResolver; from services.hardware_startup_coordinator import HardwareStartupCoordinator; from services.hardware_case_source_store import HardwareCaseSourceStore; from services.hardware_asset_repository import CandidateAssetRepository; from services.hardware_asset_operation_journal import HardwareAssetOperationJournal; from services.hardware_case_r1_workbench import HardwareR1WorkbenchService; from services.hardware_case_r1_runtime import build_hardware_case_r1_structurer; print('STARTUP_IMPORT=PASS')"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            win_bat="$(cygpath -w "$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat")"
-            if launcher_output=$(cmd.exe /d /c "call \"$win_bat\"" 2>&1); then launcher_status=0; else launcher_status=$?; fi
-          else
+          if [ "$RUNNER_OS" != "Windows" ]; then
             if launcher_output=$("$extract/RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.command" 2>&1); then launcher_status=0; else launcher_status=$?; fi
+            printf '%s\n' "$launcher_output"
+            test "$launcher_status" -ne 0
+            [[ "$launcher_output" == *"usage:"* ]]
           fi
-          printf '%s\n' "$launcher_output"
-          test "$launcher_status" -ne 0
-          [[ "$launcher_output" == *"usage:"* ]]
           mkdir -p tests
           cp "$GITHUB_WORKSPACE/tests/test_hardware_r1_wave4_execution.py" tests/
           export PYTHONPATH="$extract"
@@ -115,6 +112,16 @@ jobs:
           cat > "$runner_tmp/WAVE4_EXECUTION_NATIVE_GATE_REPORT.json" <<JSON
           {"platform":"${{ runner.os }}","fresh_extract":"PASS","python_compile":"PASS","startup_import":"PASS","launcher_no_args_fail_closed":"PASS","synthetic_execution_fake_provider":"PASS","real_provider_calls":0,"data_root_isolation":"PASS","security_scan":"PASS","real_docx_included":false}
           JSON
+
+      - name: Windows batch launcher fails closed without arguments
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bat = Join-Path $env:RUNNER_TEMP "wave4-execution-extract\RUN_HARDWARE_R1_WAVE4_REAL_EXECUTION.bat"
+          $output = & $bat 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Write-Host
+          if ($exitCode -eq 0 -or (($output -join "`n") -notmatch "usage:")) { throw "WINDOWS_LAUNCHER_DID_NOT_FAIL_CLOSED" }
 
       - uses: actions/upload-artifact@v4
         with:
