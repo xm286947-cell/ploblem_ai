@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import os
+import secrets
+import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -28,6 +33,7 @@ ollama = OllamaProvider(settings)
 active_api_key = admin_config.secret_store.effective_key()
 openai_compatible = OpenAICompatibleProvider(settings, active_api_key)
 manual_provider = UnconfiguredManualProvider()
+service_instance_id = secrets.token_urlsafe(12)
 
 
 def active_generation_provider():
@@ -75,7 +81,7 @@ app = FastAPI(title="Public Knowledge Service", version=__version__, lifespan=li
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    return {"status": "ok", "service": "public-knowledge", "version": __version__, "mode": "LIVE_OR_FIXTURE_REPLAY"}
+    return {"status": "ok", "service": "public-knowledge", "version": __version__, "mode": "LIVE_OR_FIXTURE_REPLAY", "instance_id": service_instance_id}
 
 
 @app.get("/settings", include_in_schema=False)
@@ -83,23 +89,52 @@ def admin_settings_page() -> FileResponse:
     return FileResponse(Path(__file__).with_name("admin.html"), media_type="text/html; charset=utf-8")
 
 
-def _admin_state() -> dict[str, object]:
-    return admin_config.state(
+def _admin_state(request: Request | None = None) -> dict[str, object]:
+    state = admin_config.state(
         service_version=__version__,
         embedding_status=embedding_status()["status"],
         retrieval_adapter="sqlite-lexical-reference",
         active_credential=active_api_key,
     )
+    strategy = _restart_strategy()
+    state["restart_capability"] = {
+        "strategy": strategy if strategy == "SUPERVISED_PROCESS_EXIT" else "UNAVAILABLE",
+        "available": strategy == "SUPERVISED_PROCESS_EXIT" and (request is None or _request_is_loopback(request)),
+    }
+    return state
+
+
+def _restart_strategy() -> str:
+    configured = os.getenv("PKR_RESTART_STRATEGY", "UNAVAILABLE").strip().lower()
+    return "SUPERVISED_PROCESS_EXIT" if configured == "supervised_process_exit" else "UNAVAILABLE"
+
+
+def _request_is_loopback(request: Request) -> bool:
+    host = request.url.hostname or ""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+async def _terminate_after_response() -> None:
+    # FastAPI runs BackgroundTasks after sending the response body. Uvicorn then
+    # handles SIGTERM gracefully; an external supervisor may restart this PID.
+    await asyncio.sleep(0.35)
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 @app.get("/admin/config")
-def admin_get_config() -> dict[str, object]:
-    return _admin_state()
+def admin_get_config(request: Request) -> dict[str, object]:
+    return _admin_state(request)
 
 
 @app.get("/admin/effective-config")
-def admin_get_effective_config() -> dict[str, object]:
-    return {"current_effective_config": _admin_state()["current_effective_config"], "apply_state": admin_config.apply_state()}
+def admin_get_effective_config(request: Request) -> dict[str, object]:
+    state = _admin_state(request)
+    return {"current_effective_config": state["current_effective_config"], "apply_state": state["apply_state"]}
 
 
 @app.post("/admin/config/validate")
@@ -196,7 +231,7 @@ def admin_test_provider(body: dict[str, object]) -> dict[str, object]:
 
 
 @app.put("/admin/config")
-def admin_save_config(body: dict[str, object]) -> dict[str, object]:
+def admin_save_config(body: dict[str, object], request: Request) -> dict[str, object]:
     allowed = {"config", "test_id", "api_key", "openai_api_key", "clear_credential"}
     if set(body) - allowed or not isinstance(body.get("config"), dict) or not isinstance(body.get("test_id"), str):
         raise HTTPException(422, {"errors": {"config": "Expected config values and a successful provider test ID."}})
@@ -208,7 +243,7 @@ def admin_save_config(body: dict[str, object]) -> dict[str, object]:
         )
     except ConfigValidationError as exc:
         raise HTTPException(422, {"errors": exc.errors}) from exc
-    state = _admin_state()
+    state = _admin_state(request)
     state["apply_state"] = apply_state
     return state
 
@@ -256,6 +291,17 @@ def admin_clear_provider_credential(body: dict[str, object]) -> dict[str, object
     return {"credential_status": "CONFIGURED" if admin_config.secret_store.environment_key() else "MISSING",
             "credential_source": admin_config.secret_store.source(),
             "apply_state": "RESTART_REQUIRED" if settings.provider_type == "openai_compatible" else admin_config.apply_state()}
+
+
+@app.post("/admin/restart", status_code=202)
+async def admin_restart(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    if _restart_strategy() != "SUPERVISED_PROCESS_EXIT" or not _request_is_loopback(request):
+        raise HTTPException(503, {"code": "RESTART_UNAVAILABLE", "message": "Safe supervised restart is unavailable for this service connection."})
+    if _admin_state()["apply_state"] != "RESTART_REQUIRED":
+        raise HTTPException(409, {"code": "NO_RESTART_REQUIRED", "message": "The saved configuration is already active."})
+    restart_id = secrets.token_urlsafe(18)
+    background_tasks.add_task(_terminate_after_response)
+    return {"restart_id": restart_id, "state": "RESTARTING", "strategy": "SUPERVISED_PROCESS_EXIT"}
 
 
 @app.get("/providers/manual/status")

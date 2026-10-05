@@ -116,6 +116,24 @@ def test_config_save_requires_successful_test_and_reports_restart(monkeypatch, t
     assert restarted.apply_state() == "APPLIED"
 
 
+def test_switching_to_ollama_does_not_require_or_clear_saved_openai_key(tmp_path):
+    manager = ConfigurationAdmin(
+        base=Settings.load_base(),
+        config_path=tmp_path / "config.local.json",
+        secret_path=tmp_path / "secrets.local.json",
+    )
+    saved_key = "write-only-openai-key"
+    manager.secret_store.write(saved_key)
+    candidate = manager.validate(draft_config())
+
+    test_id = manager.record_provider_test(candidate, None)
+    assert manager.save(candidate, test_id) == "RESTART_REQUIRED"
+
+    assert manager.secret_store.local_key() == saved_key
+    assert "api_key" not in manager.config_path.read_text(encoding="utf-8").lower()
+    assert saved_key not in manager.config_path.read_text(encoding="utf-8")
+
+
 def test_provider_model_mismatch_cannot_be_saved(monkeypatch, tmp_path):
     client, _ = setup_admin_client(monkeypatch, tmp_path)
     candidate = draft_config()

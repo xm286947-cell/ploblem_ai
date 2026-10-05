@@ -176,7 +176,7 @@ class ConfigurationAdmin:
             raise ConfigValidationError({"clear_credential": "Credential clearing is available only for OpenAI Compatible."})
         if candidate_key and candidate["provider_type"] != "openai_compatible":
             raise ConfigValidationError({"api_key": "API Key is accepted only for OpenAI Compatible."})
-        credential = self.effective_credential(candidate_key=candidate_key, clear_local=clear_local)
+        credential = self.effective_credential(candidate_key=candidate_key, clear_local=clear_local) if candidate["provider_type"] == "openai_compatible" else None
         if candidate["provider_type"] == "openai_compatible" and not credential:
             raise ConfigValidationError({"credential": "CREDENTIAL_MISSING: enter a key or configure OPENAI_COMPATIBLE_API_KEY."})
 

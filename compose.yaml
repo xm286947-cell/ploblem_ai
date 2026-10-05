@@ -10,6 +10,7 @@ services:
         required: false
     environment:
       PKR_DATA_DIR: /var/lib/public-knowledge
+      PKR_RESTART_STRATEGY: supervised_process_exit
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
