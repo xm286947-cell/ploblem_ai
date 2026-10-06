@@ -384,6 +384,7 @@ async function reuseAssessmentHistory(id){
   }
 }
 let MVP_SUMMARY=null;
+let MVP_PUBLIC_KNOWLEDGE_READY=false;
 function mvpScenarioCard(x){
   let status=x?.status||'NOT_RUN',body=x?.direct_answer||'尚未执行';
   return '<div class="card"><div class="pagehead"><div><b>'+esc(x?.label||'场景')+'</b><p>'+esc(body)+'</p></div>'+badge(status)+'</div>'+(x?.created_at?'<small>'+esc(x.created_at)+'</small>':'')+(x?.next_action?'<p><b>Next Action：</b>'+esc(x.next_action)+'</p>':'')+'</div>';
@@ -391,26 +392,32 @@ function mvpScenarioCard(x){
 function renderMvpSummaryPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
-  host.insertAdjacentHTML('beforeend','<div id="mvpSummaryPanel" class="card"><div class="pagehead"><div><div class="kicker">UNIFIED MVP SUMMARY</div><h3>综合评估摘要</h3><div class="muted">汇总 Device Fact、Runtime、最近一次寿命 / 诊断 / 优化结果；可直接从当前状态生成工程优化行动方案。</div></div><div class="row"><button class="secondary" onclick="loadMvpSummary()">刷新</button><button class="primary" onclick="executeIntegratedActionPlan()">基于当前状态生成优化方案</button><button class="secondary" onclick="downloadMvpSummary()">导出 Markdown</button></div></div><div id="mvpSummaryBody" class="empty">正在汇总…</div><div id="integratedActionPlanResult"></div></div>');
+  host.insertAdjacentHTML('beforeend','<div id="mvpSummaryPanel" class="card"><div class="pagehead"><div><div class="kicker">UNIFIED MVP SUMMARY</div><h3>综合评估摘要</h3><div class="muted">汇总 Device Fact、Runtime、最近一次寿命 / 诊断 / 优化结果；可直接从当前状态生成工程优化行动方案。</div></div><div class="row"><button class="secondary" onclick="loadMvpSummary()">刷新</button><button class="primary" onclick="executeIntegratedActionPlan()">生成并保存工程优化方案</button><button class="secondary" onclick="downloadMvpSummary()">导出 Markdown</button></div></div><div id="mvpSummaryBody" class="empty">正在汇总…</div><div id="integratedActionPlanResult"></div></div>');
   loadMvpSummary();
 }
 async function loadMvpSummary(){
   let d=CURRENT?.device,body=$('#mvpSummaryBody');
   if(!d||!body)return;
   try{
-    MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
+    let results=await Promise.all([
+      api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary'),
+      api('/api/public-knowledge/status?mode=LIVE').catch(()=>({connected:false}))
+    ]);
+    MVP_SUMMARY=results[0];
+    MVP_PUBLIC_KNOWLEDGE_READY=results[1]?.connected===true;
     let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
-    let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{};
+    let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{},overallReady=!!MVP_SUMMARY.mvp_ready_for_demo&&MVP_PUBLIC_KNOWLEDGE_READY;
     body.innerHTML='<div class="grid4">'+
       '<div class="card"><small>Device Fact</small><div class="metric">'+esc(f.confirmed||0)+'</div><small>适用槽位 '+esc(f.applicable||0)+' · Fact Coverage '+Math.round((f.fact_coverage_ratio||0)*100)+'%</small></div>'+
       '<div class="card"><small>Runtime</small><div class="metric">'+esc(rt.snapshot_count||0)+'</div><small>Snapshots · '+esc(rt.metric_count||0)+' Metrics</small></div>'+
       '<div class="card"><small>Lifecycle</small><p>'+badge(MVP_SUMMARY.lifecycle?.status||'DRAFT')+'</p><small>'+esc(MVP_SUMMARY.lifecycle?.reason||'')+'</small></div>'+
-      '<div class="card"><small>Public Knowledge</small><p><span class="badge CONFIRMED">IN CONTEXT</span></p><small>Engineering Context + Citation</small></div>'+
+      '<div class="card"><small>Public Knowledge</small><p>'+badge(MVP_PUBLIC_KNOWLEDGE_READY?'READY':'UNAVAILABLE')+'</p><small>'+(MVP_PUBLIC_KNOWLEDGE_READY?'Engineering Context + Citation 在线':'RAG 当前不可用；Storage 结果仍保留')+'</small></div>'+
       '<div class="card"><small>Engineering Actions</small><div class="metric">'+esc(ac.open_count||0)+'</div><small>Open / In Progress</small></div>'+
-      '<div class="card"><small>MVP Demo Readiness</small><p>'+badge(MVP_SUMMARY.mvp_ready_for_demo?'READY':'PARTIAL')+'</p><small>'+esc(actions.length?actions.length+' 项待补齐':'当前核心场景已有记录')+'</small></div>'+
+      '<div class="card"><small>MVP Demo Readiness</small><p>'+badge(overallReady?'READY':'PARTIAL')+'</p><small>'+esc(!MVP_PUBLIC_KNOWLEDGE_READY?'Public Knowledge 未连接':(actions.length?actions.length+' 项待补齐':'S1～S5 + Public Knowledge 已就绪'))+'</small></div>'+
       '</div>'+
       '<div class="grid3">'+sc.map(mvpScenarioCard).join('')+'</div>'+
-      (actions.length?'<div class="card warning"><b>继续完成</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命评估</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button></div></div>':'<div class="fact card"><b>当前器件 MVP 核心分析链已有记录。</b><p>可导出摘要，或继续使用 Public Knowledge / Compare 做工程追溯。</p></div>');
+      (!MVP_PUBLIC_KNOWLEDGE_READY?'<div class="card warning"><b>Public Knowledge 未就绪</b><p>不能把 Storage S1～S5 已形成结果误判为完整 MVP Ready；恢复 RAG 后再确认。</p></div>':'')+
+      (actions.length?'<div class="card warning"><b>继续完成</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命评估</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button></div></div>':(overallReady?'<div class="fact card"><b>当前器件 MVP 核心分析链与 Public Knowledge 均已就绪。</b><p>可导出摘要，或继续查看 Evidence / Engineering Action。</p></div>':''));
   }catch(e){
     body.innerHTML='<div class="danger">综合评估摘要暂不可用：'+esc(e.message)+'</div>';
   }
@@ -547,6 +554,7 @@ function mvpSummaryMarkdown(){
     '- Lifecycle: '+(x.lifecycle?.status||'DRAFT'),
     '',
     '## Public Knowledge',
+    '- Status: '+(MVP_PUBLIC_KNOWLEDGE_READY?'READY':'UNAVAILABLE'),
     '- Role: Engineering Context + Citation',
     '- RAG Answer != Storage Diagnosis',
     '- Public Knowledge != Formal Evidence',
