@@ -119,3 +119,19 @@ test('knowledge search unavailable state gives a clear Chinese recovery route', 
   assert.match(consumptionSource, /执行“生成检索数据”/);
   assert.doesNotMatch(consumptionTemplate, /请先重建 Consumption Projection/);
 });
+
+
+test('ambiguous publish exposes explicit reconciliation and never republishes', () => {
+  assert.match(productionTemplate, /需要处理发布对账/);
+  assert.match(productionTemplate, /data-promotion-reconcile/);
+  assert.match(productionTemplate, /处理发布对账/);
+  assert.match(source, /reconciliation_required/);
+  assert.match(source, /reconciliation_operation_type === 'PUBLISH'/);
+  const start = source.indexOf('async function reconcilePublication');
+  const end = source.indexOf('async function verifyPublication', start);
+  assert.ok(start >= 0 && end > start);
+  const reconcileBlock = source.slice(start, end);
+  assert.match(reconcileBlock, /promotion\/reconcile/);
+  assert.match(reconcileBlock, /不会再次发起“发布正式知识”/);
+  assert.doesNotMatch(reconcileBlock, /promotion\/publish/);
+});
