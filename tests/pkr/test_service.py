@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from public_knowledge_rag import app as service
@@ -218,3 +220,70 @@ def test_public_query_allows_engineering_internal_ecc_but_blocks_explicit_privat
         "/search",
         json={"query": "S/N: 1234567890"},
     ).status_code == 422
+
+
+
+def test_active_provider_health_uses_openai_compatible_when_configured(monkeypatch, tmp_path):
+    client = setup_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(
+            provider_type="openai_compatible",
+            openai_protocol="chat_completions",
+            openai_model="GLM-5.3-Flash",
+            ollama_model="unused",
+        ),
+    )
+    monkeypatch.setattr(service, "active_api_key", "configured-test-key")
+
+    class HealthyOpenAI:
+        provider_id = "openai_compatible"
+
+        def test_connection(self):
+            return {
+                "test_response_received": True,
+                "model": "GLM-5.3-Flash",
+            }
+
+    monkeypatch.setattr(service, "openai_compatible", HealthyOpenAI())
+
+    response = client.get("/providers/active/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai_compatible"
+    assert payload["status"] == "ok"
+    assert payload["protocol"] == "chat_completions"
+    assert payload["model"] == "GLM-5.3-Flash"
+    assert payload["test_response_received"] is True
+
+
+def test_active_provider_health_does_not_probe_ollama_for_openai(monkeypatch, tmp_path):
+    client = setup_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(
+            provider_type="openai_compatible",
+            openai_protocol="chat_completions",
+            openai_model="GLM-5.3-Flash",
+            ollama_model="unused",
+        ),
+    )
+    monkeypatch.setattr(service, "active_api_key", "configured-test-key")
+
+    class HealthyOpenAI:
+        provider_id = "openai_compatible"
+
+        def test_connection(self):
+            return {"test_response_received": True, "model": "GLM-5.3-Flash"}
+
+    class ExplodingOllama:
+        def version(self):
+            raise AssertionError("Ollama must not be probed")
+
+    monkeypatch.setattr(service, "openai_compatible", HealthyOpenAI())
+    monkeypatch.setattr(service, "ollama", ExplodingOllama())
+
+    response = client.get("/providers/active/health")
+    assert response.status_code == 200
