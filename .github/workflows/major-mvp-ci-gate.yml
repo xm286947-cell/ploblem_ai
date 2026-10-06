@@ -3,7 +3,7 @@ name: MAJOR MVP CI Gate
 on:
   push:
     branches:
-      - ci/major-mvp-gate-001
+      - ci/major-mvp-gate-execution
     paths:
       - .github/workflows/major-mvp-ci-gate.yml
   workflow_dispatch:
@@ -12,13 +12,13 @@ on:
         description: Frozen product source commit
         required: true
         type: string
-        default: 50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c
+        default: 8e5e2b33112a1a5ebc34bb8ca74a1c91f546bade
 
 permissions:
   contents: read
 
 concurrency:
-  group: major-mvp-ci-gate-${{ inputs.source_sha }}
+  group: major-mvp-ci-gate-${{ inputs.source_sha || '8e5e2b33112a1a5ebc34bb8ca74a1c91f546bade' }}
   cancel-in-progress: false
 
 jobs:
@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      FROZEN_PRODUCT_SHA: 50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c
-      PRODUCT_BRANCH: feature/major-mvp-productization-closure
-      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha || '50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c' }}
+      FROZEN_PRODUCT_SHA: 8e5e2b33112a1a5ebc34bb8ca74a1c91f546bade
+      PRODUCT_BRANCH: fix/major-mvp-multi-event-report-binding-closure
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha || '8e5e2b33112a1a5ebc34bb8ca74a1c91f546bade' }}
 
     steps:
       - name: Validate requested frozen source
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout frozen product source cleanly
         uses: actions/checkout@v4
         with:
-          ref: feature/major-mvp-productization-closure
+          ref: fix/major-mvp-multi-event-report-binding-closure
           path: product-source
           fetch-depth: 0
 
@@ -154,7 +154,7 @@ jobs:
           python product-source/scripts/build_major_mvp_product_candidate.py \
             --output-dir "$ARTIFACT_DIR/candidate" \
             2>&1 | tee "$ARTIFACT_DIR/package-build.log"
-          archive="$ARTIFACT_DIR/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip"
+          archive="$ARTIFACT_DIR/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_8e5e2b33112a.zip"
           test -f "$archive"
           digest="$(sha256sum "$archive" | awk '{print $1}')"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
@@ -205,12 +205,12 @@ jobs:
           if not manifest.is_file():
               raise SystemExit("PACKAGE_MANIFEST_MISSING_AFTER_EXTRACT")
           parsed = json.loads(manifest.read_text(encoding="utf-8"))
-          if parsed.get("source_commit") != "50cb839d1dd4ec7f4cd57d820dc7fda33cf0cc7c":
+          if parsed.get("source_commit") != "8e5e2b33112a1a5ebc34bb8ca74a1c91f546bade":
               raise SystemExit("PACKAGE_SOURCE_SHA_MISMATCH")
           __import__("shutil").copy2(manifest, __import__("pathlib").Path(artifacts) / "PACKAGE_MANIFEST.json")
           print(f"FRESH_EXTRACT=PASS\nPACKAGE_MANIFEST=PASS\nEXTRACTED_ROOT={roots[0]}")
           PY
-          echo "root=$extract_root/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4" >> "$GITHUB_OUTPUT"
+          echo "root=$extract_root/MAJOR_MVP_PRODUCT_CANDIDATE_8e5e2b33112a" >> "$GITHUB_OUTPUT"
 
       - name: Verify fresh package import and launch through POSIX launcher
         shell: bash
@@ -256,11 +256,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: major-mvp-product-candidate-50cb839d1dd4
+          name: major-mvp-product-candidate-8e5e2b33112a
           if-no-files-found: warn
           path: |
-            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip
-            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_50cb839d1dd4.zip.sha256
+            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_8e5e2b33112a.zip
+            ${{ env.ARTIFACT_DIR }}/candidate/MAJOR_MVP_PRODUCT_CANDIDATE_8e5e2b33112a.zip.sha256
             ${{ env.ARTIFACT_DIR }}/PACKAGE_MANIFEST.json
             ${{ env.ARTIFACT_DIR }}/regression.log
             ${{ env.ARTIFACT_DIR }}/package-build.log
