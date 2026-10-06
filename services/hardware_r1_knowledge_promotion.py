@@ -51,6 +51,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _same_evidence_refs(left: list[str], right: list[str]) -> bool:
+    """Evidence identity is order-insensitive but multiplicity-sensitive."""
+    return Counter(left) == Counter(right)
+
+
 def _json_hash(value: Mapping[str, Any]) -> str:
     payload = json.dumps(
         dict(value),
@@ -1099,7 +1104,9 @@ class HardwareR1KnowledgePromotionService:
         valid = (
             published.get("candidate_ref") == knowledge_candidate_id
             and int(published.get("revision") or 0) == PROMOTION_REVISION
-            and Counter(published.get("evidence_refs") or []) == Counter(evidence_ids)
+            and _same_evidence_refs(
+                list(published.get("evidence_refs") or []), evidence_ids
+            )
             and published.get("domain") == "HARDWARE_CASE"
             and published.get("object_type") == "HARDWARE_CASE"
             and bool(knowledge_id)
