@@ -23,6 +23,11 @@
   const retryBatchButton = q('[data-retry-failed]');
   const detail = q('[data-case-detail]');
   const debugPanel = q('[data-advanced-debug]');
+  const backgroundBatchPolling = {
+    batchId: '',
+    timer: null,
+    running: false,
+  };
 
   const escapeHtml = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -232,6 +237,81 @@
     return batch;
   }
 
+  function batchHasRunningWork(batch) {
+    return (batch?.items || []).some((item) =>
+      String(item.orchestration_status || '').toUpperCase() === 'RUNNING' ||
+      displayResult(item) === 'RUNNING'
+    );
+  }
+
+  function stopBackgroundBatchPolling() {
+    if (backgroundBatchPolling.timer !== null) {
+      window.clearInterval(backgroundBatchPolling.timer);
+    }
+    backgroundBatchPolling.batchId = '';
+    backgroundBatchPolling.timer = null;
+    backgroundBatchPolling.running = false;
+  }
+
+  function syncSelectedItemFromBatch(batch) {
+    const itemId = state.item?.item_id;
+    if (!itemId) return;
+    const current = (batch?.items || []).find((item) => item.item_id === itemId);
+    if (!current) return;
+    state.item = current;
+    if (!detail.hidden) {
+      renderDetail(current, {scroll: false, refreshPromotionState: false});
+    }
+  }
+
+  async function backgroundBatchPollingTick() {
+    const batchId = backgroundBatchPolling.batchId;
+    if (!batchId || backgroundBatchPolling.running) return;
+    backgroundBatchPolling.running = true;
+    try {
+      const batch = await refreshBatchSnapshot(batchId);
+      syncSelectedItemFromBatch(batch);
+      if (!batchHasRunningWork(batch)) {
+        stopBackgroundBatchPolling();
+      }
+    } catch (_) {
+      // Keep polling. A transient refresh failure must not require a manual reload.
+    } finally {
+      if (backgroundBatchPolling.batchId === batchId) {
+        backgroundBatchPolling.running = false;
+      }
+    }
+  }
+
+  function syncBackgroundBatchPolling(batch) {
+    const batchId = String(batch?.batch_id || '');
+    if (
+      backgroundBatchPolling.batchId &&
+      backgroundBatchPolling.batchId !== batchId
+    ) {
+      stopBackgroundBatchPolling();
+    }
+    if (!batchId || !batchHasRunningWork(batch)) {
+      if (backgroundBatchPolling.batchId === batchId) {
+        stopBackgroundBatchPolling();
+      }
+      return;
+    }
+    if (
+      backgroundBatchPolling.batchId === batchId &&
+      backgroundBatchPolling.timer !== null
+    ) {
+      return;
+    }
+    stopBackgroundBatchPolling();
+    backgroundBatchPolling.batchId = batchId;
+    backgroundBatchPolling.timer = window.setInterval(
+      backgroundBatchPollingTick,
+      1000
+    );
+    backgroundBatchPollingTick();
+  }
+
   function startBatchPolling(batchId) {
     let stopped = false;
     let running = false;
@@ -246,7 +326,7 @@
         running = false;
       }
     };
-    const timer = window.setInterval(tick, 1500);
+    const timer = window.setInterval(tick, 1000);
     tick();
     return () => {
       stopped = true;
@@ -354,6 +434,7 @@
         historySelect.value = target;
         await loadBatch(target);
       } else {
+        stopBackgroundBatchPolling();
         renderBatch(null);
         setMessage('暂无 Batch。请批量上传 Word。');
       }
@@ -364,6 +445,7 @@
 
   async function loadBatch(batchId) {
     if (!batchId) {
+      stopBackgroundBatchPolling();
       renderBatch(null);
       updateUrl({batchId: '', itemId: ''});
       return;
@@ -372,6 +454,8 @@
       const batch = await request('/batches/' + encodeURIComponent(batchId));
       renderBatch(batch);
       historySelect.value = batchId;
+      syncSelectedItemFromBatch(batch);
+      syncBackgroundBatchPolling(batch);
       updateUrl({batchId, itemId: state.item?.item_id || ''});
       setMessage(
         'Batch 已载入：' + batchId +
@@ -993,6 +1077,22 @@
     } catch (error) {
       setMessage('Advanced Debug 加载失败：' + error.message, true);
     }
+  }
+
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (
+        document.visibilityState === 'visible' &&
+        state.batch?.batch_id
+      ) {
+        refreshBatchSnapshot(state.batch.batch_id)
+          .then((batch) => {
+            syncSelectedItemFromBatch(batch);
+            syncBackgroundBatchPolling(batch);
+          })
+          .catch(() => {});
+      }
+    });
   }
 
   q('[data-batch-files]').addEventListener('change', (event) => {
