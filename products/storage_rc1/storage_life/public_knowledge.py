@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -53,6 +54,39 @@ FIXTURE_SOURCES = [
     {"source_id": "fixture-api-guide", "title": "Public Knowledge API Guide · 演示资料", "publisher": "Storage Public Knowledge", "classification": "PUBLIC", "media_type": "text/markdown", "version": "0.1", "revision": "0.1", "updated_at": "2026-10-05", "summary": "演示搜索、引用定位和来源详情操作。", "content": "Search supports lexical retrieval and citation locators. QA is unavailable in fixture data unless an explicit captured answer exists.", "structure": [{"type": "heading", "text": "API Guide"}, {"type": "paragraph", "text": "演示搜索和引用定位。"}]},
 ]
 FIXTURE_HITS = [{"hit_id": "fixture-citation-page1", "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": {"page": 1, "section": "演示记录", "chunk_id": "fixture-chunk-1"}, "text": "演示记录；不得作为正式规格事实。", "score": 0.99}]
+
+
+_OUTBOUND_SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.I),
+    re.compile(r"\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*\S+", re.I),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.I),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+]
+_OUTBOUND_PRIVATE_CONTEXT_PATTERNS = [
+    re.compile(r"\b(?:customer|project|internal|confidential|restricted)\b\s*[:：=#-]?\s*\S+", re.I),
+    re.compile(r"(?:客户|项目|内部|机密|保密|工单|问题单|现场问题)\s*[:：=#-]?\s*\S+"),
+    re.compile(r"\b(?:S/?N|serial(?:\s*(?:number|no\.?))?)\s*[:#=-]?\s*[A-Z0-9-]{4,}\b", re.I),
+    re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"),
+]
+_OUTBOUND_RUNTIME_VALUE_PATTERN = re.compile(
+    r"\b(?:percentage[ _-]*used|data[ _-]*units[ _-]*written|critical[ _-]*warning|"
+    r"media[ _-]*errors?|pre[ _-]*eol(?:[ _-]*info)?|device[ _-]*life[ _-]*time|"
+    r"ecc[ _-]*(?:corrected|uncorrectable|uncorrected)|bad[ _-]*blocks?)\b\s*[:=]\s*\S+",
+    re.I,
+)
+
+
+def _require_public_safe_outbound_query(value: str) -> str:
+    query = " ".join(str(value or "").replace("\x00", " ").split()).strip()
+    if not query:
+        raise HTTPException(422, "Public Knowledge 查询不能为空。")
+    if any(pattern.search(query) for pattern in _OUTBOUND_SECRET_PATTERNS):
+        raise HTTPException(422, "Public Knowledge 查询包含凭证/密钥信息，已阻止发送。")
+    if any(pattern.search(query) for pattern in _OUTBOUND_PRIVATE_CONTEXT_PATTERNS):
+        raise HTTPException(422, "Public Knowledge 查询包含客户/项目/内部标识，已阻止发送。")
+    if _OUTBOUND_RUNTIME_VALUE_PATTERN.search(query):
+        raise HTTPException(422, "Public Knowledge 查询包含 Runtime 实测值，已阻止发送；请只查询公开字段定义和工程背景。")
+    return query
 
 
 class SearchBody(BaseModel):
@@ -452,10 +486,11 @@ def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLA
 
 @router.post("/search")
 def search(body: SearchBody, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    safe_query = _require_public_safe_outbound_query(body.query)
     if mode == "FIXTURE_REPLAY":
-        hits = FIXTURE_HITS if any(x in body.query.lower() for x in ("gd25", "page", "sector", "引用", "演示")) else []
+        hits = FIXTURE_HITS if any(x in safe_query.lower() for x in ("gd25", "page", "sector", "引用", "演示")) else []
         return {"hits": hits[:body.top_k], "retrieval_snapshot": {"adapter": "fixture-replay", "top_k": body.top_k}, "mode": mode}
-    return {**_request(mode, "/search", {"query": body.query, "top_k": body.top_k}, base_url), "mode": mode}
+    return {**_request(mode, "/search", {"query": safe_query, "top_k": body.top_k}, base_url), "mode": mode}
 
 
 def _clean_public_context(value: str | None, limit: int) -> str | None:
@@ -638,9 +673,10 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
 
 @router.post("/ask")
 def ask(body: AskBody, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    safe_question = _require_public_safe_outbound_query(body.question)
     if mode == "FIXTURE_REPLAY":
         return {"answer": "演示回放：当前示例资料写明 page size 为 256 bytes。此内容是合成 UI fixture，不是器件规格结论。", "citations": [{"citation_id": "fixture-citation-page1", "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"]}], "mode": mode, "fixture_id": "pk-workspace-qa-001", "answer_scope": "SYNTHETIC_DEMO_ONLY"}
-    return {**_request(mode, "/ask", {"question": body.question, "mode": "LIVE"}, base_url), "mode": mode}
+    return {**_request(mode, "/ask", {"question": safe_question, "mode": "LIVE"}, base_url), "mode": mode}
 
 
 @router.get("/citations/{citation_id}")
