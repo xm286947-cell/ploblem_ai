@@ -60,7 +60,6 @@ models:
     model: mock-gpt
     temperature: 0
     max_tokens: 4096
-    timeout_seconds: 10
 """.strip(),
         encoding="utf-8",
     )
