@@ -303,9 +303,10 @@ class MajorKnowledgeRepository:
                 )
                 ids.append({"fragment_id": fragment_id, "ordinal": fragment.ordinal, "location_ref": fragment.location_ref})
             status = "FAILED" if not result.fragments else ("WARNING" if result.warnings else "SUCCESS")
+            parser_version = str(getattr(result, "parser_version", "") or PARSER_VERSION)
             connection.execute(
                 "UPDATE kb_document_version SET parser_version=?,parse_status=?,parse_warnings_json=? WHERE version_id=?",
-                (PARSER_VERSION, status, _json(result.warnings), version_id),
+                (parser_version, status, _json(result.warnings), version_id),
             )
         return ids
 
