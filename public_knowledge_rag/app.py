@@ -69,6 +69,8 @@ class AskRequest(BaseModel):
     allowed_source_ids: list[str] | None = None
     filters: dict[str, str] = Field(default_factory=dict)
     mode: Literal["LIVE", "FIXTURE_REPLAY"] = "LIVE"
+    response_language: Literal["AUTO", "zh-CN", "en"] = "AUTO"
+    include_citation_translations: bool = False
 
 
 class ReplayRequest(BaseModel):
@@ -455,8 +457,29 @@ def ask(body: AskRequest) -> dict[str, object]:
     hits = retriever.search(body.question, 10, body.allowed_source_ids)
     if body.mode == "FIXTURE_REPLAY":
         raise HTTPException(422, "FIXTURE_REPLAY requires POST /fixtures/replay with a fixture_id.")
+
+    generation_question = body.question
+    if body.response_language == "zh-CN":
+        generation_question = (
+            "请使用简体中文回答。技术术语可保留英文括注；严格只依据提供的公开资料，"
+            "保留 [1]、[2] 这类引用标记，不使用外部知识。"
+            + (
+                "先给出中文综合解读，再按引用编号逐条给出对应原文片段的忠实中文翻译；"
+                "翻译不得增补原文没有的事实。"
+                if body.include_citation_translations else
+                ""
+            )
+            + "\n\n原问题：" + body.question
+        )
+    elif body.response_language == "en":
+        generation_question = (
+            "Answer in English using only the supplied public-source excerpts; "
+            "preserve citation markers and do not use outside knowledge.\n\nQuestion: "
+            + body.question
+        )
+
     try:
-        answer, model_snapshot = active_generation_provider().generate(body.question, hits)
+        answer, model_snapshot = active_generation_provider().generate(generation_question, hits)
     except ProviderUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     citations = [{"citation_id": h.hit_id, "source_id": h.source_id, "source_revision": h.source_revision,
@@ -464,6 +487,8 @@ def ask(body: AskRequest) -> dict[str, object]:
     return {"answer": answer, "citations": citations,
             "source_refs": [{"source_id": h.source_id, "source_revision": h.source_revision} for h in hits],
             "model_snapshot": model_snapshot,
+            "response_language": body.response_language,
+            "citation_translations_requested": body.include_citation_translations,
             "retrieval_snapshot": {"adapter": "sqlite-lexical-reference", "top_k": 10}}
 
 
