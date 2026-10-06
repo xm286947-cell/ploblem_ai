@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: b8dcdf54cd31a418a0ab195d9b0858688fac9742
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: 9c9ed9d4007bcaec3cf12133e33f5580b3499f90
+      STORAGE_SOURCE_SHA: 91e5445d88d9131b6a3c21bbe5cd38857f4ee976
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: e18ad017f05812fd38ed6a6838b8fcc9e0034703
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -36,6 +36,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile products/storage_rc1/storage_life/public_knowledge.py
+
+          PKR_START="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:start.sh")"
+          printf '%s\n' "$PKR_START" | grep -q -- "--force-recreate"
+          printf '%s\n' "$PKR_START" | grep -q "PUBLIC_KNOWLEDGE_DELETE_CONTRACT=PASS"
 
           python - <<'PY'
           from pathlib import Path
@@ -75,8 +79,9 @@ jobs:
           set -euo pipefail
 
           SHORT="${STORAGE_SOURCE_SHA:0:12}"
-          PACKAGE_ID="STORAGE-MVP-REAL-FLOW-VALIDATION-${SHORT}-${PACKAGE_DATE}"
-          ZIP_NAME="STORAGE_MVP_REAL_FLOW_VALIDATION_${SHORT}_${PACKAGE_DATE}.zip"
+          PKR_SHORT="${PUBLIC_KNOWLEDGE_SOURCE_SHA:0:12}"
+          PACKAGE_ID="STORAGE-MVP-REAL-FLOW-VALIDATION-${SHORT}-PKR-${PKR_SHORT}-${PACKAGE_DATE}"
+          ZIP_NAME="STORAGE_MVP_REAL_FLOW_VALIDATION_${SHORT}_PKR_${PKR_SHORT}_${PACKAGE_DATE}.zip"
           WORK="dist/_storage_mvp_real_flow"
           PKG="${WORK}/STORAGE_PRODUCT_MVP_RC1"
 
