@@ -1048,6 +1048,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         "scenarios": scenario_items,
         "runtime": {
             "snapshot_count": runtime_trend.get("snapshot_count") or 0,
+            "formal_snapshot_count": runtime_trend.get("formal_snapshot_count") or 0,
             "metric_count": sum(1 for x in (runtime_trend.get("metrics") or []) if x.get("latest")),
             "raw_metric_count": len(runtime_trend.get("metrics") or []),
             "unverified_metric_count": sum(
