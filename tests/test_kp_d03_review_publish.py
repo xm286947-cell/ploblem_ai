@@ -526,3 +526,163 @@ def test_kp_d03_object_lifecycle_active_stale_deprecated(
             changed_by="owner",
             changed_at=datetime(2026, 9, 26, 9, 0, tzinfo=timezone.utc),
         )
+
+
+
+def _storage_model_business_candidate(
+    repository: JsonArtifactRepository,
+    evidence_id: str,
+    *,
+    candidate_id: str,
+    tags: list[str],
+) -> KnowledgeCandidate:
+    return BusinessCandidateIntakeService(repository).intake(
+        {
+            "candidate_id": candidate_id,
+            "candidate_source_type": "BUSINESS",
+            "business_source_type": "STORAGE",
+            "business_source_id": "PKR-SOURCE-001",
+            "business_source_version": "REV-1",
+            "object_type": "SOLUTION",
+            "title": "P/E Cycle test guidance",
+            "content": "Validate endurance against the reviewed P/E cycle evidence.",
+            "device_type": "NAND Flash",
+            "scope": ["storage_lifetime"],
+            "conditions": [],
+            "limitations": [],
+            "tags": tags,
+            "source_refs": [],
+            "evidence_refs": [evidence_id],
+            "confidence": 0.9,
+            "created_at": REVIEWED_AT.isoformat(),
+            "producer": "KNOWLEDGE_EXTRACTION",
+            "contract_version": "knowledge-candidate/v1",
+            "metadata": {
+                "storage_lifetime": {
+                    "schema_version": "storage-lifetime-knowledge/v1",
+                    "model_driven_extraction": True,
+                    "device_type": "NAND Flash",
+                    "canonical_parameters": ["pe_cycles"],
+                    "parameter_binding_status": "BOUND",
+                    "semantic_class_candidates": [
+                        "DESIGN_RULE",
+                        "TEST_RULE",
+                    ],
+                    "semantic_class_status": "NEEDS_REVIEW",
+                    "scenario_consumers": ["S4", "S5"],
+                    "formal_consumable": False,
+                }
+            },
+        }
+    )
+
+
+def test_storage_model_candidate_requires_reviewed_semantic_before_publish(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _storage_model_business_candidate(
+        repository,
+        evidence_id,
+        candidate_id="STORAGE-KP-SEM-001",
+        tags=[
+            "storage-lifetime",
+            "storage-parameter:pe_cycles",
+            "storage-semantic-candidate:DESIGN_RULE",
+            "storage-semantic-candidate:TEST_RULE",
+        ],
+    )
+    _confirm(repository, candidate)
+
+    with pytest.raises(
+        KnowledgePublishError,
+        match="STORAGE_SEMANTIC_REVIEW_REQUIRED",
+    ):
+        KnowledgePublishService(repository).publish(
+            candidate.candidate_id,
+            published_by="publisher",
+            published_at=PUBLISHED_AT,
+        )
+
+
+def test_storage_model_reviewed_semantic_becomes_formal_consumable(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _storage_model_business_candidate(
+        repository,
+        evidence_id,
+        candidate_id="STORAGE-KP-SEM-002",
+        tags=[
+            "storage-lifetime",
+            "storage-parameter:pe_cycles",
+            "storage-semantic-candidate:DESIGN_RULE",
+            "storage-semantic-candidate:TEST_RULE",
+        ],
+    )
+    evaluation = _evaluate(repository, candidate)
+    KnowledgeReviewService(repository).edit(
+        candidate.candidate_id,
+        evaluation.evaluation_id,
+        {
+            "tags": [
+                *candidate.tags,
+                "storage-semantic:TEST_RULE",
+            ]
+        },
+        reviewed_by="reviewer-storage",
+        reviewed_at=REVIEWED_AT,
+        review_note="Confirmed as test guidance.",
+    )
+
+    service = KnowledgePublishService(repository)
+    first = service.publish(
+        candidate.candidate_id,
+        published_by="publisher",
+        published_at=PUBLISHED_AT,
+    )
+    second = service.publish(
+        candidate.candidate_id,
+        published_by="publisher",
+        published_at=PUBLISHED_AT,
+    )
+
+    assert first == second
+    assert "storage-semantic:TEST_RULE" in first.tags
+    storage = first.metadata["storage_lifetime"]
+    assert storage["semantic_class"] == "TEST_RULE"
+    assert storage["semantic_class_status"] == "REVIEWED"
+    assert storage["formal_consumable"] is True
+    assert storage["reviewed_parameter_tags"] == [
+        "storage-parameter:pe_cycles"
+    ]
+
+
+def test_storage_model_publish_rejects_unproposed_semantic(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _storage_model_business_candidate(
+        repository,
+        evidence_id,
+        candidate_id="STORAGE-KP-SEM-003",
+        tags=[
+            "storage-lifetime",
+            "storage-parameter:pe_cycles",
+            "storage-semantic:DIAGNOSTIC_RULE",
+        ],
+    )
+    _confirm(repository, candidate)
+
+    with pytest.raises(
+        KnowledgePublishError,
+        match="STORAGE_SEMANTIC_CLASS_INVALID",
+    ):
+        KnowledgePublishService(repository).publish(
+            candidate.candidate_id,
+            published_by="publisher",
+            published_at=PUBLISHED_AT,
+        )
