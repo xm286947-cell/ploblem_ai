@@ -243,7 +243,7 @@ def test_active_provider_health_uses_openai_compatible_when_configured(monkeypat
         def test_connection(self):
             return {
                 "test_response_received": True,
-                "model": "GLM-5.3-Flash",
+                "model": "glm-5.3-flash",
             }
 
     monkeypatch.setattr(service, "openai_compatible", HealthyOpenAI())
@@ -255,6 +255,9 @@ def test_active_provider_health_uses_openai_compatible_when_configured(monkeypat
     assert payload["status"] == "ok"
     assert payload["protocol"] == "chat_completions"
     assert payload["model"] == "GLM-5.3-Flash"
+    assert payload["reported_model"] == "glm-5.3-flash"
+    assert payload["model_identity_match"] is True
+    assert payload["identity_normalization"] == "strip+casefold"
     assert payload["test_response_received"] is True
 
 
@@ -287,3 +290,37 @@ def test_active_provider_health_does_not_probe_ollama_for_openai(monkeypatch, tm
 
     response = client.get("/providers/active/health")
     assert response.status_code == 200
+
+
+
+def test_active_provider_health_rejects_real_model_identity_change(monkeypatch, tmp_path):
+    client = setup_client(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(
+            provider_type="openai_compatible",
+            openai_protocol="chat_completions",
+            openai_model="GLM-5.3-Flash",
+            ollama_model="unused",
+        ),
+    )
+    monkeypatch.setattr(service, "active_api_key", "configured-test-key")
+
+    class WrongModelOpenAI:
+        provider_id = "openai_compatible"
+
+        def test_connection(self):
+            return {
+                "test_response_received": True,
+                "model": "GLM-4.7-Flash",
+            }
+
+    monkeypatch.setattr(service, "openai_compatible", WrongModelOpenAI())
+
+    response = client.get("/providers/active/health")
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["code"] == "MODEL_IDENTITY_MISMATCH"
+    assert detail["configured_model"] == "GLM-5.3-Flash"
+    assert detail["reported_model"] == "GLM-4.7-Flash"
