@@ -1,0 +1,274 @@
+name: Storage MVP Public Knowledge Delete Contract Hotfix
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-pkr-delete-contract-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hotfix:
+    runs-on: ubuntu-latest
+    env:
+      BASE_PKR_SHA: 3ce389a9a8f8863aafd2405d53870cccff977838
+      TARGET_PKR_SHA: e18ad017f05812fd38ed6a6838b8fcc9e0034703
+      PATCH_ID: STORAGE_PKR_DELETE_CONTRACT_HOTFIX_20261006_R2
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build mixed-state-safe patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+
+          git fetch --no-tags origin "$BASE_PKR_SHA" "$TARGET_PKR_SHA"
+          for f in start.sh public_knowledge_rag/app.py public_knowledge_rag/store.py; do
+            mkdir -p "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/$(dirname "$f")"
+            git show "$TARGET_PKR_SHA:$f" > "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/$f"
+          done
+          chmod +x "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root=Path("/tmp")/os.environ["PATCH_ID"]
+          base=os.environ["BASE_PKR_SHA"]
+          target=os.environ["TARGET_PKR_SHA"]
+          files=["start.sh","public_knowledge_rag/app.py","public_knowledge_rag/store.py"]
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          manifest={
+              "patch_id":os.environ["PATCH_ID"],
+              "base_pkr_sha":base,
+              "target_pkr_sha":target,
+              "scope":"Public Knowledge delete-contract closure only",
+              "user_data_touched":False,
+              "docker_volume_touched":False,
+              "files":[],
+          }
+          for rel in files:
+              old=subprocess.check_output(["git","show",f"{base}:{rel}"])
+              new=(root/"payload/PUBLIC_KNOWLEDGE_SERVICE"/rel).read_bytes()
+              manifest["files"].append({
+                  "path":"PUBLIC_KNOWLEDGE_SERVICE/"+rel,
+                  "base_sha256":sha(old),
+                  "target_sha256":sha(new),
+              })
+          (root/"PATCH_MANIFEST.json").write_text(
+              json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8"
+          )
+          PY
+
+          cat > "$ROOT/patch_apply.py" <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+
+          PATCH_DIR = Path(__file__).resolve().parent
+          MANIFEST = json.loads((PATCH_DIR / "PATCH_MANIFEST.json").read_text(encoding="utf-8"))
+
+          def digest(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          if len(sys.argv) != 2:
+              raise SystemExit("usage: patch_apply.py <storage-package-root>")
+
+          target_root = Path(sys.argv[1]).expanduser().resolve()
+          backup_root = target_root / ".storage_hotfix_backup" / MANIFEST["patch_id"]
+          states = []
+
+          for item in MANIFEST["files"]:
+              dst = target_root / item["path"]
+              if not dst.is_file():
+                  raise SystemExit("PATCH_TARGET_MISSING: " + item["path"])
+              current = digest(dst)
+              if current == item["target_sha256"]:
+                  states.append(("target", item, dst))
+              elif current == item["base_sha256"]:
+                  states.append(("base", item, dst))
+              else:
+                  raise SystemExit(
+                      "PATCH_BASE_MISMATCH: " + item["path"]
+                      + "\n当前文件既不是原始 0b6e 包内 Public Knowledge 基线，也不是目标版本。"
+                      + "\n补丁停止，不覆盖现场文件。"
+                  )
+
+          if all(state == "target" for state, _, __ in states):
+              print("ALREADY_PATCHED=YES")
+              raise SystemExit(0)
+
+          for state, item, dst in states:
+              if state != "base":
+                  continue
+              bak = backup_root / item["path"]
+              bak.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(dst, bak)
+
+          for state, item, dst in states:
+              if state != "base":
+                  continue
+              rel = item["path"].removeprefix("PUBLIC_KNOWLEDGE_SERVICE/")
+              src = PATCH_DIR / "payload" / "PUBLIC_KNOWLEDGE_SERVICE" / rel
+              tmp = dst.with_name(dst.name + ".hotfix_tmp")
+              shutil.copy2(src, tmp)
+              if dst.name == "start.sh":
+                  os.chmod(tmp, 0o755)
+              if digest(tmp) != item["target_sha256"]:
+                  tmp.unlink(missing_ok=True)
+                  raise SystemExit("PATCH_PAYLOAD_HASH_MISMATCH: " + item["path"])
+              os.replace(tmp, dst)
+              if dst.name == "start.sh":
+                  os.chmod(dst, 0o755)
+
+          for item in MANIFEST["files"]:
+              dst = target_root / item["path"]
+              if digest(dst) != item["target_sha256"]:
+                  raise SystemExit("PATCH_VERIFY_FAILED: " + item["path"])
+
+          print("PATCH_RESULT=PASS")
+          print("UPDATED_FILES=3")
+          print("USER_DATA_TOUCHED=NO")
+          print("DOCKER_VOLUME_TOUCHED=NO")
+          print("BACKUP_DIR=" + str(backup_root))
+          PY
+
+          cat > "$ROOT/apply_patch.command" <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          choose_target() {
+            if [ "$#" -ge 1 ] && [ -d "$1" ]; then
+              printf '%s' "$1"
+              return
+            fi
+            if [ -f "$PWD/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py" ]; then
+              printf '%s' "$PWD"
+              return
+            fi
+            if [ -f "$(dirname "$PATCH_DIR")/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py" ]; then
+              printf '%s' "$(dirname "$PATCH_DIR")"
+              return
+            fi
+            if command -v osascript >/dev/null 2>&1; then
+              osascript -e 'POSIX path of (choose folder with prompt "选择当前 0b6e7c8b Storage 测试包根目录")' 2>/dev/null || true
+            fi
+          }
+
+          TARGET="$(choose_target "${1:-}")"
+          TARGET="${TARGET%/}"
+          if [ -z "$TARGET" ] || [ ! -f "$TARGET/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py" ]; then
+            echo "没有找到 Storage 包根目录。"
+            read -r -p "按回车退出..."
+            exit 2
+          fi
+
+          echo "[1/3] 应用 Public Knowledge 删除契约补丁..."
+          python3 "$PATCH_DIR/patch_apply.py" "$TARGET"
+
+          echo "[2/3] 重建并重启 Public Knowledge..."
+          (cd "$TARGET/PUBLIC_KNOWLEDGE_SERVICE" && bash ./start.sh)
+
+          echo "[3/3] 从宿主机再次验证 DELETE 契约..."
+          python3 - <<'PY'
+          import json, urllib.request
+          spec=json.load(urllib.request.urlopen("http://127.0.0.1:9000/openapi.json", timeout=10))
+          paths=spec.get("paths", {})
+          required=[
+              "/sources/{source_id}",
+              "/sources/{source_id}/revisions/{revision_id}",
+          ]
+          missing=[p for p in required if "delete" not in paths.get(p,{})]
+          if missing:
+              raise SystemExit("DELETE_CONTRACT_STILL_MISSING:"+",".join(missing))
+          print("PUBLIC_KNOWLEDGE_DELETE_CONTRACT=PASS")
+          PY
+
+          echo
+          echo "补丁完成。回浏览器刷新页面后，再点“删除资料”。"
+          read -r -p "按回车关闭..."
+          SH
+
+          cat > "$ROOT/README_双击_apply_patch.command.txt" <<EOF
+          适用现场：
+          - 当前仍在使用 STORAGE ... 0b6e7c8b... 完整包
+          - Storage UI 已有“删除资料”按钮
+          - 点击删除返回 Method Not Allowed
+          - 上一版 start.sh-only 补丁已经应用也没关系
+
+          本补丁只更新 3 个 Public Knowledge 程序文件：
+          1. PUBLIC_KNOWLEDGE_SERVICE/start.sh
+          2. PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py
+          3. PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/store.py
+
+          不修改 Storage、不修改 SQLite 数据、不删除 Docker 数据卷。
+
+          macOS：
+          双击 apply_patch.command，选择当前正在测试的 Storage 包根目录。
+          补丁会自动重建 Public Knowledge，并验证 DELETE 路由。
+          EOF
+
+          chmod +x "$ROOT/apply_patch.command"
+
+      - name: Self-test mixed patch state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          TEST="/tmp/pkr-delete-hotfix-test"
+          rm -rf "$TEST"
+          mkdir -p "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+
+          # Simulate the user's exact state:
+          # start.sh already updated by R1, app.py/store.py still at old baseline.
+          git show "$TARGET_PKR_SHA:start.sh" > "$TEST/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+          git show "$BASE_PKR_SHA:public_knowledge_rag/app.py" > "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+          git show "$BASE_PKR_SHA:public_knowledge_rag/store.py" > "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/store.py"
+
+          python3 "$ROOT/patch_apply.py" "$TEST"
+          python3 "$ROOT/patch_apply.py" "$TEST" | grep -q "ALREADY_PATCHED=YES"
+
+          python3 -m py_compile             "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"             "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/store.py"
+
+          grep -q '@app.delete("/sources/{source_id}")' "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+          grep -q '@app.delete("/sources/{source_id}/revisions/{revision_id}")' "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+          grep -q 'def delete_source(self, source_id' "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/store.py"
+          grep -q 'def delete_revision(self, source_id' "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/store.py"
+
+          echo "MIXED_STATE_HOTFIX_SELFTEST=PASS"
+
+      - name: Package patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp
+          zip -qr "${PATCH_ID}.zip" "${PATCH_ID}"
+          sha256sum "${PATCH_ID}.zip" > "${PATCH_ID}.zip.sha256"
+
+      - name: Upload patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PATCH_ID }}
+          path: |
+            /tmp/${{ env.PATCH_ID }}.zip
+            /tmp/${{ env.PATCH_ID }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
