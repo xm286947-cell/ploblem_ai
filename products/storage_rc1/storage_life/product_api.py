@@ -2641,21 +2641,47 @@ def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "
         skill.get("status") or result.get("status") or "UNKNOWN"
     )
     result["product_assessment_status"] = product_status
+    old_fingerprint = _device_fact_fingerprint(old_detail)
+    new_fingerprint = _device_fact_fingerprint(new_detail)
+    knowledge_identity = _knowledge_release_identity()
+    record_input = {
+        "old_id": old_id,
+        "new_id": new_id,
+        "_old_device_fact_fingerprint": old_fingerprint,
+        "_new_device_fact_fingerprint": new_fingerprint,
+        "_knowledge_release_identity": knowledge_identity,
+    }
+
+    # Compare is auto-triggered from the product flow.  Reopening the same
+    # unchanged A->B comparison must not create duplicate assessment history.
+    existing = next(
+        (
+            item for item in core.list_device_assessments(new_id, limit=50)
+            if str(item.get("assessment_type") or "").upper() == "COMPARE"
+            and str((item.get("input") or {}).get("old_id") or "") == old_id
+            and str((item.get("input") or {}).get("new_id") or "") == new_id
+            and str((item.get("input") or {}).get("_old_device_fact_fingerprint") or "") == old_fingerprint
+            and str((item.get("input") or {}).get("_new_device_fact_fingerprint") or "") == new_fingerprint
+            and dict((item.get("input") or {}).get("_knowledge_release_identity") or {}) == knowledge_identity
+            and str(item.get("status") or "").upper() == str(product_status or "").upper()
+        ),
+        None,
+    )
+    if existing is not None:
+        result["assessment_record"] = existing
+        result["assessment_reused"] = True
+        return result
+
     record = core.save_device_assessment(
         new_id,
         "COMPARE",
         product_status,
-        {
-            "old_id": old_id,
-            "new_id": new_id,
-            "_old_device_fact_fingerprint": _device_fact_fingerprint(old_detail),
-            "_new_device_fact_fingerprint": _device_fact_fingerprint(new_detail),
-            "_knowledge_release_identity": _knowledge_release_identity(),
-        },
+        record_input,
         result,
         created_by=assessment_author,
     )
     result["assessment_record"] = record
+    result["assessment_reused"] = False
     return result
 
 
