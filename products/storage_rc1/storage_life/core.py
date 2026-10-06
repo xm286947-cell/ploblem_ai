@@ -2099,6 +2099,7 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
         raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
     captured_at = captured_dt.astimezone(timezone.utc).isoformat()
     source_label = str(source_label or "").strip()[:500]
+    placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
     raw_text = str(raw_text or "")
     if len(raw_text) > 200_000:
         raise ValueError("RUNTIME_TEXT_TOO_LARGE")
@@ -2117,7 +2118,8 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
         if requested_availability not in {"AVAILABLE", "NOT_AVAILABLE", "NOT_SUPPORTED", "STALE", "INVALID"}:
             requested_availability = "NOT_AVAILABLE"
         requested_confirmed = item.get("confirmed_by_user") is True
-        evidence_ready = bool(source_label and source_line)
+        source_is_explicit = bool(source_label and source_label.upper() not in placeholder_sources)
+        evidence_ready = bool(source_is_explicit and source_line)
         formal_confirmed = bool(
             requested_confirmed
             and evidence_ready
