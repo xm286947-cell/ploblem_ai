@@ -1,0 +1,138 @@
+name: QS W4 Full Platform Real Data Gate 644aee9
+
+on:
+  push:
+    branches:
+      - ci/qs-w4-realdata-nav-644aee9
+    paths:
+      - ".github/workflows/qs-w4-realdata-nav-644aee9.yml"
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SOURCE_SHA: 644aee92959a4e1b0a92630967082b8b8bbb52d7
+  PACKAGE_BASENAME: QUALITY_PLATFORM_W4_REALDATA_VALIDATION_644aee92959a
+
+jobs:
+  focused-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 644aee92959a4e1b0a92630967082b8b8bbb52d7
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_SHA"
+          git diff --check "$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA"
+      - name: Run focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q             tests/test_qsv1_portrait_consumption.py             tests/test_software_assessment_qsv1_browser_flow.py             tests/test_r2_w2_qsv1_production_chain.py             tests/test_step1b_qsv1_mature_preview.py
+      - name: Validate real-data preflight contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          EMPTY_DB="$RUNNER_TEMP/empty.db"
+          python - <<'PY'
+          import sqlite3, os
+          p=os.environ["RUNNER_TEMP"]+"/empty.db"
+          sqlite3.connect(p).close()
+          PY
+          python tools/quality_scenario_real_data_preflight.py --db "$EMPTY_DB" | tee "$RUNNER_TEMP/empty-preflight.txt"
+          grep -q "REAL_DATA_PREFLIGHT=NOT_READY" "$RUNNER_TEMP/empty-preflight.txt"
+          if python tools/quality_scenario_real_data_preflight.py --db "$EMPTY_DB" --require; then
+            echo "EMPTY_DB_REQUIRE_MUST_FAIL"
+            exit 1
+          fi
+          READY_DB="$RUNNER_TEMP/ready.db"
+          python - <<'PY'
+          import os, sqlite3
+          p=os.environ["RUNNER_TEMP"]+"/ready.db"
+          c=sqlite3.connect(p)
+          c.executescript("""
+          CREATE TABLE quality_issue(knowledge_id TEXT PRIMARY KEY,business_issue_id TEXT);
+          CREATE TABLE source_material(material_id TEXT PRIMARY KEY,material_type TEXT);
+          CREATE TABLE issue_material_link(material_id TEXT,link_status TEXT);
+          INSERT INTO quality_issue VALUES('K1','ITR2026100001');
+          INSERT INTO source_material VALUES('M1','SOFTWARE_OPERATION');
+          INSERT INTO source_material VALUES('M2','ITR_CS');
+          INSERT INTO source_material VALUES('M3','ESCAPE_ANALYSIS');
+          INSERT INTO issue_material_link VALUES('M1','LINKED');
+          """)
+          c.commit(); c.close()
+          PY
+          python tools/quality_scenario_real_data_preflight.py --db "$READY_DB" --require | tee "$RUNNER_TEMP/ready-preflight.txt"
+          grep -q "REAL_DATA_PREFLIGHT=PASS" "$RUNNER_TEMP/ready-preflight.txt"
+      - name: Build full current quality platform package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/full-quality-platform"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE" dist
+          git archive "$PRODUCT_SOURCE_SHA" | tar -x -C "$STAGE"
+          printf '%s\n'             'QUALITY PLATFORM W4 REAL-DATA VALIDATION CANDIDATE'             ''             'PACKAGE_SCOPE=FULL_CURRENT_QUALITY_PLATFORM'             "SOURCE_SHA=$PRODUCT_SOURCE_SHA"             'SYNTHETIC_BUSINESS_DATA_INCLUDED=NO'             'REAL_DATA_BINDING_REQUIRED=YES'             'REAL_DATA_PREFLIGHT=tools/quality_scenario_real_data_preflight.py'             'MATURE_HOST_RETURN_LINK=FIXED'             'REAL_MATURE_BROWSER_GOLDEN=PENDING'             'W4_ARCH_REVIEW=PENDING'             ''             'Read QUALITY_SCENARIO_W4_REAL_DATA_BINDING.md before Browser Golden.'             'macOS: ./start_quality_capability_p1.command --port 18080'             'Windows: start_quality_capability_p1.bat --port 18080'             > "$STAGE/00_FULL_PLATFORM_README_FIRST.txt"
+          printf '%s\n'             '{'             '  "package_type": "W4_REALDATA_VALIDATION_CANDIDATE",'             '  "package_scope": "FULL_CURRENT_QUALITY_PLATFORM",'             "  \"source_sha\": \"$PRODUCT_SOURCE_SHA\","             '  "synthetic_business_data_included": false,'             '  "real_data_binding_required": true,'             '  "real_data_preflight": "tools/quality_scenario_real_data_preflight.py",'             '  "mature_host_return_link_fixed": true,'             '  "windows_entry": "start_quality_capability_p1.bat",'             '  "macos_entry": "start_quality_capability_p1.command",'             '  "real_mature_browser_golden": "PENDING",'             '  "w4_arch_review": "PENDING"'             '}' > "$STAGE/FULL_PLATFORM_MANIFEST.json"
+          printf '%s\n' "$PRODUCT_SOURCE_SHA" > "$STAGE/PRODUCT_SOURCE_SHA"
+          test -f "$STAGE/QUALITY_SCENARIO_W4_REAL_DATA_BINDING.md"
+          test -f "$STAGE/tools/quality_scenario_real_data_preflight.py"
+          test -f "$STAGE/start_quality_capability_p1.bat"
+          test -f "$STAGE/start_quality_capability_p1.command"
+          (
+            cd "$STAGE"
+            zip -q -r "$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip" .
+          )
+          sha256sum "dist/${PACKAGE_BASENAME}.zip" | tee "dist/${PACKAGE_BASENAME}.zip.sha256"
+      - name: Verify package identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import json,os,zipfile,pathlib; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); assert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']; assert m['real_data_binding_required'] is True; assert m['synthetic_business_data_included'] is False; assert m['mature_host_return_link_fixed'] is True; print('FULL_PLATFORM_PACKAGE_IDENTITY=PASS')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_PLATFORM_W4_REALDATA_VALIDATION_644aee92959a
+          path: |
+            dist/QUALITY_PLATFORM_W4_REALDATA_VALIDATION_644aee92959a.zip
+            dist/QUALITY_PLATFORM_W4_REALDATA_VALIDATION_644aee92959a.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 644aee92959a4e1b0a92630967082b8b8bbb52d7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Windows mature host smoke
+        shell: pwsh
+        run: python tools/step1b_qsv1_launcher_smoke.py --platform windows --port 18080
+
+  smoke-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 644aee92959a4e1b0a92630967082b8b8bbb52d7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: macOS mature host smoke
+        shell: bash
+        run: python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 18081
