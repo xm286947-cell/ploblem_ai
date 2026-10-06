@@ -26,7 +26,8 @@
     <div>Device: {{ detail.candidate.metadata.storage_lifetime.device_type }}</div>
     <div>Parameter: {{ detail.candidate.metadata.storage_lifetime.canonical_parameters|join(", ") or "UNRESOLVED" }}</div>
     <div>Semantic Review: {{ detail.candidate.metadata.storage_lifetime.semantic_class_status }}</div>
-    <div>Allowed Knowledge Types: {{ detail.candidate.metadata.storage_lifetime.semantic_class_candidates|join(", ") or "UNRESOLVED" }}</div>
+    <div>AI Suggested Knowledge Types: {{ detail.candidate.metadata.storage_lifetime.semantic_class_candidates|join(", ") or "UNRESOLVED" }}</div>
+    <div>Human Review Options: {{ (detail.candidate.metadata.storage_lifetime.semantic_class_review_options or detail.candidate.metadata.storage_lifetime.semantic_class_candidates)|join(", ") or "UNRESOLVED" }}</div>
     <div>Consumers: {{ detail.candidate.metadata.storage_lifetime.scenario_consumers|join(", ") }}</div>
     <div class="muted">必须由人工选择唯一 Knowledge Type 后才能 Publish；AI 候选标签本身不可成为 Formal Knowledge。</div>
   </div>
@@ -105,6 +106,13 @@
     <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
     <h3>EDIT</h3>
     <label>Reviewed By<input name="reviewed_by" required></label>
+    <label>Object Type
+      <select name="object_type">
+        {% for value in ["FACT", "CONCEPT", "SOLUTION", "DIAGNOSTIC", "REQUIREMENT"] %}
+        <option value="{{ value }}" {% if detail.candidate.object_type.value == value %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <label>Title<input name="title" value="{{ detail.candidate.title }}"></label>
     <label>Content<textarea name="content" rows="5" required>{{ detail.candidate.content }}</textarea></label>
     <label>Scope<input name="scope" value="{{ detail.candidate.scope|join(', ') }}"></label>
@@ -113,7 +121,8 @@
     <label>Storage Knowledge Type
       <select name="storage_semantic_class">
         <option value="">请选择并人工确认</option>
-        {% for semantic in detail.candidate.metadata.storage_lifetime.semantic_class_candidates %}
+        {% set review_options = detail.candidate.metadata.storage_lifetime.semantic_class_review_options or detail.candidate.metadata.storage_lifetime.semantic_class_candidates %}
+        {% for semantic in review_options %}
         <option value="{{ semantic }}">{{ semantic }}</option>
         {% endfor %}
       </select>
