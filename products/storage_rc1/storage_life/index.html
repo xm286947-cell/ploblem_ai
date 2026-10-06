@@ -1148,7 +1148,7 @@ async function pkContextSearchInline(ctx,targetId){
   let target=$('#'+targetId);
   if(!target)return;
   target.innerHTML='<div class="card">正在加载公开知识背景…</div>';
-  let body={device_type:ctx.device_type||null,vendor:ctx.vendor||null,model:ctx.model||null,parameter_name:ctx.parameter_name||null,focus:ctx.focus||'PARAMETER',top_k:4};
+  let body={device_type:pkPublicContextValue(ctx.device_type,100),vendor:pkPublicContextValue(ctx.vendor,160),model:pkPublicContextValue(ctx.model,200),parameter_name:pkPublicContextValue(ctx.parameter_name,200),focus:ctx.focus||'PARAMETER',top_k:4};
   let args='mode=LIVE';
   try{
     let r=await api('/api/public-knowledge/context-search?'+args,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),hits=r.hits||[];
