@@ -1,0 +1,253 @@
+name: Storage MVP Real Flow Validation Package
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-mvp-real-flow-package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STORAGE_SOURCE_SHA: 0b6e7c8bbecc7777a6f2cb9a79dbdd5e1751dd0c
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 3ce389a9a8f8863aafd2405d53870cccff977838
+      RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+      PACKAGE_DATE: "20261006"
+
+    steps:
+      - name: Checkout frozen Storage source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.STORAGE_SOURCE_SHA }}
+          fetch-depth: 0
+
+      - name: Assemble human real-flow validation package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SHORT="${STORAGE_SOURCE_SHA:0:12}"
+          PACKAGE_ID="STORAGE-MVP-REAL-FLOW-VALIDATION-${SHORT}-${PACKAGE_DATE}"
+          ZIP_NAME="STORAGE_MVP_REAL_FLOW_VALIDATION_${SHORT}_${PACKAGE_DATE}.zip"
+          WORK="dist/_storage_mvp_real_flow"
+          PKG="${WORK}/STORAGE_PRODUCT_MVP_RC1"
+
+          rm -rf "$WORK" "dist/$ZIP_NAME" "dist/$ZIP_NAME.sha256" "dist/$ZIP_NAME.DELIVERY_MANIFEST.json"
+          mkdir -p "$PKG"
+
+          cp -a products/storage_rc1/. "$PKG/"
+
+          for d in knowledge_production repositories parser contracts compatibility services quality_knowledge common models schema analysis builder knowledge parsing retriever; do
+            if [ -d "$d" ]; then
+              cp -a "$d" "$PKG/"
+            fi
+          done
+
+          mkdir -p "$PKG/config/runtime/agents" "$PKG/prompts/runtime/knowledge_production"
+          cp config/runtime/agents/knowledge.production.extract.yaml "$PKG/config/runtime/agents/knowledge.production.extract.yaml"
+          cp prompts/runtime/knowledge_production/knowledge_extract.md "$PKG/prompts/runtime/knowledge_production/knowledge_extract.md"
+
+          git fetch --no-tags origin "$RUNTIME_SOURCE_SHA"
+          RUNTIME_TMP="$(mktemp -d)"
+          git archive "$RUNTIME_SOURCE_SHA"             runtime             config/runtime/model.yaml             tools/openai_mock/server.py             requirements-runtime-p0-test.txt             | tar -x -C "$RUNTIME_TMP"
+
+          mkdir -p "$PKG/vendor/unified_agent_runtime/config/runtime" "$PKG/vendor/unified_agent_runtime/tools/openai_mock"
+          cp -a "$RUNTIME_TMP/runtime" "$PKG/vendor/unified_agent_runtime/"
+          cp "$RUNTIME_TMP/config/runtime/model.yaml" "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
+          cp "$RUNTIME_TMP/tools/openai_mock/server.py" "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          cp "$RUNTIME_TMP/requirements-runtime-p0-test.txt" "$PKG/vendor/unified_agent_runtime/"
+          printf '%s\n' "$RUNTIME_SOURCE_SHA" > "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+
+          PKR_DIR="$PKG/PUBLIC_KNOWLEDGE_SERVICE"
+          mkdir -p "$PKR_DIR"
+          git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
+          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA"             public_knowledge_rag             Dockerfile             compose.yaml             start.sh             stop.sh             scripts/health.sh             | tar -x -C "$PKR_DIR"
+
+          cat > "$PKG/START_MACOS.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT"
+          echo "[1/2] Starting Public Knowledge Service..."
+          (cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE" && bash ./start.sh)
+          echo "[2/2] Starting Storage MVP..."
+          echo "Storage: http://127.0.0.1:8765"
+          echo "Public Knowledge: http://127.0.0.1:9000"
+          exec bash "$ROOT/run_macos.sh"
+          EOF
+
+          cat > "$PKG/START_WINDOWS.bat" <<'EOF'
+          @echo off
+          setlocal EnableExtensions
+          for %%I in ("%~dp0.") do set "ROOT=%%~fI"
+          cd /d "%ROOT%"
+
+          echo [1/2] Starting Public Knowledge Service...
+          where docker >nul 2>&1
+          if errorlevel 1 (
+            echo ERROR: Docker Desktop / docker command not found.
+            pause
+            exit /b 2
+          )
+          docker compose -f "%ROOT%\PUBLIC_KNOWLEDGE_SERVICE\compose.yaml" up -d --build
+          if errorlevel 1 (
+            echo ERROR: Public Knowledge Service failed to start.
+            pause
+            exit /b 2
+          )
+
+          powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 30;$i++){try{$r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:9000/health;if($r.StatusCode -eq 200){$ok=$true;break}}catch{};Start-Sleep -Seconds 1};if(-not $ok){exit 2}"
+          if errorlevel 1 (
+            echo ERROR: Public Knowledge Service health check failed.
+            pause
+            exit /b 2
+          )
+
+          echo [2/2] Starting Storage MVP...
+          echo Storage: http://127.0.0.1:8765
+          echo Public Knowledge: http://127.0.0.1:9000
+          call "%ROOT%\run_windows.bat"
+          exit /b %ERRORLEVEL%
+          EOF
+
+          cat > "$PKG/REAL_FLOW_README.txt" <<EOF
+          Storage MVP 人工真实流程验证包
+
+          PACKAGE_ID=$PACKAGE_ID
+          STORAGE_SOURCE_SHA=$STORAGE_SOURCE_SHA
+          PUBLIC_KNOWLEDGE_SOURCE_SHA=$PUBLIC_KNOWLEDGE_SOURCE_SHA
+          RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA
+
+          目的：
+          - 仅用于真实用户 S1 -> S5 连续流程验证
+          - 不是正式 Release 包
+          - 不声明 Product Gate / RC PASS
+
+          macOS：
+          1. 确保 Docker Desktop 已启动
+          2. 双击 START_MACOS.command，或终端执行 bash START_MACOS.command
+          3. 打开 http://127.0.0.1:8765
+
+          Windows：
+          1. 确保 Docker Desktop 已启动
+          2. 双击 START_WINDOWS.bat
+          3. 打开 http://127.0.0.1:8765
+
+          Public Knowledge：
+          http://127.0.0.1:9000
+          Settings: http://127.0.0.1:9000/settings
+
+          验证主链：
+          S1 Device Fact / Evidence
+          -> Public Knowledge Search / Citation
+          -> S2 Compare / Change Impact
+          -> Runtime Snapshot / Trend
+          -> S3 Lifetime / Target Service Life
+          -> S4 Diagnosis
+          -> S5 Optimization
+          -> Engineering Actions
+          -> Unified MVP Summary
+
+          约束：
+          - 禁止手改 DB 制造 PASS
+          - 禁止测试 fixture 替代真实用户数据
+          - 发现真实断点后记录现场，再回代码做最小修复
+          EOF
+
+          chmod +x "$PKG/START_MACOS.command" "$PKG/run_macos.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh"
+
+          cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "package_type": "HUMAN_REAL_FLOW_VALIDATION",
+            "product": "Storage MVP",
+            "storage_source_sha": "$STORAGE_SOURCE_SHA",
+            "public_knowledge_source_sha": "$PUBLIC_KNOWLEDGE_SOURCE_SHA",
+            "runtime_source_sha": "$RUNTIME_SOURCE_SHA",
+            "validation_scope": "S1_TO_S5_REAL_USER_FLOW",
+            "product_gate_pass": "NOT_CLAIMED",
+            "release_candidate": false,
+            "fresh_extract_required": true
+          }
+          EOF
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          root = Path("dist/_storage_mvp_real_flow/STORAGE_PRODUCT_MVP_RC1")
+          patterns = [
+              re.compile(r"sk-proj-[A-Za-z0-9_-]{8,}"),
+              re.compile(r"BEGIN PRIVATE KEY"),
+              re.compile(r"AKIA[0-9A-Z]{12,}"),
+          ]
+          hits = []
+          for p in root.rglob("*"):
+              if not p.is_file() or p.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".zip", ".sqlite3", ".pyc"}:
+                  continue
+              try:
+                  txt = p.read_text(encoding="utf-8")
+              except Exception:
+                  continue
+              if any(rx.search(txt) for rx in patterns):
+                  hits.append(str(p.relative_to(root)))
+          if hits:
+              raise SystemExit("SECRET_SCAN_FAILED:" + ",".join(hits))
+          print("SECRET_SCAN=PASS")
+          PY
+
+          python -m compileall -q "$PKG/storage_life" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+          bash -n "$PKG/START_MACOS.command"
+          bash -n "$PKG/run_macos.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+
+          (
+            cd "$PKG"
+            find . -type f ! -name FILE_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > FILE_SHA256SUMS.txt
+          )
+
+          (
+            cd "$WORK"
+            zip -qr "../$ZIP_NAME" STORAGE_PRODUCT_MVP_RC1
+          )
+
+          SHA="$(sha256sum "dist/$ZIP_NAME" | awk '{print $1}')"
+          SIZE="$(stat -c%s "dist/$ZIP_NAME")"
+          printf '%s  %s\n' "$SHA" "$ZIP_NAME" > "dist/$ZIP_NAME.sha256"
+
+          cat > "dist/$ZIP_NAME.DELIVERY_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "package": "$ZIP_NAME",
+            "storage_source_sha": "$STORAGE_SOURCE_SHA",
+            "public_knowledge_source_sha": "$PUBLIC_KNOWLEDGE_SOURCE_SHA",
+            "runtime_source_sha": "$RUNTIME_SOURCE_SHA",
+            "sha256": "$SHA",
+            "size_bytes": $SIZE,
+            "package_type": "HUMAN_REAL_FLOW_VALIDATION",
+            "fresh_extract_required": true,
+            "product_gate_pass": "NOT_CLAIMED",
+            "release_candidate": false
+          }
+          EOF
+
+          echo "PACKAGE_ID=$PACKAGE_ID"
+          echo "PACKAGE=$ZIP_NAME"
+          echo "SHA256=$SHA"
+          echo "SIZE=$SIZE"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-mvp-real-flow-validation
+          path: |
+            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip
+            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip.sha256
+            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
+          retention-days: 30
