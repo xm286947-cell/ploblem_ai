@@ -193,6 +193,26 @@ jobs:
           http://127.0.0.1:9000
           Settings: http://127.0.0.1:9000/settings
 
+          W4 第一条真实 NAND Golden：
+          Source: STDL-EXT-001_kioxia_endurance.pdf
+          Drive File ID: 1TiZsOz-3ohqKeat4JlyujgFaHJeirO_g
+          Publisher: KIOXIA Corporation
+          Device Type: NAND Flash
+          Canonical Parameter: pe_cycles
+          Preferred Knowledge Type: PARAMETER_DEFINITION
+
+          执行：
+          1. 在 Public Knowledge LIVE 重新导入该 PDF，并填写 Publisher
+          2. 资料详情 -> 按寿命模型生产知识 -> NAND Flash -> 按模型分析
+          3. pe_cycles 必须命中真实 Citation；未命中则记录断点，禁止手改 DB
+          4. 生成 Knowledge Candidate
+          5. Existing Knowledge Production 中核对 Evidence / Locator / Revision
+          6. Reviewer 将首条对象收敛到 pe_cycles，并确认 PARAMETER_DEFINITION
+          7. Publish
+          8. 生成 Release Candidate（此时不得切换 Consumer）
+          9. Reviewer 显式 Promote
+          10. 回 Storage 验证 structured Formal Knowledge consumption
+
           验证主链：
           S1 Device Fact / Evidence
           -> Public Knowledge Search / Citation
