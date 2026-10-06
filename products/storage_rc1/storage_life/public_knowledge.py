@@ -197,6 +197,7 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
             "mode": mode,
             "connected": True,
             "search_ready": True,
+            "citation_ready": True,
             "retrieval_ready": True,
             "source_count": len(FIXTURE_SOURCES),
             "service": "本地演示回放",
@@ -214,23 +215,48 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     # actually usable with indexed public material".
     source_count = 0
     search_ready = False
+    citation_ready = False
     retrieval_ready = False
     try:
         source_result = _request(mode, "/sources", base_url=base_url)
         source_items = source_result.get("sources") if isinstance(source_result, dict) else None
         if isinstance(source_items, list):
             source_count = len(source_items)
-        # Probe the actual Search contract.  A zero-hit response is still a
-        # healthy Search endpoint; readiness separately requires indexed source
-        # material so an empty catalog cannot look MVP-ready.
+
+        # MVP readiness requires an actual indexed source -> Search hit ->
+        # resolvable Citation path.  Process health and an empty successful
+        # Search response are not sufficient for the Storage product contract.
+        probe_query = "storage public knowledge retrieval probe"
+        if source_items:
+            first = source_items[0] if isinstance(source_items[0], dict) else {}
+            probe_query = str(
+                first.get("title")
+                or first.get("source_id")
+                or probe_query
+            )[:300]
         probe = _request(
             mode,
             "/search",
-            {"query": "storage public knowledge retrieval probe", "top_k": 1},
+            {"query": probe_query, "top_k": 1},
             base_url=base_url,
         )
-        search_ready = isinstance(probe, dict) and isinstance(probe.get("hits"), list)
-        retrieval_ready = connected and source_count > 0 and search_ready
+        hits = probe.get("hits") if isinstance(probe, dict) else None
+        search_ready = isinstance(hits, list) and bool(hits)
+        if search_ready:
+            first_hit = hits[0] if isinstance(hits[0], dict) else {}
+            citation_id = str(first_hit.get("hit_id") or first_hit.get("citation_id") or "")
+            if citation_id:
+                citation_probe = _request(
+                    mode,
+                    "/citations/" + quote(citation_id, safe=""),
+                    base_url=base_url,
+                )
+                citation_ready = bool(
+                    isinstance(citation_probe, dict)
+                    and citation_probe.get("source_id")
+                    and citation_probe.get("locator") is not None
+                )
+        retrieval_ready = connected and source_count > 0 and search_ready and citation_ready
     except HTTPException:
         retrieval_ready = False
 
@@ -249,6 +275,7 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
         "mode": "LIVE",
         "connected": connected,
         "search_ready": search_ready,
+        "citation_ready": citation_ready,
         "retrieval_ready": retrieval_ready,
         "source_count": source_count,
         "service": h.get("service"),
