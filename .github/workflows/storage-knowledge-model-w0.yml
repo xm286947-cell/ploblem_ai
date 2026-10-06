@@ -27,6 +27,8 @@ on:
       - "products/storage_rc1/tests/test_storage_knowledge_semantic_query.py"
       - "tests/test_kp_d03_review_publish.py"
       - "tests/test_kp_d05_processing_ui.py"
+      - "products/storage_rc1/storage_life/app.py"
+      - "products/storage_rc1/tests/test_storage_release_promotion.py"
       - ".github/workflows/storage-knowledge-model-w0.yml"
 
 permissions:
@@ -56,6 +58,7 @@ jobs:
             products/storage_rc1/storage_life/knowledge_product.py \
             products/storage_rc1/storage_life/knowledge_release.py \
             products/storage_rc1/storage_life/product_api.py \
+            products/storage_rc1/storage_life/app.py \
             products/storage_rc1/skills/runtime_adapter.py \
             knowledge_production/release_binding.py \
             knowledge_production/extraction.py \
