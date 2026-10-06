@@ -220,3 +220,134 @@ test('retry shows visible Stage B running state before delayed POST completes', 
   assert.equal(retryButton.textContent, 'Retry Failed Stage');
   assert.match(element('[data-detail-status]').innerHTML, /CANDIDATE_READY/);
 });
+
+
+test('running batch resumes auto-refresh after page load and stops at terminal state', async () => {
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector)) elements.set(selector, new FakeElement(selector));
+    return elements.get(selector);
+  };
+  element('[data-batch-summary]').strongs = Array.from({length: 6}, () => new FakeElement('strong'));
+  element('[data-result-filter]').value = '';
+
+  const root = new FakeElement('root');
+  root.dataset.api = '/api/v2/hardware-cases/r1/workbench';
+  root.querySelector = element;
+
+  const running = item({
+    stage_a: 'RUNNING',
+    stage_b: 'WAITING',
+    gate: 'WAITING',
+    result: 'RUNNING',
+    orchestration_status: 'RUNNING',
+    failed_stage: null,
+    error_code: null,
+    provider_calls: 1,
+    duration_ms: 456,
+    updated_at: '2026-10-06T00:00:01Z',
+  });
+  const done = item({
+    stage_a: 'PASS',
+    stage_b: 'PASS',
+    gate: 'PASS',
+    result: 'CANDIDATE_READY',
+    orchestration_status: 'CANDIDATE_READY',
+    failed_stage: null,
+    error_code: null,
+    provider_calls: 2,
+    duration_ms: 789,
+    updated_at: '2026-10-06T00:00:02Z',
+  });
+
+  const batchFor = (current) => ({
+    batch_id: 'B1',
+    status: current.result === 'RUNNING' ? 'RUNNING' : 'READY_FOR_REVIEW',
+    summary: {
+      TOTAL: 1,
+      QUEUED: 0,
+      RUNNING: current.result === 'RUNNING' ? 1 : 0,
+      CANDIDATE_READY: current.result === 'CANDIDATE_READY' ? 1 : 0,
+      REVIEW: 0,
+      FAILED: 0,
+    },
+    items: [current],
+  });
+
+  let finalized = false;
+  let batchGets = 0;
+  const fetch = async (url, options = {}) => {
+    const method = String(options.method || 'GET').toUpperCase();
+    if (url.endsWith('/batches?limit=50')) {
+      return response({items: [{batch_id: 'B1', status: 'RUNNING'}]});
+    }
+    if (url.endsWith('/batches/B1') && method === 'GET') {
+      batchGets += 1;
+      return response(batchFor(finalized ? done : running));
+    }
+    throw new Error('Unexpected request: ' + method + ' ' + url);
+  };
+
+  let nextIntervalId = 0;
+  const intervals = new Map();
+  const cleared = new Set();
+  const windowObject = {
+    location: {href: 'http://localhost/p0/hardware-cases/production?batch=B1'},
+    history: {replaceState() {}},
+    scrollY: 0,
+    confirm: () => true,
+    setInterval(fn, delay) {
+      nextIntervalId += 1;
+      intervals.set(nextIntervalId, {fn, delay});
+      return nextIntervalId;
+    },
+    clearInterval(id) {
+      cleared.add(id);
+    },
+  };
+  const documentObject = {
+    visibilityState: 'visible',
+    listeners: {},
+    querySelector: (selector) => selector === '[data-r1-workbench]' ? root : null,
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    },
+  };
+
+  const context = vm.createContext({
+    window: windowObject,
+    document: documentObject,
+    fetch,
+    URL,
+    URLSearchParams,
+    encodeURIComponent,
+    FormData: class {},
+    console,
+    setTimeout,
+    clearTimeout,
+  });
+
+  const scriptPath = fileURLToPath(new URL('../../quality_knowledge/web/static/hardware_case_knowledge_production.js', import.meta.url));
+  vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context, {filename: scriptPath});
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(batchGets >= 2, 'initial load plus immediate background refresh expected');
+  assert.match(element('[data-batch-items]').innerHTML, /RUNNING/);
+  assert.equal(intervals.size, 1);
+  const [intervalId, interval] = [...intervals.entries()][0];
+  assert.equal(interval.delay, 1000);
+
+  finalized = true;
+  await interval.fn();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.match(element('[data-batch-items]').innerHTML, /CANDIDATE_READY/);
+  assert.equal(cleared.has(intervalId), true);
+
+  const terminalGetCount = batchGets;
+  await interval.fn();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(batchGets, terminalGetCount, 'terminal batch must stop background polling');
+});
