@@ -391,6 +391,51 @@ def test_m83_mature_topn_policy_does_not_rerank_retrieval(
     ]
 
 
+def test_m84_enabled_is_ai_recommendation_only(
+    tmp_path: Path,
+    monkeypatch,
+):
+    service = RepeatAgentAnalysisService(
+        tmp_path,
+        report_root=tmp_path / "data/repeat_reports",
+        decision_enabled=True,
+    )
+    monkeypatch.setattr(
+        service,
+        "_similarity",
+        lambda context: (_similarity_wrapper(), {"status": "SUCCESS"}),
+    )
+    monkeypatch.setattr(
+        service,
+        "_solution",
+        lambda context, similarity: (_solution_wrapper(), {"status": "SUCCESS"}),
+    )
+    recommendation_calls = []
+
+    def recommendation(context, similarity, solution):
+        recommendation_calls.append(context["case_id"])
+        return {
+            "status": "SUCCESS",
+            "decision": "LIKELY_REPEAT",
+            "confidence": 0.91,
+            "decision_reason": "核心机理高度相似但仍需人工确认",
+            "evidence_chain": [],
+            "key_differences": ["版本不同"],
+            "validation_required": ["核对当前根因"],
+            "risks": [],
+            "recommended_actions": ["人工复核 Evidence"],
+        }, {"status": "SUCCESS"}
+
+    monkeypatch.setattr(service, "_recommendation", recommendation)
+    enriched = service.analyze({"query_id": "RQ-1"}, _search_result())
+
+    assert recommendation_calls == ["HCASE-1"]
+    candidate = enriched["candidates"][0]
+    assert candidate["ai_recommendation"]["decision"] == "LIKELY_REPEAT"
+    assert enriched["agent_analysis"]["m84_recommendation"] == "ENABLED"
+    assert "human_decision" not in enriched
+
+
 def test_ai_recommendation_never_becomes_human_final_decision(tmp_path: Path):
     repository = RepeatQueryTraceRepository(tmp_path / "repeat.db")
     repository.save({
