@@ -55,9 +55,12 @@ class KnowledgePublishService:
         except KnowledgeReviewError as exc:
             raise KnowledgePublishError(exc.code) from exc
 
+        published_metadata = self._validated_published_metadata(candidate)
         object_id = self._object_id(candidate.candidate_id)
         current = self._load_current(object_id)
-        if current is not None and self._same_knowledge_material(current, candidate):
+        if current is not None and self._same_knowledge_material(
+            current, candidate, published_metadata
+        ):
             return current
 
         evaluation = self.evaluations.evaluate(
@@ -92,7 +95,7 @@ class KnowledgePublishService:
             producer=candidate.producer,
             published_by=actor,
             published_at=published_at,
-            metadata=candidate.metadata,
+            metadata=published_metadata,
         )
         self._commit_version(obj)
         return obj
@@ -155,6 +158,65 @@ class KnowledgePublishService:
         if not evaluation.publish_readiness:
             raise KnowledgePublishError("PUBLISH_GATE_FAILED")
 
+    @staticmethod
+    def _validated_published_metadata(candidate) -> dict[str, Any]:
+        metadata = dict(candidate.metadata or {})
+        storage = metadata.get("storage_lifetime")
+        if not isinstance(storage, dict) or not storage.get(
+            "model_driven_extraction"
+        ):
+            return metadata
+
+        semantic_tags = list(
+            dict.fromkeys(
+                tag.split(":", 1)[1]
+                for tag in candidate.tags
+                if isinstance(tag, str)
+                and tag.startswith("storage-semantic:")
+                and tag.split(":", 1)[1]
+            )
+        )
+        if len(semantic_tags) != 1:
+            raise KnowledgePublishError(
+                "STORAGE_SEMANTIC_REVIEW_REQUIRED"
+            )
+        selected = semantic_tags[0]
+        allowed = {
+            str(value)
+            for value in (
+                storage.get("semantic_class_candidates") or []
+            )
+            if str(value)
+        }
+        if selected not in allowed:
+            raise KnowledgePublishError(
+                "STORAGE_SEMANTIC_CLASS_INVALID"
+            )
+
+        parameter_tags = [
+            tag
+            for tag in candidate.tags
+            if isinstance(tag, str)
+            and tag.startswith("storage-parameter:")
+            and tag.split(":", 1)[1]
+        ]
+        if not parameter_tags:
+            raise KnowledgePublishError(
+                "STORAGE_PARAMETER_REVIEW_REQUIRED"
+            )
+
+        storage = {
+            **storage,
+            "semantic_class": selected,
+            "semantic_class_status": "REVIEWED",
+            "formal_consumable": True,
+            "reviewed_parameter_tags": list(
+                dict.fromkeys(parameter_tags)
+            ),
+        }
+        metadata["storage_lifetime"] = storage
+        return metadata
+
     def _commit_version(self, obj: KnowledgeObject) -> None:
         payload = obj.model_dump(mode="json")
         history_path = (
@@ -196,6 +258,7 @@ class KnowledgePublishService:
     def _same_knowledge_material(
         current: KnowledgeObject,
         candidate,
+        published_metadata: dict[str, Any] | None = None,
     ) -> bool:
         current_material = {
             "candidate_id": current.candidate_id,
@@ -243,6 +306,10 @@ class KnowledgePublishService:
             "evidence_refs": candidate.evidence_refs,
             "source_refs": candidate.source_refs,
             "producer": candidate.producer,
-            "metadata": candidate.metadata,
+            "metadata": (
+                published_metadata
+                if published_metadata is not None
+                else candidate.metadata
+            ),
         }
         return current_material == candidate_material
