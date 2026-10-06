@@ -5,6 +5,7 @@ reads Storage's private knowledge or candidate stores.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -151,6 +152,14 @@ def _public_source_uri(value: str | None) -> str | None:
     ):
         raise HTTPException(422, "公开资料来源 URL 含凭证/签名类查询参数，已阻止展示。")
     host = parsed.hostname.lower()
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith((".local", ".internal")):
+        raise HTTPException(422, "公开资料来源 URL 不能指向本地或内部主机。")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise HTTPException(422, "公开资料来源 URL 不能使用私有或保留 IP。")
     host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
     authority = host_text + (f":{port}" if port is not None else "")
     path = parsed.path or ""
