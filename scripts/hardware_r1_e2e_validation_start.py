@@ -95,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             "WORKBENCH_PAGE": ("GET", "/p0/hardware-cases/knowledge-production", 200, {}),
             "KNOWLEDGE_PAGE": ("GET", "/p0/hardware-cases/knowledge?e2e=1", 200, {}),
             "WORKBENCH_API": ("GET", "/api/v2/hardware-cases/r1/workbench/batches", 200, {"X-Hardware-Case-Role": "MAINTAINER"}),
+            "OPERABILITY_READY": ("GET", "/ready", 200, {}),
             "CONSUMPTION_API": ("GET", "/api/public/hardware-knowledge/v1/search", 503, {}),
             "READINESS_API": ("GET", "/api/e2e/hardware-r1/readiness", 200, {}),
         }
