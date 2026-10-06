@@ -35,8 +35,26 @@ def _binding_path(release_root: Path | None = None) -> Path:
         local = release_root / "release_binding.json"
         if local.is_file():
             return local.resolve()
+
+    # Repository and distributable-package layouts have different parent
+    # depths. Resolve the controlled default binding by searching upward for
+    # the packaged contracts tree instead of assuming a source-tree layout.
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = (
+            parent
+            / "contracts"
+            / "release_binding"
+            / "v1"
+            / "release_binding.json"
+        )
+        if candidate.is_file():
+            return candidate.resolve()
+
+    # Return the nearest expected path so the existing _json() path reports a
+    # deterministic fail-closed error without leaking arbitrary locations.
     return (
-        Path(__file__).resolve().parents[3]
+        here.parent.parent
         / "contracts"
         / "release_binding"
         / "v1"
