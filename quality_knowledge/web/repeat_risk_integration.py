@@ -401,8 +401,11 @@ class RepeatWebFacade:
         format: str = "markdown",
     ) -> dict[str, str]:
         if self.agent_analysis is None:
-            raise KeyError("REPEAT_REPORT_NOT_FOUND")
-        return self.agent_analysis.read_report(query_id, format=format)
+            raise ValueError("REPEAT_REPORT_NOT_FOUND")
+        try:
+            return self.agent_analysis.read_report(query_id, format=format)
+        except KeyError as exc:
+            raise ValueError("REPEAT_REPORT_NOT_FOUND") from exc
 
     def decide(
         self,
