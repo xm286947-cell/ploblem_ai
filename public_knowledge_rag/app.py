@@ -274,11 +274,33 @@ def active_provider_health() -> dict[str, object]:
             result = openai_compatible.test_connection()
         except ProviderUnavailable as exc:
             raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from exc
+
+        configured_model = str(settings.openai_model or "").strip()
+        reported_model = str(result.get("model") or configured_model).strip()
+        model_identity_match = (
+            bool(configured_model)
+            and bool(reported_model)
+            and configured_model.casefold() == reported_model.casefold()
+        )
+        if not model_identity_match:
+            raise HTTPException(
+                503,
+                {
+                    "code": "MODEL_IDENTITY_MISMATCH",
+                    "message": "Provider responded with a different model identity.",
+                    "configured_model": configured_model,
+                    "reported_model": reported_model,
+                },
+            )
+
         return {
             "provider": openai_compatible.provider_id,
             "status": "ok",
             "protocol": settings.openai_protocol,
-            "model": result.get("model") or settings.openai_model,
+            "model": configured_model,
+            "reported_model": reported_model,
+            "model_identity_match": True,
+            "identity_normalization": "strip+casefold",
             "test_response_received": bool(result.get("test_response_received")),
         }
 
