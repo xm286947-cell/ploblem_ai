@@ -1,0 +1,40 @@
+{
+  "name": "QS W4 Mac Mock Diagnostic 46fe83f",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-mac-mock-diagnostic-46fe83f"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-mac-mock-diagnostic-46fe83f.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "diag": {
+      "runs-on": "macos-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "46fe83f7c6f2b01ad92795405e9f947ae342e805"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Start mock and configure",
+          "shell": "bash",
+          "run": "set -euxo pipefail\npython tools/openai_mock/server.py --host 127.0.0.1 --port 18090 > /tmp/w4mock.log 2>&1 &\nPID=$!\nsleep 2\ncat /tmp/w4mock.log\nps -p $PID -o pid,command || true\npython tools/quality_scenario_functional_provider.py --host 127.0.0.1 --port 18090\nkill $PID\nwait $PID || true"
+        }
+      ]
+    }
+  }
+}
