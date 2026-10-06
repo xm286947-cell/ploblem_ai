@@ -1790,10 +1790,6 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     trend = core.runtime_metric_trends(device_id, limit=40)
     current_fact_fingerprint = _device_fact_fingerprint(detail)
     current_knowledge_release = _knowledge_release_identity()
-    current_runtime_trend_fingerprint = _runtime_trend_fingerprint(device_id)
-
-    latest_formal_capture = _iso_datetime(trend.get("latest_formal_capture_time"))
-    latest_formal_snapshot_created_at = _iso_datetime(trend.get("latest_formal_snapshot_created_at"))
 
     def assessment_view(kind: str) -> dict[str, Any] | None:
         item = latest.get(kind)
@@ -1807,26 +1803,20 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         if recorded_knowledge_release != current_knowledge_release:
             return None
         recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
-        if (
-            kind in {"LIFETIME", "DIAGNOSIS"}
-            and (
-                not recorded_runtime_fingerprint
-                or recorded_runtime_fingerprint != current_runtime_trend_fingerprint
-            )
-        ):
-            return None
-        if latest_formal_snapshot_created_at and kind in {"LIFETIME", "DIAGNOSIS"}:
-            assessment_created_at = _iso_datetime(item.get("created_at"))
-            if assessment_created_at is None or latest_formal_snapshot_created_at > assessment_created_at:
-                return None
-        if latest_formal_capture and kind in {"LIFETIME", "DIAGNOSIS"}:
-            captures = [
-                _iso_datetime(x.get("capture_time"))
-                for x in (recorded_input.get("runtime_observations") or [])
-                if isinstance(x, dict) and x.get("capture_time")
+        if kind in {"LIFETIME", "DIAGNOSIS"}:
+            dependency_metrics = [
+                str(x).strip()
+                for x in (recorded_input.get("_runtime_dependency_metrics") or [])
+                if str(x or "").strip()
             ]
-            captures = [x for x in captures if x is not None]
-            if not captures or latest_formal_capture > max(captures):
+            current_dependency_fingerprint = _runtime_trend_fingerprint(
+                device_id,
+                dependency_metrics,
+            )
+            if (
+                not recorded_runtime_fingerprint
+                or recorded_runtime_fingerprint != current_dependency_fingerprint
+            ):
                 return None
         result = item.get("result") or {}
         skill = result.get("skill_result") or {}
