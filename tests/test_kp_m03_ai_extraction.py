@@ -580,3 +580,69 @@ def test_kp_m03_provider_schema_error_exposes_only_safe_paths(
     serialized = json.dumps(exc_info.value.details)
     assert "SECRET_RAW_PROVIDER_VALUE" not in serialized
     assert "secret.invalid" not in serialized
+
+
+
+def test_kp_m03_w4_device_type_singleton_list_is_normalized() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = ["NAND Flash"]
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert parsed.candidates[0].device_type == "NAND Flash"
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        {"device_type": "NAND Flash"},
+        {"device_family": "NAND Flash"},
+        {"family": "NAND Flash"},
+        {"name": "NAND Flash"},
+        {"value": "NAND Flash"},
+        {"type": "NAND Flash"},
+        {"family": "NAND Flash", "name": "NAND Flash"},
+    ],
+)
+def test_kp_m03_w4_device_type_unambiguous_object_is_normalized(wrapped) -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = wrapped
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert parsed.candidates[0].device_type == "NAND Flash"
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        ["NAND Flash", "eMMC"],
+        {"family": "NAND Flash", "name": "eMMC"},
+        {"family": 123},
+        123,
+        True,
+    ],
+)
+def test_kp_m03_w4_device_type_ambiguous_or_semantic_coercion_fails_closed(invalid) -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = invalid
+
+    with pytest.raises(ValidationError) as exc_info:
+        KnowledgeExtractionOutput.model_validate(payload)
+
+    assert any(
+        tuple(error["loc"]) == ("candidates", 0, "device_type")
+        for error in exc_info.value.errors(include_input=False)
+    )
+
+
+def test_kp_m03_prompt_requires_scalar_device_type() -> None:
+    prompt = (
+        ROOT / "prompts/runtime/knowledge_production/knowledge_extract.md"
+    ).read_text(encoding="utf-8")
+
+    assert 'device_type MUST be one JSON string such as "NAND Flash" or null' in prompt
+    assert "NEVER emit an object or array for device_type" in prompt
