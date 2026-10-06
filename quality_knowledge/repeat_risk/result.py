@@ -145,6 +145,8 @@ class RepeatResultService:
             "search_error": search_result.get("error_code"),
             "candidate_count": len(candidates),
             "candidates": candidates,
+            "agent_analysis": deepcopy(search_result.get("agent_analysis") or {}),
+            "analysis_report": deepcopy(search_result.get("analysis_report") or {}),
             "warnings": warnings,
             "human_decision": {
                 "decision": "PENDING",
@@ -346,4 +348,8 @@ class RepeatResultService:
             "typed_actions": deepcopy(typed_actions),
             "semantic_coverage": deepcopy(semantic_coverage),
             "semantic_evidence_status": semantic_evidence_status,
+            "agent_analysis_status": item.get("agent_analysis_status"),
+            "agent_similarity": deepcopy(item.get("agent_similarity") or {}),
+            "agent_solution": deepcopy(item.get("agent_solution") or {}),
+            "ai_recommendation": deepcopy(item.get("ai_recommendation") or {}),
         }
