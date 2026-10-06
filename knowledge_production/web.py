@@ -146,9 +146,36 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         reviewed_by: str = Form(...),
         title: str = Form(""),
         content: str = Form(...),
+        scope: str = Form(""),
+        tags: str = Form(""),
+        storage_semantic_class: str = Form(""),
         review_note: str = Form(""),
     ):
-        edits = {"content": content}
+        parsed_scope = [
+            value.strip()
+            for value in scope.split(",")
+            if value.strip()
+        ]
+        parsed_tags = [
+            value.strip()
+            for value in tags.split(",")
+            if value.strip()
+        ]
+        selected_semantic = storage_semantic_class.strip()
+        if selected_semantic:
+            parsed_tags = [
+                value
+                for value in parsed_tags
+                if not value.startswith("storage-semantic:")
+            ]
+            parsed_tags.append(
+                f"storage-semantic:{selected_semantic}"
+            )
+        edits = {
+            "content": content,
+            "scope": list(dict.fromkeys(parsed_scope)),
+            "tags": list(dict.fromkeys(parsed_tags)),
+        }
         if title.strip():
             edits["title"] = title.strip()
         try:
