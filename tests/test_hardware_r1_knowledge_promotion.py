@@ -35,6 +35,7 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
+    _same_evidence_refs,
 )
 from services.hardware_r1_e2e_nonprod_knowledge import ManagedNonProdReleaseController
 from quality_knowledge.web.hardware_r1_workbench_api import (
@@ -293,6 +294,27 @@ def setup_case(
         transport,
         candidate,
     )
+
+
+def test_publication_evidence_multiset_allows_order_only_difference() -> None:
+    local = ["EV-A", "EV-B", "EV-C"]
+    remote = ["EV-C", "EV-A", "EV-B"]
+    assert _same_evidence_refs(remote, local) is True
+
+
+@pytest.mark.parametrize(
+    ("remote", "local"),
+    [
+        (["EV-A", "EV-B"], ["EV-A", "EV-B", "EV-C"]),
+        (["EV-A", "EV-B", "EV-C", "EV-D"], ["EV-A", "EV-B", "EV-C"]),
+        (["EV-A", "EV-A", "EV-B"], ["EV-A", "EV-B", "EV-B"]),
+    ],
+)
+def test_publication_evidence_multiset_rejects_missing_extra_or_duplicate(
+    remote: list[str],
+    local: list[str],
+) -> None:
+    assert _same_evidence_refs(remote, local) is False
 
 
 def test_precheck_and_candidate_intake_are_item_idempotent_and_do_not_publish(
