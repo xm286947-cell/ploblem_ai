@@ -7,6 +7,15 @@ if [ -d /Applications/Docker.app/Contents/Resources/bin ]; then
   export PATH
 fi
 
+if [ "$#" -gt 1 ]; then
+  echo "Usage: bash scripts/stop_isolated.sh [instance_id]"
+  exit 2
+fi
+if [ "$#" -eq 1 ]; then
+  PKR_ISOLATED_INSTANCE_ID="$1"
+  export PKR_ISOLATED_INSTANCE_ID
+fi
+
 STATE_DIR="$PWD/.pkr_isolated_instances"
 if [ ! -d "$STATE_DIR" ]; then
   echo "ERROR: isolated state directory not found; refusing to delete any Docker resources."
