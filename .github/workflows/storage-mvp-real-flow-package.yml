@@ -61,7 +61,9 @@ jobs:
           mkdir -p /tmp/pkr-focused
           git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
           git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA" public_knowledge_rag tests/pkr | tar -x -C /tmp/pkr-focused
-          python -m pip install -q --disable-pip-version-check -r /tmp/pkr-focused/tests/pkr/requirements-test.txt
+          python -m pip install -q --disable-pip-version-check \
+            -r /tmp/pkr-focused/public_knowledge_rag/requirements-runtime.txt \
+            httpx==0.28.1 pytest==9.0.2
           (
             cd /tmp/pkr-focused
             python -m pytest -q tests/pkr/test_service.py
