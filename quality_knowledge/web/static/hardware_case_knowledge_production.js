@@ -12,6 +12,7 @@
     itemAction: {pending: false, action: null, stage: null},
     reviewDraft: null,
     reviewEvidenceIds: [],
+    consumptionReadyItemId: null,
   };
 
   const q = (selector) => root.querySelector(selector);
@@ -37,9 +38,11 @@
   }
 
   function stageDisplay(stage) {
-    if (stage === 'STAGE_A') return 'Stage A';
-    if (stage === 'STAGE_B') return 'Stage B';
-    return stage || 'Failed Stage';
+    if (stage === 'STAGE_A') return '问题事实提取';
+    if (stage === 'STAGE_B') return '工程知识生成';
+    if (stage === 'GATE') return '证据校验';
+    if (stage === 'PARSE') return '文档解析';
+    return stage || '失败环节';
   }
 
   function setItemActionStatus(text = '', bad = false) {
@@ -60,8 +63,8 @@
     );
     retry.textContent =
       pending && state.itemAction.action === 'retry-failed-stage'
-        ? 'Retrying ' + stageDisplay(state.itemAction.stage) + '…'
-        : 'Retry Failed Stage';
+        ? '正在重试' + stageDisplay(state.itemAction.stage) + '…'
+        : '重试失败环节';
   }
 
   async function request(path, options = {}) {
@@ -93,10 +96,39 @@
     return '';
   }
 
-  function statusPill(value) {
-    const display = value || '—';
-    return '<span class="hc-status ' + statusClass(display) + '">' +
-      escapeHtml(display) + '</span>';
+  const statusLabels = {
+    PASS: '通过',
+    CACHE_HIT: '复用已验证结果',
+    CANDIDATE_READY: '待发布',
+    REVIEW: '待人工确认',
+    QUEUED: '待处理',
+    RUNNING: '处理中',
+    WAITING: '待执行',
+    FAILED: '处理失败',
+    PARSE_FAILED: '文档解析失败',
+    STAGE_A_FAILED: '问题事实提取失败',
+    STAGE_B_FAILED: '工程知识生成失败',
+    GATE_FAILED: '证据校验失败',
+    RUNTIME_BLOCKED: '运行环境阻断',
+    DEPENDENCY_BLOCKED: '依赖阻断',
+    READY_FOR_REVIEW: '待确认 / 待发布',
+    PARTIAL_FAILURE: '部分失败',
+    EMPTY: '暂无数据',
+    MIXED: '混合状态',
+  };
+
+  function statusLabel(value) {
+    const code = String(value || '');
+    return statusLabels[code] || code || '—';
+  }
+
+  function statusPill(value, showCode = false) {
+    const code = String(value || '');
+    const display = statusLabel(code);
+    return '<span class="hc-status ' + statusClass(code) + '" title="' +
+      escapeHtml(code || '—') + '">' + escapeHtml(display) +
+      (showCode && code ? '<small class="hc-tech-code">' + escapeHtml(code) + '</small>' : '') +
+      '</span>';
   }
 
   function updateUrl({batchId, itemId} = {}) {
@@ -217,10 +249,10 @@
   function failureHint(item) {
     if (item.error_code === 'PROVIDER_TIMEOUT' &&
         ['STAGE_A', 'STAGE_B'].includes(item.failed_stage)) {
-      return 'Provider Timeout：使用 Retry Failed Stage，仅重试失败阶段；不要 Force Full Run。';
+      return 'AI 服务响应超时：建议使用“重试失败环节”，只重试失败步骤；不要直接“强制完整重跑”。';
     }
     if (item.error_code) {
-      return '失败原因：' + item.error_code + '。可先查看 Advanced Debug，再按失败阶段选择性重试。';
+      return '失败原因：' + item.error_code + '。可先查看“诊断信息（高级）”，再按失败环节选择性重试。';
     }
     return '';
   }
@@ -345,13 +377,13 @@
     state.batch = batch;
     ensurePassiveBatchPolling(batch);
     q('[data-batch-ref]').textContent =
-      batch ? batch.batch_id + ' · ' + (batch.status || '—') : '尚未选择 Batch。';
+      batch ? batch.batch_id + ' · ' + statusLabel(batch.status) : '尚未选择导入任务。';
     renderSummary(batch?.summary || {});
     runBatchButton.disabled = !batch;
     retryBatchButton.disabled = !batch || !(batch.summary?.FAILED > 0);
 
     if (!batch) {
-      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">暂无 Batch。</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">暂无导入任务。</td></tr>';
       return;
     }
 
@@ -362,7 +394,7 @@
     });
 
     if (!items.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">当前筛选无 Case。</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">当前筛选条件下没有案例。</td></tr>';
       return;
     }
 
@@ -392,7 +424,7 @@
           <td><small>${escapeHtml(item.updated_at || '—')}</small></td>
           <td>
             <button class="hc-button" type="button"
-              data-open-item="${escapeHtml(item.item_id)}">打开结果</button>
+              data-open-item="${escapeHtml(item.item_id)}">查看详情</button>
           </td>
         </tr>
       `;
@@ -403,10 +435,10 @@
     try {
       const payload = await request('/batches?limit=50');
       const batches = payload.items || [];
-      historySelect.innerHTML = '<option value="">Batch History</option>' +
+      historySelect.innerHTML = '<option value="">历史导入记录</option>' +
         batches.map((batch) =>
           '<option value="' + escapeHtml(batch.batch_id) + '">' +
-          escapeHtml(batch.batch_id + ' · ' + batch.status) +
+          escapeHtml(batch.batch_id + ' · ' + statusLabel(batch.status)) +
           '</option>'
         ).join('');
       const target = preferredBatch || new URL(window.location.href).searchParams.get('batch') ||
@@ -416,10 +448,10 @@
         await loadBatch(target);
       } else {
         renderBatch(null);
-        setMessage('暂无 Batch。请批量上传 Word。');
+        setMessage('暂无导入任务。请先上传 Word。');
       }
     } catch (error) {
-      setMessage('Batch History 加载失败：' + error.message, true);
+      setMessage('历史导入记录加载失败：' + error.message, true);
     }
   }
 
@@ -435,11 +467,11 @@
       historySelect.value = batchId;
       updateUrl({batchId, itemId: state.item?.item_id || ''});
       setMessage(
-        'Batch 已载入：' + batchId +
-        (batch.status === 'PARTIAL_FAILURE' ? '（存在部分失败，成功 Case 已保留）' : '')
+        '导入任务已载入：' + batchId +
+        (batch.status === 'PARTIAL_FAILURE' ? '（存在部分失败，已成功的案例会保留）' : '')
       );
     } catch (error) {
-      setMessage('Batch 加载失败：' + error.message, true);
+      setMessage('导入任务加载失败：' + error.message, true);
     }
   }
 
@@ -448,7 +480,7 @@
     if (!files.length) return;
     const data = new FormData();
     files.forEach((file) => data.append('files', file, file.name));
-    setMessage('正在创建 Batch 并执行文件级 Parse / Source Binding Precheck…');
+    setMessage('正在创建导入任务，并执行文档解析和源文件校验…');
     try {
       const batch = await request('/batches', {
         method: 'POST',
@@ -459,10 +491,10 @@
       debugPanel.hidden = true;
       await loadHistory(batch.batch_id);
       setMessage(
-        'Batch 已创建。合法 Case 可继续 Run / Resume；单文件失败不会回滚其他 Case。'
+        '导入任务已创建。可继续处理；单个文件失败不会影响其他案例。'
       );
     } catch (error) {
-      setMessage('批量上传失败：' + error.message, true);
+      setMessage('Word 上传失败：' + error.message, true);
     }
   }
 
@@ -476,8 +508,8 @@
         }
       }
       setMessage(action === 'retry-failed-only'
-        ? '正在执行 Retry Failed Only…'
-        : '正在执行 Batch Run / Resume…');
+        ? '正在仅重试失败项…'
+        : '正在开始 / 继续处理本次导入任务…');
       const batchId = state.batch.batch_id;
       const stopPolling = startBatchPolling(batchId);
       let payload;
@@ -492,10 +524,10 @@
       renderBatch(payload);
       const selected = payload.retry_selected_count;
       setMessage(selected === undefined
-        ? 'Batch Run / Resume 完成。'
-        : 'Retry Failed Only 完成，选择 ' + selected + ' 个 Failed Case。');
+        ? '本次导入任务处理完成。'
+        : '失败项重试完成，共选择 ' + selected + ' 个失败案例。');
     } catch (error) {
-      setMessage('Batch 操作失败：' + error.message, true);
+      setMessage('导入任务操作失败：' + error.message, true);
     }
   }
 
@@ -786,6 +818,67 @@
     }
   }
 
+  function renderNextStep(item = state.item, promotion = state.promotion) {
+    const title = q('[data-next-step-title]');
+    const body = q('[data-next-step-body]');
+    const flow = q('[data-knowledge-flow]');
+    if (!title || !body || !flow || !item) return;
+
+    const result = displayResult(item);
+    const promotionStatus =
+      promotion?.status || promotion?.promotion_status || 'NOT_STARTED';
+    const reviewRequired =
+      result === 'REVIEW' ||
+      item.candidate_asset?.production_review_status === 'REQUIRED';
+    const consumptionReady = state.consumptionReadyItemId === item.item_id;
+
+    let active = 0;
+    let titleText = '下一步：继续处理';
+    let bodyText = '完成 AI 分析后，再进行人工确认和正式知识发布。';
+
+    if (result === 'RUNNING' || result === 'QUEUED') {
+      active = 0;
+      titleText = result === 'RUNNING' ? '正在进行 AI 分析' : '下一步：开始 AI 分析';
+      bodyText = '系统正在执行“文档解析 → 问题事实提取 → 工程知识生成 → 证据校验”。';
+    } else if (result === 'FAILED') {
+      active = 0;
+      titleText = '下一步：处理失败项';
+      bodyText = '先查看失败原因，再使用“重试失败环节”；已成功的步骤不会重复执行。';
+    } else if (reviewRequired) {
+      active = 1;
+      titleText = '下一步：完成人工确认';
+      bodyText = '对照 AI 识别结果和原文证据，确认或修正后即可进入正式知识发布。';
+    } else if (consumptionReady) {
+      active = 5;
+      titleText = '已完成：正式知识可以检索使用';
+      bodyText = '检索数据已生成，可直接进入“正式知识检索”搜索和查看证据。';
+    } else if (['NOT_STARTED', 'PRECHECK_PASS', 'INTAKE_FAILED', 'CANDIDATE_INTAKED',
+                'REVIEW_FAILED', 'REVIEW_CONFIRMED', 'PUBLISH_FAILED'].includes(promotionStatus)) {
+      active = 2;
+      if (promotionStatus === 'NOT_STARTED') titleText = '下一步：进行发布前检查';
+      else if (['PRECHECK_PASS', 'INTAKE_FAILED'].includes(promotionStatus)) titleText = '下一步：提交正式审核';
+      else if (['CANDIDATE_INTAKED', 'REVIEW_FAILED'].includes(promotionStatus)) titleText = '下一步：确认正式审核';
+      else titleText = '下一步：发布正式知识';
+      bodyText = '按下方“正式知识发布”步骤依次完成，不会自动发布。';
+    } else if (['PUBLISHED_PENDING_QUERY_BACK', 'VERIFY_FAILED'].includes(promotionStatus)) {
+      active = 3;
+      titleText = '下一步：验证发布结果';
+      bodyText = '确认已发布的正式知识能够按原身份正确读取后，再生成检索数据。';
+    } else if (promotionStatus === 'VERIFIED') {
+      active = 4;
+      titleText = '下一步：生成检索数据';
+      bodyText = '正式知识已经发布并验证通过；生成检索数据后即可被正式知识检索使用。';
+    }
+
+    const steps = ['AI 分析', '人工确认', '正式发布', '发布验证', '生成检索数据', '搜索使用'];
+    flow.innerHTML = steps.map((step, index) =>
+      '<span class="' + (index < active ? 'done' : index === active ? 'active' : '') + '">' +
+      '<b>' + (index + 1) + '</b>' + escapeHtml(step) + '</span>'
+    ).join('');
+    title.textContent = titleText;
+    body.textContent = bodyText;
+  }
+
   function renderDetail(
     item,
     {scroll = true, refreshPromotionState = true} = {}
@@ -796,8 +889,9 @@
     q('[data-case-heading]').textContent =
       (item.business_case_id || 'ID 待确认') + ' · ' + (item.source_file || '—');
     q('[data-detail-batch]').textContent = item.batch_id || '—';
-    q('[data-detail-status]').innerHTML = statusPill(displayResult(item));
-    q('[data-detail-failed-stage]').textContent = item.failed_stage || '—';
+    q('[data-detail-status]').innerHTML = statusPill(displayResult(item), true);
+    q('[data-detail-failed-stage]').textContent =
+      item.failed_stage ? stageDisplay(item.failed_stage) + '（' + item.failed_stage + '）' : '—';
     q('[data-detail-error-code]').textContent = item.error_code || '—';
     const hint = q('[data-detail-failure-hint]');
     const hintText = failureHint(item);
@@ -809,16 +903,17 @@
       Number(item.duration_ms || 0).toLocaleString() + ' ms';
     q('[data-detail-run-ref]').textContent = item.run_ref || '—';
     q('[data-detail-stages]').innerHTML = [
-      ['Parse', item.parse],
-      ['Stage A', item.stage_a],
-      ['Stage B', item.stage_b],
-      ['Gate', item.gate],
-      ['Result', displayResult(item)],
+      ['文档解析', item.parse],
+      ['问题事实提取', item.stage_a],
+      ['工程知识生成', item.stage_b],
+      ['证据校验', item.gate],
+      ['处理结果', displayResult(item)],
     ].map(([name, value]) =>
       '<span><b>' + escapeHtml(name) + '</b>' + statusPill(value) + '</span>'
     ).join('');
     renderReviewRequired(item);
     renderHumanReview(item);
+    renderNextStep(item, null);
     q('[data-candidate-preview]').textContent =
       JSON.stringify(item.candidate || null, null, 2);
     q('[data-evidence-summary]').textContent =
@@ -843,12 +938,26 @@
     const promotion = payload?.promotion || payload || {};
     state.promotion = promotion;
     const status = promotion.status || promotion.promotion_status || 'NOT_STARTED';
+    const promotionLabels = {
+      NOT_STARTED: '尚未开始',
+      PRECHECK_PASS: '发布前检查通过',
+      INTAKE_FAILED: '提交正式审核失败',
+      CANDIDATE_INTAKED: '已提交正式审核',
+      REVIEW_FAILED: '正式审核失败',
+      REVIEW_CONFIRMED: '正式审核已通过',
+      PUBLISH_FAILED: '发布失败',
+      PUBLISHED_PENDING_QUERY_BACK: '已发布，待验证',
+      VERIFY_FAILED: '发布验证失败',
+      VERIFIED: '发布验证通过',
+      BLOCKED: '流程被阻断',
+    };
     q('[data-promotion-status]').textContent = [
-      '状态：' + status,
-      promotion.knowledge_id ? 'knowledge_id：' + promotion.knowledge_id : '',
+      '当前状态：' + (promotionLabels[status] || status) + (status ? '（' + status + '）' : ''),
+      promotion.knowledge_id ? '正式知识编号：' + promotion.knowledge_id : '',
       promotion.error_code ? '错误：' + promotion.error_code : '',
       note,
     ].filter(Boolean).join(' · ');
+    renderNextStep(state.item, promotion);
     const canAct = Boolean(
       state.item &&
       ['CANDIDATE_READY', 'REVIEW'].includes(displayResult(state.item)) &&
@@ -879,14 +988,14 @@
       let payload;
       if (action === 'review') {
         const reviewer = q('[data-formal-reviewer]').value.trim();
-        if (!reviewer || !window.confirm('确认将已审核的 Durable Candidate 原样提交为 Formal Review？')) return;
+        if (!reviewer || !window.confirm('确认对当前已人工确认的知识草稿执行正式审核？不会修改知识内容。')) return;
         payload = await request('/items/' + itemId + '/promotion/review', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({reviewer, review_comment: q('[data-formal-review-comment]').value.trim()}),
         });
       } else if (action === 'publish') {
         const publisher = q('[data-formal-reviewer]').value.trim();
-        if (!publisher || !window.confirm('只向当前配置的 NON_PROD Unified Knowledge 发布。确认继续？')) return;
+        if (!publisher || !window.confirm('确认发布为正式知识？当前仍只会写入已配置的 NON_PROD Unified Knowledge。')) return;
         payload = await request('/items/' + itemId + '/promotion/publish', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({publisher}),
@@ -895,30 +1004,46 @@
         payload = await request('/items/' + itemId + '/promotion/' + action, {method: 'POST'});
       }
       paintPromotion(payload);
-      setMessage('Promotion 操作完成：' + action);
+      setMessage('正式知识发布步骤已完成：' + action);
     } catch (error) {
       paintPromotion(state.promotion || {}, '操作被阻止：' + error.message);
-      setMessage('Promotion 操作失败：' + error.message, true);
+      setMessage('正式知识发布步骤失败：' + error.message, true);
     }
   }
 
-  async function verifyAndProject() {
+  async function verifyPublication() {
     if (!state.item) return;
     try {
-      const verified = await request('/items/' + encodeURIComponent(state.item.item_id) + '/promotion/verify', {method: 'POST'});
-      paintPromotion(verified, '远端 Query Back 身份已校验');
-      const candidateId = state.item.candidate_id || state.item.candidate?.candidate_id;
-      if (!candidateId) throw new Error('CANDIDATE_ID_MISSING');
-      const projected = await fetch('/api/v2/hardware-cases/r1/workbench/consumption/project/' + encodeURIComponent(candidateId), {
-        method: 'POST', headers: {'X-Hardware-Case-Role': 'MAINTAINER', Accept: 'application/json'},
-      });
-      const body = await projected.json().catch(() => ({}));
-      if (!projected.ok) throw new Error(body.detail || 'PROJECTION_UPDATE_FAILED');
-      paintPromotion(verified, 'Query Back PASS · Consumption Projection 已更新');
-      setMessage('Formal Knowledge 已验证并进入 Knowledge Search。');
+      const verified = await request(
+        '/items/' + encodeURIComponent(state.item.item_id) + '/promotion/verify',
+        {method: 'POST'}
+      );
+      paintPromotion(verified, '发布结果验证通过');
+      setMessage('正式知识发布结果验证通过。下一步：生成检索数据。');
     } catch (error) {
-      paintPromotion(state.promotion || {}, '验证/Projection 失败：' + error.message);
-      setMessage('Verify / Projection 失败：' + error.message, true);
+      paintPromotion(state.promotion || {}, '发布结果验证失败：' + error.message);
+      setMessage('发布结果验证失败：' + error.message, true);
+    }
+  }
+
+  async function projectConsumption() {
+    if (!state.item) return;
+    const candidateId = state.item.candidate_id || state.item.candidate?.candidate_id;
+    try {
+      if (!candidateId) throw new Error('CANDIDATE_ID_MISSING');
+      const response = await fetch(
+        '/api/v2/hardware-cases/r1/workbench/consumption/project/' + encodeURIComponent(candidateId),
+        {method: 'POST', headers: {'X-Hardware-Case-Role': 'MAINTAINER', Accept: 'application/json'}}
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || 'PROJECTION_UPDATE_FAILED');
+      state.consumptionReadyItemId = state.item.item_id;
+      paintPromotion(state.promotion || {status: 'VERIFIED'}, '检索数据已生成');
+      renderNextStep(state.item, state.promotion || {status: 'VERIFIED'});
+      setMessage('检索数据已生成，现在可以进入“正式知识检索”。');
+    } catch (error) {
+      paintPromotion(state.promotion || {}, '生成检索数据失败：' + error.message);
+      setMessage('生成检索数据失败：' + error.message, true);
     }
   }
 
@@ -936,7 +1061,7 @@
   async function itemAction(action) {
     if (!state.item || state.itemAction.pending) return;
     if (action === 'force-full-run') {
-      if (!window.confirm('Force Full Run 将绕过 Stage A/B Cache，成本更高。继续？')) {
+      if (!window.confirm('“强制完整重跑”会绕过已有 AI 分析缓存，成本更高。确认继续？')) {
         return;
       }
     }
@@ -947,10 +1072,10 @@
       action === 'retry-failed-stage' ? state.item.failed_stage : null;
     const visibleAction =
       action === 'retry-failed-stage'
-        ? '重试 ' + stageDisplay(retryStage)
+        ? '重试' + stageDisplay(retryStage)
         : action === 'run-resume'
-        ? 'Run / Resume'
-        : 'Force Full Run';
+        ? '继续处理'
+        : '强制完整重跑';
 
     state.itemAction = {pending: true, action, stage: retryStage};
     paintItemActionControls(state.item);
@@ -984,7 +1109,7 @@
         visibleAction + ' 失败：' + error.message,
         true
       );
-      setMessage('Case 操作失败：' + error.message, true);
+      setMessage('案例处理失败：' + error.message, true);
       try {
         const current = await request('/items/' + encodeURIComponent(itemId));
         syncItemIntoBatch(current);
@@ -1052,7 +1177,7 @@
       debugPanel.hidden = false;
       debugPanel.scrollIntoView({block: 'start', behavior: 'smooth'});
     } catch (error) {
-      setMessage('Advanced Debug 加载失败：' + error.message, true);
+      setMessage('诊断信息加载失败：' + error.message, true);
     }
   }
 
@@ -1148,16 +1273,8 @@
   q('[data-promotion-intake]').addEventListener('click', () => promotionAction('intake'));
   q('[data-promotion-review]').addEventListener('click', () => promotionAction('review'));
   q('[data-promotion-publish]').addEventListener('click', () => promotionAction('publish'));
-  q('[data-promotion-verify]').addEventListener('click', verifyAndProject);
-  q('[data-project-consumption]').addEventListener('click', async () => {
-    const candidateId = state.item?.candidate_id || state.item?.candidate?.candidate_id;
-    try {
-      const response = await fetch('/api/v2/hardware-cases/r1/workbench/consumption/project/' + encodeURIComponent(candidateId), {method: 'POST', headers: {'X-Hardware-Case-Role': 'MAINTAINER'}});
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.detail || 'PROJECTION_UPDATE_FAILED');
-      paintPromotion(state.promotion, 'Consumption Projection 已更新');
-      setMessage('Projection 已更新，可打开 Knowledge Search 验证。');
-    } catch (error) { paintPromotion(state.promotion, 'Projection 失败：' + error.message); }
+  q('[data-promotion-verify]').addEventListener('click', verifyPublication);
+  q('[data-project-consumption]').addEventListener('click', projectConsumption);
   });
 
   const params = new URL(window.location.href).searchParams;
