@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import threading
 
 import yaml
 
@@ -16,6 +17,7 @@ from quality_knowledge.repeat_risk.search import (
     RepeatHistoricalCaseSearchService,
     SEARCH_SUCCESS,
 )
+from tools.openai_mock.server import Behavior, create_server
 
 
 ROOT = Path(__file__).parents[1]
@@ -220,6 +222,92 @@ def test_m83_compact_payload_keeps_typed_semantic_and_exact_evidence():
     assert "typed_semantic" in payload
     assert "retrieval_document" not in json.dumps(payload, ensure_ascii=False)
     assert "embedding" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_m82_m83_execute_through_unified_runtime_provider(tmp_path: Path):
+    for relative in (
+        "config/runtime/agents/major_issue.repeat_similarity.yaml",
+        "config/runtime/agents/major_issue.repeat_solution.yaml",
+        "prompts/similarity_analyzer.md",
+        "prompts/solution_analyzer.md",
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((ROOT / relative).read_text(encoding="utf-8"), encoding="utf-8")
+
+    server = create_server("127.0.0.1", 0)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.01},
+        daemon=True,
+    )
+    thread.start()
+    try:
+        host, port = server.server_address
+        model_config = tmp_path / "config/model.local.yaml"
+        model_config.parent.mkdir(parents=True, exist_ok=True)
+        model_config.write_text(
+            (
+                "active_model: repeat_mock\n"
+                "models:\n"
+                "  repeat_mock:\n"
+                "    provider: openai_compatible\n"
+                f"    base_url: http://{host}:{port}/v1\n"
+                "    api_key: runtime-test-secret\n"
+                "    model: repeat-mock-model\n"
+                "    temperature: 0\n"
+                "    max_tokens: 4096\n"
+            ),
+            encoding="utf-8",
+        )
+
+        service = RepeatAgentAnalysisService(
+            tmp_path,
+            model_config_path=model_config,
+            report_root=tmp_path / "data/repeat_reports",
+            decision_enabled=False,
+        )
+        context = service._candidate_context(
+            "RQ-RUNTIME",
+            _search_result()["query_input"],
+            _candidate(),
+        )
+
+        server.state.configure("default", _similarity_analysis(), Behavior())
+        similarity, similarity_exec = service._similarity(context)
+        assert similarity["analysis_status"] == "SUCCESS"
+        assert similarity["analysis"]["overall_score"] == 82
+        assert similarity_exec["provider_calls"] == 1
+        assert server.state.counters()["default"] == 1
+
+        server.state.configure(
+            "default",
+            _solution_wrapper()["analysis"],
+            Behavior(),
+        )
+        solution, solution_exec = service._solution(context, similarity)
+        assert solution["analysis_status"] == "SUCCESS"
+        assert solution["analysis"]["applicability"] == "PARTIAL_REUSE"
+        assert solution_exec["provider_calls"] == 1
+        assert server.state.counters()["default"] == 1
+
+        assert service.runtime is not None
+        assert set(service._resolved) == {
+            "major_issue.repeat_similarity",
+            "major_issue.repeat_solution",
+        }
+        assert (
+            service._resolved["major_issue.repeat_similarity"].definition.model
+            == "repeat-mock-model"
+        )
+        assert (
+            service._resolved["major_issue.repeat_solution"].definition.model
+            == "repeat-mock-model"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_product_agent_service_does_not_reconnect_legacy_provider_client():
