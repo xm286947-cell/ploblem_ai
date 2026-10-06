@@ -637,6 +637,20 @@ class HardwareR1KnowledgePromotionService:
             raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
         return item, asset, evidence_ids
 
+    def _workbench_item(self, item_id: str) -> dict[str, Any]:
+        """Resolve a durable promotion's origin through the Workbench service API."""
+        item_key = str(item_id or "").strip()
+        if not item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        try:
+            item = self.workbench.get_item(item_key)
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "BATCH_ITEM_NOT_FOUND")
+            raise HardwareR1PromotionError(code) from error
+        if not isinstance(item, dict) or str(item.get("item_id") or "") != item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        return item
+
     @staticmethod
     def _promotion_view(record: Mapping[str, Any], evidence_ids: list[str]) -> dict[str, Any]:
         return {

@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -38,6 +39,9 @@ from services.hardware_r1_knowledge_promotion import (
 from quality_knowledge.web.hardware_r1_workbench_api import (
     create_hardware_r1_workbench_router,
 )
+from quality_knowledge.web.p0_app import create_p0_app
+import services.hardware_case_r1_workbench as workbench_module
+from services.hardware_case_r1_workbench import HardwareR1WorkbenchStore
 
 
 NOW = datetime(2026, 10, 3, 6, 0, tzinfo=timezone.utc)
@@ -1149,7 +1153,9 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert pending["reconciliation_operation_type"] == "PUBLISH"
     assert pending["reconciliation_error_code"] == "PUBLISH_RECONCILIATION_REQUIRED"
 
-    repaired = restarted.reconcile_item("HWI-RECOVERY")
+    startup = restarted.reconcile_startup()
+    repaired = restarted.get_item("HWI-RECOVERY")
+    assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert repaired["knowledge_id"]
     settled = restarted.get_item("HWI-RECOVERY")
@@ -1163,6 +1169,87 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
     assert restarted.recovery_diagnostics()["pending_remote_reconciliation_count"] == 0
     assert source["source_id"] == promotion.assets.get_candidate(intake["asset_candidate_id"])["source_id"]
+
+
+def test_p0_app_starts_and_reconciles_pending_publish_without_republishing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        workbench_module, "uuid4", lambda: SimpleNamespace(hex="b" * 32)
+    )
+    workbench_store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = workbench_store.create_batch()
+    item_id = "HWI-" + "a" * 16
+    promotion, _, _, source, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id=item_id, batch_id=batch_id
+    )
+    intake = promotion.intake_item(item_id)
+    promotion.review_item(
+        item_id,
+        reviewer="startup-recovery-reviewer",
+        review_time=NOW,
+        review_comment="startup recovery test",
+    )
+    monkeypatch.setattr(workbench_module, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    stored_item_id = workbench_store.add_item(
+        batch_id,
+        source_file="A0152-synthetic.docx",
+        business_case_id="A0152",
+        source_id=source["source_id"],
+        orchestration_status="CANDIDATE_READY",
+        snapshot={"source": {"source_id": source["source_id"]}},
+        result={
+            "pipeline_status": "GOLDEN_PREVIEW_READY",
+            "status": "PASS",
+            "evidence_validation": validation(),
+            "knowledge_object": candidate,
+            "provider_call_count": 0,
+        },
+        candidate_id=intake["asset_candidate_id"],
+    )
+    assert stored_item_id == item_id
+
+    original_transition = promotion._transition
+
+    def crash_after_remote_publish(item, asset, record, target, **kwargs):
+        if target == "PUBLISHED_PENDING_QUERY_BACK":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_transition(item, asset, record, target, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_after_remote_publish)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.publish_item(
+            item_id, publisher="startup-recovery-publisher", published_at=NOW
+        )
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    monkeypatch.undo()
+
+    app = create_p0_app(
+        tmp_path / "hardware.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_case_source_root=tmp_path / "sources",
+        hardware_r1_workbench_db_path=tmp_path / "workbench.db",
+        hardware_knowledge_adapter=promotion.bridge.adapter,
+        hardware_knowledge_release_version=RELEASE,
+        hardware_startup_status={"status": "READY", "ready": True},
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    assert app.state.hardware_r1_promotion_status["ready"] is True
+    recovery = app.state.hardware_r1_promotion_status["remote_recovery"]
+    assert recovery["pending_remote_reconciliation_count"] == 0
+    assert recovery["startup_queries_used"] == 1
+    assert promotion.operation_journal.get(
+        promotion._operation_id(intake["asset_candidate_id"], "PUBLISH", 1)
+    )["operation_state"] == "COMPLETED"
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+
+    with TestClient(app) as client:
+        ready = client.get("/ready")
+        assert ready.status_code in {200, 503}, ready.text
+        assert ready.json()["service"] == "HARDWARE_CASE"
 
 
 def test_candidate_remote_success_crash_before_promotion_ledger_recovers_on_restart(tmp_path, monkeypatch):
