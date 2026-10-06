@@ -1171,6 +1171,72 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert source["source_id"] == promotion.assets.get_candidate(intake["asset_candidate_id"])["source_id"]
 
 
+def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not_republish(
+    tmp_path, monkeypatch
+):
+    promotion, workbench, _, _, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    intake = _prepare_reviewed_promotion(promotion, candidate)
+    original_transition = promotion._transition
+
+    def crash_after_remote_publish(item, asset, record, target, **kwargs):
+        if target == "PUBLISHED_PENDING_QUERY_BACK":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_transition(item, asset, record, target, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_after_remote_publish)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.publish_item(
+            "HWI-RECOVERY", publisher="reconciliation-publisher", published_at=NOW
+        )
+    publish_operation = promotion.operation_journal.get(
+        promotion._operation_id(intake["asset_candidate_id"], "PUBLISH", 1)
+    )
+    assert publish_operation["operation_state"] in {
+        "REMOTE_SENT",
+        "OUTCOME_UNKNOWN",
+        "RECONCILING",
+    }
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+
+    app = FastAPI()
+    app.include_router(
+        create_hardware_r1_workbench_router(
+            workbench, promotion_service=promotion
+        )
+    )
+    client = TestClient(app)
+    headers = {"X-Hardware-Case-Role": "MAINTAINER"}
+    promotion_path = (
+        "/api/v2/hardware-cases/r1/workbench/items/HWI-RECOVERY/promotion"
+    )
+    response = client.get(promotion_path, headers=headers)
+    assert response.status_code == 200, response.text
+    assert {
+        key: response.json().get(key)
+        for key in (
+            "reconciliation_required",
+            "reconciliation_operation_type",
+            "reconciliation_error_code",
+        )
+    } == {
+        "reconciliation_required": True,
+        "reconciliation_operation_type": "PUBLISH",
+        "reconciliation_error_code": "PUBLISH_RECONCILIATION_REQUIRED",
+    }
+
+    monkeypatch.undo()
+    reconcile = client.post(promotion_path + "/reconcile", headers=headers)
+    assert reconcile.status_code == 200, reconcile.text
+    assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
+    assert reconcile.json()["reconciled"] is True
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+
+
 def test_p0_app_starts_and_reconciles_pending_publish_without_republishing(
     tmp_path, monkeypatch
 ):
