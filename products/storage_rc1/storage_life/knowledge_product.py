@@ -169,8 +169,12 @@ def knowledge_release_root() -> Path:
 
 
 def _default_binding_template() -> dict[str, Any]:
+    # Resolve from the effective project/package root rather than a fixed
+    # source-tree parent depth. In the repository this module lives under
+    # products/storage_rc1/storage_life, while in the distributable package
+    # storage_life is moved to the package root.
     path = (
-        Path(__file__).resolve().parents[3]
+        project_root()
         / "contracts"
         / "release_binding"
         / "v1"
