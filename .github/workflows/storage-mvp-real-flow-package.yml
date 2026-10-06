@@ -232,6 +232,82 @@ jobs:
 
           chmod +x "$PKG/START_MACOS.command" "$PKG/run_macos.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh"
 
+          cat > "$PKG/KNOWLEDGE_PRODUCTION_W4_GOLDEN_README.txt" <<'EOF'
+          Storage Knowledge Production W4 Real Golden
+
+          目标：
+          用一份真实 NAND Flash 公开 PDF，连续验证：
+          Public Source
+          -> Storage Lifetime Model Scan
+          -> Existing Knowledge Production Candidate + Evidence
+          -> Human Semantic Review
+          -> Publish
+          -> Immutable Release Candidate
+          -> Explicit Binding Promotion
+          -> Storage Formal Knowledge Consumption
+
+          推荐资料：
+          - 已有 KIOXIA NAND endurance / reliability 类公开 PDF
+          - 必须是真实公开资料，不用 fixture
+          - 导入时填写真实 Publisher；没有 Publisher/官方来源时 Formal Handoff 会 Fail-Closed
+
+          W4-A 知识生产真实链：
+          1. 启动包，打开 http://127.0.0.1:8765
+          2. 左侧 公共知识维护 -> 导入公开资料
+          3. 选择真实 PDF，填写：
+             - 资料标题
+             - 发布方 / Publisher
+             - PUBLIC
+          4. 提交后进入 公开资料库 -> 详情
+          5. 在“按寿命模型生产知识”选择 NAND Flash
+          6. 点击“按模型分析”
+             - 查看 FOUND / NOT_FOUND
+             - 查看关键参数、所需知识类型、S1~S5 消费场景、Citation 数
+          7. 点击“生成 Knowledge Candidate”
+             - 系统必须使用 Exact Public Source Revision PDF
+             - 不允许 Public QA 文本直接变 Formal Knowledge
+          8. 打开 Candidate
+          9. 执行 Evaluation
+          10. Human Review：
+              - 核对 Evidence
+              - 核对 canonical parameter
+              - 若同页多参数为 AMBIGUOUS，必须人工判断，不可自动任选
+              - 选择唯一 Storage Knowledge Type
+              - EDIT & CONFIRM
+          11. Publish
+              - 未选 Storage Knowledge Type 必须禁止 Publish
+              - Published metadata 应为 semantic_class_status=REVIEWED
+          12. 回到 Storage 公共知识工作台
+          13. 输入明确 Release Version，例如：
+              KP-STORAGE-LIFETIME-W4-20261006-R1
+          14. 构建 Release Candidate
+              - 当前 Active Release 此时不能变化
+          15. 输入批准人，执行“批准并切换到 Storage”
+              - 禁止 latest
+              - Release + Binding 必须同步切换
+          16. 验证 Formal Knowledge：
+              - 只消费 REVIEWED / formal_consumable Knowledge
+              - S2/S3/S4/S5 按 semantic_class + canonical_parameter + scenario 消费
+              - 新模型知识缺失时 Fail-Closed，不允许悄悄回退成关键词猜测
+
+          W4-A 判定：
+          PASS 仅当上述链路使用真实 PDF 连续完成，期间：
+          - NO_DB_MANUAL_WRITE
+          - NO_FIXTURE_AS_REAL
+          - NO_DIRECT_FORMAL_WRITE
+          - NO_AI_ARBITRARY_FORMULA
+          - NO_PUBLIC_KNOWLEDGE_AS_FORMAL_EVIDENCE
+          - NO_LATEST_FLOATING_RELEASE
+
+          W4-B 产品消费：
+          W4-A 完成后，再按 REAL_FLOW_README.txt 连续跑：
+          S1 -> Public Knowledge -> S2 -> Runtime -> S3 -> S4 -> S5 -> Actions -> Summary。
+
+          发现断点：
+          记录页面、操作、错误原文和当时 Source/Release 身份；
+          不现场改 DB，不绕过 Review，不用测试脚本制造 PASS。
+          EOF
+
           cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
           {
             "package_id": "$PACKAGE_ID",
