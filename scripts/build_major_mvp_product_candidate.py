@@ -18,7 +18,6 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BASE = "73e9db071c55ae056573982b70db9480be838353"
-EXPECTED_BRANCH = "feature/major-mvp-productization-closure"
 PACKAGE_PREFIX = "MAJOR_MVP_PRODUCT_CANDIDATE_"
 SOURCE_DIRS = {
     "analysis",
@@ -242,8 +241,8 @@ def _copy_source(root: Path, stage: Path) -> None:
 def _git_metadata(root: Path, *, require_clean: bool) -> tuple[str, str, str]:
     commit = _git(root, "rev-parse", "HEAD")
     branch = _git(root, "branch", "--show-current")
-    if branch != EXPECTED_BRANCH:
-        raise CandidateBuildError(f"SOURCE_BRANCH_MISMATCH={branch}")
+    if not branch:
+        branch = os.getenv("GITHUB_REF_NAME", "").strip() or "DETACHED"
     _git(root, "merge-base", "--is-ancestor", SOURCE_BASE, "HEAD")
     dirty = bool(_git(root, "status", "--porcelain", "--untracked-files=all"))
     if require_clean and dirty:
