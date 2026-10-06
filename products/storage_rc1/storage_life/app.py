@@ -268,6 +268,20 @@ def product_device_mvp_summary(device_id: str):
         raise HTTPException(404, "器件不存在")
 
 
+@app.post("/api/product/devices/{device_id}/engineering-actions/from-optimization/{assessment_id}", tags=["Storage Product MVP"])
+def product_persist_engineering_actions_from_optimization(device_id: str, assessment_id: str, body: dict | None = None):
+    try:
+        return product_api.persist_engineering_actions_from_optimization(
+            device_id,
+            assessment_id,
+            updated_by=str((body or {}).get("updated_by") or "Storage MVP UI"),
+        )
+    except KeyError:
+        raise HTTPException(404, "优化评估不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/product/devices/{device_id}/engineering-actions", tags=["Storage Product MVP"])
 def product_engineering_actions(device_id: str):
     try:
