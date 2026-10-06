@@ -249,12 +249,32 @@ class StorageDomainSkillAdapter:
             _text(x) for x in items
             if x.get("canonical_object_type") in {"TechnicalSolution", "SoftwareRequirementKnowledge"} and _text(x)
         ]
-        validation = [
-            _text(x) for x in items
-            if x.get("canonical_object_type") == "DiagnosticMethod" and _text(x)
-        ]
+        validation = []
+        for item in items:
+            # A DiagnosticMethod object may still be only a semantic definition
+            # (for example "Percentage Used").  Create TEST_VALIDATION actions
+            # only from explicitly structured validation/test method fields;
+            # never reinterpret arbitrary diagnostic prose as a test procedure.
+            explicit = []
+            for key in ("validation_method", "validation", "test_method", "verification_method"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    explicit.append(value.strip())
+                elif isinstance(value, list):
+                    explicit.extend(str(x).strip() for x in value if str(x).strip())
+            content = item.get("content")
+            if isinstance(content, dict):
+                for key in ("validation_method", "validation", "test_method", "verification_method"):
+                    value = content.get(key)
+                    if isinstance(value, str) and value.strip():
+                        explicit.append(value.strip())
+                    elif isinstance(value, list):
+                        explicit.extend(str(x).strip() for x in value if str(x).strip())
+            for value in explicit:
+                if value not in validation:
+                    validation.append(value)
         # Keep control and validation semantics separate.  If the current
-        # release has engineering controls but no explicit DiagnosticMethod,
+        # release has engineering controls but no explicit validation method,
         # do not copy the same control text into TEST_VALIDATION; surface the
         # missing validation method instead so S5 remains reviewable/fail-closed.
         missing = list(knowledge.get("missing_information") or [])
