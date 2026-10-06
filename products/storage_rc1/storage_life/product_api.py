@@ -1039,63 +1039,28 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 complete = False
                 next_action = "当前运行观测尚未形成可完成的 S4 诊断结果。"
 
-        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_snapshot_created_at:
-            assessment_created_at = _iso_datetime(item.get("created_at"))
-            if assessment_created_at is None or latest_formal_snapshot_created_at > assessment_created_at:
-                complete = False
-                next_action = (
-                    "已确认 Runtime Snapshot 集合在本次分析后发生变化；请基于当前快照重新执行该场景。"
-                    if kind != "OPTIMIZATION"
-                    else "已确认 Runtime Snapshot 集合在本次优化后发生变化；请先刷新 S3/S4，再重新生成 S5。"
-                )
-
         if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+            dependency_metrics = [
+                str(x).strip()
+                for x in (recorded_input.get("_runtime_dependency_metrics") or [])
+                if str(x or "").strip()
+            ]
+            current_runtime_fingerprint = _runtime_trend_fingerprint(
+                device_id,
+                dependency_metrics if kind in {"LIFETIME", "DIAGNOSIS"} else None,
+            )
             recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
             if (
                 not recorded_runtime_fingerprint
-                or recorded_runtime_fingerprint != current_runtime_trend_fingerprint
+                or recorded_runtime_fingerprint != current_runtime_fingerprint
             ):
                 complete = False
                 next_action = (
-                    "已确认 Runtime Snapshot / Trend 已变化；请基于当前运行数据重新执行该场景。"
+                    "该场景依赖的 Runtime Snapshot / Trend 已变化；请基于当前相关运行数据重新执行。"
                     if kind != "OPTIMIZATION"
-                    else "已确认 Runtime Snapshot / Trend 已变化；请先刷新 S3/S4，再重新生成 S5 优化方案。"
+                    else "Runtime Snapshot / Trend 已变化；请先刷新 S3/S4，再重新生成 S5 优化方案。"
                 )
 
-        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"} and latest_formal_runtime_at:
-            recorded_capture_times = []
-            if kind in {"LIFETIME", "DIAGNOSIS"}:
-                recorded_capture_times = [
-                    _iso_datetime(x.get("capture_time"))
-                    for x in (recorded_input.get("runtime_observations") or [])
-                    if isinstance(x, dict) and x.get("capture_time")
-                ]
-            else:
-                recorded_runtime_context = (
-                    ((recorded_input.get("user_context") or {}).get("assessment_context") or {})
-                    .get("runtime_context") or []
-                )
-                recorded_capture_times = [
-                    _iso_datetime(x.get("captured_at"))
-                    for x in recorded_runtime_context
-                    if isinstance(x, dict) and x.get("captured_at")
-                ]
-            recorded_capture_times = [x for x in recorded_capture_times if x is not None]
-            latest_recorded_capture = max(recorded_capture_times) if recorded_capture_times else None
-            if latest_recorded_capture is None:
-                complete = False
-                next_action = (
-                    "当前历史评估没有绑定可追溯的运行采集时间；请基于当前 Runtime Snapshot 重新执行。"
-                    if kind != "OPTIMIZATION"
-                    else "当前历史优化没有绑定可追溯的 Runtime 上下文；请先刷新 S3/S4，再重新生成 S5。"
-                )
-            elif latest_formal_runtime_at > latest_recorded_capture:
-                complete = False
-                next_action = (
-                    "存在采集时间更新的已确认 Runtime Snapshot；请基于最新运行数据重新执行该场景。"
-                    if kind != "OPTIMIZATION"
-                    else "存在采集时间更新的已确认 Runtime Snapshot；请先刷新 S3/S4，再重新生成 S5 优化方案。"
-                )
         return {
             "type": kind,
             "label": label,
