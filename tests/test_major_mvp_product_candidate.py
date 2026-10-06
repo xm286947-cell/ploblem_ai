@@ -19,6 +19,7 @@ def test_candidate_source_selection_excludes_local_data_and_credentials() -> Non
     }
 
     assert "quality_knowledge/web/p0_app.py" in selected
+    assert "quality_knowledge/major_cases/pdf_markdown.py" in selected
     assert "quality_knowledge/web/static/major_production.js" in selected
     assert "services/historical_case_contract.py" in selected
     assert "input/new_cases.xlsx" not in selected
@@ -27,6 +28,9 @@ def test_candidate_source_selection_excludes_local_data_and_credentials() -> Non
     assert "config/runtime/model.yaml" in selected  # Replaced with safe env-only profile at stage time.
     assert "config/model.yaml" in selected  # Replaced with safe disabled profile at stage time.
     assert not any("tests/" in path or path.endswith(".db") for path in selected)
+    requirements = (ROOT / "requirements-major-mvp-product.txt").read_text(encoding="utf-8")
+    assert "pymupdf4llm" in requirements.lower()
+    assert "pymupdf" in requirements.lower()
 
 
 def test_candidate_runtime_model_templates_have_no_literal_credentials() -> None:
