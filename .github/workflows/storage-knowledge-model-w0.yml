@@ -20,6 +20,7 @@ on:
       - "knowledge_production/release_binding.py"
       - "products/storage_rc1/tests/test_storage_release_binding_upgrade.py"
       - "products/storage_rc1/tests/test_storage_product_semantic_consumption.py"
+      - "products/storage_rc1/tests/test_storage_kp_provider_status.py"
       - "knowledge_production/extraction.py"
       - "tests/test_kp_m03_ai_extraction.py"
       - "knowledge_production/publish.py"
@@ -82,6 +83,9 @@ jobs:
               "发布方 / Publisher",
               "pkBuildRelease",
               "pkPromoteRelease",
+              "pkKnowledgeProviderStatus",
+              "pkLoadKnowledgeProviderStatus",
+              "/api/product/knowledge-production/provider-status",
               "批准并切换到 Storage",
           ]
           missing=[item for item in required if item not in html]
@@ -114,3 +118,4 @@ jobs:
           python -m pytest -q products/storage_rc1/tests/test_storage_release_binding_upgrade.py
           python -m pytest -q products/storage_rc1/tests/test_storage_release_promotion.py
           python -m pytest -q products/storage_rc1/tests/test_storage_product_semantic_consumption.py
+          python -m pytest -q products/storage_rc1/tests/test_storage_kp_provider_status.py
