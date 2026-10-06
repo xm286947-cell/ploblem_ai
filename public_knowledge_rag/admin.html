@@ -47,7 +47,7 @@
         <div class="field"><label for="request_timeout_seconds">Request timeout (seconds)</label><input id="request_timeout_seconds" type="number" min="1" max="600" step="1"><span class="source" data-source="request_timeout_seconds"></span></div>
         <div class="field"><label for="max_generate_tokens">Max output tokens</label><input id="max_generate_tokens" type="number" min="1" max="32768" step="1"><span class="source" data-source="max_generate_tokens"></span></div>
         <div class="field"><label for="thinking_mode">Thinking / reasoning</label><select id="thinking_mode"><option value="disabled">Disabled</option><option value="enabled">Enabled</option></select><span class="source" data-source="thinking_mode"></span></div>
-        <div class="field"><label>Credential status</label><input readonly value="Not Required (LAN Ollama)" aria-label="Credential status: not required"></div>
+        <div class="field"><label>Credential status</label><input id="credential-summary" readonly value="Loading…" aria-label="Credential status"></div>
       </div>
       <div class="toolbar">
         <button id="validate" class="secondary">Validate</button>
@@ -144,6 +144,14 @@
         ["Max output tokens",saved.max_generate_tokens], ["Thinking mode",saved.thinking_mode]
       ]);
       $("credential-status").textContent=`Credential: ${state.saved_credential_status || "MISSING"} · source ${sources.credential || "MISSING"}`;
+      const credentialSummary = $("credential-summary");
+      if (saved.provider_type === "openai_compatible") {
+        credentialSummary.value = state.saved_credential_status === "CONFIGURED"
+          ? "Configured (OpenAI Compatible)"
+          : "Missing (OpenAI Compatible)";
+      } else {
+        credentialSummary.value = "Not Required (Ollama)";
+      }
       $("embedding-view").innerHTML=kv([["Provider",conf.embedding.provider],["Model",conf.embedding.model],["Runtime",conf.embedding.runtime],["Endpoint",conf.embedding.endpoint],["Status",conf.embedding.status]]);
       $("retrieval-view").innerHTML=kv([["Mode",conf.retrieval.mode],["Adapter",conf.retrieval.adapter],["Top K",conf.retrieval.top_k],["Chunk size (characters)",conf.retrieval.chunk_size],["Chunk overlap (characters)",conf.retrieval.chunk_overlap],["Vector backend",conf.retrieval.vector_backend],["Reranker",conf.retrieval.reranker]]);
       $("service-view").innerHTML=kv([["Version",conf.service.service_version],["Data directory ID",conf.service.data_directory_id],["Source class gate",conf.service.source_class_gate],["Capabilities",conf.service.capabilities.join(", ")],["Health",conf.service.health],["Config hash",conf.service.config_hash]]);
