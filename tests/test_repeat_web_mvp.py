@@ -369,6 +369,15 @@ def test_web_main_path_invokes_agent_analysis_after_retrieval(tmp_path: Path):
         def __init__(self):
             self.calls = 0
 
+        def read_report(self, query_id, *, format="markdown"):
+            assert format == "markdown"
+            return {
+                "query_id": query_id,
+                "format": format,
+                "content_type": "text/markdown; charset=utf-8",
+                "content": "# Repeat Analysis Report\n\nAI preliminary only.",
+            }
+
         def analyze(self, query_trace, search_result):
             self.calls += 1
             assert query_trace["subject_ref"] == "ITR-1"
@@ -410,6 +419,13 @@ def test_web_main_path_invokes_agent_analysis_after_retrieval(tmp_path: Path):
     assert result["agent_analysis"]["provider_boundary"] == "UNIFIED_RUNTIME_ONLY"
     assert result["analysis_report"]["status"] == "AVAILABLE"
     assert result["human_decision"]["decision"] == "PENDING"
+
+    report = client.get(
+        f"/api/v2/repeat-risk/queries/{result['query_id']}/report",
+        params={"format": "markdown"},
+    )
+    assert report.status_code == 200
+    assert "Repeat Analysis Report" in report.text
 
 
 def test_all_four_human_decisions_persist(tmp_path: Path):
@@ -578,3 +594,5 @@ def test_static_contract_rationale_first_similarity_secondary_and_no_new_repeat_
     assert "data-repeat-evidence-drawer" in html
     assert "/p0/repeat" not in pages
     assert "Repeat App" not in pages
+    assert "打开 Markdown 分析报告" in js
+    assert js.index("AI Repeat 建议") < js.index("HUMAN DECISION")
