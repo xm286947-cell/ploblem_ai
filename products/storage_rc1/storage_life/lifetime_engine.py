@@ -111,6 +111,7 @@ class FormulaRegistry:
         "EMMC_DEVICE_LIFE_TIME_B_V1": FormulaSpec(formula_id="EMMC_DEVICE_LIFE_TIME_B_V1", formula_version="1.0", description="eMMC DEVICE_LIFE_TIME_EST_TYP_B", output_unit="protocol_tier", required_inputs=["device_life_time_b"], required_knowledge_parameters=["life_time_b_map"], protocol_semantics=True),
         "EMMC_PRE_EOL_V1": FormulaSpec(formula_id="EMMC_PRE_EOL_V1", formula_version="1.0", description="eMMC PRE_EOL_INFO lifecycle warning", output_unit="protocol_tier", required_inputs=["pre_eol_info"], required_knowledge_parameters=["pre_eol_map"], protocol_semantics=True),
         "NAND_PE_MARGIN_V1": FormulaSpec(formula_id="NAND_PE_MARGIN_V1", formula_version="1.0", description="Rated P/E cycles minus observed P/E cycles", output_unit="cycles", required_inputs=["rated_pe_cycles", "pe_cycle"]),
+        "NAND_REQUIRED_PE_BUDGET_V1": FormulaSpec(formula_id="NAND_REQUIRED_PE_BUDGET_V1", formula_version="1.0", description="Required NAND P/E endurance from explicit mission/workload stress", output_unit="cycles", required_inputs=["pe_cycles_per_day", "target_service_life_years", "operating_days_per_year", "design_margin_ratio"]),
         "NAND_ERASE_COUNT_MARGIN_V1": FormulaSpec(formula_id="NAND_ERASE_COUNT_MARGIN_V1", formula_version="1.0", description="Rated endurance minus observed erase count", output_unit="cycles", required_inputs=["rated_pe_cycles", "erase_count"]),
         "GENERIC_WAF_V1": FormulaSpec(formula_id="GENERIC_WAF_V1", formula_version="1.0", description="Media written bytes divided by host written bytes", output_unit="ratio", required_inputs=["media_written_bytes", "host_written_bytes"]),
         "GENERIC_ENDURANCE_MARGIN_V1": FormulaSpec(formula_id="GENERIC_ENDURANCE_MARGIN_V1", formula_version="1.0", description="Rated endurance minus observed endurance", output_unit="cycles", required_inputs=["rated_endurance_cycles", "observed_endurance_cycles"]),
@@ -121,7 +122,7 @@ class FormulaRegistry:
         "nvme.data_units_written": "NVME_DATA_UNITS_WRITTEN_V1", "nvme.percentage_used": "NVME_PERCENTAGE_USED_INTERPRETATION_V1",
         "emmc.device_life_time_a": "EMMC_DEVICE_LIFE_TIME_A_V1", "emmc.device_life_time_b": "EMMC_DEVICE_LIFE_TIME_B_V1",
         "emmc.pre_eol_info": "EMMC_PRE_EOL_V1", "emmc.life_time": "EMMC_DEVICE_LIFE_TIME_A_V1",
-        "nand.pe_margin": "NAND_PE_MARGIN_V1", "nand.erase_count_margin": "NAND_ERASE_COUNT_MARGIN_V1",
+        "nand.pe_margin": "NAND_PE_MARGIN_V1", "nand.required_pe_budget": "NAND_REQUIRED_PE_BUDGET_V1", "nand.erase_count_margin": "NAND_ERASE_COUNT_MARGIN_V1",
         "generic.waf": "GENERIC_WAF_V1", "generic.endurance_margin": "GENERIC_ENDURANCE_MARGIN_V1",
         "nand.wear_distribution": "NAND_WEAR_DISTRIBUTION_V1",
     }
@@ -238,7 +239,7 @@ class LifetimeEngine:
 
     def assess(self, request, metric):
         original = metric; formal, _ = self.registry.resolve(metric)
-        methods = {"SSD_TBW_CONSUMPTION_V1": "_assess_ssd_tbw", "SSD_DWPD_OBSERVED_V1": "_assess_ssd_dwpd", "NVME_DATA_UNITS_WRITTEN_V1": "_assess_nvme_data_units_written", "NVME_PERCENTAGE_USED_INTERPRETATION_V1": "_assess_nvme_percentage_used", "EMMC_DEVICE_LIFE_TIME_A_V1": "_assess_emmc_device_life_time_a", "EMMC_DEVICE_LIFE_TIME_B_V1": "_assess_emmc_device_life_time_b", "EMMC_PRE_EOL_V1": "_assess_emmc_pre_eol_info", "NAND_PE_MARGIN_V1": "_assess_nand_pe_margin", "NAND_ERASE_COUNT_MARGIN_V1": "_assess_nand_erase_count_margin", "GENERIC_WAF_V1": "_assess_generic_waf", "GENERIC_ENDURANCE_MARGIN_V1": "_assess_generic_endurance_margin", "NAND_WEAR_DISTRIBUTION_V1": "_assess_nand_wear_distribution"}
+        methods = {"SSD_TBW_CONSUMPTION_V1": "_assess_ssd_tbw", "SSD_DWPD_OBSERVED_V1": "_assess_ssd_dwpd", "NVME_DATA_UNITS_WRITTEN_V1": "_assess_nvme_data_units_written", "NVME_PERCENTAGE_USED_INTERPRETATION_V1": "_assess_nvme_percentage_used", "EMMC_DEVICE_LIFE_TIME_A_V1": "_assess_emmc_device_life_time_a", "EMMC_DEVICE_LIFE_TIME_B_V1": "_assess_emmc_device_life_time_b", "EMMC_PRE_EOL_V1": "_assess_emmc_pre_eol_info", "NAND_PE_MARGIN_V1": "_assess_nand_pe_margin", "NAND_REQUIRED_PE_BUDGET_V1": "_assess_nand_required_pe_budget", "NAND_ERASE_COUNT_MARGIN_V1": "_assess_nand_erase_count_margin", "GENERIC_WAF_V1": "_assess_generic_waf", "GENERIC_ENDURANCE_MARGIN_V1": "_assess_generic_endurance_margin", "NAND_WEAR_DISTRIBUTION_V1": "_assess_nand_wear_distribution"}
         formula = (formal, self.registry.SPECS[formal].formula_version)
         try:
             if original == "emmc.life_time": return self._assess_emmc_aggregate(request, original, formula)
@@ -317,6 +318,58 @@ class LifetimeEngine:
         return self._result(request, metric, formula, status=LifetimeAssessmentStatus.CALCULATED, inputs={rated_name: rated, observed_names[0]: observed}, result=rated - observed, unit="cycles", boundary_checks=boundary, evidence_refs=self._refs(rf) + self._refs(of, oo), source_refs=[x["source_ref"] for x in trace.values()], replay_inputs=trace, confidence_basis=["DETERMINISTIC_ARITHMETIC", "NEGATIVE_MARGIN_PRESERVED"])
 
     def _assess_nand_pe_margin(self, request, metric, formula): return self._assess_nand_margin(request, metric, formula, "rated_pe_cycles", ("pe_cycle", "erase_count"))
+
+    def _assess_nand_required_pe_budget(self, request, metric, formula):
+        values = {}
+        refs = []
+        assumptions = []
+        expected_units = {
+            "pe_cycles_per_day": {"cycle_per_day", "cycles_per_day"},
+            "target_service_life_years": {"year", "years"},
+            "operating_days_per_year": {"day_per_year", "days_per_year"},
+            "design_margin_ratio": {"ratio"},
+        }
+        for name in ("pe_cycles_per_day", "target_service_life_years", "operating_days_per_year", "design_margin_ratio"):
+            value, assumption = self._assumption(request, name)
+            if value is None or assumption is None:
+                raise _InsufficientData([name])
+            unit = str(assumption.unit or "").strip().lower()
+            if unit not in expected_units[name]:
+                raise _InvalidInput([f"{name}:UNIT_INCOMPATIBLE:{assumption.unit}"])
+            values[name] = self._number(value, name)
+            assumptions.append(assumption)
+            refs.extend(assumption.evidence_refs)
+        if values["pe_cycles_per_day"] < 0:
+            raise _InvalidInput(["pe_cycles_per_day:OUT_OF_RANGE"])
+        if values["target_service_life_years"] <= 0 or values["operating_days_per_year"] <= 0:
+            raise _InvalidInput(["SERVICE_LIFE_OR_OPERATING_DAYS_OUT_OF_RANGE"])
+        if values["design_margin_ratio"] < 0 or values["design_margin_ratio"] > 5:
+            raise _InvalidInput(["design_margin_ratio:OUT_OF_RANGE"])
+        required = (
+            values["pe_cycles_per_day"]
+            * values["operating_days_per_year"]
+            * values["target_service_life_years"]
+            * (1.0 + values["design_margin_ratio"])
+        )
+        trace = {
+            item.name: self._trace(item.name, values[item.name], item.unit or "", assumption=item)
+            for item in assumptions
+        }
+        return self._result(
+            request,
+            metric,
+            formula,
+            status=LifetimeAssessmentStatus.CALCULATED,
+            inputs=values,
+            assumptions=assumptions,
+            result=required,
+            unit="cycles",
+            boundary_checks=["NO_INFERRED_WAF_OR_WEAR_MODEL"],
+            evidence_refs=refs,
+            source_refs=[item.name for item in assumptions],
+            replay_inputs=trace,
+            confidence_basis=["DETERMINISTIC_ARITHMETIC", "EXPLICIT_MISSION_AND_WORKLOAD_INPUTS"],
+        )
     def _assess_nand_erase_count_margin(self, request, metric, formula): return self._assess_nand_margin(request, metric, formula, "rated_pe_cycles", ("erase_count",))
     def _assess_generic_endurance_margin(self, request, metric, formula): return self._assess_nand_margin(request, metric, formula, "rated_endurance_cycles", ("observed_endurance_cycles", "erase_count"))
 
