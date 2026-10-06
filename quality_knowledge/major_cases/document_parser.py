@@ -106,12 +106,16 @@ def _is_page_marker(line: str) -> bool:
 
 def _is_markdown_table_line(line: str) -> bool:
     stripped = line.strip()
-    return len(stripped) >= 3 and stripped.startswith("|") and stripped.endswith("|")
+    return len(stripped) >= 3 and stripped.count("|") >= 2 and stripped.startswith("|")
 
 
-def _markdown_page_fragments(page: MarkdownPage, start_ordinal: int) -> list[ParsedFragment]:
+def _markdown_page_fragments(
+    page: MarkdownPage,
+    start_ordinal: int,
+    heading_state: list[str] | None = None,
+) -> list[ParsedFragment]:
     fragments: list[ParsedFragment] = []
-    headings: list[str] = []
+    headings = heading_state if heading_state is not None else []
     paragraph: list[str] = []
     table: list[str] = []
     local_no = 0
@@ -176,8 +180,11 @@ def _markdown_page_fragments(page: MarkdownPage, start_ordinal: int) -> list[Par
 def parse_pdf(path: str | Path) -> ParseResult:
     document = normalize_pdf_to_markdown(path)
     fragments: list[ParsedFragment] = []
+    headings: list[str] = []
     for page in document.pages:
-        fragments.extend(_markdown_page_fragments(page, len(fragments) + 1))
+        fragments.extend(
+            _markdown_page_fragments(page, len(fragments) + 1, headings)
+        )
 
     warnings = list(document.warnings)
     if not fragments:
