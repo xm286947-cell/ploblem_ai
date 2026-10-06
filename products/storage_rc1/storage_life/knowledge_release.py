@@ -26,6 +26,11 @@ def _root() -> Path:
 
 
 def _binding_path() -> Path:
+    configured = os.environ.get(
+        "STORAGE_KNOWLEDGE_BINDING_PATH", ""
+    ).strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
     return (
         Path(__file__).resolve().parents[3]
         / "contracts"
