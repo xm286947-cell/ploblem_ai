@@ -119,6 +119,7 @@ class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     response_language: str = Field(default="zh-CN", max_length=16)
     include_citation_translations: bool = False
+    allowed_source_ids: list[str] | None = Field(default=None, max_length=10)
 
 
 class ContextSearchBody(BaseModel):
@@ -1463,11 +1464,20 @@ def ask(body: AskBody, mode: str = "FIXTURE_REPLAY", base_url: str | None = None
         raise HTTPException(422, "不支持的回答语言。")
     if mode == "FIXTURE_REPLAY":
         return {"answer": "演示回放：当前示例资料写明 page size 为 256 bytes。此内容是合成 UI fixture，不是器件规格结论。", "citations": [{"citation_id": "fixture-citation-page1", "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"]}], "mode": mode, "fixture_id": "pk-workspace-qa-001", "answer_scope": "SYNTHETIC_DEMO_ONLY"}
+    allowed_source_ids = None
+    if body.allowed_source_ids is not None:
+        allowed_source_ids = []
+        for raw_source_id in body.allowed_source_ids:
+            source_id = str(raw_source_id or "").strip()
+            if not source_id or len(source_id) > 200:
+                raise HTTPException(422, "Public Knowledge source_id 无效。")
+            allowed_source_ids.append(source_id)
     payload = {
         "question": safe_question,
         "mode": "LIVE",
         "response_language": body.response_language,
         "include_citation_translations": body.include_citation_translations,
+        "allowed_source_ids": allowed_source_ids,
     }
     return {**_request(mode, "/ask", payload, base_url), "mode": mode}
 
