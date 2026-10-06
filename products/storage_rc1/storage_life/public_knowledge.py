@@ -849,6 +849,46 @@ def _kp_source_id(public_source_id: str) -> str:
     return "PKR-" + safe
 
 
+KNOWLEDGE_EXTRACTION_USER_ERRORS: dict[str, tuple[int, str]] = {
+    "PROVIDER_TRANSPORT": (
+        503,
+        "AI Provider 当前无法连接。请先检查 Agent Config / 模型服务是否已启动且可达，再重新生成 Candidate。",
+    ),
+    "PROVIDER_HTTP_ERROR": (
+        503,
+        "AI Provider 返回服务错误。请检查模型服务状态与认证配置，再重新生成 Candidate。",
+    ),
+    "PROVIDER_BASE_URL_INVALID": (
+        503,
+        "AI Provider 地址配置无效。请在 Agent Config 中修正 Provider 地址后重试。",
+    ),
+    "PROVIDER_CONFIG_INCOMPLETE": (
+        503,
+        "AI Provider 配置不完整。请先补齐 Agent Config 所需配置后重试。",
+    ),
+    "PROVIDER_NOT_BOUND": (
+        503,
+        "Knowledge Production 尚未绑定可用的 AI Provider。请先完成 Agent Config 后重试。",
+    ),
+    "PROVIDER_TYPE_UNSUPPORTED": (
+        503,
+        "当前 AI Provider 类型不受支持。请切换到已支持的 Provider 配置后重试。",
+    ),
+    "PROVIDER_OUTPUT_SHAPE_INVALID": (
+        502,
+        "AI Provider 返回格式不符合 Knowledge Production 合同；未生成 Candidate，请检查 Provider/模型配置。",
+    ),
+    "PROVIDER_SCHEMA_INVALID": (
+        502,
+        "AI Provider 返回结果未通过 Knowledge Production Schema 校验；未生成 Candidate。",
+    ),
+    "PROVIDER_ENVELOPE_INVALID": (
+        502,
+        "AI Provider 返回协议格式无效；未生成 Candidate，请检查 Provider 兼容性。",
+    ),
+}
+
+
 @router.post("/knowledge-production/extract")
 def model_extract_to_knowledge_production(
     body: KnowledgeProductionExtractBody,
@@ -1184,11 +1224,30 @@ def model_extract_to_knowledge_production(
             detail={"code": str(exc)},
         ) from exc
     except Exception as exc:
-        code = str(getattr(exc, "code", "KNOWLEDGE_EXTRACTION_FAILED"))
-        status_code = 503 if code == "KNOWLEDGE_EXTRACTION_FAILED" else 422
+        code = str(
+            getattr(exc, "code", "KNOWLEDGE_EXTRACTION_FAILED")
+        ).strip()
+        safe = KNOWLEDGE_EXTRACTION_USER_ERRORS.get(code)
+        if safe is not None:
+            status_code, message = safe
+            raise HTTPException(
+                status_code,
+                detail={
+                    "code": code,
+                    "message": message,
+                    "retryable": code
+                    in {"PROVIDER_TRANSPORT", "PROVIDER_HTTP_ERROR"},
+                },
+            ) from exc
         raise HTTPException(
-            status_code,
-            detail={"code": code},
+            503,
+            detail={
+                "code": "KNOWLEDGE_EXTRACTION_FAILED",
+                "message": (
+                    "AI 知识抽取未完成，系统已保持 Fail-Closed，"
+                    "没有生成或发布任何 Formal Knowledge。"
+                ),
+            },
         ) from exc
 
     return {
