@@ -36,6 +36,7 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
 )
+from services.hardware_r1_e2e_nonprod_knowledge import ManagedNonProdReleaseController
 from quality_knowledge.web.hardware_r1_workbench_api import (
     create_hardware_r1_workbench_router,
 )
