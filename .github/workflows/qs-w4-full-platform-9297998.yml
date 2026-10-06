@@ -1,0 +1,103 @@
+name: QS W4 Full Platform Final Candidate 9297998
+
+on:
+  push:
+    branches:
+      - ci/qs-w4-full-platform-9297998
+    paths:
+      - ".github/workflows/qs-w4-full-platform-9297998.yml"
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SOURCE_SHA: 9297998ece35c82fc3ba91e63b4d652c8b593a41
+  PACKAGE_BASENAME: QUALITY_PLATFORM_W4_BROWSER_VALIDATION_9297998ece35
+
+jobs:
+  focused-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9297998ece35c82fc3ba91e63b4d652c8b593a41
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_SHA"
+          git diff --check "$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA"
+      - name: Run W4 focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q             tests/test_qsv1_portrait_consumption.py             tests/test_software_assessment_qsv1_browser_flow.py             tests/test_r2_w2_qsv1_production_chain.py             tests/test_step1b_qsv1_mature_preview.py
+      - name: Build full current quality platform package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/full-quality-platform"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE" dist
+          git archive "$PRODUCT_SOURCE_SHA" | tar -x -C "$STAGE"
+          printf '%s\n'             'QUALITY PLATFORM W4 BROWSER VALIDATION CANDIDATE'             ''             'PACKAGE_SCOPE=FULL_CURRENT_QUALITY_PLATFORM'             "SOURCE_SHA=$PRODUCT_SOURCE_SHA"             'INCREMENTAL_PACKAGE=NO'             'STANDALONE_QS_PACKAGE=NO'             'CURRENT_PROJECT_IS_SINGLE_DELIVERY_SOURCE=YES'             'QSV1_PUBLISHED_PORTRAIT_CONSUMPTION=YES'             'QUALITY_SCENARIO_PRODUCTION_ENTRY=SOFTWARE_ASSESSMENT'             'PRODUCT_PORTRAIT_ENTRY=YES'             'INDUSTRY_PORTRAIT_ENTRY=YES'             'CUSTOMER_PORTRAIT_ENTRY=YES'             'REAL_MATURE_BROWSER_GOLDEN=PENDING'             'W4_ARCH_REVIEW=PENDING'             'W5_RELEASE_PACKAGE=NO'             ''             'Windows: run start_quality_capability_p1.bat'             'macOS: run ./start_quality_capability_p1.command'             'Production entry: /software-assessment#quality-scenario-production'             'QSV1 review: /p0/quality-scenarios/workbench'             'Product portrait: /quality-scenario-assets/portrait?portrait_axis=product'             'Industry portrait: /quality-scenario-assets/portrait?portrait_axis=industry'             'Customer portrait: /quality-scenario-assets/portrait?portrait_axis=customer'             > "$STAGE/00_FULL_PLATFORM_README_FIRST.txt"
+          printf '%s\n'             '{'             '  "package_type": "W4_BROWSER_VALIDATION_CANDIDATE",'             '  "package_scope": "FULL_CURRENT_QUALITY_PLATFORM",'             "  \"source_sha\": \"$PRODUCT_SOURCE_SHA\","             '  "incremental_package": false,'             '  "standalone_qs_package": false,'             '  "current_project_is_single_delivery_source": true,'             '  "qsv1_published_portrait_consumption": true,'             '  "production_entry": "/software-assessment#quality-scenario-production",'             '  "product_portrait": "/quality-scenario-assets/portrait?portrait_axis=product",'             '  "industry_portrait": "/quality-scenario-assets/portrait?portrait_axis=industry",'             '  "customer_portrait": "/quality-scenario-assets/portrait?portrait_axis=customer",'             '  "windows_entry": "start_quality_capability_p1.bat",'             '  "macos_entry": "start_quality_capability_p1.command",'             '  "real_mature_browser_golden": "PENDING",'             '  "w4_arch_review": "PENDING"'             '}' > "$STAGE/FULL_PLATFORM_MANIFEST.json"
+          printf '%s\n' "$PRODUCT_SOURCE_SHA" > "$STAGE/PRODUCT_SOURCE_SHA"
+          test -f "$STAGE/start_quality_capability_p1.bat"
+          test -f "$STAGE/start_quality_capability_p1.command"
+          test -f "$STAGE/quality_knowledge/web/templates/software_assessment_workbench.html"
+          test -f "$STAGE/quality_knowledge/web/templates/scenario_customer_portrait.html"
+          (
+            cd "$STAGE"
+            zip -q -r "$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip" .
+          )
+          sha256sum "dist/${PACKAGE_BASENAME}.zip" | tee "dist/${PACKAGE_BASENAME}.zip.sha256"
+      - name: Verify package identity and entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c "import json,os,zipfile,pathlib; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); s=z.read('PRODUCT_SOURCE_SHA').decode().strip(); assert s==os.environ['PRODUCT_SOURCE_SHA']; assert m['package_scope']=='FULL_CURRENT_QUALITY_PLATFORM'; assert m['qsv1_published_portrait_consumption'] is True; assert m['production_entry']=='/software-assessment#quality-scenario-production'; assert 'STEP1B_PREVIEW_MANIFEST.json' not in z.namelist(); print('FULL_PLATFORM_PACKAGE_IDENTITY=PASS')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_PLATFORM_W4_BROWSER_VALIDATION_9297998ece35
+          path: |
+            dist/QUALITY_PLATFORM_W4_BROWSER_VALIDATION_9297998ece35.zip
+            dist/QUALITY_PLATFORM_W4_BROWSER_VALIDATION_9297998ece35.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9297998ece35c82fc3ba91e63b4d652c8b593a41
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Windows mature host smoke
+        shell: pwsh
+        run: python tools/step1b_qsv1_launcher_smoke.py --platform windows --port 18080
+
+  smoke-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9297998ece35c82fc3ba91e63b4d652c8b593a41
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: macOS mature host smoke
+        shell: bash
+        run: python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 18081
