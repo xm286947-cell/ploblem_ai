@@ -186,8 +186,8 @@ test('retry shows visible Stage B running state before delayed POST completes', 
   // Must be visible before the delayed POST resolves.
   assert.equal(postCount, 1);
   assert.equal(inlineStatus.hidden, false);
-  assert.equal(inlineStatus.textContent, '正在重试 Stage B…');
-  assert.equal(retryButton.textContent, 'Retrying Stage B…');
+  assert.equal(inlineStatus.textContent, '正在重试工程知识生成…');
+  assert.equal(retryButton.textContent, '正在重试工程知识生成…');
   assert.equal(retryButton.disabled, true);
   assert.equal(runButton.disabled, true);
   assert.equal(forceButton.disabled, true);
@@ -203,7 +203,7 @@ test('retry shows visible Stage B running state before delayed POST completes', 
   await intervalCallbacks.at(-1)();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.match(element('[data-detail-status]').innerHTML, /RUNNING/);
-  assert.match(element('[data-detail-stages]').innerHTML, /Stage B/);
+  assert.match(element('[data-detail-stages]').innerHTML, /工程知识生成/);
   assert.match(element('[data-detail-stages]').innerHTML, /RUNNING/);
   assert.equal(element('[data-detail-provider-calls]').textContent, 2);
   assert.equal(element('[data-detail-duration]').textContent, '456 ms');
@@ -213,10 +213,10 @@ test('retry shows visible Stage B running state before delayed POST completes', 
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(postCount, 1);
-  assert.equal(inlineStatus.textContent, '重试 Stage B 完成：CANDIDATE_READY');
+  assert.equal(inlineStatus.textContent, '重试工程知识生成 完成：CANDIDATE_READY');
   assert.equal(runButton.disabled, false);
   assert.equal(forceButton.disabled, false);
   assert.equal(retryButton.disabled, true);
-  assert.equal(retryButton.textContent, 'Retry Failed Stage');
+  assert.equal(retryButton.textContent, '重试失败环节');
   assert.match(element('[data-detail-status]').innerHTML, /CANDIDATE_READY/);
 });
