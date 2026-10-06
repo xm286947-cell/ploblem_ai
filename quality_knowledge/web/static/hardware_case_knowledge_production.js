@@ -232,7 +232,62 @@
     return batch;
   }
 
+  let foregroundBatchPolling = 0;
+  let passiveBatchPollingStop = null;
+
+  function stopPassiveBatchPolling() {
+    if (!passiveBatchPollingStop) return;
+    const stop = passiveBatchPollingStop;
+    passiveBatchPollingStop = null;
+    stop();
+  }
+
+  function ensurePassiveBatchPolling(batch) {
+    const shouldPoll = Boolean(
+      batch?.batch_id &&
+      batch.status === 'RUNNING' &&
+      foregroundBatchPolling === 0
+    );
+    if (!shouldPoll) {
+      stopPassiveBatchPolling();
+      return;
+    }
+    if (passiveBatchPollingStop) return;
+
+    const batchId = batch.batch_id;
+    let stopped = false;
+    let running = false;
+    let timer = null;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (timer !== null) window.clearInterval(timer);
+      if (passiveBatchPollingStop === stop) passiveBatchPollingStop = null;
+    };
+    const tick = async () => {
+      if (stopped || running) return;
+      if (state.batch?.batch_id !== batchId) {
+        stop();
+        return;
+      }
+      running = true;
+      try {
+        const latest = await refreshBatchSnapshot(batchId);
+        if (latest.status !== 'RUNNING') stop();
+      } catch (_) {
+        // Keep the currently visible snapshot; the next tick may recover.
+      } finally {
+        running = false;
+      }
+    };
+    timer = window.setInterval(tick, 1000);
+    passiveBatchPollingStop = stop;
+    tick();
+  }
+
   function startBatchPolling(batchId) {
+    stopPassiveBatchPolling();
+    foregroundBatchPolling += 1;
     let stopped = false;
     let running = false;
     const tick = async () => {
@@ -246,11 +301,16 @@
         running = false;
       }
     };
-    const timer = window.setInterval(tick, 1500);
+    const timer = window.setInterval(tick, 1000);
     tick();
     return () => {
+      if (stopped) return;
       stopped = true;
       window.clearInterval(timer);
+      foregroundBatchPolling = Math.max(0, foregroundBatchPolling - 1);
+      if (state.batch?.status === 'RUNNING') {
+        ensurePassiveBatchPolling(state.batch);
+      }
     };
   }
 
@@ -283,6 +343,7 @@
 
   function renderBatch(batch) {
     state.batch = batch;
+    ensurePassiveBatchPolling(batch);
     q('[data-batch-ref]').textContent =
       batch ? batch.batch_id + ' · ' + (batch.status || '—') : '尚未选择 Batch。';
     renderSummary(batch?.summary || {});
