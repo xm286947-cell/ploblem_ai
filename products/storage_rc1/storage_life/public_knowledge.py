@@ -88,6 +88,34 @@ class ImportBody(BaseModel):
     media_type: str = "text/plain"
 
 
+def _public_source_uri(value: str | None) -> str | None:
+    """Validate a public-source URL as metadata only; Storage never fetches it."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 2048:
+        raise HTTPException(422, "公开资料来源 URL 过长。")
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(422, "公开资料来源 URL 无效。") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise HTTPException(422, "公开资料来源 URL 仅允许无凭证的 HTTP(S) 地址。")
+    host = parsed.hostname.lower()
+    host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    authority = host_text + (f":{port}" if port is not None else "")
+    path = parsed.path or ""
+    query = f"?{parsed.query}" if parsed.query else ""
+    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
+    return f"{parsed.scheme.lower()}://{authority}{path}{query}{fragment}"
+
+
 def _canonical_service_url(value: str) -> str:
     base = str(value or "").strip().rstrip("/")
     parsed = urlparse(base)
@@ -338,7 +366,9 @@ def import_source(body: ImportBody, mode: str = "FIXTURE_REPLAY", base_url: str 
         raise HTTPException(422, "仅允许导入明确标记为 PUBLIC 的资料。")
     if mode == "FIXTURE_REPLAY":
         raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能提交公开资料。")
-    return _request(mode, "/sources/import", body.model_dump(), base_url)
+    payload = body.model_dump()
+    payload["source_uri"] = _public_source_uri(body.source_uri)
+    return _request(mode, "/sources/import", payload, base_url)
 
 
 @router.post("/sources/import-file")
@@ -357,9 +387,10 @@ async def import_file(title: str = Form(...), classification: str = Form(...), f
     if len(content) > 25 * 1024 * 1024:
         raise HTTPException(413, "资料超过 Storage 导入上限 25 MiB。")
     media_type = file.content_type or "application/octet-stream"
+    safe_source_uri = _public_source_uri(source_uri)
     return _request_file(mode, "/sources/import-file",
                          {"title": title.strip(), "classification": classification.strip().upper(),
-                          "source_uri": source_uri or ""}, filename, content, media_type, base_url)
+                          "source_uri": safe_source_uri or ""}, filename, content, media_type, base_url)
 
 
 @router.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
@@ -509,12 +540,17 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
         if not source:
             source_detail_status = "UNAVAILABLE"
         title = str(source.get("title") or hit.get("source_title") or hit.get("title") or source_id)
-        source_uri = (
+        raw_source_uri = (
             source.get("source_uri")
             or source.get("official_url")
             or hit.get("source_uri")
             or hit.get("official_url")
         )
+        try:
+            source_uri = _public_source_uri(raw_source_uri)
+        except HTTPException:
+            # Invalid upstream metadata is not a navigable official source.
+            source_uri = None
         locator = _normalize_citation_locator({"locator": hit.get("locator")}).get("locator")
         if not isinstance(locator, dict):
             locator = {"raw": str(locator or "")}
