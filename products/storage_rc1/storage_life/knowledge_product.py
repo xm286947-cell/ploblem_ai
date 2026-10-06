@@ -127,6 +127,7 @@ def extract_source(
     source_version: str,
     *,
     requested_topics: list[str] | None = None,
+    candidate_metadata: dict | None = None,
 ) -> dict:
     root = project_root()
     model_config = model_config_path()
@@ -142,6 +143,7 @@ def extract_source(
         source,
         structured,
         requested_topics=requested_topics or [],
+        candidate_metadata=candidate_metadata or {},
     )
     return {
         "source_id": source_id,
