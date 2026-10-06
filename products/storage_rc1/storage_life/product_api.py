@@ -1061,6 +1061,34 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             else:
                 remaining.append(f"{item['label']} 尚未形成可完成结果：{item['status']}")
     action_items = core.list_engineering_actions(device_id)
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    knowledge_readiness = RealKnowledgeAssessmentService.current().readiness()
+    required_packs = {
+        "S2": "PACK_CHANGE_IMPACT",
+        "S3": "PACK_LIFETIME_ENGINEERING",
+        "S4": "PACK_DIAGNOSTIC_VALIDATION",
+        "S5": "PACK_WRITE_GOVERNANCE",
+    }
+    pack_rows = {}
+    content_blockers = []
+    readiness_packs = knowledge_readiness.get("packs") or {}
+    for scenario_id, pack_id in required_packs.items():
+        row = dict(readiness_packs.get(pack_id) or {})
+        pack_rows[scenario_id] = {
+            "pack_id": pack_id,
+            "status": row.get("status") or "UNKNOWN",
+            "formal_knowledge_object_count": row.get("formal_knowledge_object_count") or 0,
+            "missing_critical_knowledge": list(row.get("missing_critical_knowledge") or []),
+            "recommended_next_owner": row.get("recommended_next_owner"),
+        }
+        if str(row.get("status") or "").upper() in {"BLOCKED", "PARTIAL"}:
+            content_blockers.append({
+                "scenario": scenario_id,
+                "pack_id": pack_id,
+                "status": row.get("status") or "UNKNOWN",
+                "missing_critical_knowledge": list(row.get("missing_critical_knowledge") or []),
+                "owner": row.get("recommended_next_owner") or "Knowledge Production / Source Verification",
+            })
     return {
         "device": detail["device"],
         "lifecycle": detail["lifecycle"],
@@ -1101,6 +1129,12 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 1 for x in action_items
                 if x.get("status") in {"OPEN", "IN_PROGRESS"}
             ),
+        },
+        "formal_knowledge_readiness": {
+            "knowledge_release": knowledge_readiness.get("knowledge_release") or {},
+            "formal_knowledge_object_count": knowledge_readiness.get("formal_knowledge_object_count") or 0,
+            "packs": pack_rows,
+            "content_blockers": content_blockers,
         },
         "public_knowledge": {
             "integration": "IN_CONTEXT",
