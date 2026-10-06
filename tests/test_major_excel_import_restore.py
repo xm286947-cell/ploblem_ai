@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
+from quality_knowledge.major_cases.document_parser import ParseResult, ParsedFragment
+import quality_knowledge.major_cases.restore as restore_module
 from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 
@@ -450,6 +452,125 @@ def test_multi_itr_excel_source_fact_is_case_scoped_and_analyzable_for_each_even
         occurrence = next(item for item in body["candidates"] if item["entry_type"] == "TRC_OCCURRENCE")
         assert occurrence["content"] == "Shared TRC occurrence"
         assert {item["source_link_id"] for item in occurrence["evidence"]} == {shared_link["source_link_id"]}
+
+
+
+def test_multi_itr_report_without_unique_event_reference_fails_closed(tmp_path: Path):
+    client = _client(tmp_path)
+    content = _xlsx_with_rows([[
+        "IGR-MULTI-REPORT-001", "ITR20269931", "Multi-event report requires binding",
+        "TRC", "MRC", "PLC-X", "Motion", "review.pdf", "ITR20269932",
+    ]], headers=[
+        "IGR编号", "ITR单号", "问题描述", "TRC发生", "MRC发生", "产品", "模块",
+        "报告文件名", "关联ITR",
+    ])
+    preview = client.post(
+        "/api/v2/major-production/excel/preview",
+        data={"group_code": "MAJOR", "domain": "QUALITY"},
+        files=[
+            ("file", (
+                "multi-report.xlsx",
+                content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )),
+            ("materials", ("review.pdf", b"%PDF-1.4\n", "application/pdf")),
+        ],
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["blocked"] == 1
+    assert body["rows"][0]["report_match"]["event_binding_status"] == "REVIEW_REQUIRED"
+    assert body["rows"][0]["report_match"]["event_binding_itr"] == ""
+    assert "MULTI_EVENT_REPORT_BINDING_AMBIGUOUS" in body["rows"][0]["blocking_reasons"]
+
+    confirm = client.post(
+        "/api/v2/major-production/excel/confirm",
+        data={"batch_id": body["batch_id"]},
+    )
+    assert confirm.status_code == 409
+    assert confirm.json()["detail"] == "MAJOR_EXCEL_BATCH_PRECHECK_FAILED"
+    assert client.app.state.major_case_repository.list_cases()["total"] == 0
+
+
+def test_multi_itr_report_filename_uniquely_binds_second_event(
+    tmp_path: Path,
+    monkeypatch,
+):
+    client = _client(tmp_path)
+    monkeypatch.setattr(
+        restore_module,
+        "parse_document",
+        lambda _path: ParseResult(
+            "PDF",
+            [
+                ParsedFragment(
+                    ordinal=1,
+                    section_path="",
+                    location_type="PAGE",
+                    location_ref="page:1",
+                    fragment_type="TEXT",
+                    text="review evidence",
+                )
+            ],
+        ),
+    )
+    report_name = "ITR20269942-review.pdf"
+    content = _xlsx_with_rows([[
+        "IGR-MULTI-REPORT-002", "ITR20269941", "Report belongs to second event",
+        "TRC", "MRC", "PLC-X", "Motion", report_name, "ITR20269942",
+    ]], headers=[
+        "IGR编号", "ITR单号", "问题描述", "TRC发生", "MRC发生", "产品", "模块",
+        "报告文件名", "关联ITR",
+    ])
+    preview = client.post(
+        "/api/v2/major-production/excel/preview",
+        data={"group_code": "MAJOR", "domain": "QUALITY"},
+        files=[
+            ("file", (
+                "multi-report-bound.xlsx",
+                content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )),
+            ("materials", (report_name, b"%PDF-1.4\n", "application/pdf")),
+        ],
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["blocked"] == 0
+    match = body["rows"][0]["report_match"]
+    assert match["event_binding_status"] == "BOUND"
+    assert match["event_binding_itr"] == "ITR20269942"
+
+    confirm = client.post(
+        "/api/v2/major-production/excel/confirm",
+        data={"batch_id": body["batch_id"]},
+    )
+    assert confirm.status_code == 200, confirm.text
+    case_id = confirm.json()["result"]["case_ids"][0]
+    detail = client.get(f"/api/v2/major-production/cases/{case_id}").json()
+    events = {event["standard_itr"]: event for event in detail["events"]}
+    assert set(events) == {"ITR20269941", "ITR20269942"}
+
+    fact_links = [
+        item for item in detail["source_links"]
+        if item["source_type"] == "MAJOR_EXCEL_SOURCE_FACT"
+    ]
+    assert len(fact_links) == 1
+    assert fact_links[0]["event_id"] is None
+    assert json.loads(fact_links[0]["snapshot_json"])["binding_scope"] == "CASE_SHARED"
+
+    document_links = [
+        item for item in detail["source_links"]
+        if item["source_type"] == "MAJOR_SOURCE_DOCUMENT"
+    ]
+    assert len(document_links) == 1
+    link = document_links[0]
+    assert link["event_id"] == events["ITR20269942"]["event_id"]
+    assert link["event_id"] != events["ITR20269941"]["event_id"]
+    snapshot = json.loads(link["snapshot_json"])
+    assert snapshot["event_binding_basis"] == "REPORT_FILENAME_ITR"
+    assert snapshot["event_binding_itr"] == "ITR20269942"
+
 
 
 def test_repeated_excel_source_is_idempotent_then_changed_content_adds_revision(tmp_path: Path):
