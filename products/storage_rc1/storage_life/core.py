@@ -2196,6 +2196,7 @@ def runtime_metric_trends(device_id, limit=40):
     """Return validated per-metric history and simple deltas without interpreting risk."""
     snapshots = list_runtime_snapshots(device_id, limit=limit)
     series = {}
+    formal_batch_ids_all = set()
     latest_formal_snapshot_created_at = None
     latest_formal_capture_time = None
     for batch in reversed(snapshots):
@@ -2211,6 +2212,7 @@ def runtime_metric_trends(device_id, limit=40):
             )
             if formally_consumable:
                 batch_has_formal = True
+                formal_batch_ids_all.add(str(batch.get("id") or ""))
             point = {
                 "batch_id": batch["id"],
                 "captured_at": batch["captured_at"],
@@ -2256,16 +2258,10 @@ def runtime_metric_trends(device_id, limit=40):
             "delta": delta,
             "points": points[-12:],
         })
-    formal_batch_ids = {
-        str(point.get("batch_id"))
-        for item in result
-        for point in (item.get("points") or [])
-        if point.get("formally_consumable") and point.get("batch_id")
-    }
     return {
         "device_id": device_id,
         "snapshot_count": len(snapshots),
-        "formal_snapshot_count": len(formal_batch_ids),
+        "formal_snapshot_count": len({x for x in formal_batch_ids_all if x}),
         "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
         "latest_formal_capture_time": latest_formal_capture_time,
         "metrics": result,
