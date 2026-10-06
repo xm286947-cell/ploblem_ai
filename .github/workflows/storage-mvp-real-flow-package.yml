@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 28023b358f181fb7597399f94de4ee5fbfe29947
+      STORAGE_SOURCE_SHA: 1243f805d8574a57691d7c4dfc0168de516c58df
       PUBLIC_KNOWLEDGE_SOURCE_SHA: 78ccc746a9df97bb1842d154363a431b64756280
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
@@ -56,6 +56,7 @@ jobs:
               "按寿命模型生产知识",
               "pkPublisher",
               "/knowledge-production/extract",
+              "MODEL_ANCHOR_REQUIRED",
           ]
           missing = [item for item in required if item not in html]
           if missing:
