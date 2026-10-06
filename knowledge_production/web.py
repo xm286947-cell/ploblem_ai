@@ -146,23 +146,33 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         reviewed_by: str = Form(...),
         title: str = Form(""),
         content: str = Form(...),
-        scope: str = Form(""),
-        tags: str = Form(""),
-        storage_semantic_class: str = Form(""),
+        scope: str | None = Form(None),
+        tags: str | None = Form(None),
+        storage_semantic_class: str | None = Form(None),
         review_note: str = Form(""),
     ):
-        parsed_scope = [
-            value.strip()
-            for value in scope.split(",")
-            if value.strip()
-        ]
-        parsed_tags = [
-            value.strip()
-            for value in tags.split(",")
-            if value.strip()
-        ]
-        selected_semantic = storage_semantic_class.strip()
+        edits = {"content": content}
+        if scope is not None:
+            parsed_scope = [
+                value.strip()
+                for value in scope.split(",")
+                if value.strip()
+            ]
+            edits["scope"] = list(dict.fromkeys(parsed_scope))
+
+        parsed_tags = None
+        if tags is not None:
+            parsed_tags = [
+                value.strip()
+                for value in tags.split(",")
+                if value.strip()
+            ]
+
+        selected_semantic = str(storage_semantic_class or "").strip()
         if selected_semantic:
+            if parsed_tags is None:
+                detail = service.get_candidate_detail(candidate_id)
+                parsed_tags = list(detail["candidate"].tags)
             parsed_tags = [
                 value
                 for value in parsed_tags
@@ -171,11 +181,9 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
             parsed_tags.append(
                 f"storage-semantic:{selected_semantic}"
             )
-        edits = {
-            "content": content,
-            "scope": list(dict.fromkeys(parsed_scope)),
-            "tags": list(dict.fromkeys(parsed_tags)),
-        }
+
+        if parsed_tags is not None:
+            edits["tags"] = list(dict.fromkeys(parsed_tags))
         if title.strip():
             edits["title"] = title.strip()
         try:
