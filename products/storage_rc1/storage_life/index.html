@@ -255,10 +255,30 @@ async function loadDiagnostics(){
     $('#diagnosticRuntimePanel').innerHTML='<div class="danger">无法准备运行诊断：'+esc(e.message)+'</div>';
   }
 }
+const COMMON_RUNTIME_DIAGNOSTIC_METRICS=[
+  ['critical_warning','NVMe Critical Warning'],
+  ['media_errors','NVMe Media / Data Integrity Errors'],
+  ['available_spare','NVMe Available Spare'],
+  ['available_spare_threshold','NVMe Available Spare Threshold'],
+  ['percentage_used','NVMe Percentage Used'],
+  ['device_life_time_est_typ_a','eMMC Life Time A'],
+  ['device_life_time_est_typ_b','eMMC Life Time B'],
+  ['pre_eol_info','eMMC PRE_EOL_INFO'],
+  ['runtime_bad_block','Bad Block Count'],
+  ['program_fail','Program Fail Count'],
+  ['erase_fail','Erase Fail Count'],
+  ['erase_count','Erase Count'],
+  ['pe_cycle','P/E Cycle'],
+  ['ecc_corrected','ECC Corrected Count'],
+  ['ecc_uncorrectable','ECC Uncorrectable Count'],
+  ['bit_flip_count','Bit Flip Count'],
+  ['bit_flip_threshold','Bit Flip Threshold']
+];
 function renderDiagnosticRuntimePanel(){
   let d=DEV.find(x=>x.id===$('#diagDevice').value),items=DIAG_CONTEXT?.items||[];
   if(!d)return;
-  let options=items.map(x=>'<option value="'+esc(x.canonical_name)+'">'+esc(x.indicator)+' · '+esc(x.data_source||'')+'</option>').join('');
+  let seen=new Set(),options=items.map(x=>{seen.add(x.canonical_name);return '<option value="'+esc(x.canonical_name)+'">'+esc(x.indicator)+' · '+esc(x.data_source||'')+'</option>'}).join('');
+  options+=COMMON_RUNTIME_DIAGNOSTIC_METRICS.filter(x=>!seen.has(x[0])).map(x=>'<option value="'+esc(x[0])+'">'+esc(x[1])+' · Runtime Observation</option>').join('');
   $('#diagnosticRuntimePanel').innerHTML='<div class="pagehead"><div><div class="kicker">S4 · RUNTIME DIAGNOSIS</div><h3>运行观测诊断</h3><div class="muted">把现场读取值作为 Runtime Observation 送入既有 storage-diagnostic-validation Skill；不会把运行数据发送给 Public Knowledge。</div></div>'+pkContextButton({focus:'DIAGNOSIS',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'health SMART EXT_CSD ECC bad block program erase fail diagnostic'},'查诊断公共知识')+'</div><div class="row"><label>诊断指标<br><select id="diagMetric">'+(options||'<option value="">当前没有诊断指标</option>')+'</select></label><label>运行值<br><input id="diagRuntimeValue" placeholder="例如 0x02 / 87 / 15"></label><label>单位<br><input id="diagRuntimeUnit" placeholder="% / code / count / cycles"></label><label>实际采集时间<br><input id="diagCapturedAt" type="datetime-local"></label></div><div class="row" style="margin-top:10px"><label>读取接口 / 命令<br><input id="diagRuntimeSource" placeholder="nvme smart-log / EXT_CSD / MTD stats"></label><label>运行证据引用<br><input id="diagRuntimeEvidence" placeholder="日志文件 / 采集记录 / 截图编号"></label><label>诊断问题<br><input id="diagQuestion" value="当前观测是否提示寿命退化、介质健康或可观测性风险？"></label></div><label style="display:block;margin-top:8px"><input id="diagObservationConfirmed" type="checkbox"> 我确认该观测来自当前器件/所填读取接口，且实际采集时间准确。</label><div class="row" style="margin-top:10px"><button class="primary" onclick="executeRuntimeDiagnosis()">执行运行诊断</button><small>未确认的手工观测不会进入正式运行诊断。</small></div>';
   if($('#diagCapturedAt'))$('#diagCapturedAt').value=runtimeLocalInputValue(new Date());
 }
@@ -839,27 +859,37 @@ function applyParsedToLifetime(index){
   if($('#lifeMetric')){$('#lifeMetric').value=metric;lifeMetricChanged()}
   if($('#lifeRuntimeValue'))$('#lifeRuntimeValue').value=x.normalized_value??x.raw_value??'';
   if($('#lifeRuntimeUnit'))$('#lifeRuntimeUnit').value=x.unit||'';
-  if($('#lifeRuntimeSource'))$('#lifeRuntimeSource').value=x.source_label||$('#runtimeImportSource')?.value||'PASTED_RUNTIME_OUTPUT';
-  if($('#lifeRuntimeEvidence'))$('#lifeRuntimeEvidence').value=x.source_line||'Parsed runtime source line';
+  if($('#lifeRuntimeSource'))$('#lifeRuntimeSource').value=$('#runtimeImportSource')?.value.trim()||x.source_label||'';
+  if($('#lifeRuntimeEvidence'))$('#lifeRuntimeEvidence').value=x.source_line||'';
+  let captured=runtimeCaptureIso();
+  if($('#lifeCapturedAt')&&captured)$('#lifeCapturedAt').value=runtimeLocalInputValue(new Date(captured));
+  if($('#lifeObservationConfirmed'))$('#lifeObservationConfirmed').checked=runtimeImportConfirmed();
   scrollDeviceSection('lifetimePanel');
-  msg('已把运行指标带入寿命评估，请补充观测窗口 / 目标寿命后计算。');
+  msg('已把运行指标、真实采集时间和来源确认状态带入寿命评估。');
 }
 async function applyParsedToDiagnosis(index){
   let x=parsedObservation(index),d=CURRENT?.device;
   if(!x||!d)return;
   await openDiagnosisForCurrentDevice();
-  let alias={ecc_corrected:'ecc_status',ecc_uncorrectable:'ecc_status',erase_count:'runtime_bad_block',pe_cycle:'lifetime_counter'};
   let metric=x.metric_name,select=$('#diagMetric');
   if(select){
     let values=[...select.options].map(o=>o.value);
-    if(values.includes(metric))select.value=metric;
-    else if(alias[metric]&&values.includes(alias[metric]))select.value=alias[metric];
+    if(!values.includes(metric)){
+      let option=document.createElement('option');
+      option.value=metric;
+      option.textContent=metric+' · Parsed Runtime Observation';
+      select.appendChild(option);
+    }
+    select.value=metric;
   }
   if($('#diagRuntimeValue'))$('#diagRuntimeValue').value=x.normalized_value??x.raw_value??'';
   if($('#diagRuntimeUnit'))$('#diagRuntimeUnit').value=x.unit||'';
-  if($('#diagRuntimeSource'))$('#diagRuntimeSource').value=x.source_label||'PASTED_RUNTIME_OUTPUT';
-  if($('#diagRuntimeEvidence'))$('#diagRuntimeEvidence').value=x.source_line||'Parsed runtime source line';
-  msg('已把识别到的运行指标带入诊断页面。');
+  if($('#diagRuntimeSource'))$('#diagRuntimeSource').value=$('#runtimeImportSource')?.value.trim()||x.source_label||'';
+  if($('#diagRuntimeEvidence'))$('#diagRuntimeEvidence').value=x.source_line||'';
+  let captured=runtimeCaptureIso();
+  if($('#diagCapturedAt')&&captured)$('#diagCapturedAt').value=runtimeLocalInputValue(new Date(captured));
+  if($('#diagObservationConfirmed'))$('#diagObservationConfirmed').checked=runtimeImportConfirmed();
+  msg('已把原始运行指标、真实采集时间和来源确认状态带入诊断页面。');
 }
 function renderScenarioLauncher(d){
   let host=$('#deviceDetail');
