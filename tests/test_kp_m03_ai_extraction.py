@@ -447,7 +447,7 @@ def test_kp_m03_unknown_runtime_error_stays_generic(
         service.extract(source, structured)
 
 
-def test_kp_m03_w4_list_type_failure_matches_prompt_contract(
+def test_kp_m03_w4_list_type_failure_is_losslessly_normalized(
     tmp_path: Path,
 ) -> None:
     prompt = (
@@ -460,29 +460,47 @@ def test_kp_m03_w4_list_type_failure_matches_prompt_contract(
         ROOT / "tests/fixtures/w4_kp_list_type_contract_failure.json"
     )
     sanitized_failure = json.loads(fixture_path.read_text(encoding="utf-8"))
+    normalized = KnowledgeExtractionOutput.model_validate(sanitized_failure)
+    draft = normalized.candidates[0]
+    canonical_object = '{"redacted_non_array_shape":true}'
+    assert draft.scope == [canonical_object]
+    assert draft.conditions == [canonical_object]
+    assert draft.limitations == [canonical_object]
+    assert draft.tags == []
+
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["scope"] = {"device_family": "eMMC"}
+    payload["candidates"][0]["conditions"] = {"mode": "health"}
+    payload["candidates"][0]["limitations"] = {"review": "required"}
+    payload["candidates"][0]["tags"] = {"source": "official"}
+
+    candidates = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(payload),
+    ).extract(source, structured)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.scope == ['{"device_family":"eMMC"}']
+    assert candidate.conditions == ['{"mode":"health"}']
+    assert candidate.limitations == ['{"review":"required"}']
+    assert candidate.tags == ['{"source":"official"}']
+    assert candidate.evidence_refs
+
+
+def test_kp_m03_w4_list_normalization_keeps_unknown_scalars_fail_closed() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["scope"] = 123
+
     with pytest.raises(ValidationError) as exc_info:
-        KnowledgeExtractionOutput.model_validate(sanitized_failure)
+        KnowledgeExtractionOutput.model_validate(payload)
 
     observed = {
         (tuple(error["loc"]), error["type"])
         for error in exc_info.value.errors(include_input=False)
     }
-    assert observed == {
-        (("candidates", 0, "scope"), "list_type"),
-        (("candidates", 0, "conditions"), "list_type"),
-        (("candidates", 0, "limitations"), "list_type"),
-    }
-
-    repository = JsonArtifactRepository(tmp_path)
-    source, structured = _seed_source(repository)
-    service = KnowledgeExtractionService(
-        repository,
-        FakeRuntime(sanitized_failure),
-    )
-    with pytest.raises(
-        KnowledgeExtractionError,
-        match="KNOWLEDGE_CONTRACT_INVALID",
-    ):
-        service.extract(source, structured)
-    assert not (tmp_path / "knowledge/production/candidates").exists()
-    assert not (tmp_path / "knowledge/production/evidence").exists()
+    assert (("candidates", 0, "scope"), "list_type") in observed

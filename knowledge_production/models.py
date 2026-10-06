@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 KNOWLEDGE_CANDIDATE_CONTRACT_VERSION = "knowledge-candidate/v1"
@@ -198,6 +199,36 @@ class KnowledgeExtractionCandidateDraft(StrictModel):
     tags: list[str] = Field(default_factory=list)
     evidence_locations: list[EvidenceLocation] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator(
+        "scope",
+        "conditions",
+        "limitations",
+        "tags",
+        mode="before",
+    )
+    @classmethod
+    def normalize_provider_string_lists(cls, value: Any) -> Any:
+        """Normalize only lossless provider shape variants.
+
+        Real-provider W4 evidence showed JSON objects in fields whose contract
+        is list[str].  Preserve the complete object as one canonical JSON
+        string instead of dropping keys or loosening the final field type.
+        JSON null is the unambiguous empty-list equivalent.  Other scalar
+        shapes remain invalid and continue to fail closed.
+        """
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [
+                json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ]
+        return value
 
 
 class KnowledgeExtractionOutput(StrictModel):
