@@ -345,22 +345,27 @@ LIFETIME_FORMAL_KNOWLEDGE_QUERIES = {
     "NVME_PERCENTAGE_USED_INTERPRETATION_V1": {
         "query": "NVMe Percentage Used",
         "semantic_tokens": ("percentage used", "percentage_used"),
+        "canonical_parameter": "percentage_used",
     },
     "NVME_DATA_UNITS_WRITTEN_V1": {
         "query": "NVMe Data Units Written bytes per data unit",
         "semantic_tokens": ("data units written", "data_units_written", "bytes_per_data_unit"),
+        "canonical_parameter": "data_units_written",
     },
     "EMMC_DEVICE_LIFE_TIME_A_V1": {
         "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_A",
         "semantic_tokens": ("device_life_time_est_typ_a", "life time a", "life_time_a"),
+        "canonical_parameter": "life_time_a",
     },
     "EMMC_DEVICE_LIFE_TIME_B_V1": {
         "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_B",
         "semantic_tokens": ("device_life_time_est_typ_b", "life time b", "life_time_b"),
+        "canonical_parameter": "life_time_b",
     },
     "EMMC_PRE_EOL_V1": {
         "query": "eMMC PRE_EOL_INFO",
         "semantic_tokens": ("pre_eol_info", "pre eol", "pre_eol"),
+        "canonical_parameter": "pre_eol",
     },
 }
 
@@ -387,6 +392,13 @@ def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[
         config["query"],
         device_type=device_type,
         top_k=8,
+        semantic_classes=[
+            "PARAMETER_DEFINITION",
+            "CALCULATION_RULE",
+            "APPLICABILITY_RULE",
+        ],
+        canonical_parameters=[config["canonical_parameter"]],
+        scenario_consumer="S3",
     )
     if result.get("status") != "READY":
         return []
