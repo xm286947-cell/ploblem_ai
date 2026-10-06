@@ -1050,6 +1050,8 @@ def model_extract_to_knowledge_production(
             },
             candidate_enricher=candidate_enricher,
         )
+    except HTTPException:
+        raise
     except StorageKnowledgeProductError as exc:
         raise HTTPException(
             422,
