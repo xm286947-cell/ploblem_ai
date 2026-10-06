@@ -25,12 +25,16 @@ def _root() -> Path:
     return (Path(__file__).resolve().parents[1] / "knowledge_release" / "current").resolve()
 
 
-def _binding_path() -> Path:
+def _binding_path(release_root: Path | None = None) -> Path:
     configured = os.environ.get(
         "STORAGE_KNOWLEDGE_BINDING_PATH", ""
     ).strip()
     if configured:
         return Path(configured).expanduser().resolve()
+    if release_root is not None:
+        local = release_root / "release_binding.json"
+        if local.is_file():
+            return local.resolve()
     return (
         Path(__file__).resolve().parents[3]
         / "contracts"
@@ -120,7 +124,7 @@ class KnowledgeReleaseConsumer:
         """
 
         manifest = self._validated_manifest()
-        binding = _json(_binding_path())
+        binding = _json(_binding_path(self.root))
         try:
             validate_release_binding(binding, release_manifest=manifest)
         except (ReleaseBindingError, TypeError) as exc:
