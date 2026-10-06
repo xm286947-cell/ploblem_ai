@@ -247,6 +247,21 @@ def _url(value: str | None) -> str:
     return requested
 
 
+def _request_timeout_seconds(path: str) -> float:
+    """Keep retrieval fast while allowing model-backed synthesis to finish."""
+    if path == "/ask":
+        raw = os.getenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "60")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 60.0
+        # The Public Knowledge provider has its own fail-closed timeout (45s by
+        # default). The Storage proxy must not abort earlier, but it must also
+        # never wait without a bound.
+        return min(max(value, 15.0), 180.0)
+    return 8.0
+
+
 def _request(mode: str, path: str, payload: dict | None = None, base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         return None
@@ -256,7 +271,7 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
     data = json.dumps(payload).encode() if payload is not None else None
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
-        with _NO_REDIRECT_OPENER.open(req, timeout=8) as response:
+        with _NO_REDIRECT_OPENER.open(req, timeout=_request_timeout_seconds(path)) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:1000]
