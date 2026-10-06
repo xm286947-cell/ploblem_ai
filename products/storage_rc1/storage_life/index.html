@@ -676,6 +676,22 @@ function renderRuntimeImportPanel(d){
   );
   if($('#runtimeCapturedAt'))$('#runtimeCapturedAt').value=runtimeLocalInputValue(new Date());
 }
+function currentDeviceHasConfirmedNvme(){
+  let fact=(CURRENT?.device_facts||[]).find(x=>x.canonical_name==='interface');
+  return String(fact?.value||'').toLowerCase().includes('nvme');
+}
+function applyRuntimeMetricApplicability(items,d){
+  const nvmeOnly=new Set(['critical_warning','media_errors','available_spare','available_spare_threshold','percentage_used','data_units_written']);
+  const emmcOnly=new Set(['device_life_time_a','device_life_time_b','device_life_time_est_typ_a','device_life_time_est_typ_b','pre_eol','pre_eol_info','bkops_status','ext_csd_health_report']);
+  for(let x of items||[]){
+    if(nvmeOnly.has(x.metric_name)&&(d?.device_type!=='SSD'||!currentDeviceHasConfirmedNvme())){
+      x.diagnostic_supported=false;x.suggested_lifetime_metric=null;x.product_applicability='S1 需先确认 Interface 包含 NVMe';
+    }else if(emmcOnly.has(x.metric_name)&&d?.device_type!=='eMMC'){
+      x.diagnostic_supported=false;x.suggested_lifetime_metric=null;x.product_applicability='该字段仅适用于 eMMC';
+    }else x.product_applicability='APPLICABLE';
+  }
+  return items||[];
+}
 async function parseRuntimeImport(){
   let d=CURRENT?.device,text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||'PASTED_RUNTIME_OUTPUT',box=$('#runtimeImportResult');
   RUNTIME_SNAPSHOT_ID=null;
@@ -686,9 +702,9 @@ async function parseRuntimeImport(){
   try{
     RUNTIME_PARSE_RESULT=await api('/api/product/runtime-observations/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_type:d.device_type,text,source_label:source})});
     RUNTIME_PARSED_RAW_TEXT=text;
-    let items=RUNTIME_PARSE_RESULT.observations||[];
+    let items=applyRuntimeMetricApplicability(RUNTIME_PARSE_RESULT.observations||[],d);
     let diagCount=items.filter(x=>x.diagnostic_supported).length,lifeCount=items.filter(x=>x.suggested_lifetime_metric).length;
-    box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+((diagCount||lifeCount)?'<button class="primary" onclick="executeParsedHealthAnalysis()">一键分析本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bit Flip / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
+    box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+((diagCount||lifeCount)?'<button class="primary" onclick="executeParsedHealthAnalysis()">一键分析本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b>'+(x.product_applicability&&x.product_applicability!=='APPLICABLE'?'<br><small class="danger">'+esc(x.product_applicability)+'</small>':'')+'</td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bit Flip / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
   }catch(e){RUNTIME_PARSE_RESULT=null;RUNTIME_PARSED_RAW_TEXT='';box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
 }
 function runtimeParsedInputCurrent(){
