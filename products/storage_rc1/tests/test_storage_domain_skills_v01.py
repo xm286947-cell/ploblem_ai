@@ -416,3 +416,73 @@ def test_legacy_release_without_structured_contract_remains_compatible():
     assert result["status"] == "READY"
     assert result["selection_mode"] == "LEGACY_FORMAL_COMPATIBILITY"
     assert result["items"]
+
+
+
+class UpgradedBindingKnowledgeConsumer(
+    ReviewedSemanticKnowledgeConsumer
+):
+    def status(self):
+        return {
+            "available": True,
+            "status": "READY",
+            "knowledge_release_version": "KP-STORAGE-LIFETIME-20261006-R2",
+        }
+
+    def validate_storage_binding(self):
+        return {
+            "knowledge_release_version": (
+                "KP-STORAGE-LIFETIME-20261006-R2"
+            )
+        }
+
+    def query(
+        self,
+        text,
+        *,
+        device_type="",
+        top_k=8,
+        knowledge_release_version=None,
+        semantic_class="",
+        canonical_parameter="",
+        scenario_consumer="",
+    ):
+        assert (
+            knowledge_release_version
+            == "KP-STORAGE-LIFETIME-20261006-R2"
+        )
+        result = super().query(
+            text,
+            device_type=device_type,
+            top_k=top_k,
+            knowledge_release_version=knowledge_release_version,
+            semantic_class=semantic_class,
+            canonical_parameter=canonical_parameter,
+            scenario_consumer=scenario_consumer,
+        )
+        result["knowledge_release_version"] = (
+            "KP-STORAGE-LIFETIME-20261006-R2"
+        )
+        return result
+
+
+def test_controlled_binding_supersedes_legacy_pack_release_pin():
+    adapter = StorageDomainSkillAdapter(
+        knowledge_consumer=UpgradedBindingKnowledgeConsumer()
+    )
+
+    result = adapter.query_pack(
+        "PACK_DIAGNOSTIC_VALIDATION",
+        "ECC status",
+        device_type="NAND Flash",
+        semantic_classes=["DIAGNOSTIC_RULE"],
+        canonical_parameters=["ecc_status"],
+        scenario_consumer="S4",
+    )
+
+    assert result["status"] == "READY"
+    assert (
+        result["knowledge_release_version"]
+        == "KP-STORAGE-LIFETIME-20261006-R2"
+    )
+    assert result["selection_mode"] == "REVIEWED_STORAGE_SEMANTIC"
