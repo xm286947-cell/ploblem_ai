@@ -229,3 +229,148 @@ def test_model_scan_rejects_unknown_parameter_before_search(monkeypatch):
     )
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "MODEL_SCAN_PARAMETER_UNKNOWN"
+
+
+def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
+    from storage_life import knowledge_product
+
+    scan = {
+        "model_version": "storage-lifetime-knowledge/v1",
+        "device_type": "NAND Flash",
+        "coverage": {
+            "parameter_count": 2,
+            "found_count": 2,
+            "not_found_count": 0,
+            "role_gap_count": 0,
+        },
+        "parameters": [
+            {
+                "canonical_name": "pe_cycles",
+                "coverage_status": "FOUND",
+                "queries_tried": ["P/E Cycle"],
+                "knowledge_requirements": [
+                    "PARAMETER_DEFINITION",
+                    "CALCULATION_RULE",
+                    "TEST_RULE",
+                ],
+                "scenario_consumers": ["S1", "S2", "S3", "S4", "S5"],
+            },
+            {
+                "canonical_name": "retention",
+                "coverage_status": "FOUND",
+                "queries_tried": ["Data Retention"],
+                "knowledge_requirements": [
+                    "PARAMETER_DEFINITION",
+                    "APPLICABILITY_RULE",
+                    "TEST_RULE",
+                ],
+                "scenario_consumers": ["S1", "S2", "S3", "S4", "S5"],
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        public_knowledge,
+        "_model_scan_source",
+        lambda body, mode, base_url: scan,
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "_public_source_detail",
+        lambda source_id, mode, base_url: (
+            {
+                "source_id": source_id,
+                "title": "KIOXIA NAND endurance",
+                "source_class": "PUBLIC",
+                "source_uri": "https://example.com/kioxia.pdf",
+            },
+            [
+                {
+                    "revision_id": "rev-1",
+                    "original_filename": "kioxia.pdf",
+                    "media_type": "application/pdf",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "source_snapshot",
+        lambda source_id, revision_id, mode, base_url: public_knowledge.Response(
+            content=b"%PDF exact public snapshot",
+            media_type="application/pdf",
+        ),
+    )
+
+    seen = {}
+
+    def ingest_source(payload, **kwargs):
+        seen["ingest_payload"] = payload
+        seen["ingest_kwargs"] = kwargs
+        return {
+            "source_document": {
+                "source_id": "PKR-source-1",
+                "source_version": "rev-1",
+            }
+        }
+
+    def extract_source(source_id, source_version, **kwargs):
+        seen["extract"] = {
+            "source_id": source_id,
+            "source_version": source_version,
+            **kwargs,
+        }
+        return {
+            "source_id": source_id,
+            "source_version": source_version,
+            "candidate_count": 2,
+            "candidate_ids": ["KPC-1", "KPC-2"],
+            "status": "PENDING_REVIEW",
+            "review_url": "/knowledge-production/candidates",
+        }
+
+    monkeypatch.setattr(knowledge_product, "ingest_source", ingest_source)
+    monkeypatch.setattr(knowledge_product, "extract_source", extract_source)
+
+    response = client.post(
+        "/api/public-knowledge/knowledge-production/extract?mode=LIVE",
+        json={
+            "source_id": "source-1",
+            "device_type": "NAND Flash",
+            "revision_id": "rev-1",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate_count"] == 2
+    assert payload["candidate_ids"] == ["KPC-1", "KPC-2"]
+    assert payload["formal_knowledge_published"] is False
+    assert payload["formal_release_created"] is False
+    assert payload["requested_topics"] == ["P/E Cycle", "Data Retention"]
+
+    assert seen["ingest_payload"] == b"%PDF exact public snapshot"
+    assert seen["ingest_kwargs"]["source_id"] == "PKR-source-1"
+    assert seen["ingest_kwargs"]["revision"] == "rev-1"
+
+    metadata = seen["extract"]["candidate_metadata"]["storage_lifetime"]
+    assert metadata["schema_version"] == "storage-lifetime-knowledge/v1"
+    assert metadata["device_type"] == "NAND Flash"
+    assert metadata["public_source_id"] == "source-1"
+    assert metadata["public_source_revision"] == "rev-1"
+    assert metadata["formal_consumable"] is False
+    assert metadata["semantic_class_status"] == "NEEDS_REVIEW"
+    assert "CALCULATION_RULE" in metadata["semantic_class_candidates"]
+
+
+def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fixture extraction must stop before any source work")
+
+    monkeypatch.setattr(public_knowledge, "_model_scan_source", forbidden)
+    response = client.post(
+        "/api/public-knowledge/knowledge-production/extract",
+        json={
+            "source_id": "fixture-gd25q64e",
+            "device_type": "NAND Flash",
+        },
+    )
+    assert response.status_code == 409
