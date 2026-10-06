@@ -964,6 +964,7 @@ function optimizationList(title,items){
   return '<div class="card"><b>'+esc(title)+'</b><ul>'+items.map(function(x){return '<li>'+esc(typeof x==='string'?x:JSON.stringify(x))+'</li>'}).join('')+'</ul></div>';
 }
 
+let LAST_OPTIMIZATION_ASSESSMENT_ID=null;
 async function executeOptimizationAssessment(){
   let d=CURRENT?.device;
   if(!d)return;
@@ -980,6 +981,7 @@ async function executeOptimizationAssessment(){
         assessment_author:'Storage MVP S5 UI'
       })
     });
+    LAST_OPTIMIZATION_ASSESSMENT_ID=r.optimization_assessment?.id||null;
     let sr=r.skill_result||{},st=sr.structured_result||{},missing=r.remaining_information||sr.missing_information||st.missing_information||[],state=r.current_state||[];
     let html='<div class="card '+(sr.status==='ANSWERED'&&r.upstream_ready?'fact':'warning')+'">'+
       '<b>'+esc(sr.status||'UNKNOWN')+' · S5 Integrated Write Governance</b>'+
@@ -997,7 +999,7 @@ async function executeOptimizationAssessment(){
     if(missing.length)html+=optimizationList('仍缺信息',missing);
     if(!r.upstream_ready)html+='<div class="warning card"><b>S5 尚不能形成可执行清单</b><p>请先让最新 S3 寿命 / 风险和 S4 运行诊断形成可完成结果；当前优化内容仅作为草案。</p></div>';
     html+='<div class="row">'+
-      (r.upstream_ready?'<button class="primary" onclick="executeIntegratedActionPlan();scrollDeviceSection(\'mvpSummaryPanel\')">保存为工程执行清单</button>':'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看 S1～S5 缺口</button>')+
+      (r.upstream_ready&&LAST_OPTIMIZATION_ASSESSMENT_ID?'<button class="primary" onclick="persistCurrentOptimizationActions()">保存为工程执行清单</button>':'<button class="secondary" onclick="scrollDeviceSection(\'mvpSummaryPanel\')">查看 S1～S5 缺口</button>')+
       pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'write amplification cache batching persistence logging wear leveling monitoring lifetime optimization'},'展开更多公共知识')+
       '</div><div id="optimizationPublicContext"></div>';
     $('#optimizationResult').innerHTML=html;
@@ -1006,6 +1008,25 @@ async function executeOptimizationAssessment(){
     loadMvpSummary();
   }catch(e){
     $('#optimizationResult').innerHTML='<div class="danger card"><b>优化建议未完成</b><p>'+esc(e.message)+'</p></div>';
+  }
+}
+
+async function persistCurrentOptimizationActions(){
+  let d=CURRENT?.device,id=LAST_OPTIMIZATION_ASSESSMENT_ID;
+  if(!d||!id)return msg('当前没有可保存的 S5 优化评估，请先生成优化建议。',true);
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/engineering-actions/from-optimization/'+encodeURIComponent(id),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({updated_by:'Storage MVP UI'})
+    });
+    msg('已保存当前已审阅的优化方案；没有重新执行 Write Governance Skill。');
+    await loadEngineeringActions();
+    await loadMvpSummary();
+    let box=$('#optimizationResult');
+    if(box)box.insertAdjacentHTML('beforeend','<div class="fact card"><b>工程执行清单已保存</b><p>来源 Assessment '+esc(r.optimization_assessment_id||id)+'；保存过程中未重新生成优化建议。</p></div>');
+  }catch(e){
+    msg('工程执行清单保存失败：'+e.message,true);
   }
 }
 
