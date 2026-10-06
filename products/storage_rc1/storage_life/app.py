@@ -121,6 +121,10 @@ class KnowledgeReleaseBuildRequest(BaseModel):
     release_version: str
 
 
+class KnowledgeReleasePromoteRequest(BaseModel):
+    approved_by: str
+
+
 
 @app.get("/api/product/dashboard", tags=["Storage Product MVP"])
 def product_dashboard():
@@ -465,12 +469,55 @@ async def knowledge_production_extract(source_id: str, source_version: str, requ
 
 @app.post("/api/product/knowledge-production/releases", tags=["Storage Product MVP"])
 async def knowledge_production_release(body: KnowledgeReleaseBuildRequest):
+    """Build an immutable Knowledge Release candidate.
+
+    Building never changes the active Storage consumer binding.
+    """
     try:
         result = await run_in_threadpool(
-            knowledge_product.build_and_activate_release,
+            knowledge_product.build_release_candidate,
             body.release_version,
         )
-        return {**result, "consumer_status": KnowledgeReleaseConsumer.current().status()}
+        return {
+            **result,
+            "consumer_status": KnowledgeReleaseConsumer.current().status(),
+        }
+    except Exception as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post(
+    "/api/product/knowledge-production/releases/{release_version}/promote",
+    tags=["Storage Product MVP"],
+)
+async def knowledge_production_release_promote(
+    release_version: str,
+    body: KnowledgeReleasePromoteRequest,
+):
+    """Explicitly select a reviewed immutable release + pinned binding."""
+    try:
+        result = await run_in_threadpool(
+            knowledge_product.promote_release_candidate,
+            release_version,
+            approved_by=body.approved_by,
+        )
+        consumer = KnowledgeReleaseConsumer.current()
+        binding = consumer.validate_storage_binding()
+        return {
+            **result,
+            "consumer_status": consumer.status(),
+            "binding": {
+                "knowledge_release_version": binding.get(
+                    "knowledge_release_version"
+                ),
+                "compatibility_status": binding.get(
+                    "compatibility_status"
+                ),
+                "latest_floating_dependency": binding.get(
+                    "latest_floating_dependency"
+                ),
+            },
+        }
     except Exception as exc:
         raise HTTPException(409, str(exc)) from exc
 
