@@ -64,9 +64,28 @@ _OUTBOUND_SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
 ]
 _OUTBOUND_PRIVATE_CONTEXT_PATTERNS = [
-    re.compile(r"\b(?:customer|project|internal|confidential|restricted)\b\s*[:：=#-]?\s*\S+", re.I),
-    re.compile(r"(?:客户|项目|内部|机密|保密|工单|问题单|现场问题)\s*[:：=#-]?\s*\S+"),
-    re.compile(r"\b(?:S/?N|serial(?:\s*(?:number|no\.?))?)\s*[:#=-]?\s*[A-Z0-9-]{4,}\b", re.I),
+    # Require an explicit identifier shape.  Plain public engineering phrases
+    # such as "internal ECC" or "customer requirement" must remain searchable.
+    re.compile(
+        r"\b(?:customer|project|internal|confidential|restricted)"
+        r"(?:[_\s-]*(?:id|name|code|ticket|case))?\s*[:=#]\s*\S+",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:customer|project|internal)\s+(?:id|name|code|ticket|case)\s+[A-Za-z0-9._-]{3,}\b",
+        re.I,
+    ),
+    re.compile(
+        r"(?:客户|项目|内部|机密|保密|工单|问题单|现场问题)"
+        r"(?:名|名称|编号|ID|id|号)?\s*[:：=#]\s*\S+"
+    ),
+    re.compile(
+        r"(?:客户|项目|工单|问题单)(?:名|名称|编号|ID|id|号)\s+[A-Za-z0-9._-]{3,}"
+    ),
+    re.compile(
+        r"\b(?:S/?N|serial(?:\s*(?:number|no\.?))?)\s*[:#=]\s*[A-Z0-9-]{4,}\b",
+        re.I,
+    ),
     re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"),
 ]
 _OUTBOUND_RUNTIME_VALUE_PATTERN = re.compile(
