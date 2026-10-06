@@ -80,10 +80,7 @@ async function loadMvpGuidedFlow(){
   if(!id)return msg('请选择分析器件',true);
   box.innerHTML='<div class="card">正在汇总 S1～S5 当前状态…</div>';
   try{
-    let results=await Promise.all([
-      api('/api/product/devices/'+encodeURIComponent(id)+'/mvp-summary'),
-      api('/api/public-knowledge/status?mode=LIVE').catch(()=>({connected:false,retrieval_ready:false,source_count:0}))
-    ]),r=results[0],pkHealth=results[1]||{},sc=r.scenarios||[],actions=r.remaining_actions||[],pk=r.public_knowledge||{},ac=r.action_checklist||{},pkReady=pkHealth.retrieval_ready===true;
+    let r=await api('/api/product/devices/'+encodeURIComponent(id)+'/mvp-summary'),pkHealth=r.public_knowledge||{},sc=r.scenarios||[],actions=r.remaining_actions||[],pk=pkHealth,ac=r.action_checklist||{},pkReady=pkHealth.retrieval_ready===true;
     box.innerHTML='<div class="grid4">'+sc.map(x=>'<div class="card"><div class="pagehead"><div><b>'+esc(x.label||x.type)+'</b><p>'+esc(x.direct_answer||'尚未执行')+'</p>'+(x.next_action?'<small>下一步：'+esc(x.next_action)+'</small>':'')+'</div>'+badge(x.status||'NOT_RUN')+'</div>'+guidedScenarioAction(x.type,id)+'</div>').join('')+'</div>'+
       '<div class="card"><b>Public Knowledge</b> '+badge(pkReady?'READY':'UNAVAILABLE')+'<p>'+esc(pk.role||'')+'</p><small>'+(pkReady?'RAG 检索已就绪 · '+esc(pkHealth.source_count||0)+' 个公开资料源。':(pkHealth.connected?'RAG 服务已连接，但当前没有可用公开资料或 Sources 检索不可用。':'RAG 服务当前不可用；Storage 分析保持可用。'))+'</small><div class="row" style="margin-top:8px"><button class="secondary" onclick="openDeviceKnowledge(\''+esc(id)+'\')">查当前器件公共知识</button></div></div>'+
       '<div class="card"><b>Engineering Actions</b><p>Open / In Progress：'+esc(ac.open_count||0)+'</p><button class="secondary" onclick="openDevice(\''+esc(id)+'\');setTimeout(()=>scrollDeviceSection(\'engineeringActionsPanel\'),0)">打开执行清单</button></div>'+
@@ -420,12 +417,8 @@ async function loadMvpSummary(){
   let d=CURRENT?.device,body=$('#mvpSummaryBody');
   if(!d||!body)return;
   try{
-    let results=await Promise.all([
-      api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary'),
-      api('/api/public-knowledge/status?mode=LIVE').catch(()=>({connected:false,retrieval_ready:false,source_count:0}))
-    ]);
-    MVP_SUMMARY=results[0];
-    MVP_PUBLIC_KNOWLEDGE_READY=results[1]?.retrieval_ready===true;
+    MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
+    MVP_PUBLIC_KNOWLEDGE_READY=MVP_SUMMARY.public_knowledge?.retrieval_ready===true;
     let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
     let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{},overallReady=!!MVP_SUMMARY.mvp_ready_for_demo&&MVP_PUBLIC_KNOWLEDGE_READY;
     body.innerHTML='<div class="grid4">'+
