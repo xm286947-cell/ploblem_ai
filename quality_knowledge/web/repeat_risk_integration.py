@@ -394,6 +394,16 @@ class RepeatWebFacade:
             "result": result,
         }
 
+    def report(
+        self,
+        query_id: str,
+        *,
+        format: str = "markdown",
+    ) -> dict[str, str]:
+        if self.agent_analysis is None:
+            raise KeyError("REPEAT_REPORT_NOT_FOUND")
+        return self.agent_analysis.read_report(query_id, format=format)
+
     def decide(
         self,
         query_id: str,
