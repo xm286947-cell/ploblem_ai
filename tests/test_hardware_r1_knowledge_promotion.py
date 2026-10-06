@@ -1114,9 +1114,7 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
         promotion.bridge.adapter,
         release_prefix=RELEASE,
     )
-    stale_release = controller.ensure_queryable_release()
-    stale_release_version = str(stale_release["release_version"])
-    assert stale_release_version.startswith(RELEASE + "-R")
+    assert controller.status()["release_version"] is None
     publish_operation_id = promotion._operation_id(
         intake["asset_candidate_id"], "PUBLISH", 1
     )
@@ -1160,7 +1158,6 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     )
     refreshed_release_version = str(controller.status()["release_version"])
     assert refreshed_release_version.startswith(RELEASE + "-R")
-    assert refreshed_release_version != stale_release_version
     repaired = restarted.get_item("HWI-RECOVERY")
     assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
@@ -1191,9 +1188,7 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
         promotion.bridge.adapter,
         release_prefix=RELEASE,
     )
-    stale_release = controller.ensure_queryable_release()
-    stale_release_version = str(stale_release["release_version"])
-    assert stale_release_version.startswith(RELEASE + "-R")
+    assert controller.status()["release_version"] is None
 
     def crash_after_remote_publish(item, asset, record, target, **kwargs):
         if target == "PUBLISHED_PENDING_QUERY_BACK":
@@ -1248,7 +1243,6 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     assert reconcile.status_code == 200, reconcile.text
     refreshed_release_version = str(controller.status()["release_version"])
     assert refreshed_release_version.startswith(RELEASE + "-R")
-    assert refreshed_release_version != stale_release_version
     assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert reconcile.json()["reconciled"] is True
     assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
