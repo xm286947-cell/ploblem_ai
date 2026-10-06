@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: cba384f55eaf49a585a17564cabdb8a80fb4d5f8
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: 89e9acfe53981e1eaa683dc375a11eb2782dda68
+      STORAGE_SOURCE_SHA: 1008852c93ef00976bf4ba96868f958d645674a6
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 31d0db7a068ff38428e31fb2ed033e913eaad2f4
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -49,17 +49,31 @@ jobs:
           printf '%s\n' "$PKR_ISOLATED" | grep -q 'command -v python3'
           printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker compose -p "$ISOLATED_PROJECT"'
           printf '%s\n' "$PKR_ISOLATED" | grep -q 'NO_FREE_ISOLATED_PORT'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q '.pkr_isolated_instances'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'PKR_ISOLATED_STATUS=.RUNNING.'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'LATEST_FILE'
           if printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker rm -f'; then
             echo "ISOLATED_SCRIPT_UNSAFE_CONTAINER_DELETE"
             exit 1
-          fi
-          if printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker volume rm -f.*PKR_ISOLATED_VOLUME' | grep -v 'cleanup_on_error'; then
-            true
           fi
           if printf '%s\n' "$PKR_ISOLATED" | grep -q -- '--remove-orphans'; then
             echo "ISOLATED_SCRIPT_UNSAFE_REMOVE_ORPHANS"
             exit 1
           fi
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q '.pkr_isolated_last.env'; then
+            echo "ISOLATED_SCRIPT_SINGLE_STATE_REGRESSION"
+            exit 1
+          fi
+
+          PKR_STOP="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/stop_isolated.sh")"
+          printf '%s\n' "$PKR_STOP" | grep -q 'multiple isolated instances are running'
+          printf '%s\n' "$PKR_STOP" | grep -q 'PKR_STOP_ALL_ISOLATED'
+          printf '%s\n' "$PKR_STOP" | grep -q 'scripts/list_isolated.sh'
+          printf '%s\n' "$PKR_STOP" | grep -q 'PKR_ISOLATED_INSTANCE_ID'
+
+          PKR_LIST="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/list_isolated.sh")"
+          printf '%s\n' "$PKR_LIST" | grep -q 'INSTANCE_ID'
+          printf '%s\n' "$PKR_LIST" | grep -q 'STATUS'
 
           PKR_COMPOSE="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:compose.isolated.yaml")"
           printf '%s\n' "$PKR_COMPOSE" | grep -q 'container_name: ${PKR_ISOLATED_CONTAINER}'
@@ -284,7 +298,7 @@ jobs:
           - 发现真实断点后记录现场，再回代码做最小修复
           EOF
 
-          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_macos_isolated_w4.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
+          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_macos_isolated_w4.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/list_isolated.sh"
 
           cat > "$PKG/KNOWLEDGE_PRODUCTION_W4_GOLDEN_README.txt" <<'EOF'
           Storage Knowledge Production W4 Real Golden
@@ -455,6 +469,7 @@ jobs:
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/list_isolated.sh"
 
           (
             cd "$PKG"
