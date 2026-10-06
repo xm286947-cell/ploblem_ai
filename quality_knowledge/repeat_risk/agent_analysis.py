@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 import hashlib
 import json
+import re
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -613,6 +614,37 @@ class RepeatAgentAnalysisService:
             "confidence": delivery.get("confidence"),
             "report_json_ref": relative(delivery.get("report_json")),
             "report_markdown_ref": relative(delivery.get("report_markdown")),
+        }
+
+    def read_report(
+        self,
+        query_id: str,
+        *,
+        format: str = "markdown",
+    ) -> dict[str, str]:
+        safe_query_id = _text(query_id)
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", safe_query_id):
+            raise ValueError("REPEAT_REPORT_QUERY_ID_INVALID")
+        normalized = _text(format).lower() or "markdown"
+        if normalized not in {"markdown", "json"}:
+            raise ValueError("REPEAT_REPORT_FORMAT_INVALID")
+        filename = "report.md" if normalized == "markdown" else "report.json"
+        path = (self.report_root / safe_query_id / filename).resolve()
+        try:
+            path.relative_to(self.report_root)
+        except ValueError as exc:
+            raise ValueError("REPEAT_REPORT_PATH_INVALID") from exc
+        if not path.is_file():
+            raise KeyError("REPEAT_REPORT_NOT_FOUND")
+        return {
+            "query_id": safe_query_id,
+            "format": normalized,
+            "content_type": (
+                "text/markdown; charset=utf-8"
+                if normalized == "markdown"
+                else "application/json; charset=utf-8"
+            ),
+            "content": path.read_text(encoding="utf-8"),
         }
 
     def analyze(
