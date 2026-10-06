@@ -224,38 +224,56 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
             source_count = len(source_items)
 
         # MVP readiness requires an actual indexed source -> Search hit ->
-        # resolvable Citation path.  Process health and an empty successful
-        # Search response are not sufficient for the Storage product contract.
-        probe_query = "storage public knowledge retrieval probe"
-        if source_items:
-            first = source_items[0] if isinstance(source_items[0], dict) else {}
-            probe_query = str(
-                first.get("title")
-                or first.get("source_id")
-                or probe_query
-            )[:300]
-        probe = _request(
-            mode,
-            "/search",
-            {"query": probe_query, "top_k": 1},
-            base_url=base_url,
-        )
-        hits = probe.get("hits") if isinstance(probe, dict) else None
-        search_ready = isinstance(hits, list) and bool(hits)
-        if search_ready:
+        # resolvable Citation path.  A source title is not guaranteed to appear
+        # verbatim inside parsed chunks, so probe several real source identities
+        # instead of letting the first catalog row create a false negative.
+        probe_candidates: list[str] = []
+        for raw_source in (source_items or [])[:5]:
+            if not isinstance(raw_source, dict):
+                continue
+            values = [
+                raw_source.get("title"),
+                raw_source.get("source_uri"),
+                raw_source.get("source_id"),
+            ]
+            query = " ".join(
+                str(value).strip()
+                for value in values
+                if isinstance(value, str) and value.strip()
+            )[:600]
+            if query and query not in probe_candidates:
+                probe_candidates.append(query)
+
+        for probe_query in probe_candidates:
+            probe = _request(
+                mode,
+                "/search",
+                {"query": probe_query, "top_k": 1},
+                base_url=base_url,
+            )
+            hits = probe.get("hits") if isinstance(probe, dict) else None
+            if not isinstance(hits, list) or not hits:
+                continue
+            search_ready = True
             first_hit = hits[0] if isinstance(hits[0], dict) else {}
             citation_id = str(first_hit.get("hit_id") or first_hit.get("citation_id") or "")
-            if citation_id:
-                citation_probe = _request(
-                    mode,
-                    "/citations/" + quote(citation_id, safe=""),
-                    base_url=base_url,
-                )
-                citation_ready = bool(
-                    isinstance(citation_probe, dict)
-                    and citation_probe.get("source_id")
-                    and citation_probe.get("locator") is not None
-                )
+            if not citation_id:
+                continue
+            citation_probe = _request(
+                mode,
+                "/citations/" + quote(citation_id, safe=""),
+                base_url=base_url,
+            )
+            citation_ready = bool(
+                isinstance(citation_probe, dict)
+                and citation_probe.get("source_id")
+                and citation_probe.get("source_revision")
+                and citation_probe.get("locator") is not None
+                and citation_probe.get("text") is not None
+            )
+            if citation_ready:
+                break
+
         retrieval_ready = connected and source_count > 0 and search_ready and citation_ready
     except HTTPException:
         retrieval_ready = False
