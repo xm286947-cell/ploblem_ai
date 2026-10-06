@@ -1,0 +1,28 @@
+name: Hardware R1 Reconciliation Hotfix Export
+
+on:
+  push:
+    branches:
+      - artifact/hardware-r1-reconciliation-hotfix-00fa9588
+
+jobs:
+  export-hotfix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and smoke hotfix
+        run: python scripts/export_hardware_r1_reconciliation_hotfix.py
+      - name: Upload hotfix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_R1_PUBLISH_RECONCILIATION_UI_HOTFIX_00fa9588
+          path: dist/hotfix/**
+          if-no-files-found: error
+          retention-days: 90
