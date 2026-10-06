@@ -1,8 +1,6 @@
 agent_id: major_issue.repeat_solution
 version: v1
 label: Major Issue Repeat Solution Analysis
-model_ref: qwen_prod
-
 prompt:
   ref: prompts/solution_analyzer.md
   version: M8.3-P1
@@ -28,3 +26,4 @@ metadata:
   analysis_stage: repeat_solution
   provider_response_shape: json_object
   what_how_boundary: RUNTIME_EXECUTION_ONLY
+  model_selection: ACTIVE_MODEL
