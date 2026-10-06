@@ -9,66 +9,66 @@
 <main class="hc-page" data-r1-workbench data-api="{{ hardware_workbench_api_prefix }}">
   <section class="hc-hero">
     <div>
-      <span class="hc-kicker">HARDWARE R1 · BATCH FIRST KNOWLEDGE PRODUCTION</span>
+      <span class="hc-kicker">硬件知识生产 · 导入、审核与发布</span>
       <h1>知识生产工作台</h1>
-      <p>Batch 只负责组织与操作；每个 Case 继续复用冻结的 Parse → Stage A → Stage B → Gate。REVIEW 不等于 Formal Publish。</p>
+      <p>Word 导入 → AI 分析 → 人工确认 → 发布正式知识 → 生成检索数据 → 搜索使用。</p>
     </div>
     <div class="hc-workbench-actions">
       <label class="hc-button primary">
         批量上传 Word
         <input type="file" accept=".docx" multiple hidden data-batch-files>
       </label>
-      <button class="hc-button" type="button" data-run-batch disabled>Run / Resume Batch</button>
-      <button class="hc-button" type="button" data-retry-failed disabled>Retry Failed Only</button>
+      <button class="hc-button" type="button" data-run-batch disabled>开始 / 继续处理</button>
+      <button class="hc-button" type="button" data-retry-failed disabled>仅重试失败项</button>
     </div>
   </section>
 
   <section class="hc-card">
     <div class="hc-card-head">
       <div>
-        <h2>Batch Queue</h2>
+        <h2>本次导入任务</h2>
         <p data-batch-ref>尚未选择 Batch。</p>
       </div>
       <div class="hc-workbench-filters">
-        <select data-batch-history aria-label="Batch History">
-          <option value="">Batch History</option>
+        <select data-batch-history aria-label="历史导入记录">
+          <option value="">历史导入记录</option>
         </select>
         <select data-result-filter aria-label="Result Filter">
           <option value="">全部状态</option>
-          <option value="QUEUED">QUEUED</option>
-          <option value="RUNNING">RUNNING</option>
-          <option value="CANDIDATE_READY">CANDIDATE_READY</option>
-          <option value="REVIEW">REVIEW</option>
-          <option value="FAILED">FAILED</option>
-          <option value="RUNTIME_BLOCKED">RUNTIME_BLOCKED</option>
-          <option value="DEPENDENCY_BLOCKED">DEPENDENCY_BLOCKED</option>
+          <option value="QUEUED">待处理</option>
+          <option value="RUNNING">处理中</option>
+          <option value="CANDIDATE_READY">待发布</option>
+          <option value="REVIEW">待人工确认</option>
+          <option value="FAILED">处理失败</option>
+          <option value="RUNTIME_BLOCKED">运行环境阻断</option>
+          <option value="DEPENDENCY_BLOCKED">依赖阻断</option>
         </select>
       </div>
     </div>
     <div class="hc-workbench-summary" data-batch-summary>
-      <span><b>TOTAL</b><strong>0</strong></span>
-      <span><b>QUEUED</b><strong>0</strong></span>
-      <span><b>RUNNING</b><strong>0</strong></span>
-      <span><b>CANDIDATE READY</b><strong>0</strong></span>
-      <span><b>REVIEW</b><strong>0</strong></span>
-      <span><b>FAILED</b><strong>0</strong></span>
+      <span><b>总计</b><strong>0</strong></span>
+      <span><b>待处理</b><strong>0</strong></span>
+      <span><b>处理中</b><strong>0</strong></span>
+      <span><b>待发布</b><strong>0</strong></span>
+      <span><b>待人工确认</b><strong>0</strong></span>
+      <span><b>失败</b><strong>0</strong></span>
     </div>
-    <p class="hc-workbench-message" role="status" data-workbench-message>正在载入 Batch History…</p>
+    <p class="hc-workbench-message" role="status" data-workbench-message>正在载入历史导入记录…</p>
     <div class="hc-workbench-table-wrap">
       <table class="hc-workbench-table">
         <thead>
           <tr>
-            <th>Case / Source File</th>
-            <th>Parse</th>
-            <th>Stage A</th>
-            <th>Stage B</th>
-            <th>Gate</th>
-            <th>Result</th>
-            <th>Error</th>
-            <th>Provider Calls</th>
-            <th>Duration</th>
-            <th>Last Updated</th>
-            <th>Action</th>
+            <th>案例 / 源文件</th>
+            <th>文档解析</th>
+            <th>问题事实提取</th>
+            <th>工程知识生成</th>
+            <th>证据校验</th>
+            <th>处理结果</th>
+            <th>错误原因</th>
+            <th>AI 调用</th>
+            <th>耗时</th>
+            <th>最后更新</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody data-batch-items>
@@ -81,34 +81,64 @@
   <section class="hc-card" data-case-detail hidden>
     <div class="hc-card-head">
       <div>
-        <h2>Case Detail</h2>
+        <h2>案例处理详情</h2>
         <p data-case-heading>—</p>
       </div>
-      <button class="hc-button" type="button" data-return-batch>Return to Batch</button>
+      <button class="hc-button" type="button" data-return-batch>返回导入列表</button>
     </div>
     <div class="hc-workbench-detail">
+      <section class="hc-next-step" data-next-step>
+        <div>
+          <span class="hc-kicker">当前流程</span>
+          <h3 data-next-step-title>正在判断下一步…</h3>
+          <p data-next-step-body>系统会根据当前处理状态提示下一步操作。</p>
+        </div>
+        <div class="hc-knowledge-flow" data-knowledge-flow></div>
+      </section>
       <div class="hc-workbench-detail-grid">
-        <div><b>Batch Ref</b><span data-detail-batch>—</span></div>
-        <div><b>Current Status</b><span data-detail-status>—</span></div>
-        <div><b>Failed Stage</b><span data-detail-failed-stage>—</span></div>
-        <div><b>Error Code</b><span data-detail-error-code>—</span></div>
-        <div><b>Provider Calls</b><span data-detail-provider-calls>—</span></div>
-        <div><b>Duration</b><span data-detail-duration>—</span></div>
-        <div><b>Run Ref</b><span data-detail-run-ref>—</span></div>
+        <div><b>导入批次</b><span data-detail-batch>—</span></div>
+        <div><b>当前状态</b><span data-detail-status>—</span></div>
+        <div><b>失败环节</b><span data-detail-failed-stage>—</span></div>
+        <div><b>错误代码</b><span data-detail-error-code>—</span></div>
+        <div><b>AI 调用次数</b><span data-detail-provider-calls>—</span></div>
+        <div><b>处理耗时</b><span data-detail-duration>—</span></div>
+        <div><b>运行编号</b><span data-detail-run-ref>—</span></div>
       </div>
       <div class="hc-workbench-stage-strip" data-detail-stages></div>
       <div class="hc-review-required" data-review-required hidden><h3>需要人工确认</h3><p data-review-summary></p><div data-review-conflicts></div></div>\n      <p class="hc-workbench-message" data-detail-failure-hint hidden></p>
       <p class="hc-workbench-message" role="status" aria-live="polite" data-item-action-status hidden></p>
       <div class="hc-workbench-detail-actions">
-        <button class="hc-button" type="button" data-item-run>Run / Resume</button>
-        <button class="hc-button" type="button" data-item-retry>Retry Failed Stage</button>
-        <button class="hc-button" type="button" data-open-debug>Advanced Debug</button>
+        <button class="hc-button" type="button" data-item-run>继续处理</button>
+        <button class="hc-button" type="button" data-item-retry>重试失败环节</button>
+        <button class="hc-button" type="button" data-open-debug>诊断信息（高级）</button>
       </div>
+      <section class="hc-card hc-promotion-card" data-e2e-promotion hidden>
+        <div class="hc-card-head">
+          <div>
+            <h3>正式知识发布</h3>
+            <p>把已确认的知识草稿发布为正式知识，再生成检索数据。每一步都需要人工确认。</p>
+          </div>
+        </div>
+        <p class="hc-promotion-status" role="status" data-promotion-status>正在读取发布状态…</p>
+        <div class="hc-workbench-detail-grid hc-promotion-meta">
+          <label>审核人 <input type="text" data-formal-reviewer value="E2E_MAINTAINER"></label>
+          <label>审核说明 <input type="text" data-formal-review-comment placeholder="填写正式审核说明"></label>
+        </div>
+        <div class="hc-promotion-steps">
+          <button class="hc-button" type="button" data-promotion-precheck>1. 发布前检查</button>
+          <button class="hc-button" type="button" data-promotion-intake>2. 提交正式审核</button>
+          <button class="hc-button" type="button" data-promotion-review>3. 确认审核通过</button>
+          <button class="hc-button primary" type="button" data-promotion-publish>4. 发布正式知识</button>
+          <button class="hc-button" type="button" data-promotion-verify>5. 验证发布结果</button>
+          <button class="hc-button" type="button" data-project-consumption>6. 生成检索数据</button>
+          <a class="hc-button secondary" href="/p0/hardware-cases/knowledge?e2e=1">进入正式知识检索</a>
+        </div>
+      </section>
       <section class="hc-card" data-human-review>
         <div class="hc-card-head">
           <div>
-            <h3>人工知识审核</h3>
-            <p>复用成熟 Review 交互：AI Candidate 与 Evidence 对照后，可人工修正、确认、暂缓或拒绝。Source / Evidence 身份不可编辑。</p>
+            <h3>知识人工确认</h3>
+            <p>对照 AI 识别结果和原文证据，可人工修正、确认、暂缓或拒绝。原始资料和证据身份不可编辑。</p>
           </div>
           <span class="hc-status" data-human-review-status>—</span>
         </div>
@@ -117,13 +147,13 @@
             <div data-human-review-fields></div>
           </section>
           <aside class="hc-review-evidence">
-            <h3>Evidence 对照</h3>
+            <h3>原文证据对照</h3>
             <div data-human-review-evidence></div>
           </aside>
         </div>
         <div class="hc-workbench-detail-grid">
-          <label>Reviewer <input type="text" data-human-reviewer value="E2E_MAINTAINER"></label>
-          <label>Review Reason <input type="text" data-human-review-reason placeholder="说明确认、修改、暂缓或拒绝原因"></label>
+          <label>审核人 <input type="text" data-human-reviewer value="E2E_MAINTAINER"></label>
+          <label>审核说明 <input type="text" data-human-review-reason placeholder="说明确认、修改、暂缓或拒绝原因"></label>
         </div>
         <div class="hc-workbench-detail-actions">
           <button class="hc-button primary" type="button" data-human-review-action="CONFIRM">确认 / 保存修正</button>
@@ -132,48 +162,36 @@
         </div>
         <div class="hc-workbench-message" data-human-review-message hidden></div>
         <details>
-          <summary>Review Audit</summary>
+          <summary>审核记录</summary>
           <div data-human-review-history></div>
         </details>
       </section>
-      <h3>Candidate Preview</h3>
-      <pre class="hc-workbench-json" data-candidate-preview>—</pre>
-      <h3>Evidence / Gate Summary</h3>
-      <pre class="hc-workbench-json" data-evidence-summary>—</pre>
-      <section class="hc-card" data-e2e-promotion hidden>
-        <div class="hc-card-head"><div><h3>Durable Candidate → Formal Knowledge</h3><p>每个远端写入都需要人工逐步确认；Publish 仅允许配置为 NON_PROD 的 Unified Knowledge。</p></div></div>
-        <p role="status" data-promotion-status>读取 Promotion 状态…</p>
-        <label>Reviewer <input type="text" data-formal-reviewer value="E2E_MAINTAINER"></label>
-        <label>Review Comment <input type="text" data-formal-review-comment placeholder="审核说明"></label>
-        <div class="hc-workbench-actions">
-          <button class="hc-button" type="button" data-promotion-precheck>Precheck</button>
-          <button class="hc-button" type="button" data-promotion-intake>Intake Candidate</button>
-          <button class="hc-button" type="button" data-promotion-review>人工 Formal Review</button>
-          <button class="hc-button primary" type="button" data-promotion-publish>人工确认 Publish</button>
-          <button class="hc-button" type="button" data-promotion-verify>Verify + Query Back</button>
-          <button class="hc-button" type="button" data-project-consumption>更新本地 Consumption Projection</button>
-          <a class="hc-button secondary" href="/p0/hardware-cases/knowledge?e2e=1">打开 Knowledge Search</a>
-        </div>
-      </section>
+      <details class="hc-technical-details">
+        <summary>查看技术详情（高级）</summary>
+        <h3>待发布知识原始数据</h3>
+        <pre class="hc-workbench-json" data-candidate-preview>—</pre>
+        <h3>证据与校验原始数据</h3>
+        <pre class="hc-workbench-json" data-evidence-summary>—</pre>
+      </details>
     </div>
   </section>
 
   <section class="hc-card" data-advanced-debug hidden>
     <div class="hc-card-head">
       <div>
-        <h2>Advanced Debug</h2>
-        <p>专家诊断入口。只读诊断为默认；Force Full Run 会绕过 A/B Cache，成本更高。</p>
+        <h2>诊断信息（高级）</h2>
+        <p>仅供研发排障使用。普通用户无需操作；“强制完整重跑”会绕过已有缓存，成本更高。</p>
       </div>
       <button class="hc-button" type="button" data-close-debug>关闭 Debug</button>
     </div>
     <div class="hc-workbench-detail">
       <div class="hc-source-warning">
-        Force Full Run 仅用于高级维护诊断。失败不得覆盖 Last Good Cache。
+        “强制完整重跑”仅用于高级诊断。失败不得覆盖上一次成功结果。
       </div>
-      <button class="hc-button" type="button" data-force-item>Force Full Run</button>
+      <button class="hc-button" type="button" data-force-item>强制完整重跑</button>
       <pre class="hc-workbench-json" data-debug-json>—</pre>
     </div>
   </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.5"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.6"></script>{% endblock %}
