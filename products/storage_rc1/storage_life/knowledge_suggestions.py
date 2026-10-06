@@ -27,8 +27,8 @@ class SourceRef(BaseModel):
     revision: str = Field(min_length=1)
     locator: dict[str, Any]
     citation_id: str = Field(min_length=1)
-    source_uri: str | None = None
-    immutable_identity: str | None = None
+    source_uri: str | None = Field(default=None, max_length=2048)
+    immutable_identity: str | None = Field(default=None, max_length=256)
 
 
 class PublicKnowledgeSuggestionV1(BaseModel):
