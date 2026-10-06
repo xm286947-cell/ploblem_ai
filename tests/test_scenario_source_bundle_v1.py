@@ -391,11 +391,32 @@ def test_bundle_bridge_review_protection_is_scoped_to_bundle_revision(tmp_path):
     assessment = _add(repo, "SW-OPS", "ITR2026100011", {
         "问题信息_问题描述": "Bundle lineage", "问题信息_产品型号": "P-SW",
     })
-    bundle = build_scenario_source_bundle_v1(
-        _snapshot(assessment, []), evidence_repository=repo
+    resolution_v1 = _add(repo, "ITR-CS", "ITR2026100011CS-V1", {
+        "问题信息_问题原因定位": "旧来源根因",
+    })
+    resolution_v2 = _add(repo, "ITR-CS", "ITR2026100011CS-V2", {
+        "问题信息_问题原因定位": "新来源根因",
+    })
+    snapshot_v1 = _snapshot(
+        assessment,
+        [_ref("RESOLUTION", resolution_v1)],
+        effective_analysis={},
+        leakage_analysis={},
     )
+    snapshot_v2 = _snapshot(
+        assessment,
+        [_ref("RESOLUTION", resolution_v2)],
+        effective_analysis={},
+        leakage_analysis={},
+    )
+    bundle = build_scenario_source_bundle_v1(snapshot_v1, evidence_repository=repo)
+    revised = build_scenario_source_bundle_v1(snapshot_v2, evidence_repository=repo)
+    assert revised["bundle_id"] == bundle["bundle_id"]
+    assert revised["bundle_revision"] != bundle["bundle_revision"]
+
     bundle_store = ScenarioSourceBundleV1SnapshotStore(repo.db_path)
     bundle_store.save(bundle)
+    bundle_store.save(revised)
 
     class Repository:
         def __init__(self):
@@ -440,15 +461,14 @@ def test_bundle_bridge_review_protection_is_scoped_to_bundle_revision(tmp_path):
     with pytest.raises(ValueError, match="同一 Bundle 修订"):
         ReverseQualityBundleBridge(same_service, bundle_store).analyse(bundle)
 
-    revised = json.loads(json.dumps(bundle, ensure_ascii=False))
-    revised["bundle_revision"] = "BUNDLE-REVISION-2"
-    bundle_store.save(revised)
     revised_service = MatureService(previous)
     result = ReverseQualityBundleBridge(revised_service, bundle_store).analyse(revised)
 
-    assert result["input"]["bundle_provenance"]["bundle_revision"] == "BUNDLE-REVISION-2"
+    assert result["input"]["bundle_provenance"]["bundle_id"] == bundle["bundle_id"]
+    assert result["input"]["bundle_provenance"]["bundle_revision"] == revised["bundle_revision"]
     assert len(revised_service.repository.started) == 1
-    assert revised_service.repository.started[0]["input_payload"]["bundle_provenance"]["bundle_revision"] == "BUNDLE-REVISION-2"
+    assert revised_service.repository.started[0]["input_payload"]["bundle_provenance"]["bundle_revision"] == revised["bundle_revision"]
+    assert previous["bundle_provenance"]["bundle_revision"] == bundle["bundle_revision"]
 
 
 def test_bundle_requires_a_frozen_snapshot_and_selected_assessment_locator(tmp_path):
