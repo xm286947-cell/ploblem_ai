@@ -5,17 +5,17 @@ HARDWARE CASE PRODUCT TEST FULL V0.1
 
 【第一次使用】
 
-1. 双击：
-   INIT_LOCAL_CONFIG.bat
-
-2. 编辑：
+1. 首次启动会自动创建安全的本地配置模板。模板使用 loopback 地址和占位模型名；开始 AI 任务前请编辑：
    config\runtime\model.local.yaml
 
    至少配置：
    - base_url
    - model
-   - api_key_env（推荐）
-     或本机临时 api_key（禁止重新上传/提交）
+   - api_key_env（如 Provider 需要密钥）
+
+   密钥只保存在环境变量中，不要写入 ZIP 或提交。
+
+2. 如需单独初始化配置，可双击 INIT_LOCAL_CONFIG.bat。
 
 3. 检查环境：
    CHECK_ENV.bat

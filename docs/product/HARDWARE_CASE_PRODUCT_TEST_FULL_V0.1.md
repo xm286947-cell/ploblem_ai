@@ -71,13 +71,19 @@ P07 manages the two ACTIVE base trees through the frozen Excel Import workflow.
 
 ## First-time setup
 
-1. Run:
+The first product start automatically copies the safe, non-secret bootstrap
+configuration when `config/runtime/model.local.yaml` is absent. This validates
+the Runtime configuration contract without contacting a Provider. Configure a
+company-approved endpoint and model before running AI tasks; keep credentials
+in environment variables.
+
+To create the same local files without starting the product, run:
 
 ```bat
 INIT_LOCAL_CONFIG.bat
 ```
 
-2. Edit:
+Then edit:
 
 `config\runtime\model.local.yaml`
 

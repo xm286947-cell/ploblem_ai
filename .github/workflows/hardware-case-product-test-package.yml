@@ -6,6 +6,8 @@ on:
       - "scripts/build_hardware_case_product_test_package.py"
       - "scripts/hardware_case_package_closure_gate.py"
       - "scripts/hardware_case_product_test_smoke.py"
+      - "scripts/hardware_case_complete_product_smoke.py"
+      - "scripts/hardware_case_fresh_extract_gate.py"
       - "run_hardware_case_product_test.bat"
       - "run_hardware_case_product_test.sh"
       - "INIT_LOCAL_CONFIG.bat"
@@ -30,6 +32,8 @@ on:
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
+      - "repositories/__init__.py"
+      - "repositories/json_repository.py"
       - "services/hardware_*"
       - "services/hardware_asset_migrations/**"
       - "schema/hardware_*"
@@ -40,6 +44,7 @@ on:
       - "scripts/build_hardware_case_product_test_package.py"
       - "scripts/hardware_case_package_closure_gate.py"
       - "scripts/hardware_case_product_test_smoke.py"
+      - "scripts/hardware_case_complete_product_smoke.py"
       - "scripts/hardware_case_fresh_extract_gate.py"
       - "scripts/hardware_case_precheck.py"
       - "scripts/hardware_case_web_start.py"
@@ -66,6 +71,8 @@ on:
       - ".github/workflows/hardware-case-product-test-package.yml"
       - "quality_knowledge/**"
       - "repositories/hardware_*"
+      - "repositories/__init__.py"
+      - "repositories/json_repository.py"
       - "services/hardware_*"
       - "services/hardware_asset_migrations/**"
       - "schema/hardware_*"
@@ -101,6 +108,10 @@ jobs:
       - name: Run package closure regression
         run: python -m pytest -q --noconftest tests/test_hardware_case_product_package_closure.py
 
+      - name: Run fresh-extract startup and complete product smoke
+        working-directory: dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
+        run: python scripts/hardware_case_fresh_extract_gate.py
+
       - name: Verify POSIX launcher modes from fresh extract
         run: python scripts/hardware_case_package_launcher_gate.py
 
@@ -126,6 +137,11 @@ jobs:
           assert manifest["system_endpoints"]["readiness"] == "/ready"
           assert manifest["release_semantics"]["contract_version_independent_from_product_version"] is True
           assert manifest["release_semantics"]["fresh_extract_gate_required"] is True
+          assert manifest["config_lifecycle"]["bootstrap"] == "INIT_LOCAL_CONFIG_COPIES_LOOPBACK_NON_SECRET_TEMPLATE"
+          assert manifest["config_lifecycle"]["bootstrap_state"] == "CONFIGURABLE_READY_PROVIDER_REQUIRES_COMPANY_CONFIGURATION"
+          assert manifest["config_lifecycle"]["ready_semantics"] == "CONFIG_VALIDATED_PROVIDER_CONNECTIVITY_NOT_PROBED"
+          assert manifest["config_lifecycle"]["secret_in_package"] is False
+          assert manifest["dependency_closure"]["status"] == "PASS"
           assert manifest["frontend_gate"] == "P01_P07_FRONTEND_GATE_PASS"
           assert manifest["runtime"]["agent_id"] == "hardware_case.structure"
           assert manifest["runtime"]["provider_ownership"] == "UNIFIED_RUNTIME"
@@ -210,6 +226,8 @@ jobs:
           assert "prompts/runtime/hardware_case/r1_case_extract_v1.md" in paths
           assert "prompts/runtime/hardware_case/r1_reuse_derive_v1.md" in paths
           assert "services/hardware_case_runtime_adapter.py" in paths
+          assert "repositories/json_repository.py" in paths
+          assert "repositories/json_repository.py" in json.loads((stage / "PACKAGE_DEPENDENCY_CLOSURE.json").read_text(encoding="utf-8"))["files"]
           assert "services/hardware_case_markdown_agent.py" in paths
           assert "services/hardware_case_r1_runtime.py" in paths
           assert "services/hardware_case_r1_preview_store.py" in paths

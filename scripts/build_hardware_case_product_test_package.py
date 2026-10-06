@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -108,6 +109,8 @@ CLOSURE_ROOTS = [
     "scripts/hardware_case_precheck.py",
     "scripts/hardware_case_mvp_smoke.py",
     "scripts/hardware_case_product_test_smoke.py",
+    "scripts/hardware_case_complete_product_smoke.py",
+    "scripts/hardware_case_fresh_extract_gate.py",
     "quality_knowledge/web/p0_app.py",
     "services/hardware_case_runtime_adapter.py",
 ]
@@ -254,6 +257,27 @@ def _direct_imports(path: Path, root: Path) -> list[tuple[str, int, str]]:
                 import_module = alias.name if not module and node.level else module
                 imported = f"{module}.{alias.name}" if module else alias.name
                 imports.append((import_module, node.level, imported))
+    # A package __getattr__ can satisfy ``from package import ExportedName``
+    # by importing a sibling module at attribute access time. Include imports
+    # nested in package-level __getattr__ while keeping unrelated function
+    # imports (for example disabled p0_app domains) out of this product profile.
+    if path.name == "__init__.py":
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name != "__getattr__":
+                continue
+            for child in ast.walk(node):
+                if isinstance(child, ast.Import):
+                    imports.extend(
+                        (alias.name, 0, alias.name) for alias in child.names
+                    )
+                elif isinstance(child, ast.ImportFrom):
+                    module = child.module or ""
+                    for alias in child.names:
+                        import_module = alias.name if not module and child.level else module
+                        imported = f"{module}.{alias.name}" if module else alias.name
+                        imports.append((import_module, child.level, imported))
     return imports
 
 
@@ -361,7 +385,6 @@ def security_assertions(files: list[dict[str, object]]) -> None:
         "quality_knowledge/web/p1_pages.py",
         "services/historical_case_contract.py",
         "services/knowledge_service.py",
-        "repositories/json_repository.py",
         "main.py",
     }
     for entry in files:
@@ -376,6 +399,29 @@ def security_assertions(files: list[dict[str, object]]) -> None:
             forbidden.append(path_text)
     if forbidden:
         raise SystemExit("FORBIDDEN_PACKAGE_FILES=" + ",".join(sorted(set(forbidden))))
+
+    secret_patterns = (
+        re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+        re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
+        re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+        re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    )
+    absolute_path_markers = (
+        "/Users/",
+        "/home/",
+        "C:\\Users\\",
+        "C:/Users/",
+    )
+    for entry in files:
+        path = STAGE / str(entry["path"])
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if any(pattern.search(content) for pattern in secret_patterns):
+            raise SystemExit("SECRET_SCAN_FAIL=" + str(entry["path"]))
+        if any(marker in content for marker in absolute_path_markers):
+            raise SystemExit("LOCAL_ABSOLUTE_PATH_SCAN_FAIL=" + str(entry["path"]))
 
 
 def main() -> int:
@@ -409,6 +455,8 @@ def main() -> int:
         path.chmod(path.stat().st_mode | 0o111)
 
     closure = copy_dependency_closure()
+    if "repositories/json_repository.py" not in closure["files"]:
+        raise SystemExit("JSON_REPOSITORY_MISSING_FROM_DEPENDENCY_CLOSURE")
 
     # Empty company-local working folders are intentionally created in the
     # package. Real data is supplied only after extraction inside the company.
@@ -493,6 +541,9 @@ def main() -> int:
             "precedence": ["ENV_SECRET_REFERENCE", "LOCAL_CONFIG", "PACKAGED_NON_SECRET_DEFAULT"],
             "secret_in_package": False,
             "missing_required_config": "FAIL_CLOSED",
+            "bootstrap": "INIT_LOCAL_CONFIG_COPIES_LOOPBACK_NON_SECRET_TEMPLATE",
+            "bootstrap_state": "CONFIGURABLE_READY_PROVIDER_REQUIRES_COMPANY_CONFIGURATION",
+            "ready_semantics": "CONFIG_VALIDATED_PROVIDER_CONNECTIVITY_NOT_PROBED",
             "windows_macos_semantics": "SAME",
         },
         "data_reliability": {
@@ -710,6 +761,13 @@ def main() -> int:
     print(f"FILES={len(files) + 1}")
     print("PACKAGE_STATUS=READY_FOR_INTERNAL_TEST")
     print("RELEASE_STATUS=TEST_PACKAGE_NOT_RELEASE")
+    print("JSON_REPOSITORY_PRESENT=YES")
+    print("RECURSIVE_LOCAL_IMPORT_CLOSURE=PASS")
+    print("UNRESOLVED_LOCAL_IMPORTS=0")
+    print("DEV_WORKSPACE_DEPENDENCY=NO")
+    print("MANUAL_FILE_INJECTION=NO")
+    print("SECRET_SCAN=PASS")
+    print("LOCAL_ABSOLUTE_PATH_SCAN=PASS")
     return 0
 
 

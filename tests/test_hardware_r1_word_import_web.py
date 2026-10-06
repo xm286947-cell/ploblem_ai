@@ -7,6 +7,7 @@ from zipfile import ZipFile
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.p0_app import create_p0_app
+from services.hardware_asset_repository import CandidateAssetRepository
 
 
 MAINTAINER = {"X-Hardware-Case-Role": "MAINTAINER"}
@@ -39,10 +40,12 @@ def _docx(path: Path) -> bytes:
 
 
 def _client(tmp_path: Path) -> TestClient:
+    hardware_db = tmp_path / "hardware.db"
+    CandidateAssetRepository(hardware_db.with_name("hardware_asset.db")).initialize()
     return TestClient(
         create_p0_app(
             tmp_path / "quality.db",
-            hardware_case_db_path=tmp_path / "hardware.db",
+            hardware_case_db_path=hardware_db,
             hardware_tree_upload_dir=tmp_path / "tree_uploads",
             hardware_case_source_root=tmp_path / "sources",
             enabled_domains={"HARDWARE_CASE"},
@@ -172,10 +175,12 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
             "material_links": [],
         }
 
+    hardware_db = tmp_path / "hardware.db"
+    CandidateAssetRepository(hardware_db.with_name("hardware_asset.db")).initialize()
     client = TestClient(
         create_p0_app(
             tmp_path / "quality.db",
-            hardware_case_db_path=tmp_path / "hardware.db",
+            hardware_case_db_path=hardware_db,
             hardware_tree_upload_dir=tmp_path / "tree_uploads",
             hardware_case_source_root=tmp_path / "sources",
             hardware_case_r1_structurer=structurer,
@@ -318,4 +323,3 @@ def test_v14_agent_execution_mode_query_contract_is_fail_closed(tmp_path: Path):
     )
     assert invalid.status_code == 400
     assert invalid.json()["detail"] == "RETRY_FAILED_STAGE_INVALID"
-
