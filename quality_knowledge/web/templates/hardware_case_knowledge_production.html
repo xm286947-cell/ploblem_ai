@@ -120,6 +120,11 @@
           </div>
         </div>
         <p class="hc-promotion-status" role="status" data-promotion-status>正在读取发布状态…</p>
+        <div class="hc-source-warning" data-promotion-reconciliation hidden>
+          <strong>需要处理发布对账</strong>
+          <p data-promotion-reconciliation-detail>上一次发布请求的远端结果无法确认。请先完成发布对账，不要重复点击“发布正式知识”。</p>
+          <button class="hc-button" type="button" data-promotion-reconcile>处理发布对账</button>
+        </div>
         <div class="hc-workbench-detail-grid hc-promotion-meta">
           <label>审核人 <input type="text" data-formal-reviewer value="E2E_MAINTAINER"></label>
           <label>审核说明 <input type="text" data-formal-review-comment placeholder="填写正式审核说明"></label>
@@ -194,4 +199,4 @@
   </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.6"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.7"></script>{% endblock %}
