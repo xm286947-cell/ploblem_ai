@@ -734,6 +734,73 @@ def _count_calls(transport, method, path):
     return sum(call["method"] == method and call["path"] == path for call in transport.calls)
 
 
+def _seed_unrelated_queryable_release(
+    promotion,
+    source_store,
+    knowledge_root: Path,
+) -> tuple[ManagedNonProdReleaseController, str]:
+    """Create an immutable release that predates the A0152 publish."""
+    other_source = source_store.register_active_bytes(
+        "A0207", "A0207-release-seed.docx", b"unrelated release seed"
+    )
+    other_golden = golden("A0207", other_source["source_id"], "B0007")
+    adapter = promotion.bridge.adapter
+    other_evidence = other_golden["evidence"][0]
+    other_evidence_id = promotion.bridge.evidence_id(
+        "A0207", other_source["source_id"], other_evidence["block_id"]
+    )
+    adapter.intake_evidence(
+        case_id="A0207",
+        source_metadata=other_source,
+        evidence={
+            "evidence_id": other_evidence_id,
+            "source_ref": other_source["source_ref"],
+            "evidence_type": "PARAGRAPH",
+            "locator": {
+                **other_evidence["source_locator"],
+                "block_id": other_evidence["block_id"],
+            },
+            "excerpt_or_caption": other_evidence["text"],
+        },
+        revision=1,
+        source_revision=other_source["source_id"],
+    )
+    adapter.intake_candidate(
+        case_id="A0207",
+        source_document_id=other_source["source_id"],
+        source_ref=other_source["source_ref"],
+        structured_content=other_golden,
+        evidence_refs=[other_evidence_id],
+        revision=1,
+        source_version=other_source["source_id"],
+    )
+    adapter.review_candidate(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        state="CONFIRMED",
+        reviewer="release-seed-reviewer",
+        review_time=NOW,
+        confirmed_content=other_golden,
+        revision=1,
+    )
+    adapter.publish(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        hardware_publish_gate={"passed": True},
+        evidence_refs=[other_evidence_id],
+        publisher="release-seed-publisher",
+        published_at=NOW,
+        revision=1,
+    )
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        adapter,
+        release_prefix=RELEASE,
+    )
+    release = controller.ensure_queryable_release()
+    version = str(release["release_version"])
+    assert version.startswith(RELEASE + "-R")
+    return controller, version
+
+
 def test_remote_write_is_journaled_before_send_and_remote_key_is_idempotent(tmp_path, monkeypatch):
     promotion, _, _, _, _, transport, _ = setup_case(
         tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
@@ -1109,12 +1176,12 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     original_transition = promotion._transition
     original_add_reference = promotion.bridge.add_source_reference
     original_journal_transition = promotion._journal_transition
-    controller = ManagedNonProdReleaseController(
-        JsonArtifactRepository(knowledge_root),
-        promotion.bridge.adapter,
-        release_prefix=RELEASE,
+    controller, stale_release_version = _seed_unrelated_queryable_release(
+        promotion, source_store, knowledge_root
     )
-    assert controller.status()["release_version"] is None
+    publish_calls_before_target = _count_calls(
+        transport, "POST", "/v1/knowledge/publish"
+    )
     publish_operation_id = promotion._operation_id(
         intake["asset_candidate_id"], "PUBLISH", 1
     )
@@ -1158,6 +1225,7 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     )
     refreshed_release_version = str(controller.status()["release_version"])
     assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
     repaired = restarted.get_item("HWI-RECOVERY")
     assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
@@ -1170,7 +1238,10 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert journal["operation_state"] == "COMPLETED"
     refs = source_store.formal_knowledge_references("A0152")
     assert any(item["knowledge_id"] == repaired["knowledge_id"] for item in refs)
-    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
     assert restarted.recovery_diagnostics()["pending_remote_reconciliation_count"] == 0
     assert source["source_id"] == promotion.assets.get_candidate(intake["asset_candidate_id"])["source_id"]
 
@@ -1178,17 +1249,17 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
 def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not_republish(
     tmp_path, monkeypatch
 ):
-    promotion, workbench, _, _, knowledge_root, transport, candidate = setup_case(
+    promotion, workbench, source_store, _, knowledge_root, transport, candidate = setup_case(
         tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
     )
     intake = _prepare_reviewed_promotion(promotion, candidate)
     original_transition = promotion._transition
-    controller = ManagedNonProdReleaseController(
-        JsonArtifactRepository(knowledge_root),
-        promotion.bridge.adapter,
-        release_prefix=RELEASE,
+    controller, stale_release_version = _seed_unrelated_queryable_release(
+        promotion, source_store, knowledge_root
     )
-    assert controller.status()["release_version"] is None
+    publish_calls_before_target = _count_calls(
+        transport, "POST", "/v1/knowledge/publish"
+    )
 
     def crash_after_remote_publish(item, asset, record, target, **kwargs):
         if target == "PUBLISHED_PENDING_QUERY_BACK":
@@ -1208,7 +1279,10 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
         "OUTCOME_UNKNOWN",
         "RECONCILING",
     }
-    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
 
     app = FastAPI()
     app.include_router(
@@ -1243,9 +1317,13 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     assert reconcile.status_code == 200, reconcile.text
     refreshed_release_version = str(controller.status()["release_version"])
     assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
     assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert reconcile.json()["reconciled"] is True
-    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
 
 
 def test_p0_app_starts_and_reconciles_pending_publish_without_republishing(
