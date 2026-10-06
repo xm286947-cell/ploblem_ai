@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -q pytest pydantic
+      - run: python -m pip install -q pytest -r public_knowledge_rag/requirements-runtime.txt pydantic
       - name: Verify publisher provenance
         env:
           PYTHONPATH: ${{ github.workspace }}
