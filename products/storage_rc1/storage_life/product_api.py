@@ -584,7 +584,7 @@ def _formal_knowledge(
     )
     try:
         structured = consumer.query(
-            query,
+            "",
             device_type=device_type,
             top_k=top_k,
             canonical_parameter=canonical_name,
