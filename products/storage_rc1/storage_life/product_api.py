@@ -553,6 +553,7 @@ def _formal_knowledge(
     *,
     context: str = "",
     top_k: int = 3,
+    scenario_consumer: str = "",
 ) -> dict[str, Any]:
     consumer = KnowledgeReleaseConsumer.current()
     status = consumer.status()
@@ -570,11 +571,23 @@ def _formal_knowledge(
         if str(item or "").strip()
     )
     try:
-        result = consumer.query(
+        structured = consumer.query(
             query,
             device_type=device_type,
             top_k=top_k,
+            canonical_parameter=canonical_name,
+            scenario_consumer=scenario_consumer,
         )
+        if structured.get("results"):
+            result = structured
+        else:
+            # Compatibility bridge for older Knowledge Releases that predate
+            # storage-lifetime-knowledge/v1 reviewed semantic metadata.
+            result = consumer.query(
+                query,
+                device_type=device_type,
+                top_k=top_k,
+            )
     except Exception as exc:
         return {
             "status": "UNKNOWN",
@@ -596,6 +609,7 @@ def _formal_knowledge(
         "knowledge_release_version": result.get("knowledge_release_version"),
         "results": rows,
         "evidence_refs": evidence_refs,
+        "selection_mode": result.get("selection_mode", "TEXT_AND_DEVICE"),
     }
 
 
@@ -638,6 +652,7 @@ def device_slots(device_id: str) -> dict[str, Any]:
                 field.get("parameter_name") or key,
                 device["device_type"],
                 context="engineering meaning diagnostic lifetime",
+                scenario_consumer="S4" if is_diagnostic else "",
             )
             if is_diagnostic or review_status == "CONFIRMED"
             else {
@@ -2648,6 +2663,7 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
                 parameter_name,
                 details[0]["device"]["device_type"],
                 context="comparison difference engineering meaning",
+                scenario_consumer="S2",
             )
             if comparable_types
             else {
@@ -2791,6 +2807,7 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 field.get("parameter_name") or key,
                 dtype,
                 context="diagnostic read method interpretation lifetime health",
+                scenario_consumer="S4",
             )
             if applicable
             else {
@@ -2929,6 +2946,7 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
             row["parameter_name"],
             comparison["devices"][0]["device_type"],
             context="change impact software test monitoring lifetime risk",
+            scenario_consumer="S2",
         )
         if knowledge["status"] == "MATCHED":
             first = knowledge["results"][0]
