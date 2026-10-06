@@ -105,6 +105,24 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"RESULT=BLOCKED\nCHECK={name}\nEXPECTED={expected}\nACTUAL={response.status_code}\nBODY={response.text[:500]}", file=sys.stderr)
                     return 3
                 print(f"{name}=PASS")
+            operability = client.get("/ready")
+            payload = operability.json()
+            knowledge = (
+                payload.get("dependencies", {}).get("UNIFIED_KNOWLEDGE", {})
+                if isinstance(payload, dict)
+                else {}
+            )
+            if knowledge.get("status") != "READY":
+                print(
+                    "RESULT=BLOCKED\n"
+                    "CHECK=OPERABILITY_KNOWLEDGE\n"
+                    f"ACTUAL={knowledge}\n"
+                    f"BODY={operability.text[:500]}",
+                    file=sys.stderr,
+                )
+                return 3
+            print("OPERABILITY_KNOWLEDGE=PASS")
+            print(f"OPERABILITY_STATUS={payload.get('status')}")
         print("RESULT=PASS\nAPP_FACTORY=create_p0_app\nENABLED_DOMAINS=HARDWARE_CASE")
         return 0
     app = build_app(data_root=data_root, startup_status=startup)
