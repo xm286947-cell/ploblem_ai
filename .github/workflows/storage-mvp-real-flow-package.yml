@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 91e5445d88d9131b6a3c21bbe5cd38857f4ee976
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: e18ad017f05812fd38ed6a6838b8fcc9e0034703
+      STORAGE_SOURCE_SHA: e6fd5b828c314da0fd30e0166b9d40ce7a84afd4
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 78ccc746a9df97bb1842d154363a431b64756280
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -53,6 +53,9 @@ jobs:
               "async function pkDeleteRevision",
               "async function pkSynthesizeSearch",
               "搜索并综合",
+              "按寿命模型生产知识",
+              "pkPublisher",
+              "/knowledge-production/extract",
           ]
           missing = [item for item in required if item not in html]
           if missing:
