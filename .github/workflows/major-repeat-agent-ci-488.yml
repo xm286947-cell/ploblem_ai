@@ -1,0 +1,291 @@
+name: MAJOR-REPEAT-AGENT-CI-488
+on:
+  push:
+    branches: ["ci/major-repeat-agent-488"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  PRODUCT_SOURCE_SHA: 3fe85d3901838b5c9d5d04f9d5491daded7dfc6f
+  SOURCE_BASE: 9410af7c7d5b0fbcd27b71e406d7703dec8bf345
+
+jobs:
+  ubuntu-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ env.PRODUCT_SOURCE_SHA }}
+          fetch-depth: 0
+      - name: Frozen source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git merge-base --is-ancestor "$SOURCE_BASE" HEAD
+          echo SOURCE_SHA_FIXED=PASS
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-major-mvp-product.txt
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Static gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q quality_knowledge services presentation scripts runtime retriever
+          find quality_knowledge/web/static -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+          git diff --check "$SOURCE_BASE"...HEAD
+          echo PYTHON_COMPILE=PASS
+          echo JS_SYNTAX=PASS
+          echo DIFF_CHECK=PASS
+      - name: Focused regression
+        run: >
+          python -m pytest -q
+          tests/test_repeat_agent_capability_restore.py
+          tests/test_repeat_web_mvp.py
+          tests/test_repeat_itr_subject.py
+          tests/test_repeat_search_contract.py
+          tests/test_repeat_result_contract.py
+          tests/test_repeat_runtime_config.py
+          tests/test_m82_similarity_analyzer.py
+          tests/test_m83_solution_analyzer.py
+          tests/test_m84_repeat_decision.py
+          tests/test_solution_context_optimization.py
+          tests/test_historical_case_consumer_contract.py
+          tests/test_major_repeat_gp01_browser_production.py
+          tests/test_major_mvp_product_candidate.py
+      - name: Related Major regression
+        run: >
+          python -m pytest -q
+          tests/test_major_workspace_binding.py
+          tests/test_case_publish_adapter.py
+          tests/test_case_publish_service.py
+          tests/test_major_repository_connection_lifecycle.py
+      - name: Clean and build Candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard "$PRODUCT_SOURCE_SHA"
+          git clean -fdx
+          test -z "$(git status --porcelain --untracked-files=all)"
+          python scripts/build_major_mvp_product_candidate.py --output-dir dist | tee build.log
+          PREFIX="$(echo "$PRODUCT_SOURCE_SHA" | cut -c1-12)"
+          ZIP="dist/MAJOR_MVP_PRODUCT_CANDIDATE_$PREFIX.zip"
+          test -f "$ZIP"
+          echo "CANDIDATE_ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo WORKTREE_CLEAN=YES
+          echo PACKAGE_BUILD=PASS
+      - name: Package gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/major_mvp_product_candidate_gate.py "$CANDIDATE_ZIP" | tee package_gate.log
+          python - "$CANDIDATE_ZIP" "$PRODUCT_SOURCE_SHA" <<'PY'
+          import json,sys,zipfile
+          z,expected=sys.argv[1:]
+          with zipfile.ZipFile(z) as f:
+              root=f.namelist()[0].split("/",1)[0]
+              m=json.loads(f.read(root+"/PACKAGE_MANIFEST.json"))
+          assert m["source_commit"]==expected
+          assert m["source_dirty"] is False
+          assert "data/runtime/.keep" in m["files"]
+          assert "data/repeat_reports/.keep" in m["files"]
+          print("PACKAGE_MANIFEST=PASS")
+          print("MANIFEST_SOURCE_SHA=PASS")
+          PY
+      - name: Fresh extract and startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf fresh && mkdir fresh
+          unzip -q "$CANDIDATE_ZIP" -d fresh
+          PKG="$(find fresh -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          echo "PKG_ROOT=$PKG" >> "$GITHUB_ENV"
+          PYTHONPATH="$PKG" python - <<'PY'
+          import importlib
+          for n in ["quality_knowledge.web.p0_app","quality_knowledge.repeat_risk.agent_analysis","services.historical_case_contract","presentation.delivery_service"]:
+              importlib.import_module(n)
+          print("PACKAGE_IMPORT=PASS")
+          PY
+          (cd "$PKG" && python scripts/major_mvp_product_start.py --check)
+          DATA="$(mktemp -d)"
+          (cd "$PKG" && python scripts/major_mvp_product_start.py --data-root "$DATA" --host 127.0.0.1 --port 8877) >server.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8877/p0/issues >/dev/null && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8877/p0/major-production >/dev/null
+          curl -fsS http://127.0.0.1:8877/p0/cases >/dev/null
+          curl -fsS http://127.0.0.1:8877/p0/issues >/dev/null
+          kill "$PID" || true
+          wait "$PID" || true
+          trap - EXIT
+          echo FRESH_EXTRACT=PASS
+          echo SERVER_START=PASS
+          echo MAJOR_PRODUCTION_ENTRY=PASS
+          echo HISTORICAL_CASE_ENTRY=PASS
+          echo REPEAT_RISK_ENTRY=PASS
+      - name: Chromium smoke on fresh Candidate UI assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/browser488.py <<'PY'
+          import os,sys,threading,time
+          from pathlib import Path
+          pkg=Path(os.environ["PKG_ROOT"]).resolve()
+          sys.path.insert(0,str(pkg))
+          from fastapi import FastAPI
+          from fastapi.responses import PlainTextResponse
+          import uvicorn
+          from playwright.sync_api import sync_playwright
+          from quality_knowledge.web.p0_pages import create_p0_insights_router
+          app=FastAPI(); app.include_router(create_p0_insights_router())
+          cand={"case_id":"HCASE-CI-001","title":"掉电恢复后启动失败","historical_phenomenon":"掉电恢复后启动失败","retrieval_score":0.91,"rank":1,
+                "why_relevant":[{"type":"RETRIEVAL_REASON","text":"掉电恢复场景一致"}],"root_causes":["掉电窗口写入未完成"],"measures":["增加原子保存"],"verification":"100 次验证通过",
+                "evidence_refs":[{"source_type":"REPORT","source_id":"ITR-H-001","file_name":"history.pdf","page":7}],
+                "evidence":[{"evidence_id":"E1","source_type":"REPORT","source_id":"ITR-H-001","file_name":"history.pdf","page":7,"section":"Root Cause","raw_text":"掉电窗口存在未完成写入。"}],
+                "detail_status":"SUCCESS","case_status":"PUBLISHED","agent_analysis_status":"SUCCESS",
+                "agent_similarity":{"analysis_status":"SUCCESS","analysis":{"analysis_summary":"当前问题与历史案例高度相似。","key_similarities":["现象一致"],"key_differences":["版本不同"]}},
+                "agent_solution":{"analysis_status":"SUCCESS","analysis":{"analysis_summary":"历史措施可参考但需确认当前根因。","applicability":"PARTIAL_REUSE","reusable_actions":["原子保存"],"reuse_risks":["确认版本差异"]}},
+                "ai_recommendation":{"status":"SUCCESS","decision":"SIMILAR","decision_reason":"证据支持相似，最终由人工确认。"}}
+          result={"contract_version":"repeat-result/v1","query_id":"RQ-CI-001","subject_ref":"ITR-CI-001","search_status":"SUCCESS","result_status":"READY_FOR_REVIEW","candidate_count":1,"candidates":[cand],"warnings":[],
+                  "human_decision":{"decision":"PENDING","decided_by":None,"reason":None,"decided_at":None},
+                  "agent_analysis":{"status":"SUCCESS","m82_similarity":"SUCCESS","m83_solution":"SUCCESS","m84_recommendation":"SUCCESS","provider_boundary":"UNIFIED_RUNTIME"},
+                  "analysis_report":{"status":"AVAILABLE"},"generated_at":"2026-10-06T22:00:00+08:00"}
+          @app.get("/api/v2/issues/K-CI")
+          def issue(): return {"issue":{"knowledge_id":"K-CI","business_issue_id":"ITR-CI-001","business_type":"PLC","product_code":"PLC","normalized_snapshot":{"ISSUE_FACT":{"business_issue_id":"ITR-CI-001","title":"掉电恢复失败","description":"掉电后再次上电启动失败","product":"PLC","version":"V3.2","platform":"控制器","severity":"H","issue_type":"可靠性"}},"raw_json":{}},"analysis":None,"effective_analysis":None,"human_revisions":[]}
+          @app.get("/api/v2/issues/K-CI/navigation")
+          def nav(): return {"position":1,"total":1,"previous_id":None,"next_id":None}
+          @app.get("/api/v2/issues/K-CI/repeat-risk")
+          def state(): return {"subject":{"itr_ref":"ITR-CI-001","source":"ITR_RESOLUTION_WORKBENCH","itr_snapshot":{"itr_id":"ITR-CI-001","problem_description":"掉电后启动失败","product":"PLC","version":"V3.2","scene":"掉电恢复","itr_version":"V3"}},"optional_context":{"missed_test_available":False,"missed_test_ref":None},"latest_query":{"query_id":"RQ-CI-001"},"latest_result":result}
+          @app.get("/api/v2/historical-cases")
+          def cases(): return {"contract_version":"historical-case/v1","status_filter":"PUBLISHED","total":1,"items":[{"case_id":"HCASE-CI-001","itr":"ITR-H-001","title":"掉电恢复后启动失败","product":"PLC","status":"PUBLISHED","published_at":"2026-10-01T10:00:00+08:00","case_version":"REV-1"}]}
+          @app.get("/api/v2/historical-cases/HCASE-CI-001")
+          def detail(): return {"contract_version":"historical-case/v1","case_id":"HCASE-CI-001","itr":"ITR-H-001","title":"掉电恢复后启动失败","problem_description":"掉电后启动失败","product":"PLC","symptom":"启动失败","root_cause":"掉电窗口写入未完成","solution":"增加原子保存","verification_result":"100 次通过","status":"ACTIVE","publication_status":"PUBLISHED","published_at":"2026-10-01T10:00:00+08:00","case_version":"REV-1","evidence":cand["evidence"]}
+          @app.get("/api/v2/repeat-risk/queries/RQ-CI-001/report")
+          def report(format:str="markdown"): return PlainTextResponse("# Repeat Analysis Report\n\nsource: repeat-result/v1\n",media_type="text/markdown")
+          server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=8878,log_level="warning"))
+          th=threading.Thread(target=server.run,daemon=True); th.start()
+          deadline=time.time()+15
+          while not server.started and time.time()<deadline: time.sleep(.1)
+          assert server.started
+          with sync_playwright() as p:
+              b=p.chromium.launch(); page=b.new_page(viewport={"width":1440,"height":1000})
+              page.goto("http://127.0.0.1:8878/p0/issues/K-CI",wait_until="networkidle")
+              page.get_by_text("找到 1 个值得关注的历史案例").wait_for()
+              page.get_by_text("AGENT ANALYSIS").wait_for()
+              page.get_by_text("AI Repeat 建议 · 非最终结论").wait_for()
+              page.get_by_text("HUMAN DECISION").wait_for()
+              page.get_by_text("打开 Markdown 分析报告").wait_for()
+              assert page.get_by_text("人工结论：REPEAT").count()==0
+              page.click("[data-repeat-evidence='0']")
+              page.get_by_text("掉电窗口存在未完成写入。").wait_for()
+              page.screenshot(path="ci488-browser-smoke.png",full_page=True)
+              page.goto("http://127.0.0.1:8878/p0/cases/HCASE-CI-001",wait_until="networkidle")
+              page.get_by_text("掉电恢复后启动失败").first.wait_for()
+              b.close()
+          server.should_exit=True; th.join(timeout=5)
+          print("CI_BROWSER_SMOKE=PASS")
+          PY
+          PKG_ROOT="$PKG_ROOT" python /tmp/browser488.py
+      - name: Record and upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(sha256sum "$CANDIDATE_ZIP" | awk '{print $1}')"
+          echo "CI_PACKAGE_SHA256=$SHA" | tee ci488_result.txt
+          echo "PACKAGE=$(basename "$CANDIDATE_ZIP")" | tee -a ci488_result.txt
+          echo "PRODUCT_SOURCE_SHA=$PRODUCT_SOURCE_SHA" | tee -a ci488_result.txt
+          echo "RESULT=PASS" | tee -a ci488_result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-agent-ci488-\${{ github.run_id }}
+          path: |
+            dist/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip
+            dist/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip.sha256
+            ci488_result.txt
+            build.log
+            package_gate.log
+            server.log
+            ci488-browser-smoke.png
+          if-no-files-found: error
+          retention-days: 90
+
+  posix-launcher:
+    needs: ubuntu-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: POSIX launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q artifact/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip -d fresh
+          PKG="$(find fresh -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          test -x "$PKG/START_MAJOR_MVP.sh"
+          MAJOR_MVP_PORT=8890 "$PKG/START_MAJOR_MVP.sh" --host 127.0.0.1 --port 8890 >posix.log 2>&1 &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 120); do curl -fsS http://127.0.0.1:8890/p0/issues >/dev/null && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8890/p0/issues >/dev/null
+          echo POSIX_LAUNCHER_CI=PASS
+          kill "$PID" || true
+
+  macos-launcher:
+    needs: ubuntu-gate
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: macOS launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q artifact/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip -d fresh
+          PKG="$(find fresh -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          test -x "$PKG/START_MAJOR_MVP.command"
+          MAJOR_MVP_PORT=8892 "$PKG/START_MAJOR_MVP.command" --host 127.0.0.1 --port 8892 >macos.log 2>&1 &
+          PID=$!; trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 150); do curl -fsS http://127.0.0.1:8892/p0/issues >/dev/null && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8892/p0/issues >/dev/null
+          echo MACOS_LAUNCHER_CI=PASS
+          kill "$PID" || true
+
+  windows-launcher:
+    needs: ubuntu-gate
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Windows launcher
+        shell: pwsh
+        run: |
+          $zip=Get-ChildItem artifact\MAJOR_MVP_PRODUCT_CANDIDATE_*.zip | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath fresh
+          $pkg=Get-ChildItem fresh -Directory | Select-Object -First 1
+          if (-not (Test-Path (Join-Path $pkg.FullName "START_MAJOR_MVP.bat"))) { throw "launcher missing" }
+          $env:MAJOR_MVP_PORT="8891"
+          $proc=Start-Process -FilePath "cmd.exe" -ArgumentList "/c","START_MAJOR_MVP.bat --host 127.0.0.1 --port 8891" -WorkingDirectory $pkg.FullName -PassThru -RedirectStandardOutput windows.log -RedirectStandardError windows.err
+          $ok=$false
+          for($i=0;$i -lt 150;$i++){try{$r=Invoke-WebRequest -Uri "http://127.0.0.1:8891/p0/issues" -UseBasicParsing -TimeoutSec 2;if($r.StatusCode -eq 200){$ok=$true;break}}catch{};Start-Sleep -Seconds 1}
+          if(-not $ok){Get-Content windows.log -ErrorAction SilentlyContinue;Get-Content windows.err -ErrorAction SilentlyContinue;throw "Windows launcher did not become ready"}
+          Write-Output WINDOWS_LAUNCHER_CI=PASS
+          cmd /c "taskkill /PID $($proc.Id) /T /F" | Out-Null
