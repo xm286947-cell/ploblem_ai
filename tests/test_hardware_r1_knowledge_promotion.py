@@ -968,10 +968,19 @@ def test_promotion_recovery_diagnostics_route_is_maintainer_only(tmp_path):
     promotion, workbench, *_ = setup_case(
         tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
     )
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        promotion.bridge.adapter,
+        release_prefix=RELEASE,
+    )
+    assert controller.status()["release_version"] is None
+
     app = FastAPI()
     app.include_router(
         create_hardware_r1_workbench_router(
-            workbench, promotion_service=promotion
+            workbench,
+            promotion_service=promotion,
+            release_controller=controller,
         )
     )
     client = TestClient(app)
@@ -1113,25 +1122,16 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
 
     def crash_on_asset_commit(*args, **kwargs):
         if crash_point == "remote-before-ledger" and args[3] == "PUBLISHED_PENDING_QUERY_BACK":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_transition(*args, **kwargs)
 
     def crash_before_source_ref(*args, **kwargs):
         if crash_point == "ledger-before-source-ref":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_add_reference(*args, **kwargs)
 
     def crash_before_journal_complete(operation_id, state, **kwargs):
         if crash_point == "source-ref-before-journal" and operation_id == publish_operation_id and state == "COMPLETED":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_journal_transition(operation_id, state, **kwargs)
 
@@ -1154,7 +1154,16 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert pending["reconciliation_operation_type"] == "PUBLISH"
     assert pending["reconciliation_error_code"] == "PUBLISH_RECONCILIATION_REQUIRED"
 
-    startup = restarted.reconcile_startup()
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        restarted.bridge.adapter,
+        release_prefix=RELEASE,
+    )
+    assert controller.status()["release_version"] is None
+    startup = restarted.reconcile_startup(
+        prepare_publication_query=controller.ensure_queryable_release
+    )
+    assert str(controller.status()["release_version"]).startswith(RELEASE + "-R")
     repaired = restarted.get_item("HWI-RECOVERY")
     assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
@@ -1183,9 +1192,6 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
 
     def crash_after_remote_publish(item, asset, record, target, **kwargs):
         if target == "PUBLISHED_PENDING_QUERY_BACK":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_transition(item, asset, record, target, **kwargs)
 
@@ -1233,6 +1239,7 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     monkeypatch.undo()
     reconcile = client.post(promotion_path + "/reconcile", headers=headers)
     assert reconcile.status_code == 200, reconcile.text
+    assert str(controller.status()["release_version"]).startswith(RELEASE + "-R")
     assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert reconcile.json()["reconciled"] is True
     assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
