@@ -1,0 +1,210 @@
+name: QS W4 Full Current Quality Platform Package
+
+on:
+  push:
+    branches:
+      - ci/qs-w4-full-platform-ff838474
+    paths:
+      - ".github/workflows/qs-w4-full-platform-package.yml"
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SOURCE_SHA: ff838474ce6bb542915f059d35a80e2229cf4dda
+  PACKAGE_BASENAME: QUALITY_PLATFORM_W4_BROWSER_VALIDATION_ff838474ce6b
+
+jobs:
+  build-full-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_SHA"
+          git diff --check "$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA"
+
+      - name: Build full current quality platform package
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/full-quality-platform"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE" dist
+          git archive "$PRODUCT_SOURCE_SHA" | tar -x -C "$STAGE"
+
+          cat > "$STAGE/00_FULL_PLATFORM_README_FIRST.txt" <<EOF
+QUALITY PLATFORM W4 BROWSER VALIDATION CANDIDATE
+
+PACKAGE_SCOPE=FULL_CURRENT_QUALITY_PLATFORM
+SOURCE_SHA=$PRODUCT_SOURCE_SHA
+INCREMENTAL_PACKAGE=NO
+STANDALONE_QS_PACKAGE=NO
+LEGACY_EXTERNAL_RESTORE_REQUIRED=NO
+CURRENT_PROJECT_IS_SINGLE_DELIVERY_SOURCE=YES
+W5_RELEASE_PACKAGE=NO
+REAL_MATURE_BROWSER_GOLDEN=PENDING
+W4_ARCH_REVIEW=PENDING
+SYNTHETIC_BUSINESS_DATA_INCLUDED=NO
+
+This package is built directly from the current consolidated project source.
+Existing mature quality functions and the new QSV1 capability are delivered together.
+
+Included product capability areas:
+- Issues / ITR
+- ITR Recovery Workbench
+- ITR Resolution Workbench
+- Software Assessment Workbench
+- Missed Test Analysis
+- Existing quality-scenario capabilities
+- QSV1 generation
+- Review / Confirm / Publish
+- P02 Library consumption
+- P03 Source / Evidence / History
+
+Windows:
+1. Optional mature DB binding:
+   set LEGACY_QUALITY_ISSUE_DB_PATH=C:\path\to\mature-quality.db
+2. Optional QSV1 DB binding:
+   set QUALITY_SCENARIO_V1_DB_PATH=C:\path\to\qsv1.db
+3. Run start_quality_capability_p1.bat
+4. Open http://127.0.0.1:8080/software-assessment
+
+macOS:
+1. Optional mature DB binding:
+   export LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/mature-quality.db
+2. Optional QSV1 DB binding:
+   export QUALITY_SCENARIO_V1_DB_PATH=/path/to/qsv1.db
+3. Run ./start_quality_capability_p1.command
+4. Open http://127.0.0.1:8080/software-assessment
+
+This is the complete W4 browser-validation package, not an incremental patch.
+EOF
+
+          cat > "$STAGE/FULL_PLATFORM_MANIFEST.json" <<EOF
+{
+  "package_type": "W4_BROWSER_VALIDATION_CANDIDATE",
+  "package_scope": "FULL_CURRENT_QUALITY_PLATFORM",
+  "source_sha": "$PRODUCT_SOURCE_SHA",
+  "incremental_package": false,
+  "standalone_qs_package": false,
+  "legacy_external_restore_required": false,
+  "current_project_is_single_delivery_source": true,
+  "w5_release_package": false,
+  "real_mature_browser_golden": "PENDING",
+  "w4_arch_review": "PENDING",
+  "synthetic_business_data_included": false,
+  "windows_entry": "start_quality_capability_p1.bat",
+  "macos_entry": "start_quality_capability_p1.command",
+  "browser_entry": "/software-assessment",
+  "mature_capabilities": [
+    "issues_itr",
+    "itr_recovery_workbench",
+    "itr_resolution_workbench",
+    "software_assessment_workbench",
+    "missed_test_analysis",
+    "existing_quality_scenario",
+    "qsv1_generation",
+    "review_confirm_publish",
+    "p02_library",
+    "p03_source_evidence_history"
+  ]
+}
+EOF
+          printf '%s\n' "$PRODUCT_SOURCE_SHA" > "$STAGE/PRODUCT_SOURCE_SHA"
+
+          test -f "$STAGE/start_quality_capability_p1.bat"
+          test -f "$STAGE/start_quality_capability_p1.command"
+          test -f "$STAGE/quality_knowledge/web/software_assessment_qsv1.py"
+          test -f "$STAGE/quality_knowledge/reverse_quality_bundle_bridge.py"
+          test -f "$STAGE/quality_knowledge/quality_scenario_candidate_v1_service.py"
+
+          (
+            cd "$STAGE"
+            zip -q -r "$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip" .
+          )
+          sha256sum "dist/${PACKAGE_BASENAME}.zip" | tee "dist/${PACKAGE_BASENAME}.zip.sha256"
+
+      - name: Verify full-platform package identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          pkg = Path("dist") / (os.environ["PACKAGE_BASENAME"] + ".zip")
+          with zipfile.ZipFile(pkg) as z:
+              names = set(z.namelist())
+              manifest = json.loads(z.read("FULL_PLATFORM_MANIFEST.json"))
+              source = z.read("PRODUCT_SOURCE_SHA").decode().strip()
+          assert source == os.environ["PRODUCT_SOURCE_SHA"]
+          assert manifest["source_sha"] == source
+          assert manifest["package_scope"] == "FULL_CURRENT_QUALITY_PLATFORM"
+          assert manifest["incremental_package"] is False
+          assert manifest["standalone_qs_package"] is False
+          required = {
+              "start_quality_capability_p1.bat",
+              "start_quality_capability_p1.command",
+              "quality_knowledge/web/software_assessment_qsv1.py",
+              "quality_knowledge/reverse_quality_bundle_bridge.py",
+              "quality_knowledge/quality_scenario_candidate_v1_service.py",
+          }
+          missing = sorted(required - names)
+          assert not missing, missing
+          print("FULL_PLATFORM_PACKAGE_IDENTITY=PASS")
+          PY
+
+      - name: Upload full-platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_PLATFORM_W4_BROWSER_VALIDATION_ff838474ce6b
+          path: |
+            dist/QUALITY_PLATFORM_W4_BROWSER_VALIDATION_ff838474ce6b.zip
+            dist/QUALITY_PLATFORM_W4_BROWSER_VALIDATION_ff838474ce6b.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Full-platform Windows launcher and route smoke
+        shell: pwsh
+        run: |
+          python tools/step1b_qsv1_launcher_smoke.py --platform windows --port 18080
+
+  smoke-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Full-platform macOS launcher and route smoke
+        shell: bash
+        run: |
+          python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 18081
