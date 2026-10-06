@@ -75,6 +75,8 @@ jobs:
               "pkModelScanEncoded",
               "pkModelExtractEncoded",
               "/knowledge-production/extract",
+              "pkPublisher",
+              "发布方 / Publisher",
           ]
           missing=[item for item in required if item not in html]
           assert not missing, missing
@@ -83,7 +85,7 @@ jobs:
           node --check /tmp/storage-knowledge-production.js
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
           python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
-            -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode"
+            -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode or file_import_forwards_publisher_provenance or model_extract_requires_source_authority_before_kp_handoff"
           python -m pytest -q tests/test_kp_d03_review_publish.py \
             -k "storage_model_candidate_requires_reviewed_semantic_before_publish or storage_model_reviewed_semantic_becomes_formal_consumable or storage_model_publish_rejects_unproposed_semantic"
           python -m pytest -q tests/test_kp_d05_processing_ui.py \
