@@ -11,7 +11,7 @@ import re
 import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, quote, urlparse
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -141,13 +141,23 @@ def _public_source_uri(value: str | None) -> str | None:
         or parsed.password
     ):
         raise HTTPException(422, "公开资料来源 URL 仅允许无凭证的 HTTP(S) 地址。")
+    sensitive_query_keys = {
+        "key", "api_key", "apikey", "token", "access_token", "auth",
+        "password", "secret", "credential", "signature", "sig",
+    }
+    if any(
+        str(key or "").lower() in sensitive_query_keys
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    ):
+        raise HTTPException(422, "公开资料来源 URL 含凭证/签名类查询参数，已阻止展示。")
     host = parsed.hostname.lower()
     host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
     authority = host_text + (f":{port}" if port is not None else "")
     path = parsed.path or ""
     query = f"?{parsed.query}" if parsed.query else ""
-    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
-    return f"{parsed.scheme.lower()}://{authority}{path}{query}{fragment}"
+    # Fragments are client-side navigation only; omit them from stored/displayed
+    # canonical metadata to avoid carrying opaque tokens in source URLs.
+    return f"{parsed.scheme.lower()}://{authority}{path}{query}"
 
 
 def _canonical_service_url(value: str) -> str:
