@@ -16,7 +16,7 @@
   <nav class="main-nav">
     <a class="nav-item {% if request.url.path.startswith('/issues') or request.url.path.startswith('/analysis') %}active{% endif %}" href="/issues">问题工作台</a>
     <a class="nav-item {% if request.url.path.startswith('/statistics') %}active{% endif %}" href="/statistics">质量洞察</a>
-    <a class="nav-item {% if request.url.path.startswith('/p0/quality-scenarios') or request.url.path.startswith('/p0/quality-scenario-insights') %}active{% endif %}" href="/p0/quality-scenarios/workbench">新质量场景审核</a>
+    <a class="nav-item {% if request.url.path.startswith('/p0/quality-scenarios') or request.url.path.startswith('/p0/quality-scenario-insights') %}active{% endif %}" href="/p0/quality-scenarios/workbench">新质量场景（预览）</a>
     <a class="nav-item {% if request.url.path == '/quality-scenarios' or (request.url.path.startswith('/quality-scenarios/') and not request.url.path.startswith('/quality-scenarios/insights')) %}active{% endif %}" href="/quality-scenarios">原质量场景库</a>
     <a class="nav-item {% if request.url.path == '/quality-scenario-assets' %}active{% endif %}" href="/quality-scenario-assets">场景资产与画像</a>
     <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets/portrait') and request.query_params.get('portrait_axis') == 'product' %}active{% endif %}" href="/quality-scenario-assets/portrait?portrait_axis=product">产品质量画像</a>
