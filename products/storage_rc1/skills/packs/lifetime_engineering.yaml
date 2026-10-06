@@ -11,6 +11,7 @@ allowed_object_types:
   - KnowledgeFact
   - TechnicalConcept
   - DiagnosticMethod
+  - SoftwareRequirementKnowledge
 required_evidence:
   formal_release_only: true
   evidence_refs_required: true
