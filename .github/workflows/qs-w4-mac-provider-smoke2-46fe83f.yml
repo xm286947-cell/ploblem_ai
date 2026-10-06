@@ -1,0 +1,50 @@
+{
+  "name": "QS W4 macOS Controlled Provider Full Chain Smoke2 46fe83f",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-mac-provider-smoke2-46fe83f"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-mac-provider-smoke2-46fe83f.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "mac-provider-full-chain": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 35,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "46fe83f7c6f2b01ad92795405e9f947ae342e805"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Prepare package-like venv and fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m venv --system-site-packages .venv\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db"
+        },
+        {
+          "name": "Run Mac controlled-provider full chain",
+          "shell": "bash",
+          "run": "python - <<'PY'\nimport json,os,signal,subprocess,time,urllib.request\nfrom pathlib import Path\nroot=Path.cwd()\nlog_path=root/'validation'/'mac_provider_full_chain.log'\nlog=log_path.open('w+',encoding='utf-8',errors='replace')\nproc=subprocess.Popen(\n    ['./start_w4_mac_functional_provider_golden.command','--host','127.0.0.1','--port','18083'],\n    cwd=root,\n    stdout=log,\n    stderr=subprocess.STDOUT,\n    text=True,\n    start_new_session=True,\n)\nbase='http://127.0.0.1:18083'\ntry:\n    ok=False\n    for _ in range(720):\n        try:\n            urllib.request.urlopen(base+'/software-assessment',timeout=1)\n            ok=True\n            break\n        except Exception:\n            if proc.poll() is not None:\n                break\n            time.sleep(.25)\n    if not ok:\n        log.flush(); log.seek(0)\n        raise AssertionError('MAC_PROVIDER_HOST_NOT_READY\\n'+log.read()[-12000:])\n    manifest=json.load(open(root/'validation'/'quality_scenario_w4_fixture.db.fixture.json',encoding='utf-8'))\n    g1=next(x for x in manifest['cases'] if x['case_id']=='G1_COMPLETE')\n    def req(method,path,payload=None):\n        data=None if payload is None else json.dumps(payload,ensure_ascii=False).encode('utf-8')\n        r=urllib.request.Request(base+path,data=data,method=method,headers={'Content-Type':'application/json'})\n        with urllib.request.urlopen(r,timeout=30) as resp:\n            raw=resp.read()\n            ctype=resp.headers.get_content_type()\n            return resp.status,(json.loads(raw.decode('utf-8')) if ctype=='application/json' else raw.decode('utf-8'))\n    payload={'material_ids':[g1['software_assessment_material_id']],'trigger_source':'HIGH_PERCEPTION','trigger_reason':'W4_MAC_FUNCTIONAL_GOLDEN'}\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload)\n    assert s==200 and p['items'][0]['state']=='READY',p\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload)\n    assert s==200,start\n    task_id=start['task_id']\n    task=None\n    for _ in range(300):\n        s,task=req('GET',f'/api/v2/software-assessment/quality-scenario/generations/{task_id}')\n        states={x.get('state') for x in task.get('items',[])}\n        if 'ANALYZING' not in states:\n            break\n        time.sleep(.1)\n    assert task['items'][0]['state']=='CANDIDATE_CREATED',task\n    scenario=task['items'][0]['scenario']; sid=scenario['scenario_id']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/review',{'expected_scenario_version':scenario['scenario_version'],'review_status':'CONFIRMED','reviewer':'W4 Mac CI','comment':'controlled provider mac functional golden'})\n    assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/confirm',{'expected_scenario_version':scenario['scenario_version'],'quality_confirmed_by':'W4 Quality','technical_confirmed_by':'W4 Technical','confirmation_note':'Mac controlled-provider CI'})\n    assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/publish',{'expected_scenario_version':scenario['scenario_version'],'published_by':'W4 Mac CI'})\n    assert s==200 and r['scenario']['status']=='PUBLISHED',r\n    for axis,marker in [('product','PLC-X200'),('industry','新能源'),('customer','客户A')]:\n        with urllib.request.urlopen(base+f'/quality-scenario-assets/portrait?portrait_axis={axis}',timeout=10) as resp:\n            text=resp.read().decode('utf-8')\n        assert marker in text,(axis,marker)\n    print('MAC_PROVIDER_HOST=PASS')\n    print('MAC_PROVIDER_G1_SOURCE_TO_PUBLISH=PASS')\n    print('MAC_PROVIDER_PRODUCT_PORTRAIT=PASS')\n    print('MAC_PROVIDER_INDUSTRY_PORTRAIT=PASS')\n    print('MAC_PROVIDER_CUSTOMER_PORTRAIT=PASS')\n    print('REAL_PROVIDER_GOLDEN=NO')\nfinally:\n    try:\n        os.killpg(proc.pid,signal.SIGTERM)\n    except ProcessLookupError:\n        pass\n    try:\n        proc.wait(timeout=8)\n    except subprocess.TimeoutExpired:\n        try:\n            os.killpg(proc.pid,signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        proc.wait(timeout=5)\n    log.close()\n\nPY"
+        }
+      ]
+    }
+  }
+}
