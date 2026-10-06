@@ -128,3 +128,46 @@ def test_contract_version_visible_compatible_and_unknown_version_rejected(tmp_pa
     assert payload["product_version"] != payload["public_contract_version"]
 
     assert client.get("/api/public/hardware/v999/contract").status_code == 404
+
+
+def test_ready_accepts_actual_local_nonprod_knowledge_binding_without_external_urls(
+    tmp_path, monkeypatch
+):
+    model_config = _runtime_config(tmp_path)
+    monkeypatch.setenv("HARDWARE_CASE_MODEL_CONFIG", str(model_config))
+    monkeypatch.setenv("HARDWARE_CASE_API_KEY", "test-secret")
+    monkeypatch.setenv("HARDWARE_R1_E2E_PROFILE", "1")
+    monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "NON_PROD")
+    monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_MODE", "LOCAL_NON_PROD")
+    monkeypatch.setenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION", "HARDWARE-R1-E2E")
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_BASE_URL", raising=False)
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_READINESS_URL", raising=False)
+
+    client = TestClient(_app(tmp_path))
+    ready = client.get("/ready")
+    assert ready.status_code == 200, ready.text
+    dependency = ready.json()["dependencies"]["UNIFIED_KNOWLEDGE"]
+    assert dependency["status"] == "READY"
+    assert dependency["mode"] == "LOCAL_NON_PROD"
+    assert dependency["managed_release"] is True
+
+
+def test_ready_keeps_local_nonprod_fail_closed_when_binding_is_incomplete(
+    tmp_path, monkeypatch
+):
+    model_config = _runtime_config(tmp_path)
+    monkeypatch.setenv("HARDWARE_CASE_MODEL_CONFIG", str(model_config))
+    monkeypatch.setenv("HARDWARE_CASE_API_KEY", "test-secret")
+    monkeypatch.setenv("HARDWARE_R1_E2E_PROFILE", "1")
+    monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_ENV", "NON_PROD")
+    monkeypatch.setenv("HARDWARE_R1_E2E_KNOWLEDGE_MODE", "LOCAL_NON_PROD")
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION", raising=False)
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_BASE_URL", raising=False)
+    monkeypatch.delenv("HARDWARE_KNOWLEDGE_READINESS_URL", raising=False)
+
+    client = TestClient(_app(tmp_path))
+    ready = client.get("/ready")
+    assert ready.status_code == 503
+    dependency = ready.json()["dependencies"]["UNIFIED_KNOWLEDGE"]
+    assert dependency["status"] == "UNREADY"
+    assert dependency["error_code"] == "BLOCKED_BY_ENVIRONMENT"
