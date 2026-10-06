@@ -351,14 +351,37 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
     assert seen["ingest_kwargs"]["source_id"] == "PKR-source-1"
     assert seen["ingest_kwargs"]["revision"] == "rev-1"
 
-    metadata = seen["extract"]["candidate_metadata"]["storage_lifetime"]
+    bridge = seen["extract"]["candidate_metadata"]["storage_source_bridge"]
+    assert bridge["schema_version"] == "storage-lifetime-knowledge/v1"
+    assert bridge["public_source_id"] == "source-1"
+    assert bridge["public_source_revision"] == "rev-1"
+
+    class ObjectType:
+        value = "FACT"
+
+    class Draft:
+        title = "P/E Cycle endurance fact"
+        object_type = ObjectType()
+
+    enrichment = seen["extract"]["candidate_enricher"](Draft())
+    metadata = enrichment["metadata"]["storage_lifetime"]
     assert metadata["schema_version"] == "storage-lifetime-knowledge/v1"
     assert metadata["device_type"] == "NAND Flash"
     assert metadata["public_source_id"] == "source-1"
     assert metadata["public_source_revision"] == "rev-1"
+    assert metadata["canonical_parameters"] == ["pe_cycles"]
+    assert metadata["parameter_binding_status"] == "BOUND"
     assert metadata["formal_consumable"] is False
     assert metadata["semantic_class_status"] == "NEEDS_REVIEW"
-    assert "CALCULATION_RULE" in metadata["semantic_class_candidates"]
+    assert set(metadata["semantic_class_candidates"]) == {
+        "PARAMETER_DEFINITION",
+        "CALCULATION_RULE",
+    }
+    assert "storage-parameter:pe_cycles" in enrichment["tags"]
+    assert (
+        "storage-semantic-candidate:CALCULATION_RULE"
+        in enrichment["tags"]
+    )
 
 
 def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
