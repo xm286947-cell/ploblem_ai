@@ -77,6 +77,9 @@ jobs:
               "/knowledge-production/extract",
               "pkPublisher",
               "发布方 / Publisher",
+              "pkBuildRelease",
+              "pkPromoteRelease",
+              "批准并切换到 Storage",
           ]
           missing=[item for item in required if item not in html]
           assert not missing, missing
@@ -95,4 +98,5 @@ jobs:
           python -m pytest -q products/storage_rc1/tests/test_storage_domain_skills_v01.py \
             -k "reviewed_semantic_pack_query_selects_parameter_without_prose_guess or reviewed_model_release_missing_scenario_does_not_fall_back_to_legacy_prose or legacy_release_without_structured_contract_remains_compatible or controlled_binding_supersedes_legacy_pack_release_pin or gs03_emmc_diagnostic_separates_capability_from_current_observation or gs05_change_impact_unknown_never_becomes_safe"
           python -m pytest -q products/storage_rc1/tests/test_storage_release_binding_upgrade.py
+          python -m pytest -q products/storage_rc1/tests/test_storage_release_promotion.py
           python -m pytest -q products/storage_rc1/tests/test_storage_product_semantic_consumption.py
