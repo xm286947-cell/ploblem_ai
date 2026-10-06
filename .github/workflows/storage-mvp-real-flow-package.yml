@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 72974b17175e0aefae4e273e61aa1d5a4de8dad1
+      STORAGE_SOURCE_SHA: 39088433faacc2de9f5102ab117fe6fb52136ecf
       PUBLIC_KNOWLEDGE_SOURCE_SHA: 20c2f6c1ebd07d9c6c5b240b66a10427421a2e56
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
@@ -261,7 +261,7 @@ jobs:
           - 发现真实断点后记录现场，再回代码做最小修复
           EOF
 
-          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
+          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_macos_isolated_w4.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
 
           cat > "$PKG/KNOWLEDGE_PRODUCTION_W4_GOLDEN_README.txt" <<'EOF'
           Storage Knowledge Production W4 Real Golden
@@ -428,6 +428,7 @@ jobs:
           bash -n "$PKG/START_PKR_ISOLATED.command"
           bash -n "$PKG/STOP_PKR_ISOLATED.command"
           bash -n "$PKG/run_macos.sh"
+          bash -n "$PKG/run_macos_isolated_w4.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
