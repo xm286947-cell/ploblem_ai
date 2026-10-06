@@ -910,26 +910,101 @@ def model_extract_to_knowledge_production(
     lifetime_model = StorageLifetimeKnowledgeModel.from_product_root()
     semantic_model = lifetime_model.model.get("semantic_classes") or {}
 
-    def candidate_enricher(draft):
-        title = str(getattr(draft, "title", "") or "")
-        title_folded = title.casefold()
-        matched = []
-        for item in found_parameters:
-            queries = [
-                str(value).strip()
-                for value in (item.get("queries_tried") or [])
-                if str(value).strip()
-            ]
-            canonical = str(item.get("canonical_name") or "").strip()
-            if (
-                any(query.casefold() in title_folded for query in queries)
-                or (
-                    canonical
-                    and canonical.replace("_", " ").casefold()
-                    in title_folded
+    def _normalized_section(value: Any) -> str:
+        return re.sub(
+            r"[^a-z0-9\u4e00-\u9fff]+",
+            " ",
+            str(value or "").casefold(),
+        ).strip()
+
+    def _page_number(value: Any) -> int | None:
+        try:
+            page = int(value)
+        except (TypeError, ValueError):
+            return None
+        return page if page >= 1 else None
+
+    def _locator_matches_parameter(draft, item: dict[str, Any]) -> bool:
+        locations = list(getattr(draft, "evidence_locations", None) or [])
+        if not locations:
+            return False
+        for location in locations:
+            candidate_page = _page_number(getattr(location, "page", None))
+            if candidate_page is None:
+                continue
+            candidate_section = _normalized_section(
+                getattr(location, "section", None)
+            )
+            for hit in item.get("hits") or []:
+                locator = (
+                    hit.get("locator")
+                    if isinstance(hit, dict)
+                    else None
                 )
-            ):
-                matched.append(item)
+                if not isinstance(locator, dict):
+                    continue
+                hit_page = _page_number(locator.get("page"))
+                if hit_page != candidate_page:
+                    continue
+                hit_section = _normalized_section(locator.get("section"))
+                if candidate_section and hit_section:
+                    if not (
+                        candidate_section == hit_section
+                        or candidate_section in hit_section
+                        or hit_section in candidate_section
+                    ):
+                        continue
+                return True
+        return False
+
+    def _text_matches_parameter(draft, item: dict[str, Any]) -> bool:
+        text_parts = [
+            str(getattr(draft, "title", "") or ""),
+            str(getattr(draft, "summary", "") or ""),
+            str(getattr(draft, "content", "") or ""),
+            " ".join(
+                str(value)
+                for value in (getattr(draft, "tags", None) or [])
+                if str(value or "").strip()
+            ),
+        ]
+        haystack = " ".join(text_parts).casefold()
+        queries = [
+            str(value).strip()
+            for value in (item.get("queries_tried") or [])
+            if str(value).strip()
+        ]
+        canonical = str(item.get("canonical_name") or "").strip()
+        tokens = [
+            *queries,
+            canonical.replace("_", " ") if canonical else "",
+        ]
+        return any(
+            token.casefold() in haystack
+            for token in tokens
+            if token
+        )
+
+    def candidate_enricher(draft):
+        locator_matched = [
+            item
+            for item in found_parameters
+            if _locator_matches_parameter(draft, item)
+        ]
+        if locator_matched:
+            matched = locator_matched
+            binding_basis = "EVIDENCE_LOCATOR"
+        else:
+            matched = [
+                item
+                for item in found_parameters
+                if _text_matches_parameter(draft, item)
+            ]
+            binding_basis = (
+                "CANDIDATE_TEXT"
+                if matched
+                else "UNRESOLVED"
+            )
 
         object_type = getattr(getattr(draft, "object_type", None), "value", None)
         if not object_type:
@@ -999,6 +1074,7 @@ def model_extract_to_knowledge_production(
                         if len(parameters) > 1
                         else "UNRESOLVED"
                     ),
+                    "parameter_binding_basis": binding_basis,
                     "semantic_class_candidates": semantic_candidates,
                     "semantic_class_status": status,
                     "scenario_consumers": consumers,
