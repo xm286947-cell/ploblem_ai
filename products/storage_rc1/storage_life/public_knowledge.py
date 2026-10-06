@@ -144,6 +144,14 @@ class ModelScanBody(BaseModel):
     parameter_names: list[str] = Field(default_factory=list, max_length=40)
 
 
+class KnowledgeProductionExtractBody(BaseModel):
+    source_id: str = Field(min_length=1, max_length=200)
+    device_type: str = Field(min_length=1, max_length=100)
+    revision_id: str | None = Field(default=None, max_length=200)
+    top_k_per_parameter: int = Field(default=3, ge=1, le=5)
+    parameter_names: list[str] = Field(default_factory=list, max_length=40)
+
+
 class ImportBody(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1, max_length=25 * 1024 * 1024)
@@ -723,6 +731,235 @@ def model_scan(
     candidates, publish knowledge or turn RAG output into formal evidence.
     """
     return _model_scan_source(body, mode=mode, base_url=base_url)
+
+
+def _public_source_detail(
+    source_id: str,
+    *,
+    mode: str,
+    base_url: str | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if mode != "LIVE":
+        raise HTTPException(
+            409,
+            "模型化 Knowledge Production 只允许 LIVE Public Knowledge 资料。",
+        )
+    raw = _request(
+        mode,
+        "/sources/" + quote(source_id, safe=""),
+        base_url=base_url,
+    )
+    source = raw.get("source") if isinstance(raw, dict) else None
+    revisions = raw.get("revisions") if isinstance(raw, dict) else None
+    if not isinstance(source, dict):
+        raise HTTPException(404, "Public Knowledge 资料不存在。")
+    if str(source.get("source_class") or "PUBLIC").upper() != "PUBLIC":
+        raise HTTPException(422, "仅允许 PUBLIC 资料进入模型化知识生产。")
+    return dict(source), [
+        dict(item) for item in (revisions or []) if isinstance(item, dict)
+    ]
+
+
+def _select_public_revision(
+    revisions: list[dict[str, Any]],
+    requested_revision: str | None,
+) -> dict[str, Any]:
+    if not revisions:
+        raise HTTPException(422, "Public Knowledge 资料没有可用 Revision。")
+    requested = str(requested_revision or "").strip()
+    if not requested:
+        return revisions[0]
+    for item in revisions:
+        if str(item.get("revision_id") or "") == requested:
+            return item
+    raise HTTPException(
+        404,
+        detail={
+            "code": "PUBLIC_SOURCE_REVISION_NOT_FOUND",
+            "revision_id": requested,
+        },
+    )
+
+
+def _kp_source_id(public_source_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", public_source_id).strip(".-")
+    if not safe:
+        raise HTTPException(422, "Public Knowledge Source ID 无法转换为知识生产身份。")
+    return "PKR-" + safe
+
+
+@router.post("/knowledge-production/extract")
+def model_extract_to_knowledge_production(
+    body: KnowledgeProductionExtractBody,
+    mode: str = "LIVE",
+    base_url: str | None = None,
+):
+    """Bridge one Public Knowledge PDF into the existing Knowledge Production.
+
+    RAG only selects source evidence and model topics. Candidate creation,
+    evidence binding and later review/publish remain owned by the existing
+    Knowledge Production stack.
+    """
+    if mode != "LIVE":
+        raise HTTPException(
+            409,
+            "模型化 Knowledge Production 只允许 LIVE Public Knowledge 资料。",
+        )
+
+    scan = _model_scan_source(
+        ModelScanBody(
+            source_id=body.source_id,
+            device_type=body.device_type,
+            top_k_per_parameter=body.top_k_per_parameter,
+            parameter_names=body.parameter_names,
+        ),
+        mode=mode,
+        base_url=base_url,
+    )
+    found_parameters = [
+        item
+        for item in scan["parameters"]
+        if item.get("coverage_status") == "FOUND"
+    ]
+    if not found_parameters:
+        return {
+            "status": "NO_MODEL_EVIDENCE",
+            "candidate_count": 0,
+            "candidate_ids": [],
+            "model_scan": scan["coverage"],
+            "device_type": scan["device_type"],
+            "formal_knowledge_published": False,
+            "next_action": "补充资料或参数检索证据后再进入 Knowledge Production。",
+        }
+
+    source, revisions = _public_source_detail(
+        body.source_id,
+        mode=mode,
+        base_url=base_url,
+    )
+    revision = _select_public_revision(revisions, body.revision_id)
+    revision_id = str(revision.get("revision_id") or "")
+    filename = str(
+        revision.get("original_filename")
+        or f"{body.source_id}.pdf"
+    )
+    media_type = str(revision.get("media_type") or "")
+    if not filename.lower().endswith(".pdf") and media_type != "application/pdf":
+        raise HTTPException(
+            422,
+            detail={
+                "code": "MODEL_EXTRACTION_SOURCE_NOT_PDF",
+                "media_type": media_type,
+                "filename": filename,
+            },
+        )
+
+    snapshot = source_snapshot(
+        body.source_id,
+        revision_id,
+        mode="LIVE",
+        base_url=base_url,
+    )
+    payload = bytes(snapshot.body)
+    if not payload:
+        raise HTTPException(422, "Public Knowledge 原始 PDF Snapshot 为空。")
+
+    requested_topics = list(
+        dict.fromkeys(
+            str(item.get("queries_tried", [])[-1]).strip()
+            for item in found_parameters
+            if item.get("queries_tried")
+            and str(item.get("queries_tried", [])[-1]).strip()
+        )
+    )
+    requested_parameters = [
+        str(item["canonical_name"]) for item in found_parameters
+    ]
+    semantic_targets = list(
+        dict.fromkeys(
+            semantic_class
+            for item in found_parameters
+            for semantic_class in item.get("knowledge_requirements") or []
+        )
+    )
+    scenario_consumers = list(
+        dict.fromkeys(
+            consumer
+            for item in found_parameters
+            for consumer in item.get("scenario_consumers") or []
+        )
+    )
+
+    from .knowledge_product import (
+        StorageKnowledgeProductError,
+        extract_source,
+        ingest_source,
+    )
+
+    try:
+        ingested = ingest_source(
+            payload,
+            filename=filename,
+            source_id=_kp_source_id(body.source_id),
+            publisher=_publisher_from_source(source),
+            title=str(source.get("title") or filename),
+            revision=revision_id,
+            official_url=str(source.get("source_uri") or ""),
+        )
+        source_document = ingested["source_document"]
+        extracted = extract_source(
+            str(source_document["source_id"]),
+            str(source_document["source_version"]),
+            requested_topics=requested_topics,
+            candidate_metadata={
+                "storage_lifetime": {
+                    "schema_version": scan["model_version"],
+                    "model_driven_extraction": True,
+                    "device_type": scan["device_type"],
+                    "public_source_id": body.source_id,
+                    "public_source_revision": revision_id,
+                    "requested_parameters": requested_parameters,
+                    "semantic_class_candidates": semantic_targets,
+                    "semantic_class_status": "NEEDS_REVIEW",
+                    "scenario_consumers": scenario_consumers,
+                    "formal_consumable": False,
+                    "boundary": (
+                        "Candidate only. Existing Knowledge Production "
+                        "Review/Publish/Release is required."
+                    ),
+                }
+            },
+        )
+    except StorageKnowledgeProductError as exc:
+        raise HTTPException(
+            422,
+            detail={"code": str(exc)},
+        ) from exc
+    except Exception as exc:
+        code = str(getattr(exc, "code", "KNOWLEDGE_EXTRACTION_FAILED"))
+        status_code = 503 if code == "KNOWLEDGE_EXTRACTION_FAILED" else 422
+        raise HTTPException(
+            status_code,
+            detail={"code": code},
+        ) from exc
+
+    return {
+        **extracted,
+        "status": "PENDING_REVIEW",
+        "device_type": scan["device_type"],
+        "public_source_id": body.source_id,
+        "public_source_revision": revision_id,
+        "model_scan": scan["coverage"],
+        "requested_parameters": requested_parameters,
+        "requested_topics": requested_topics,
+        "semantic_class_candidates": semantic_targets,
+        "formal_knowledge_published": False,
+        "formal_release_created": False,
+        "next_action": (
+            "进入 Existing Knowledge Production Review；"
+            "确认后 Publish，再生成 Knowledge Release。"
+        ),
+    }
 
 
 @router.post("/search")
