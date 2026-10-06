@@ -15,6 +15,8 @@ from typing import Any
 import math
 import re
 
+from .lifetime_engine import LifetimeAssumption, LifetimeAssessmentRequest, LifetimeEngine
+
 
 FIT = "FIT"
 FIT_WITH_RISK = "FIT_WITH_RISK"
@@ -92,19 +94,51 @@ def derive_required_storage_profile(
     elif pe_per_day < 0:
         raise ValueError("pe_cycles_per_day:NON_NEGATIVE_REQUIRED")
     elif years is not None:
-        required_pe = pe_per_day * days_per_year * years * (1.0 + margin)
-        trace.append({
-            "requirement": "required_pe_cycles",
-            "formula": "pe_cycles_per_day * operating_days_per_year * target_service_life_years * (1 + design_margin_ratio)",
-            "inputs": {
-                "pe_cycles_per_day": pe_per_day,
-                "operating_days_per_year": days_per_year,
-                "target_service_life_years": years,
-                "design_margin_ratio": margin,
-            },
-            "result": required_pe,
-            "unit": "cycles",
-        })
+        assessment = LifetimeEngine().assess(
+            LifetimeAssessmentRequest(
+                device_id="REQUIRED_STORAGE_PROFILE",
+                assumptions=[
+                    LifetimeAssumption(
+                        name="pe_cycles_per_day",
+                        value=pe_per_day,
+                        unit="cycles_per_day",
+                        rationale="EXPLICIT_WORKLOAD_PROFILE",
+                    ),
+                    LifetimeAssumption(
+                        name="target_service_life_years",
+                        value=years,
+                        unit="years",
+                        rationale="EXPLICIT_MISSION_PROFILE",
+                    ),
+                    LifetimeAssumption(
+                        name="operating_days_per_year",
+                        value=days_per_year,
+                        unit="days_per_year",
+                        rationale="MISSION_PROFILE_OR_EXPLICIT_CALENDAR_DEFAULT",
+                    ),
+                    LifetimeAssumption(
+                        name="design_margin_ratio",
+                        value=margin,
+                        unit="ratio",
+                        rationale="EXPLICIT_MISSION_PROFILE",
+                    ),
+                ],
+            ),
+            "NAND_REQUIRED_PE_BUDGET_V1",
+        )
+        if assessment.status.value == "CALCULATED":
+            required_pe = float(assessment.result)
+            trace.append({
+                "requirement": "required_pe_cycles",
+                "formula_id": assessment.formula_id,
+                "formula_version": assessment.formula_version,
+                "inputs": assessment.inputs,
+                "result": required_pe,
+                "unit": assessment.unit,
+                "replay_trace": assessment.replay_trace,
+            })
+        else:
+            missing.extend(assessment.missing_inputs or assessment.error_details or ["NAND_REQUIRED_PE_BUDGET_NOT_CALCULATED"])
 
     retention = _optional_number(mission.get("required_retention_years"))
     if retention is not None and retention < 0:
@@ -316,10 +350,11 @@ def compose_role_views(
 
     knowledge = dict(formal_nand_knowledge or {})
     knowledge_items = list(knowledge.get("results") or knowledge.get("items") or [])
-    formal_ready = bool(
+    item_evidence_ready = bool(
         knowledge_items
         and all(item.get("evidence_refs") for item in knowledge_items if isinstance(item, dict))
     )
+    formal_ready = bool(item_evidence_ready or (knowledge_items and knowledge.get("evidence_refs")))
     blockers = list(required_profile.get("missing_information") or [])
     if not formal_ready:
         blockers.append("FORMAL_NAND_KNOWLEDGE_WITH_EVIDENCE_REQUIRED")
