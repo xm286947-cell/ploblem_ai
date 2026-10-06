@@ -37,6 +37,35 @@ class KnowledgeExtractionError(RuntimeError):
         super().__init__(code)
 
 
+SAFE_RUNTIME_FAILURE_CODES = frozenset({
+    "PROVIDER_TRANSPORT",
+    "PROVIDER_HTTP_ERROR",
+    "PROVIDER_BASE_URL_INVALID",
+    "PROVIDER_CONFIG_INCOMPLETE",
+    "PROVIDER_NOT_BOUND",
+    "PROVIDER_TYPE_UNSUPPORTED",
+    "PROVIDER_OUTPUT_SHAPE_INVALID",
+    "PROVIDER_SCHEMA_INVALID",
+    "PROVIDER_ENVELOPE_INVALID",
+})
+
+
+def _stable_runtime_failure_code(value: Any) -> str | None:
+    """Return only safe, stable Runtime error identities.
+
+    Provider URLs, credentials, raw responses and exception strings remain
+    inside Runtime evidence. Knowledge Production only surfaces a bounded code
+    that the product can turn into an actionable, non-secret message.
+    """
+    error = getattr(value, "error", None)
+    if isinstance(error, dict):
+        raw = error.get("code")
+    else:
+        raw = getattr(error, "code", None)
+    code = str(raw or "").strip().upper()
+    return code if code in SAFE_RUNTIME_FAILURE_CODES else None
+
+
 def _candidate_id(
     source_id: str,
     source_version: str,
@@ -200,12 +229,16 @@ class KnowledgeExtractionService:
         try:
             result = self.runtime.invoke(request)
         except Exception as exc:
+            safe_code = _stable_runtime_failure_code(exc)
             raise KnowledgeExtractionError(
-                "KNOWLEDGE_EXTRACTION_FAILED"
+                safe_code or "KNOWLEDGE_EXTRACTION_FAILED"
             ) from exc
 
         if getattr(result, "status", None) != RuntimeStatus.COMPLETED:
-            raise KnowledgeExtractionError("KNOWLEDGE_EXTRACTION_FAILED")
+            raise KnowledgeExtractionError(
+                _stable_runtime_failure_code(result)
+                or "KNOWLEDGE_EXTRACTION_FAILED"
+            )
 
         try:
             output = KnowledgeExtractionOutput.model_validate(result.data)
