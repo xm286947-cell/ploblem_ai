@@ -414,15 +414,7 @@ def _require_lifetime_metric_applicable(detail: dict[str, Any], requested_metric
         raise ValueError(f"LIFETIME_METRIC_NOT_APPLICABLE:{formal}:{dtype}")
 
     if formal in {"NVME_DATA_UNITS_WRITTEN_V1", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"}:
-        interface_fact = next(
-            (
-                fact for fact in (detail.get("device_facts") or [])
-                if str(fact.get("canonical_name") or "") == "interface"
-            ),
-            None,
-        )
-        interface_value = str((interface_fact or {}).get("value") or "").lower()
-        if "nvme" not in interface_value:
+        if not _confirmed_nvme_interface(detail):
             raise ValueError(
                 f"NVME_PROTOCOL_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE:{formal}"
             )
@@ -1222,6 +1214,50 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     }
 
 
+def _confirmed_nvme_interface(detail: dict[str, Any]) -> bool:
+    interface_fact = next(
+        (
+            fact for fact in (detail.get("device_facts") or [])
+            if str(fact.get("canonical_name") or "") == "interface"
+        ),
+        None,
+    )
+    return "nvme" in str((interface_fact or {}).get("value") or "").lower()
+
+
+def _require_runtime_metrics_applicable(
+    detail: dict[str, Any],
+    observations: list[dict[str, Any]],
+) -> None:
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    nvme_only = {
+        "critical_warning",
+        "media_errors",
+        "available_spare",
+        "available_spare_threshold",
+        "percentage_used",
+        "data_units_written",
+    }
+    emmc_only = {
+        "device_life_time_a",
+        "device_life_time_b",
+        "device_life_time_est_typ_a",
+        "device_life_time_est_typ_b",
+        "pre_eol",
+        "pre_eol_info",
+        "bkops_status",
+        "ext_csd_health_report",
+    }
+    for raw in observations or []:
+        metric = str((raw or {}).get("metric_name") or "").strip()
+        if not metric:
+            continue
+        if metric in nvme_only and (dtype != "SSD" or not _confirmed_nvme_interface(detail)):
+            raise ValueError(f"NVME_RUNTIME_METRIC_NOT_APPLICABLE:{metric}")
+        if metric in emmc_only and dtype != "eMMC":
+            raise ValueError(f"EMMC_RUNTIME_METRIC_NOT_APPLICABLE:{metric}")
+
+
 def _verify_runtime_snapshot_evidence(device_id: str, item: dict[str, Any]) -> bool:
     ref = str(item.get("evidence_ref") or "").strip()
     if not ref.startswith("runtime-snapshot:"):
@@ -1357,10 +1393,12 @@ def execute_device_skill(
     detail = device_slots(device_id)
     request = dict(payload or {})
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    raw_runtime = list(request.get("runtime_observations") or [])
+    _require_runtime_metrics_applicable(detail, raw_runtime)
     bound_runtime = _bind_runtime_observations(
         device_id,
         dtype,
-        list(request.get("runtime_observations") or []),
+        raw_runtime,
         trusted_runtime=trusted_runtime,
     )
     request["runtime_observations"] = bound_runtime
