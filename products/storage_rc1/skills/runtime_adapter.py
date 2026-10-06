@@ -375,20 +375,30 @@ class StorageDomainSkillAdapter:
                         else:
                             consumed_ratio_at_target = projected_host_bytes / rated_tbw_bytes
                             remaining_bytes_at_target = rated_tbw_bytes - projected_host_bytes
+                            max_allowable_dwpd = rated_tbw_bytes / capacity_bytes / target_days
+                            dwpd_margin = max_allowable_dwpd - observed_dwpd
                             target_projection = {
-                            "target_service_life": {"value": target_value, "unit": "years"},
-                            "target_days": target_days,
-                            "observed_dwpd": observed_dwpd,
-                            "capacity_bytes": capacity_bytes,
-                            "projected_host_written_bytes": projected_host_bytes,
-                            "rated_tbw_bytes": rated_tbw_bytes,
-                            "consumed_ratio_at_target": consumed_ratio_at_target,
-                            "remaining_bytes_at_target": remaining_bytes_at_target,
-                            "budget_status": (
-                                "WITHIN_BUDGET"
-                                if projected_host_bytes <= rated_tbw_bytes
-                                else "EXCEEDS_BUDGET"
-                            ),
+                                "target_service_life": {"value": target_value, "unit": "years"},
+                                "target_days": target_days,
+                                "observed_dwpd": observed_dwpd,
+                                "max_allowable_dwpd": max_allowable_dwpd,
+                                "dwpd_margin": dwpd_margin,
+                                "capacity_bytes": capacity_bytes,
+                                "projected_host_written_bytes": projected_host_bytes,
+                                "rated_tbw_bytes": rated_tbw_bytes,
+                                "consumed_ratio_at_target": consumed_ratio_at_target,
+                                "remaining_bytes_at_target": remaining_bytes_at_target,
+                                "projection_basis": "FULL_RATED_TBW_BUDGET_FROM_ZERO",
+                                "existing_consumption_included": False,
+                                "boundary_note": (
+                                    "目标寿命预算按完整额定 TBW 从零基线投影；"
+                                    "若评估的是已服役器件，必须另行计入既有累计写入量。"
+                                ),
+                                "budget_status": (
+                                    "WITHIN_BUDGET"
+                                    if projected_host_bytes <= rated_tbw_bytes
+                                    else "EXCEEDS_BUDGET"
+                                ),
                                 "evidence_refs": sorted(
                                     set(list(result.evidence_refs) + list(rated_fact.evidence_refs))
                                 ),
