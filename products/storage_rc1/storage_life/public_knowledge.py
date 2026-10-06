@@ -896,6 +896,110 @@ def model_extract_to_knowledge_production(
         ingest_source,
     )
 
+    lifetime_model = StorageLifetimeKnowledgeModel.from_product_root()
+    semantic_model = lifetime_model.model.get("semantic_classes") or {}
+
+    def candidate_enricher(draft):
+        title = str(getattr(draft, "title", "") or "")
+        title_folded = title.casefold()
+        matched = []
+        for item in found_parameters:
+            queries = [
+                str(value).strip()
+                for value in (item.get("queries_tried") or [])
+                if str(value).strip()
+            ]
+            canonical = str(item.get("canonical_name") or "").strip()
+            if (
+                any(query.casefold() in title_folded for query in queries)
+                or (
+                    canonical
+                    and canonical.replace("_", " ").casefold()
+                    in title_folded
+                )
+            ):
+                matched.append(item)
+
+        object_type = getattr(getattr(draft, "object_type", None), "value", None)
+        if not object_type:
+            object_type = str(getattr(draft, "object_type", "") or "")
+
+        semantic_candidates = list(
+            dict.fromkeys(
+                semantic_class
+                for item in matched
+                for semantic_class in (item.get("knowledge_requirements") or [])
+                if object_type
+                in (
+                    semantic_model.get(semantic_class, {}).get(
+                        "allowed_object_types"
+                    )
+                    or []
+                )
+            )
+        )
+        parameters = list(
+            dict.fromkeys(
+                str(item.get("canonical_name") or "")
+                for item in matched
+                if str(item.get("canonical_name") or "")
+            )
+        )
+        consumers = list(
+            dict.fromkeys(
+                str(consumer)
+                for item in matched
+                for consumer in (item.get("scenario_consumers") or [])
+            )
+        )
+        tag_values = [
+            "storage-lifetime",
+            "storage-device:"
+            + re.sub(
+                r"[^a-z0-9]+",
+                "-",
+                scan["device_type"].casefold(),
+            ).strip("-"),
+            *[f"storage-parameter:{value}" for value in parameters],
+            *[
+                f"storage-semantic-candidate:{value}"
+                for value in semantic_candidates
+            ],
+        ]
+        status = (
+            "NEEDS_REVIEW"
+            if semantic_candidates
+            else "UNRESOLVED"
+        )
+        return {
+            "tags": tag_values,
+            "metadata": {
+                "storage_lifetime": {
+                    "schema_version": scan["model_version"],
+                    "model_driven_extraction": True,
+                    "device_type": scan["device_type"],
+                    "public_source_id": body.source_id,
+                    "public_source_revision": revision_id,
+                    "canonical_parameters": parameters,
+                    "parameter_binding_status": (
+                        "BOUND"
+                        if len(parameters) == 1
+                        else "AMBIGUOUS"
+                        if len(parameters) > 1
+                        else "UNRESOLVED"
+                    ),
+                    "semantic_class_candidates": semantic_candidates,
+                    "semantic_class_status": status,
+                    "scenario_consumers": consumers,
+                    "formal_consumable": False,
+                    "boundary": (
+                        "Reviewer must select exactly one "
+                        "storage-semantic:* class before Publish."
+                    ),
+                }
+            },
+        }
+
     try:
         ingested = ingest_source(
             payload,
@@ -912,23 +1016,16 @@ def model_extract_to_knowledge_production(
             str(source_document["source_version"]),
             requested_topics=requested_topics,
             candidate_metadata={
-                "storage_lifetime": {
+                "storage_source_bridge": {
                     "schema_version": scan["model_version"],
-                    "model_driven_extraction": True,
-                    "device_type": scan["device_type"],
                     "public_source_id": body.source_id,
                     "public_source_revision": revision_id,
                     "requested_parameters": requested_parameters,
                     "semantic_class_candidates": semantic_targets,
-                    "semantic_class_status": "NEEDS_REVIEW",
                     "scenario_consumers": scenario_consumers,
-                    "formal_consumable": False,
-                    "boundary": (
-                        "Candidate only. Existing Knowledge Production "
-                        "Review/Publish/Release is required."
-                    ),
                 }
             },
+            candidate_enricher=candidate_enricher,
         )
     except StorageKnowledgeProductError as exc:
         raise HTTPException(
