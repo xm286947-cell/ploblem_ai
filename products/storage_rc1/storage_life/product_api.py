@@ -594,32 +594,17 @@ def _formal_knowledge(
             result = structured
         else:
             # Compatibility bridge is allowed only for a wholly legacy Formal
-            # Knowledge release. Once any reviewed Storage-lifetime object is
-            # present, a missing parameter/scenario match is a real knowledge
-            # gap and must not silently fall back to prose matching.
-            broad = consumer.query(
-                "",
-                device_type=device_type,
-                top_k=50,
+            # Knowledge release.  Current KnowledgeReleaseConsumer exposes a
+            # metadata probe so this decision never depends on search text.
+            probe = getattr(
+                consumer,
+                "has_reviewed_storage_knowledge",
+                None,
             )
-            has_reviewed_storage = any(
-                isinstance(row.get("metadata"), dict)
-                and isinstance(
-                    row["metadata"].get("storage_lifetime"),
-                    dict,
-                )
-                and row["metadata"]["storage_lifetime"].get(
-                    "formal_consumable"
-                )
-                is True
-                and str(
-                    row["metadata"]["storage_lifetime"].get(
-                        "semantic_class_status"
-                    )
-                    or ""
-                ).upper()
-                == "REVIEWED"
-                for row in (broad.get("results") or [])
+            has_reviewed_storage = (
+                bool(probe(device_type=device_type))
+                if callable(probe)
+                else False
             )
             result = (
                 structured
@@ -630,14 +615,6 @@ def _formal_knowledge(
                     top_k=top_k,
                 )
             )
-            if (
-                not has_reviewed_storage
-                and isinstance(result, dict)
-            ):
-                result = {
-                    **result,
-                    "selection_mode": "LEGACY_FORMAL_COMPATIBILITY",
-                }
     except Exception as exc:
         return {
             "status": "UNKNOWN",
@@ -668,7 +645,18 @@ def _formal_knowledge(
         "knowledge_release_version": result.get("knowledge_release_version"),
         "results": rows,
         "evidence_refs": evidence_refs,
-        "selection_mode": result.get("selection_mode", "TEXT_AND_DEVICE"),
+        "selection_mode": result.get(
+            "selection_mode",
+            "TEXT_AND_DEVICE",
+        ),
+        "compatibility_mode": (
+            "LEGACY_FORMAL_COMPATIBILITY"
+            if rows
+            and result.get("selection_mode", "TEXT_AND_DEVICE")
+            == "TEXT_AND_DEVICE"
+            and not structured.get("results")
+            else None
+        ),
     }
 
 
