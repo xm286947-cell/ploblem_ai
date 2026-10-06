@@ -39,3 +39,40 @@ def test_new_asset_migration_module_is_discovered_automatically(tmp_path: Path, 
     assert future in closure["asset_migration_modules"]
     assert future in closure["roots"]
     assert future in closure["files"]
+
+
+def test_lazy_package_exports_are_followed_as_recursive_dependencies(tmp_path: Path, monkeypatch):
+    migrations = tmp_path / "services" / "hardware_asset_migrations"
+    migrations.mkdir(parents=True)
+    for name in package_builder.REQUIRED_ASSET_MIGRATION_MODULES:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('"""fixture migration"""\n', encoding="utf-8")
+
+    repositories = tmp_path / "repositories"
+    repositories.mkdir()
+    (tmp_path / "app.py").write_text(
+        "from repositories import JsonArtifactRepository\n", encoding="utf-8"
+    )
+    (repositories / "__init__.py").write_text(
+        "def __getattr__(name):\n"
+        "    if name == 'JsonArtifactRepository':\n"
+        "        from .json_repository import JsonArtifactRepository\n"
+        "        return JsonArtifactRepository\n"
+        "    raise AttributeError(name)\n",
+        encoding="utf-8",
+    )
+    (repositories / "json_repository.py").write_text(
+        "class JsonArtifactRepository: pass\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(package_builder, "CLOSURE_ROOTS", ["app.py"])
+
+    closure = package_builder.dependency_closure(tmp_path)
+
+    assert closure["status"] == "PASS"
+    assert "repositories/json_repository.py" in closure["files"]
+    assert any(
+        edge["from"] == "repositories/__init__.py"
+        and edge["target"] == "repositories/json_repository.py"
+        for edge in closure["edges"]
+    )

@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "knowledge_production/public_service.py"
+      - "scripts/build_hardware_case_product_test_package.py"
+      - "scripts/hardware_case_complete_product_smoke.py"
       - "tests/test_hardware_r1_knowledge_promotion.py"
       - "tests/test_hardware_r1_golden_unified_bridge_spike.py"
       - ".github/workflows/knowledge-windows-safe-idempotency.yml"

@@ -116,6 +116,11 @@ def _runtime_ready(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
             "status": "READY",
             "agent_id": resolved.definition.agent_id,
             "config_hash": resolved.config_hash[:16],
+            "configuration_state": str(
+                resolved.provider.metadata.get("configuration_state")
+                or "CONFIGURED"
+            ),
+            "provider_connectivity": "NOT_PROBED",
         }
     except Exception as error:
         code = str(getattr(error, "code", None) or type(error).__name__)

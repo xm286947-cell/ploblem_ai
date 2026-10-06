@@ -54,6 +54,13 @@ def main() -> int:
         raise SystemExit("PACKAGE_ASSET_MIGRATION_CLOSURE_MISSING")
     if closure.get("status") != "PASS":
         raise SystemExit("PACKAGE_DEPENDENCY_CLOSURE_FAIL")
+    if closure.get("unresolved_local_imports"):
+        raise SystemExit("PACKAGE_UNRESOLVED_LOCAL_IMPORTS_PRESENT")
+    json_repository = "repositories/json_repository.py"
+    if json_repository not in closure_paths or json_repository not in package_paths:
+        raise SystemExit("PACKAGE_JSON_REPOSITORY_MISSING")
+    if manifest.get("dependency_closure", {}).get("status") != "PASS":
+        raise SystemExit("PACKAGE_DEPENDENCY_MANIFEST_STATUS_FAIL")
     staged = closure.get("staged_verification") or {}
     if staged.get("status") != "PASS" or staged.get("file_count") != staged.get("expected_file_count"):
         raise SystemExit("PACKAGE_STAGED_CLOSURE_INCOMPLETE")
@@ -68,24 +75,33 @@ def main() -> int:
     with zipfile.ZipFile(archive_path) as archive:
         archive_paths = set(archive.namelist())
     archive_prefix = STAGE.name + "/"
+    if archive_prefix + json_repository not in archive_paths:
+        raise SystemExit("PACKAGE_ARCHIVE_JSON_REPOSITORY_MISSING")
     missing_from_archive = [
         relative for relative in expected if archive_prefix + relative not in archive_paths
     ]
     if missing_from_archive:
         raise SystemExit("PACKAGE_ARCHIVE_MIGRATIONS_MISSING=" + ",".join(missing_from_archive))
 
-    import_code = [
-        "import importlib",
-        "importlib.import_module('services.hardware_asset_repository')",
-    ]
-    import_code.extend(
-        "importlib.import_module(%r)" % _python_module_name(relative)
-        for relative in expected
+    local_modules = sorted(
+        {
+            _python_module_name(relative)
+            for relative in closure_paths
+            if Path(relative).suffix == ".py"
+        }
     )
+    import_code = [
+        "import importlib,pathlib,sys",
+        "root=pathlib.Path.cwd().resolve()",
+        "sys.path.insert(0,str(root))",
+        "modules=%r" % local_modules,
+        "loaded=[importlib.import_module(name) for name in modules]",
+        "assert all(root in pathlib.Path(m.__file__).resolve().parents or pathlib.Path(m.__file__).resolve()==root for m in loaded if getattr(m,'__file__',None)),'IMPORT_OUTSIDE_PACKAGE'",
+    ]
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     result = subprocess.run(
-        [sys.executable, "-c", ";".join(import_code)],
+        [sys.executable, "-I", "-c", ";".join(import_code)],
         cwd=STAGE,
         env=env,
         check=False,
@@ -99,7 +115,10 @@ def main() -> int:
 
     print("ASSET_MIGRATION_MODULES_PACKAGED=PASS")
     print("PACKAGE_DEPENDENCY_CLOSURE=PASS")
-    print("PACKAGE_ASSET_REPOSITORY_IMPORT=PASS")
+    print("RECURSIVE_LOCAL_IMPORT_CLOSURE=PASS")
+    print("UNRESOLVED_LOCAL_IMPORTS=0")
+    print("JSON_REPOSITORY_PRESENT=YES")
+    print("DEV_WORKSPACE_DEPENDENCY=NO")
     return 0
 
 
