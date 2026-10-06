@@ -179,6 +179,49 @@ def test_runtime_agent_configs_reuse_mature_prompts():
     assert solution["metadata"]["what_how_boundary"] == "RUNTIME_EXECUTION_ONLY"
 
 
+def test_repeat_agent_configs_follow_runtime_active_model():
+    for name in (
+        "major_issue.repeat_similarity.yaml",
+        "major_issue.repeat_solution.yaml",
+        "major_issue.repeat_case.yaml",
+    ):
+        config = yaml.safe_load(
+            (ROOT / "config/runtime/agents" / name).read_text(encoding="utf-8")
+        )
+        assert "model_ref" not in config
+        assert config["metadata"]["model_selection"] == "ACTIVE_MODEL"
+
+
+def test_candidate_builder_packages_repeat_runtime_and_report_assets():
+    source = (
+        ROOT / "scripts/build_major_mvp_product_candidate.py"
+    ).read_text(encoding="utf-8")
+    assert '"data/runtime/.keep"' in source
+    assert '"data/repeat_reports/.keep"' in source
+    assert '"REPEAT_AGENT_SIMILARITY_M8_2"' in source
+    assert '"REPEAT_AGENT_SOLUTION_M8_3"' in source
+    assert '"REPEAT_AI_RECOMMENDATION_M8_4_OPTIONAL"' in source
+    assert '"REPEAT_MARKDOWN_REPORT"' in source
+
+
+def test_m83_compact_payload_keeps_typed_semantic_and_exact_evidence():
+    context = RepeatAgentAnalysisService._candidate_context(
+        "RQ-1",
+        _search_result()["query_input"],
+        _candidate(),
+    )
+    payload = RepeatAgentAnalysisService._solution_payload(
+        context,
+        _similarity_wrapper(),
+    )
+    assert payload["query"]["problem"] == "当前控制器掉电后启动失败"
+    assert payload["historical_case"]["case_id"] == "HCASE-1"
+    assert payload["exact_evidence"][0]["raw_text"] == "掉电窗口存在未完成写入。"
+    assert "typed_semantic" in payload
+    assert "retrieval_document" not in json.dumps(payload, ensure_ascii=False)
+    assert "embedding" not in json.dumps(payload, ensure_ascii=False)
+
+
 def test_product_agent_service_does_not_reconnect_legacy_provider_client():
     source = (
         ROOT / "quality_knowledge/repeat_risk/agent_analysis.py"
