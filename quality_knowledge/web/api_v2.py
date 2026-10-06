@@ -589,7 +589,7 @@ def create_v2_router(
 
     def _repeat_http_error(error: Exception) -> HTTPException:
         code = getattr(error, "code", None) or str(error)
-        if code in {"ISSUE_NOT_FOUND", "ITR_NOT_FOUND", "REPEAT_QUERY_NOT_FOUND", "REPEAT_RESULT_NOT_FOUND", "CASE_NOT_FOUND"}:
+        if code in {"ISSUE_NOT_FOUND", "ITR_NOT_FOUND", "REPEAT_QUERY_NOT_FOUND", "REPEAT_RESULT_NOT_FOUND", "REPEAT_REPORT_NOT_FOUND", "CASE_NOT_FOUND"}:
             return HTTPException(404, code)
         if code in {"CASE_SERVICE_UNAVAILABLE", "SEARCH_UNAVAILABLE", "REPEAT_RISK_NOT_CONFIGURED"}:
             return HTTPException(503, code)
