@@ -345,6 +345,119 @@ jobs:
           (root/"README_先看我.txt").write_text("\n".join(x[10:] if x.startswith("          ") else x for x in readme.splitlines())+"\n",encoding="utf-8")
           PY
 
+          # Overwrite the generated helper with a literal, syntax-stable applicator.
+          cat > "${ROOT}/patch_apply.py" <<'PYAPP'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          import shutil
+          import sys
+          from datetime import datetime
+          from pathlib import Path
+
+          PATCH_DIR = Path(__file__).resolve().parent
+          MANIFEST = json.loads((PATCH_DIR / "PATCH_MANIFEST.json").read_text(encoding="utf-8"))
+
+          def digest(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def backup_root(target: Path) -> Path:
+              return target / ".storage_hotfix_backup" / MANIFEST["patch_id"]
+
+          def apply(target: Path) -> None:
+              files = MANIFEST["files"]
+              states = []
+              for item in files:
+                  dst = target / item["path"]
+                  if not dst.is_file():
+                      raise SystemExit(f"PATCH_TARGET_FILE_MISSING: {item['path']}")
+                  current = digest(dst)
+                  if current == item["target_sha256"]:
+                      states.append(("target", item, dst))
+                  elif current == item["base_sha256"]:
+                      states.append(("base", item, dst))
+                  else:
+                      raise SystemExit(
+                          "PATCH_BASE_MISMATCH: " + item["path"]
+                          + "\n当前文件不是本补丁支持的 0b6e7c8b 基线，也不是已更新版本。"
+                          + "\n为保护现场数据，补丁已停止，不会覆盖。"
+                      )
+
+              if all(state == "target" for state, _, __ in states):
+                  print("ALREADY_PATCHED=YES")
+                  return
+
+              bdir = backup_root(target)
+              for state, item, dst in states:
+                  if state != "base":
+                      continue
+                  bak = bdir / item["path"]
+                  bak.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(dst, bak)
+
+              for state, item, dst in states:
+                  if state != "base":
+                      continue
+                  src = PATCH_DIR / "payload" / item["path"]
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  tmp = dst.with_name(dst.name + ".hotfix_tmp")
+                  shutil.copy2(src, tmp)
+                  if digest(tmp) != item["target_sha256"]:
+                      tmp.unlink(missing_ok=True)
+                      raise SystemExit("PATCH_PAYLOAD_HASH_MISMATCH: " + item["path"])
+                  os.replace(tmp, dst)
+
+              for item in files:
+                  dst = target / item["path"]
+                  if digest(dst) != item["target_sha256"]:
+                      raise SystemExit("PATCH_VERIFY_FAILED: " + item["path"])
+
+              stamp = {
+                  "patch_id": MANIFEST["patch_id"],
+                  "base_sha": MANIFEST["base_sha"],
+                  "target_runtime_sha": MANIFEST["target_runtime_sha"],
+                  "applied_at": datetime.now().astimezone().isoformat(),
+                  "backup_dir": str(bdir),
+              }
+              marker = target / ".storage_hotfix_applied.json"
+              marker.write_text(json.dumps(stamp, ensure_ascii=False, indent=2), encoding="utf-8")
+              print("PATCH_RESULT=PASS")
+              print("USER_DATA_TOUCHED=NO")
+              print("BACKUP_DIR=" + str(bdir))
+
+          def rollback(target: Path) -> None:
+              bdir = backup_root(target)
+              if not bdir.is_dir():
+                  raise SystemExit("ROLLBACK_BACKUP_NOT_FOUND")
+              for item in MANIFEST["files"]:
+                  src = bdir / item["path"]
+                  dst = target / item["path"]
+                  if not src.is_file():
+                      raise SystemExit("ROLLBACK_FILE_MISSING: " + item["path"])
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(src, dst)
+                  if digest(dst) != item["base_sha256"]:
+                      raise SystemExit("ROLLBACK_VERIFY_FAILED: " + item["path"])
+              (target / ".storage_hotfix_applied.json").unlink(missing_ok=True)
+              print("ROLLBACK_RESULT=PASS")
+
+          if len(sys.argv) != 3 or sys.argv[1] not in {"apply", "rollback"}:
+              raise SystemExit("usage: patch_apply.py apply|rollback <installed-package-root>")
+          target = Path(sys.argv[2]).expanduser().resolve()
+          if sys.argv[1] == "apply":
+              apply(target)
+          else:
+              rollback(target)
+          PYAPP
+
+          python -m py_compile "${ROOT}/patch_apply.py"
+          find "${ROOT}" -type d -name __pycache__ -prune -exec rm -rf {} +
+
           chmod +x "${ROOT}/apply_patch.command" "${ROOT}/rollback_patch.command"
 
       - name: Upload hotfix artifact
