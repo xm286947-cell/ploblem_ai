@@ -544,7 +544,10 @@ class RepeatAgentAnalysisService:
             overall_status,
             warnings,
         )
-        delivery = DeliveryService(self.report_root).deliver(analysis)
+        delivery = DeliveryService(self.report_root).deliver(
+            analysis,
+            source_artifact=f"repeat-result/v1:{query_id}",
+        )
 
         def relative(path_value: Any) -> str:
             path = Path(str(path_value or "")).resolve()
