@@ -129,7 +129,7 @@ def _seed_case_artifacts(repo: JsonArtifactRepository) -> None:
     )
 
 
-def _client(tmp_path: Path):
+def _client(tmp_path: Path, *, agent_analysis=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "p0.db"
     _init(db)
@@ -139,7 +139,14 @@ def _client(tmp_path: Path):
         knowledge_id="K-ITR-1",
         business_id="ITR-1",
         title="当前控制器掉电后启动失败",
-        raw_extra={"关联漏测问题": "MISS-1"},
+        raw_extra={
+            "关联漏测问题": "MISS-1",
+            "IPMT": "IPMT-A",
+            "SPDT": "SPDT-A",
+            "责任部门二级": "研发二部",
+            "原因一级分类": "软件设计",
+            "原因二级分类": "资源管理",
+        },
     )
     _save_issue(
         p0,
@@ -161,6 +168,7 @@ def _client(tmp_path: Path):
 
     def repeat_search(query, top_k):
         mode["calls"] += 1
+        mode["last_query"] = query.to_dict()
         if mode["state"] == "unavailable":
             raise RuntimeError("synthetic search outage")
         if mode["state"] == "empty":
@@ -191,6 +199,7 @@ def _client(tmp_path: Path):
         issue_repository=p0,
         repeat_repository=RepeatQueryTraceRepository(tmp_path / "repeat.db"),
         case_service=case_service,
+        agent_analysis=agent_analysis,
     )
     app = create_p0_app(db, stage_runner=None, repeat_web=facade)
     mode["artifacts"] = artifacts
@@ -338,6 +347,69 @@ def test_success_candidate_evidence_roundtrip(tmp_path: Path):
     assert candidate["typed_causes"] == []
     detail = client.get("/api/v2/historical-cases/HCASE-1").json()
     assert detail["evidence"][0]["page"] == 7
+
+
+def test_query_input_restores_organization_and_classification_from_itr_workbench(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    response = _query(client, "K-ITR-1")
+    assert response.status_code == 201
+    assert mode["last_query"]["organization"] == {
+        "ipmt": "IPMT-A",
+        "spdt": "SPDT-A",
+        "responsible_department_level2": "研发二部",
+    }
+    assert mode["last_query"]["classification"] == {
+        "cause_level1": "软件设计",
+        "cause_level2": "资源管理",
+    }
+
+
+def test_web_main_path_invokes_agent_analysis_after_retrieval(tmp_path: Path):
+    class FakeAgentAnalysis:
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, query_trace, search_result):
+            self.calls += 1
+            assert query_trace["subject_ref"] == "ITR-1"
+            assert search_result["status"] == "SUCCESS"
+            result = dict(search_result)
+            result["candidates"] = [dict(item) for item in search_result["candidates"]]
+            result["candidates"][0]["agent_analysis_status"] = "SUCCESS"
+            result["candidates"][0]["agent_similarity"] = {
+                "analysis_status": "SUCCESS",
+                "analysis": {"analysis_summary": "M8.2 reached from Web main path"},
+            }
+            result["candidates"][0]["agent_solution"] = {
+                "analysis_status": "SUCCESS",
+                "analysis": {"analysis_summary": "M8.3 reached from Web main path"},
+            }
+            result["candidates"][0]["ai_recommendation"] = {
+                "status": "DISABLED",
+                "decision": None,
+            }
+            result["agent_analysis"] = {
+                "status": "SUCCESS",
+                "m82_similarity": "RESTORED",
+                "m83_solution": "RESTORED",
+                "m84_recommendation": "DISABLED",
+                "provider_boundary": "UNIFIED_RUNTIME_ONLY",
+            }
+            result["analysis_report"] = {
+                "status": "AVAILABLE",
+                "report_markdown_ref": "data/repeat_reports/RQ/report.md",
+            }
+            return result
+
+    agent = FakeAgentAnalysis()
+    client, _ = _client(tmp_path, agent_analysis=agent)
+    result = _query(client, "K-ITR-1").json()["result"]
+
+    assert agent.calls == 1
+    assert result["candidates"][0]["agent_analysis_status"] == "SUCCESS"
+    assert result["agent_analysis"]["provider_boundary"] == "UNIFIED_RUNTIME_ONLY"
+    assert result["analysis_report"]["status"] == "AVAILABLE"
+    assert result["human_decision"]["decision"] == "PENDING"
 
 
 def test_all_four_human_decisions_persist(tmp_path: Path):
