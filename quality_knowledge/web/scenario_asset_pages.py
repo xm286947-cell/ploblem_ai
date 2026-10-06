@@ -8,8 +8,8 @@ DIMENSIONS={'industry':'行业','customer':'客户','product':'产品型号','bu
             'activity':'业务活动','scale':'系统规模','environment':'环境/工况','concern':'客户质量关注点',
             'quality':'质量属性','period':'场景问题时间','scenario':'质量场景'}
 
-def create_asset_router(repository,templates,generation=None):
-    router=APIRouter();service=ScenarioAssets(repository)
+def create_asset_router(repository,templates,generation=None,qsv1_repository=None):
+    router=APIRouter();service=ScenarioAssets(repository,qsv1_repository=qsv1_repository)
     from quality_knowledge.scenario_interpretation import ScenarioInterpretation
     interpreter=ScenarioInterpretation(service,generation) if generation else None
 
@@ -150,10 +150,17 @@ def create_asset_router(repository,templates,generation=None):
                 'conflict_count':sum(x.get('source_status')=='CONFLICT' for x in market_rows),
                 'agent_input_count':len(market_rows)}
         latest_interpretation=interpreter.latest({**filters,'portrait_mode':'1'}) if interpreter else None
+        portrait_axis=str(filters.get('portrait_axis') or '').strip().lower()
+        if portrait_axis not in {'product','industry','customer'}:
+            portrait_axis=''
+        portrait_title={'product':'产品质量画像','industry':'行业质量画像','customer':'客户质量画像'}.get(
+            portrait_axis,'产品 / 行业 / 客户质量画像'
+        )
         return templates.TemplateResponse(request,'scenario_customer_portrait.html',{
             'report':report,'filters':filters,'dimensions':DIMENSIONS,'taxonomy_labels':taxonomy_labels,
             'choices':choices,'product_group_tabs':product_group_tabs,'market_scope':market_scope,
             'portrait_digest':portrait_digest(market_scope['items'] if market_scope else []),
+            'portrait_axis':portrait_axis,'portrait_title':portrait_title,
             'interpretation':latest_interpretation,'archives':interpreter.archives(10) if interpreter else []})
 
     @router.get('/quality-scenario-assets/{sid}')

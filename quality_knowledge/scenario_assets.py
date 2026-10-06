@@ -17,8 +17,9 @@ METRIC_FIELDS = {'name':'指标名称','concern':'客户质量关注点','observ
 
 
 class ScenarioAssets:
-    def __init__(self, repository):
+    def __init__(self, repository, qsv1_repository=None):
         self.repo = repository
+        self.qsv1 = qsv1_repository
         with self.repo.connect() as c:
             c.executescript('''
             CREATE TABLE IF NOT EXISTS scenario_asset_context(scenario_id TEXT PRIMARY KEY,data_json TEXT NOT NULL);
@@ -74,6 +75,64 @@ class ScenarioAssets:
             assets.append({**s,'context':contexts.get(sid,{}),'members':[{**by_id[m],'context':contexts.get(m,{}),'issue_ids':sorted(evidence[m])} for m in members],
                            'issue_ids':sorted(set().union(*(evidence[m] for m in members))),
                            'metrics':[metric for m in members for metric in metrics[m]]})
+
+        # QSV1 remains lifecycle/history source-of-truth. Published scenarios are
+        # projected read-only into the mature ScenarioAssets consumption model
+        # so existing product/customer/industry portraits can consume them
+        # without duplicating the portrait engine or writing legacy rows.
+        if self.qsv1 is not None:
+            existing_ids={asset['scenario_id'] for asset in assets}
+            try:
+                published=self.qsv1.list(status='PUBLISHED')
+            except TypeError:
+                from quality_knowledge.quality_scenario_v1 import ScenarioStatus
+                published=self.qsv1.list(status=ScenarioStatus.PUBLISHED)
+            for item in published:
+                if item.scenario_id in existing_ids:
+                    continue
+                source_ids=[]
+                for ref in item.source_problem_refs:
+                    if ref.source_type in {'SELECTED_ISSUE','ITR'}:
+                        if ref.source_id and ref.source_id not in source_ids:
+                            source_ids.append(ref.source_id)
+                        if ref.canonical_itr and ref.canonical_itr not in source_ids:
+                            source_ids.append(ref.canonical_itr)
+                member={
+                    'scenario_id':item.scenario_id,
+                    'scenario_code':item.scenario_id,
+                    'name':item.scenario_name,
+                    'status':'PUBLISHED',
+                    'version_no':item.scenario_version,
+                    'product_code':item.product_code,
+                    'lifecycle_code':item.lifecycle_stage_code,
+                    'activity_code':item.business_activity_code,
+                    'experience_requirement':item.expected_result,
+                    'concern_points':item.quality_concern_name,
+                    'quality_attribute':item.quality_concern_name,
+                    'primary_quality_concern_code':item.quality_concern_code,
+                    'trigger_conditions':item.trigger_condition,
+                    'preconditions':'',
+                    'applicable_boundary':item.applicability_scope,
+                    'customer_perception':item.scenario_description,
+                    'system_scale':'',
+                    'operating_environment':'',
+                    'operating_condition':'',
+                    'duration_frequency':'',
+                    'disturbances':'',
+                    'extreme_conditions':'',
+                    'context':{},
+                    'issue_ids':source_ids,
+                    'qsv1_projection':True,
+                    'qsv1_scenario_version':item.scenario_version,
+                    'qsv1_published_at':item.version.published_at,
+                }
+                assets.append({
+                    **member,
+                    'members':[member],
+                    'issue_ids':source_ids,
+                    'metrics':[],
+                    'source_of_truth':'QSV1',
+                })
         return assets
 
     def facts(self):
@@ -105,6 +164,24 @@ class ScenarioAssets:
                             'field_evidence':row.get('field_evidence') or {}}
             from quality_knowledge.scenario_evidence import enrich_facts
             facts=enrich_facts(c,facts)
+
+        # Allow QSV1 source references to resolve the same mature issue facts
+        # whether provenance points at knowledge_id, business_issue_id, or the
+        # frozen software-assessment material id.
+        aliases={}
+        for key,value in list(facts.items()):
+            if not isinstance(value,dict):
+                continue
+            for alias in (
+                value.get('business_issue_id'),
+                value.get('source_material_id'),
+                value.get('cs_material_id'),
+                value.get('itr_material_id'),
+            ):
+                alias=str(alias or '').strip()
+                if alias and alias not in facts:
+                    aliases.setdefault(alias,value)
+        facts.update(aliases)
         return facts
 
     def report(self,filters=None,*,facts=None,assets=None):

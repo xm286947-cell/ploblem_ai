@@ -582,6 +582,7 @@ def create_p0_app(
             legacy_router, legacy_services = create_legacy_quality_issue_router(
                 legacy_db,
                 initialize_schema=False,
+                qsv1_db_path=primary_db,
             )
             app.include_router(legacy_router)
             app.state.legacy_quality_issue_services = legacy_services

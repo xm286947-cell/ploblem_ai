@@ -3,8 +3,8 @@
 {% block body %}
 <div class="page-header">
   <div>
-    <span class="eyebrow">SOFTWARE ASSESSMENT · EXISTING CAPABILITY</span>
-    <h1>软件考核工作台</h1>
+    <span class="eyebrow">QUALITY SCENARIO PRODUCTION ROOT · SOFTWARE ASSESSMENT</span>
+    <h1>软件考核工作台 · 质量场景生产入口</h1>
     <p>从成熟软件考核来源选题，核对冻结来源后生成质量场景；软件考核仍是唯一生产入口，Review、确认与发布沿用现有 QSV1 工作台。</p>
   </div>
   <div class="page-actions">
@@ -20,7 +20,7 @@
   <div class="metric-card"><span>含源考核状态 / 结果</span><strong>{{ source_state }}</strong><small>仅展示 Source 明确提供字段</small></div>
 </div>
 
-<section class="data-card sa-qsv1" data-sa-qsv1 data-api-prefix="/api/v2/software-assessment/quality-scenario">
+<section id="quality-scenario-production" class="data-card sa-qsv1" data-sa-qsv1 data-api-prefix="/api/v2/software-assessment/quality-scenario">
   <div class="compact-card">
     <strong>从软件考核生成质量场景</strong>
     <p>复用当前考核来源 → 冻结 Source Snapshot → QSV1 Candidate。不会建立第二套考核状态机。</p>

@@ -212,7 +212,7 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_
     }
 
 
-def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
+def create_legacy_quality_issue_router(db_path, *, initialize_schema=False, qsv1_db_path=None):
     """Build legacy routes and services without creating a Web application.
 
     The Overall composition root supplies a prevalidated, existing Legacy DB
@@ -272,7 +272,17 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     tpl.env.globals['confidence'] = _confidence
     tpl.env.globals['zh_value'] = zh_value
     from .scenario_asset_pages import create_asset_router
-    app.include_router(create_asset_router(scenario_repo, tpl, scenario_generation_svc))
+    qsv1_repository=None
+    if qsv1_db_path:
+        from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
+        qsv1_repository=SQLiteQualityScenarioV1Repository(qsv1_db_path)
+        state.qsv1_repository=qsv1_repository
+    app.include_router(create_asset_router(
+        scenario_repo,
+        tpl,
+        scenario_generation_svc,
+        qsv1_repository=qsv1_repository,
+    ))
 
     def filters(req):
         return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}
