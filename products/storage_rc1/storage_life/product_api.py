@@ -1291,7 +1291,7 @@ def analyze_runtime_trend(
                 ],
                 "assessment_request": {"assumptions": []},
                 "target_service_life": {},
-                "record_assessment": not primary_target_assessment_recorded,
+                "record_assessment": False,
                 "assessment_author": "Storage MVP Runtime Trend",
             })
             structured = (conversion.get("skill_result") or {}).get("structured_result") or {}
@@ -1357,7 +1357,7 @@ def analyze_runtime_trend(
                 ],
                 "assessment_request": {"assumptions": []},
                 "target_service_life": {},
-                "record_assessment": True,
+                "record_assessment": not primary_target_assessment_recorded,
                 "assessment_author": "Storage MVP Runtime Trend",
             })
         except Exception as exc:
