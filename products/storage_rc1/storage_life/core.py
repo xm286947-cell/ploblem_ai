@@ -1725,6 +1725,33 @@ def list_candidates(device_id):
 
 
 
+def _validate_manual_evidence_text(local_path, source_page, source_text):
+    """Require human-entered Evidence to be locatable on the declared source page."""
+    path = Path(str(local_path or ""))
+    if not path.is_file():
+        raise ValueError("Evidence 来源文件不可用，不能创建正式事实")
+    text = str(source_text or "").strip()
+    if not text:
+        raise ValueError("Evidence 原文不能为空")
+    if path.suffix.lower() != ".pdf":
+        try:
+            page_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise ValueError("Evidence 来源文件无法读取") from exc
+    else:
+        try:
+            pages = extract_pdf_pages(path.read_bytes(), [source_page])
+        except (OSError, ValueError) as exc:
+            raise ValueError("无法重新读取指定 Evidence 页；不能确认正式事实") from exc
+        page_text = pages[0][1] if pages else ""
+
+    normalize = lambda value: " ".join(str(value or "").replace("\u00a0", " ").split()).casefold()
+    expected = normalize(text)
+    actual = normalize(page_text)
+    if not expected or expected not in actual:
+        raise ValueError("Evidence 原文与指定来源页内容不匹配；请从原始资料复制可定位原文")
+
+
 def add_manual_fact(device_id, canonical_name, parameter_name, value, unit, by, *,
                     source_page, source_text, source_section="", condition="", scope=""):
     """Create one human-confirmed Device Fact when AI did not produce a usable candidate.
@@ -1766,12 +1793,13 @@ def add_manual_fact(device_id, canonical_name, parameter_name, value, unit, by, 
     history_id = uuid4().hex
 
     with connect() as con:
-        row = con.execute("""SELECT d.*,s.id AS source_id,s.page_count,s.filename
+        row = con.execute("""SELECT d.*,s.id AS source_id,s.page_count,s.filename,s.local_path
             FROM devices d JOIN sources s ON s.id=d.source_id WHERE d.id=?""", (device_id,)).fetchone()
         if not row:
             raise KeyError(device_id)
         if row["page_count"] and source_page > int(row["page_count"]):
             raise ValueError(f"证据页码超出规格书范围：1-{row['page_count']}")
+        _validate_manual_evidence_text(row["local_path"], source_page, source_text)
         conflict = con.execute("""SELECT id FROM candidates
             WHERE device_id=? AND canonical_name=? AND condition=? AND scope=?
               AND verify_status='confirmed' LIMIT 1""",
@@ -1850,13 +1878,14 @@ def replace_candidate_evidence(candidate_id, by, *, source_page, source_text, so
 
     changed_at = now()
     with connect() as con:
-        candidate = con.execute("""SELECT c.*,d.source_id,s.page_count
+        candidate = con.execute("""SELECT c.*,d.source_id,s.page_count,s.local_path
             FROM candidates c JOIN devices d ON d.id=c.device_id
             JOIN sources s ON s.id=d.source_id WHERE c.id=?""", (candidate_id,)).fetchone()
         if not candidate:
             raise KeyError(candidate_id)
         if candidate["page_count"] and source_page > int(candidate["page_count"]):
             raise ValueError(f"证据页码超出规格书范围：1-{candidate['page_count']}")
+        _validate_manual_evidence_text(candidate["local_path"], source_page, source_text)
 
         old_evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,
             e.source_text,e.confidence,e.extraction_method,e.scope
