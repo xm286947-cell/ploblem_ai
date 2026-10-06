@@ -12,6 +12,21 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _same_bundle_lineage(previous: dict[str, Any], provenance: dict[str, Any]) -> bool | None:
+    """Return True/False for known Bundle lineage, None when legacy provenance is unknown."""
+    previous_provenance = previous.get("bundle_provenance")
+    if not isinstance(previous_provenance, dict):
+        previous_input = previous.get("input")
+        if isinstance(previous_input, dict):
+            previous_provenance = previous_input.get("bundle_provenance")
+    if not isinstance(previous_provenance, dict):
+        return None
+    return (
+        str(previous_provenance.get("bundle_id") or "") == str(provenance.get("bundle_id") or "")
+        and str(previous_provenance.get("bundle_revision") or "") == str(provenance.get("bundle_revision") or "")
+    )
+
+
 class ReverseQualityBundleBridge:
     """Use mature analysis semantics without invoking its legacy source lookup."""
 
@@ -52,15 +67,22 @@ class ReverseQualityBundleBridge:
         previous = self.service.get(canonical)
         if previous and previous.get("source_hash") == source_hash:
             return previous
-        if previous and previous.get("status") == "CONFIRMED":
-            raise ValueError("已有人工确认记录，不能由 Bundle 分析覆盖")
-        if previous and any(
+
+        # Human review protects the exact frozen Bundle lineage. A newer Bundle
+        # revision is a new production lineage and may be analysed without
+        # mutating the reviewed run. Legacy results without Bundle provenance
+        # remain protected because a distinct lineage cannot be proven.
+        lineage_match = _same_bundle_lineage(previous, provenance) if previous else False
+        review_protected = previous is not None and lineage_match is not False
+        if review_protected and previous.get("status") == "CONFIRMED":
+            raise ValueError("已有人工确认记录，不能由同一 Bundle 修订分析覆盖")
+        if review_protected and any(
             item.get("review_status") in {"CONFIRMED", "REJECTED"}
             for item in (previous.get("review") or {}).values()
         ):
-            raise ValueError("已有人工逐字段审核；请先人工处理，不允许新 Bundle 覆盖")
-        if previous and previous.get("match_reviewed"):
-            raise ValueError("场景匹配已人工审核，不允许新 Bundle 覆盖")
+            raise ValueError("同一 Bundle 修订已有人工逐字段审核；不允许覆盖")
+        if review_protected and previous.get("match_reviewed"):
+            raise ValueError("同一 Bundle 修订的场景匹配已人工审核；不允许覆盖")
 
         run = self.service.repository.start_run(
             canonical_itr=canonical,

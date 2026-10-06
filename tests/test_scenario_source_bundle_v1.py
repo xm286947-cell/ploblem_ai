@@ -386,6 +386,71 @@ def test_bundle_bridge_passes_only_bundle_facts_to_mature_service(tmp_path):
         ReverseQualityBundleBridge(service, bundle_store).analyse(altered)
 
 
+def test_bundle_bridge_review_protection_is_scoped_to_bundle_revision(tmp_path):
+    repo = MaterialRepository(tmp_path / "mature.db")
+    assessment = _add(repo, "SW-OPS", "ITR2026100011", {
+        "问题信息_问题描述": "Bundle lineage", "问题信息_产品型号": "P-SW",
+    })
+    bundle = build_scenario_source_bundle_v1(
+        _snapshot(assessment, []), evidence_repository=repo
+    )
+    bundle_store = ScenarioSourceBundleV1SnapshotStore(repo.db_path)
+    bundle_store.save(bundle)
+
+    class Repository:
+        def __init__(self):
+            self.started = []
+
+        def start_run(self, **kwargs):
+            self.started.append(kwargs)
+            return {"run_id": "RQ-RUN-NEW"}
+
+        def fail_run(self, *_args):
+            raise AssertionError("unexpected failure")
+
+    class Scenarios:
+        @staticmethod
+        def taxonomy_active(_product):
+            return {"version_id": "TAX-1"}
+
+    class MatureService:
+        def __init__(self, previous):
+            self.repository = Repository()
+            self.scenarios = Scenarios()
+            self.previous = previous
+
+        def get(self, _canonical):
+            return self.previous
+
+        @staticmethod
+        def _analyse_run(facts, _taxonomy, _source_hash, _run_id, _product_code):
+            return {"input": facts}
+
+    previous = {
+        "source_hash": "OLD-HASH",
+        "status": "CONFIRMED",
+        "review": {},
+        "match_reviewed": False,
+        "bundle_provenance": {
+            "bundle_id": bundle["bundle_id"],
+            "bundle_revision": bundle["bundle_revision"],
+        },
+    }
+    same_service = MatureService(previous)
+    with pytest.raises(ValueError, match="同一 Bundle 修订"):
+        ReverseQualityBundleBridge(same_service, bundle_store).analyse(bundle)
+
+    revised = json.loads(json.dumps(bundle, ensure_ascii=False))
+    revised["bundle_revision"] = "BUNDLE-REVISION-2"
+    bundle_store.save(revised)
+    revised_service = MatureService(previous)
+    result = ReverseQualityBundleBridge(revised_service, bundle_store).analyse(revised)
+
+    assert result["input"]["bundle_provenance"]["bundle_revision"] == "BUNDLE-REVISION-2"
+    assert len(revised_service.repository.started) == 1
+    assert revised_service.repository.started[0]["input_payload"]["bundle_provenance"]["bundle_revision"] == "BUNDLE-REVISION-2"
+
+
 def test_bundle_requires_a_frozen_snapshot_and_selected_assessment_locator(tmp_path):
     repo = MaterialRepository(tmp_path / "mature.db")
     with pytest.raises(ValueError, match="FROZEN_SOURCE_SNAPSHOT_SELECTED_ISSUE_REQUIRED"):
