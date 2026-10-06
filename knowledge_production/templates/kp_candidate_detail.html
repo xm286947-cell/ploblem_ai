@@ -20,6 +20,17 @@
   <p>{{ detail.candidate.content }}</p>
   <div><strong>Scope</strong> {{ detail.candidate.scope|join(", ") }}</div>
   <div><strong>Tags</strong> {{ detail.candidate.tags|join(", ") }}</div>
+  {% if detail.candidate.metadata.storage_lifetime %}
+  <div class="card">
+    <strong>Storage Lifetime Model</strong>
+    <div>Device: {{ detail.candidate.metadata.storage_lifetime.device_type }}</div>
+    <div>Parameter: {{ detail.candidate.metadata.storage_lifetime.canonical_parameters|join(", ") or "UNRESOLVED" }}</div>
+    <div>Semantic Review: {{ detail.candidate.metadata.storage_lifetime.semantic_class_status }}</div>
+    <div>Allowed Knowledge Types: {{ detail.candidate.metadata.storage_lifetime.semantic_class_candidates|join(", ") or "UNRESOLVED" }}</div>
+    <div>Consumers: {{ detail.candidate.metadata.storage_lifetime.scenario_consumers|join(", ") }}</div>
+    <div class="muted">必须由人工选择唯一 Knowledge Type 后才能 Publish；AI 候选标签本身不可成为 Formal Knowledge。</div>
+  </div>
+  {% endif %}
   <div><strong>Source References</strong><pre>{{ detail.candidate.source_refs|join("\n") }}</pre></div>
   {% if detail.candidate.metadata.origin_workspace == "public-knowledge" %}
   <div class="card">
@@ -96,6 +107,18 @@
     <label>Reviewed By<input name="reviewed_by" required></label>
     <label>Title<input name="title" value="{{ detail.candidate.title }}"></label>
     <label>Content<textarea name="content" rows="5" required>{{ detail.candidate.content }}</textarea></label>
+    <label>Scope<input name="scope" value="{{ detail.candidate.scope|join(', ') }}"></label>
+    <label>Tags<input name="tags" value="{{ detail.candidate.tags|join(', ') }}"></label>
+    {% if detail.candidate.metadata.storage_lifetime %}
+    <label>Storage Knowledge Type
+      <select name="storage_semantic_class">
+        <option value="">请选择并人工确认</option>
+        {% for semantic in detail.candidate.metadata.storage_lifetime.semantic_class_candidates %}
+        <option value="{{ semantic }}">{{ semantic }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
     <label>Note<textarea name="review_note"></textarea></label>
     <button class="secondary" type="submit">EDIT & CONFIRM</button>
   </form>
