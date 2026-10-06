@@ -115,22 +115,20 @@ def taxonomy():
 
 def test_r2_w2_qsv1_candidate_review_confirm_publish_traceability(tmp_path: Path):
     db = tmp_path / "qsv1.db"
+    repository = SQLiteQualityScenarioV1Repository(db)
+    candidate_service = CandidateV1Service(repository)
     app = FastAPI()
     app.include_router(create_quality_scenario_v1_router(str(db)))
     client = TestClient(app)
 
-    created = client.post(
-        PREFIX + "/quality-scenarios/candidates/from-reverse",
-        json={
-            "reverse_quality_result": reverse_result(),
-            "taxonomy": taxonomy(),
-            "trigger_source": "HIGH_PERCEPTION",
-            "trigger_reason": "客户高感知问题",
-            "created_by": "R2_W2",
-        },
+    created = candidate_service.create_from_reverse(
+        reverse_result(),
+        taxonomy(),
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="客户高感知问题",
+        created_by="R2_W2",
     )
-    assert created.status_code == 200, created.text
-    scenario = created.json()["scenario"]
+    scenario = created.scenario.model_dump(mode="json")
     scenario_id = scenario["scenario_id"]
     assert scenario["status"] == "CANDIDATE"
     assert scenario["source_problem_refs"]
@@ -141,18 +139,14 @@ def test_r2_w2_qsv1_candidate_review_confirm_publish_traceability(tmp_path: Path
     assert "SSB-R2-001/BUNDLE-R1" in provenance_evidence["content_ref"]
 
     # A fresh analysis run against the same frozen bundle reuses the candidate.
-    repeated = client.post(
-        PREFIX + "/quality-scenarios/candidates/from-reverse",
-        json={
-            "reverse_quality_result": reverse_result(run="RQRUN-R2-W2-RETRY"),
-            "taxonomy": taxonomy(),
-            "trigger_source": "HIGH_PERCEPTION",
-            "trigger_reason": "客户高感知问题",
-        },
+    repeated = candidate_service.create_from_reverse(
+        reverse_result(run="RQRUN-R2-W2-RETRY"),
+        taxonomy(),
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="客户高感知问题",
     )
-    assert repeated.status_code == 200, repeated.text
-    assert repeated.json()["created"] is False
-    assert repeated.json()["scenario"]["scenario_id"] == scenario_id
+    assert repeated.created is False
+    assert repeated.scenario.scenario_id == scenario_id
 
     candidates = client.get(PREFIX + "/quality-scenarios/candidates")
     assert candidates.status_code == 200
@@ -213,29 +207,39 @@ def test_r2_w2_qsv1_candidate_review_confirm_publish_traceability(tmp_path: Path
     assert trace.json()["evidence"]
 
     # New source revision creates a new lineage and leaves published history intact.
-    revised = client.post(
-        PREFIX + "/quality-scenarios/candidates/from-reverse",
-        json={
-            "reverse_quality_result": reverse_result(revision="BUNDLE-R2", run="RQRUN-R2-W2-R2"),
-            "taxonomy": taxonomy(),
-            "trigger_source": "HIGH_PERCEPTION",
-            "trigger_reason": "客户高感知问题",
-        },
+    revised = candidate_service.create_from_reverse(
+        reverse_result(revision="BUNDLE-R2", run="RQRUN-R2-W2-R2"),
+        taxonomy(),
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="客户高感知问题",
     )
-    assert revised.status_code == 200, revised.text
-    assert revised.json()["created"] is True
-    assert revised.json()["scenario"]["scenario_id"] != scenario_id
+    assert revised.created is True
+    assert revised.scenario.scenario_id != scenario_id
     assert client.get(PREFIX + f"/quality-scenarios/{scenario_id}").json()["status"] == "PUBLISHED"
     assert len(client.get(PREFIX + f"/quality-scenarios/{scenario_id}/history").json()["versions"]) == 4
 
 
-def test_w3_candidate_requires_w2_bundle_provenance(tmp_path: Path):
+def test_formal_qsv1_router_does_not_expose_raw_reverse_quality_candidate_write(tmp_path: Path):
     app = FastAPI()
-    app.include_router(create_quality_scenario_v1_router(str(tmp_path / "missing-provenance.db")))
+    app.include_router(create_quality_scenario_v1_router(str(tmp_path / "formal-host.db")))
     response = TestClient(app).post(
         PREFIX + "/quality-scenarios/candidates/from-reverse",
         json={
-            "reverse_quality_result": {
+            "reverse_quality_result": reverse_result(),
+            "taxonomy": taxonomy(),
+            "trigger_source": "HIGH_PERCEPTION",
+            "trigger_reason": "test",
+        },
+    )
+    assert response.status_code == 405
+
+
+def test_w3_candidate_requires_w2_bundle_provenance(tmp_path: Path):
+    repository = SQLiteQualityScenarioV1Repository(tmp_path / "missing-provenance.db")
+    service = CandidateV1Service(repository)
+    with pytest.raises(ValueError, match="QSV1_BUNDLE_PROVENANCE_REQUIRED"):
+        service.create_from_reverse(
+            {
                 "result_version": "reverse-quality-v0.1",
                 "analysis_id": "A1",
                 "run_id": "R1",
@@ -243,13 +247,10 @@ def test_w3_candidate_requires_w2_bundle_provenance(tmp_path: Path):
                 "identity": {"canonical_itr": "ITR-1", "product_code": "PLC", "taxonomy_version_id": "STV-R2-W2-1"},
                 "fields": {},
             },
-            "taxonomy": taxonomy(),
-            "trigger_source": "HIGH_PERCEPTION",
-            "trigger_reason": "test",
-        },
-    )
-    assert response.status_code == 400
-    assert response.json()["detail"] == "QSV1_BUNDLE_PROVENANCE_REQUIRED"
+            taxonomy(),
+            trigger_source="HIGH_PERCEPTION",
+            trigger_reason="test",
+        )
 
 
 def test_w3_ambiguous_existing_bundle_identity_fails_closed(tmp_path: Path):

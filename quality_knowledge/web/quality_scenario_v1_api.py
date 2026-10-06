@@ -43,30 +43,13 @@ def _expected_version(payload: dict[str, Any]) -> int:
 
 def create_quality_scenario_v1_router(db_path: str) -> APIRouter:
     router = APIRouter(prefix="/api/v2/quality-scenario-workflow/v1", tags=["QualityScenario V1 Workflow"])
+    # Candidate production is intentionally internal-only. The formal product host
+    # must enter through Software Assessment -> frozen Bundle -> W2 -> W3, never
+    # through a caller-supplied ReverseQualityResult write endpoint.
     repository = SQLiteQualityScenarioV1Repository(db_path)
     candidates = CandidateV1Service(repository)
     workflow = QualityScenarioV1WorkflowService(repository)
     traceability = QualityScenarioTraceabilityService(repository)
-
-    @router.post("/quality-scenarios/candidates/from-reverse")
-    def create_candidate(payload: dict[str, Any]) -> dict[str, Any]:
-        result = payload.get("reverse_quality_result")
-        taxonomy = payload.get("taxonomy")
-        if not isinstance(result, dict):
-            raise HTTPException(400, "REVERSE_QUALITY_RESULT_REQUIRED")
-        if not isinstance(taxonomy, dict):
-            raise HTTPException(400, "SCENARIO_TAXONOMY_REQUIRED")
-        try:
-            produced = candidates.create_from_reverse(
-                result,
-                taxonomy,
-                trigger_source=payload.get("trigger_source"),
-                trigger_reason=str(payload.get("trigger_reason") or ""),
-                created_by=str(payload.get("created_by") or ""),
-            )
-            return produced.to_dict()
-        except ValueError as error:
-            raise _http_error(error) from error
 
     @router.get("/quality-scenarios/candidates")
     def list_candidates(
