@@ -11,6 +11,7 @@ on:
       - "products/storage_rc1/storage_life/public_knowledge.py"
       - "products/storage_rc1/storage_life/knowledge_product.py"
       - "products/storage_rc1/storage_life/knowledge_release.py"
+      - "products/storage_rc1/storage_life/product_api.py"
       - "products/storage_rc1/storage_life/index.html"
       - "knowledge_production/extraction.py"
       - "knowledge_production/publish.py"
@@ -48,6 +49,7 @@ jobs:
             products/storage_rc1/storage_life/public_knowledge.py \
             products/storage_rc1/storage_life/knowledge_product.py \
             products/storage_rc1/storage_life/knowledge_release.py \
+            products/storage_rc1/storage_life/product_api.py \
             knowledge_production/extraction.py \
             knowledge_production/publish.py \
             knowledge_production/web.py
