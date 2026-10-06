@@ -408,6 +408,78 @@ class RepeatAgentAnalysisService:
         }
         return wrapper, execution
 
+    @staticmethod
+    def _solution_payload(
+        context: dict[str, Any],
+        similarity: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Current-contract equivalent of the mature M8.3 compact payload.
+
+        The historical implementation deliberately excluded retrieval documents,
+        embeddings and unrelated raw blocks.  The Web product does the same,
+        but consumes only the current public projections instead of recreating
+        legacy JSON authorities.
+        """
+
+        query = deepcopy(context.get("query") or {})
+        candidate = deepcopy(context.get("candidate") or {})
+        case = deepcopy(context.get("case") or {})
+        evidence = deepcopy(context.get("evidence") or {})
+        similarity_analysis = deepcopy((similarity or {}).get("analysis") or {})
+        return {
+            "query_id": context.get("query_id"),
+            "case_id": context.get("case_id"),
+            "query": {
+                "problem": query.get("text"),
+                "cause_description": query.get("cause_description"),
+                "solution": query.get("solution"),
+                "organization": deepcopy(query.get("organization") or {}),
+                "filters": deepcopy(query.get("filters") or {}),
+                "classification": deepcopy(query.get("classification") or {}),
+            },
+            "candidate": {
+                key: candidate.get(key)
+                for key in (
+                    "case_id",
+                    "rank",
+                    "score",
+                    "retrieval_score",
+                    "title",
+                )
+                if candidate.get(key) is not None
+            },
+            "historical_case": {
+                "case_id": case.get("case_id"),
+                "title": case.get("title"),
+                "problem_description": case.get("problem_description"),
+                "historical_phenomenon": case.get("historical_phenomenon"),
+                "root_causes": deepcopy(case.get("root_causes") or []),
+                "measures": deepcopy(case.get("measures") or []),
+                "verification": case.get("verification"),
+                "typed_semantic": deepcopy(case.get("typed_semantic") or {}),
+            },
+            "exact_evidence": deepcopy(evidence.get("items") or []),
+            "typed_semantic": deepcopy(evidence.get("typed_semantic") or {}),
+            "similarity_analysis": {
+                key: similarity_analysis.get(key)
+                for key in (
+                    "overall_score",
+                    "overall_level",
+                    "dimensions",
+                    "key_similarities",
+                    "key_differences",
+                    "evidence_gaps",
+                    "analysis_summary",
+                    "confidence",
+                )
+                if similarity_analysis.get(key) is not None
+            } | {
+                "analysis_status": (similarity or {}).get("analysis_status")
+                or "MISSING"
+            },
+            "quality": deepcopy(context.get("quality") or {}),
+        }
+
     def _solution(
         self,
         context: dict[str, Any],
@@ -415,10 +487,7 @@ class RepeatAgentAnalysisService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         query_id = _text(context.get("query_id"))
         case_id = _text(context.get("case_id"))
-        payload = {
-            **deepcopy(context),
-            "similarity_analysis": deepcopy(similarity),
-        }
+        payload = self._solution_payload(context, similarity)
         analysis, execution = self._invoke(
             agent_id=SOLUTION_AGENT_ID,
             stage="repeat_solution",
@@ -485,6 +554,10 @@ class RepeatAgentAnalysisService:
             **deepcopy(context),
             "similarity_analysis": deepcopy(similarity),
             "solution_analysis": deepcopy(solution),
+            "authority_boundary": {
+                "ai_output": "RECOMMENDATION_ONLY",
+                "final_decision": "HUMAN_DECISION",
+            },
         }
         query_id = _text(context.get("query_id"))
         case_id = _text(context.get("case_id"))
