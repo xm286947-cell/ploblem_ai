@@ -156,6 +156,23 @@ class RepeatITRService:
             "product": _text(_first(raw, "product", "product_name")),
             "version": _text(_first(raw, "version", "product_version")),
             "scene": _text(_first(raw, "scene", "scenario", "lifecycle_scene")),
+            "ipmt": _text(_first(raw, "ipmt", "IPMT")),
+            "spdt": _text(_first(raw, "spdt", "SPDT")),
+            "responsible_department_level2": _text(
+                _first(
+                    raw,
+                    "responsible_department_level2",
+                    "责任部门二级",
+                    "二级责任部门",
+                    "责任部门",
+                )
+            ),
+            "cause_level1": _text(
+                _first(raw, "cause_level1", "cause_level_1", "原因一级分类", "一级原因分类")
+            ),
+            "cause_level2": _text(
+                _first(raw, "cause_level2", "cause_level_2", "原因二级分类", "二级原因分类")
+            ),
             "existing_context": deepcopy(
                 _first(raw, "existing_context", "context", "analysis_context") or {}
             ),
