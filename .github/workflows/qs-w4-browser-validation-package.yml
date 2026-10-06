@@ -1,0 +1,188 @@
+name: QS W4 Browser Validation Package FF838474
+
+on:
+  push:
+    branches:
+      - ci/qs-w4-package-ff838474
+    paths:
+      - ".github/workflows/qs-w4-browser-validation-package.yml"
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SOURCE_SHA: ff838474ce6bb542915f059d35a80e2229cf4dda
+  PACKAGE_BASENAME: QUALITY_SCENARIO_W4_BROWSER_VALIDATION_ff838474ce6b
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_SOURCE_SHA"
+          git diff --check "$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build mature-platform preview package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/build_step1b_qsv1_preview_package.py --output-dir dist
+          SRC="dist/STEP1B_QSV1_MATURE_PREVIEW_${PRODUCT_SOURCE_SHA:0:12}.zip"
+          DST="dist/${PACKAGE_BASENAME}.zip"
+          mv "$SRC" "$DST"
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          source = os.environ["PRODUCT_SOURCE_SHA"]
+          pkg = Path("dist") / f"{os.environ['PACKAGE_BASENAME']}.zip"
+          readme = f"""QUALITY SCENARIO W4 BROWSER VALIDATION CANDIDATE
+
+PACKAGE_TYPE=W4_BROWSER_VALIDATION_CANDIDATE
+SOURCE_SHA={source}
+W5_RELEASE_PACKAGE=NO
+BUSINESS_FLOW_CODE_WALKTHROUGH=PASS
+CI_REMEDIATION=PASS
+REAL_MATURE_BROWSER_GOLDEN=PENDING
+W4_ARCH_REVIEW=PENDING
+SYNTHETIC_BUSINESS_DATA_INCLUDED=NO
+
+Purpose:
+Use this package only for real mature-data Browser Golden G1-G5.
+
+Production root:
+Software Assessment Workbench
+-> Frozen Source Snapshot
+-> ScenarioSourceBundle V1
+-> Reverse Quality / Unified Runtime
+-> QSV1 Candidate
+-> Review / Confirm
+-> Publish
+-> P02 Library
+-> P03 Source / Evidence / History
+
+Windows:
+1. Optional: set LEGACY_QUALITY_ISSUE_DB_PATH=C:\\path\\to\\mature.db
+2. Optional: set QUALITY_SCENARIO_V1_DB_PATH=C:\\path\\to\\existing-qsv1.db
+3. Run start_quality_capability_p1.bat
+4. Open http://127.0.0.1:8080/software-assessment
+
+macOS:
+1. Optional: export LEGACY_QUALITY_ISSUE_DB_PATH=/path/to/mature.db
+2. Optional: export QUALITY_SCENARIO_V1_DB_PATH=/path/to/existing-qsv1.db
+3. Run ./start_quality_capability_p1.command
+4. Open http://127.0.0.1:8080/software-assessment
+
+Do not treat this package as W5 release approval.
+"""
+          manifest = {
+              "package_type": "W4_BROWSER_VALIDATION_CANDIDATE",
+              "source_sha": source,
+              "w5_release_package": False,
+              "business_flow_walkthrough": "PASS",
+              "remediation_ci": "PASS",
+              "real_mature_browser_golden": "PENDING",
+              "w4_arch_review": "PENDING",
+              "synthetic_business_data_included": False,
+              "windows_entry": "start_quality_capability_p1.bat",
+              "macos_entry": "start_quality_capability_p1.command",
+              "browser_entry": "/software-assessment",
+              "legacy_db_env": "LEGACY_QUALITY_ISSUE_DB_PATH",
+              "qsv1_db_env": "QUALITY_SCENARIO_V1_DB_PATH",
+          }
+          with zipfile.ZipFile(pkg, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+              zf.writestr("00_W4_BROWSER_VALIDATION_README_FIRST.txt", readme)
+              zf.writestr("W4_BROWSER_VALIDATION_MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+              zf.writestr("W4_PRODUCT_SOURCE_SHA", source + "\n")
+          PY
+          sha256sum "dist/${PACKAGE_BASENAME}.zip" | tee "dist/${PACKAGE_BASENAME}.zip.sha256"
+          {
+            echo "PACKAGE_TYPE=W4_BROWSER_VALIDATION_CANDIDATE"
+            echo "SOURCE_SHA=$PRODUCT_SOURCE_SHA"
+            echo "PACKAGE=${PACKAGE_BASENAME}.zip"
+            echo "W5_RELEASE_PACKAGE=NO"
+            echo "REAL_MATURE_BROWSER_GOLDEN=PENDING"
+            echo "W4_ARCH_REVIEW=PENDING"
+          } > "dist/${PACKAGE_BASENAME}_BUILD_INFO.txt"
+
+      - name: Verify package identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          pkg = Path("dist") / f"{os.environ['PACKAGE_BASENAME']}.zip"
+          with zipfile.ZipFile(pkg) as zf:
+              source = zf.read("W4_PRODUCT_SOURCE_SHA").decode().strip()
+              manifest = json.loads(zf.read("W4_BROWSER_VALIDATION_MANIFEST.json"))
+              names = set(zf.namelist())
+          assert source == os.environ["PRODUCT_SOURCE_SHA"]
+          assert manifest["source_sha"] == os.environ["PRODUCT_SOURCE_SHA"]
+          assert manifest["package_type"] == "W4_BROWSER_VALIDATION_CANDIDATE"
+          assert "start_quality_capability_p1.bat" in names
+          assert "start_quality_capability_p1.command" in names
+          print("PACKAGE_IDENTITY=PASS")
+          PY
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_SCENARIO_W4_BROWSER_VALIDATION_ff838474ce6b
+          path: |
+            dist/QUALITY_SCENARIO_W4_BROWSER_VALIDATION_ff838474ce6b.zip
+            dist/QUALITY_SCENARIO_W4_BROWSER_VALIDATION_ff838474ce6b.zip.sha256
+            dist/QUALITY_SCENARIO_W4_BROWSER_VALIDATION_ff838474ce6b_BUILD_INFO.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Windows mature launcher smoke
+        shell: pwsh
+        run: |
+          python tools/step1b_qsv1_launcher_smoke.py --platform windows --port 18080
+
+  smoke-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact reviewed product source
+        uses: actions/checkout@v4
+        with:
+          ref: ff838474ce6bb542915f059d35a80e2229cf4dda
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: macOS mature launcher smoke
+        shell: bash
+        run: |
+          python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 18081
