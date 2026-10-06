@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from storage_life import product_api
 from storage_life.knowledge_release import KnowledgeReleaseConsumer
 
 
@@ -155,3 +156,110 @@ def test_legacy_query_contract_remains_backward_compatible(
         "KO-TEST",
         "KO-LEGACY",
     }
+
+
+class _FakeProductConsumer:
+    def __init__(self, *, structured_results, legacy_results):
+        self.structured_results = structured_results
+        self.legacy_results = legacy_results
+        self.calls = []
+
+    def status(self):
+        return {
+            "available": True,
+            "status": "READY",
+            "knowledge_release_version": "release-v1",
+        }
+
+    def query(self, text, **kwargs):
+        self.calls.append({"text": text, **kwargs})
+        if kwargs.get("canonical_parameter"):
+            return {
+                "knowledge_release_version": "release-v1",
+                "selection_mode": "REVIEWED_STORAGE_SEMANTIC",
+                "results": list(self.structured_results),
+            }
+        return {
+            "knowledge_release_version": "release-v1",
+            "selection_mode": "TEXT_AND_DEVICE",
+            "results": list(self.legacy_results),
+        }
+
+
+def test_product_formal_knowledge_prefers_reviewed_structured_match(
+    monkeypatch,
+) -> None:
+    structured = [
+        {
+            "object_id": "KO-STRUCTURED",
+            "title": "P/E reviewed rule",
+            "evidence": [{"evidence_id": "EVD-STRUCTURED"}],
+        }
+    ]
+    consumer = _FakeProductConsumer(
+        structured_results=structured,
+        legacy_results=[
+            {
+                "object_id": "KO-LEGACY",
+                "evidence": [{"evidence_id": "EVD-LEGACY"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        product_api.KnowledgeReleaseConsumer,
+        "current",
+        classmethod(lambda cls: consumer),
+    )
+
+    result = product_api._formal_knowledge(
+        "pe_cycles",
+        "P/E Cycle",
+        "NAND Flash",
+        context="comparison difference engineering meaning",
+        scenario_consumer="S2",
+    )
+
+    assert result["status"] == "MATCHED"
+    assert result["selection_mode"] == "REVIEWED_STORAGE_SEMANTIC"
+    assert [item["object_id"] for item in result["results"]] == [
+        "KO-STRUCTURED"
+    ]
+    assert result["evidence_refs"] == ["EVD-STRUCTURED"]
+    assert len(consumer.calls) == 1
+    assert consumer.calls[0]["canonical_parameter"] == "pe_cycles"
+    assert consumer.calls[0]["scenario_consumer"] == "S2"
+
+
+def test_product_formal_knowledge_falls_back_only_for_legacy_release(
+    monkeypatch,
+) -> None:
+    consumer = _FakeProductConsumer(
+        structured_results=[],
+        legacy_results=[
+            {
+                "object_id": "KO-LEGACY",
+                "title": "Legacy P/E knowledge",
+                "evidence": [{"evidence_id": "EVD-LEGACY"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        product_api.KnowledgeReleaseConsumer,
+        "current",
+        classmethod(lambda cls: consumer),
+    )
+
+    result = product_api._formal_knowledge(
+        "pe_cycles",
+        "P/E Cycle",
+        "NAND Flash",
+        context="comparison difference engineering meaning",
+        scenario_consumer="S2",
+    )
+
+    assert result["status"] == "MATCHED"
+    assert result["selection_mode"] == "TEXT_AND_DEVICE"
+    assert [item["object_id"] for item in result["results"]] == ["KO-LEGACY"]
+    assert len(consumer.calls) == 2
+    assert consumer.calls[0]["canonical_parameter"] == "pe_cycles"
+    assert "canonical_parameter" not in consumer.calls[1]
