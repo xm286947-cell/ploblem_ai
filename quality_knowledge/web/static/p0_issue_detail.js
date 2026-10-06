@@ -463,6 +463,90 @@
       slots + '</div></section>';
   }
 
+  function repeatAgentAnalysisHtml(candidate) {
+    const similarityEnvelope = obj(candidate.agent_similarity);
+    const similarity = obj(similarityEnvelope.analysis);
+    const solutionEnvelope = obj(candidate.agent_solution);
+    const solution = obj(solutionEnvelope.analysis);
+    const recommendation = obj(candidate.ai_recommendation);
+    const status = candidate.agent_analysis_status || '';
+
+    if (!status && !similarityEnvelope.analysis_status && !solutionEnvelope.analysis_status && !recommendation.status) {
+      return '';
+    }
+
+    const keySimilarities = arr(similarity.key_similarities);
+    const keyDifferences = arr(similarity.key_differences);
+    const reusable = arr(solution.reusable_actions);
+    const reuseRisks = arr(solution.reuse_risks);
+    const recommendationBlock = recommendation.status === 'SUCCESS'
+      ? '<section><label>AI Repeat 建议 · 非最终结论</label><p><strong>' +
+        esc(recommendation.decision || 'INSUFFICIENT_EVIDENCE') + '</strong> · ' +
+        esc(recommendation.decision_reason || '未提供说明') +
+        '</p><small>该建议仅辅助人工判断，不会写入 HUMAN DECISION。</small></section>'
+      : '<section><label>AI Repeat 建议</label><p>' +
+        esc(recommendation.status === 'DISABLED'
+          ? '当前配置未启用 M8.4；最终结论仍由人工判断。'
+          : recommendation.status === 'UNAVAILABLE' || recommendation.status === 'FAILED'
+            ? 'AI Repeat 建议当前不可用；不会生成自动结论。'
+            : '本次未生成 AI Repeat 建议。') +
+        '</p></section>';
+
+    return '<section class="p0-repeat-agent-analysis">' +
+      '<div class="p0-card-head"><div><span class="p0-kicker">AGENT ANALYSIS</span>' +
+      '<h4>Repeat 智能分析</h4><p>基于当前 ITR、历史 Typed Semantic 与原始 Evidence；不改变检索排名。</p></div>' +
+      '<span>' + esc(status || 'NOT_RUN') + '</span></div>' +
+      '<div class="p0-repeat-case-grid">' +
+      '<section><label>AI 相似性分析</label><p>' +
+      esc(similarity.analysis_summary || (similarityEnvelope.analysis_status === 'UNAVAILABLE'
+        ? 'Provider / Runtime 当前不可用，保留原检索结果。'
+        : '暂无分析结果')) +
+      '</p>' +
+      (keySimilarities.length ? '<small>相同点：' + esc(keySimilarities.join('；')) + '</small>' : '') +
+      (keyDifferences.length ? '<small>差异点：' + esc(keyDifferences.join('；')) + '</small>' : '') +
+      '</section>' +
+      '<section><label>历史措施复用分析</label><p>' +
+      esc(solution.analysis_summary || (solutionEnvelope.analysis_status === 'UNAVAILABLE'
+        ? 'Provider / Runtime 当前不可用，未生成措施复用判断。'
+        : '暂无分析结果')) +
+      '</p>' +
+      (solution.applicability ? '<small>适用性：' + esc(solution.applicability) + '</small>' : '') +
+      (reusable.length ? '<small>可复用：' + esc(reusable.join('；')) + '</small>' : '') +
+      (reuseRisks.length ? '<small>风险：' + esc(reuseRisks.join('；')) + '</small>' : '') +
+      '</section>' +
+      recommendationBlock +
+      '</div></section>';
+  }
+
+  function repeatAnalysisReportHtml(result) {
+    const agent = obj(result.agent_analysis);
+    const report = obj(result.analysis_report);
+    if (!agent.status && !report.status) return '';
+
+    const reportText = report.status === 'AVAILABLE'
+      ? '综合分析报告已生成'
+      : report.status === 'FAILED'
+        ? '综合分析报告生成失败：' + (report.reason || '')
+        : report.status === 'NOT_GENERATED'
+          ? '本次没有候选案例，不生成分析报告。'
+          : '综合分析报告尚未生成';
+
+    return '<section class="p0-repeat-report">' +
+      '<div><span class="p0-kicker">REPEAT ANALYSIS REPORT</span><h3>' +
+      esc(reportText) + '</h3>' +
+      '<p>M8.2=' + esc(agent.m82_similarity || '-') +
+      ' · M8.3=' + esc(agent.m83_solution || '-') +
+      ' · M8.4=' + esc(agent.m84_recommendation || '-') +
+      ' · Provider=' + esc(agent.provider_boundary || '-') + '</p></div>' +
+      (report.status === 'AVAILABLE'
+        ? '<details><summary>报告交付引用</summary><dl>' +
+          '<dt>JSON</dt><dd>' + esc(report.report_json_ref || '-') + '</dd>' +
+          '<dt>Markdown</dt><dd>' + esc(report.report_markdown_ref || '-') + '</dd>' +
+          '</dl></details>'
+        : '') +
+      '</section>';
+  }
+
   function candidateHtml(candidate, index) {
     const rationale = arr(candidate.why_relevant);
     const semanticMode = candidateSemanticMode(candidate);
@@ -493,6 +577,7 @@
         : '<section><label>语义结果</label><p>' + esc(semanticMode === 'TYPED' ? '按八类 Typed Semantic 展示' : '不展示未验证的通用语义') + '</p></section>') +
       '</div>' +
       semanticProjectionHtml(candidate, index) +
+      repeatAgentAnalysisHtml(candidate) +
       '<div class="p0-repeat-secondary"><span><b>Verification</b> ' + esc(candidate.verification || '未确认 / 无已确认内容') + '</span>' +
       '<span><b>Similarity</b> ' + esc(score) + '</span>' +
       '<span><b>Evidence</b> ' + esc(evidenceCount) + '</span></div>' +
@@ -550,6 +635,7 @@
       esc(contextText) + '</strong></div><span>Query ' + esc(result.query_id || '-') + '</span></div>' +
       '<div class="p0-repeat-result-title">找到 <b>' + esc(result.candidate_count || 0) + '</b> 个值得关注的历史案例</div>' +
       candidates.map(candidateHtml).join('') +
+      repeatAnalysisReportHtml(result) +
       decisionHtml(result);
   }
 
