@@ -694,6 +694,7 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
 
     source_label = str(payload.get("source_label") or "").strip()
     captured_at = payload.get("captured_at")
+    raw_text = str(payload.get("raw_text") or "")
     placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
     explicit_source = bool(source_label and source_label.upper() not in placeholder_sources)
     observations = []
@@ -703,13 +704,18 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
         item = dict(raw)
         source_line = str(item.get("source_line") or item.get("evidence_ref") or "").strip()
         user_confirmed = item.get("confirmed_by_user") is True
-        # Formal trend eligibility is issued at the server boundary.  Browser
-        # supplied quality_status / availability_status are ignored.
+        source_line_matches_raw = bool(raw_text and source_line and source_line in raw_text)
+        if user_confirmed and source_line and raw_text and not source_line_matches_raw:
+            raise ValueError("RUNTIME_SOURCE_LINE_NOT_IN_RAW_TEXT")
+        # Formal trend eligibility is issued at the server boundary. Browser
+        # supplied quality_status / availability_status are ignored. A pasted
+        # observation becomes formal only when its exact evidence line is still
+        # present in the persisted raw capture.
         provenance_ready = bool(
             user_confirmed
             and captured_at
             and explicit_source
-            and source_line
+            and source_line_matches_raw
         )
         item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
         item["availability_status"] = "AVAILABLE" if captured_at else "NOT_AVAILABLE"
@@ -720,7 +726,7 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
         device_id,
         observations,
         source_label=source_label or "PASTED_RUNTIME_OUTPUT",
-        raw_text=str(payload.get("raw_text") or ""),
+        raw_text=raw_text,
         captured_at=captured_at,
         created_by=str(payload.get("created_by") or "Storage MVP UI"),
     )
