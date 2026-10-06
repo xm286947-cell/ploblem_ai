@@ -9,6 +9,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from typing import Any, Iterable
 from urllib.parse import parse_qs, urlparse
 
@@ -136,6 +137,17 @@ class MockState:
 class OpenAIMockServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind() performs socket.getfqdn(host) after binding.
+        # Some isolated macOS runners can block indefinitely on that reverse
+        # DNS lookup even for 127.0.0.1, leaving the process alive but never
+        # reaching listen(). The mock never needs a canonical hostname, so use
+        # the TCPServer bind contract and retain the literal bound host.
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = int(port)
 
     def __init__(self, server_address: tuple[str, int], state: MockState | None = None) -> None:
         self.state = state or MockState()
