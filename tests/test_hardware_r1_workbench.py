@@ -1790,6 +1790,74 @@ def test_human_review_rejects_new_parameter_with_forged_evidence(
         )
 
 
+
+def test_human_review_rejects_duplicate_key_parameter_name(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-duplicate-param.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-duplicate-param.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0212", source_id="3" * 64)
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "baud_rate",
+            "value": 115200,
+            "unit": "bps",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.8,
+            "warnings": [],
+        }
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0212", source_id="3" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0212.docx",
+        business_case_id="A0212",
+        source_id="3" * 64,
+        snapshot=_snapshot("A0212", "3" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            **deepcopy(
+                result["knowledge_object"]["engineering_context"]["key_parameters"][0]
+            ),
+            "__review_original_index": 0,
+        },
+        {
+            "__review_new": True,
+            "name": "baud_rate",
+            "value": 921600,
+            "unit": "bps",
+            "evidence_block_ids": ["B0001"],
+        },
+    ]
+
+    with pytest.raises(
+        HardwareR1WorkbenchError,
+        match="REVIEW_KEY_PARAMETER_NAME_INVALID",
+    ):
+        service.apply_human_review(
+            item_id,
+            decision="CONFIRM",
+            reviewer="reviewer-params",
+            reason="duplicate parameter names must fail closed",
+            confirmed_content=confirmed,
+        )
+
+
 def test_human_review_api_corrects_candidate_and_blocks_rejected_candidate(
     tmp_path: Path,
 ) -> None:
