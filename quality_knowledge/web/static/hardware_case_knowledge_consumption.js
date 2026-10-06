@@ -79,20 +79,20 @@
         <div class="hc-knowledge-result-head">
           <div><h3><button type="button" data-open-knowledge="${esc(item.knowledge_id)}">${esc(text(item.title))}</button></h3>
             <div class="hc-knowledge-meta"><code>knowledge_id: ${esc(item.knowledge_id)}</code><code>business_case_id: ${esc(item.business_case_id)}</code><span>${esc(item.source_domain)} / ${esc(item.source_object_type)}</span></div>
-          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>match score</small></div>
+          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>匹配度</small></div>
         </div>
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
-        <div class="hc-knowledge-evidence">Evidence refs (${evidenceRefs.length}): ${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
+        <div class="hc-knowledge-evidence">证据引用（${evidenceRefs.length}）：${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
       </article>`;
     }).join('');
   }
 
-  function setUnavailable(message = '正式知识消费索引当前不可用，请先重建 Consumption Projection。') {
+  function setUnavailable(message = '请先到知识生产工作台，对已发布案例执行“生成检索数据”。') {
     q('[data-knowledge-unavailable]').hidden = false;
-    q('[data-knowledge-unavailable]').textContent = message;
+    q('[data-knowledge-unavailable-message]').textContent = message;
     q('[data-knowledge-results]').innerHTML = '';
-    q('[data-knowledge-summary]').textContent = '消费索引不可用';
+    q('[data-knowledge-summary]').textContent = '正式知识检索数据尚未生成';
   }
 
   async function fetchJson(path) {
@@ -124,7 +124,7 @@
     } catch (error) {
       results = [];
       if (error.status === 503) setUnavailable();
-      else setUnavailable(`正式知识消费索引请求失败：${error.message}`);
+      else setUnavailable(`正式知识检索请求失败：${error.message}`);
     }
   }
 
@@ -141,7 +141,7 @@
       return `<section class="hc-knowledge-detail-section"><h3>${esc(title)}</h3><div class="hc-knowledge-detail-grid">${present.map(field => `<div class="hc-knowledge-detail-item"><strong>${esc(labels[field] || field)}</strong><span>${esc(valueText(item[field]))}</span></div>`).join('')}</div></section>`;
     }).join('');
     const refs = Array.isArray(item.evidence_refs) ? item.evidence_refs : [];
-    body.innerHTML = metadata + content + `<section class="hc-knowledge-detail-section"><h3>Evidence refs</h3><div class="hc-knowledge-detail-item"><span>${refs.length ? refs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</span></div></section>`;
+    body.innerHTML = metadata + content + `<section class="hc-knowledge-detail-section"><h3>证据引用</h3><div class="hc-knowledge-detail-item"><span>${refs.length ? refs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</span></div></section>`;
     q('[data-detail-title]').textContent = text(item.title);
     q('[data-detail-subtitle]').textContent = `${item.knowledge_id || '—'} · ${item.business_case_id || '—'}`;
     q('[data-knowledge-detail]').hidden = false;
@@ -156,7 +156,7 @@
       renderDetail(await fetchJson('/objects/' + encodeURIComponent(knowledgeId)));
     } catch (error) {
       if (error.status === 503) setUnavailable();
-      q('[data-detail-body]').innerHTML = `<div class="hc-error">${esc(error.status === 503 ? '正式知识消费索引当前不可用，请先重建 Consumption Projection。' : `正式知识详情读取失败：${error.message}`)}</div>`;
+      q('[data-detail-body]').innerHTML = `<div class="hc-error">${esc(error.status === 503 ? '正式知识检索数据尚未生成，请返回知识生产工作台执行“生成检索数据”。' : `正式知识详情读取失败：${error.message}`)}</div>`;
     }
   }
 

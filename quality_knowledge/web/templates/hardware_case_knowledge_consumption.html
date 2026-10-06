@@ -2,18 +2,18 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1"><link rel="stylesheet" href="/p0/static/hardware_case_knowledge_consumption.css?v=wave3b-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1"><link rel="stylesheet" href="/p0/static/hardware_case_knowledge_consumption.css?v=wave3b-v2">{% endblock %}
 {% block breadcrumb %}正式知识消费{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page hc-knowledge-page" data-hc-page="knowledge-consumption" data-api="{{ hardware_knowledge_api_prefix }}">
   <header class="hc-page-head">
     <div>
-      <span class="hc-kicker">HARDWARE KNOWLEDGE · WAVE 3B</span>
+      <span class="hc-kicker">正式硬件知识 · 检索与复用</span>
       <h1>正式硬件知识消费</h1>
       <p>面向研发复用、器件风险和市场应用问题的只读正式知识检索。</p>
     </div>
-    <span class="hc-status ok">Formal Knowledge · Read only</span>
+    <span class="hc-status ok">正式知识 · 只读</span>
   </header>
 
   <section class="hc-card hc-knowledge-query" aria-label="正式知识检索">
@@ -33,7 +33,13 @@
 
   <section class="hc-card" aria-live="polite">
     <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">hardware-knowledge-consumption/v1</span></div>
-    <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>正式知识消费索引当前不可用，请先重建 Consumption Projection。</div>
+    <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>
+      <div>
+        <strong>正式知识检索数据尚未生成</strong>
+        <p data-knowledge-unavailable-message>请先到知识生产工作台，对已发布案例执行“生成检索数据”。</p>
+      </div>
+      <a class="hc-button primary" href="/p0/hardware-cases/knowledge-production">返回知识生产工作台</a>
+    </div>
     <div class="hc-knowledge-results" data-knowledge-results><div class="hc-empty">请输入关键词或结构化筛选条件。</div></div>
   </section>
 
@@ -44,4 +50,4 @@
   <div class="hc-toast" data-hc-toast hidden></div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=wave4-stage4-v1"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=wave4-stage4-v2"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}

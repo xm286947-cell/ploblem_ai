@@ -1420,10 +1420,10 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     page = client.get("/p0/hardware-cases/knowledge-production")
     assert page.status_code == 200
     assert "知识生产工作台" in page.text
-    assert "Retry Failed Only" in page.text
-    assert "Advanced Debug" in page.text
-    assert "Force Full Run" in page.text
-    assert "Error Code" in page.text
+    assert "仅重试失败项" in page.text
+    assert "诊断信息（高级）" in page.text
+    assert "强制完整重跑" in page.text
+    assert "错误代码" in page.text
     assert "data-detail-error-code" in page.text
     assert "data-review-required" in page.text
     assert "需要人工确认" in page.text
