@@ -61,6 +61,7 @@ jobs:
             products/storage_rc1/storage_life/product_api.py \
             products/storage_rc1/storage_life/app.py \
             products/storage_rc1/skills/runtime_adapter.py \
+            products/storage_rc1/skills/real_knowledge.py \
             knowledge_production/release_binding.py \
             knowledge_production/extraction.py \
             knowledge_production/publish.py \
@@ -87,6 +88,14 @@ jobs:
           print("MODEL_DRIVEN_UI_STATIC=PASS")
           PY
           node --check /tmp/storage-knowledge-production.js
+          python - <<'PY'
+          from products.storage_rc1.skills import real_knowledge
+          assert "NAND_FLASH" in real_knowledge.PRIORITY_SOURCE_GROUPS
+          assert "RAW_NAND" not in real_knowledge.PRIORITY_SOURCE_GROUPS
+          source = Path("products/storage_rc1/skills/real_knowledge.py").read_text(encoding="utf-8")
+          assert 'device_type="NAND Flash"' in source
+          print("CANONICAL_NAND_FAMILY=PASS")
+          PY
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
           python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
             -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode or file_import_forwards_publisher_provenance or model_extract_requires_source_authority_before_kp_handoff"
