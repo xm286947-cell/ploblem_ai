@@ -1,5 +1,5 @@
 name: Storage MVP Real Flow Validation Package
-# W4_PKR_POLICY_ALIGNMENT_REFREEZE
+# W4_CODEX_FORMAL_TEST_CANDIDATE_REFREEZE
 
 on:
   push:
@@ -78,15 +78,15 @@ jobs:
             python -m pytest -q tests/pkr/test_service.py
           )
 
-      - name: Assemble human real-flow validation package
+      - name: Assemble formal W4 Codex test candidate
         shell: bash
         run: |
           set -euo pipefail
 
           SHORT="${STORAGE_SOURCE_SHA:0:12}"
           PKR_SHORT="${PUBLIC_KNOWLEDGE_SOURCE_SHA:0:12}"
-          PACKAGE_ID="STORAGE-MVP-REAL-FLOW-VALIDATION-${SHORT}-PKR-${PKR_SHORT}-${PACKAGE_DATE}"
-          ZIP_NAME="STORAGE_MVP_REAL_FLOW_VALIDATION_${SHORT}_PKR_${PKR_SHORT}_${PACKAGE_DATE}.zip"
+          PACKAGE_ID="STORAGE-KNOWLEDGE-W4-FORMAL-TEST-CANDIDATE-${SHORT}-PKR-${PKR_SHORT}-${PACKAGE_DATE}"
+          ZIP_NAME="STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_${SHORT}_PKR_${PKR_SHORT}_${PACKAGE_DATE}.zip"
           WORK="dist/_storage_mvp_real_flow"
           PKG="${WORK}/STORAGE_PRODUCT_MVP_RC1"
 
@@ -178,7 +178,7 @@ jobs:
           EOF
 
           cat > "$PKG/REAL_FLOW_README.txt" <<EOF
-          Storage MVP 人工真实流程验证包
+          Storage Knowledge Production W4 正式提测包
 
           PACKAGE_ID=$PACKAGE_ID
           STORAGE_SOURCE_SHA=$STORAGE_SOURCE_SHA
@@ -186,7 +186,8 @@ jobs:
           RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA
 
           目的：
-          - 仅用于真实用户 S1 -> S5 连续流程验证
+          - 作为 STORAGE-KNOWLEDGE-PRODUCTION-W4-REAL-GOLDEN-CODEX-001 的正式提测输入
+          - 由 Codex 在 Fresh Extract 真实环境执行 Real Golden
           - 不是正式 Release 包
           - 不声明 Product Gate / RC PASS
 
@@ -370,7 +371,7 @@ jobs:
           cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
           {
             "package_id": "$PACKAGE_ID",
-            "package_type": "HUMAN_REAL_FLOW_VALIDATION",
+            "package_type": "FORMAL_TEST_CANDIDATE",
             "product": "Storage MVP",
             "storage_source_sha": "$STORAGE_SOURCE_SHA",
             "public_knowledge_source_sha": "$PUBLIC_KNOWLEDGE_SOURCE_SHA",
@@ -463,7 +464,7 @@ jobs:
             "runtime_source_sha": "$RUNTIME_SOURCE_SHA",
             "sha256": "$SHA",
             "size_bytes": $SIZE,
-            "package_type": "HUMAN_REAL_FLOW_VALIDATION",
+            "package_type": "FORMAL_TEST_CANDIDATE",
             "fresh_extract_required": true,
             "product_gate_pass": "NOT_CLAIMED",
             "release_candidate": false
@@ -480,8 +481,8 @@ jobs:
         with:
           name: storage-mvp-real-flow-validation
           path: |
-            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip
-            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip.sha256
-            dist/STORAGE_MVP_REAL_FLOW_VALIDATION_*.zip.DELIVERY_MANIFEST.json
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip.sha256
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip.DELIVERY_MANIFEST.json
           if-no-files-found: error
           retention-days: 30
