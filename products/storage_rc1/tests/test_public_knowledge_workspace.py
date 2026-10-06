@@ -705,3 +705,124 @@ def test_model_scan_filters_weak_lexical_hits_by_evidence_anchor(monkeypatch):
 
     assert payload["coverage"]["found_count"] == 1
     assert payload["coverage"]["not_found_count"] == 3
+
+
+
+def test_model_extract_surfaces_safe_provider_transport_action(
+    monkeypatch,
+):
+    from storage_life import knowledge_product
+
+    monkeypatch.setattr(
+        public_knowledge,
+        "_model_scan_source",
+        lambda body, mode, base_url: {
+            "model_version": "storage-lifetime-knowledge/v1",
+            "device_type": "NAND Flash",
+            "coverage": {
+                "parameter_count": 1,
+                "found_count": 1,
+                "not_found_count": 0,
+                "role_gap_count": 0,
+            },
+            "parameters": [
+                {
+                    "canonical_name": "pe_cycles",
+                    "coverage_status": "FOUND",
+                    "queries_tried": ["P/E Cycle"],
+                    "knowledge_requirements": [
+                        "PARAMETER_DEFINITION",
+                    ],
+                    "scenario_consumers": ["S1", "S2", "S3"],
+                    "hits": [
+                        {
+                            "source_id": "source-provider",
+                            "source_revision": "rev-provider",
+                            "locator": {
+                                "page": 3,
+                                "section": "Document",
+                                "type": "pdf_text",
+                            },
+                            "text": "Program/Erase (P/E) cycle",
+                            "score": 1.0,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "_public_source_detail",
+        lambda source_id, mode, base_url: (
+            {
+                "source_id": source_id,
+                "title": "KIOXIA endurance",
+                "source_class": "PUBLIC",
+                "publisher": "KIOXIA Corporation",
+                "source_uri": "https://business.kioxia.com/",
+            },
+            [
+                {
+                    "revision_id": "rev-provider",
+                    "original_filename": "kioxia.pdf",
+                    "media_type": "application/pdf",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "source_snapshot",
+        lambda source_id, revision_id, mode, base_url:
+        public_knowledge.Response(
+            content=b"%PDF exact public snapshot",
+            media_type="application/pdf",
+        ),
+    )
+    monkeypatch.setattr(
+        knowledge_product,
+        "ingest_source",
+        lambda *args, **kwargs: {
+            "source_document": {
+                "source_id": "PKR-source-provider",
+                "source_version": "rev-provider",
+            }
+        },
+    )
+
+    class ProviderTransportError(RuntimeError):
+        code = "PROVIDER_TRANSPORT"
+
+        def __str__(self):
+            return (
+                "http://secret.internal/v1 "
+                "api_key=must-not-escape"
+            )
+
+    monkeypatch.setattr(
+        knowledge_product,
+        "extract_source",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ProviderTransportError()
+        ),
+    )
+
+    response = client.post(
+        "/api/public-knowledge/knowledge-production/extract?mode=LIVE",
+        json={
+            "source_id": "source-provider",
+            "device_type": "NAND Flash",
+            "revision_id": "rev-provider",
+            "parameter_names": ["pe_cycles"],
+        },
+    )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["code"] == "PROVIDER_TRANSPORT"
+    assert "AI Provider" in detail["message"]
+    assert detail["retryable"] is True
+    serialized = str(detail)
+    assert "secret.internal" not in serialized
+    assert "must-not-escape" not in serialized
