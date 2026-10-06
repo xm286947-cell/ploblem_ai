@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 6cb8260f5b8ebe97cc237f911fb61f9cab0ec3dc
+      STORAGE_SOURCE_SHA: 6d24040a4b542e2464bf02d6ac51012eecd5dd57
       PUBLIC_KNOWLEDGE_SOURCE_SHA: a9536f3814f9e3cd2b9e040e216f68ea61a07c15
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
