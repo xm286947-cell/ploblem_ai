@@ -293,10 +293,12 @@ class FakeRuntime:
         *,
         status: RuntimeStatus = RuntimeStatus.COMPLETED,
         raises: Exception | None = None,
+        error: object | None = None,
     ) -> None:
         self.data = data
         self.status = status
         self.raises = raises
+        self.error = error
 
     def invoke(self, request):
         if self.raises is not None:
@@ -305,6 +307,7 @@ class FakeRuntime:
             status=self.status,
             data=self.data,
             task_id="task-kp-m03",
+            error=self.error,
         )
 
 
@@ -387,5 +390,57 @@ def test_kp_m03_non_completed_runtime_result_fails_closed(
 
     with pytest.raises(
         KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"
+    ):
+        service.extract(source, structured)
+
+
+
+def test_kp_m03_provider_transport_identity_is_preserved(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=SimpleNamespace(
+                code="PROVIDER_TRANSPORT",
+                message=(
+                    "provider transport failure at "
+                    "http://secret.internal/v1?api_key=must-not-escape"
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        KnowledgeExtractionError,
+        match="^PROVIDER_TRANSPORT$",
+    ):
+        service.extract(source, structured)
+
+
+def test_kp_m03_unknown_runtime_error_stays_generic(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=SimpleNamespace(
+                code="PRIVATE_INTERNAL_FAILURE",
+                message="secret provider detail",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        KnowledgeExtractionError,
+        match="^KNOWLEDGE_EXTRACTION_FAILED$",
     ):
         service.extract(source, structured)
