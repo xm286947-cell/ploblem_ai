@@ -359,14 +359,38 @@ def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLA
             content = upstream.read(25 * 1024 * 1024 + 1)
             if len(content) > 25 * 1024 * 1024:
                 raise HTTPException(413, "原始快照超过 Storage 下载上限 25 MiB。")
+
+            upstream_type = upstream.headers.get_content_type()
+            active_types = {
+                "text/html",
+                "application/xhtml+xml",
+                "image/svg+xml",
+                "application/xml",
+                "text/xml",
+            }
             disposition = upstream.headers.get("Content-Disposition", "inline")
             if "\r" in disposition or "\n" in disposition:
-                disposition = "inline"
+                disposition = "attachment"
+            # Public Knowledge may legitimately contain HTML/SVG/XML source
+            # documents.  Never replay active content inline under the Storage
+            # product origin; that would turn a public source snapshot into a
+            # same-origin script surface.
+            media_type = upstream_type
+            if upstream_type in active_types:
+                media_type = "application/octet-stream"
+                disposition = (
+                    'attachment; filename="public-knowledge-source-'
+                    + quote(source_id, safe="")[:80]
+                    + '"'
+                )
+
             return Response(
                 content,
-                media_type=upstream.headers.get_content_type(),
+                media_type=media_type,
                 headers={
                     "Content-Disposition": disposition,
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "sandbox; default-src 'none'",
                     "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
                     "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", ""),
                 },
