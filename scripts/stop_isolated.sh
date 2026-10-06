@@ -6,7 +6,7 @@ if [ -d /Applications/Docker.app/Contents/Resources/bin ]; then
   export PATH
 fi
 
-docker compose -f compose.isolated.yaml down --remove-orphans || true
+docker compose -p storage-pkr-w4-isolated -f compose.isolated.yaml down || true
 docker rm -f storage-public-knowledge-w4-isolated >/dev/null 2>&1 || true
 
 if [ "${PKR_REMOVE_ISOLATED_VOLUME:-0}" = "1" ]; then
