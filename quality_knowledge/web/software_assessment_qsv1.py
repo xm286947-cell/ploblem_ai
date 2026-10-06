@@ -5,6 +5,8 @@ Quality bridge, Candidate V1, and QSV1 workflow storage remain their owners.
 """
 from __future__ import annotations
 
+import json
+import sqlite3
 import threading
 import uuid
 from typing import Any
@@ -19,6 +21,55 @@ from quality_knowledge.reverse_quality_bundle_adapter import ReverseQualityInput
 from quality_knowledge.scenario_source_bundle_v1 import build_scenario_source_bundle_v1
 
 
+class SoftwareAssessmentQSV1TaskStore:
+    """Durable browser-orchestration metadata; Runtime execution remains Runtime-owned."""
+
+    def __init__(self, db_path: str):
+        self.db_path = str(db_path)
+        self._initialize()
+
+    def connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.db_path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _initialize(self) -> None:
+        with self.connect() as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS quality_scenario_generation_task_v1(
+                       task_id TEXT PRIMARY KEY,
+                       task_json TEXT NOT NULL,
+                       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                   )"""
+            )
+
+    def save(self, task: dict[str, Any]) -> None:
+        payload = json.dumps(
+            task, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+        )
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO quality_scenario_generation_task_v1(task_id,task_json)
+                   VALUES(?,?)
+                   ON CONFLICT(task_id) DO UPDATE SET
+                     task_json=excluded.task_json,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (str(task["task_id"]), payload),
+            )
+
+    def get(self, task_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT task_json FROM quality_scenario_generation_task_v1 WHERE task_id=?",
+                (str(task_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        value = json.loads(row["task_json"])
+        return value if isinstance(value, dict) else None
+
+
 class SoftwareAssessmentQSV1Flow:
     """State translation for the mature workbench, with no second business store."""
 
@@ -28,8 +79,43 @@ class SoftwareAssessmentQSV1Flow:
         self.bundle_store = generation_service.source_bundle_snapshots
         self.qsv1 = SQLiteQualityScenarioV1Repository(qsv1_db_path)
         self.candidates = CandidateV1Service(self.qsv1)
+        self.task_store = SoftwareAssessmentQSV1TaskStore(qsv1_db_path)
         self._tasks: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+
+    def _store_task(self, task: dict[str, Any]) -> None:
+        with self._lock:
+            self._tasks[str(task["task_id"])] = task
+        self.task_store.save(task)
+
+    def _load_task(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            cached = self._tasks.get(task_id)
+        if cached is not None:
+            return cached
+        persisted = self.task_store.get(task_id)
+        if persisted is None:
+            return None
+
+        # A process restart can leave a persisted item at ANALYZING even though
+        # no worker is still alive. Convert only those orphaned in-flight items
+        # into an explicit retryable failure while preserving the frozen Bundle.
+        interrupted = False
+        for item in persisted.get("items") or []:
+            if item.get("state") == "ANALYZING":
+                item["state"] = "PROVIDER_FAILED"
+                item["error"] = "GENERATION_INTERRUPTED_BY_PROCESS_RESTART"
+                item["created"] = None
+                interrupted = True
+        if persisted.get("state") == "ANALYZING":
+            persisted["state"] = "PARTIAL"
+            interrupted = True
+
+        with self._lock:
+            self._tasks[task_id] = persisted
+        if interrupted:
+            self.task_store.save(persisted)
+        return persisted
 
     @staticmethod
     def _validate_trigger(trigger_source: str, trigger_reason: str) -> tuple[str, str]:
@@ -206,19 +292,20 @@ class SoftwareAssessmentQSV1Flow:
             "generation_id": generation_id, "trigger_source": trigger_source, "trigger_reason": trigger_reason,
             "items": bundle_items,
         }
-        with self._lock:
-            self._tasks[task_id] = task
+        self._store_task(task)
         return self.get_task(task_id)
 
     def run_task(self, task_id: str) -> None:
-        with self._lock:
-            task = self._tasks.get(task_id)
+        task = self._load_task(task_id)
         if not task:
             return
         completed = 0
         for item in task["items"]:
             if item.get("state") in {"INFORMATION_REQUIRED", "SOURCE_BINDING_FAILED", "EXISTING_CANDIDATE"}:
                 completed += 1
+                with self._lock:
+                    task["progress"] = {"completed": completed, "total": len(task["items"])}
+                self.task_store.save(task)
                 continue
             key = item.get("bundle_key")
             try:
@@ -264,37 +351,37 @@ class SoftwareAssessmentQSV1Flow:
             completed += 1
             with self._lock:
                 task["progress"] = {"completed": completed, "total": len(task["items"])}
+            self.task_store.save(task)
         with self._lock:
             states = {item.get("state") for item in task["items"]}
             task["state"] = "COMPLETED" if not states.intersection({"ANALYZING", "PROVIDER_FAILED", "SOURCE_BINDING_FAILED", "INFORMATION_REQUIRED"}) else "PARTIAL"
+        self.task_store.save(task)
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
-        with self._lock:
-            task = self._tasks.get(task_id)
-            if task is None:
-                return None
-            return {
-                key: value for key, value in task.items()
-                if key not in {"generation_id"}
-            }
+        task = self._load_task(task_id)
+        if task is None:
+            return None
+        return {
+            key: value for key, value in task.items()
+            if key not in {"generation_id"}
+        }
 
     def retry(self, task_id: str) -> dict[str, Any]:
-        with self._lock:
-            source = self._tasks.get(task_id)
-            if source is None:
-                raise ValueError("SOFTWARE_ASSESSMENT_TASK_NOT_FOUND")
-            retry_items = [item for item in source["items"] if item.get("state") == "PROVIDER_FAILED"]
-            if not retry_items:
-                raise ValueError("SOFTWARE_ASSESSMENT_NO_RETRYABLE_ITEMS")
-            task_id = "QSFAST-" + uuid.uuid4().hex[:16]
-            task = {
-                "task_id": task_id, "state": "ANALYZING",
-                "progress": {"completed": 0, "total": len(retry_items)},
-                "trigger_source": source["trigger_source"], "trigger_reason": source["trigger_reason"],
-                "items": [dict(item, state="ANALYZING", error="", created=None) for item in retry_items],
-            }
-            self._tasks[task_id] = task
-        return self.get_task(task_id)
+        source = self._load_task(task_id)
+        if source is None:
+            raise ValueError("SOFTWARE_ASSESSMENT_TASK_NOT_FOUND")
+        retry_items = [item for item in source["items"] if item.get("state") == "PROVIDER_FAILED"]
+        if not retry_items:
+            raise ValueError("SOFTWARE_ASSESSMENT_NO_RETRYABLE_ITEMS")
+        new_task_id = "QSFAST-" + uuid.uuid4().hex[:16]
+        task = {
+            "task_id": new_task_id, "state": "ANALYZING",
+            "progress": {"completed": 0, "total": len(retry_items)},
+            "trigger_source": source["trigger_source"], "trigger_reason": source["trigger_reason"],
+            "items": [dict(item, state="ANALYZING", error="", created=None) for item in retry_items],
+        }
+        self._store_task(task)
+        return self.get_task(new_task_id)
 
 
 def create_software_assessment_qsv1_router(generation_service, scenario_repository, qsv1_db_path: str) -> APIRouter:

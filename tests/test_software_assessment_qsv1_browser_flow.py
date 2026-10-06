@@ -113,15 +113,24 @@ def test_browser_flow_preserves_bundle_for_retry_and_renders_persisted_duplicate
     assert failed["items"][0]["state"] == "PROVIDER_FAILED"
     assert flow.bundle_store.get(frozen_key["bundle_id"], frozen_key["bundle_revision"]) is not None
 
-    retry = flow.retry(task["task_id"])
+    # Simulate a fresh process: in-memory _tasks is empty, but the failed
+    # browser orchestration state must be recoverable from durable metadata.
+    restarted = SoftwareAssessmentQSV1Flow(
+        flow.generation, flow.scenarios, str(tmp_path / "qsv1.db")
+    )
+    recovered = restarted.get_task(task["task_id"])
+    assert recovered["items"][0]["state"] == "PROVIDER_FAILED"
+    assert recovered["items"][0]["bundle_key"] == frozen_key
+
+    retry = restarted.retry(task["task_id"])
     assert retry["items"][0]["bundle_key"] == frozen_key
-    flow.run_task(retry["task_id"])
-    completed = flow.get_task(retry["task_id"])
+    restarted.run_task(retry["task_id"])
+    completed = restarted.get_task(retry["task_id"])
     assert completed["items"][0]["state"] == "CANDIDATE_CREATED"
     persisted = completed["items"][0]["scenario"]
     assert persisted["status"] == "CANDIDATE"
 
-    duplicate = flow.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    duplicate = restarted.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
     assert duplicate["items"][0]["state"] == "EXISTING_CANDIDATE"
     assert duplicate["items"][0]["scenario"]["scenario_id"] == persisted["scenario_id"]
     assert any(
