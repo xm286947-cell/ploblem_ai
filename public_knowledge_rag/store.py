@@ -28,7 +28,8 @@ class Store:
                 PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS sources (
                     source_id TEXT PRIMARY KEY, title TEXT NOT NULL, source_uri TEXT,
-                    source_class TEXT NOT NULL CHECK(source_class='PUBLIC'), created_at TEXT NOT NULL
+                    source_class TEXT NOT NULL CHECK(source_class='PUBLIC'), created_at TEXT NOT NULL,
+                    publisher TEXT
                 );
                 CREATE TABLE IF NOT EXISTS source_revisions (
                     source_id TEXT NOT NULL REFERENCES sources(source_id), revision_id TEXT NOT NULL,
@@ -47,6 +48,10 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS idx_revisions_source ON source_revisions(source_id, created_at);
             """)
+            source_columns = {row["name"] for row in db.execute("PRAGMA table_info(sources)")}
+            if "publisher" not in source_columns:
+                db.execute("ALTER TABLE sources ADD COLUMN publisher TEXT")
+
             columns = {row["name"] for row in db.execute("PRAGMA table_info(source_revisions)")}
             migrations = {
                 "raw_sha256": "TEXT", "snapshot_bytes": "BLOB", "locator_ready": "INTEGER NOT NULL DEFAULT 1",
@@ -59,8 +64,9 @@ class Store:
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_revision_raw_unique ON source_revisions(source_id,raw_sha256) WHERE raw_sha256 IS NOT NULL")
 
     def import_source(self, title: str, source_uri: str | None, content: str, media_type: str, parser_id: str,
-                      parser_version: str, chunks: list[Chunk], *, raw_bytes: bytes | None = None,
-                      locator_ready: bool = True, element_counts: dict[str, int] | None = None,
+                      parser_version: str, chunks: list[Chunk], *, publisher: str | None = None,
+                      raw_bytes: bytes | None = None, locator_ready: bool = True,
+                      element_counts: dict[str, int] | None = None,
                       original_filename: str | None = None) -> tuple[str, str, bool]:
         source_key = (source_uri or title.strip()).lower().encode("utf-8")
         source_id = "src_" + hashlib.sha256(source_key).hexdigest()[:24]
@@ -72,7 +78,23 @@ class Store:
             existing = db.execute("SELECT 1 FROM source_revisions WHERE source_id=? AND raw_sha256=?", (source_id, raw_hash)).fetchone()
             if existing:
                 return source_id, revision_id, False
-            db.execute("INSERT OR IGNORE INTO sources VALUES(?,?,?,?,?)", (source_id, title, source_uri, "PUBLIC", now))
+            normalized_publisher = str(publisher or "").strip() or None
+            db.execute(
+                """INSERT OR IGNORE INTO sources
+                (source_id,title,source_uri,source_class,created_at,publisher)
+                VALUES(?,?,?,?,?,?)""",
+                (source_id, title, source_uri, "PUBLIC", now, normalized_publisher),
+            )
+            if normalized_publisher:
+                db.execute(
+                    """UPDATE sources
+                    SET publisher=CASE
+                        WHEN publisher IS NULL OR TRIM(publisher)='' THEN ?
+                        ELSE publisher
+                    END
+                    WHERE source_id=?""",
+                    (normalized_publisher, source_id),
+                )
             db.execute("""INSERT INTO source_revisions
                 (source_id,revision_id,content_sha256,content,media_type,parser_id,parser_version,created_at,
                  raw_sha256,snapshot_bytes,locator_ready,element_counts,original_filename)
@@ -86,7 +108,7 @@ class Store:
 
     def list_sources(self) -> list[dict[str, object]]:
         with self.connect() as db:
-            rows = db.execute("""SELECT s.source_id,s.title,s.source_uri,s.created_at,r.revision_id,r.content_sha256,
+            rows = db.execute("""SELECT s.source_id,s.title,s.source_uri,s.publisher,s.created_at,r.revision_id,r.content_sha256,
                 r.raw_sha256 source_sha256,r.media_type,r.parser_id,r.parser_version,r.locator_ready,r.element_counts,
                 r.created_at revision_created_at
                 FROM sources s JOIN source_revisions r ON r.source_id=s.source_id
