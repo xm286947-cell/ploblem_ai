@@ -619,6 +619,44 @@ def _model_scan_terms(parameter: dict[str, Any]) -> list[str]:
     return terms[:3]
 
 
+def _normalized_evidence_text(value: Any) -> str:
+    return re.sub(
+        r"[^a-z0-9\u4e00-\u9fff]+",
+        " ",
+        str(value or "").casefold(),
+    ).strip()
+
+
+def _model_scan_evidence_anchors(parameter: dict[str, Any]) -> list[str]:
+    """Return strict evidence anchors from the existing parameter model.
+
+    Retrieval is intentionally broad, but a lexical hit is not model coverage.
+    A parameter is FOUND only when the original hit text contains one of the
+    model-derived English/canonical anchors.
+    """
+    terms = _model_scan_terms(parameter)
+    anchors: list[str] = []
+    # The first two terms are the English label (when present) and the
+    # canonical parameter name. The literal bilingual display label is only a
+    # retrieval fallback and is deliberately not required in source evidence.
+    for term in terms[:2]:
+        normalized = _normalized_evidence_text(term)
+        if normalized and normalized not in anchors:
+            anchors.append(normalized)
+    return anchors
+
+
+def _model_scan_hit_matches_parameter(
+    hit: dict[str, Any],
+    parameter: dict[str, Any],
+) -> bool:
+    text = _normalized_evidence_text(hit.get("text"))
+    if not text:
+        return False
+    anchors = _model_scan_evidence_anchors(parameter)
+    return bool(anchors and any(anchor in text for anchor in anchors))
+
+
 def _model_scan_source(
     body: ModelScanBody,
     *,
@@ -662,11 +700,15 @@ def _model_scan_source(
         for term in _model_scan_terms(parameter):
             safe_query = _require_public_safe_outbound_query(term)
             tried.append(safe_query)
+            retrieval_top_k = min(
+                50,
+                max(body.top_k_per_parameter * 8, 20),
+            )
             if mode == "FIXTURE_REPLAY":
                 response = search(
                     SearchBody(
                         query=safe_query,
-                        top_k=body.top_k_per_parameter,
+                        top_k=retrieval_top_k,
                     ),
                     mode=mode,
                     base_url=base_url,
@@ -677,24 +719,32 @@ def _model_scan_source(
                     "/search",
                     {
                         "query": safe_query,
-                        "top_k": body.top_k_per_parameter,
+                        "top_k": retrieval_top_k,
                         "filters": {"source_id": body.source_id},
                     },
                     base_url,
                 )
             raw_hits = response.get("hits") if isinstance(response, dict) else []
-            hits = [
+            source_hits = [
                 _normalize_citation_locator(dict(hit))
                 for hit in (raw_hits or [])
                 if str(hit.get("source_id") or "") == body.source_id
             ]
-            if hits:
+            matched_hits = [
+                hit
+                for hit in source_hits
+                if _model_scan_hit_matches_parameter(hit, parameter)
+            ]
+            if matched_hits:
+                hits = matched_hits[: body.top_k_per_parameter]
                 break
         results.append(
             {
                 **parameter,
                 "coverage_status": "FOUND" if hits else "NOT_FOUND",
                 "queries_tried": tried,
+                "evidence_anchors": _model_scan_evidence_anchors(parameter),
+                "evidence_match_policy": "MODEL_ANCHOR_REQUIRED",
                 "hits": hits,
             }
         )
