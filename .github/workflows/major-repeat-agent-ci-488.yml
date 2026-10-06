@@ -185,7 +185,7 @@ jobs:
               page.get_by_text("找到 1 个值得关注的历史案例").wait_for()
               page.get_by_text("AGENT ANALYSIS").wait_for()
               page.get_by_text("AI Repeat 建议 · 非最终结论").wait_for()
-              page.get_by_text("HUMAN DECISION").wait_for()
+              page.get_by_text("HUMAN DECISION", exact=True).wait_for()
               page.get_by_text("打开 Markdown 分析报告").wait_for()
               assert page.get_by_text("人工结论：REPEAT").count()==0
               page.click("[data-repeat-evidence='0']")
