@@ -431,6 +431,28 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
     )
     assert "storage-parameter:pe_cycles" in evidence_enrichment["tags"]
 
+    # Multiple model parameters can legitimately share one datasheet table/page.
+    # Keep that ambiguity visible for human review instead of choosing one.
+    scan["parameters"][1]["hits"][0]["locator"] = {
+        "page": 10,
+        "section": "Reliability",
+    }
+    ambiguous_enrichment = seen["extract"]["candidate_enricher"](
+        EvidenceBoundDraft()
+    )
+    ambiguous_metadata = ambiguous_enrichment["metadata"][
+        "storage_lifetime"
+    ]
+    assert ambiguous_metadata["canonical_parameters"] == [
+        "pe_cycles",
+        "retention",
+    ]
+    assert ambiguous_metadata["parameter_binding_status"] == "AMBIGUOUS"
+    assert (
+        ambiguous_metadata["parameter_binding_basis"]
+        == "EVIDENCE_LOCATOR"
+    )
+
 
 def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
     def forbidden(*args, **kwargs):
