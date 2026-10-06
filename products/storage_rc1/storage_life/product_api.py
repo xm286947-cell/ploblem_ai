@@ -811,6 +811,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 "type": kind,
                 "label": label,
                 "status": "NOT_RUN",
+                "effective_status": "NOT_RUN",
                 "complete": False,
                 "assessment_id": None,
                 "created_at": None,
@@ -1009,6 +1010,13 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             "type": kind,
             "label": label,
             "status": status,
+            "effective_status": (
+                "READY"
+                if complete else
+                "NOT_RUN"
+                if status == "NOT_RUN" else
+                "NEEDS_ATTENTION"
+            ),
             "complete": complete,
             "assessment_id": item.get("id"),
             "created_at": item.get("created_at"),
@@ -1026,6 +1034,7 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
         "type": "FACT",
         "label": "S1 参数事实",
         "status": fact_status,
+        "effective_status": "READY" if lifecycle_ready else ("NOT_RUN" if fact_status == "NOT_RUN" else "NEEDS_ATTENTION"),
         "complete": lifecycle_ready,
         "assessment_id": None,
         "created_at": None,
