@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 0b6e7c8bbecc7777a6f2cb9a79dbdd5e1751dd0c
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: 3ce389a9a8f8863aafd2405d53870cccff977838
+      STORAGE_SOURCE_SHA: b8dcdf54cd31a418a0ab195d9b0858688fac9742
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 9c9ed9d4007bcaec3cf12133e33f5580b3499f90
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -26,6 +26,46 @@ jobs:
         with:
           ref: ${{ env.STORAGE_SOURCE_SHA }}
           fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Focused usability fix verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile products/storage_rc1/storage_life/public_knowledge.py
+
+          python - <<'PY'
+          from pathlib import Path
+          html = Path("products/storage_rc1/storage_life/index.html").read_text(encoding="utf-8")
+          start = html.index("<script>") + len("<script>")
+          end = html.index("</script>", start)
+          Path("/tmp/storage_inline.js").write_text(html[start:end], encoding="utf-8")
+          required = [
+              "$('#pkImportTitle').value=f.name;",
+              "async function pkDeleteSource",
+              "async function pkDeleteRevision",
+              "async function pkSynthesizeSearch",
+              "搜索并综合",
+          ]
+          missing = [item for item in required if item not in html]
+          if missing:
+              raise SystemExit("STORAGE_USABILITY_FIX_MISSING:" + ",".join(missing))
+          print("STORAGE_USABILITY_FIX_STATIC=PASS")
+          PY
+          node --check /tmp/storage_inline.js
+
+          rm -rf /tmp/pkr-focused
+          mkdir -p /tmp/pkr-focused
+          git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
+          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA" public_knowledge_rag tests/pkr | tar -x -C /tmp/pkr-focused
+          python -m pip install -q --disable-pip-version-check -r /tmp/pkr-focused/tests/pkr/requirements-test.txt
+          (
+            cd /tmp/pkr-focused
+            python -m pytest -q tests/pkr/test_service.py
+          )
 
       - name: Assemble human real-flow validation package
         shell: bash
