@@ -117,3 +117,18 @@ def test_live_qa_failure_is_passed_as_fail_closed(monkeypatch):
     response = client.post("/api/public-knowledge/ask?mode=LIVE", json={"question": "question"})
     assert response.status_code == 503
     assert "model unavailable" in response.text
+
+
+def test_generation_request_uses_longer_bounded_timeout(monkeypatch):
+    assert public_knowledge._request_timeout_seconds("/search") == 8.0
+    assert public_knowledge._request_timeout_seconds("/health") == 8.0
+    assert public_knowledge._request_timeout_seconds("/ask") == 60.0
+
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "120")
+    assert public_knowledge._request_timeout_seconds("/ask") == 120.0
+
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "999")
+    assert public_knowledge._request_timeout_seconds("/ask") == 180.0
+
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "invalid")
+    assert public_knowledge._request_timeout_seconds("/ask") == 60.0
