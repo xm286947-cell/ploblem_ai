@@ -1115,9 +1115,12 @@ def _bind_runtime_observations(
     derived trend observations use trusted_runtime=True after the snapshot store
     has already enforced those requirements.
     """
+    raw_items = list(observations or [])
+    if len(raw_items) > 128:
+        raise ValueError("RUNTIME_OBSERVATION_LIMIT_EXCEEDED:128")
     bound: list[dict[str, Any]] = []
     normalized_type = templates.normalize_device_type(device_type)
-    for raw in observations or []:
+    for raw in raw_items:
         if not isinstance(raw, dict):
             raise ValueError("RUNTIME_OBSERVATION_OBJECT_REQUIRED")
         item = dict(raw)
@@ -1131,11 +1134,19 @@ def _bind_runtime_observations(
         capture_time = item.get("capture_time")
         source = str(item.get("source_command_or_interface") or "").strip()
         evidence = str(item.get("evidence_ref") or item.get("raw_output_ref") or "").strip()
+        if len(source) > 500:
+            raise ValueError("RUNTIME_SOURCE_LABEL_TOO_LONG")
+        if len(evidence) > 4000:
+            raise ValueError("RUNTIME_EVIDENCE_REF_TOO_LONG")
+        metric_name = str(item.get("metric_name") or "").strip()
+        if not metric_name or len(metric_name) > 160:
+            raise ValueError("RUNTIME_METRIC_NAME_INVALID")
         confirmed = item.pop("confirmed_by_user", False) is True
         provenance_ready = bool(capture_time and source and evidence and (trusted_runtime or confirmed))
 
         item["device_id"] = device_id
         item["device_type"] = normalized_type
+        item["metric_name"] = metric_name
         item["source_command_or_interface"] = source or None
         item["evidence_ref"] = evidence or None
         item["raw_output_ref"] = str(item.get("raw_output_ref") or evidence or "").strip() or None
