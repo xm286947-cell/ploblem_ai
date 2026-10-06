@@ -186,6 +186,7 @@ def test_product_agent_service_does_not_reconnect_legacy_provider_client():
     assert "ConfiguredAgentRuntime" in source
     assert "OpenAICompatibleClient" not in source
     assert "builder.ai_client" not in source
+    assert "builder.repeat_decision" not in source
 
 
 def test_full_queryinput_restores_organization_and_classification_context():
@@ -263,6 +264,131 @@ def test_agent_analysis_is_additive_keeps_retrieval_rank_and_delivers_report(
     assert report["metadata"]["source_artifact"] == "repeat-result/v1:RQ-1"
     assert report["traceability"]["source_artifact"] == "repeat-result/v1:RQ-1"
     assert "AI初步判断" in report["repeat_decision"]["notice"]
+
+
+def test_typed_semantic_and_exact_evidence_are_agent_inputs(
+    tmp_path: Path,
+    monkeypatch,
+):
+    service = RepeatAgentAnalysisService(
+        tmp_path,
+        report_root=tmp_path / "data/repeat_reports",
+        decision_enabled=False,
+    )
+    search_result = _search_result()
+    candidate = search_result["candidates"][0]
+    candidate["semantic_mode"] = "TYPED"
+    candidate["semantic_contract_version"] = "major-semantic-publish/v1"
+    candidate["typed_causes"] = [{
+        "semantic_type": "TRC_OCCURRENCE",
+        "value": "掉电窗口写入未完成",
+        "evidence": [{
+            "evidence_id": "E-TYPED-1",
+            "source_type": "REPORT",
+            "source_id": "ITR-H-1",
+            "raw_text": "掉电窗口存在未完成写入。",
+        }],
+    }]
+    candidate["typed_actions"] = [{
+        "semantic_type": "CORRECTIVE_ACTION",
+        "value": "增加原子保存",
+        "evidence": [{
+            "evidence_id": "E-TYPED-2",
+            "source_type": "REPORT",
+            "source_id": "ITR-H-1",
+            "raw_text": "采用原子保存机制。",
+        }],
+    }]
+    candidate["semantic_coverage"] = {
+        "TRC_OCCURRENCE": "PRESENT",
+        "TRC_ESCAPE": "MISSING",
+        "MRC_OCCURRENCE": "MISSING",
+        "MRC_ESCAPE": "MISSING",
+        "TECHNICAL_ACTION": "MISSING",
+        "MANAGEMENT_ACTION": "MISSING",
+        "CORRECTIVE_ACTION": "PRESENT",
+        "PREVENTIVE_ACTION": "MISSING",
+    }
+    candidate["semantic_evidence_status"] = "COMPLETE"
+
+    captured = {}
+
+    def similarity(context):
+        captured["context"] = context
+        return _similarity_wrapper(), {"status": "SUCCESS"}
+
+    monkeypatch.setattr(service, "_similarity", similarity)
+    monkeypatch.setattr(
+        service,
+        "_solution",
+        lambda context, similarity: (_solution_wrapper(), {"status": "SUCCESS"}),
+    )
+
+    enriched = service.analyze({"query_id": "RQ-1"}, search_result)
+
+    typed = captured["context"]["case"]["typed_semantic"]
+    assert typed["mode"] == "TYPED"
+    assert typed["causes"][0]["semantic_type"] == "TRC_OCCURRENCE"
+    assert typed["actions"][0]["semantic_type"] == "CORRECTIVE_ACTION"
+    assert captured["context"]["evidence"]["items"][0]["raw_text"] == "掉电窗口存在未完成写入。"
+    assert enriched["candidates"][0]["rank"] == 1
+
+
+def test_m83_mature_topn_policy_does_not_rerank_retrieval(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "model.yaml").write_text(
+        "solution_ai:\n  candidate_top_n: 1\n  min_similarity_score: 0\n"
+        "repeat_decision_ai:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    service = RepeatAgentAnalysisService(
+        tmp_path,
+        report_root=tmp_path / "data/repeat_reports",
+        decision_enabled=False,
+    )
+    search_result = _search_result()
+    first = search_result["candidates"][0]
+    second = dict(_candidate())
+    second["case_id"] = "HCASE-2"
+    second["title"] = "历史案例二"
+    second["rank"] = 2
+    second["retrieval_score"] = 0.84
+    search_result["candidates"] = [first, second]
+
+    def similarity(context):
+        wrapper = _similarity_wrapper()
+        wrapper["metadata"]["case_id"] = context["case_id"]
+        wrapper["analysis"] = dict(wrapper["analysis"])
+        wrapper["analysis"]["overall_score"] = (
+            75 if context["case_id"] == "HCASE-1" else 92
+        )
+        return wrapper, {"status": "SUCCESS"}
+
+    solution_calls = []
+
+    def solution(context, similarity_result):
+        solution_calls.append(context["case_id"])
+        wrapper = _solution_wrapper()
+        wrapper["metadata"]["case_id"] = context["case_id"]
+        return wrapper, {"status": "SUCCESS"}
+
+    monkeypatch.setattr(service, "_similarity", similarity)
+    monkeypatch.setattr(service, "_solution", solution)
+
+    enriched = service.analyze({"query_id": "RQ-1"}, search_result)
+    by_id = {item["case_id"]: item for item in enriched["candidates"]}
+
+    assert solution_calls == ["HCASE-2"]
+    assert by_id["HCASE-1"]["agent_solution"]["analysis_status"] == "SKIPPED"
+    assert by_id["HCASE-2"]["agent_solution"]["analysis_status"] == "SUCCESS"
+    assert [(item["case_id"], item["rank"], item["retrieval_score"]) for item in enriched["candidates"]] == [
+        ("HCASE-1", 1, 0.87),
+        ("HCASE-2", 2, 0.84),
+    ]
 
 
 def test_ai_recommendation_never_becomes_human_final_decision(tmp_path: Path):
