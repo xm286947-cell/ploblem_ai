@@ -4,6 +4,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 from uuid import uuid4
 
 from knowledge_production import (
@@ -128,6 +129,7 @@ def extract_source(
     *,
     requested_topics: list[str] | None = None,
     candidate_metadata: dict | None = None,
+    candidate_enricher: Callable[[Any], dict[str, Any]] | None = None,
 ) -> dict:
     root = project_root()
     model_config = model_config_path()
@@ -144,6 +146,7 @@ def extract_source(
         structured,
         requested_topics=requested_topics or [],
         candidate_metadata=candidate_metadata or {},
+        candidate_enricher=candidate_enricher,
     )
     return {
         "source_id": source_id,
