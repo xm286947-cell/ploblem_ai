@@ -74,6 +74,28 @@ DIAGNOSTIC_METHODS = {
     "lifetime_counter": ("厂商寄存器", "按 Datasheet 读取寿命计数", "严格按厂商定义解释"),
 }
 
+RUNTIME_DIAGNOSTIC_OPTION_LABELS = {
+    "critical_warning": "NVMe Critical Warning",
+    "media_errors": "NVMe Media / Data Integrity Errors",
+    "available_spare": "NVMe Available Spare",
+    "available_spare_threshold": "NVMe Available Spare Threshold",
+    "percentage_used": "NVMe Percentage Used",
+    "data_units_written": "NVMe Data Units Written",
+    "device_life_time_est_typ_a": "eMMC Life Time A",
+    "device_life_time_est_typ_b": "eMMC Life Time B",
+    "pre_eol_info": "eMMC PRE_EOL_INFO",
+    "runtime_bad_block": "Runtime / Grown Bad Block Count",
+    "program_fail": "Program Fail Count",
+    "erase_fail": "Erase Fail Count",
+    "erase_count": "Erase Count",
+    "pe_cycle": "P/E Cycle",
+    "ecc_corrected": "ECC Corrected Count",
+    "ecc_uncorrectable": "ECC Uncorrectable Count",
+    "bit_flip_count": "Bit Flip Count",
+    "bit_flip_threshold": "Bit Flip Threshold",
+}
+
+
 IMPACT_RULES = {
     "pe_cycles": ("写入耐久边界变化", "重新核对写入预算、合并写/缓存策略", "增加寿命/高频写场景验证", "复核擦写计数或寿命监控"),
     "tbw": ("产品级累计写入耐久变化", "重新计算软件写入预算和寿命裕量", "按目标工作负载重跑耐久测试", "复核 Data Units Written / Percentage Used"),
@@ -1471,6 +1493,7 @@ def execute_device_skill(
             }
             for x in detail["slots"]
             if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+            and _runtime_metric_applicability(detail, dtype, x.get("canonical_name"))[0]
         ]
         skill_payload = {
             "device_type": dtype,
@@ -2739,15 +2762,35 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         key = field["canonical_name"]
         if field.get("role") != "diagnostic" and key not in DIAGNOSTIC_METHODS:
             continue
-        data_source, method, interpretation = DIAGNOSTIC_METHODS.get(key, ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"))
+        applicable, applicability_reason = _runtime_metric_applicability(detail, dtype, key)
+        data_source, method, interpretation = DIAGNOSTIC_METHODS.get(
+            key,
+            ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"),
+        )
         slot = evidence_by_field.get(key) or {}
         formal = slot.get("review_status") == "CONFIRMED"
-        knowledge = slot.get("formal_knowledge") or _formal_knowledge(
-            key,
-            field.get("parameter_name") or key,
-            dtype,
-            context="diagnostic read method interpretation lifetime health",
+        knowledge = (
+            slot.get("formal_knowledge")
+            or _formal_knowledge(
+                key,
+                field.get("parameter_name") or key,
+                dtype,
+                context="diagnostic read method interpretation lifetime health",
+            )
+            if applicable
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": applicability_reason,
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
         )
+        diagnostic_status = slot.get("diagnostic_status") if device_id else None
+        diagnostic_label = slot.get("diagnostic_label") if device_id else None
+        if not applicable:
+            diagnostic_status = DIAG_NOT_APPLICABLE
+            diagnostic_label = DIAGNOSTIC_LABELS[DIAG_NOT_APPLICABLE]
         rows.append({
             "canonical_name": key,
             "indicator": field.get("parameter_name") or key,
@@ -2755,20 +2798,28 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "data_source": data_source,
             "read_method": method,
             "interpretation": interpretation,
+            "runtime_applicable": applicable,
+            "applicability_reason": applicability_reason,
             "fact_status": slot.get("status", "NOT_CHECKED") if device_id else "REFERENCE",
             "review_status": slot.get("review_status", "NOT_REVIEWED") if device_id else "REFERENCE",
-            "diagnostic_status": slot.get("diagnostic_status") if device_id else None,
-            "diagnostic_label": slot.get("diagnostic_label") if device_id else None,
+            "diagnostic_status": diagnostic_status,
+            "diagnostic_label": diagnostic_label,
             "evidence": slot.get("evidence", []) if formal else [],
             "runtime_observation": {
-                "status": "UNKNOWN",
-                "code": "RUNTIME_OBSERVATION_UNAVAILABLE",
+                "status": "UNKNOWN" if applicable else "NOT_APPLICABLE",
+                "code": "RUNTIME_OBSERVATION_UNAVAILABLE" if applicable else applicability_reason,
                 "observed_at": None,
                 "value": None,
                 "source": None,
             },
             "formal_knowledge": knowledge,
-            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "KNOWLEDGE_GAP",
+            "guidance_source": (
+                "NOT_APPLICABLE"
+                if not applicable
+                else "FORMAL_KNOWLEDGE"
+                if knowledge["status"] == "MATCHED"
+                else "KNOWLEDGE_GAP"
+            ),
         })
 
     skill_result = None
@@ -2800,13 +2851,27 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 "runtime_observations": [],
             },
         )
-    knowledge_gap = any(x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP for x in rows)
+    knowledge_gap = any(
+        x.get("runtime_applicable") is not False
+        and x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP
+        for x in rows
+    )
+    runtime_metric_options = []
+    for metric_name, label in RUNTIME_DIAGNOSTIC_OPTION_LABELS.items():
+        applicable, reason = _runtime_metric_applicability(detail, dtype, metric_name)
+        runtime_metric_options.append({
+            "metric_name": metric_name,
+            "label": label,
+            "applicable": applicable,
+            "reason": reason,
+        })
     if skill_result and skill_result.get("status") == "INSUFFICIENT_KNOWLEDGE":
         knowledge_gap = True
     return {
         "device_type": dtype,
         "device_id": device_id or None,
         "items": rows,
+        "runtime_metric_options": runtime_metric_options,
         # Keep the RC1 response contract stable for existing consumers.
         "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
         # #359 makes the product semantics explicit without mutating the frozen key.
