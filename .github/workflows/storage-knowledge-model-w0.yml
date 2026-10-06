@@ -9,6 +9,8 @@ on:
       - "products/storage_rc1/storage_life/knowledge_model.py"
       - "products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py"
       - "products/storage_rc1/storage_life/public_knowledge.py"
+      - "products/storage_rc1/storage_life/knowledge_product.py"
+      - "knowledge_production/extraction.py"
       - "products/storage_rc1/tests/test_public_knowledge_workspace.py"
       - ".github/workflows/storage-knowledge-model-w0.yml"
 
@@ -38,4 +40,4 @@ jobs:
             products/storage_rc1/storage_life/public_knowledge.py
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
           python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
-            -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search"
+            -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode"
