@@ -291,22 +291,54 @@ def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _runtime_trend_fingerprint(device_id: str) -> str:
-    """Stable identity for the formally consumable runtime trend state."""
+def _runtime_dependency_state(
+    device_id: str,
+    metric_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Stable identity for only the formal Runtime metrics a scenario consumed.
+
+    S3/S4 must not become stale merely because an unrelated telemetry metric was
+    added later.  S5 intentionally passes no metric filter because its integrated
+    plan consumes the whole current runtime context.
+    """
+    selected = {
+        str(x).strip()
+        for x in (metric_names or [])
+        if str(x or "").strip()
+    }
     trend = core.runtime_metric_trends(device_id, limit=40)
     payload = []
+    captures: list[datetime] = []
     for metric in trend.get("metrics") or []:
+        metric_name = str(metric.get("metric_name") or "")
+        if selected and metric_name not in selected:
+            continue
         for point in metric.get("points") or []:
             payload.append({
-                "metric_name": metric.get("metric_name"),
+                "metric_name": metric_name,
                 "batch_id": point.get("batch_id"),
                 "captured_at": point.get("captured_at"),
                 "normalized_value": point.get("normalized_value"),
                 "unit": point.get("unit"),
                 "source_label": point.get("source_label"),
             })
+            captured = _iso_datetime(point.get("captured_at"))
+            if captured is not None:
+                captures.append(captured)
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    return sha256(raw.encode("utf-8")).hexdigest()
+    return {
+        "fingerprint": sha256(raw.encode("utf-8")).hexdigest(),
+        "metric_names": sorted(selected),
+        "latest_capture_time": max(captures).isoformat() if captures else None,
+        "point_count": len(payload),
+    }
+
+
+def _runtime_trend_fingerprint(
+    device_id: str,
+    metric_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> str:
+    return str(_runtime_dependency_state(device_id, metric_names)["fingerprint"])
 
 
 LIFETIME_FORMAL_KNOWLEDGE_QUERIES = {
