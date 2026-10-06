@@ -196,8 +196,11 @@ def product_complete_review(device_id: str):
         raise HTTPException(404, "器件不存在")
     if not result["completed"]:
         blockers = result.get("blockers") or []
+        evidence_blockers = result.get("evidence_blockers") or []
         non_actionable_missing = result.get("non_actionable_missing") or []
-        if blockers:
+        if evidence_blockers:
+            message = "仍有已确认参数缺少可追溯 Evidence；请补齐 Source / Page / 原文后再完成确认"
+        elif blockers:
             message = "仍有需要人工处理或确认的必需/建议参数，不能完成确认"
         elif non_actionable_missing:
             message = "确认门禁尚未满足；以下规格书未声明项不要求逐项人工判断"
@@ -207,6 +210,7 @@ def product_complete_review(device_id: str):
             "code": "REVIEW_NOT_COMPLETE",
             "message": message,
             "blockers": blockers,
+            "evidence_blockers": evidence_blockers,
             "non_actionable_missing": non_actionable_missing,
             "workflow": result["workflow"],
         })
