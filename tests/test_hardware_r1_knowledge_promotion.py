@@ -1144,9 +1144,18 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
         candidate_repository=promotion.assets,
         operation_journal=promotion.operation_journal,
     )
+    pending = restarted.get_item("HWI-RECOVERY")
+    assert pending["reconciliation_required"] is True
+    assert pending["reconciliation_operation_type"] == "PUBLISH"
+    assert pending["reconciliation_error_code"] == "PUBLISH_RECONCILIATION_REQUIRED"
+
     repaired = restarted.reconcile_item("HWI-RECOVERY")
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert repaired["knowledge_id"]
+    settled = restarted.get_item("HWI-RECOVERY")
+    assert settled["reconciliation_required"] is False
+    assert settled["reconciliation_operation_type"] is None
+    assert settled["reconciliation_error_code"] is None
     journal = promotion.operation_journal.get(publish_operation_id)
     assert journal["operation_state"] == "COMPLETED"
     refs = source_store.formal_knowledge_references("A0152")
