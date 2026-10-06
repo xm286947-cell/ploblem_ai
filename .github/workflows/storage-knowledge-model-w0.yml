@@ -89,6 +89,7 @@ jobs:
           PY
           node --check /tmp/storage-knowledge-production.js
           python - <<'PY'
+          from pathlib import Path
           from products.storage_rc1.skills import real_knowledge
           assert "NAND_FLASH" in real_knowledge.PRIORITY_SOURCE_GROUPS
           assert "RAW_NAND" not in real_knowledge.PRIORITY_SOURCE_GROUPS
