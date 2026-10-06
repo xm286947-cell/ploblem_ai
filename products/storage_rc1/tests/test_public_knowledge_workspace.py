@@ -397,3 +397,110 @@ def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
         },
     )
     assert response.status_code == 409
+
+
+def test_file_import_forwards_publisher_provenance(monkeypatch):
+    seen = {}
+
+    def capture(mode, path, fields, filename, content, media_type, base_url=None):
+        seen.update(
+            mode=mode,
+            path=path,
+            fields=fields,
+            filename=filename,
+            content=content,
+            media_type=media_type,
+        )
+        return {"source_id": "s1", "source_sha256": "sha"}
+
+    monkeypatch.setattr(public_knowledge, "_request_file", capture)
+    response = client.post(
+        "/api/public-knowledge/sources/import-file?mode=LIVE",
+        data={
+            "title": "KIOXIA SLC NAND",
+            "publisher": "KIOXIA Corporation",
+            "classification": "PUBLIC",
+        },
+        files={"file": ("kioxia.pdf", b"%PDF", "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    assert seen["fields"]["publisher"] == "KIOXIA Corporation"
+    assert seen["fields"]["title"] == "KIOXIA SLC NAND"
+
+
+def test_model_extract_requires_source_authority_before_kp_handoff(
+    monkeypatch,
+):
+    from storage_life import knowledge_product
+
+    monkeypatch.setattr(
+        public_knowledge,
+        "_model_scan_source",
+        lambda body, mode, base_url: {
+            "model_version": "storage-lifetime-knowledge/v1",
+            "device_type": "NAND Flash",
+            "coverage": {
+                "parameter_count": 1,
+                "found_count": 1,
+                "not_found_count": 0,
+                "role_gap_count": 0,
+            },
+            "parameters": [
+                {
+                    "canonical_name": "cell_type",
+                    "coverage_status": "FOUND",
+                    "queries_tried": ["Cell Type"],
+                    "knowledge_requirements": ["PARAMETER_DEFINITION"],
+                    "scenario_consumers": ["S1", "S2"],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "_public_source_detail",
+        lambda source_id, mode, base_url: (
+            {
+                "source_id": source_id,
+                "title": "Unknown publisher source",
+                "source_class": "PUBLIC",
+                "source_uri": None,
+                "publisher": None,
+            },
+            [
+                {
+                    "revision_id": "rev-1",
+                    "original_filename": "source.pdf",
+                    "media_type": "application/pdf",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        public_knowledge,
+        "source_snapshot",
+        lambda source_id, revision_id, mode, base_url: public_knowledge.Response(
+            content=b"%PDF public source",
+            media_type="application/pdf",
+        ),
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unattributed source must not enter Knowledge Production")
+
+    monkeypatch.setattr(knowledge_product, "ingest_source", forbidden)
+    response = client.post(
+        "/api/public-knowledge/knowledge-production/extract?mode=LIVE",
+        json={
+            "source_id": "source-no-publisher",
+            "device_type": "NAND Flash",
+            "revision_id": "rev-1",
+        },
+    )
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]["code"]
+        == "PUBLIC_SOURCE_PUBLISHER_REQUIRED"
+    )
