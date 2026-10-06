@@ -160,6 +160,49 @@ class KnowledgeReleaseConsumer:
         src_by_ref = {str(x.get("source_ref") or ""): x for x in sources if x.get("source_ref")}
         return manifest, objects, ev_by_id, src_by_ref
 
+    def has_reviewed_storage_knowledge(
+        self,
+        *,
+        device_type: str = "",
+    ) -> bool:
+        """Return whether this immutable release has reviewed Storage metadata.
+
+        This is a migration/provenance probe, not a search. It prevents
+        product consumers from falling back to legacy prose once the release
+        has started publishing storage-lifetime-knowledge/v1 objects.
+        """
+        _, objects, _, _ = self._payload()
+        requested_types = _device_type_aliases(device_type)
+        for obj in objects:
+            if str(obj.get("status") or "ACTIVE") != "ACTIVE":
+                continue
+            if device_type:
+                object_types = _device_type_aliases(
+                    str(obj.get("device_type") or "")
+                )
+                if (
+                    object_types
+                    and "generic" not in object_types
+                    and requested_types.isdisjoint(object_types)
+                ):
+                    continue
+            metadata = obj.get("metadata")
+            storage = (
+                metadata.get("storage_lifetime")
+                if isinstance(metadata, dict)
+                else None
+            )
+            if (
+                isinstance(storage, dict)
+                and storage.get("formal_consumable") is True
+                and str(
+                    storage.get("semantic_class_status") or ""
+                ).upper()
+                == "REVIEWED"
+            ):
+                return True
+        return False
+
     def query(
         self,
         text: str,
