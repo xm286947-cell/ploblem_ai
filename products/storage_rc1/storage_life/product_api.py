@@ -1184,6 +1184,49 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     }
 
 
+def _verify_runtime_snapshot_evidence(device_id: str, item: dict[str, Any]) -> bool:
+    ref = str(item.get("evidence_ref") or "").strip()
+    if not ref.startswith("runtime-snapshot:"):
+        return False
+    parts = ref.split(":")
+    if len(parts) not in {2, 3} or not parts[1]:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_REF_INVALID")
+    batch_id = parts[1]
+    observation_id = parts[2] if len(parts) == 3 else ""
+    try:
+        snapshot = core.get_runtime_snapshot(batch_id)
+    except KeyError as exc:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_NOT_FOUND") from exc
+    if str(snapshot.get("device_id") or "") != device_id:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_DEVICE_MISMATCH")
+    candidates = list(snapshot.get("observations") or [])
+    if observation_id:
+        candidates = [x for x in candidates if str(x.get("id") or "") == observation_id]
+    metric = str(item.get("metric_name") or "").strip()
+    candidates = [x for x in candidates if str(x.get("metric_name") or "").strip() == metric]
+    if not candidates:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_OBSERVATION_MISMATCH")
+    stored = candidates[0]
+    if (
+        str(stored.get("quality_status") or "").upper() != "VALID"
+        or str(stored.get("availability_status") or "").upper() != "AVAILABLE"
+        or int(stored.get("confirmed_by_user") or 0) != 1
+    ):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_NOT_FORMAL")
+    claimed_value = item.get("normalized_value", item.get("raw_value"))
+    stored_value = stored.get("normalized_value", stored.get("raw_value"))
+    if str(claimed_value) != str(stored_value):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_VALUE_MISMATCH")
+    claimed_source = str(item.get("source_command_or_interface") or "").strip()
+    if claimed_source and claimed_source != str(snapshot.get("source_label") or "").strip():
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_SOURCE_MISMATCH")
+    claimed_time = _iso_datetime(item.get("capture_time"))
+    stored_time = _iso_datetime(snapshot.get("captured_at"))
+    if claimed_time is None or stored_time is None or claimed_time.astimezone(timezone.utc) != stored_time.astimezone(timezone.utc):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_TIME_MISMATCH")
+    return True
+
+
 def _bind_runtime_observations(
     device_id: str,
     device_type: str,
@@ -1233,7 +1276,13 @@ def _bind_runtime_observations(
         if not metric_name or len(metric_name) > 160:
             raise ValueError("RUNTIME_METRIC_NAME_INVALID")
         confirmed = item.pop("confirmed_by_user", False) is True
-        provenance_ready = bool(capture_time and source_is_explicit and evidence and (trusted_runtime or confirmed))
+        snapshot_verified = _verify_runtime_snapshot_evidence(device_id, item) if evidence.startswith("runtime-snapshot:") else False
+        provenance_ready = bool(
+            capture_time
+            and source_is_explicit
+            and evidence
+            and (trusted_runtime or snapshot_verified or confirmed)
+        )
 
         item["device_id"] = device_id
         item["device_type"] = normalized_type
