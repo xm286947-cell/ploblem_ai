@@ -2083,12 +2083,21 @@ def complete_parameter_review(device_id: str) -> dict[str, Any]:
         for x in workbench["rows"]
         if x["ux_state"] == UX_UNKNOWN
     ]
-    workflow = {**workflow, "non_actionable_missing": non_actionable_missing}
+    evidence_blockers = [
+        str(x) for x in (workflow.get("missing_evidence_fields") or [])
+        if str(x).strip()
+    ]
+    workflow = {
+        **workflow,
+        "non_actionable_missing": non_actionable_missing,
+        "evidence_blockers": evidence_blockers,
+    }
     return {
         "device_id": device_id,
         "completed": bool(workflow.get("formal_ready")),
         "workflow": workflow,
         "blockers": blockers,
+        "evidence_blockers": evidence_blockers,
         "non_actionable_missing": non_actionable_missing,
         "gate": "CONFIRMED_DEVICE_FACT_GATE_UNCHANGED",
     }
