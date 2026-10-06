@@ -49,6 +49,18 @@ ISOLATED_PROJECT="storage-pkr-w4-$INSTANCE_ID"
 PKR_ISOLATED_CONTAINER="storage-public-knowledge-w4-$INSTANCE_ID"
 PKR_ISOLATED_VOLUME="storage_public_knowledge_w4_${INSTANCE_ID}_data"
 
+STATE_DIR="$PWD/.pkr_isolated_instances"
+STATE_FILE="$STATE_DIR/$INSTANCE_ID.env"
+LATEST_FILE="$STATE_DIR/LATEST"
+umask 077
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+if [ -e "$STATE_FILE" ]; then
+  echo "ERROR: isolated instance state already exists: $INSTANCE_ID"
+  echo "Choose a new PKR_ISOLATED_INSTANCE_ID or stop/remove the recorded instance explicitly."
+  exit 2
+fi
+
 if [ -n "${PKR_ISOLATED_PORT:-}" ]; then
   PORT_CANDIDATE="$PKR_ISOLATED_PORT"
   "$PYTHON_BIN" - "$PORT_CANDIDATE" <<'PY'
@@ -90,14 +102,14 @@ if docker volume inspect "$PKR_ISOLATED_VOLUME" >/dev/null 2>&1; then
   exit 2
 fi
 
-STATE_FILE="$PWD/.pkr_isolated_last.env"
-umask 077
 cat > "$STATE_FILE" <<EOF
+PKR_ISOLATED_INSTANCE_ID='$INSTANCE_ID'
 ISOLATED_PROJECT='$ISOLATED_PROJECT'
 PKR_ISOLATED_CONTAINER='$PKR_ISOLATED_CONTAINER'
 PKR_ISOLATED_VOLUME='$PKR_ISOLATED_VOLUME'
 PKR_ISOLATED_PORT='$PKR_ISOLATED_PORT'
 PKR_SOURCE_VOLUME='$SOURCE_VOLUME'
+PKR_ISOLATED_STATUS='STARTING'
 EOF
 
 cleanup_on_error() {
@@ -106,6 +118,7 @@ cleanup_on_error() {
     echo "Isolated startup failed; cleaning only resources created by this run."
     docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml down >/dev/null 2>&1 || true
     docker volume rm -f "$PKR_ISOLATED_VOLUME" >/dev/null 2>&1 || true
+    rm -f "$STATE_FILE"
   fi
   exit "$code"
 }
@@ -113,7 +126,11 @@ trap cleanup_on_error EXIT HUP INT TERM
 
 docker volume create "$PKR_ISOLATED_VOLUME" >/dev/null
 
-docker run --rm   -v "$SOURCE_VOLUME:/from:ro"   -v "$PKR_ISOLATED_VOLUME:/to"   alpine:3.20   sh -c 'cp -a /from/. /to/'
+docker run --rm \
+  -v "$SOURCE_VOLUME:/from:ro" \
+  -v "$PKR_ISOLATED_VOLUME:/to" \
+  alpine:3.20 \
+  sh -c 'cp -a /from/. /to/'
 
 docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml up -d --build
 
@@ -173,9 +190,21 @@ else
   echo "ISOLATED_PKR_REAL_PROVIDER_TEST=SKIPPED"
 fi
 
+cat > "$STATE_FILE" <<EOF
+PKR_ISOLATED_INSTANCE_ID='$INSTANCE_ID'
+ISOLATED_PROJECT='$ISOLATED_PROJECT'
+PKR_ISOLATED_CONTAINER='$PKR_ISOLATED_CONTAINER'
+PKR_ISOLATED_VOLUME='$PKR_ISOLATED_VOLUME'
+PKR_ISOLATED_PORT='$PKR_ISOLATED_PORT'
+PKR_SOURCE_VOLUME='$SOURCE_VOLUME'
+PKR_ISOLATED_STATUS='RUNNING'
+EOF
+printf '%s\n' "$INSTANCE_ID" > "$LATEST_FILE"
+
 trap - EXIT HUP INT TERM
 
 echo "Original Public Knowledge service was not stopped or modified."
+echo "ISOLATED_INSTANCE_ID=$INSTANCE_ID"
 echo "ISOLATED_STATE_FILE=$STATE_FILE"
 echo "ISOLATED_PROJECT=$ISOLATED_PROJECT"
 echo "ISOLATED_CONTAINER=$PKR_ISOLATED_CONTAINER"
