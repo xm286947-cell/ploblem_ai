@@ -33,6 +33,8 @@ def test_live_status_exposes_only_model_identity_and_safe_status(monkeypatch):
     def request(mode, path, payload=None, base_url=None):
         if path == "/health":
             return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
+        if path == "/sources":
+            return {"sources": []}
         if path == "/config":
             return {"config": {
                 "ollama_model": "qwen-text:latest",
