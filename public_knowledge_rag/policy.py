@@ -37,6 +37,10 @@ _PRIVATE_QUERY_PATTERNS = [
         r"\b(?:S/?N|serial(?:\s*(?:number|no\.?))?)\s*[:#=]\s*[A-Z0-9-]{4,}\b",
         re.I,
     ),
+    re.compile(
+        r"\bserial\s*(?:number|no\.?)\s+[A-Z0-9-]{4,}\b",
+        re.I,
+    ),
     re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"),
 ]
 
