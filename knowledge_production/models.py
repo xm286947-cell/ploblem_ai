@@ -209,16 +209,18 @@ class KnowledgeExtractionCandidateDraft(StrictModel):
     )
     @classmethod
     def normalize_provider_string_lists(cls, value: Any) -> Any:
-        """Normalize only lossless provider shape variants.
+        """Normalize only lossless provider cardinality/shape variants.
 
-        Real-provider W4 evidence showed JSON objects in fields whose contract
-        is list[str].  Preserve the complete object as one canonical JSON
-        string instead of dropping keys or loosening the final field type.
-        JSON null is the unambiguous empty-list equivalent.  Other scalar
-        shapes remain invalid and continue to fail closed.
+        Provider JSON occasionally emits one value where the contract expects
+        list[str].  Wrap a single string as one item, preserve a JSON object as
+        one canonical JSON string, and treat null as the empty list.  Numeric
+        and boolean scalars remain invalid so semantic coercion still fails
+        closed.
         """
         if value is None:
             return []
+        if isinstance(value, str):
+            return [value]
         if isinstance(value, dict):
             return [
                 json.dumps(
@@ -230,10 +232,45 @@ class KnowledgeExtractionCandidateDraft(StrictModel):
             ]
         return value
 
+    @field_validator("evidence_locations", mode="before")
+    @classmethod
+    def normalize_single_evidence_location(cls, value: Any) -> Any:
+        """A single evidence object is losslessly equivalent to a 1-item list."""
+        if isinstance(value, dict):
+            return [value]
+        return value
+
 
 class KnowledgeExtractionOutput(StrictModel):
     candidates: list[KnowledgeExtractionCandidateDraft] = Field(default_factory=list)
     unknowns_or_gaps: list[str] = Field(default_factory=list)
+
+    @field_validator("candidates", mode="before")
+    @classmethod
+    def normalize_single_candidate(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        return value
+
+    @field_validator("unknowns_or_gaps", mode="before")
+    @classmethod
+    def normalize_unknowns_or_gaps(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [
+                json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ]
+        return value
 
 
 class EvidenceValidationStatus(str, Enum):

@@ -504,3 +504,79 @@ def test_kp_m03_w4_list_normalization_keeps_unknown_scalars_fail_closed() -> Non
         for error in exc_info.value.errors(include_input=False)
     }
     assert (("candidates", 0, "scope"), "list_type") in observed
+
+
+
+def test_kp_m03_w4_safe_cardinality_normalization_is_bounded() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = payload["candidates"][0]
+    payload["candidates"]["scope"] = "device_health"
+    payload["candidates"]["conditions"] = {"mode": "monitoring"}
+    payload["candidates"]["limitations"] = None
+    payload["candidates"]["tags"] = "health"
+    payload["candidates"]["evidence_locations"] = payload["candidates"]["evidence_locations"][0]
+    payload["unknowns_or_gaps"] = "needs human review"
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert len(parsed.candidates) == 1
+    draft = parsed.candidates[0]
+    assert draft.scope == ["device_health"]
+    assert draft.conditions == ['{"mode":"monitoring"}']
+    assert draft.limitations == []
+    assert draft.tags == ["health"]
+    assert len(draft.evidence_locations) == 1
+    assert parsed.unknowns_or_gaps == ["needs human review"]
+
+    payload["candidates"] = {
+        **payload["candidates"],
+        "scope": 123,
+    }
+    with pytest.raises(ValidationError):
+        KnowledgeExtractionOutput.model_validate(payload)
+
+
+def test_kp_m03_provider_schema_error_exposes_only_safe_paths(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    runtime_error = SimpleNamespace(
+        code="PROVIDER_SCHEMA_INVALID",
+        details={
+            "errors": [
+                {
+                    "loc": ("candidates", 0, "confidence"),
+                    "type": "float_parsing",
+                    "msg": "Input should be a valid number",
+                    "input": "SECRET_RAW_PROVIDER_VALUE",
+                    "url": "https://secret.invalid/error",
+                }
+            ]
+        },
+    )
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=runtime_error,
+        ),
+    )
+
+    with pytest.raises(KnowledgeExtractionError) as exc_info:
+        service.extract(source, structured)
+
+    assert exc_info.value.code == "PROVIDER_SCHEMA_INVALID"
+    assert exc_info.value.details == {
+        "schema_errors": [
+            {
+                "loc": ["candidates", 0, "confidence"],
+                "type": "float_parsing",
+                "message": "Input should be a valid number",
+            }
+        ]
+    }
+    serialized = json.dumps(exc_info.value.details)
+    assert "SECRET_RAW_PROVIDER_VALUE" not in serialized
+    assert "secret.invalid" not in serialized

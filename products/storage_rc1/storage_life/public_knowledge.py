@@ -1230,14 +1230,24 @@ def model_extract_to_knowledge_production(
         safe = KNOWLEDGE_EXTRACTION_USER_ERRORS.get(code)
         if safe is not None:
             status_code, message = safe
+            detail = {
+                "code": code,
+                "message": message,
+                "retryable": code
+                in {"PROVIDER_TRANSPORT", "PROVIDER_HTTP_ERROR"},
+            }
+            if code == "PROVIDER_SCHEMA_INVALID":
+                safe_details = getattr(exc, "details", None)
+                if isinstance(safe_details, dict):
+                    schema_errors = safe_details.get("schema_errors")
+                    if isinstance(schema_errors, list) and schema_errors:
+                        detail["schema_errors"] = schema_errors
+                    json_schema_path = safe_details.get("json_schema_path")
+                    if isinstance(json_schema_path, list) and json_schema_path:
+                        detail["json_schema_path"] = json_schema_path
             raise HTTPException(
                 status_code,
-                detail={
-                    "code": code,
-                    "message": message,
-                    "retryable": code
-                    in {"PROVIDER_TRANSPORT", "PROVIDER_HTTP_ERROR"},
-                },
+                detail=detail,
             ) from exc
         raise HTTPException(
             503,

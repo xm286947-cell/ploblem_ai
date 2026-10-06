@@ -30,10 +30,11 @@ from .models import (
 
 
 class KnowledgeExtractionError(RuntimeError):
-    """Stable knowledge-extraction failure."""
+    """Stable knowledge-extraction failure with bounded safe diagnostics."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, details: dict[str, Any] | None = None):
         self.code = code
+        self.details = details or {}
         super().__init__(code)
 
 
@@ -50,6 +51,17 @@ SAFE_RUNTIME_FAILURE_CODES = frozenset({
 })
 
 
+def _runtime_error(value: Any) -> Any:
+    error = getattr(value, "error", None)
+    if error is not None:
+        return error
+    if isinstance(value, dict) and "code" in value:
+        return value
+    if getattr(value, "code", None) is not None:
+        return value
+    return None
+
+
 def _stable_runtime_failure_code(value: Any) -> str | None:
     """Return only safe, stable Runtime error identities.
 
@@ -57,13 +69,57 @@ def _stable_runtime_failure_code(value: Any) -> str | None:
     inside Runtime evidence. Knowledge Production only surfaces a bounded code
     that the product can turn into an actionable, non-secret message.
     """
-    error = getattr(value, "error", None)
+    error = _runtime_error(value)
     if isinstance(error, dict):
         raw = error.get("code")
     else:
         raw = getattr(error, "code", None)
     code = str(raw or "").strip().upper()
     return code if code in SAFE_RUNTIME_FAILURE_CODES else None
+
+
+def _safe_runtime_failure_details(value: Any) -> dict[str, Any]:
+    """Expose validation paths/types only; never raw provider input or secrets."""
+    error = _runtime_error(value)
+    if isinstance(error, dict):
+        details = error.get("details")
+    else:
+        details = getattr(error, "details", None)
+    if not isinstance(details, dict):
+        return {}
+
+    safe: dict[str, Any] = {}
+    errors = details.get("errors")
+    if isinstance(errors, list):
+        safe_errors: list[dict[str, Any]] = []
+        for item in errors[:20]:
+            if not isinstance(item, dict):
+                continue
+            loc = item.get("loc")
+            safe_loc = []
+            if isinstance(loc, (list, tuple)):
+                for part in loc[:12]:
+                    if isinstance(part, int):
+                        safe_loc.append(part)
+                    elif isinstance(part, str):
+                        safe_loc.append(part[:120])
+            error_type = str(item.get("type") or "")[:120]
+            message = str(item.get("msg") or "")[:240]
+            record = {
+                "loc": safe_loc,
+                "type": error_type,
+                "message": message,
+            }
+            safe_errors.append(record)
+        if safe_errors:
+            safe["schema_errors"] = safe_errors
+
+    path = details.get("json_schema_path")
+    if isinstance(path, list):
+        safe["json_schema_path"] = [
+            str(item)[:120] for item in path[:12]
+        ]
+    return safe
 
 
 def _candidate_id(
@@ -231,13 +287,26 @@ class KnowledgeExtractionService:
         except Exception as exc:
             safe_code = _stable_runtime_failure_code(exc)
             raise KnowledgeExtractionError(
-                safe_code or "KNOWLEDGE_EXTRACTION_FAILED"
+                safe_code or "KNOWLEDGE_EXTRACTION_FAILED",
+                details=(
+                    _safe_runtime_failure_details(exc)
+                    if safe_code == "PROVIDER_SCHEMA_INVALID"
+                    else None
+                ),
             ) from exc
 
         if getattr(result, "status", None) != RuntimeStatus.COMPLETED:
-            raise KnowledgeExtractionError(
+            safe_code = (
                 _stable_runtime_failure_code(result)
                 or "KNOWLEDGE_EXTRACTION_FAILED"
+            )
+            raise KnowledgeExtractionError(
+                safe_code,
+                details=(
+                    _safe_runtime_failure_details(result)
+                    if safe_code == "PROVIDER_SCHEMA_INVALID"
+                    else None
+                ),
             )
 
         try:
