@@ -21,6 +21,7 @@ For every candidate:
 - include section and source_anchor when they are present in the input.
 
 JSON shape is part of the output contract:
+- device_type MUST be one JSON string such as "NAND Flash" or null; NEVER emit an object or array for device_type;
 - scope, conditions, limitations, and tags MUST be JSON arrays of strings;
 - Use [] when there are no values; never emit null or a scalar for these fields;
 - example: "scope": ["device health"], "conditions": [], "limitations": [], "tags": [].
