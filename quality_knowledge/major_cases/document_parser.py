@@ -9,9 +9,10 @@ import hashlib
 import re
 import xml.etree.ElementTree as ET
 
-from parser.pdf_extractor import PdfExtractor
+from .pdf_markdown import MarkdownPage, normalize_pdf_to_markdown
 
-PARSER_VERSION = "req022-parser-1"
+
+PARSER_VERSION = "req022-parser-2-markdown"
 WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
@@ -34,6 +35,11 @@ class ParseResult:
     media_type: str
     fragments: list[ParsedFragment]
     warnings: list[str] = field(default_factory=list)
+    parser_version: str = PARSER_VERSION
+    derived_format: str = ""
+    converter_mode: str = ""
+    quality_status: str = ""
+    derived_markdown: str = ""
 
 
 def _clean(text: str) -> str:
@@ -94,21 +100,101 @@ def parse_docx(path: str | Path) -> ParseResult:
     return ParseResult("DOCX", fragments, warnings)
 
 
-def parse_pdf(path: str | Path) -> ParseResult:
-    result = PdfExtractor().extract(path)
+def _is_page_marker(line: str) -> bool:
+    return bool(re.fullmatch(r"<!--\s*(?:PDF_PAGE|DOCUMENT_PAGE):\s*\d+\s*-->", line.strip()))
+
+
+def _is_markdown_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return len(stripped) >= 3 and stripped.startswith("|") and stripped.endswith("|")
+
+
+def _markdown_page_fragments(page: MarkdownPage, start_ordinal: int) -> list[ParsedFragment]:
     fragments: list[ParsedFragment] = []
-    for page in result.pages:
-        if page.text:
-            fragments.append(ParsedFragment(
-                len(fragments) + 1, "", "PAGE", f"page:{page.page_number}", "TEXT", page.text
-            ))
-    for table in result.tables:
-        text = "\n".join(" | ".join(row) for row in table["rows"])
+    headings: list[str] = []
+    paragraph: list[str] = []
+    table: list[str] = []
+    local_no = 0
+
+    def emit(lines: list[str], fragment_type: str) -> None:
+        nonlocal local_no
+        if not lines:
+            return
+        text = "\n".join(lines).strip()
+        if not text:
+            return
+        local_no += 1
         fragments.append(ParsedFragment(
-            len(fragments) + 1, "", "PAGE_TABLE",
-            f"page:{table['page_ref']}:table:{table['table_index']}", "TABLE", text,
+            start_ordinal + len(fragments),
+            " / ".join(headings),
+            "PAGE_TABLE" if fragment_type == "TABLE" else "PAGE_MARKDOWN",
+            f"page:{page.pdf_page}:markdown:{local_no}",
+            fragment_type,
+            text,
         ))
-    return ParseResult("PDF", fragments, list(result.warnings))
+
+    def flush_paragraph() -> None:
+        nonlocal paragraph
+        emit(paragraph, "TEXT")
+        paragraph = []
+
+    def flush_table() -> None:
+        nonlocal table
+        emit(table, "TABLE")
+        table = []
+
+    for raw_line in page.markdown.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if _is_page_marker(stripped):
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", stripped)
+        if heading:
+            flush_paragraph()
+            flush_table()
+            level = len(heading.group(1))
+            title = heading.group(2).strip()
+            headings[:] = headings[: level - 1]
+            headings.append(title)
+            continue
+        if _is_markdown_table_line(stripped):
+            flush_paragraph()
+            table.append(stripped)
+            continue
+        if table:
+            flush_table()
+        if not stripped:
+            flush_paragraph()
+            continue
+        paragraph.append(stripped)
+
+    flush_table()
+    flush_paragraph()
+    return fragments
+
+
+def parse_pdf(path: str | Path) -> ParseResult:
+    document = normalize_pdf_to_markdown(path)
+    fragments: list[ParsedFragment] = []
+    for page in document.pages:
+        fragments.extend(_markdown_page_fragments(page, len(fragments) + 1))
+
+    warnings = list(document.warnings)
+    if not fragments:
+        warnings.append("PDF_NO_READABLE_MARKDOWN")
+    parser_version = (
+        f"{PARSER_VERSION}:{document.converter_mode}:{document.quality_status.lower()}"
+    )
+    return ParseResult(
+        "PDF",
+        fragments,
+        list(dict.fromkeys(warnings)),
+        parser_version=parser_version,
+        derived_format="MARKDOWN",
+        converter_mode=document.converter_mode,
+        quality_status=document.quality_status,
+        derived_markdown=document.markdown,
+    )
 
 
 def parse_document(path: str | Path) -> ParseResult:
