@@ -236,7 +236,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unzip -q artifact/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip -d fresh
+          ZIP="$(find artifact -type f -name 'MAJOR_MVP_PRODUCT_CANDIDATE_*.zip' | head -n1)"
+          test -n "$ZIP"
+          unzip -q "$ZIP" -d fresh
           PKG="$(find fresh -mindepth 1 -maxdepth 1 -type d | head -n1)"
           test -x "$PKG/START_MAJOR_MVP.sh"
           MAJOR_MVP_PORT=8890 "$PKG/START_MAJOR_MVP.sh" --host 127.0.0.1 --port 8890 >posix.log 2>&1 &
@@ -261,7 +263,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unzip -q artifact/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip -d fresh
+          ZIP="$(find artifact -type f -name 'MAJOR_MVP_PRODUCT_CANDIDATE_*.zip' | head -n1)"
+          test -n "$ZIP"
+          unzip -q "$ZIP" -d fresh
           PKG="$(find fresh -mindepth 1 -maxdepth 1 -type d | head -n1)"
           test -x "$PKG/START_MAJOR_MVP.command"
           MAJOR_MVP_PORT=8892 "$PKG/START_MAJOR_MVP.command" --host 127.0.0.1 --port 8892 >macos.log 2>&1 &
@@ -285,7 +289,8 @@ jobs:
       - name: Windows launcher
         shell: pwsh
         run: |
-          $zip=Get-ChildItem artifact\MAJOR_MVP_PRODUCT_CANDIDATE_*.zip | Select-Object -First 1
+          $zip=Get-ChildItem artifact -Recurse -File -Filter "MAJOR_MVP_PRODUCT_CANDIDATE_*.zip" | Select-Object -First 1
+          if (-not $zip) { throw "Candidate ZIP missing from downloaded artifact" }
           Expand-Archive -Path $zip.FullName -DestinationPath fresh
           $pkg=Get-ChildItem fresh -Directory | Select-Object -First 1
           if (-not (Test-Path (Join-Path $pkg.FullName "START_MAJOR_MVP.bat"))) { throw "launcher missing" }
