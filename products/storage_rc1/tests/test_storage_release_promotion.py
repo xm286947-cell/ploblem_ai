@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from storage_life import knowledge_product
+from storage_life import knowledge_release
 from storage_life.knowledge_release import KnowledgeReleaseConsumer
 
 
@@ -145,3 +146,91 @@ def test_candidate_exists_without_promotion_does_not_change_current(
         == "KP-STORAGE-RC1-VALIDATION-001"
     )
     assert not (current / "release_binding.json").exists()
+
+
+
+def _binding_template(version: str = "KP-STORAGE-RC1-VALIDATION-001") -> dict:
+    return {
+        "binding_contract_version": "knowledge-release-binding/v1.0",
+        "storage_product_version": "STORAGE_PRODUCT_MVP_RC1",
+        "knowledge_release_version": version,
+        "knowledge_object_contract_version": "knowledge-object/v1",
+        "knowledge_query_contract_version": "knowledge-query/v1",
+        "common_evidence_contract_version": "common-evidence/v1.0",
+        "storage_consumer_contract_version": "UKCI-01/V1.0",
+        "release_class": "CONTROLLED_CONSUMER_VALIDATION",
+        "qualification_state": "VALIDATION_ONLY",
+        "compatibility_status": "PASS",
+        "latest_floating_dependency": False,
+        "direct_knowledge_db_access": False,
+        "candidate_store_access": False,
+        "storage_self_publish": False,
+        "required_behavior": {
+            "pinned_release_on_startup": True,
+            "fail_closed_on_version_mismatch": True,
+            "fail_closed_on_missing_release": True,
+            "fail_closed_on_evidence_contract_mismatch": True,
+            "upgrade_requires_new_binding": True,
+            "rollback_requires_previous_binding": True,
+        },
+    }
+
+
+def test_default_binding_template_resolves_from_effective_packaged_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    package_root = tmp_path / "STORAGE_PRODUCT_MVP_RC1"
+    binding_path = (
+        package_root
+        / "contracts"
+        / "release_binding"
+        / "v1"
+        / "release_binding.json"
+    )
+    binding_path.parent.mkdir(parents=True)
+    expected = _binding_template()
+    binding_path.write_text(json.dumps(expected), encoding="utf-8")
+
+    monkeypatch.setattr(
+        knowledge_product,
+        "project_root",
+        lambda: package_root,
+    )
+
+    assert knowledge_product._default_binding_template() == expected
+
+
+def test_binding_path_finds_default_contract_in_flat_packaged_layout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    package_root = tmp_path / "STORAGE_PRODUCT_MVP_RC1"
+    fake_module = package_root / "storage_life" / "knowledge_release.py"
+    fake_module.parent.mkdir(parents=True)
+    fake_module.write_text("# packaged module marker\n", encoding="utf-8")
+
+    binding_path = (
+        package_root
+        / "contracts"
+        / "release_binding"
+        / "v1"
+        / "release_binding.json"
+    )
+    binding_path.parent.mkdir(parents=True)
+    binding_path.write_text(
+        json.dumps(_binding_template()),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        knowledge_release,
+        "__file__",
+        str(fake_module),
+    )
+    monkeypatch.delenv(
+        "STORAGE_KNOWLEDGE_BINDING_PATH",
+        raising=False,
+    )
+
+    assert knowledge_release._binding_path() == binding_path.resolve()
