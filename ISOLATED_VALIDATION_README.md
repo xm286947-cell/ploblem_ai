@@ -3,14 +3,19 @@
 This mode validates a newer Public Knowledge build without stopping, replacing,
 or modifying existing Public Knowledge containers or source volumes.
 
-Each start creates a unique Compose project, container, and cloned data volume.
-It never deletes an existing isolated instance. If port 19000 is already in
-use, the launcher automatically selects the next free port in 19000..19049.
+Each start creates a unique Compose project, container, cloned data volume, and
+a durable per-instance state record. Existing isolated instances are never
+deleted or replaced on startup. If port 19000 is already in use, the launcher
+automatically selects the next free port in 19000..19049.
 
-The existing Public Knowledge volume is mounted read-only into a short-lived
-copy helper and cloned into the run-specific volume. Saved config, source
-catalog, and local SecretStore are therefore available in the isolated copy
-without modifying the source volume.
+State is stored under:
+
+```
+.pkr_isolated_instances/<instance_id>.env
+```
+
+`.pkr_isolated_instances/LATEST` is only a convenience pointer. It can change
+on later starts, but it never replaces any per-instance lifecycle record.
 
 Run passive validation:
 
@@ -18,27 +23,44 @@ Run passive validation:
 bash scripts/start_isolated.sh
 ```
 
-The script writes the created resource identities and selected port to
-`.pkr_isolated_last.env`. No real generation-provider request is made by
-default.
+List every recorded isolated instance:
 
-Run exactly one real provider-health probe only when explicitly authorized:
+```bash
+bash scripts/list_isolated.sh
+```
+
+Stop one instance explicitly:
+
+```bash
+bash scripts/stop_isolated.sh <instance_id>
+```
+
+If only one running instance exists, `bash scripts/stop_isolated.sh` may be
+used without an ID. If multiple instances are running, the command fails closed
+and asks for an explicit instance ID.
+
+Stop all recorded running isolated instances:
+
+```bash
+PKR_STOP_ALL_ISOLATED=1 bash scripts/stop_isolated.sh
+```
+
+Volumes are retained by default for inspection. To remove the selected
+instance's cloned volume while stopping:
+
+```bash
+PKR_REMOVE_ISOLATED_VOLUME=1 bash scripts/stop_isolated.sh <instance_id>
+```
+
+The existing Public Knowledge source volume is always mounted read-only into a
+short-lived copy helper; the original container and original volume are not
+stopped, removed, or written.
+
+No real generation-provider request is made by default. To authorize exactly
+one provider-health probe for a newly created instance:
 
 ```bash
 PKR_ALLOW_REAL_PROVIDER_TEST=1 bash scripts/start_isolated.sh
-```
-
-Stop only the last recorded isolated instance:
-
-```bash
-bash scripts/stop_isolated.sh
-```
-
-The cloned volume is retained by default. Remove only that recorded isolated
-volume with:
-
-```bash
-PKR_REMOVE_ISOLATED_VOLUME=1 bash scripts/stop_isolated.sh
 ```
 
 If source-volume auto-detection is ambiguous:
@@ -53,5 +75,5 @@ To request a specific free port:
 PKR_ISOLATED_PORT=19010 bash scripts/start_isolated.sh
 ```
 
-If the requested port is already occupied, startup fails closed and does not
-replace anything.
+If the requested port is occupied, startup fails closed and does not replace
+anything.
