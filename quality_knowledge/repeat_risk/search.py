@@ -252,8 +252,15 @@ class RepeatHistoricalCaseSearchService:
             text=text,
             cause_description="\n".join(dict.fromkeys(cause_parts)),
             solution="\n".join(dict.fromkeys(solution_parts)),
+            ipmt=_text(snapshot.get("ipmt")),
+            spdt=_text(snapshot.get("spdt")),
+            responsible_department_level2=_text(
+                snapshot.get("responsible_department_level2")
+            ),
             product=_text(snapshot.get("product")),
             domain=_text(existing.get("domain")),
+            cause_level1=_text(snapshot.get("cause_level1")),
+            cause_level2=_text(snapshot.get("cause_level2")),
         )
 
     @staticmethod
