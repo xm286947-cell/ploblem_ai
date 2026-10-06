@@ -261,6 +261,45 @@ def config_snapshot() -> dict[str, object]:
     return {"config": settings.public_snapshot(), "config_hash": settings.config_hash()}
 
 
+@app.get("/providers/active/health")
+def active_provider_health() -> dict[str, object]:
+    """Probe the provider that is actually active in effective configuration."""
+    if settings.provider_type == "openai_compatible":
+        if not active_api_key:
+            raise HTTPException(
+                503,
+                {"code": "CREDENTIAL_MISSING", "message": "OpenAI-compatible credential is missing."},
+            )
+        try:
+            result = openai_compatible.test_connection()
+        except ProviderUnavailable as exc:
+            raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from exc
+        return {
+            "provider": openai_compatible.provider_id,
+            "status": "ok",
+            "protocol": settings.openai_protocol,
+            "model": result.get("model") or settings.openai_model,
+            "test_response_received": bool(result.get("test_response_received")),
+        }
+
+    if settings.provider_type == "ollama":
+        try:
+            version = ollama.version()
+        except ProviderUnavailable as exc:
+            raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from exc
+        return {
+            "provider": ollama.provider_id,
+            "status": "ok",
+            "model": settings.ollama_model,
+            "version": version.get("version"),
+        }
+
+    raise HTTPException(
+        503,
+        {"code": "PROVIDER_UNREACHABLE", "message": "Configured generation provider is unavailable."},
+    )
+
+
 @app.get("/providers/ollama/health")
 def ollama_health() -> dict[str, object]:
     try:
