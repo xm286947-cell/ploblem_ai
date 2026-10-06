@@ -1,0 +1,31 @@
+name: Public Knowledge Publisher Metadata
+
+on:
+  push:
+    branches:
+      - feature/public-knowledge-publisher-metadata-001
+    paths:
+      - "public_knowledge_rag/store.py"
+      - "public_knowledge_rag/app.py"
+      - "tests/test_public_knowledge_publisher_metadata.py"
+      - ".github/workflows/public-knowledge-publisher-metadata.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -q pytest
+      - name: Verify publisher provenance
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m py_compile public_knowledge_rag/store.py public_knowledge_rag/app.py
+          python -m pytest -q tests/test_public_knowledge_publisher_metadata.py
