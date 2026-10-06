@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 8b632ea69437f47bcafc9cbe864713314c80b52c
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: 87b07f58a6699633d1e2b97f0b21303d4aea5d34
+      STORAGE_SOURCE_SHA: cba384f55eaf49a585a17564cabdb8a80fb4d5f8
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 89e9acfe53981e1eaa683dc375a11eb2782dda68
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -44,13 +44,27 @@ jobs:
           printf '%s\n' "$PKR_START" | grep -q "PUBLIC_KNOWLEDGE_DELETE_CONTRACT=PASS"
 
           PKR_ISOLATED="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/start_isolated.sh")"
-          printf '%s\n' "$PKR_ISOLATED" | grep -q 'ISOLATED_PROJECT="storage-pkr-w4-isolated"'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'INSTANCE_ID='
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'storage-pkr-w4-$INSTANCE_ID'
           printf '%s\n' "$PKR_ISOLATED" | grep -q 'command -v python3'
           printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker compose -p "$ISOLATED_PROJECT"'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'NO_FREE_ISOLATED_PORT'
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker rm -f'; then
+            echo "ISOLATED_SCRIPT_UNSAFE_CONTAINER_DELETE"
+            exit 1
+          fi
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker volume rm -f.*PKR_ISOLATED_VOLUME' | grep -v 'cleanup_on_error'; then
+            true
+          fi
           if printf '%s\n' "$PKR_ISOLATED" | grep -q -- '--remove-orphans'; then
             echo "ISOLATED_SCRIPT_UNSAFE_REMOVE_ORPHANS"
             exit 1
           fi
+
+          PKR_COMPOSE="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:compose.isolated.yaml")"
+          printf '%s\n' "$PKR_COMPOSE" | grep -q 'container_name: ${PKR_ISOLATED_CONTAINER}'
+          printf '%s\n' "$PKR_COMPOSE" | grep -q '127.0.0.1:${PKR_ISOLATED_PORT}:8080'
+          printf '%s\n' "$PKR_COMPOSE" | grep -q 'name: ${PKR_ISOLATED_VOLUME}'
 
           python - <<'PY'
           from pathlib import Path
