@@ -186,3 +186,35 @@ def test_model_digest_mismatch_fails_closed(monkeypatch):
         assert "failed closed" in str(exc)
     else:
         raise AssertionError("mismatched model digest was accepted")
+
+
+def test_public_query_allows_engineering_internal_ecc_but_blocks_explicit_private_ids(
+    monkeypatch,
+    tmp_path,
+):
+    client = setup_client(monkeypatch, tmp_path)
+    imported = public_source(
+        client,
+        "NAND device supports internal ECC and on-die ECC status reporting.",
+    )
+    assert imported.status_code == 200
+
+    public_query = client.post(
+        "/search",
+        json={"query": "internal ECC", "top_k": 5},
+    )
+    assert public_query.status_code == 200
+    assert public_query.json()["hits"]
+
+    assert client.post(
+        "/search",
+        json={"query": "internal project id: ABC123"},
+    ).status_code == 422
+    assert client.post(
+        "/search",
+        json={"query": "customer code: CUST-7788"},
+    ).status_code == 422
+    assert client.post(
+        "/search",
+        json={"query": "S/N: 1234567890"},
+    ).status_code == 422
