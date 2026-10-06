@@ -10,6 +10,7 @@ from typing import Iterator
 from urllib.request import Request, urlopen
 
 import pytest
+from pydantic import ValidationError
 
 from knowledge_production import (
     KnowledgeExtractionError,
@@ -444,3 +445,44 @@ def test_kp_m03_unknown_runtime_error_stays_generic(
         match="^KNOWLEDGE_EXTRACTION_FAILED$",
     ):
         service.extract(source, structured)
+
+
+def test_kp_m03_w4_list_type_failure_matches_prompt_contract(
+    tmp_path: Path,
+) -> None:
+    prompt = (
+        ROOT / "prompts/runtime/knowledge_production/knowledge_extract.md"
+    ).read_text(encoding="utf-8")
+    assert "scope, conditions, limitations, and tags MUST be JSON arrays of strings" in prompt
+    assert "Use [] when there are no values; never emit null or a scalar" in prompt
+
+    fixture_path = (
+        ROOT / "tests/fixtures/w4_kp_list_type_contract_failure.json"
+    )
+    sanitized_failure = json.loads(fixture_path.read_text(encoding="utf-8"))
+    with pytest.raises(ValidationError) as exc_info:
+        KnowledgeExtractionOutput.model_validate(sanitized_failure)
+
+    observed = {
+        (tuple(error["loc"]), error["type"])
+        for error in exc_info.value.errors(include_input=False)
+    }
+    assert observed == {
+        (("candidates", 0, "scope"), "list_type"),
+        (("candidates", 0, "conditions"), "list_type"),
+        (("candidates", 0, "limitations"), "list_type"),
+    }
+
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(sanitized_failure),
+    )
+    with pytest.raises(
+        KnowledgeExtractionError,
+        match="KNOWLEDGE_CONTRACT_INVALID",
+    ):
+        service.extract(source, structured)
+    assert not (tmp_path / "knowledge/production/candidates").exists()
+    assert not (tmp_path / "knowledge/production/evidence").exists()

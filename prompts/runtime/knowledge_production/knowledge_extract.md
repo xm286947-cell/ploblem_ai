@@ -20,6 +20,11 @@ For every candidate:
 - every evidence location must point to the supplied source_id/source_version and an existing page;
 - include section and source_anchor when they are present in the input.
 
+JSON shape is part of the output contract:
+- scope, conditions, limitations, and tags MUST be JSON arrays of strings;
+- Use [] when there are no values; never emit null or a scalar for these fields;
+- example: "scope": ["device health"], "conditions": [], "limitations": [], "tags": [].
+
 Critical evidence rule:
 - evidence_locations are locators only;
 - NEVER invent or return source_text inside evidence locations;
