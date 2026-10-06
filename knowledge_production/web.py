@@ -144,6 +144,7 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         candidate_id: str,
         evaluation_id: str = Form(...),
         reviewed_by: str = Form(...),
+        object_type: str | None = Form(None),
         title: str = Form(""),
         content: str = Form(...),
         scope: str | None = Form(None),
@@ -152,6 +153,8 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         review_note: str = Form(""),
     ):
         edits = {"content": content}
+        if object_type is not None and object_type.strip():
+            edits["object_type"] = object_type.strip()
         if scope is not None:
             parsed_scope = [
                 value.strip()
