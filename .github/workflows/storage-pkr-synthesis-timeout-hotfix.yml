@@ -1,0 +1,214 @@
+name: Storage Public Knowledge Synthesis Timeout Hotfix
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-pkr-synthesis-timeout-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hotfix:
+    runs-on: ubuntu-latest
+    env:
+      STORAGE_BASE: 661e4aa868c06c075520f4b48c71c01f545b92ac
+      STORAGE_TARGET: cb2d1ed15481b489dadd3b75727f0a9e19f701f1
+      PATCH_ID: STORAGE_PKR_SYNTHESIS_TIMEOUT_HOTFIX_20261006
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build one-file patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/payload/products/storage_rc1/storage_life"
+
+          git fetch --no-tags origin "$STORAGE_BASE" "$STORAGE_TARGET"
+          git show "$STORAGE_TARGET:products/storage_rc1/storage_life/public_knowledge.py"             > "$ROOT/payload/products/storage_rc1/storage_life/public_knowledge.py"
+
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root=Path("/tmp")/os.environ["PATCH_ID"]
+          path="products/storage_rc1/storage_life/public_knowledge.py"
+          old=subprocess.check_output(["git","show",f"{os.environ['STORAGE_BASE']}:{path}"])
+          new=(root/"payload"/path).read_bytes()
+          sha=lambda b: hashlib.sha256(b).hexdigest()
+          manifest={
+              "patch_id":os.environ["PATCH_ID"],
+              "path":path,
+              "base_sha256":sha(old),
+              "target_sha256":sha(new),
+              "scope":"Public Knowledge AI synthesis proxy timeout only",
+              "user_data_touched":False,
+              "database_touched":False,
+              "public_knowledge_service_touched":False,
+          }
+          (root/"PATCH_MANIFEST.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8")
+          PY
+
+          cat > "$ROOT/patch_apply.py" <<'PY'
+          from __future__ import annotations
+          import hashlib, json, os, shutil, sys
+          from pathlib import Path
+
+          PATCH_DIR=Path(__file__).resolve().parent
+          M=json.loads((PATCH_DIR/"PATCH_MANIFEST.json").read_text(encoding="utf-8"))
+
+          def digest(path:Path)->str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          if len(sys.argv)!=2:
+              raise SystemExit("usage: patch_apply.py <storage-package-root>")
+
+          root=Path(sys.argv[1]).expanduser().resolve()
+          dst=root/M["path"]
+          src=PATCH_DIR/"payload"/M["path"]
+          if not dst.is_file():
+              raise SystemExit("PATCH_TARGET_MISSING: "+M["path"])
+
+          current=digest(dst)
+          if current==M["target_sha256"]:
+              print("ALREADY_PATCHED=YES")
+              raise SystemExit(0)
+          if current!=M["base_sha256"]:
+              raise SystemExit(
+                  "PATCH_BASE_MISMATCH: "+M["path"]
+                  +"\n当前文件不是中文综合补丁后的版本，补丁已停止，不覆盖。"
+              )
+
+          backup=root/".storage_hotfix_backup"/M["patch_id"]/M["path"]
+          backup.parent.mkdir(parents=True,exist_ok=True)
+          shutil.copy2(dst,backup)
+
+          tmp=dst.with_name(dst.name+".hotfix_tmp")
+          shutil.copy2(src,tmp)
+          if digest(tmp)!=M["target_sha256"]:
+              tmp.unlink(missing_ok=True)
+              raise SystemExit("PATCH_PAYLOAD_HASH_MISMATCH")
+          os.replace(tmp,dst)
+
+          if digest(dst)!=M["target_sha256"]:
+              raise SystemExit("PATCH_VERIFY_FAILED")
+
+          print("PATCH_RESULT=PASS")
+          print("UPDATED_FILES=1")
+          print("USER_DATA_TOUCHED=NO")
+          print("PUBLIC_KNOWLEDGE_SERVICE_TOUCHED=NO")
+          print("BACKUP="+str(backup))
+          PY
+
+          cat > "$ROOT/apply_patch.command" <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          choose_target() {
+            if [ "$#" -ge 1 ] && [ -d "$1" ]; then
+              printf '%s' "$1"; return
+            fi
+            if [ -f "$PWD/products/storage_rc1/storage_life/public_knowledge.py" ]; then
+              printf '%s' "$PWD"; return
+            fi
+            if command -v osascript >/dev/null 2>&1; then
+              osascript -e 'POSIX path of (choose folder with prompt "选择当前正在测试的 Storage 包根目录")' 2>/dev/null || true
+            fi
+          }
+
+          TARGET="$(choose_target "${1:-}")"
+          TARGET="${TARGET%/}"
+          if [ -z "$TARGET" ] || [ ! -f "$TARGET/products/storage_rc1/storage_life/public_knowledge.py" ]; then
+            echo "没有找到 Storage 包根目录。"
+            read -r -p "按回车退出..."
+            exit 2
+          fi
+
+          python3 "$PATCH_DIR/patch_apply.py" "$TARGET"
+
+          echo
+          echo "补丁完成：Public Knowledge 不需要重启。"
+          echo "请关闭当前 Storage 启动窗口，再重新启动 Storage。"
+          echo "重新点“搜索并综合”；检索仍是短超时，AI 综合现在单独允许更长等待。"
+          read -r -p "按回车关闭..."
+          SH
+
+          cat > "$ROOT/README_双击_apply_patch.command.txt" <<EOF
+          修复问题：
+          “综合解读暂不可用 / Public Knowledge API 不可用：timed out”
+
+          根因：
+          Storage 代理把 AI /ask 和普通检索都限制为 8 秒。
+          中文综合 + 引用翻译生成时间超过 8 秒时，Storage 提前断开。
+
+          修复：
+          - Search / Health / Citation：仍保持 8 秒
+          - AI /ask：默认 60 秒
+          - 可通过 PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS 配置
+          - 最小 15 秒，最大 180 秒，仍然 Fail-Closed
+
+          只修改：
+          products/storage_rc1/storage_life/public_knowledge.py
+
+          不修改：
+          - Public Knowledge 服务
+          - SQLite / Docker 数据卷
+          - 已导入资料
+          - Formal Knowledge
+          - Runtime 数据
+
+          应用后只需要重新启动 Storage。
+          EOF
+
+          chmod +x "$ROOT/apply_patch.command"
+
+      - name: Self-test exact field version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          TEST="/tmp/synthesis-timeout-hotfix-test"
+          rm -rf "$TEST"
+          mkdir -p "$TEST/products/storage_rc1/storage_life"
+          git show "$STORAGE_BASE:products/storage_rc1/storage_life/public_knowledge.py"             > "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
+
+          python3 "$ROOT/patch_apply.py" "$TEST"
+          python3 "$ROOT/patch_apply.py" "$TEST" | grep -q "ALREADY_PATCHED=YES"
+          python3 -m py_compile "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
+
+          grep -q 'PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS'             "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
+          grep -q 'return 8.0'             "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
+
+          PYTHONPATH=products/storage_rc1 python -m pytest -q             products/storage_rc1/tests/test_public_knowledge_workspace.py             -k generation_request_uses_longer_bounded_timeout
+
+          echo "SYNTHESIS_TIMEOUT_HOTFIX_SELFTEST=PASS"
+
+      - name: Package patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp
+          zip -qr "${PATCH_ID}.zip" "${PATCH_ID}"
+          sha256sum "${PATCH_ID}.zip" > "${PATCH_ID}.zip.sha256"
+
+      - name: Upload patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PATCH_ID }}
+          path: |
+            /tmp/${{ env.PATCH_ID }}.zip
+            /tmp/${{ env.PATCH_ID }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
