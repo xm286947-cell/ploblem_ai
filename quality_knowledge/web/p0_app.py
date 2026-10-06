@@ -485,6 +485,7 @@ def create_p0_app(
                 project_root=root,
                 hardware_db_path=hardware_db,
                 startup_status=hardware_startup_status,
+                knowledge_status=hardware_operability_knowledge_status,
             )
         )
 
