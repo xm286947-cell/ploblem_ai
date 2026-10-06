@@ -24,6 +24,10 @@ data/logs/
 
 The bundled model profiles contain no credential values and are intentionally unconfigured. Configure `MAJOR_MVP_AI_BASE_URL` and `MAJOR_MVP_AI_API_KEY` in the process environment and set the model name in `config/runtime/model.yaml` before using provider-backed analysis. Do not place credentials in the candidate ZIP or commit local configuration.
 
+## PDF review-document preprocessing
+
+Major PDF review documents are normalized through the product's PDF-to-Markdown compatibility layer before they are projected into the existing evidence fragments. The original PDF remains the source authority; Markdown is derived only. The preferred converter is `pymupdf4llm`, with explicit fallback modes recorded in the document parser identity/warnings. Page locators remain linked to the original PDF pages.
+
 ## Product pages
 
 - Major Production: `/p0/major-production`
