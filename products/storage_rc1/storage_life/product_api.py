@@ -1733,6 +1733,7 @@ def analyze_runtime_trend(
                         }]
                     },
                     "target_service_life": dict(target_service_life or {}),
+                    "_runtime_dependency_metrics": ["data_units_written"],
                     "record_assessment": True,
                     "assessment_author": "Storage MVP Runtime Trend",
                 }, trusted_runtime=True)
@@ -1777,6 +1778,7 @@ def analyze_runtime_trend(
                 ],
                 "assessment_request": {"assumptions": []},
                 "target_service_life": {},
+                "_runtime_dependency_metrics": [source_metric],
                 "record_assessment": not primary_target_assessment_recorded,
                 "assessment_author": "Storage MVP Runtime Trend",
             }, trusted_runtime=True)
