@@ -1100,7 +1100,60 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     }
 
 
-def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _bind_runtime_observations(
+    device_id: str,
+    device_type: str,
+    observations: list[dict[str, Any]],
+    *,
+    trusted_runtime: bool = False,
+) -> list[dict[str, Any]]:
+    """Bind client/runtime observations to the selected device at the server boundary.
+
+    Browser/client claims such as quality_status=VALID are not trusted by
+    themselves.  A client observation becomes formally consumable only when it
+    explicitly confirms provenance and supplies capture/source/evidence.  Server
+    derived trend observations use trusted_runtime=True after the snapshot store
+    has already enforced those requirements.
+    """
+    bound: list[dict[str, Any]] = []
+    normalized_type = templates.normalize_device_type(device_type)
+    for raw in observations or []:
+        if not isinstance(raw, dict):
+            raise ValueError("RUNTIME_OBSERVATION_OBJECT_REQUIRED")
+        item = dict(raw)
+        claimed_device = str(item.get("device_id") or "").strip()
+        if claimed_device and claimed_device != device_id:
+            raise ValueError("RUNTIME_OBSERVATION_DEVICE_MISMATCH")
+        claimed_type = str(item.get("device_type") or "").strip()
+        if claimed_type and templates.normalize_device_type(claimed_type) != normalized_type:
+            raise ValueError("RUNTIME_OBSERVATION_DEVICE_TYPE_MISMATCH")
+
+        capture_time = item.get("capture_time")
+        source = str(item.get("source_command_or_interface") or "").strip()
+        evidence = str(item.get("evidence_ref") or item.get("raw_output_ref") or "").strip()
+        confirmed = item.pop("confirmed_by_user", False) is True
+        provenance_ready = bool(capture_time and source and evidence and (trusted_runtime or confirmed))
+
+        item["device_id"] = device_id
+        item["device_type"] = normalized_type
+        item["source_command_or_interface"] = source or None
+        item["evidence_ref"] = evidence or None
+        item["raw_output_ref"] = str(item.get("raw_output_ref") or evidence or "").strip() or None
+        # Drop caller-supplied derived trust claims and re-issue them server-side.
+        item.pop("is_formally_consumable", None)
+        item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
+        item["availability_status"] = "AVAILABLE" if capture_time else "NOT_AVAILABLE"
+        bound.append(item)
+    return bound
+
+
+def execute_device_skill(
+    device_id: str,
+    skill_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    trusted_runtime: bool = False,
+) -> dict[str, Any]:
     """Bind one selected device to the existing four Storage Domain Skill contracts."""
     allowed = {
         "storage-write-governance",
@@ -1114,12 +1167,19 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
     detail = device_slots(device_id)
     request = dict(payload or {})
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    bound_runtime = _bind_runtime_observations(
+        device_id,
+        dtype,
+        list(request.get("runtime_observations") or []),
+        trusted_runtime=trusted_runtime,
+    )
+    request["runtime_observations"] = bound_runtime
     context = {
         "device_id": device_id,
         "device_type": dtype,
         "confirmed_device_facts": detail.get("device_facts") or [],
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
-        "runtime_observations": list(request.get("runtime_observations") or []),
+        "runtime_observations": bound_runtime,
     }
 
     from skills.real_knowledge import RealKnowledgeAssessmentService
@@ -1180,8 +1240,9 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         # Confirmed Device Facts are a server-owned boundary.  Do not merge
         # caller-provided objects that merely claim source_type=CONFIRMED_DEVICE_FACT.
         assessment["confirmed_facts"] = _safe_lifetime_facts(detail)
-        if "runtime_observations" not in assessment:
-            assessment["runtime_observations"] = list(request.get("runtime_observations") or [])
+        # Nested caller-provided observations are never trusted over the product
+        # boundary; only the server-bound top-level observations are consumed.
+        assessment["runtime_observations"] = bound_runtime
         skill_payload = {
             "assessment_request": assessment,
             "requested_metric": requested_metric,
@@ -1293,7 +1354,7 @@ def analyze_runtime_trend(
                 "target_service_life": {},
                 "record_assessment": False,
                 "assessment_author": "Storage MVP Runtime Trend",
-            })
+            }, trusted_runtime=True)
             structured = (conversion.get("skill_result") or {}).get("structured_result") or {}
             converted = structured.get("measured_vs_budget") or {}
             host_bytes = converted.get("value") if isinstance(converted, dict) else None
@@ -1315,7 +1376,7 @@ def analyze_runtime_trend(
                     "target_service_life": dict(target_service_life or {}),
                     "record_assessment": True,
                     "assessment_author": "Storage MVP Runtime Trend",
-                })
+                }, trusted_runtime=True)
                 projection = (
                     ((dwpd.get("skill_result") or {}).get("structured_result") or {})
                     .get("target_service_life_projection") or {}
@@ -1359,7 +1420,7 @@ def analyze_runtime_trend(
                 "target_service_life": {},
                 "record_assessment": not primary_target_assessment_recorded,
                 "assessment_author": "Storage MVP Runtime Trend",
-            })
+            }, trusted_runtime=True)
         except Exception as exc:
             results.append({
                 "kind": "LATEST_SNAPSHOT",
