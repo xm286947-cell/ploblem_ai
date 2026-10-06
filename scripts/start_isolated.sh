@@ -7,10 +7,23 @@ if [ -d /Applications/Docker.app/Contents/Resources/bin ]; then
   export PATH
 fi
 
+ISOLATED_PROJECT="storage-pkr-w4-isolated"
 ISOLATED_CONTAINER="storage-public-knowledge-w4-isolated"
 ISOLATED_VOLUME="storage_public_knowledge_w4_isolated_data"
 ISOLATED_PORT="19000"
 SOURCE_VOLUME="${PKR_SOURCE_VOLUME:-}"
+
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  else
+    echo "ERROR: python3/python is required for isolated validation checks."
+    exit 2
+  fi
+fi
 
 if [ -z "$SOURCE_VOLUME" ]; then
   if docker volume inspect public_knowledge_service_public_knowledge_data >/dev/null 2>&1; then
@@ -42,10 +55,10 @@ docker run --rm \
   alpine:3.20 \
   sh -c 'cp -a /from/. /to/'
 
-docker compose -f compose.isolated.yaml up -d --build --force-recreate --remove-orphans
+docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml up -d --build --force-recreate
 
 echo "Waiting for isolated Public Knowledge: http://127.0.0.1:$ISOLATED_PORT"
-python - "$ISOLATED_PORT" <<'PY'
+"$PYTHON_BIN" - "$ISOLATED_PORT" <<'PY'
 import json, sys, time, urllib.request
 port = sys.argv[1]
 base = f"http://127.0.0.1:{port}"
@@ -82,7 +95,7 @@ print("ISOLATED_PKR_MODEL=" + str(config.get("openai_model") or config.get("olla
 PY
 
 if [ "${PKR_ALLOW_REAL_PROVIDER_TEST:-0}" = "1" ]; then
-  python - "$ISOLATED_PORT" <<'PY'
+  "$PYTHON_BIN" - "$ISOLATED_PORT" <<'PY'
 import json, sys, urllib.request, urllib.error
 port = sys.argv[1]
 url = f"http://127.0.0.1:{port}/providers/active/health"
