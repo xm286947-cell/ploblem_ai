@@ -574,3 +574,134 @@ def test_model_extract_requires_source_authority_before_kp_handoff(
         response.json()["detail"]["code"]
         == "PUBLIC_SOURCE_PUBLISHER_REQUIRED"
     )
+
+
+
+def test_model_scan_filters_weak_lexical_hits_by_evidence_anchor(monkeypatch):
+    calls = []
+
+    def hit(hit_id, text, page):
+        return {
+            "hit_id": hit_id,
+            "source_id": "kioxia-real",
+            "source_revision": "rev-real",
+            "locator": {
+                "page": page,
+                "section": "Document",
+                "type": "pdf_text",
+            },
+            "text": text,
+            "score": 1.0,
+        }
+
+    def request(mode, path, payload=None, base_url=None):
+        if path == "/sources/kioxia-real":
+            return {
+                "source": {
+                    "source_id": "kioxia-real",
+                    "title": "KIOXIA endurance",
+                    "classification": "PUBLIC",
+                    "revision": "Rev. 1.0",
+                }
+            }
+        if path != "/search":
+            raise AssertionError(path)
+
+        calls.append(dict(payload))
+        assert payload["filters"] == {"source_id": "kioxia-real"}
+        # W4 found that a small Top-K lets generic "data" chunks hide the
+        # actual Data Retention sentence. Retrieval may be broad; evidence
+        # acceptance below must remain strict.
+        assert payload["top_k"] >= 20
+        query = str(payload["query"]).casefold()
+        if "data retention" in query:
+            return {
+                "hits": [
+                    hit("noise-1", "Data is stored persistently.", 1),
+                    hit("noise-2", "Data center SSD applications.", 2),
+                    hit("noise-3", "Host data is written to NAND.", 3),
+                    hit(
+                        "retention-real",
+                        "Higher WAF may affect data retention and shorten NAND flash memory life.",
+                        4,
+                    ),
+                ]
+            }
+        if "ecc status" in query:
+            return {
+                "hits": [
+                    hit(
+                        "ecc-noise",
+                        "ECC routines within the flash controller may correct common bit errors.",
+                        3,
+                    )
+                ]
+            }
+        if "program fail" in query:
+            return {
+                "hits": [
+                    hit(
+                        "program-noise",
+                        "A Program/Erase cycle is generated as data is written.",
+                        3,
+                    ),
+                    hit(
+                        "failed-drive-noise",
+                        "Under-specified endurance may require failed SSDs to be replaced.",
+                        2,
+                    ),
+                ]
+            }
+        if "runtime bad block" in query:
+            return {
+                "hits": [
+                    hit(
+                        "block-noise",
+                        "Valid data may be rewritten from several NAND blocks.",
+                        3,
+                    )
+                ]
+            }
+        # bilingual display-label fallback may still retrieve noise; it must
+        # not become evidence without the strict English/canonical anchor.
+        return {"hits": []}
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    response = client.post(
+        "/api/public-knowledge/model-scan?mode=LIVE",
+        json={
+            "source_id": "kioxia-real",
+            "device_type": "NAND Flash",
+            "top_k_per_parameter": 3,
+            "parameter_names": [
+                "retention",
+                "ecc_status",
+                "program_fail",
+                "runtime_bad_block",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    by_name = {
+        item["canonical_name"]: item
+        for item in payload["parameters"]
+    }
+
+    assert by_name["retention"]["coverage_status"] == "FOUND"
+    assert [
+        item["hit_id"] for item in by_name["retention"]["hits"]
+    ] == ["retention-real"]
+    assert by_name["retention"]["evidence_match_policy"] == (
+        "MODEL_ANCHOR_REQUIRED"
+    )
+
+    # These source excerpts discuss nearby concepts, but do not define the
+    # model parameter itself. They must remain knowledge gaps.
+    for name in ("ecc_status", "program_fail", "runtime_bad_block"):
+        assert by_name[name]["coverage_status"] == "NOT_FOUND"
+        assert by_name[name]["hits"] == []
+
+    assert payload["coverage"]["found_count"] == 1
+    assert payload["coverage"]["not_found_count"] == 3
