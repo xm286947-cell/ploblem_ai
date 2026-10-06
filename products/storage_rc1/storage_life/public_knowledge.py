@@ -25,6 +25,7 @@ from .knowledge_suggestions import (
     SuggestionEdit,
     SuggestionError,
 )
+from .knowledge_model import StorageLifetimeKnowledgeModel, StorageLifetimeKnowledgeModelError
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
 
@@ -134,6 +135,13 @@ class ContextSearchBody(BaseModel):
     parameter_name: str | None = Field(default=None, max_length=200)
     focus: str = Field(default="PARAMETER", max_length=32)
     top_k: int = Field(default=6, ge=1, le=12)
+
+
+class ModelScanBody(BaseModel):
+    source_id: str = Field(min_length=1, max_length=200)
+    device_type: str = Field(min_length=1, max_length=100)
+    top_k_per_parameter: int = Field(default=3, ge=1, le=5)
+    parameter_names: list[str] = Field(default_factory=list, max_length=40)
 
 
 class ImportBody(BaseModel):
@@ -568,6 +576,153 @@ def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLA
         raise HTTPException(exc.code, "Public Knowledge 原始快照不可用。") from exc
     except (URLError, TimeoutError, OSError) as exc:
         raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+
+
+def _model_scan_terms(parameter: dict[str, Any]) -> list[str]:
+    """Build deterministic public-search terms from the frozen spec model."""
+    canonical = str(parameter.get("canonical_name") or "").strip()
+    display = str(parameter.get("display_name") or "").strip()
+    terms: list[str] = []
+
+    for match in re.findall(r"[（(]([^）)]*[A-Za-z][^）)]*)[）)]", display):
+        value = " ".join(match.split()).strip()
+        if value and value not in terms:
+            terms.append(value)
+
+    spaced = " ".join(canonical.replace("_", " ").split())
+    if spaced and spaced not in terms:
+        terms.append(spaced)
+
+    # Keep the literal display label as a last fallback only when it adds
+    # information beyond the English/canonical tokens.
+    if display and display not in terms and display.casefold() != spaced.casefold():
+        terms.append(display)
+    return terms[:3]
+
+
+def _model_scan_source(
+    body: ModelScanBody,
+    *,
+    mode: str,
+    base_url: str | None,
+) -> dict[str, Any]:
+    try:
+        model = StorageLifetimeKnowledgeModel.from_product_root()
+        profile = model.device_profile(body.device_type)
+    except StorageLifetimeKnowledgeModelError as exc:
+        raise HTTPException(422, detail={"code": exc.code, "detail": exc.detail}) from exc
+
+    source = _source_for_context(mode, body.source_id, base_url)
+    if not source:
+        raise HTTPException(404, "Public Knowledge 资料不存在。")
+    classification = str(source.get("classification") or "PUBLIC").upper()
+    if classification != "PUBLIC":
+        raise HTTPException(422, "模型扫描只允许 PUBLIC 资料。")
+
+    allowed = {item["canonical_name"] for item in profile["parameters"]}
+    requested = [str(x).strip() for x in body.parameter_names if str(x).strip()]
+    unknown = sorted(set(requested) - allowed)
+    if unknown:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "MODEL_SCAN_PARAMETER_UNKNOWN",
+                "parameters": unknown,
+            },
+        )
+    selected = [
+        item
+        for item in profile["parameters"]
+        if not requested or item["canonical_name"] in requested
+    ]
+
+    results: list[dict[str, Any]] = []
+    for parameter in selected:
+        hits: list[dict[str, Any]] = []
+        tried: list[str] = []
+        for term in _model_scan_terms(parameter):
+            safe_query = _require_public_safe_outbound_query(term)
+            tried.append(safe_query)
+            if mode == "FIXTURE_REPLAY":
+                response = search(
+                    SearchBody(
+                        query=safe_query,
+                        top_k=body.top_k_per_parameter,
+                    ),
+                    mode=mode,
+                    base_url=base_url,
+                )
+            else:
+                response = _request(
+                    mode,
+                    "/search",
+                    {
+                        "query": safe_query,
+                        "top_k": body.top_k_per_parameter,
+                        "filters": {"source_id": body.source_id},
+                    },
+                    base_url,
+                )
+            raw_hits = response.get("hits") if isinstance(response, dict) else []
+            hits = [
+                _normalize_citation_locator(dict(hit))
+                for hit in (raw_hits or [])
+                if str(hit.get("source_id") or "") == body.source_id
+            ]
+            if hits:
+                break
+        results.append(
+            {
+                **parameter,
+                "coverage_status": "FOUND" if hits else "NOT_FOUND",
+                "queries_tried": tried,
+                "hits": hits,
+            }
+        )
+
+    found = sum(1 for item in results if item["coverage_status"] == "FOUND")
+    role_gaps = sum(1 for item in results if item.get("knowledge_gap"))
+    return {
+        "model_version": profile["schema_version"],
+        "source_id": body.source_id,
+        "source_title": source.get("title"),
+        "source_revision": source.get("revision") or source.get("version"),
+        "device_type": profile["device_type"],
+        "primary_focus": profile["primary_focus"],
+        "coverage": {
+            "parameter_count": len(results),
+            "found_count": found,
+            "not_found_count": len(results) - found,
+            "role_gap_count": role_gaps,
+        },
+        "parameters": results,
+        "formula_bindings": profile["formulas"],
+        "formal_candidate_eligible": False,
+        "next_action": (
+            "基于 FOUND Citation 生成结构化 Knowledge Suggestion，"
+            "经 Existing Knowledge Production Review/Publish 后才可成为 Formal Knowledge。"
+        ),
+        "boundary": {
+            "rag_is_formal_knowledge": False,
+            "ai_content_is_evidence": False,
+            "storage_can_publish_formal_knowledge": False,
+        },
+        "mode": mode,
+    }
+
+
+@router.post("/model-scan")
+def model_scan(
+    body: ModelScanBody,
+    mode: str = "LIVE",
+    base_url: str | None = None,
+):
+    """Scan one Public Knowledge source against the frozen Storage model.
+
+    This endpoint performs deterministic retrieval only. It does not create
+    candidates, publish knowledge or turn RAG output into formal evidence.
+    """
+    return _model_scan_source(body, mode=mode, base_url=base_url)
 
 
 @router.post("/search")
