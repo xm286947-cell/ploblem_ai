@@ -6,6 +6,7 @@ Knowledge store and never auto-publishes.
 """
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import sqlite3
@@ -1098,7 +1099,7 @@ class HardwareR1KnowledgePromotionService:
         valid = (
             published.get("candidate_ref") == knowledge_candidate_id
             and int(published.get("revision") or 0) == PROMOTION_REVISION
-            and list(published.get("evidence_refs") or []) == evidence_ids
+            and Counter(published.get("evidence_refs") or []) == Counter(evidence_ids)
             and published.get("domain") == "HARDWARE_CASE"
             and published.get("object_type") == "HARDWARE_CASE"
             and bool(knowledge_id)
