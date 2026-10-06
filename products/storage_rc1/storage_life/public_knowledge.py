@@ -435,7 +435,17 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
         # Generation/config observability is optional for Search + Citation.
         cfg = {}
     config = cfg.get("config") if isinstance(cfg.get("config"), dict) else {}
-    model_name = next((config.get(key) for key in ("ollama_model", "generation_model", "model_name") if isinstance(config.get(key), str) and config.get(key).strip()), None)
+    provider_type = str(config.get("provider_type") or "").strip().lower()
+    if provider_type == "openai_compatible":
+        model_name = str(config.get("openai_model") or "").strip() or None
+    elif provider_type == "ollama":
+        model_name = str(config.get("ollama_model") or "").strip() or None
+    else:
+        model_name = next((
+            config.get(key)
+            for key in ("generation_model", "model_name", "openai_model", "ollama_model")
+            if isinstance(config.get(key), str) and config.get(key).strip()
+        ), None)
     credential_status = next((config.get(key) for key in ("credential_status", "provider_credential_status") if isinstance(config.get(key), str) and config.get(key) in {"configured", "missing", "not_required", "not_reported"}), "not_reported")
     parser_status = next((config.get(key) for key in ("parser_status", "document_parser_status") if isinstance(config.get(key), str) and config.get(key) in {"ready", "degraded", "unavailable", "not_reported"}), "not_reported")
     # Never return provider URLs, environment values, or credentials to the UI.
@@ -460,8 +470,15 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
 def provider_health(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         return {"status": "not_called", "message": "演示模式不调用模型"}
-    result = _request(mode, "/providers/ollama/health", base_url=base_url)
-    return {"status": result.get("status", "unknown"), "provider": result.get("provider"), "version": result.get("version")}
+    result = _request(mode, "/providers/active/health", base_url=base_url)
+    return {
+        "status": result.get("status", "unknown"),
+        "provider": result.get("provider"),
+        "version": result.get("version"),
+        "protocol": result.get("protocol"),
+        "model": result.get("model"),
+        "test_response_received": result.get("test_response_received"),
+    }
 
 
 @router.get("/sources")
