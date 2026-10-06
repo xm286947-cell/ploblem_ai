@@ -1157,12 +1157,28 @@ def specification_workflow_status(device_id, specs=None):
         if field and field not in pending_key:
             pending_key.append(field)
 
+    missing_evidence = []
+    for x in confirmed:
+        if x.get("priority") not in {"P0", "P1"}:
+            continue
+        traceable = any(
+            str(ev.get("source_id") or "").strip()
+            and int(ev.get("source_page") or 0) >= 1
+            and str(ev.get("source_text") or "").strip()
+            for ev in (x.get("evidence") or [])
+            if isinstance(ev, dict)
+        )
+        if not traceable:
+            field = x.get("canonical_name") or ""
+            if field and field not in missing_evidence:
+                missing_evidence.append(field)
+
     extraction = get_extraction_run(device_id)
     final_review = get_final_review(device_id)
     gate_required = bool(extraction and extraction.get("review_required"))
     gate_resolved = not gate_required or bool(final_review and final_review.get("overall_status") == "ready_for_human_review")
     review_attention = gate_required and not gate_resolved
-    formal_ready = bool(items) and not review_attention and not missing_critical and not pending_key
+    formal_ready = bool(items) and not review_attention and not missing_critical and not pending_key and not missing_evidence
 
     if review_attention:
         status = "attention_required"
@@ -1185,6 +1201,7 @@ def specification_workflow_status(device_id, specs=None):
         "missing_critical_fields": [label(f) for f in missing_critical],
         "pending_critical_fields": [label(f) for f in pending_critical],
         "pending_key_fields": [label(f) for f in pending_key],
+        "missing_evidence_fields": [label(f) for f in missing_evidence],
         "review_gate_required": gate_required,
         "review_gate_resolved": gate_resolved,
         "final_review_status": (final_review or {}).get("overall_status", "not_run"),
@@ -1943,6 +1960,15 @@ def verify(candidate_id, status, value, unit, by, condition=None, scope=None, co
         evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,e.source_text
           FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
           WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (candidate_id,))
+        persistent_evidence = [
+            item for item in evidence
+            if item.get("evidence_id")
+            and str(item.get("source_id") or "").strip()
+            and int(item.get("source_page") or 0) >= 1
+            and str(item.get("source_text") or "").strip()
+        ]
+        if status == "confirmed" and not persistent_evidence:
+            raise ValueError("确认参数必须绑定可追溯 Evidence（Source / Page / 原文）；请先修正 Evidence")
         if not evidence:
             evidence = [{"evidence_id": None, "source_id": None, "source_page": candidate["source_page"],
                          "source_section": candidate["source_section"], "source_text": candidate["source_text"]}]
