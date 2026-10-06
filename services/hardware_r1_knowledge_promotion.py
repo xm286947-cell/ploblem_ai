@@ -1256,7 +1256,22 @@ class HardwareR1KnowledgePromotionService:
         record = self._record(item, asset)
         if record is None:
             raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        return self._promotion_view(record, evidence_ids)
+        view = self._promotion_view(record, evidence_ids)
+        pending = self._pending_operations(str(asset["candidate_id"]))
+        if not pending:
+            return {
+                **view,
+                "reconciliation_required": False,
+                "reconciliation_operation_type": None,
+                "reconciliation_error_code": None,
+            }
+        operation_type = str(pending[0].get("operation_type") or "")
+        return {
+            **view,
+            "reconciliation_required": True,
+            "reconciliation_operation_type": operation_type,
+            "reconciliation_error_code": self._reconciliation_error(operation_type),
+        }
 
     def intake_batch(self, batch_id: str) -> dict[str, Any]:
         try:
