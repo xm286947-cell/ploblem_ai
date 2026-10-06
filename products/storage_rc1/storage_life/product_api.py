@@ -1251,6 +1251,7 @@ def analyze_runtime_trend(
         raise KeyError(device_id)
     dtype = templates.normalize_device_type(device["device_type"])
     results: list[dict[str, Any]] = []
+    primary_target_assessment_recorded = False
 
     def observation(metric_name: str, point: dict[str, Any], value: Any | None = None, unit: str | None = None):
         return {
@@ -1290,7 +1291,7 @@ def analyze_runtime_trend(
                 ],
                 "assessment_request": {"assumptions": []},
                 "target_service_life": {},
-                "record_assessment": True,
+                "record_assessment": not primary_target_assessment_recorded,
                 "assessment_author": "Storage MVP Runtime Trend",
             })
             structured = (conversion.get("skill_result") or {}).get("structured_result") or {}
@@ -1315,6 +1316,14 @@ def analyze_runtime_trend(
                     "record_assessment": True,
                     "assessment_author": "Storage MVP Runtime Trend",
                 })
+                projection = (
+                    ((dwpd.get("skill_result") or {}).get("structured_result") or {})
+                    .get("target_service_life_projection") or {}
+                )
+                primary_target_assessment_recorded = bool(
+                    target_service_life
+                    and projection.get("budget_status") in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}
+                )
                 results.append({
                     "kind": "TREND_DWPD",
                     "metric_name": "data_units_written",
@@ -1324,6 +1333,7 @@ def analyze_runtime_trend(
                     "delta_unit": latest.get("unit") or "data_units",
                     "conversion": conversion,
                     "assessment": dwpd,
+                    "primary_s3_assessment": primary_target_assessment_recorded,
                 })
 
     direct_metrics = {
