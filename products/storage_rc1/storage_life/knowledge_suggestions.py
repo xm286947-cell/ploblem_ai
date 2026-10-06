@@ -394,9 +394,13 @@ class PublicKnowledgeSuggestionService:
         classification = source.get("classification") or source.get("source_class")
         if str(classification or "").upper() != "PUBLIC":
             raise SuggestionError("SOURCE_NOT_PUBLIC")
-        resolved_uri = source.get("source_uri") or source.get("official_url")
-        if ref.get("source_uri") and resolved_uri and ref["source_uri"] != resolved_uri:
+        resolved_uri = _safe_source_uri(source.get("source_uri") or source.get("official_url"))
+        requested_uri = _safe_source_uri(ref.get("source_uri"))
+        if requested_uri and not resolved_uri:
             raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
+        if requested_uri and resolved_uri and requested_uri != resolved_uri:
+            raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
+        source["_validated_source_uri"] = resolved_uri
         source_status = str(source.get("status") or source.get("source_status") or "ACTIVE").upper()
         if source_status not in {"ACTIVE", "AVAILABLE", "PUBLISHED"}:
             raise SuggestionError("SOURCE_UNAVAILABLE")
