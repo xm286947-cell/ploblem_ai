@@ -1156,8 +1156,13 @@ def _bind_runtime_observations(
             raise ValueError("RUNTIME_OBSERVATION_DEVICE_TYPE_MISMATCH")
 
         capture_time = item.get("capture_time")
+        capture_dt = _iso_datetime(capture_time)
+        if capture_time and (capture_dt is None or capture_dt.tzinfo is None):
+            raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
         source = str(item.get("source_command_or_interface") or "").strip()
         evidence = str(item.get("evidence_ref") or item.get("raw_output_ref") or "").strip()
+        placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
+        source_is_explicit = bool(source and source.upper() not in placeholder_sources)
         if len(source) > 500:
             raise ValueError("RUNTIME_SOURCE_LABEL_TOO_LONG")
         if len(evidence) > 4000:
@@ -1166,7 +1171,7 @@ def _bind_runtime_observations(
         if not metric_name or len(metric_name) > 160:
             raise ValueError("RUNTIME_METRIC_NAME_INVALID")
         confirmed = item.pop("confirmed_by_user", False) is True
-        provenance_ready = bool(capture_time and source and evidence and (trusted_runtime or confirmed))
+        provenance_ready = bool(capture_time and source_is_explicit and evidence and (trusted_runtime or confirmed))
 
         item["device_id"] = device_id
         item["device_type"] = normalized_type
