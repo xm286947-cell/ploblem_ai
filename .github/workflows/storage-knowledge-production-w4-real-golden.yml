@@ -24,8 +24,8 @@ jobs:
       STORAGE_LIFE_EXECUTION_MODE: runtime
       STORAGE_MODEL_CONFIG: ${{ github.workspace }}/config/runtime/model.yaml
       UNIFIED_AGENT_RUNTIME_ROOT: ${{ github.workspace }}/.runtime-pinned
-      STORAGE_KNOWLEDGE_REPOSITORY_DIR: ${{ runner.temp }}/w4-kp-repository
-      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ runner.temp }}/w4-release/current
+      STORAGE_KNOWLEDGE_REPOSITORY_DIR: ${{ github.workspace }}/.w4-runtime/kp-repository
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/.w4-runtime/release/current
       PUBLIC_KNOWLEDGE_API_URL: http://127.0.0.1:9000
       STORAGE_WEB_HOST: 127.0.0.1
       STORAGE_WEB_PORT: "8765"
@@ -82,9 +82,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/w4-release" "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
-          mkdir -p "$RUNNER_TEMP/w4-release" "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
-          cp -a products/storage_rc1/knowledge_release/current "$RUNNER_TEMP/w4-release/current"
+          rm -rf "$GITHUB_WORKSPACE/.w4-runtime" "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+          mkdir -p "$GITHUB_WORKSPACE/.w4-runtime/release" "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+          cp -a products/storage_rc1/knowledge_release/current "$GITHUB_WORKSPACE/.w4-runtime/release/current"
           echo "W4_RELEASE_WORKSPACE=ISOLATED"
 
       - name: Start real Storage product
@@ -231,17 +231,17 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/products/storage_rc1:${{ github.workspace }}:${{ github.workspace }}/.runtime-pinned
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/w4-review-evidence/candidates" "$RUNNER_TEMP/w4-review-evidence/evidence"
-          cp "$RUNNER_TEMP/import.json" "$RUNNER_TEMP/w4-review-evidence/"
-          cp "$RUNNER_TEMP/model-scan.json" "$RUNNER_TEMP/w4-review-evidence/"
-          cp "$RUNNER_TEMP/provider-status.json" "$RUNNER_TEMP/w4-review-evidence/"
-          cp "$RUNNER_TEMP/extract.json" "$RUNNER_TEMP/w4-review-evidence/"
-          cp "$RUNNER_TEMP/source.sha256" "$RUNNER_TEMP/w4-review-evidence/"
+          mkdir -p "$GITHUB_WORKSPACE/.w4-evidence/candidates" "$GITHUB_WORKSPACE/.w4-evidence/evidence"
+          cp "$RUNNER_TEMP/import.json" "$GITHUB_WORKSPACE/.w4-evidence/"
+          cp "$RUNNER_TEMP/model-scan.json" "$GITHUB_WORKSPACE/.w4-evidence/"
+          cp "$RUNNER_TEMP/provider-status.json" "$GITHUB_WORKSPACE/.w4-evidence/"
+          cp "$RUNNER_TEMP/extract.json" "$GITHUB_WORKSPACE/.w4-evidence/"
+          cp "$RUNNER_TEMP/source.sha256" "$GITHUB_WORKSPACE/.w4-evidence/"
           python - <<'PY'
           import json, os
           from pathlib import Path
           root=Path(os.environ["STORAGE_KNOWLEDGE_REPOSITORY_DIR"])
-          out=Path(os.environ["RUNNER_TEMP"])/"w4-review-evidence"
+          out=Path(os.environ["GITHUB_WORKSPACE"])/".w4-evidence"
           ext=json.loads((Path(os.environ["RUNNER_TEMP"])/"extract.json").read_text())
           reviewable=False
           all_evidence=True
@@ -290,7 +290,7 @@ jobs:
           print("W4_HUMAN_REVIEW_INPUT_END")
           PY
           for cid in $(python -c 'import json,os,pathlib; print(" ".join(json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"extract.json").read_text())["candidate_ids"]))'); do
-            curl --fail-with-body --silent --show-error               "http://127.0.0.1:8765/knowledge-production/candidates/$cid"               > "$RUNNER_TEMP/w4-review-evidence/candidate-$cid.html"
+            curl --fail-with-body --silent --show-error               "http://127.0.0.1:8765/knowledge-production/candidates/$cid"               > "$GITHUB_WORKSPACE/.w4-evidence/candidate-$cid.html"
           done
 
       - name: W4 Phase 1 decision
@@ -311,13 +311,13 @@ jobs:
             echo "PARAMETER_BINDING_REVIEWABLE=YES"
             echo "FORMAL_KNOWLEDGE_PUBLISHED=NO"
             echo "NEXT=HUMAN_SEMANTIC_REVIEW"
-          } | tee "$RUNNER_TEMP/w4-review-evidence/RESULT.txt"
+          } | tee "$GITHUB_WORKSPACE/.w4-evidence/RESULT.txt"
 
       - name: Upload real W4 review evidence
         uses: actions/upload-artifact@v4
         with:
           name: storage-w4-real-golden-human-review
-          path: ${{ runner.temp }}/w4-review-evidence
+          path: ${{ github.workspace }}/.w4-evidence
           if-no-files-found: error
           retention-days: 30
 
