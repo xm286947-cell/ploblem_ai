@@ -1,0 +1,5 @@
+-r ../../public_knowledge_rag/requirements-runtime.txt
+httpx==0.28.1
+pytest==9.0.2
+docling==2.133.0
+qdrant-client==1.19.1

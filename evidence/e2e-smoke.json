@@ -1,0 +1,190 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "health": {
+    "status": "ok",
+    "service": "public-knowledge",
+    "version": "0.1.0",
+    "mode": "LIVE_OR_FIXTURE_REPLAY"
+  },
+  "config": {
+    "config": {
+      "service_version": "0.1.0",
+      "ollama_url": "http://192.168.1.100:11434",
+      "ollama_model": "qwen3-vl:8b-thinking-q4_K_M",
+      "ollama_model_digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28",
+      "request_timeout_seconds": 45.0,
+      "max_generate_tokens": 512,
+      "max_source_bytes": 8388608,
+      "chunk_size": 1200,
+      "chunk_overlap": 120,
+      "source_class_gate": "PUBLIC_ONLY",
+      "provider_policy": "REMOTE_OLLAMA_LAN"
+    },
+    "config_hash": "f3372e70717ac55f60ae765c7084581437d82fac80e4465a11c9f2dfb206adb1"
+  },
+  "ollama_health": {
+    "provider": "ollama-remote-lan",
+    "endpoint": "http://192.168.1.100:11434",
+    "status": "ok",
+    "version": "0.23.0"
+  },
+  "ollama_models": {
+    "provider": "ollama-remote-lan",
+    "models": [
+      {
+        "name": "qwen3-vl:8b-thinking-q4_K_M",
+        "digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28",
+        "size": 6140415879
+      },
+      {
+        "name": "qwen3-vl:8b-thinking-local",
+        "digest": "f91e02afb7debd9738ea1f6e3fdf4697596fb6c450a4e8cb82f9800b9b6efef5",
+        "size": 5027785081
+      },
+      {
+        "name": "gemma4:e4b",
+        "digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+        "size": 9608350718
+      }
+    ]
+  },
+  "import": {
+    "source_id": "src_95fe123245db746c165984f4",
+    "source_revision": "rev_cee7ed47ee18b8287adef1fc",
+    "created": false,
+    "parser_snapshot": {
+      "id": "plain-text",
+      "version": "1"
+    },
+    "chunk_count": 1
+  },
+  "source_list_count": 1,
+  "source_detail": {
+    "source": {
+      "source_id": "src_95fe123245db746c165984f4",
+      "title": "Synthetic public infrastructure smoke record",
+      "source_uri": "https://example.org/public/infra-smoke",
+      "source_class": "PUBLIC",
+      "created_at": "2026-10-04T11:37:18Z"
+    },
+    "revisions": [
+      {
+        "revision_id": "rev_cee7ed47ee18b8287adef1fc",
+        "content_sha256": "cee7ed47ee18b8287adef1fcbf799077ef0bb1be84a7a056855239fab0a3e807",
+        "media_type": "text/plain",
+        "parser_id": "plain-text",
+        "parser_version": "1",
+        "created_at": "2026-10-04T11:37:18Z"
+      }
+    ]
+  },
+  "search": {
+    "hits": [
+      {
+        "hit_id": "hit_cf314bbc61f4ae9f2810198f",
+        "source_id": "src_95fe123245db746c165984f4",
+        "source_revision": "rev_cee7ed47ee18b8287adef1fc",
+        "locator": "char:0-73",
+        "text": "The public infrastructure smoke record states that the smoke value is 42.",
+        "score": 1.0
+      }
+    ],
+    "retrieval_snapshot": {
+      "adapter": "sqlite-lexical-reference",
+      "top_k": 10
+    }
+  },
+  "live_answer": {
+    "answer": "The smoke value is 42, as stated in the public infrastructure smoke record [1].",
+    "citations": [
+      {
+        "citation_id": "hit_cf314bbc61f4ae9f2810198f",
+        "source_id": "src_95fe123245db746c165984f4",
+        "source_revision": "rev_cee7ed47ee18b8287adef1fc",
+        "locator": "char:0-73",
+        "text": "The public infrastructure smoke record states that the smoke value is 42."
+      }
+    ],
+    "source_refs": [
+      {
+        "source_id": "src_95fe123245db746c165984f4",
+        "source_revision": "rev_cee7ed47ee18b8287adef1fc"
+      }
+    ],
+    "model_snapshot": {
+      "provider": "ollama-remote-lan",
+      "model": "qwen3-vl:8b-thinking-q4_K_M",
+      "digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28",
+      "created_at": "2026-10-04T11:44:58.143195427Z",
+      "prompt_eval_count": 64,
+      "eval_count": 164
+    },
+    "retrieval_snapshot": {
+      "adapter": "sqlite-lexical-reference",
+      "top_k": 10
+    }
+  },
+  "citation_detail": {
+    "citation_id": "hit_cf314bbc61f4ae9f2810198f",
+    "source_id": "src_95fe123245db746c165984f4",
+    "source_revision": "rev_cee7ed47ee18b8287adef1fc",
+    "locator": "char:0-73",
+    "text": "The public infrastructure smoke record states that the smoke value is 42.",
+    "content_sha256": "cee7ed47ee18b8287adef1fcbf799077ef0bb1be84a7a056855239fab0a3e807"
+  },
+  "fixture_capture": {
+    "fixture_id": "fx_6e8d3d3e9d31406dbc4b76f6",
+    "sha256": "1589cc36e21b1cefd962b9b0200c0751e21d172186db68e843e68e5a4235e409",
+    "created_at": "2026-10-04T11:45:00.380942Z",
+    "request": {
+      "question": "What is the smoke value?",
+      "allowed_source_ids": [
+        "src_95fe123245db746c165984f4"
+      ]
+    }
+  },
+  "fixture_readback": {
+    "fixture_id": "fx_6e8d3d3e9d31406dbc4b76f6",
+    "request": {
+      "allowed_source_ids": [
+        "src_95fe123245db746c165984f4"
+      ],
+      "question": "What is the smoke value?"
+    },
+    "sha256": "1589cc36e21b1cefd962b9b0200c0751e21d172186db68e843e68e5a4235e409",
+    "created_at": "2026-10-04T11:45:00.380942Z"
+  },
+  "fixture_replay": {
+    "answer": "The smoke value is 42, as stated in the public infrastructure smoke record [1].",
+    "citations": [
+      {
+        "citation_id": "hit_cf314bbc61f4ae9f2810198f",
+        "locator": "char:0-73",
+        "source_id": "src_95fe123245db746c165984f4",
+        "source_revision": "rev_cee7ed47ee18b8287adef1fc",
+        "text": "The public infrastructure smoke record states that the smoke value is 42."
+      }
+    ],
+    "model_snapshot": {
+      "created_at": "2026-10-04T11:45:00.38348414Z",
+      "digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28",
+      "eval_count": 164,
+      "model": "qwen3-vl:8b-thinking-q4_K_M",
+      "prompt_eval_count": 64,
+      "provider": "ollama-remote-lan"
+    },
+    "retrieval_snapshot": {
+      "adapter": "sqlite-lexical-reference",
+      "top_k": 10
+    },
+    "source_refs": [
+      {
+        "source_id": "src_95fe123245db746c165984f4",
+        "source_revision": "rev_cee7ed47ee18b8287adef1fc"
+      }
+    ],
+    "mode": "FIXTURE_REPLAY",
+    "fixture_id": "fx_6e8d3d3e9d31406dbc4b76f6",
+    "fixture_sha256": "1589cc36e21b1cefd962b9b0200c0751e21d172186db68e843e68e5a4235e409"
+  }
+}

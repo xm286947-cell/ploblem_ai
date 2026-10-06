@@ -1,0 +1,1 @@
+{"result": "PASS", "endpoint": "http://192.168.1.100:11434", "version": "0.23.0", "model": "qwen3-vl:8b-thinking-q4_K_M", "digest": "901cae73216286ea8c5aba8b46d307ff7188f737285ec500c795a12f05225d28", "response": "infra probe ok", "prompt_tokens": 15, "output_tokens": 58, "latency_seconds": 1.06}
