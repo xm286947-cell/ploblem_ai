@@ -1,0 +1,41 @@
+{
+  "name": "QS W4 Mac Mock Bind Diagnostic 46fe83f",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-mac-mock-bind-diag-46fe83f"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-mac-mock-bind-diag-46fe83f.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "diag": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 10,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "46fe83f7c6f2b01ad92795405e9f947ae342e805"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Probe import and bind",
+          "shell": "bash",
+          "run": "python -u - <<'PY'\nimport socket, threading, time, urllib.request\nprint(\"PYTHON_START=PASS\", flush=True)\nfrom tools.openai_mock.server import create_server\nprint(\"MOCK_IMPORT=PASS\", flush=True)\nsock=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\nsock.bind((\"127.0.0.1\",0))\nprint(\"RAW_SOCKET_BIND=PASS:\"+str(sock.getsockname()), flush=True)\nsock.close()\nprint(\"BEFORE_CREATE_SERVER\", flush=True)\nserver=create_server(\"127.0.0.1\",0)\nprint(\"CREATE_SERVER=PASS:\"+str(server.server_address), flush=True)\nthread=threading.Thread(target=server.serve_forever,kwargs={\"poll_interval\":0.01},daemon=True)\nthread.start()\nprint(\"SERVE_THREAD=STARTED\", flush=True)\nurl=f\"http://127.0.0.1:{server.server_address[1]}/__mock__/health\"\nfor i in range(40):\n    try:\n        with urllib.request.urlopen(url,timeout=.5) as r:\n            print(\"MOCK_HEALTH=\"+str(r.status)+\":\"+r.read().decode(), flush=True)\n            break\n    except Exception as e:\n        if i==39: raise\n        time.sleep(.1)\nserver.shutdown(); server.server_close(); thread.join(timeout=2)\nprint(\"MOCK_DIAG=PASS\", flush=True)\nPY"
+        }
+      ]
+    }
+  }
+}
