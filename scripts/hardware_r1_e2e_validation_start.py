@@ -95,7 +95,6 @@ def main(argv: list[str] | None = None) -> int:
             "WORKBENCH_PAGE": ("GET", "/p0/hardware-cases/knowledge-production", 200, {}),
             "KNOWLEDGE_PAGE": ("GET", "/p0/hardware-cases/knowledge?e2e=1", 200, {}),
             "WORKBENCH_API": ("GET", "/api/v2/hardware-cases/r1/workbench/batches", 200, {"X-Hardware-Case-Role": "MAINTAINER"}),
-            "OPERABILITY_READY": ("GET", "/ready", 200, {}),
             "CONSUMPTION_API": ("GET", "/api/public/hardware-knowledge/v1/search", 503, {}),
             "READINESS_API": ("GET", "/api/e2e/hardware-r1/readiness", 200, {}),
         }
@@ -106,6 +105,24 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"RESULT=BLOCKED\nCHECK={name}\nEXPECTED={expected}\nACTUAL={response.status_code}\nBODY={response.text[:500]}", file=sys.stderr)
                     return 3
                 print(f"{name}=PASS")
+            operability = client.get("/ready")
+            payload = operability.json()
+            knowledge = (
+                payload.get("dependencies", {}).get("UNIFIED_KNOWLEDGE", {})
+                if isinstance(payload, dict)
+                else {}
+            )
+            if knowledge.get("status") != "READY":
+                print(
+                    "RESULT=BLOCKED\n"
+                    "CHECK=OPERABILITY_KNOWLEDGE\n"
+                    f"ACTUAL={knowledge}\n"
+                    f"BODY={operability.text[:500]}",
+                    file=sys.stderr,
+                )
+                return 3
+            print("OPERABILITY_KNOWLEDGE=PASS")
+            print(f"OPERABILITY_STATUS={payload.get('status')}")
         print("RESULT=PASS\nAPP_FACTORY=create_p0_app\nENABLED_DOMAINS=HARDWARE_CASE")
         return 0
     app = build_app(data_root=data_root, startup_status=startup)
