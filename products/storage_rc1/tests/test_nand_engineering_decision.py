@@ -111,3 +111,105 @@ def test_role_view_can_be_ready_when_profile_and_formal_knowledge_are_ready():
     assert result["overall_status"] == "READY_FOR_DEMO"
     assert result["formal_knowledge"]["knowledge_refs"] == ["KO-NAND-PE"]
     assert result["formal_knowledge"]["evidence_refs"] == ["EVD-NAND-PE"]
+
+
+def test_required_pe_budget_is_registered_in_existing_lifetime_engine():
+    from storage_life.lifetime_engine import FormulaRegistry
+
+    spec = FormulaRegistry.describe("NAND_REQUIRED_PE_BUDGET_V1")
+    assert spec.formula_id == "NAND_REQUIRED_PE_BUDGET_V1"
+    assert FormulaRegistry.canonicalize("nand.required_pe_budget") == "NAND_REQUIRED_PE_BUDGET_V1"
+
+
+def test_product_orchestrator_reuses_existing_skills_and_views(monkeypatch):
+    from storage_life import product_api
+
+    facts = [
+        {
+            "canonical_name": "pe_cycles",
+            "parameter_name": "P/E Cycle",
+            "value": "100000",
+            "unit": "cycles",
+            "evidence": [{"evidence_id": "E-PE"}],
+        },
+        {
+            "canonical_name": "data_retention",
+            "parameter_name": "Data Retention",
+            "value": "10",
+            "unit": "Years",
+            "evidence": [{"evidence_id": "E-RET"}],
+        },
+    ]
+
+    def fake_detail(device_id):
+        return {
+            "device": {"id": device_id, "device_type": "NAND Flash", "vendor": "Vendor", "model": device_id},
+            "device_facts": facts,
+            "slots": [],
+        }
+
+    def fake_knowledge(*args, **kwargs):
+        return {
+            "status": "MATCHED",
+            "code": None,
+            "knowledge_release_version": "KREL-NAND-001",
+            "results": [{
+                "object_id": "KO-NAND-001",
+                "evidence_refs": ["EVD-NAND-001"],
+            }],
+            "evidence_refs": ["EVD-NAND-001"],
+        }
+
+    calls = []
+
+    def fake_skill(device_id, skill_id, payload, **kwargs):
+        calls.append(skill_id)
+        return {
+            "skill_result": {
+                "status": "ANSWERED",
+                "structured_result": {
+                    "suggested_validation": ["verify"],
+                    "validation_method": ["verify"],
+                },
+                "missing_information": [],
+            }
+        }
+
+    monkeypatch.setattr(product_api, "device_slots", fake_detail)
+    monkeypatch.setattr(product_api, "_formal_knowledge", fake_knowledge)
+    monkeypatch.setattr(product_api, "execute_device_skill", fake_skill)
+    monkeypatch.setattr(
+        product_api,
+        "compare_devices",
+        lambda ids: {
+            "rows": [{
+                "canonical_name": "pe_cycles",
+                "parameter_name": "P/E Cycle",
+                "is_difference": True,
+                "cells": {
+                    ids[0]: {"value": "100000", "unit": "cycles", "review_status": "CONFIRMED"},
+                    ids[1]: {"value": "60000", "unit": "cycles", "review_status": "CONFIRMED"},
+                },
+            }]
+        },
+    )
+
+    result = product_api.nand_engineering_decision(
+        "nand-a",
+        {
+            "mission_profile": {
+                "target_service_life_years": 10,
+                "required_retention_years": 10,
+            },
+            "workload_profile": {"pe_cycles_per_day": 1},
+            "candidate_device_ids": ["nand-b"],
+            "change_target_device_id": "nand-b",
+        },
+    )
+    assert result["overall_status"] == "READY_FOR_DEMO"
+    assert result["reuse"]["lifetime_engine"] == "DIRECT_REUSE_EXTENDED_ONE_FORMULA"
+    assert result["procurement"]["automatic_purchase_approval"] is False
+    assert "storage-write-governance" in calls
+    assert "storage-diagnostic-validation" in calls
+    assert "storage-change-impact" in calls
+    assert result["rules"]["second_knowledge_stack"] is False
