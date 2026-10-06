@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: \${{ env.PRODUCT_SOURCE_SHA }}
+          ref: ${{ env.PRODUCT_SOURCE_SHA }}
           fetch-depth: 0
       - name: Frozen source gate
         shell: bash
@@ -208,7 +208,7 @@ jobs:
           echo "RESULT=PASS" | tee -a ci488_result.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: major-repeat-agent-ci488-\${{ github.run_id }}
+          name: major-repeat-agent-ci488-${{ github.run_id }}
           path: |
             dist/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip
             dist/MAJOR_MVP_PRODUCT_CANDIDATE_*.zip.sha256
@@ -226,7 +226,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: POSIX launcher
@@ -249,7 +249,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: macOS launcher
@@ -272,7 +272,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-\${{ github.run_id }}, path: artifact}
+        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: Windows launcher
