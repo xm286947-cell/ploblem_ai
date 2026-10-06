@@ -1089,7 +1089,7 @@ async function pkContextSearchInline(ctx,targetId){
     let sources=hits.length?'<div class="card"><b>公开来源</b>'+hits.slice(0,4).map(h=>{
       let snapshot=pkContextSnapshotHref(h),official=(typeof h.source_uri==='string'&&/^https?:\/\//i.test(h.source_uri))?h.source_uri:'',citationPayload=pkActionPayload({citation_id:h.citation_id||''});
       return '<div class="evidence"><b>'+esc(h.source_title||h.source_id||'Public Source')+'</b><br><small>'+esc(h.publisher||'Not provided')+' · Revision '+esc(h.source_revision||'Not provided')+'</small><p>'+esc(h.original_snippet||'')+'</p><div class="row"><button class="secondary" onclick="pkOpenLiveCitationEncoded(\''+citationPayload+'\')">Citation</button>'+(snapshot?'<a class="secondary" target="_blank" rel="noopener" href="'+esc(snapshot)+'">归档原文</a>':'')+(official?'<a class="secondary" target="_blank" rel="noopener" href="'+esc(official)+'">官方来源</a>':'')+'</div></div>';
-    }).join('')+'</div>':'<div class="card muted"><b>公开知识</b><p>当前没有匹配到公开资料。</p></div>';
+    }).join('')+'</div>':'<div class="card muted"><b>当前公开资料无法确定</b><p>检索已正常完成，但没有匹配的公开资料；Storage 不会补造工程事实。</p></div>';
     target.innerHTML='<div class="group-title">Public Knowledge · 当前场景</div>'+context+sources;
   }catch(e){
     target.innerHTML='<div class="card warning"><b>公共知识暂不可用</b><p>'+esc(e.message)+'</p><small>不影响 Storage 当前分析结果。</small></div>';
