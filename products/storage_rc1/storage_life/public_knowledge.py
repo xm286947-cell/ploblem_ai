@@ -1183,6 +1183,13 @@ def model_extract_to_knowledge_production(
                     ),
                     "parameter_binding_basis": binding_basis,
                     "semantic_class_candidates": semantic_candidates,
+                    "semantic_class_review_options": list(
+                        dict.fromkeys(
+                            value
+                            for value in semantic_targets
+                            if value in semantic_model
+                        )
+                    ),
                     "semantic_class_status": status,
                     "scenario_consumers": consumers,
                     "formal_consumable": False,
