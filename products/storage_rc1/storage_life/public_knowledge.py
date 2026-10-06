@@ -154,6 +154,7 @@ class KnowledgeProductionExtractBody(BaseModel):
 
 class ImportBody(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    publisher: str | None = Field(default=None, max_length=200)
     content: str = Field(min_length=1, max_length=25 * 1024 * 1024)
     classification: str = Field(min_length=1, max_length=32)
     source_uri: str | None = Field(default=None, max_length=2048)
@@ -509,6 +510,7 @@ def import_source(body: ImportBody, mode: str = "FIXTURE_REPLAY", base_url: str 
 
 @router.post("/sources/import-file")
 async def import_file(title: str = Form(...), classification: str = Form(...), file: UploadFile = File(...),
+                      publisher: str | None = Form(default=None),
                       source_uri: str | None = Form(default=None), mode: str = "FIXTURE_REPLAY",
                       base_url: str | None = None):
     # Enforce the PUBLIC boundary before reading or forwarding file bytes.
@@ -524,9 +526,18 @@ async def import_file(title: str = Form(...), classification: str = Form(...), f
         raise HTTPException(413, "资料超过 Storage 导入上限 25 MiB。")
     media_type = file.content_type or "application/octet-stream"
     safe_source_uri = _public_source_uri(source_uri)
-    return _request_file(mode, "/sources/import-file",
-                         {"title": title.strip(), "classification": classification.strip().upper(),
-                          "source_uri": safe_source_uri or ""}, filename, content, media_type, base_url)
+    fields = {
+        "title": title.strip(),
+        "classification": classification.strip().upper(),
+        "source_uri": safe_source_uri or "",
+    }
+    normalized_publisher = str(publisher or "").strip()
+    if normalized_publisher:
+        fields["publisher"] = normalized_publisher
+    return _request_file(
+        mode, "/sources/import-file", fields,
+        filename, content, media_type, base_url,
+    )
 
 
 @router.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
@@ -1001,11 +1012,23 @@ def model_extract_to_knowledge_production(
         }
 
     try:
+        publisher = _publisher_from_source(source)
+        if not publisher:
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "PUBLIC_SOURCE_PUBLISHER_REQUIRED",
+                    "message": (
+                        "进入 Formal Knowledge 前必须补齐公开资料发布方；"
+                        "可重新导入同一文件并填写 Publisher。"
+                    ),
+                },
+            )
         ingested = ingest_source(
             payload,
             filename=filename,
             source_id=_kp_source_id(body.source_id),
-            publisher=_publisher_from_source(source),
+            publisher=publisher,
             title=str(source.get("title") or filename),
             revision=revision_id,
             official_url=str(source.get("source_uri") or ""),
@@ -1115,7 +1138,7 @@ def _publisher_from_source(source: dict[str, Any]) -> str:
             host = None
         if host:
             return host
-    return "Not provided"
+    return ""
 
 
 @router.post("/context-search")
