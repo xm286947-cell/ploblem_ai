@@ -749,6 +749,7 @@ class RepeatAgentAnalysisService:
         contexts: dict[int, dict[str, Any]] = {}
         warnings: list[dict[str, Any]] = []
         runtime_error: Exception | None = None
+        analysis_failed = False
 
         # M8.2 historically evaluates every complete retrieved candidate.
         for index, candidate in enumerate(raw_candidates):
@@ -790,6 +791,18 @@ class RepeatAgentAnalysisService:
             try:
                 similarity, _ = self._similarity(context)
                 current["agent_similarity"] = similarity
+                if similarity.get("analysis_status") != "SUCCESS":
+                    analysis_failed = True
+                    for warning in similarity.get("warnings") or []:
+                        if isinstance(warning, dict):
+                            warnings.append({
+                                "code": _text(warning.get("code"))
+                                or "SIMILARITY_ANALYSIS_FAILED",
+                                "message": (
+                                    f"{current.get('case_id')}: "
+                                    f"{_text(warning.get('message')) or 'M8.2 failed'}"
+                                ),
+                            })
             except Exception as exc:
                 runtime_error = exc
                 current["agent_analysis_status"] = "UNAVAILABLE"
@@ -860,6 +873,18 @@ class RepeatAgentAnalysisService:
                         }],
                     }
                 current["agent_solution"] = solution
+                if solution.get("analysis_status") != "SUCCESS":
+                    analysis_failed = True
+                    for warning in solution.get("warnings") or []:
+                        if isinstance(warning, dict):
+                            warnings.append({
+                                "code": _text(warning.get("code"))
+                                or "SOLUTION_ANALYSIS_FAILED",
+                                "message": (
+                                    f"{current.get('case_id')}: "
+                                    f"{_text(warning.get('message')) or 'M8.3 failed'}"
+                                ),
+                            })
             else:
                 current["agent_solution"] = {
                     "analysis_status": "SKIPPED",
@@ -887,6 +912,15 @@ class RepeatAgentAnalysisService:
                     "decision_reason": str(exc),
                 }
             current["ai_recommendation"] = recommendation
+            if recommendation.get("status") in {"FAILED", "UNAVAILABLE"}:
+                analysis_failed = True
+                warnings.append({
+                    "code": "REPEAT_AI_RECOMMENDATION_FAILED",
+                    "message": (
+                        f"{current.get('case_id')}: "
+                        f"{recommendation.get('decision_reason') or 'M8.4 failed'}"
+                    ),
+                })
 
             similarity_ok = similarity.get("analysis_status") == "SUCCESS"
             solution_status = (current.get("agent_solution") or {}).get(
@@ -911,6 +945,8 @@ class RepeatAgentAnalysisService:
             overall_status = "PARTIAL_SUCCESS"
         elif runtime_error is not None:
             overall_status = "UNAVAILABLE"
+        elif analysis_failed:
+            overall_status = "FAILED"
         else:
             overall_status = "SKIPPED"
 
