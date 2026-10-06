@@ -1,0 +1,175 @@
+version: storage-lifetime-knowledge/v1
+
+primary_focus: NAND Flash
+
+canonical_device_types:
+  - NAND Flash
+  - NOR Flash
+  - eMMC
+  - SSD
+
+compatibility_aliases:
+  Raw NAND: NAND Flash
+  SPI NAND: NAND Flash
+  Serial NAND: NAND Flash
+  Parallel NAND: NAND Flash
+
+layer_policy:
+  public_knowledge:
+    purpose: SOURCE_DISCOVERY_AND_ENGINEERING_CONTEXT
+    formal_consumable: false
+  device_fact:
+    purpose: CONFIRMED_DEVICE_SPECIFICATION
+    formal_consumable: true
+  formal_knowledge:
+    purpose: REVIEWED_REUSABLE_ENGINEERING_KNOWLEDGE
+    formal_consumable: true
+  runtime_observation:
+    purpose: VERIFIED_RUNTIME_TELEMETRY
+    formal_consumable: true
+
+semantic_classes:
+  PARAMETER_DEFINITION:
+    allowed_object_types: [FACT, CONCEPT]
+    consumers: [S1, S2, S3, S4, S5]
+  MECHANISM_CONCEPT:
+    allowed_object_types: [CONCEPT]
+    consumers: [S2, S5]
+  CALCULATION_RULE:
+    allowed_object_types: [FACT, REQUIREMENT]
+    consumers: [S3]
+  DIAGNOSTIC_RULE:
+    allowed_object_types: [DIAGNOSTIC, REQUIREMENT]
+    consumers: [S4]
+  DESIGN_RULE:
+    allowed_object_types: [SOLUTION, REQUIREMENT]
+    consumers: [S5]
+  TEST_RULE:
+    allowed_object_types: [SOLUTION, REQUIREMENT]
+    consumers: [S4, S5]
+  CHANGE_IMPACT_RULE:
+    allowed_object_types: [CONCEPT, SOLUTION, REQUIREMENT]
+    consumers: [S2, S5]
+  APPLICABILITY_RULE:
+    allowed_object_types: [FACT, REQUIREMENT]
+    consumers: [S2, S3, S4, S5]
+
+role_to_knowledge:
+  endurance:
+    - PARAMETER_DEFINITION
+    - CALCULATION_RULE
+    - TEST_RULE
+    - CHANGE_IMPACT_RULE
+  retention:
+    - PARAMETER_DEFINITION
+    - APPLICABILITY_RULE
+    - TEST_RULE
+    - CHANGE_IMPACT_RULE
+  diagnostic:
+    - PARAMETER_DEFINITION
+    - DIAGNOSTIC_RULE
+    - TEST_RULE
+  degradation:
+    - PARAMETER_DEFINITION
+    - DIAGNOSTIC_RULE
+    - TEST_RULE
+    - CHANGE_IMPACT_RULE
+  influencing_factor:
+    - PARAMETER_DEFINITION
+    - MECHANISM_CONCEPT
+    - DESIGN_RULE
+    - CHANGE_IMPACT_RULE
+  general:
+    - PARAMETER_DEFINITION
+    - MECHANISM_CONCEPT
+    - CHANGE_IMPACT_RULE
+
+scenario_contracts:
+  S1:
+    name: Device Fact
+    consumes:
+      - CONFIRMED_DEVICE_FACT
+      - PARAMETER_DEFINITION
+    public_knowledge_role: DISCOVERY_ONLY
+  S2:
+    name: Compare / Change Impact
+    consumes:
+      - CONFIRMED_DEVICE_FACT
+      - MECHANISM_CONCEPT
+      - CHANGE_IMPACT_RULE
+      - APPLICABILITY_RULE
+  S3:
+    name: Lifetime
+    consumes:
+      - CONFIRMED_DEVICE_FACT
+      - VERIFIED_RUNTIME_OBSERVATION
+      - CALCULATION_RULE
+      - FORMULA_REGISTRY
+  S4:
+    name: Diagnosis
+    consumes:
+      - VERIFIED_RUNTIME_OBSERVATION
+      - DIAGNOSTIC_RULE
+      - TEST_RULE
+  S5:
+    name: Optimization
+    consumes:
+      - S3_RESULT
+      - S4_RESULT
+      - DESIGN_RULE
+      - TEST_RULE
+      - CHANGE_IMPACT_RULE
+
+formula_policy:
+  execution_source: FormulaRegistry
+  allow_ai_executable_formula: false
+  allow_prose_constant_extraction_at_runtime: false
+  require_registered_formula_id: true
+  require_formal_knowledge_for_protocol_semantics: true
+
+formula_bindings:
+  SSD:
+    - SSD_TBW_CONSUMPTION_V1
+    - SSD_DWPD_OBSERVED_V1
+    - NVME_DATA_UNITS_WRITTEN_V1
+    - NVME_PERCENTAGE_USED_INTERPRETATION_V1
+    - GENERIC_WAF_V1
+  eMMC:
+    - EMMC_DEVICE_LIFE_TIME_A_V1
+    - EMMC_DEVICE_LIFE_TIME_B_V1
+    - EMMC_PRE_EOL_V1
+    - GENERIC_WAF_V1
+  NAND Flash:
+    - NAND_PE_MARGIN_V1
+    - NAND_ERASE_COUNT_MARGIN_V1
+    - NAND_WEAR_DISTRIBUTION_V1
+    - GENERIC_WAF_V1
+    - GENERIC_ENDURANCE_MARGIN_V1
+  NOR Flash:
+    - GENERIC_ENDURANCE_MARGIN_V1
+
+production_policy:
+  source_first: true
+  citation_required: true
+  ai_content_is_evidence: false
+  review_required_before_publish: true
+  formal_publish_owner: EXISTING_KNOWLEDGE_PRODUCTION
+  storage_can_publish_formal_knowledge: false
+  immutable_release_required: true
+
+metadata_contract:
+  schema_version: storage-lifetime-knowledge/v1
+  required:
+    - semantic_class
+    - device_types
+    - scenario_consumers
+    - authority
+    - boundary
+  optional:
+    - canonical_parameters
+    - formula_id
+    - required_inputs
+    - required_knowledge_parameters
+    - diagnostic_signal
+    - applicability
+    - source_strength
