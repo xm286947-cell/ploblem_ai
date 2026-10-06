@@ -200,6 +200,48 @@ class KnowledgeExtractionCandidateDraft(StrictModel):
     evidence_locations: list[EvidenceLocation] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
 
+    @field_validator("device_type", mode="before")
+    @classmethod
+    def normalize_provider_device_type(cls, value: Any) -> Any:
+        """Normalize bounded, lossless provider wrappers around device_type.
+
+        Real OpenAI-compatible providers sometimes wrap a scalar device family
+        in a one-item list or a small object. Accept only shapes where one
+        unambiguous string identity can be recovered. Ambiguous/multi-valued
+        shapes are returned unchanged so Pydantic still fails closed.
+        """
+        if value is None or isinstance(value, str):
+            return value
+
+        if isinstance(value, (list, tuple)):
+            if len(value) == 1 and isinstance(value[0], str):
+                return value[0]
+            return value
+
+        if isinstance(value, dict):
+            preferred_keys = (
+                "device_type",
+                "device_family",
+                "family",
+                "name",
+                "value",
+                "type",
+            )
+            candidates = [
+                value.get(key)
+                for key in preferred_keys
+                if isinstance(value.get(key), str) and value.get(key).strip()
+            ]
+            unique = []
+            for item in candidates:
+                if item not in unique:
+                    unique.append(item)
+            if len(unique) == 1:
+                return unique[0]
+            return value
+
+        return value
+
     @field_validator(
         "scope",
         "conditions",
