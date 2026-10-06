@@ -9,7 +9,6 @@ import json
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from builder.repeat_decision import RepeatDecisionDTO
 from presentation.delivery_service import DeliveryService
 from quality_knowledge.runtime_model_config import resolve_major_runtime_model_config
 from runtime import (
@@ -103,6 +102,37 @@ class RepeatSolutionDTO(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class RepeatEvidenceDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: str
+    strength: Literal["STRONG", "MEDIUM", "WEAK"]
+    query_evidence: list[str] = Field(default_factory=list)
+    case_evidence: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class RepeatDecisionDTO(BaseModel):
+    """Mature M8.4 output contract used only as a Unified Runtime schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal[
+        "REPEAT_CASE",
+        "LIKELY_REPEAT",
+        "RELATED_CASE",
+        "NEW_CASE",
+        "INSUFFICIENT_EVIDENCE",
+    ]
+    confidence: float = Field(ge=0.0, le=1.0)
+    decision_reason: str = ""
+    evidence_chain: list[RepeatEvidenceDTO] = Field(default_factory=list)
+    key_differences: list[str] = Field(default_factory=list)
+    validation_required: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
 def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
@@ -162,6 +192,25 @@ class RepeatAgentAnalysisService:
         except Exception:
             return False
         return bool((raw.get("repeat_decision_ai") or {}).get("enabled", False))
+
+    def _solution_policy(self) -> tuple[int, float]:
+        """Reuse the historical M8.3 candidate selection policy unchanged."""
+
+        path = self.project_root / "config/model.yaml"
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return 3, 0.0
+        config = raw.get("solution_ai") or {}
+        try:
+            top_n = max(0, int(config.get("candidate_top_n", 3)))
+        except (TypeError, ValueError):
+            top_n = 3
+        try:
+            min_score = float(config.get("min_similarity_score", 0))
+        except (TypeError, ValueError):
+            min_score = 0.0
+        return top_n, min_score
 
     def _ensure_runtime(self) -> ConfiguredAgentRuntime:
         if self.runtime is None:
@@ -592,20 +641,39 @@ class RepeatAgentAnalysisService:
             return enriched
 
         analyzed: list[dict[str, Any]] = []
+        contexts: dict[int, dict[str, Any]] = {}
         warnings: list[dict[str, Any]] = []
-        success_count = 0
         runtime_error: Exception | None = None
 
-        for candidate in raw_candidates:
+        # M8.2 historically evaluates every complete retrieved candidate.
+        for index, candidate in enumerate(raw_candidates):
             current = deepcopy(candidate)
             context = self._candidate_context(
                 query_id,
                 query_input,
                 current,
             )
+            contexts[index] = context
             current["agent_comparison_context"] = deepcopy(context)
+
             if current.get("detail_status") != "SUCCESS":
                 current["agent_analysis_status"] = "SKIPPED_INCOMPLETE_CANDIDATE"
+                current["agent_similarity"] = {
+                    "analysis_status": "SKIPPED",
+                    "analysis": {},
+                    "warnings": [{
+                        "code": "CANDIDATE_DETAIL_INCOMPLETE",
+                        "message": "M8.2 skipped because candidate detail/evidence is incomplete.",
+                    }],
+                }
+                current["agent_solution"] = {
+                    "analysis_status": "SKIPPED",
+                    "analysis": {},
+                    "warnings": [{
+                        "code": "CANDIDATE_DETAIL_INCOMPLETE",
+                        "message": "M8.3 skipped because candidate detail/evidence is incomplete.",
+                    }],
+                }
                 current["ai_recommendation"] = {
                     "status": "SKIPPED",
                     "decision": None,
@@ -617,22 +685,6 @@ class RepeatAgentAnalysisService:
             try:
                 similarity, _ = self._similarity(context)
                 current["agent_similarity"] = similarity
-                solution, _ = self._solution(context, similarity)
-                current["agent_solution"] = solution
-                recommendation, _ = self._recommendation(
-                    context,
-                    similarity,
-                    solution,
-                )
-                current["ai_recommendation"] = recommendation
-                if (
-                    similarity.get("analysis_status") == "SUCCESS"
-                    and solution.get("analysis_status") == "SUCCESS"
-                ):
-                    current["agent_analysis_status"] = "SUCCESS"
-                    success_count += 1
-                else:
-                    current["agent_analysis_status"] = "PARTIAL"
             except Exception as exc:
                 runtime_error = exc
                 current["agent_analysis_status"] = "UNAVAILABLE"
@@ -659,11 +711,98 @@ class RepeatAgentAnalysisService:
                 }
             analyzed.append(current)
 
-        if success_count == len(
-            [item for item in analyzed if item.get("detail_status") == "SUCCESS"]
-        ) and success_count:
+        # M8.3 mature policy: rank only by M8.2 similarity for invocation
+        # selection. This does NOT mutate Retriever rank/score or product order.
+        top_n, min_score = self._solution_policy()
+        eligible: list[tuple[int, float]] = []
+        for index, candidate in enumerate(analyzed):
+            similarity = candidate.get("agent_similarity") or {}
+            analysis = similarity.get("analysis") or {}
+            if (
+                candidate.get("detail_status") == "SUCCESS"
+                and similarity.get("analysis_status") == "SUCCESS"
+            ):
+                try:
+                    score = float(analysis.get("overall_score") or 0.0)
+                except (TypeError, ValueError):
+                    score = 0.0
+                if score >= min_score:
+                    eligible.append((index, score))
+        eligible.sort(key=lambda item: item[1], reverse=True)
+        selected_indexes = {
+            index for index, _ in (eligible[:top_n] if top_n > 0 else eligible)
+        }
+
+        for index, current in enumerate(analyzed):
+            if current.get("detail_status") != "SUCCESS":
+                continue
+            if current.get("agent_analysis_status") == "UNAVAILABLE":
+                continue
+
+            context = contexts[index]
+            similarity = current.get("agent_similarity") or {}
+            if index in selected_indexes:
+                try:
+                    solution, _ = self._solution(context, similarity)
+                except Exception as exc:
+                    runtime_error = exc
+                    solution = {
+                        "analysis_status": "UNAVAILABLE",
+                        "analysis": {},
+                        "warnings": [{
+                            "code": "REPEAT_AGENT_RUNTIME_UNAVAILABLE",
+                            "message": str(exc),
+                        }],
+                    }
+                current["agent_solution"] = solution
+            else:
+                current["agent_solution"] = {
+                    "analysis_status": "SKIPPED",
+                    "analysis": {},
+                    "warnings": [{
+                        "code": "M83_NOT_SELECTED_BY_MATURE_POLICY",
+                        "message": (
+                            "Historical M8.3 candidate_top_n/min_similarity_score "
+                            "policy skipped this candidate."
+                        ),
+                    }],
+                }
+
+            try:
+                recommendation, _ = self._recommendation(
+                    context,
+                    similarity,
+                    current["agent_solution"],
+                )
+            except Exception as exc:
+                runtime_error = exc
+                recommendation = {
+                    "status": "UNAVAILABLE",
+                    "decision": None,
+                    "decision_reason": str(exc),
+                }
+            current["ai_recommendation"] = recommendation
+
+            similarity_ok = similarity.get("analysis_status") == "SUCCESS"
+            solution_status = (current.get("agent_solution") or {}).get(
+                "analysis_status"
+            )
+            solution_ok = solution_status in {"SUCCESS", "SKIPPED"}
+            current["agent_analysis_status"] = (
+                "SUCCESS" if similarity_ok and solution_ok else "PARTIAL"
+            )
+
+        complete_candidates = [
+            item for item in analyzed if item.get("detail_status") == "SUCCESS"
+        ]
+        successful_candidates = [
+            item
+            for item in complete_candidates
+            if item.get("agent_analysis_status") == "SUCCESS"
+        ]
+        if complete_candidates and len(successful_candidates) == len(complete_candidates):
             overall_status = "SUCCESS"
-        elif success_count:
+        elif successful_candidates:
             overall_status = "PARTIAL_SUCCESS"
         elif runtime_error is not None:
             overall_status = "UNAVAILABLE"
@@ -681,6 +820,8 @@ class RepeatAgentAnalysisService:
             "status": overall_status,
             "m82_similarity": "RESTORED",
             "m83_solution": "RESTORED",
+            "m83_candidate_top_n": top_n,
+            "m83_min_similarity_score": min_score,
             "m84_recommendation": (
                 "ENABLED" if self.decision_enabled else "DISABLED"
             ),
@@ -713,4 +854,6 @@ __all__ = [
     "RepeatSimilarityDimensionsDTO",
     "RepeatSimilarityDimensionDTO",
     "RepeatSolutionDTO",
+    "RepeatDecisionDTO",
+    "RepeatEvidenceDTO",
 ]
