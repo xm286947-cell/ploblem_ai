@@ -66,6 +66,43 @@ def _pick_raw(raw: dict[str, Any], aliases: Iterable[str]) -> str:
     return ""
 
 
+
+def _unique_report_event_itr(itrs: Iterable[Any], match: dict[str, Any]) -> str:
+    """Return the one Event ITR explicitly named by a matched report filename.
+
+    Multi-Event rows are case-shared at the Excel Source Fact level. A review
+    document may become Event-specific only when its filename uniquely names
+    one of those Event ITRs; otherwise the relation remains unresolved and the
+    governed import must fail closed instead of guessing the first Event.
+    """
+
+    canonical_itrs: list[str] = []
+    for value in itrs:
+        canonical = normalize_itr(value)
+        if canonical and canonical not in canonical_itrs:
+            canonical_itrs.append(canonical)
+    if len(canonical_itrs) <= 1:
+        return canonical_itrs[0] if canonical_itrs else ""
+
+    matched_path = str(match.get("matched_report_path") or "").strip()
+    if not matched_path:
+        return ""
+
+    names = [
+        Path(matched_path).name,
+        str(match.get("report_filename") or "").strip(),
+    ]
+    hits: list[str] = []
+    for itr in canonical_itrs:
+        pattern = re.compile(
+            rf"(?<![0-9A-Z]){re.escape(itr)}(?![0-9A-Z])",
+            re.IGNORECASE,
+        )
+        if any(name and pattern.search(Path(name).stem) for name in names):
+            hits.append(itr)
+    return hits[0] if len(hits) == 1 else ""
+
+
 EXTRA_ALIASES = {
     "igr": ("IGR", "IGR号", "IGR编号", "重大问题编号", "重大问题单号"),
     "title": ("重大问题标题", "问题标题", "Bug标题", "标题"),
@@ -216,6 +253,7 @@ class MajorCaseRestoreService:
                 "parse_status": "NO_REPORT" if not item["normalized_fields"].get("report_filename") else "REPORT_NOT_FOUND",
                 "parse_warnings": [],
             }
+            match = dict(match)
             blockers: list[str] = []
             if not item["completeness"]["importable"]:
                 blockers.append("ROW_NOT_IMPORTABLE")
@@ -224,6 +262,19 @@ class MajorCaseRestoreService:
             matched_path = str(match.get("matched_report_path") or "").strip()
             if matched_path and not Path(matched_path).is_file():
                 blockers.append("MATCHED_REPORT_NOT_FOUND")
+
+            event_itrs = list(item.get("itrs") or [])
+            if matched_path and len(event_itrs) > 1:
+                binding_itr = _unique_report_event_itr(event_itrs, match)
+                match["event_binding_itr"] = binding_itr
+                match["event_binding_status"] = (
+                    "BOUND" if binding_itr else "REVIEW_REQUIRED"
+                )
+                if not binding_itr:
+                    blockers.append("MULTI_EVENT_REPORT_BINDING_AMBIGUOUS")
+            elif matched_path and len(event_itrs) == 1:
+                match["event_binding_itr"] = normalize_itr(event_itrs[0])
+                match["event_binding_status"] = "BOUND"
             igr_case = self._identity_case(group_code, "IGR", str(item.get("igr") or ""))
             source_case = self._identity_case(group_code, "SOURCE_KEY", str(item.get("source_key") or ""))
             if igr_case and source_case and igr_case != source_case:
@@ -479,6 +530,18 @@ class MajorCaseRestoreService:
             matched_path = str(match.get("matched_report_path") or "").strip()
             if matched_path and not Path(matched_path).is_file():
                 errors.append({"row": row_no, "error": "MATCHED_REPORT_NOT_FOUND"})
+            if matched_path and len(row.get("itrs") or []) > 1:
+                binding_itr = normalize_itr(match.get("event_binding_itr"))
+                canonical_itrs = {
+                    normalize_itr(value)
+                    for value in row.get("itrs") or []
+                    if normalize_itr(value)
+                }
+                if not binding_itr or binding_itr not in canonical_itrs:
+                    errors.append({
+                        "row": row_no,
+                        "error": "MULTI_EVENT_REPORT_BINDING_AMBIGUOUS",
+                    })
 
             group_code = str(preview.get("group_code") or "")
             igr = str(row.get("igr") or "")
@@ -803,10 +866,24 @@ class MajorCaseRestoreService:
                             document["version_id"],
                             parsed,
                         )
-                    primary_event = events[0]
+                    report_event = events[0]
+                    binding_basis = "SINGLE_EVENT"
+                    if len(events) > 1:
+                        binding_itr = normalize_itr(match.get("event_binding_itr"))
+                        report_event = next(
+                            (
+                                event
+                                for event in events
+                                if normalize_itr(event.get("standard_itr")) == binding_itr
+                            ),
+                            None,
+                        )
+                        if report_event is None:
+                            raise ValueError("MULTI_EVENT_REPORT_BINDING_AMBIGUOUS")
+                        binding_basis = "REPORT_FILENAME_ITR"
                     self.repository.add_source_link(
                         case_id,
-                        primary_event["event_id"],
+                        report_event["event_id"],
                         {
                             "record_id": document["version_id"],
                             "source_type": "MAJOR_SOURCE_DOCUMENT",
@@ -818,10 +895,12 @@ class MajorCaseRestoreService:
                             "document_id": document["document_id"],
                             "batch_id": batch_id,
                             "run_id": run_id,
+                            "event_binding_basis": binding_basis,
+                            "event_binding_itr": report_event.get("standard_itr") or "",
                         },
-                        standard_itr=primary_event.get("standard_itr") or "",
+                        standard_itr=report_event.get("standard_itr") or "",
                         role="CURRENT_EVENT",
-                        status="LINKED" if primary_event.get("standard_itr") else "NOT_FOUND",
+                        status="LINKED" if report_event.get("standard_itr") else "NOT_FOUND",
                     )
                     stats["documents"] += 1
 
