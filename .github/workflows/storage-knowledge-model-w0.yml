@@ -10,6 +10,7 @@ on:
       - "products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py"
       - "products/storage_rc1/storage_life/public_knowledge.py"
       - "products/storage_rc1/storage_life/knowledge_product.py"
+      - "products/storage_rc1/storage_life/index.html"
       - "knowledge_production/extraction.py"
       - "knowledge_production/publish.py"
       - "knowledge_production/web.py"
@@ -46,6 +47,23 @@ jobs:
             knowledge_production/extraction.py \
             knowledge_production/publish.py \
             knowledge_production/web.py
+          python - <<'PY'
+          from pathlib import Path
+          html=Path("products/storage_rc1/storage_life/index.html").read_text(encoding="utf-8")
+          start=html.index("<script>")+len("<script>")
+          end=html.index("</script>",start)
+          Path("/tmp/storage-knowledge-production.js").write_text(html[start:end],encoding="utf-8")
+          required=[
+              "按寿命模型生产知识",
+              "pkModelScanEncoded",
+              "pkModelExtractEncoded",
+              "/knowledge-production/extract",
+          ]
+          missing=[item for item in required if item not in html]
+          assert not missing, missing
+          print("MODEL_DRIVEN_UI_STATIC=PASS")
+          PY
+          node --check /tmp/storage-knowledge-production.js
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
           python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
             -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode"
