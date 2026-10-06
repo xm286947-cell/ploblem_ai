@@ -1,0 +1,103 @@
+{
+  "name": "QS W4 macOS Functional Golden f86ad86",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-mac-functional-f86ad86"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-mac-functional-f86ad86.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PRODUCT_SOURCE_SHA": "f86ad8642a8f17553f14c5c2d23d0339003c548e",
+    "PACKAGE_BASENAME": "QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f86ad8642a8f"
+  },
+  "jobs": {
+    "validate-and-package": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "f86ad8642a8f17553f14c5c2d23d0339003c548e",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Verify exact source",
+          "shell": "bash",
+          "run": "set -euo pipefail\n[ \"$(git rev-parse HEAD)\" = \"$PRODUCT_SOURCE_SHA\" ]\ngit diff --check \"$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA\""
+        },
+        {
+          "name": "Focused regression",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m pytest -q tests/test_quality_scenario_w4_functional_fixture.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_r2_w2_qsv1_production_chain.py tests/test_step1b_qsv1_mature_preview.py"
+        },
+        {
+          "name": "Build controlled Source-Fact fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt\ngrep -q 'W4_FUNCTIONAL_FIXTURE=READY' validation/fixture_build.txt\ngrep -q 'DIRECT_QSV1_CANDIDATE_WRITE=NO' validation/fixture_build.txt\ngrep -q 'DIRECT_QSV1_PUBLISH_WRITE=NO' validation/fixture_build.txt\npython tools/quality_scenario_real_data_preflight.py --db validation/quality_scenario_w4_fixture.db --require | tee validation/fixture_preflight.txt\ngrep -q 'REAL_DATA_PREFLIGHT=PASS' validation/fixture_preflight.txt"
+        },
+        {
+          "name": "Build full mac functional package",
+          "shell": "bash",
+          "run": "set -euo pipefail\nSTAGE=\"$RUNNER_TEMP/w4-mac-functional\"\nrm -rf \"$STAGE\"\nmkdir -p \"$STAGE\" dist\ngit archive \"$PRODUCT_SOURCE_SHA\" | tar -x -C \"$STAGE\"\nmkdir -p \"$STAGE/validation\"\ncp validation/quality_scenario_w4_fixture.db \"$STAGE/validation/\"\ncp validation/quality_scenario_w4_fixture.db.fixture.json \"$STAGE/validation/\"\ncp validation/fixture_build.txt \"$STAGE/validation/\"\ncp validation/fixture_preflight.txt \"$STAGE/validation/\"\npython -c \"from pathlib import Path; import os; Path('$STAGE/PRODUCT_SOURCE_SHA').write_text(os.environ['PRODUCT_SOURCE_SHA']+'\\\\n',encoding='utf-8')\"\npython -c \"from pathlib import Path; import os,json; m={'package_type':'W4_MAC_FUNCTIONAL_GOLDEN_CANDIDATE','package_scope':'FULL_CURRENT_QUALITY_PLATFORM','source_sha':os.environ['PRODUCT_SOURCE_SHA'],'test_fixture_included':True,'synthetic_business_data':True,'direct_qsv1_candidate_write':False,'direct_qsv1_publish_write':False,'real_mature_data_golden':False,'real_mature_data_compatibility':'DEFERRED','macos_entry':'start_w4_mac_functional_golden.command'}; Path('$STAGE/FULL_PLATFORM_MANIFEST.json').write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')\"\npython -c \"from pathlib import Path; import os; t='QUALITY PLATFORM W4 MAC FUNCTIONAL GOLDEN CANDIDATE\\\\n\\\\nSOURCE_SHA='+os.environ['PRODUCT_SOURCE_SHA']+'\\\\nTEST_FIXTURE_INCLUDED=YES\\\\nSYNTHETIC_BUSINESS_DATA=YES\\\\nDIRECT_QSV1_CANDIDATE_WRITE=NO\\\\nDIRECT_QSV1_PUBLISH_WRITE=NO\\\\nREAL_MATURE_DATA_GOLDEN=NO\\\\nREAL_MATURE_DATA_COMPATIBILITY=DEFERRED\\\\n\\\\nmacOS: ./start_w4_mac_functional_golden.command --port 18080\\\\n\\\\nG5 revision: ./.venv/bin/python tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db --advance-g5\\\\n'; Path('$STAGE/00_W4_MAC_FUNCTIONAL_README_FIRST.txt').write_text(t,encoding='utf-8')\"\ntest -x \"$STAGE/start_quality_capability_p1.command\"\ntest -x \"$STAGE/start_w4_mac_functional_golden.command\"\ntest -f \"$STAGE/validation/quality_scenario_w4_fixture.db\"\n(cd \"$STAGE\" && zip -q -r \"$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip\" .)\nsha256sum \"dist/${PACKAGE_BASENAME}.zip\" | tee \"dist/${PACKAGE_BASENAME}.zip.sha256\""
+        },
+        {
+          "name": "Verify package identity",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -c \"import json,os,pathlib,zipfile; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); assert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']; assert m['test_fixture_included'] is True; assert m['direct_qsv1_candidate_write'] is False; assert m['direct_qsv1_publish_write'] is False; assert m['real_mature_data_golden'] is False; assert 'validation/quality_scenario_w4_fixture.db' in z.namelist(); assert 'start_w4_mac_functional_golden.command' in z.namelist(); print('MAC_FUNCTIONAL_PACKAGE_IDENTITY=PASS')\""
+        },
+        {
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f86ad8642a8f",
+            "path": "dist/QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f86ad8642a8f.zip\ndist/QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f86ad8642a8f.zip.sha256",
+            "if-no-files-found": "error",
+            "retention-days": 30,
+            "compression-level": 0
+          }
+        }
+      ]
+    },
+    "smoke-macos": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "f86ad8642a8f17553f14c5c2d23d0339003c548e"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Native launcher smoke",
+          "shell": "bash",
+          "run": "python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 18081"
+        }
+      ]
+    }
+  }
+}
