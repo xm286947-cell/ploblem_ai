@@ -52,6 +52,7 @@ def active_generation_provider():
 
 class ImportRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    publisher: str | None = Field(default=None, max_length=200)
     content: str = Field(min_length=1)
     classification: str
     source_uri: str | None = None
@@ -334,9 +335,11 @@ def import_source(body: ImportRequest) -> dict[str, object]:
     chunks = chunker.chunk(parsed)
     source_id, revision_id, created = store.import_source(
         body.title, body.source_uri, parsed.text, body.media_type, parsed.parser_id, parsed.parser_version, chunks,
-        raw_bytes=content_bytes, locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
+        publisher=body.publisher, raw_bytes=content_bytes,
+        locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
     )
     return {"source_id": source_id, "source_revision": revision_id, "created": created,
+            "publisher": (body.publisher or "").strip() or None,
             "source_sha256": hashlib.sha256(content_bytes).hexdigest(),
             "parser_snapshot": {"id": parsed.parser_id, "version": parsed.parser_version},
             "element_counts": parsed.element_counts or {}, "locator_status": "READY" if parsed.locator_ready else "PARTIAL_NOT_EVIDENCE_READY",
@@ -346,6 +349,7 @@ def import_source(body: ImportRequest) -> dict[str, object]:
 @app.post("/sources/import-file")
 async def import_file(title: str = Form(..., min_length=1, max_length=300),
                       classification: str = Form(...), file: UploadFile = File(...),
+                      publisher: str | None = Form(default=None, max_length=200),
                       source_uri: str | None = Form(default=None)) -> dict[str, object]:
     # Gate metadata before selecting or invoking any parser or provider.
     require_public_source(classification, "", source_uri)
@@ -371,10 +375,12 @@ async def import_file(title: str = Form(..., min_length=1, max_length=300),
     chunks = chunker.chunk(parsed) if parsed.locator_ready else []
     source_id, revision_id, created = store.import_source(
         title, source_uri, parsed.text, media_type, parsed.parser_id, parsed.parser_version, chunks,
-        raw_bytes=content_bytes, locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
+        publisher=publisher, raw_bytes=content_bytes,
+        locator_ready=parsed.locator_ready, element_counts=parsed.element_counts,
         original_filename=filename,
     )
     return {"source_id": source_id, "source_revision": revision_id, "created": created,
+            "publisher": (publisher or "").strip() or None,
             "source_sha256": hashlib.sha256(content_bytes).hexdigest(),
             "original_filename": filename, "media_type": media_type,
             "parser_snapshot": {"id": parsed.parser_id, "version": parsed.parser_version},
