@@ -1586,7 +1586,29 @@ def execute_device_skill(
             record_input = dict(request)
             record_input["_device_fact_fingerprint"] = _device_fact_fingerprint(detail)
             record_input["_knowledge_release_identity"] = _knowledge_release_identity()
-            record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(device_id)
+
+            if assessment_type in {"LIFETIME", "DIAGNOSIS"}:
+                requested_dependencies = (
+                    list(request.get("_runtime_dependency_metrics") or [])
+                    if trusted_runtime else []
+                )
+                dependency_metrics = sorted({
+                    str(x).strip()
+                    for x in (
+                        requested_dependencies
+                        or [obs.get("metric_name") for obs in bound_runtime if isinstance(obs, dict)]
+                    )
+                    if str(x or "").strip()
+                })
+                record_input["_runtime_dependency_metrics"] = dependency_metrics
+                record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(
+                    device_id,
+                    dependency_metrics,
+                )
+            else:
+                # S5 consumes the complete current runtime context.
+                record_input["_runtime_dependency_metrics"] = []
+                record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(device_id)
             response["assessment_record"] = core.save_device_assessment(
                 device_id,
                 assessment_type,
