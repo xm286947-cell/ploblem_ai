@@ -151,5 +151,7 @@ def test_legacy_query_contract_remains_backward_compatible(
 
     assert result["selection_mode"] == "TEXT_AND_DEVICE"
     assert {item["object_id"] for item in result["results"]} == {
-        "KO-LEGACY"
+        "KO-CALC",
+        "KO-TEST",
+        "KO-LEGACY",
     }
