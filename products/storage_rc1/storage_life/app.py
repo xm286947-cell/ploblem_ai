@@ -4,6 +4,8 @@ from pathlib import Path
 import json
 import threading
 import time
+import socket
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -856,6 +858,89 @@ def runtime_status(device_type: str = ""):
         return runtime_bridge.status(device_type or None)
     except runtime_bridge.RuntimeBridgeUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.get(
+    "/api/product/knowledge-production/provider-status",
+    tags=["Storage Product MVP"],
+)
+def knowledge_production_provider_status():
+    """Expose a safe preflight for the existing Knowledge Production Provider.
+
+    This is read-only. It does not create a second Agent Config surface and it
+    never returns credentials. The transport probe only checks the endpoint
+    selected by the server-owned Runtime model configuration.
+    """
+    from . import runtime_bridge
+
+    info = runtime_bridge.status()
+    boundary = dict(info.get("knowledge_production") or {})
+    configured = bool(info.get("configured"))
+    base_url = str(info.get("base_url") or "").strip()
+    parsed = urlsplit(base_url) if base_url else None
+    host = parsed.hostname if parsed is not None else None
+    port = (
+        parsed.port
+        if parsed is not None and parsed.port
+        else 443
+        if parsed is not None and parsed.scheme == "https"
+        else 80
+        if parsed is not None and parsed.scheme == "http"
+        else None
+    )
+
+    transport_status = "NOT_CHECKED"
+    if configured and host and port:
+        try:
+            with socket.create_connection((host, port), timeout=0.7):
+                pass
+            transport_status = "REACHABLE"
+        except OSError:
+            transport_status = "UNREACHABLE"
+
+    model_ref = str(info.get("profile") or "")
+    execution_ready = bool(
+        configured
+        and model_ref
+        and transport_status == "REACHABLE"
+    )
+    return {
+        "configured": configured,
+        "execution_ready": execution_ready,
+        "agent_id": boundary.get("agent_id"),
+        "model_ref": model_ref or None,
+        "provider": info.get("provider"),
+        "model": info.get("model"),
+        "endpoint": {
+            "scheme": parsed.scheme if parsed is not None else None,
+            "host": host,
+            "port": port,
+        },
+        "transport_status": transport_status,
+        "credential_present": bool(info.get("api_key_present")),
+        "credential_name": info.get("api_key_env"),
+        "model_config_source": (
+            "user"
+            if str(info.get("execution_mode_source") or "") == "environment"
+            and bool(str((info.get("runtime") or {}).get("model_config") or ""))
+            else "package_or_server_config"
+        ),
+        "boundary": {
+            "runtime_owner": "UNIFIED_AGENT_RUNTIME",
+            "second_agent_config": False,
+            "secret_exposed": False,
+            "transport_probe_only": True,
+        },
+        "next_action": (
+            "READY_TO_EXTRACT"
+            if execution_ready
+            else (
+                "START_OR_FIX_AI_PROVIDER"
+                if configured
+                else "FIX_RUNTIME_AGENT_CONFIG"
+            )
+        ),
+    }
 
 
 @app.get("/api/v1/runtime/route", tags=["Runtime Integration"])
