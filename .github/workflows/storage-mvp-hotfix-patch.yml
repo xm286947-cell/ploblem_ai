@@ -347,29 +347,9 @@ jobs:
 
           chmod +x "${ROOT}/apply_patch.command" "${ROOT}/rollback_patch.command"
 
-      - name: Build ZIP and checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /tmp/storage-hotfix
-          python - <<'PY'
-          import os, zipfile
-          from pathlib import Path
-          patch_id=os.environ["PATCH_ID"]
-          root=Path(patch_id)
-          out=Path(patch_id+".zip")
-          with zipfile.ZipFile(out,"w",compression=zipfile.ZIP_DEFLATED) as z:
-              for p in root.rglob("*"):
-                  if p.is_file():
-                      z.write(p,p.as_posix())
-          PY
-          sha256sum "${PATCH_ID}.zip" > "${PATCH_ID}.zip.sha256"
-
       - name: Upload hotfix artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PATCH_ID }}
-          path: |
-            /tmp/storage-hotfix/${{ env.PATCH_ID }}.zip
-            /tmp/storage-hotfix/${{ env.PATCH_ID }}.zip.sha256
+          path: /tmp/storage-hotfix/${{ env.PATCH_ID }}/
           if-no-files-found: error
