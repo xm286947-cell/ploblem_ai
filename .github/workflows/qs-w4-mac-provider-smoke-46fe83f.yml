@@ -1,0 +1,50 @@
+{
+  "name": "QS W4 macOS Controlled Provider Full Chain Smoke 46fe83f",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-mac-provider-smoke-46fe83f"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-mac-provider-smoke-46fe83f.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "mac-provider-full-chain": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 35,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "46fe83f7c6f2b01ad92795405e9f947ae342e805"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Prepare package-like venv and fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m venv --system-site-packages .venv\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db"
+        },
+        {
+          "name": "Run Mac controlled-provider full chain",
+          "shell": "bash",
+          "run": "set -euo pipefail\n./start_w4_mac_functional_provider_golden.command --host 127.0.0.1 --port 18083 > validation/mac_provider_host.log 2>&1 &\nPID=$!\ncleanup(){ kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true; }\ntrap cleanup EXIT\npython - <<'PY'\nimport json,time,urllib.request\nbase='http://127.0.0.1:18083'\nok=False\nfor _ in range(720):\n    try:\n        urllib.request.urlopen(base+'/software-assessment',timeout=1)\n        ok=True\n        break\n    except Exception:\n        time.sleep(.25)\nassert ok,'MAC_PROVIDER_HOST_NOT_READY'\nmanifest=json.load(open('validation/quality_scenario_w4_fixture.db.fixture.json',encoding='utf-8'))\ng1=next(x for x in manifest['cases'] if x['case_id']=='G1_COMPLETE')\ndef req(method,path,payload=None):\n    data=None if payload is None else json.dumps(payload,ensure_ascii=False).encode('utf-8')\n    r=urllib.request.Request(base+path,data=data,method=method,headers={'Content-Type':'application/json'})\n    with urllib.request.urlopen(r,timeout=30) as resp:\n        return resp.status,json.loads(resp.read().decode('utf-8')) if resp.headers.get_content_type()=='application/json' else resp.read().decode('utf-8')\npayload={'material_ids':[g1['software_assessment_material_id']],'trigger_source':'HIGH_PERCEPTION','trigger_reason':'W4_MAC_FUNCTIONAL_GOLDEN'}\ns,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload)\nassert s==200 and p['items'][0]['state']=='READY',p\ns,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload)\nassert s==200,start\ntask_id=start['task_id']\ntask=None\nfor _ in range(200):\n    s,task=req('GET',f'/api/v2/software-assessment/quality-scenario/generations/{task_id}')\n    states={x.get('state') for x in task.get('items',[])}\n    if 'ANALYZING' not in states:\n        break\n    time.sleep(.1)\nassert task['items'][0]['state']=='CANDIDATE_CREATED',task\nscenario=task['items'][0]['scenario']; sid=scenario['scenario_id']\ns,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/review',{'expected_scenario_version':scenario['scenario_version'],'review_status':'CONFIRMED','reviewer':'W4 Mac CI','comment':'controlled provider mac functional golden'})\nassert s==200,r\nscenario=r['scenario']\ns,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/confirm',{'expected_scenario_version':scenario['scenario_version'],'quality_confirmed_by':'W4 Quality','technical_confirmed_by':'W4 Technical','confirmation_note':'Mac controlled-provider CI'})\nassert s==200,r\nscenario=r['scenario']\ns,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/publish',{'expected_scenario_version':scenario['scenario_version'],'published_by':'W4 Mac CI'})\nassert s==200 and r['scenario']['status']=='PUBLISHED',r\nfor axis,marker in [('product','PLC-X200'),('industry','新能源'),('customer','客户A')]:\n    with urllib.request.urlopen(base+f'/quality-scenario-assets/portrait?portrait_axis={axis}',timeout=10) as resp:\n        text=resp.read().decode('utf-8')\n    assert marker in text,(axis,marker)\nprint('MAC_PROVIDER_HOST=PASS')\nprint('MAC_PROVIDER_G1_SOURCE_TO_PUBLISH=PASS')\nprint('MAC_PROVIDER_PRODUCT_PORTRAIT=PASS')\nprint('MAC_PROVIDER_INDUSTRY_PORTRAIT=PASS')\nprint('MAC_PROVIDER_CUSTOMER_PORTRAIT=PASS')\nprint('REAL_PROVIDER_GOLDEN=NO')\nPY\n"
+        }
+      ]
+    }
+  }
+}
