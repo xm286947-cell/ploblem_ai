@@ -523,6 +523,9 @@
     const report = obj(result.analysis_report);
     if (!agent.status && !report.status) return '';
 
+    const reportHref = result.query_id
+      ? '/api/v2/repeat-risk/queries/' + encodeURIComponent(result.query_id) + '/report?format=markdown'
+      : '';
     const reportText = report.status === 'AVAILABLE'
       ? '综合分析报告已生成'
       : report.status === 'FAILED'
@@ -538,11 +541,9 @@
       ' · M8.3=' + esc(agent.m83_solution || '-') +
       ' · M8.4=' + esc(agent.m84_recommendation || '-') +
       ' · Provider=' + esc(agent.provider_boundary || '-') + '</p></div>' +
-      (report.status === 'AVAILABLE'
-        ? '<details><summary>报告交付引用</summary><dl>' +
-          '<dt>JSON</dt><dd>' + esc(report.report_json_ref || '-') + '</dd>' +
-          '<dt>Markdown</dt><dd>' + esc(report.report_markdown_ref || '-') + '</dd>' +
-          '</dl></details>'
+      (report.status === 'AVAILABLE' && reportHref
+        ? '<p><a class="p0-ghost" href="' + esc(reportHref) +
+          '" target="_blank" rel="noopener">打开 Markdown 分析报告</a></p>'
         : '') +
       '</section>';
   }
