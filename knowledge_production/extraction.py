@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -119,6 +119,7 @@ class KnowledgeExtractionService:
         *,
         requested_topics: list[str] | None = None,
         candidate_metadata: dict[str, Any] | None = None,
+        candidate_enricher: Callable[[Any], dict[str, Any]] | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -250,6 +251,27 @@ class KnowledgeExtractionService:
                 raise KnowledgeExtractionError("EVIDENCE_MISSING")
 
             draft_payload = draft.model_dump(mode="json")
+            enrichment: dict[str, Any] = {}
+            if candidate_enricher is not None:
+                raw_enrichment = candidate_enricher(draft)
+                if not isinstance(raw_enrichment, dict):
+                    raise KnowledgeExtractionError(
+                        "CANDIDATE_ENRICHMENT_INVALID"
+                    )
+                enrichment = raw_enrichment
+            extra_tags = enrichment.get("tags") or []
+            extra_metadata = enrichment.get("metadata") or {}
+            if not isinstance(extra_tags, list) or not all(
+                isinstance(item, str) and item.strip()
+                for item in extra_tags
+            ):
+                raise KnowledgeExtractionError(
+                    "CANDIDATE_ENRICHMENT_INVALID"
+                )
+            if not isinstance(extra_metadata, dict):
+                raise KnowledgeExtractionError(
+                    "CANDIDATE_ENRICHMENT_INVALID"
+                )
             candidate = KnowledgeCandidate(
                 candidate_id=_candidate_id(
                     source_document.source_id,
@@ -266,7 +288,14 @@ class KnowledgeExtractionService:
                 scope=draft.scope,
                 conditions=draft.conditions,
                 limitations=draft.limitations,
-                tags=draft.tags,
+                tags=list(
+                    dict.fromkeys(
+                        [
+                            *draft.tags,
+                            *[item.strip() for item in extra_tags],
+                        ]
+                    )
+                ),
                 evidence_refs=list(dict.fromkeys(evidence_ids)),
                 source_refs=list(dict.fromkeys(source_refs)),
                 extraction_version=self.extraction_version,
@@ -277,6 +306,7 @@ class KnowledgeExtractionService:
                 created_at=source_document.created_at,
                 metadata={
                     **dict(candidate_metadata or {}),
+                    **extra_metadata,
                     "runtime_task_id": getattr(
                         result, "task_id", None
                     ),
