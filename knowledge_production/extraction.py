@@ -118,6 +118,7 @@ class KnowledgeExtractionService:
         structured_document: StructuredDocument,
         *,
         requested_topics: list[str] | None = None,
+        candidate_metadata: dict[str, Any] | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -275,6 +276,7 @@ class KnowledgeExtractionService:
                 contract_version="knowledge-candidate/v1",
                 created_at=source_document.created_at,
                 metadata={
+                    **dict(candidate_metadata or {}),
                     "runtime_task_id": getattr(
                         result, "task_id", None
                     ),
