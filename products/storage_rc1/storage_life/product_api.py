@@ -593,13 +593,51 @@ def _formal_knowledge(
         if structured.get("results"):
             result = structured
         else:
-            # Compatibility bridge for older Knowledge Releases that predate
-            # storage-lifetime-knowledge/v1 reviewed semantic metadata.
-            result = consumer.query(
-                query,
+            # Compatibility bridge is allowed only for a wholly legacy Formal
+            # Knowledge release. Once any reviewed Storage-lifetime object is
+            # present, a missing parameter/scenario match is a real knowledge
+            # gap and must not silently fall back to prose matching.
+            broad = consumer.query(
+                "",
                 device_type=device_type,
-                top_k=top_k,
+                top_k=50,
             )
+            has_reviewed_storage = any(
+                isinstance(row.get("metadata"), dict)
+                and isinstance(
+                    row["metadata"].get("storage_lifetime"),
+                    dict,
+                )
+                and row["metadata"]["storage_lifetime"].get(
+                    "formal_consumable"
+                )
+                is True
+                and str(
+                    row["metadata"]["storage_lifetime"].get(
+                        "semantic_class_status"
+                    )
+                    or ""
+                ).upper()
+                == "REVIEWED"
+                for row in (broad.get("results") or [])
+            )
+            result = (
+                structured
+                if has_reviewed_storage
+                else consumer.query(
+                    query,
+                    device_type=device_type,
+                    top_k=top_k,
+                )
+            )
+            if (
+                not has_reviewed_storage
+                and isinstance(result, dict)
+            ):
+                result = {
+                    **result,
+                    "selection_mode": "LEGACY_FORMAL_COMPATIBILITY",
+                }
     except Exception as exc:
         return {
             "status": "UNKNOWN",
@@ -617,7 +655,16 @@ def _formal_knowledge(
                 evidence_refs.append(evidence_id)
     return {
         "status": "MATCHED" if rows else "NO_MATCH",
-        "code": None if rows else "NO_MATCHING_PUBLISHED_KNOWLEDGE",
+        "code": (
+            None
+            if rows
+            else (
+                "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                if result.get("selection_mode")
+                == "REVIEWED_STORAGE_SEMANTIC"
+                else "NO_MATCHING_PUBLISHED_KNOWLEDGE"
+            )
+        ),
         "knowledge_release_version": result.get("knowledge_release_version"),
         "results": rows,
         "evidence_refs": evidence_refs,
