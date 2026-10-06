@@ -124,8 +124,52 @@ class StorageDomainSkillAdapter:
                 "items": [],
                 "missing_information": [str(status.get("code") or "FORMAL_KNOWLEDGE_RELEASE_REQUIRED")],
             }
-        release_version = str(status.get("knowledge_release_version") or "")
-        if pack.current_release_version and release_version != pack.current_release_version:
+        release_version = str(
+            status.get("knowledge_release_version") or ""
+        )
+        binding_validator = getattr(
+            self.knowledge_consumer,
+            "validate_storage_binding",
+            None,
+        )
+        if callable(binding_validator):
+            try:
+                binding = binding_validator()
+            except KnowledgeReleaseError as exc:
+                return {
+                    "status": "INSUFFICIENT_KNOWLEDGE",
+                    "pack_id": pack_id,
+                    "knowledge_refs": [],
+                    "evidence_refs": [],
+                    "items": [],
+                    "missing_information": [str(exc)],
+                    "selection_mode": "CONTROLLED_BINDING",
+                }
+            bound_release = str(
+                (binding or {}).get("knowledge_release_version") or ""
+            )
+            if not bound_release or bound_release != release_version:
+                return {
+                    "status": "INSUFFICIENT_KNOWLEDGE",
+                    "pack_id": pack_id,
+                    "knowledge_refs": [],
+                    "evidence_refs": [],
+                    "items": [],
+                    "missing_information": [
+                        (
+                            "RELEASE_VERSION_MISMATCH:"
+                            f"expected={bound_release or 'MISSING'},"
+                            f"actual={release_version}"
+                        )
+                    ],
+                    "selection_mode": "CONTROLLED_BINDING",
+                }
+        elif (
+            pack.current_release_version
+            and release_version != pack.current_release_version
+        ):
+            # Legacy adapter compatibility: older/fake consumers do not expose
+            # the binding validator, so retain the previous pack pin.
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
                 "pack_id": pack_id,
@@ -133,7 +177,11 @@ class StorageDomainSkillAdapter:
                 "evidence_refs": [],
                 "items": [],
                 "missing_information": [
-                    f"RELEASE_VERSION_MISMATCH:expected={pack.current_release_version},actual={release_version}"
+                    (
+                        "RELEASE_VERSION_MISMATCH:"
+                        f"expected={pack.current_release_version},"
+                        f"actual={release_version}"
+                    )
                 ],
             }
         requested_semantics = {
