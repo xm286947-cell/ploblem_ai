@@ -46,10 +46,25 @@ class RepeatSimilarityDimensionDTO(BaseModel):
     reason: str = ""
 
 
+class RepeatSimilarityDimensionsDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    problem_object: RepeatSimilarityDimensionDTO
+    phenomenon: RepeatSimilarityDimensionDTO
+    trigger_condition: RepeatSimilarityDimensionDTO
+    impact: RepeatSimilarityDimensionDTO
+    failure_mechanism: RepeatSimilarityDimensionDTO
+    trc: RepeatSimilarityDimensionDTO
+    mrc: RepeatSimilarityDimensionDTO
+    root_cause: RepeatSimilarityDimensionDTO
+    classification: RepeatSimilarityDimensionDTO
+    organization_context: RepeatSimilarityDimensionDTO
+
+
 class RepeatSimilarityDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    dimensions: dict[str, RepeatSimilarityDimensionDTO]
+    dimensions: RepeatSimilarityDimensionsDTO
     overall_score: int = Field(ge=0, le=100)
     overall_level: Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
     key_similarities: list[str] = Field(default_factory=list)
@@ -692,6 +707,7 @@ class RepeatAgentAnalysisService:
 __all__ = [
     "RepeatAgentAnalysisService",
     "RepeatSimilarityDTO",
+    "RepeatSimilarityDimensionsDTO",
     "RepeatSimilarityDimensionDTO",
     "RepeatSolutionDTO",
 ]
