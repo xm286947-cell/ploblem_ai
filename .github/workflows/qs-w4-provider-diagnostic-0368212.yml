@@ -1,0 +1,42 @@
+{
+  "name": "QS W4 Provider Diagnostic 0368212",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-provider-diagnostic-0368212"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-provider-diagnostic-0368212.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "diagnostic": {
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "036821207f6e5bfe8bff3f4646093af4b0fb9f7e"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Provider E2E",
+          "run": "python -m pytest -q tests/test_quality_scenario_w4_functional_provider_e2e.py -vv"
+        }
+      ]
+    }
+  }
+}
