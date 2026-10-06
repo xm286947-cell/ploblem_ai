@@ -116,6 +116,8 @@ class SearchBody(BaseModel):
 
 class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    response_language: str = Field(default="zh-CN", max_length=16)
+    include_citation_translations: bool = False
 
 
 class ContextSearchBody(BaseModel):
@@ -709,7 +711,7 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
             generated = _request(
                 mode,
                 "/ask",
-                {"question": public_question, "mode": "LIVE"},
+                {"question": public_question, "mode": "LIVE", "response_language": "zh-CN"},
                 base_url,
             )
             answer = generated.get("answer") if isinstance(generated, dict) else None
@@ -743,9 +745,17 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
 @router.post("/ask")
 def ask(body: AskBody, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     safe_question = _require_public_safe_outbound_query(body.question)
+    if body.response_language not in {"AUTO", "zh-CN", "en"}:
+        raise HTTPException(422, "不支持的回答语言。")
     if mode == "FIXTURE_REPLAY":
         return {"answer": "演示回放：当前示例资料写明 page size 为 256 bytes。此内容是合成 UI fixture，不是器件规格结论。", "citations": [{"citation_id": "fixture-citation-page1", "source_id": "fixture-gd25q64e", "source_revision": "Rev1.6", "locator": FIXTURE_HITS[0]["locator"], "text": FIXTURE_HITS[0]["text"]}], "mode": mode, "fixture_id": "pk-workspace-qa-001", "answer_scope": "SYNTHETIC_DEMO_ONLY"}
-    return {**_request(mode, "/ask", {"question": safe_question, "mode": "LIVE"}, base_url), "mode": mode}
+    payload = {
+        "question": safe_question,
+        "mode": "LIVE",
+        "response_language": body.response_language,
+        "include_citation_translations": body.include_citation_translations,
+    }
+    return {**_request(mode, "/ask", payload, base_url), "mode": mode}
 
 
 @router.get("/citations/{citation_id}")
