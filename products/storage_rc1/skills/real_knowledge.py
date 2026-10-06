@@ -23,7 +23,7 @@ PACK_FILES = {
 }
 
 PRIORITY_SOURCE_GROUPS = {
-    "NAND_RAW_FLASH": ["EK-001", "EK-002", "EK-003", "EK-005", "EK-011", "EK-012", "EK-013"],
+    "NAND_FLASH": ["EK-001", "EK-002", "EK-003", "EK-005", "EK-011", "EK-012", "EK-013"],
     "EMMC_STANDARD_HEALTH": ["EK-007", "EK-025"],
     "NVME_SMART_HEALTH": ["EK-018", "EK-019"],
     "LINUX_WRITE_PATH": ["EK-004", "EK-020", "EK-021", "EK-022", "EK-028"],
@@ -184,20 +184,20 @@ class RealKnowledgeAssessmentService:
                 critical = PRIORITY_SOURCE_GROUPS["LINUX_WRITE_PATH"] + PRIORITY_SOURCE_GROUPS["SSD_ENDURANCE_WORKLOAD"]
             elif pack_id == "PACK_LIFETIME_ENGINEERING":
                 critical = (
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["SSD_ENDURANCE_WORKLOAD"]
                 )
             elif pack_id == "PACK_DIAGNOSTIC_VALIDATION":
                 critical = (
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                 )
             else:
                 critical = sorted(set(
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["LINUX_WRITE_PATH"]
@@ -361,7 +361,7 @@ class RealKnowledgeAssessmentService:
             ),
             "RG04": result(
                 "RG04", rg04,
-                additional_missing=["FORMAL_RAW_NAND_DIAGNOSTIC_KNOWLEDGE_NOT_RELEASED"],
+                additional_missing=["FORMAL_NAND_FLASH_DIAGNOSTIC_KNOWLEDGE_NOT_RELEASED"],
                 supported=[],
                 unsupported=[
                     "P/E and erase-block evidence-backed interpretation",
