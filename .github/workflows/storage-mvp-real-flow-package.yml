@@ -95,6 +95,15 @@ jobs:
 
           cp -a products/storage_rc1/. "$PKG/"
 
+          # Keep the field package cross-platform: the historical Chinese
+          # convenience filename is the only non-ASCII path in Storage RC1,
+          # and Info-ZIP can materialize it as #Uxxxx on Linux fresh extract.
+          # Rename it in the package only; no product/runtime behavior depends
+          # on the filename.
+          if [ -f "$PKG/查看日志.bat" ]; then
+            mv "$PKG/查看日志.bat" "$PKG/view_logs.bat"
+          fi
+
           for d in knowledge_production repositories parser contracts compatibility services quality_knowledge common models schema analysis builder knowledge parsing retriever; do
             if [ -d "$d" ]; then
               cp -a "$d" "$PKG/"
@@ -411,6 +420,35 @@ jobs:
             cd "$WORK"
             zip -qr "../$ZIP_NAME" STORAGE_PRODUCT_MVP_RC1
           )
+
+          # Fresh-extract package integrity check. This intentionally validates
+          # the bytes users will actually receive, not only the pre-zip tree.
+          FRESH="$(mktemp -d)"
+          unzip -q "dist/$ZIP_NAME" -d "$FRESH"
+          (
+            cd "$FRESH/STORAGE_PRODUCT_MVP_RC1"
+            sha256sum -c FILE_SHA256SUMS.txt >/dev/null
+            python -m compileall -q storage_life knowledge_production
+            bash -n START_MACOS.command
+            bash -n run_macos.sh
+            bash -n PUBLIC_KNOWLEDGE_SERVICE/start.sh
+          )
+          python - "dist/$ZIP_NAME" <<'PY'
+          import sys
+          import zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as archive:
+              non_ascii = [
+                  name for name in archive.namelist()
+                  if not name.isascii()
+              ]
+          if non_ascii:
+              raise SystemExit(
+                  "NON_ASCII_PACKAGE_PATHS:" + ",".join(non_ascii)
+              )
+          print("FRESH_EXTRACT_INTEGRITY=PASS")
+          print("PACKAGE_PATH_PORTABILITY=PASS")
+          PY
 
           SHA="$(sha256sum "dist/$ZIP_NAME" | awk '{print $1}')"
           SIZE="$(stat -c%s "dist/$ZIP_NAME")"
