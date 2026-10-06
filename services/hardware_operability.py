@@ -126,12 +126,16 @@ def _knowledge_ready(
     environ: Mapping[str, str],
     knowledge_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if knowledge_status:
+    if (
+        knowledge_status
+        and str(knowledge_status.get("mode") or "").upper() == "LOCAL_NON_PROD"
+        and bool(knowledge_status.get("managed_release"))
+    ):
         ready = bool(knowledge_status.get("ready"))
         payload = {
             "status": "READY" if ready else "UNREADY",
-            "mode": knowledge_status.get("mode"),
-            "managed_release": bool(knowledge_status.get("managed_release")),
+            "mode": "LOCAL_NON_PROD",
+            "managed_release": True,
             "release_version": knowledge_status.get("release_version"),
         }
         if not ready:
