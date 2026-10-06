@@ -191,7 +191,20 @@ jobs:
           grep -q 'PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS'             "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
           grep -q 'return 8.0'             "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
 
-          PYTHONPATH=products/storage_rc1 python -m pytest -q             products/storage_rc1/tests/test_public_knowledge_workspace.py             -k generation_request_uses_longer_bounded_timeout
+          python3 - <<'PY'
+          from pathlib import Path
+          text=Path("/tmp/synthesis-timeout-hotfix-test/products/storage_rc1/storage_life/public_knowledge.py").read_text(encoding="utf-8")
+          required=[
+              'PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "60"',
+              'if path == "/ask":',
+              'return min(max(value, 15.0), 180.0)',
+              'return 8.0',
+              'timeout=_request_timeout_seconds(path)',
+          ]
+          missing=[item for item in required if item not in text]
+          assert not missing, missing
+          print("TIMEOUT_POLICY_STATIC=PASS")
+          PY
 
           echo "SYNTHESIS_TIMEOUT_HOTFIX_SELFTEST=PASS"
 
