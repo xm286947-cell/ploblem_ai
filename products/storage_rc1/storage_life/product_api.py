@@ -1249,6 +1249,7 @@ def execute_device_skill(
     payload: dict[str, Any] | None = None,
     *,
     trusted_runtime: bool = False,
+    trusted_assessment_context: bool = False,
 ) -> dict[str, Any]:
     """Bind one selected device to the existing four Storage Domain Skill contracts."""
     allowed = {
@@ -1283,6 +1284,13 @@ def execute_device_skill(
 
     if skill_id == "storage-write-governance":
         user_context = dict(request.get("user_context") or {})
+        # S5 chain state is server-owned.  The generic product skill endpoint may
+        # accept a user question/workload description, but it must not let a
+        # browser fabricate "latest S3/S4" objects and persist a falsely complete
+        # optimization assessment.  Only the integrated action-plan orchestrator
+        # may inject the current validated assessment context.
+        if not trusted_assessment_context:
+            user_context.pop("assessment_context", None)
         user_context.setdefault("question", f"{dtype} software write behavior lifetime governance")
         user_context["device_context"] = context
         skill_payload = {
@@ -1802,7 +1810,7 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         "workload_software_facts": workload_facts,
         "record_assessment": True,
         "assessment_author": str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
-    })
+    }, trusted_assessment_context=True)
     skill = optimization.get("skill_result") or {}
     structured = skill.get("structured_result") or {}
 
