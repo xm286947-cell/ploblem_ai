@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 env:
-  PRODUCT_SOURCE_SHA: 3fe85d3901838b5c9d5d04f9d5491daded7dfc6f
+  PRODUCT_SOURCE_SHA: d96ede298e7e9285569c1485bf696a66a12a136a
   SOURCE_BASE: 9410af7c7d5b0fbcd27b71e406d7703dec8bf345
 
 jobs:
