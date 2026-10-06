@@ -57,3 +57,12 @@ test('human review supports evidence-bound parameter add and remove', () => {
   assert.match(source, /__review_original_index/);
   assert.match(source, /__review_new/);
 });
+
+
+test('running batch progress auto-refreshes without manual page refresh', () => {
+  assert.match(source, /function ensurePassiveBatchPolling\(batch\)/);
+  assert.match(source, /batch\.status === 'RUNNING'/);
+  assert.match(source, /refreshBatchSnapshot\(batchId\)/);
+  assert.match(source, /window\.setInterval\(tick, 1000\)/);
+  assert.match(source, /stopPassiveBatchPolling\(\)/);
+});
