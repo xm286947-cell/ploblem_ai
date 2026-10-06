@@ -7,8 +7,14 @@ import pytest
 
 import quality_knowledge.major_cases.document_parser as document_parser
 import quality_knowledge.major_cases.pdf_markdown as pdf_markdown
-from quality_knowledge.major_cases.document_parser import parse_docx, parse_pdf
+from quality_knowledge.major_cases.document_parser import (
+    ParseResult,
+    ParsedFragment,
+    parse_docx,
+    parse_pdf,
+)
 from quality_knowledge.major_cases.pdf_markdown import MarkdownDocument, MarkdownPage
+from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 
 
 def _page(page: int, body: str, raw_text: str = "") -> MarkdownPage:
@@ -42,7 +48,8 @@ def test_pdf_markdown_projection_preserves_page_section_and_table(
                 "| --- | --- | --- |\n"
                 "| 原子提交 | Team-A | Done |",
             ),
-            _page(2, "## MRC流出\n\n评审检查项未覆盖该并发窗口。"),
+            _page(2, "纠正措施在第二页继续描述，仍应保持上一页章节上下文。"),
+            _page(3, "## MRC流出\n\n评审检查项未覆盖该并发窗口。"),
         ],
         markdown="synthetic",
         quality_status="PASS",
@@ -71,9 +78,13 @@ def test_pdf_markdown_projection_preserves_page_section_and_table(
     assert "| 措施 | Owner | 状态 |" in table.text
     assert table.location_ref.startswith("page:1:markdown:")
 
+    continued = next(item for item in result.fragments if "第二页继续" in item.text)
+    assert continued.section_path == "TRC发生 / 纠正措施"
+    assert continued.location_ref.startswith("page:2:markdown:")
+
     mrc = next(item for item in result.fragments if "评审检查项" in item.text)
     assert mrc.section_path == "MRC流出"
-    assert mrc.location_ref.startswith("page:2:markdown:")
+    assert mrc.location_ref.startswith("page:3:markdown:")
 
 
 def test_pdf_markdown_fallback_is_explicit_not_silent(
@@ -149,6 +160,48 @@ def test_docx_parsing_contract_remains_unchanged(tmp_path: Path) -> None:
     assert result.fragments[0].text == "原有 DOCX 段落解析保持不变"
     assert result.fragments[1].fragment_type == "TABLE"
     assert "措施 | 状态" in result.fragments[1].text
+
+
+def test_repository_keeps_pdf_as_authority_and_records_converter_identity(
+    tmp_path: Path,
+) -> None:
+    repository = MajorKnowledgeRepository(
+        tmp_path / "major.db",
+        tmp_path / "attachments",
+    )
+    case = repository.create_case("Markdown authority boundary", "MAJOR", "QUALITY")
+    source = tmp_path / "review.pdf"
+    source.write_bytes(b"%PDF-source-authority")
+    version = repository.ingest_file(case["case_id"], source)
+
+    result = ParseResult(
+        "PDF",
+        [
+            ParsedFragment(
+                1,
+                "TRC发生",
+                "PAGE_MARKDOWN",
+                "page:1:markdown:1",
+                "TEXT",
+                "PDF-derived semantic evidence",
+            )
+        ],
+        [],
+        parser_version="req022-parser-2-markdown:pymupdf4llm:pass",
+        derived_format="MARKDOWN",
+        converter_mode="pymupdf4llm",
+        quality_status="PASS",
+        derived_markdown="<!-- PDF_PAGE: 1 -->\n\nPDF-derived semantic evidence",
+    )
+    repository.save_parse_result(version["version_id"], result)
+
+    stored = repository.version(version["version_id"])
+    assert stored is not None
+    assert stored["media_type"] == "PDF"
+    assert stored["attachment_path"].endswith(".pdf")
+    assert stored["parser_version"] == "req022-parser-2-markdown:pymupdf4llm:pass"
+    assert repository.fragments(version["version_id"])[0]["location_ref"] == "page:1:markdown:1"
+    assert not list((tmp_path / "attachments").rglob("*.md"))
 
 
 def test_pymupdf4llm_primary_converter_smoke(tmp_path: Path) -> None:
