@@ -75,10 +75,23 @@ class Store:
         revision_id = "rev_" + raw_hash[:24]
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
         with self.connect() as db:
-            existing = db.execute("SELECT 1 FROM source_revisions WHERE source_id=? AND raw_sha256=?", (source_id, raw_hash)).fetchone()
-            if existing:
-                return source_id, revision_id, False
             normalized_publisher = str(publisher or "").strip() or None
+            existing = db.execute(
+                "SELECT 1 FROM source_revisions WHERE source_id=? AND raw_sha256=?",
+                (source_id, raw_hash),
+            ).fetchone()
+            if existing:
+                if normalized_publisher:
+                    db.execute(
+                        """UPDATE sources
+                        SET publisher=CASE
+                            WHEN publisher IS NULL OR TRIM(publisher)='' THEN ?
+                            ELSE publisher
+                        END
+                        WHERE source_id=?""",
+                        (normalized_publisher, source_id),
+                    )
+                return source_id, revision_id, False
             db.execute(
                 """INSERT OR IGNORE INTO sources
                 (source_id,title,source_uri,source_class,created_at,publisher)
