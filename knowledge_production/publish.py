@@ -21,6 +21,18 @@ from .models import (
 from .review import KnowledgeReviewError, KnowledgeReviewService
 
 
+_STORAGE_SEMANTIC_ALLOWED_OBJECT_TYPES = {
+    "PARAMETER_DEFINITION": {"FACT", "CONCEPT"},
+    "MECHANISM_CONCEPT": {"CONCEPT"},
+    "CALCULATION_RULE": {"FACT", "REQUIREMENT"},
+    "DIAGNOSTIC_RULE": {"DIAGNOSTIC", "REQUIREMENT"},
+    "DESIGN_RULE": {"SOLUTION", "REQUIREMENT"},
+    "TEST_RULE": {"SOLUTION", "REQUIREMENT"},
+    "CHANGE_IMPACT_RULE": {"CONCEPT", "SOLUTION", "REQUIREMENT"},
+    "APPLICABILITY_RULE": {"FACT", "REQUIREMENT"},
+}
+
+
 class KnowledgePublishError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
@@ -181,16 +193,52 @@ class KnowledgePublishService:
                 "STORAGE_SEMANTIC_REVIEW_REQUIRED"
             )
         selected = semantic_tags[0]
-        allowed = {
+        ai_candidates = [
             str(value)
             for value in (
                 storage.get("semantic_class_candidates") or []
             )
             if str(value)
-        }
+        ]
+        review_options = [
+            str(value)
+            for value in (
+                storage.get("semantic_class_review_options") or []
+            )
+            if str(value)
+        ]
+        bridge = metadata.get("storage_source_bridge")
+        bridge_options = []
+        if isinstance(bridge, dict):
+            bridge_options = [
+                str(value)
+                for value in (
+                    bridge.get("semantic_class_candidates") or []
+                )
+                if str(value)
+            ]
+        allowed_sequence = (
+            review_options
+            or bridge_options
+            or ai_candidates
+        )
+        allowed = set(allowed_sequence)
         if selected not in allowed:
             raise KnowledgePublishError(
                 "STORAGE_SEMANTIC_CLASS_INVALID"
+            )
+
+        object_type = getattr(candidate.object_type, "value", None)
+        object_type = str(object_type or candidate.object_type or "")
+        allowed_object_types = _STORAGE_SEMANTIC_ALLOWED_OBJECT_TYPES.get(
+            selected
+        )
+        if (
+            not allowed_object_types
+            or object_type not in allowed_object_types
+        ):
+            raise KnowledgePublishError(
+                "STORAGE_SEMANTIC_OBJECT_TYPE_INVALID"
             )
 
         parameter_tags = [
@@ -210,6 +258,13 @@ class KnowledgePublishService:
             "semantic_class": selected,
             "semantic_class_status": "REVIEWED",
             "formal_consumable": True,
+            "semantic_class_review_options": list(
+                dict.fromkeys(allowed_sequence)
+            ),
+            "semantic_class_review_override": (
+                selected not in set(ai_candidates)
+            ),
+            "reviewed_object_type": object_type,
             "reviewed_parameter_tags": list(
                 dict.fromkeys(parameter_tags)
             ),
