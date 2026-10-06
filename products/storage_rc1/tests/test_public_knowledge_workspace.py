@@ -132,3 +132,100 @@ def test_generation_request_uses_longer_bounded_timeout(monkeypatch):
 
     monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "invalid")
     assert public_knowledge._request_timeout_seconds("/ask") == 60.0
+
+
+def test_model_scan_uses_frozen_storage_model_and_source_filter(monkeypatch):
+    calls = []
+
+    def request(mode, path, payload=None, base_url=None):
+        calls.append((mode, path, payload))
+        if path == "/sources/source-1":
+            return {
+                "source": {
+                    "source_id": "source-1",
+                    "title": "NAND endurance datasheet",
+                    "classification": "PUBLIC",
+                    "revision": "Rev1",
+                }
+            }
+        if path == "/search":
+            assert payload["filters"] == {"source_id": "source-1"}
+            if "P/E Cycle" in payload["query"]:
+                return {
+                    "hits": [
+                        {
+                            "hit_id": "citation-pe",
+                            "source_id": "source-1",
+                            "source_revision": "Rev1",
+                            "locator": {
+                                "page": 10,
+                                "section": "Reliability",
+                            },
+                            "text": "Endurance: 100000 P/E cycles.",
+                            "score": 1.0,
+                        }
+                    ]
+                }
+            return {"hits": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    response = client.post(
+        "/api/public-knowledge/model-scan?mode=LIVE",
+        json={
+            "source_id": "source-1",
+            "device_type": "Raw NAND",
+            "top_k_per_parameter": 2,
+            "parameter_names": ["pe_cycles", "bit_flip_threshold"],
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["device_type"] == "NAND Flash"
+    assert payload["primary_focus"] is True
+    assert payload["coverage"] == {
+        "parameter_count": 2,
+        "found_count": 1,
+        "not_found_count": 1,
+        "role_gap_count": 1,
+    }
+    parameters = {
+        item["canonical_name"]: item for item in payload["parameters"]
+    }
+    assert parameters["pe_cycles"]["coverage_status"] == "FOUND"
+    assert "CALCULATION_RULE" in parameters["pe_cycles"][
+        "knowledge_requirements"
+    ]
+    assert parameters["bit_flip_threshold"]["coverage_status"] == "NOT_FOUND"
+    assert (
+        parameters["bit_flip_threshold"]["knowledge_gap"]
+        == "PARAMETER_ROLE_UNCLASSIFIED"
+    )
+    assert payload["formal_candidate_eligible"] is False
+    assert payload["boundary"]["rag_is_formal_knowledge"] is False
+    assert any(path == "/search" for _, path, _ in calls)
+
+
+def test_model_scan_rejects_unknown_parameter_before_search(monkeypatch):
+    def request(mode, path, payload=None, base_url=None):
+        if path == "/sources/source-1":
+            return {
+                "source": {
+                    "source_id": "source-1",
+                    "title": "NAND datasheet",
+                    "classification": "PUBLIC",
+                }
+            }
+        raise AssertionError("search must not run for an unknown model parameter")
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    response = client.post(
+        "/api/public-knowledge/model-scan?mode=LIVE",
+        json={
+            "source_id": "source-1",
+            "device_type": "NAND Flash",
+            "parameter_names": ["invented_parameter"],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "MODEL_SCAN_PARAMETER_UNKNOWN"
