@@ -1,4 +1,4 @@
-name: Storage Knowledge Model W0-W1
+name: Storage Knowledge Production W0-W3
 
 on:
   push:
@@ -11,7 +11,11 @@ on:
       - "products/storage_rc1/storage_life/public_knowledge.py"
       - "products/storage_rc1/storage_life/knowledge_product.py"
       - "knowledge_production/extraction.py"
+      - "knowledge_production/publish.py"
+      - "knowledge_production/web.py"
+      - "knowledge_production/templates/kp_candidate_detail.html"
       - "products/storage_rc1/tests/test_public_knowledge_workspace.py"
+      - "tests/test_kp_d03_review_publish.py"
       - ".github/workflows/storage-knowledge-model-w0.yml"
 
 permissions:
@@ -37,7 +41,13 @@ jobs:
         run: |
           python -m py_compile \
             products/storage_rc1/storage_life/knowledge_model.py \
-            products/storage_rc1/storage_life/public_knowledge.py
+            products/storage_rc1/storage_life/public_knowledge.py \
+            products/storage_rc1/storage_life/knowledge_product.py \
+            knowledge_production/extraction.py \
+            knowledge_production/publish.py \
+            knowledge_production/web.py
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
           python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
             -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search or model_extract_bridges_exact_public_pdf_into_existing_kp or model_extract_never_runs_in_fixture_mode"
+          python -m pytest -q tests/test_kp_d03_review_publish.py \
+            -k "storage_model_candidate_requires_reviewed_semantic_before_publish or storage_model_reviewed_semantic_becomes_formal_consumable or storage_model_publish_rejects_unproposed_semantic"
