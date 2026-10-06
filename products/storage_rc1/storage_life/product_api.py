@@ -1279,23 +1279,24 @@ def execute_device_skill(
             "workload_software_facts": list(request.get("workload_software_facts") or []),
         }
     elif skill_id == "storage-diagnostic-validation":
-        capabilities = list(request.get("diagnostic_capabilities") or [])
-        if not capabilities:
-            capabilities = [
-                {
-                    "canonical_name": x["canonical_name"],
-                    "diagnostic_status": x.get("diagnostic_status"),
-                    "datasheet_fact": x.get("value"),
-                    "review_status": x.get("review_status"),
-                    "evidence_refs": [
-                        e.get("evidence_id") or e.get("source_id")
-                        for e in x.get("evidence") or []
-                        if e.get("evidence_id") or e.get("source_id")
-                    ],
-                }
-                for x in detail["slots"]
-                if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
-            ]
+        # Diagnostic capability is a server-owned projection of current Device
+        # Fact.  Product callers may provide Runtime Observation/question, but
+        # cannot claim unsupported datasheet capabilities or evidence refs.
+        capabilities = [
+            {
+                "canonical_name": x["canonical_name"],
+                "diagnostic_status": x.get("diagnostic_status"),
+                "datasheet_fact": x.get("value"),
+                "review_status": x.get("review_status"),
+                "evidence_refs": [
+                    e.get("evidence_id") or e.get("source_id")
+                    for e in x.get("evidence") or []
+                    if e.get("evidence_id") or e.get("source_id")
+                ],
+            }
+            for x in detail["slots"]
+            if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+        ]
         skill_payload = {
             "device_type": dtype,
             "target_question": str(
