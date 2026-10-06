@@ -129,6 +129,16 @@ class RepeatResultService:
                 "message": "本次查询未召回历史候选；这不等价于 NOT_REPEAT。",
             })
 
+        agent_analysis = deepcopy(search_result.get("agent_analysis") or {})
+        for warning in agent_analysis.get("warnings") or []:
+            if isinstance(warning, dict):
+                warnings.append({
+                    "code": _text(warning.get("code"))
+                    or "REPEAT_AGENT_ANALYSIS_WARNING",
+                    "message": _text(warning.get("message"))
+                    or "Repeat Agent analysis is degraded.",
+                })
+
         result = {
             "contract_version": RESULT_CONTRACT_VERSION,
             "query_id": query_id,
@@ -145,7 +155,7 @@ class RepeatResultService:
             "search_error": search_result.get("error_code"),
             "candidate_count": len(candidates),
             "candidates": candidates,
-            "agent_analysis": deepcopy(search_result.get("agent_analysis") or {}),
+            "agent_analysis": agent_analysis,
             "analysis_report": deepcopy(search_result.get("analysis_report") or {}),
             "warnings": warnings,
             "human_decision": {
