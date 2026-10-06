@@ -1,0 +1,2 @@
+Trigger MAJOR-REPEAT-AGENT-CI-488 after workflow registration.
+Product source remains 3fe85d3901838b5c9d5d04f9d5491daded7dfc6f.
