@@ -691,12 +691,36 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
     devices = {x["id"]: x for x in core.list_devices()}
     if device_id not in devices:
         raise KeyError(device_id)
+
+    source_label = str(payload.get("source_label") or "").strip()
+    captured_at = payload.get("captured_at")
+    observations = []
+    for raw in list(payload.get("observations") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        source_line = str(item.get("source_line") or item.get("evidence_ref") or "").strip()
+        user_confirmed = item.get("confirmed_by_user") is True
+        # Formal trend eligibility is issued at the server boundary.  Browser
+        # supplied quality_status / availability_status are ignored.
+        provenance_ready = bool(
+            user_confirmed
+            and captured_at
+            and source_label
+            and source_label != "PASTED_RUNTIME_OUTPUT"
+            and source_line
+        )
+        item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
+        item["availability_status"] = "AVAILABLE" if captured_at else "NOT_AVAILABLE"
+        item["confirmed_by_user"] = provenance_ready
+        observations.append(item)
+
     return core.save_runtime_snapshot(
         device_id,
-        list(payload.get("observations") or []),
-        source_label=str(payload.get("source_label") or "PASTED_RUNTIME_OUTPUT"),
+        observations,
+        source_label=source_label or "PASTED_RUNTIME_OUTPUT",
         raw_text=str(payload.get("raw_text") or ""),
-        captured_at=payload.get("captured_at"),
+        captured_at=captured_at,
         created_by=str(payload.get("created_by") or "Storage MVP UI"),
     )
 
