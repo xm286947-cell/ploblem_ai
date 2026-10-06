@@ -367,7 +367,7 @@ def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
 
     monkeypatch.setattr(public_knowledge, "_model_scan_source", forbidden)
     response = client.post(
-        "/api/public-knowledge/knowledge-production/extract",
+        "/api/public-knowledge/knowledge-production/extract?mode=FIXTURE_REPLAY",
         json={
             "source_id": "fixture-gd25q64e",
             "device_type": "NAND Flash",
