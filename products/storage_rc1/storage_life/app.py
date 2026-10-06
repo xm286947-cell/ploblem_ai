@@ -24,6 +24,7 @@ from .knowledge_release import KnowledgeReleaseConsumer, KnowledgeReleaseError
 from .engineering_insight import StorageEngineeringInsightService, create_engineering_insight_router
 from .skill_api import create_storage_skill_router
 from .public_knowledge import router as public_knowledge_router
+from . import public_knowledge as public_knowledge_api
 
 app = FastAPI(title="存储器件寿命知识库 MVP", version="0.8.0-rc3-runtime-rc2.1")
 engineering_insight_service = StorageEngineeringInsightService()
@@ -267,9 +268,36 @@ def product_device_assessments(device_id: str, limit: int = 20):
 @app.get("/api/product/devices/{device_id}/mvp-summary", tags=["Storage Product MVP"])
 def product_device_mvp_summary(device_id: str):
     try:
-        return product_api.device_mvp_summary(device_id)
+        result = product_api.device_mvp_summary(device_id)
     except KeyError:
         raise HTTPException(404, "器件不存在")
+
+    try:
+        pk = public_knowledge_api.status(mode="LIVE")
+    except HTTPException as exc:
+        pk = {
+            "connected": False,
+            "search_ready": False,
+            "retrieval_ready": False,
+            "source_count": 0,
+            "error_status": exc.status_code,
+        }
+
+    pk_ready = bool(pk.get("retrieval_ready"))
+    result["public_knowledge"] = {
+        **dict(result.get("public_knowledge") or {}),
+        "connected": bool(pk.get("connected")),
+        "search_ready": bool(pk.get("search_ready")),
+        "retrieval_ready": pk_ready,
+        "source_count": int(pk.get("source_count") or 0),
+    }
+    if not pk_ready:
+        remaining = list(result.get("remaining_actions") or [])
+        if "恢复 Public Knowledge 检索与公开资料源" not in remaining:
+            remaining.append("恢复 Public Knowledge 检索与公开资料源")
+        result["remaining_actions"] = remaining
+    result["mvp_ready_for_demo"] = bool(result.get("mvp_ready_for_demo")) and pk_ready
+    return result
 
 
 @app.post("/api/product/devices/{device_id}/engineering-actions/from-optimization/{assessment_id}", tags=["Storage Product MVP"])
