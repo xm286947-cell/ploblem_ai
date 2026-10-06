@@ -117,10 +117,10 @@ class ContextSearchBody(BaseModel):
 
 class ImportBody(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    content: str = Field(min_length=1)
-    classification: str
-    source_uri: str | None = None
-    media_type: str = "text/plain"
+    content: str = Field(min_length=1, max_length=25 * 1024 * 1024)
+    classification: str = Field(min_length=1, max_length=32)
+    source_uri: str | None = Field(default=None, max_length=2048)
+    media_type: str = Field(default="text/plain", min_length=1, max_length=160)
 
 
 def _public_source_uri(value: str | None) -> str | None:
