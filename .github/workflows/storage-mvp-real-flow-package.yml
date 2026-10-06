@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     env:
       STORAGE_SOURCE_SHA: 72974b17175e0aefae4e273e61aa1d5a4de8dad1
-      PUBLIC_KNOWLEDGE_SOURCE_SHA: f6e2c1ca319ab1bfdf6f07e91f6fe4a28db311cb
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: 20c2f6c1ebd07d9c6c5b240b66a10427421a2e56
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
 
@@ -128,7 +128,7 @@ jobs:
           PKR_DIR="$PKG/PUBLIC_KNOWLEDGE_SERVICE"
           mkdir -p "$PKR_DIR"
           git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
-          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA"             public_knowledge_rag             Dockerfile             compose.yaml             start.sh             stop.sh             scripts/health.sh             | tar -x -C "$PKR_DIR"
+          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA"             public_knowledge_rag             Dockerfile             compose.yaml             compose.isolated.yaml             start.sh             stop.sh             scripts             ISOLATED_VALIDATION_README.md             | tar -x -C "$PKR_DIR"
 
           cat > "$PKG/START_MACOS.command" <<'EOF'
           #!/bin/bash
@@ -175,6 +175,22 @@ jobs:
           echo Public Knowledge: http://127.0.0.1:9000
           call "%ROOT%\run_windows.bat"
           exit /b %ERRORLEVEL%
+          EOF
+
+          cat > "$PKG/START_PKR_ISOLATED.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE"
+          exec bash ./scripts/start_isolated.sh
+          EOF
+
+          cat > "$PKG/STOP_PKR_ISOLATED.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE"
+          exec bash ./scripts/stop_isolated.sh
           EOF
 
           cat > "$PKG/REAL_FLOW_README.txt" <<EOF
@@ -245,7 +261,7 @@ jobs:
           - 发现真实断点后记录现场，再回代码做最小修复
           EOF
 
-          chmod +x "$PKG/START_MACOS.command" "$PKG/run_macos.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh"
+          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
 
           cat > "$PKG/KNOWLEDGE_PRODUCTION_W4_GOLDEN_README.txt" <<'EOF'
           Storage Knowledge Production W4 Real Golden
@@ -409,8 +425,12 @@ jobs:
 
           python -m compileall -q "$PKG/storage_life" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
           bash -n "$PKG/START_MACOS.command"
+          bash -n "$PKG/START_PKR_ISOLATED.command"
+          bash -n "$PKG/STOP_PKR_ISOLATED.command"
           bash -n "$PKG/run_macos.sh"
           bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
 
           (
             cd "$PKG"
