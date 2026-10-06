@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
@@ -694,6 +694,8 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
 
     source_label = str(payload.get("source_label") or "").strip()
     captured_at = payload.get("captured_at")
+    placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
+    explicit_source = bool(source_label and source_label.upper() not in placeholder_sources)
     observations = []
     for raw in list(payload.get("observations") or []):
         if not isinstance(raw, dict):
@@ -706,8 +708,7 @@ def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, 
         provenance_ready = bool(
             user_confirmed
             and captured_at
-            and source_label
-            and source_label != "PASTED_RUNTIME_OUTPUT"
+            and explicit_source
             and source_line
         )
         item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
@@ -1203,6 +1204,8 @@ def _bind_runtime_observations(
         capture_dt = _iso_datetime(capture_time)
         if capture_time and (capture_dt is None or capture_dt.tzinfo is None):
             raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
+        if capture_dt is not None and capture_dt.astimezone(timezone.utc) > datetime.now(timezone.utc) + timedelta(minutes=5):
+            raise ValueError("RUNTIME_CAPTURE_TIME_IN_FUTURE")
         source = str(item.get("source_command_or_interface") or "").strip()
         evidence = str(item.get("evidence_ref") or item.get("raw_output_ref") or "").strip()
         placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
