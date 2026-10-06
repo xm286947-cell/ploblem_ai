@@ -6,10 +6,11 @@ the shared Knowledge Production intake and repository.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -89,14 +90,35 @@ def _safe_source_uri(value: Any) -> str | None:
         port = parsed.port
     except ValueError as exc:
         raise SuggestionError("SOURCE_URI_INVALID") from exc
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise SuggestionError("SOURCE_URI_INVALID")
+    sensitive_query_keys = {
+        "key", "api_key", "apikey", "token", "access_token", "auth",
+        "password", "secret", "credential", "signature", "sig",
+    }
+    if any(
+        str(key or "").lower() in sensitive_query_keys
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    ):
         raise SuggestionError("SOURCE_URI_INVALID")
     host = parsed.hostname.lower()
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith((".local", ".internal")):
+        raise SuggestionError("SOURCE_URI_INVALID")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise SuggestionError("SOURCE_URI_INVALID")
     host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
     authority = host_text + (f":{port}" if port is not None else "")
     query = f"?{parsed.query}" if parsed.query else ""
-    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
-    return f"{parsed.scheme.lower()}://{authority}{parsed.path or ''}{query}{fragment}"
+    return f"{parsed.scheme.lower()}://{authority}{parsed.path or ''}{query}"
 
 class PublicKnowledgeSuggestionService:
     def __init__(self, repository, *, evidence_intake, candidate_intake,
