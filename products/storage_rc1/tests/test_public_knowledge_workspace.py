@@ -35,7 +35,9 @@ def test_live_status_exposes_only_model_identity_and_safe_status(monkeypatch):
             return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
         if path == "/config":
             return {"config": {
-                "ollama_model": "qwen-text:latest",
+                "provider_type": "openai_compatible",
+                "openai_model": "GLM-5.3-Flash",
+                "ollama_model": "stale-ollama-model",
                 "credential_status": {"secret": "must not escape"},
                 "parser_status": "ready",
                 "api_key": "secret-value",
@@ -44,11 +46,34 @@ def test_live_status_exposes_only_model_identity_and_safe_status(monkeypatch):
 
     monkeypatch.setattr(public_knowledge, "_request", request)
     result = client.get("/api/public-knowledge/status?mode=LIVE").json()
-    assert result["model_name"] == "qwen-text:latest"
+    assert result["model_name"] == "GLM-5.3-Flash"
     assert result["credential_status"] == "not_reported"
     assert result["parser_status"] == "ready"
+    assert "stale-ollama-model" not in str(result)
     assert "secret" not in str(result)
     assert "api_key" not in result
+
+
+def test_live_provider_health_probes_active_provider_not_ollama(monkeypatch):
+    seen = {}
+
+    def request(mode, path, payload=None, base_url=None):
+        seen["path"] = path
+        return {
+            "status": "ok",
+            "provider": "openai_compatible",
+            "protocol": "chat_completions",
+            "model": "GLM-5.3-Flash",
+            "test_response_received": True,
+        }
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    result = client.get("/api/public-knowledge/provider-health?mode=LIVE").json()
+    assert seen["path"] == "/providers/active/health"
+    assert result["status"] == "ok"
+    assert result["provider"] == "openai_compatible"
+    assert result["model"] == "GLM-5.3-Flash"
+    assert result["test_response_received"] is True
 
 
 def test_import_rejects_non_public_before_forwarding(monkeypatch):
