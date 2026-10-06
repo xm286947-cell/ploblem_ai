@@ -394,6 +394,30 @@ def get_source(source_id: str) -> dict[str, object]:
     return result
 
 
+@app.delete("/sources/{source_id}/revisions/{revision_id}")
+def delete_source_revision(source_id: str, revision_id: str) -> dict[str, object]:
+    result = store.delete_revision(source_id, revision_id)
+    if result is None:
+        raise HTTPException(404, "Source revision not found.")
+    return {
+        **result,
+        "scope": "PUBLIC_KNOWLEDGE_SOURCE_ONLY",
+        "formal_knowledge_affected": False,
+    }
+
+
+@app.delete("/sources/{source_id}")
+def delete_source(source_id: str) -> dict[str, object]:
+    result = store.delete_source(source_id)
+    if result is None:
+        raise HTTPException(404, "Source not found.")
+    return {
+        **result,
+        "scope": "PUBLIC_KNOWLEDGE_SOURCE_ONLY",
+        "formal_knowledge_affected": False,
+    }
+
+
 @app.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
 def source_snapshot(source_id: str, revision_id: str) -> Response:
     snapshot = store.get_snapshot(source_id, revision_id)
