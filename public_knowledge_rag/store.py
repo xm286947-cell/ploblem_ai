@@ -116,6 +116,73 @@ class Store:
             revision_data.append(value)
         return {"source": dict(src), "revisions": revision_data}
 
+    def delete_revision(self, source_id: str, revision_id: str) -> dict[str, object] | None:
+        """Delete one PUBLIC source revision and its indexed chunks.
+
+        This operates only inside the Public Knowledge source store. If the last
+        revision is removed, the empty source record is removed as well.
+        """
+        with self.connect() as db:
+            exists = db.execute(
+                "SELECT 1 FROM source_revisions WHERE source_id=? AND revision_id=?",
+                (source_id, revision_id),
+            ).fetchone()
+            if not exists:
+                return None
+            chunk_count = db.execute(
+                "SELECT COUNT(*) FROM chunks WHERE source_id=? AND revision_id=?",
+                (source_id, revision_id),
+            ).fetchone()[0]
+            db.execute(
+                "DELETE FROM chunks WHERE source_id=? AND revision_id=?",
+                (source_id, revision_id),
+            )
+            db.execute(
+                "DELETE FROM source_revisions WHERE source_id=? AND revision_id=?",
+                (source_id, revision_id),
+            )
+            remaining = db.execute(
+                "SELECT COUNT(*) FROM source_revisions WHERE source_id=?",
+                (source_id,),
+            ).fetchone()[0]
+            source_deleted = remaining == 0
+            if source_deleted:
+                db.execute("DELETE FROM sources WHERE source_id=?", (source_id,))
+        return {
+            "source_id": source_id,
+            "source_revision": revision_id,
+            "deleted_revision": True,
+            "deleted_chunk_count": int(chunk_count),
+            "remaining_revision_count": int(remaining),
+            "source_deleted": source_deleted,
+        }
+
+    def delete_source(self, source_id: str) -> dict[str, object] | None:
+        """Delete a PUBLIC source, all revisions, snapshots and indexed chunks."""
+        with self.connect() as db:
+            exists = db.execute(
+                "SELECT 1 FROM sources WHERE source_id=?", (source_id,)
+            ).fetchone()
+            if not exists:
+                return None
+            revision_count = db.execute(
+                "SELECT COUNT(*) FROM source_revisions WHERE source_id=?",
+                (source_id,),
+            ).fetchone()[0]
+            chunk_count = db.execute(
+                "SELECT COUNT(*) FROM chunks WHERE source_id=?",
+                (source_id,),
+            ).fetchone()[0]
+            db.execute("DELETE FROM chunks WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM source_revisions WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM sources WHERE source_id=?", (source_id,))
+        return {
+            "source_id": source_id,
+            "deleted_source": True,
+            "deleted_revision_count": int(revision_count),
+            "deleted_chunk_count": int(chunk_count),
+        }
+
     def get_snapshot(self, source_id: str, revision_id: str) -> tuple[bytes, str, str, str] | None:
         with self.connect() as db:
             row = db.execute("SELECT snapshot_bytes,media_type,original_filename,raw_sha256 FROM source_revisions WHERE source_id=? AND revision_id=?",
