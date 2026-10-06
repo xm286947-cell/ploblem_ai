@@ -642,6 +642,7 @@ function downloadMvpSummary(){
 let RUNTIME_PARSE_RESULT=null;
 let RUNTIME_PARSED_RAW_TEXT='';
 let RUNTIME_SNAPSHOT_ID=null;
+let RUNTIME_SNAPSHOT_RECORD=null;
 let RUNTIME_TREND=null;
 function runtimeLocalInputValue(date){
   let d=date||new Date(),pad=n=>String(n).padStart(2,'0');
@@ -663,6 +664,7 @@ function renderRuntimeImportPanel(d){
   RUNTIME_PARSE_RESULT=null;
   RUNTIME_PARSED_RAW_TEXT='';
   RUNTIME_SNAPSHOT_ID=null;
+  RUNTIME_SNAPSHOT_RECORD=null;
   host.insertAdjacentHTML('beforeend',
     '<div id="runtimeImportPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME DATA INPUT</div><h3>运行数据快速导入</h3>'+
     '<div class="muted">粘贴 SMART / NVMe Health / EXT_CSD / ECC / Bit Flip / Bad Block / MTD 输出；只提取显式字段，不做诊断推测。</div></div></div>'+
@@ -677,6 +679,7 @@ function renderRuntimeImportPanel(d){
 async function parseRuntimeImport(){
   let d=CURRENT?.device,text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||'PASTED_RUNTIME_OUTPUT',box=$('#runtimeImportResult');
   RUNTIME_SNAPSHOT_ID=null;
+  RUNTIME_SNAPSHOT_RECORD=null;
   if(!d||!box)return;
   if(!text.trim())return msg('请先粘贴运行数据',true);
   box.innerHTML='<div class="card">正在识别显式运行指标…</div>';
@@ -720,6 +723,7 @@ async function saveRuntimeSnapshot(){
       })
     });
     RUNTIME_SNAPSHOT_ID=r.id||null;
+    RUNTIME_SNAPSHOT_RECORD=r;
     msg('运行快照已保存：'+(RUNTIME_SNAPSHOT_ID||'OK'));
     await loadRuntimeTrend();
     return r;
@@ -781,8 +785,11 @@ async function loadRuntimeTrend(){
 function parsedObservation(index){return (RUNTIME_PARSE_RESULT?.observations||[])[index]||null}
 function parsedRuntimeObservationPayload(x,d,index){
   let source=$('#runtimeImportSource')?.value.trim()||'',capturedAt=runtimeCaptureIso(),confirmed=runtimeImportConfirmed();
+  let stored=(RUNTIME_SNAPSHOT_RECORD?.observations||[]).find(o=>o.metric_name===x.metric_name&&String(o.raw_value??'')===String(x.raw_value??''))||
+    (RUNTIME_SNAPSHOT_RECORD?.observations||[]).find(o=>o.metric_name===x.metric_name);
+  let snapshotRef=RUNTIME_SNAPSHOT_ID?('runtime-snapshot:'+RUNTIME_SNAPSHOT_ID+(stored?.id?':'+stored.id:'')):null;
   return {
-    observation_id:'runtime-import-'+Date.now()+'-'+index,
+    observation_id:stored?.id||('runtime-import-'+Date.now()+'-'+index),
     device_id:d.id,
     device_type:d.device_type,
     metric_name:x.metric_name,
@@ -791,11 +798,11 @@ function parsedRuntimeObservationPayload(x,d,index){
     unit:x.unit||'',
     capture_time:capturedAt,
     source_command_or_interface:source||null,
-    raw_output_ref:x.source_line||source||null,
-    evidence_ref:x.source_line||null,
-    collector:'STORAGE_MVP_RUNTIME_IMPORT',
-    confirmed_by_user:confirmed,
-    quality_status:confirmed?'VALID':'UNKNOWN',
+    raw_output_ref:snapshotRef||x.source_line||source||null,
+    evidence_ref:snapshotRef||null,
+    collector:'STORAGE_MVP_RUNTIME_SNAPSHOT',
+    confirmed_by_user:confirmed&&!!snapshotRef,
+    quality_status:confirmed&&snapshotRef?'VALID':'UNKNOWN',
     availability_status:capturedAt?'AVAILABLE':'NOT_AVAILABLE'
   };
 }
@@ -810,8 +817,12 @@ async function executeParsedHealthAnalysis(){
   if(!runtimeCaptureIso())return msg('请填写有效的实际采集时间',true);
   box.innerHTML='<div class="card">正在保存运行快照并执行健康分析：寿命 '+lifeItems.length+' 项 · 诊断 '+diagItems.length+' 项…</div>';
   if(!RUNTIME_SNAPSHOT_ID){
-    try{await saveRuntimeSnapshot()}catch(e){box.insertAdjacentHTML('beforeend','<div class="warning card"><b>快照未保存</b><p>'+esc(e.message)+'</p><small>本次分析仍继续，但不会进入运行趋势。</small></div>')}
+    try{await saveRuntimeSnapshot()}catch(e){
+      box.innerHTML='<div class="danger card"><b>运行快照未保存，健康分析已停止</b><p>'+esc(e.message)+'</p><small>粘贴数据必须先形成可追溯 Runtime Snapshot，禁止在原始采集未落盘时生成正式寿命/诊断结果。</small></div>';
+      return;
+    }
   }
+  if(!RUNTIME_SNAPSHOT_ID)return msg('运行快照尚未保存，不能执行正式健康分析',true);
   let diagnosis=null,lifeResults=[];
   if(diagItems.length){
     try{
@@ -873,6 +884,10 @@ async function executeParsedBatchDiagnosis(){
   if(!items.length)return msg('当前运行数据没有可诊断指标',true);
   if(!requireCurrentRuntimeParse())return;
   if(!runtimeImportConfirmed())return msg('请先确认运行数据来源和实际采集时间',true);
+  if(!RUNTIME_SNAPSHOT_ID){
+    try{await saveRuntimeSnapshot()}catch(e){return msg('运行快照未保存，批量诊断已停止：'+e.message,true)}
+  }
+  if(!RUNTIME_SNAPSHOT_ID)return msg('运行快照尚未保存，不能执行正式批量诊断',true);
   let observations=items.map((x,i)=>parsedRuntimeObservationPayload(x,d,'B'+i));
   box.innerHTML='<div class="card">正在用 Existing Diagnostic Skill 分析 '+items.length+' 个运行指标…</div>';
   try{
