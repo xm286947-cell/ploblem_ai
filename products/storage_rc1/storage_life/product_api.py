@@ -1715,6 +1715,103 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
     }
 
 
+def persist_engineering_actions_from_optimization(
+    device_id: str,
+    assessment_id: str,
+    *,
+    updated_by: str = "Storage MVP UI",
+) -> dict[str, Any]:
+    """Persist the exact S5 plan the user already reviewed.
+
+    The plan is not re-generated here.  This prevents "save" from silently
+    executing the write-governance Skill a second time and changing the plan
+    that the user just saw.
+    """
+    assessment = core.get_device_assessment(assessment_id)
+    if assessment.get("device_id") != device_id:
+        raise ValueError("OPTIMIZATION_ASSESSMENT_DEVICE_MISMATCH")
+    if str(assessment.get("assessment_type") or "").upper() != "OPTIMIZATION":
+        raise ValueError("OPTIMIZATION_ASSESSMENT_REQUIRED")
+
+    summary = device_mvp_summary(device_id)
+    s5 = next(
+        (x for x in (summary.get("scenarios") or []) if x.get("type") == "OPTIMIZATION"),
+        None,
+    )
+    if (
+        not s5
+        or s5.get("assessment_id") != assessment_id
+        or not bool(s5.get("complete"))
+    ):
+        raise ValueError("OPTIMIZATION_ASSESSMENT_STALE_OR_INCOMPLETE")
+
+    result = assessment.get("result") or {}
+    skill = result.get("skill_result") or {}
+    structured = skill.get("structured_result") or {}
+    controls = [str(x) for x in (structured.get("engineering_control_options") or []) if str(x).strip()]
+    validation = [str(x) for x in (structured.get("suggested_validation") or []) if str(x).strip()]
+    missing = [str(x) for x in (skill.get("missing_information") or []) if str(x).strip()]
+    if not controls and not validation:
+        raise ValueError("OPTIMIZATION_ACTIONS_EMPTY")
+
+    recorded_input = assessment.get("input") or {}
+    chain_context = dict((recorded_input.get("user_context") or {}).get("assessment_context") or {})
+    upstream_ids = [
+        str((chain_context.get("latest_lifetime") or {}).get("assessment_id") or "").strip(),
+        str((chain_context.get("latest_diagnosis") or {}).get("assessment_id") or "").strip(),
+    ]
+    upstream_ids = [x for x in upstream_ids if x]
+
+    evidence_refs = {str(x) for x in (skill.get("evidence_refs") or []) if str(x)}
+    knowledge_refs = {str(x) for x in (skill.get("knowledge_refs") or []) if str(x)}
+    for upstream_id in upstream_ids:
+        try:
+            upstream = core.get_device_assessment(upstream_id)
+        except KeyError:
+            raise ValueError("UPSTREAM_ASSESSMENT_NOT_FOUND")
+        if upstream.get("device_id") != device_id:
+            raise ValueError("UPSTREAM_ASSESSMENT_DEVICE_MISMATCH")
+        upstream_skill = ((upstream.get("result") or {}).get("skill_result") or {})
+        evidence_refs.update(str(x) for x in (upstream_skill.get("evidence_refs") or []) if str(x))
+        knowledge_refs.update(str(x) for x in (upstream_skill.get("knowledge_refs") or []) if str(x))
+        structured_upstream = upstream_skill.get("structured_result") or {}
+        for obs in structured_upstream.get("current_observation") or []:
+            if not isinstance(obs, dict):
+                continue
+            ref = str(obs.get("evidence_ref") or obs.get("raw_output_ref") or "").strip()
+            if ref:
+                evidence_refs.add(ref)
+
+    action_rows = [
+        {"action_type": "SOFTWARE_CONTROL", "title": x, "detail": x}
+        for x in controls
+    ] + [
+        {"action_type": "TEST_VALIDATION", "title": x, "detail": x}
+        for x in validation
+    ]
+    action_rows.extend(
+        {"action_type": "FOLLOW_UP", "title": x, "detail": x}
+        for x in missing
+    )
+
+    checklist = core.create_engineering_actions(
+        device_id,
+        assessment_id,
+        action_rows,
+        evidence_refs=sorted(evidence_refs),
+        knowledge_refs=sorted(knowledge_refs),
+        source_assessment_ids=upstream_ids,
+        created_by=updated_by,
+    )
+    return {
+        "device_id": device_id,
+        "optimization_assessment_id": assessment_id,
+        "action_persistence_status": "PERSISTED",
+        "action_checklist": checklist,
+        "reexecuted_skill": False,
+    }
+
+
 def engineering_action_checklist(device_id: str) -> dict[str, Any]:
     devices = {x["id"]: x for x in core.list_devices()}
     if device_id not in devices:
