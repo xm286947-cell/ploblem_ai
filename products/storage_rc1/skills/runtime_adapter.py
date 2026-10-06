@@ -241,12 +241,25 @@ class StorageDomainSkillAdapter:
         question = " ".join(x for x in query_parts if x.strip())
         knowledge = self.query_pack("PACK_WRITE_GOVERNANCE", question, device_type=device_type)
         items = knowledge.get("items") or []
-        mechanisms = [_text(x) for x in items if _text(x)]
+        mechanisms = [
+            _text(x) for x in items
+            if x.get("canonical_object_type") in {"KnowledgeFact", "TechnicalConcept"} and _text(x)
+        ]
         controls = [
             _text(x) for x in items
             if x.get("canonical_object_type") in {"TechnicalSolution", "SoftwareRequirementKnowledge"} and _text(x)
         ]
+        validation = [
+            _text(x) for x in items
+            if x.get("canonical_object_type") == "DiagnosticMethod" and _text(x)
+        ]
+        # Keep control and validation semantics separate.  If the current
+        # release has engineering controls but no explicit DiagnosticMethod,
+        # do not copy the same control text into TEST_VALIDATION; surface the
+        # missing validation method instead so S5 remains reviewable/fail-closed.
         missing = list(knowledge.get("missing_information") or [])
+        if controls and not validation:
+            missing.append("EXPLICIT_TEST_VALIDATION_METHOD_NOT_FOUND")
         status = "ANSWERED" if items else "INSUFFICIENT_KNOWLEDGE"
         answer = (
             "已基于正式知识与证据给出写入机制、工程控制与验证关注点。"
@@ -262,7 +275,7 @@ class StorageDomainSkillAdapter:
                 "engineering_control_options": controls,
                 "conditions_and_limits": [str(x.get("limitations") or []) for x in items if x.get("limitations")],
                 "missing_information": missing,
-                "suggested_validation": controls,
+                "suggested_validation": validation,
                 "evidence_refs": knowledge.get("evidence_refs") or [],
                 "confidence_basis": ["FORMAL_KNOWLEDGE_RELEASE", "EVIDENCE_TRACEABLE"] if items else [],
                 "review_roles": ["Storage Engineering", "Software", "Test"],
