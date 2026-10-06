@@ -889,9 +889,12 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
             elif not chain_current:
                 complete = False
                 next_action = "基于最新 S3 寿命结果和 S4 诊断结果重新生成综合优化方案。"
-            elif status in completed_statuses and not controls and not validation:
+            elif status in completed_statuses and not controls:
                 complete = False
-                next_action = "当前优化结果没有形成可执行工程控制或验证动作；补充软件行为/风险上下文后重新生成。"
+                next_action = "当前优化结果没有形成可执行软件控制；补充软件行为/风险上下文或正式知识后重新生成。"
+            elif status in completed_statuses and not validation:
+                complete = False
+                next_action = "当前优化结果缺少独立测试/验证方法；补齐 DiagnosticMethod / 验证知识后重新生成，不能把软件控制项复制成测试项。"
         elif kind == "DIAGNOSIS":
             current_observation = structured.get("current_observation") or []
             diagnosis_status = str(structured.get("diagnosis_status") or "")
@@ -1640,7 +1643,8 @@ def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None
         and diagnosis
         and software_behavior
         and str(skill.get("status") or "").upper() == "ANSWERED"
-        and (controls or validation_actions)
+        and controls
+        and validation_actions
     )
     combined_evidence_refs = sorted({
         str(ref)
