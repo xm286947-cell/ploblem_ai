@@ -6,7 +6,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -2097,7 +2097,10 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
         raise ValueError("RUNTIME_CAPTURE_TIME_INVALID") from exc
     if captured_dt.tzinfo is None:
         raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
-    captured_at = captured_dt.astimezone(timezone.utc).isoformat()
+    captured_utc = captured_dt.astimezone(timezone.utc)
+    if captured_utc > datetime.now(timezone.utc) + timedelta(minutes=5):
+        raise ValueError("RUNTIME_CAPTURE_TIME_IN_FUTURE")
+    captured_at = captured_utc.isoformat()
     source_label = str(source_label or "").strip()[:500]
     placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
     raw_text = str(raw_text or "")
