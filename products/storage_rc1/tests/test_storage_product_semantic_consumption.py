@@ -15,6 +15,9 @@ class _ProductKnowledgeConsumer:
             "knowledge_release_version": "KP-SEMANTIC-001",
         }
 
+    def has_reviewed_storage_knowledge(self, *, device_type=""):
+        return self.reviewed_model
+
     def query(
         self,
         text,
@@ -131,7 +134,8 @@ def test_product_formal_knowledge_keeps_legacy_release_compatibility(
     )
 
     assert result["status"] == "MATCHED"
-    assert result["selection_mode"] == "LEGACY_FORMAL_COMPATIBILITY"
+    assert result["selection_mode"] == "TEXT_AND_DEVICE"
+    assert result["compatibility_mode"] == "LEGACY_FORMAL_COMPATIBILITY"
     assert [row["object_id"] for row in result["results"]] == [
         "KO-LEGACY"
     ]
