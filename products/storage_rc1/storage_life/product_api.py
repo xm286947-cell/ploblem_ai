@@ -1062,7 +1062,16 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
                 remaining.append(f"{item['label']} 尚未形成可完成结果：{item['status']}")
     action_items = core.list_engineering_actions(device_id)
     from skills.real_knowledge import RealKnowledgeAssessmentService
-    knowledge_readiness = RealKnowledgeAssessmentService.current().readiness()
+    try:
+        knowledge_readiness = RealKnowledgeAssessmentService.current().readiness()
+    except Exception as exc:
+        # Summary remains usable when the Formal Knowledge package is missing or
+        # unreadable, but readiness must fail closed and expose the content/runtime gap.
+        knowledge_readiness = {
+            "knowledge_release": {"status": "UNAVAILABLE", "code": str(exc)},
+            "formal_knowledge_object_count": 0,
+            "packs": {},
+        }
     required_packs = {
         "S2": "PACK_CHANGE_IMPACT",
         "S3": "PACK_LIFETIME_ENGINEERING",
@@ -1074,14 +1083,15 @@ def device_mvp_summary(device_id: str) -> dict[str, Any]:
     readiness_packs = knowledge_readiness.get("packs") or {}
     for scenario_id, pack_id in required_packs.items():
         row = dict(readiness_packs.get(pack_id) or {})
+        pack_status = row.get("status") or "UNAVAILABLE"
         pack_rows[scenario_id] = {
             "pack_id": pack_id,
-            "status": row.get("status") or "UNKNOWN",
+            "status": pack_status,
             "formal_knowledge_object_count": row.get("formal_knowledge_object_count") or 0,
             "missing_critical_knowledge": list(row.get("missing_critical_knowledge") or []),
             "recommended_next_owner": row.get("recommended_next_owner"),
         }
-        if str(row.get("status") or "").upper() in {"BLOCKED", "PARTIAL"}:
+        if str(pack_status).upper() in {"BLOCKED", "PARTIAL", "UNAVAILABLE", "UNKNOWN"}:
             content_blockers.append({
                 "scenario": scenario_id,
                 "pack_id": pack_id,
