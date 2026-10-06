@@ -48,13 +48,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Require real provider configuration
+      - name: Record real provider configuration availability
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$DASHSCOPE_BASE_URL" || { echo "::error::DASHSCOPE_BASE_URL is not configured"; exit 2; }
-          test -n "$DASHSCOPE_API_KEY" || { echo "::error::DASHSCOPE_API_KEY is not configured"; exit 2; }
-          echo "REAL_PROVIDER_CONFIG=AVAILABLE"
+          if [ -n "$DASHSCOPE_BASE_URL" ] && [ -n "$DASHSCOPE_API_KEY" ]; then
+            echo "REAL_PROVIDER_CONFIG=AVAILABLE"
+          else
+            echo "::warning::Real Provider configuration is unavailable; W4 will continue through real source/import/model-scan and fail closed before extraction."
+            echo "REAL_PROVIDER_CONFIG=UNAVAILABLE"
+          fi
 
       - name: Install existing product runtime dependencies
         shell: bash
@@ -176,24 +179,34 @@ jobs:
           PY
 
       - name: Knowledge Production real-provider preflight
+        id: provider_preflight
         shell: bash
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error             http://127.0.0.1:8765/api/product/knowledge-production/provider-status             | tee "$RUNNER_TEMP/provider-status.json"
-          python - <<'PY'
+          READY="$(python - <<'PY'
           import json, os, pathlib
           d=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"provider-status.json").read_text())
-          assert d.get("configured") is True, d
-          assert d.get("execution_ready") is True, d
-          assert d.get("credential_present") is True, d
-          assert d.get("model_ref") == "qwen_prod", d
-          assert d.get("transport_status") == "REACHABLE", d
-          print("PROVIDER_PREFLIGHT=PASS")
-          print("PROVIDER="+str(d.get("provider")))
-          print("MODEL="+str(d.get("model")))
+          ready=(
+              d.get("configured") is True
+              and d.get("execution_ready") is True
+              and d.get("credential_present") is True
+              and d.get("model_ref") == "qwen_prod"
+              and d.get("transport_status") == "REACHABLE"
+          )
+          print("yes" if ready else "no")
           PY
+          )"
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          if [ "$READY" = "yes" ]; then
+            echo "PROVIDER_PREFLIGHT=PASS"
+          else
+            echo "PROVIDER_PREFLIGHT=BLOCKED"
+            python -m json.tool "$RUNNER_TEMP/provider-status.json"
+          fi
 
       - name: Existing Knowledge Production extraction from exact Public revision
+        if: steps.provider_preflight.outputs.ready == 'yes'
         shell: bash
         run: |
           set -euo pipefail
@@ -226,6 +239,7 @@ jobs:
           PY
 
       - name: Capture Candidate and Evidence for human semantic review
+        if: steps.provider_preflight.outputs.ready == 'yes'
         shell: bash
         env:
           PYTHONPATH: ${{ github.workspace }}/products/storage_rc1:${{ github.workspace }}:${{ github.workspace }}/.runtime-pinned
@@ -294,32 +308,59 @@ jobs:
           done
 
       - name: W4 Phase 1 decision
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.w4-evidence"
+          for f in import.json model-scan.json provider-status.json extract.json source.sha256; do
+            if [ -f "$RUNNER_TEMP/$f" ]; then
+              cp "$RUNNER_TEMP/$f" "$GITHUB_WORKSPACE/.w4-evidence/$f"
+            fi
+          done
           {
             echo "TASK=STORAGE-KNOWLEDGE-PRODUCTION-W4-REAL-GOLDEN-001"
             echo "PHASE=W4-A1_REAL_CANDIDATE"
-            echo "REAL_SOURCE=YES"
-            echo "PUBLIC_KNOWLEDGE_IMPORT=PASS"
-            echo "MODEL_SCAN=PASS"
-            echo "MODEL_EVIDENCE_ANCHOR=PASS"
-            echo "PROVIDER_PREFLIGHT=PASS"
-            echo "EXISTING_KP_REUSED=YES"
-            echo "CANDIDATE_CREATED=YES"
-            echo "EVIDENCE_TRACEABLE=YES"
-            echo "PARAMETER_BINDING_REVIEWABLE=YES"
+            echo "REAL_SOURCE=$([ -f "$RUNNER_TEMP/source.sha256" ] && echo YES || echo NO)"
+            echo "PUBLIC_KNOWLEDGE_IMPORT=$([ -f "$RUNNER_TEMP/import.json" ] && echo PASS || echo NOT_RUN)"
+            echo "MODEL_SCAN=$([ -f "$RUNNER_TEMP/model-scan.json" ] && echo PASS || echo NOT_RUN)"
+            echo "MODEL_EVIDENCE_ANCHOR=$([ -f "$RUNNER_TEMP/model-scan.json" ] && echo PASS || echo NOT_RUN)"
+            if [ "${{ steps.provider_preflight.outputs.ready }}" = "yes" ]; then
+              echo "PROVIDER_PREFLIGHT=PASS"
+              echo "EXISTING_KP_REUSED=$([ -f "$RUNNER_TEMP/extract.json" ] && echo YES || echo NO)"
+              echo "CANDIDATE_CREATED=$([ -f "$RUNNER_TEMP/extract.json" ] && echo YES || echo NO)"
+              echo "NEXT=HUMAN_SEMANTIC_REVIEW"
+            else
+              echo "PROVIDER_PREFLIGHT=BLOCKED"
+              echo "EXISTING_KP_REUSED=NOT_RUN"
+              echo "CANDIDATE_CREATED=NOT_RUN"
+              echo "NEXT=CONFIGURE_EXISTING_QWEN_PROVIDER_AND_RERUN_W4_A1"
+            fi
             echo "FORMAL_KNOWLEDGE_PUBLISHED=NO"
-            echo "NEXT=HUMAN_SEMANTIC_REVIEW"
           } | tee "$GITHUB_WORKSPACE/.w4-evidence/RESULT.txt"
 
-      - name: Upload real W4 review evidence
+      - name: Upload real W4 review evidence and production repository
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: storage-w4-real-golden-human-review
-          path: ${{ github.workspace }}/.w4-evidence
-          if-no-files-found: error
+          path: |
+            ${{ github.workspace }}/.w4-evidence
+            ${{ github.workspace }}/.w4-runtime/kp-repository
+          if-no-files-found: warn
           retention-days: 30
+
+      - name: Enforce W4 Phase 1 outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.provider_preflight.outputs.ready }}" != "yes" ]; then
+            echo "::error::W4 blocked at existing Knowledge Production Provider preflight."
+            exit 2
+          fi
+          test -f "$RUNNER_TEMP/extract.json" || { echo "::error::W4 extraction did not produce a result."; exit 3; }
+          echo "W4_A1=READY_FOR_HUMAN_SEMANTIC_REVIEW"
 
       - name: Dump service logs on failure
         if: failure()
