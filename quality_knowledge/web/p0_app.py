@@ -413,6 +413,12 @@ def create_p0_app(
         repeat_web = None
         app.state.repeat_risk_service = None
 
+    # Operability /ready is mounted before the Hardware Knowledge binding is
+    # fully composed.  Keep a shared live status mapping so the route reports
+    # the actual in-process LOCAL_NON_PROD state instead of requiring external
+    # Knowledge URLs that are intentionally absent in the E2E profile.
+    hardware_operability_knowledge_status: dict[str, Any] = {}
+
     if "HARDWARE_CASE" in domains and hardware_startup_status is not None and not hardware_startup_status.get("ready"):
         hardware_db = (
             Path(hardware_case_db_path)
@@ -424,6 +430,7 @@ def create_p0_app(
                 project_root=root,
                 hardware_db_path=hardware_db,
                 startup_status=hardware_startup_status,
+                knowledge_status=hardware_operability_knowledge_status,
             )
         )
         app.state.hardware_data_reliability = None
@@ -664,8 +671,17 @@ def create_p0_app(
                     "mode": "EXTERNAL_OR_INJECTED",
                     "managed_release": False,
                     "release_version": knowledge_release_version or None,
+                    "code": (
+                        None
+                        if effective_knowledge_adapter is not None
+                        else "KNOWLEDGE_CONFIG_REQUIRED"
+                    ),
                 }
             app.state.hardware_r1_knowledge_environment_status = (
+                hardware_r1_knowledge_environment_status
+            )
+            hardware_operability_knowledge_status.clear()
+            hardware_operability_knowledge_status.update(
                 hardware_r1_knowledge_environment_status
             )
             if effective_knowledge_adapter is not None:
