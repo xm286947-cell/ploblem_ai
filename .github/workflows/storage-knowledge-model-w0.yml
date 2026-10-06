@@ -1,4 +1,4 @@
-name: Storage Knowledge Model W0
+name: Storage Knowledge Model W0-W1
 
 on:
   push:
@@ -8,6 +8,8 @@ on:
       - "products/storage_rc1/config/storage_lifetime_knowledge_model.yaml"
       - "products/storage_rc1/storage_life/knowledge_model.py"
       - "products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py"
+      - "products/storage_rc1/storage_life/public_knowledge.py"
+      - "products/storage_rc1/tests/test_public_knowledge_workspace.py"
       - ".github/workflows/storage-knowledge-model-w0.yml"
 
 permissions:
@@ -25,11 +27,15 @@ jobs:
           python-version: "3.12"
 
       - name: Install focused dependencies
-        run: python -m pip install -q pytest PyYAML fastapi pydantic jsonschema httpx
+        run: python -m pip install -q -r products/storage_rc1/requirements.txt
 
       - name: Validate model and focused tests
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
         run: |
-          python -m py_compile products/storage_rc1/storage_life/knowledge_model.py
+          python -m py_compile \
+            products/storage_rc1/storage_life/knowledge_model.py \
+            products/storage_rc1/storage_life/public_knowledge.py
           python -m pytest -q products/storage_rc1/tests/test_storage_lifetime_knowledge_model.py
+          python -m pytest -q products/storage_rc1/tests/test_public_knowledge_workspace.py \
+            -k "model_scan_uses_frozen_storage_model_and_source_filter or model_scan_rejects_unknown_parameter_before_search"
