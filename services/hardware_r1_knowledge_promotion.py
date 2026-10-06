@@ -637,6 +637,20 @@ class HardwareR1KnowledgePromotionService:
             raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
         return item, asset, evidence_ids
 
+    def _workbench_item(self, item_id: str) -> dict[str, Any]:
+        """Resolve a durable promotion's origin through the Workbench service API."""
+        item_key = str(item_id or "").strip()
+        if not item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        try:
+            item = self.workbench.get_item(item_key)
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "BATCH_ITEM_NOT_FOUND")
+            raise HardwareR1PromotionError(code) from error
+        if not isinstance(item, dict) or str(item.get("item_id") or "") != item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        return item
+
     @staticmethod
     def _promotion_view(record: Mapping[str, Any], evidence_ids: list[str]) -> dict[str, Any]:
         return {
@@ -1170,8 +1184,18 @@ class HardwareR1KnowledgePromotionService:
             return self._reconcile_publish(item, asset, evidence_ids, record, entry)
         raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
 
-    def reconcile_startup(self, *, max_remote_queries: int = 2) -> dict[str, Any]:
-        """Use a bounded read-only reconciliation budget during app startup."""
+    def reconcile_startup(
+        self,
+        *,
+        max_remote_queries: int = 2,
+        prepare_publication_query: Any | None = None,
+    ) -> dict[str, Any]:
+        """Use a bounded read-only reconciliation budget during app startup.
+
+        LOCAL_NON_PROD callers may provide a release refresher.  It is invoked
+        only immediately before reconciling a pending PUBLISH operation so the
+        read-only publication lookup sees the latest immutable release.
+        """
         budget = max(0, min(int(max_remote_queries), 4))
         try:
             entries = self.operation_journal.list_nonterminal()
@@ -1205,6 +1229,8 @@ class HardwareR1KnowledgePromotionService:
                     continue
                 item_id = str(promotion_record.get("origin_item_id") or "")
                 item = self._workbench_item(item_id)
+                if prepare_publication_query is not None:
+                    prepare_publication_query()
                 evidence_ids = [
                     str(value.get("evidence_id") or "")
                     for value in asset.get("evidence_refs") or []

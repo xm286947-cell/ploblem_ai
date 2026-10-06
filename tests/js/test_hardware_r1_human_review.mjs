@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 
 const sourcePath = fileURLToPath(
@@ -134,4 +135,143 @@ test('ambiguous publish exposes explicit reconciliation and never republishes', 
   assert.match(reconcileBlock, /promotion\/reconcile/);
   assert.match(reconcileBlock, /不会再次发起“发布正式知识”/);
   assert.doesNotMatch(reconcileBlock, /promotion\/publish/);
+});
+
+test('pending PUBLISH API state reveals reconciliation and disables unsafe actions', async () => {
+  class FakeElement {
+    constructor() {
+      this.dataset = {};
+      this.textContent = '';
+      this.innerHTML = '';
+      this.hidden = false;
+      this.disabled = false;
+      this.value = '';
+      this.listeners = {};
+      this.classList = {toggle() {}, add() {}, remove() {}};
+      this.strongs = [];
+    }
+
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    }
+
+    querySelectorAll(selector) {
+      return selector === 'strong' ? this.strongs : [];
+    }
+
+    scrollIntoView() {}
+  }
+
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector)) elements.set(selector, new FakeElement());
+    return elements.get(selector);
+  };
+  element('[data-batch-summary]').strongs = Array.from(
+    {length: 6},
+    () => new FakeElement()
+  );
+  const item = {
+    item_id: 'I1',
+    batch_id: 'B1',
+    business_case_id: 'A0152',
+    source_file: 'A0152-demo.docx',
+    parse: 'PASS',
+    stage_a: 'PASS',
+    stage_b: 'PASS',
+    gate: 'PASS',
+    result: 'CANDIDATE_READY',
+    orchestration_status: 'CANDIDATE_READY',
+    candidate_id: 'C1',
+    candidate: null,
+  };
+  const promotion = {
+    status: 'REVIEW_CONFIRMED',
+    reconciliation_required: true,
+    reconciliation_operation_type: 'PUBLISH',
+    reconciliation_error_code: 'PUBLISH_RECONCILIATION_REQUIRED',
+  };
+  const requests = [];
+  const response = (payload) => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    async json() { return payload; },
+  });
+  const fetch = async (url, options = {}) => {
+    const method = String(options.method || 'GET').toUpperCase();
+    requests.push({url, method});
+    if (url.endsWith('/batches?limit=50')) {
+      return response({items: [{batch_id: 'B1', status: 'READY_FOR_REVIEW'}]});
+    }
+    if (url.endsWith('/batches/B1')) {
+      return response({
+        batch_id: 'B1',
+        status: 'READY_FOR_REVIEW',
+        summary: {TOTAL: 1, QUEUED: 0, RUNNING: 0, CANDIDATE_READY: 1, REVIEW: 0, FAILED: 0},
+        items: [item],
+      });
+    }
+    if (url.endsWith('/items/I1') && method === 'GET') return response(item);
+    if (url.endsWith('/items/I1/promotion') && method === 'GET') {
+      return response(promotion);
+    }
+    if (url.endsWith('/items/I1/promotion/reconcile') && method === 'POST') {
+      return response({status: 'PUBLISHED_PENDING_QUERY_BACK', reconciled: true});
+    }
+    throw new Error('Unexpected request: ' + method + ' ' + url);
+  };
+  const root = new FakeElement();
+  root.dataset.api = '/api/v2/hardware-cases/r1/workbench';
+  root.querySelector = element;
+  root.querySelectorAll = () => [];
+  const windowObject = {
+    location: {href: 'http://localhost/p0/hardware-cases/knowledge-production?batch=B1&item=I1'},
+    history: {replaceState() {}},
+    scrollY: 0,
+    confirm: () => true,
+    setInterval() { return 1; },
+    clearInterval() {},
+  };
+  const context = vm.createContext({
+    window: windowObject,
+    document: {
+      querySelector: (selector) => selector === '[data-r1-workbench]' ? root : null,
+    },
+    fetch,
+    URL,
+    URLSearchParams,
+    encodeURIComponent,
+    FormData: class {},
+    console,
+    setTimeout,
+    clearTimeout,
+  });
+  vm.runInContext(source, context, {filename: sourcePath});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(element('[data-promotion-reconciliation]').hidden, false);
+  assert.match(
+    element('[data-promotion-status]').textContent,
+    /PUBLISH_RECONCILIATION_REQUIRED/
+  );
+  assert.match(
+    element('[data-promotion-reconciliation-detail]').textContent,
+    /不会再次发起发布/
+  );
+  assert.equal(element('[data-promotion-reconcile]').disabled, false);
+  assert.equal(element('[data-promotion-publish]').disabled, true);
+  assert.equal(element('[data-promotion-verify]').disabled, true);
+  assert.equal(element('[data-project-consumption]').disabled, true);
+
+  await element('[data-promotion-reconcile]').listeners.click();
+  assert.equal(
+    requests.filter(({url, method}) => method === 'POST' && url.endsWith('/promotion/reconcile')).length,
+    1
+  );
+  assert.equal(
+    requests.filter(({url}) => url.endsWith('/promotion/publish')).length,
+    0
+  );
 });

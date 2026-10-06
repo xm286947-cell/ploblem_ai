@@ -715,9 +715,14 @@ def create_p0_app(
                 else:
                     try:
                         remote_recovery = hardware_r1_promotion_service.reconcile_startup(
-                            max_remote_queries=2
+                            max_remote_queries=2,
+                            prepare_publication_query=(
+                                managed_nonprod_release_controller.ensure_queryable_release
+                                if managed_nonprod_release_controller is not None
+                                else None
+                            ),
                         )
-                    except HardwareR1PromotionError as error:
+                    except (HardwareR1PromotionError, HardwareR1ManagedNonProdError) as error:
                         remote_recovery = {
                             "pending_remote_reconciliation_count": 0,
                             "blocked_asset_count": 0,
