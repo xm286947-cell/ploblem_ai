@@ -2054,16 +2054,31 @@ def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text=
             continue
         raw_value = item.get("raw_value")
         normalized = item.get("normalized_value", raw_value)
+        source_line = str(item.get("source_line") or item.get("evidence_ref") or "").strip()[:4000]
+        requested_quality = str(item.get("quality_status") or "UNKNOWN").upper()
+        requested_availability = str(item.get("availability_status") or "NOT_AVAILABLE").upper()
+        if requested_quality not in {"VALID", "INVALID", "UNKNOWN"}:
+            requested_quality = "UNKNOWN"
+        if requested_availability not in {"AVAILABLE", "NOT_AVAILABLE", "NOT_SUPPORTED", "STALE", "INVALID"}:
+            requested_availability = "NOT_AVAILABLE"
+        requested_confirmed = item.get("confirmed_by_user") is True
+        evidence_ready = bool(source_label and source_line)
+        formal_confirmed = bool(
+            requested_confirmed
+            and evidence_ready
+            and requested_quality == "VALID"
+            and requested_availability == "AVAILABLE"
+        )
         rows_to_save.append({
             "id": uuid4().hex,
             "metric_name": metric_name,
             "raw_value": "" if raw_value is None else str(raw_value),
             "normalized_value": "" if normalized is None else str(normalized),
             "unit": str(item.get("unit") or ""),
-            "source_line": str(item.get("source_line") or item.get("evidence_ref") or "")[:4000],
-            "quality_status": str(item.get("quality_status") or "UNKNOWN").upper(),
-            "availability_status": str(item.get("availability_status") or "NOT_AVAILABLE").upper(),
-            "confirmed_by_user": 1 if item.get("confirmed_by_user") is True else 0,
+            "source_line": source_line,
+            "quality_status": requested_quality if formal_confirmed or requested_quality == "INVALID" else "UNKNOWN",
+            "availability_status": requested_availability if evidence_ready else "NOT_AVAILABLE",
+            "confirmed_by_user": 1 if formal_confirmed else 0,
             "ordinal": index,
         })
     if not rows_to_save:
@@ -2134,6 +2149,8 @@ def runtime_metric_trends(device_id, limit=40):
                 str(obs.get("quality_status") or "").upper() == "VALID"
                 and str(obs.get("availability_status") or "").upper() == "AVAILABLE"
                 and int(obs.get("confirmed_by_user") or 0) == 1
+                and str(batch.get("source_label") or "").strip()
+                and str(obs.get("source_line") or "").strip()
             )
             if formally_consumable:
                 batch_has_formal = True
@@ -2182,9 +2199,16 @@ def runtime_metric_trends(device_id, limit=40):
             "delta": delta,
             "points": points[-12:],
         })
+    formal_batch_ids = {
+        str(point.get("batch_id"))
+        for item in result
+        for point in (item.get("points") or [])
+        if point.get("formally_consumable") and point.get("batch_id")
+    }
     return {
         "device_id": device_id,
         "snapshot_count": len(snapshots),
+        "formal_snapshot_count": len(formal_batch_ids),
         "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
         "latest_formal_capture_time": latest_formal_capture_time,
         "metrics": result,
