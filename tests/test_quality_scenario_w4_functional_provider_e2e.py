@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -113,7 +114,20 @@ def test_w4_controlled_provider_runs_g1_through_publish_and_portraits(tmp_path, 
         )
         assert started.status_code == 200, started.text
         task = wait_task(client, started.json()["task_id"])
-        assert task["items"][0]["state"] == "CANDIDATE_CREATED", task
+        if task["items"][0]["state"] != "CANDIDATE_CREATED":
+            rq_db = tmp_path / "reverse_quality_v01.db"
+            diagnostic = []
+            if rq_db.exists():
+                with sqlite3.connect(rq_db) as connection:
+                    connection.row_factory = sqlite3.Row
+                    diagnostic = [
+                        dict(row) for row in connection.execute(
+                            "SELECT run_id,status,error,model FROM reverse_quality_run ORDER BY started_at"
+                        ).fetchall()
+                    ]
+            raise AssertionError(
+                {"task": task, "reverse_quality_runs": diagnostic}
+            )
         scenario = task["items"][0]["scenario"]
         scenario_id = scenario["scenario_id"]
         assert scenario["blockers"] == []
