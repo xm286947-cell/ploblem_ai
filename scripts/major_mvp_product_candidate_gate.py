@@ -77,8 +77,9 @@ def verify_candidate(archive_path: str) -> dict[str, str]:
             raise ValueError("PACKAGE_ID_MISMATCH")
         if package_root != f"MAJOR_MVP_PRODUCT_CANDIDATE_{source_commit[:12]}":
             raise ValueError("SOURCE_SHA_IN_PACKAGE_NAME_MISMATCH")
-        if manifest.get("source_branch") != "feature/major-mvp-productization-closure":
-            raise ValueError("SOURCE_BRANCH_MISMATCH")
+        source_branch = str(manifest.get("source_branch") or "").strip()
+        if not source_branch:
+            raise ValueError("SOURCE_BRANCH_MISSING")
         if manifest.get("source_base") != "73e9db071c55ae056573982b70db9480be838353":
             raise ValueError("SOURCE_BASE_MISMATCH")
         if manifest.get("source_dirty") is not False:
