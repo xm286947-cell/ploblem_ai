@@ -456,13 +456,17 @@ def create_hardware_r1_workbench_router(
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
         promotion = require_promotion_service()
-        if release_controller is not None:
-            try:
-                release_controller.ensure_queryable_release()
-            except HardwareR1ManagedNonProdError as error:
-                raise HTTPException(status_code=503, detail=error.code) from error
         try:
+            current = promotion.get_item(item_id)
+            if (
+                release_controller is not None
+                and current.get("reconciliation_required") is True
+                and current.get("reconciliation_operation_type") == "PUBLISH"
+            ):
+                release_controller.ensure_queryable_release()
             return promotion.reconcile_item(item_id)
+        except HardwareR1ManagedNonProdError as error:
+            raise HTTPException(status_code=503, detail=error.code) from error
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
 
