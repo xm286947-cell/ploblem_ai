@@ -99,6 +99,37 @@ def test_delete_mistaken_revision_and_source(monkeypatch, tmp_path):
     assert client.post("/search", json={"query": "retention", "top_k": 5}).json()["hits"] == []
 
 
+
+def test_ask_can_require_chinese_synthesis_and_citation_translations(monkeypatch, tmp_path):
+    client = setup_client(monkeypatch, tmp_path)
+    public_source(client)
+
+    class CaptureProvider:
+        provider_id = "capture"
+        question = ""
+
+        def generate(self, question, contexts):
+            self.question = question
+            return "中文综合结果 [1]", {"provider": self.provider_id, "model": "fixture"}
+
+    provider = CaptureProvider()
+    monkeypatch.setattr(service, "active_generation_provider", lambda: provider)
+
+    response = client.post("/ask", json={
+        "question": "retention",
+        "response_language": "zh-CN",
+        "include_citation_translations": True,
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == "中文综合结果 [1]"
+    assert payload["response_language"] == "zh-CN"
+    assert payload["citation_translations_requested"] is True
+    assert "请使用简体中文回答" in provider.question
+    assert "逐条给出对应原文片段的忠实中文翻译" in provider.question
+    assert "原问题：retention" in provider.question
+
+
 def test_live_contract_and_fixture_capture_replay(monkeypatch, tmp_path):
     client = setup_client(monkeypatch, tmp_path)
     imported = public_source(client).json()
