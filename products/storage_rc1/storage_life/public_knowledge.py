@@ -193,15 +193,59 @@ def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, c
 @router.get("/status")
 def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
-        return {"mode": mode, "connected": True, "service": "本地演示回放", "llm": "演示数据，不调用模型", "model_name": "Not applicable · fixture replay", "credential_status": "not_reported", "parser_status": "not_reported"}
+        return {
+            "mode": mode,
+            "connected": True,
+            "retrieval_ready": True,
+            "source_count": len(FIXTURE_SOURCES),
+            "service": "本地演示回放",
+            "llm": "演示数据，不调用模型",
+            "model_name": "Not applicable · fixture replay",
+            "credential_status": "not_reported",
+            "parser_status": "not_reported",
+        }
     h = _request(mode, "/health", base_url=base_url)
-    cfg = _request(mode, "/config", base_url=base_url)
+    connected = h.get("status") == "ok"
+
+    # Retrieval/Search readiness must not depend on the generation provider
+    # configuration endpoint.  Query the source catalog independently so the
+    # UI can distinguish "service process is alive" from "Public Knowledge is
+    # actually usable with indexed public material".
+    source_count = 0
+    retrieval_ready = False
+    try:
+        source_result = _request(mode, "/sources", base_url=base_url)
+        source_items = source_result.get("sources") if isinstance(source_result, dict) else None
+        if isinstance(source_items, list):
+            source_count = len(source_items)
+            retrieval_ready = connected and source_count > 0
+    except HTTPException:
+        retrieval_ready = False
+
+    cfg: dict[str, Any] = {}
+    try:
+        cfg = _request(mode, "/config", base_url=base_url)
+    except HTTPException:
+        # Generation/config observability is optional for Search + Citation.
+        cfg = {}
     config = cfg.get("config") if isinstance(cfg.get("config"), dict) else {}
     model_name = next((config.get(key) for key in ("ollama_model", "generation_model", "model_name") if isinstance(config.get(key), str) and config.get(key).strip()), None)
     credential_status = next((config.get(key) for key in ("credential_status", "provider_credential_status") if isinstance(config.get(key), str) and config.get(key) in {"configured", "missing", "not_required", "not_reported"}), "not_reported")
     parser_status = next((config.get(key) for key in ("parser_status", "document_parser_status") if isinstance(config.get(key), str) and config.get(key) in {"ready", "degraded", "unavailable", "not_reported"}), "not_reported")
     # Never return provider URLs, environment values, or credentials to the UI.
-    return {"mode": "LIVE", "connected": h.get("status") == "ok", "service": h.get("service"), "version": h.get("version"), "config_hash": cfg.get("config_hash"), "llm": "通过服务健康接口确认；未读取或展示凭证", "model_name": model_name or "Not Reported", "credential_status": credential_status, "parser_status": parser_status}
+    return {
+        "mode": "LIVE",
+        "connected": connected,
+        "retrieval_ready": retrieval_ready,
+        "source_count": source_count,
+        "service": h.get("service"),
+        "version": h.get("version"),
+        "config_hash": cfg.get("config_hash"),
+        "llm": "Generation 配置与 Retrieval 分离；未读取或展示凭证",
+        "model_name": model_name or "Not Reported",
+        "credential_status": credential_status,
+        "parser_status": parser_status,
+    }
 
 
 @router.get("/provider-health")
