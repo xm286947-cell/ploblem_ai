@@ -158,15 +158,83 @@ class KnowledgeReleaseConsumer:
         device_type: str = "",
         top_k: int = 8,
         knowledge_release_version: str | None = None,
+        semantic_class: str = "",
+        canonical_parameter: str = "",
+        scenario_consumer: str = "",
     ) -> dict[str, Any]:
         manifest, objects, ev_by_id, src_by_ref = self._payload()
         if knowledge_release_version is not None and knowledge_release_version != manifest.get("knowledge_release_version"):
             raise KnowledgeReleaseError("RELEASE_VERSION_MISMATCH")
         terms = _terms(text)
         ranked = []
+        structured_filter = any(
+            str(value or "").strip()
+            for value in (
+                semantic_class,
+                canonical_parameter,
+                scenario_consumer,
+            )
+        )
         for obj in objects:
             if str(obj.get("status") or "ACTIVE") != "ACTIVE":
                 continue
+            if structured_filter:
+                metadata = obj.get("metadata")
+                storage = (
+                    metadata.get("storage_lifetime")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                if (
+                    not isinstance(storage, dict)
+                    or storage.get("formal_consumable") is not True
+                    or str(
+                        storage.get("semantic_class_status") or ""
+                    ).upper()
+                    != "REVIEWED"
+                ):
+                    continue
+                requested_semantic = str(semantic_class or "").strip()
+                if requested_semantic and str(
+                    storage.get("semantic_class") or ""
+                ) != requested_semantic:
+                    continue
+
+                requested_parameter = str(
+                    canonical_parameter or ""
+                ).strip()
+                if requested_parameter:
+                    parameters = {
+                        str(value).strip()
+                        for value in (
+                            storage.get("canonical_parameters") or []
+                        )
+                        if str(value or "").strip()
+                    }
+                    for tag in obj.get("tags") or []:
+                        if (
+                            isinstance(tag, str)
+                            and tag.startswith("storage-parameter:")
+                        ):
+                            parameters.add(
+                                tag.split(":", 1)[1].strip()
+                            )
+                    if requested_parameter not in parameters:
+                        continue
+
+                requested_consumer = str(
+                    scenario_consumer or ""
+                ).strip()
+                if requested_consumer:
+                    consumers = {
+                        str(value).strip()
+                        for value in (
+                            storage.get("scenario_consumers") or []
+                        )
+                        if str(value or "").strip()
+                    }
+                    if requested_consumer not in consumers:
+                        continue
             if device_type:
                 requested_types = _device_type_aliases(device_type)
                 object_types = _device_type_aliases(str(obj.get("device_type") or ""))
@@ -188,7 +256,20 @@ class KnowledgeReleaseConsumer:
             "knowledge_release_version": manifest.get("knowledge_release_version"),
             "results": items,
             "total": len(items),
-            "unknowns_or_gaps": [] if items else ["NO_MATCHING_PUBLISHED_KNOWLEDGE"],
+            "selection_mode": (
+                "REVIEWED_STORAGE_SEMANTIC"
+                if structured_filter
+                else "TEXT_AND_DEVICE"
+            ),
+            "unknowns_or_gaps": (
+                []
+                if items
+                else [
+                    "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                    if structured_filter
+                    else "NO_MATCHING_PUBLISHED_KNOWLEDGE"
+                ]
+            ),
         }
 
     def evidence(self, evidence_id: str) -> dict[str, Any]:
