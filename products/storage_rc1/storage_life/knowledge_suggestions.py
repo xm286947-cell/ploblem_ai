@@ -9,6 +9,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -76,6 +77,26 @@ class SuggestionEdit(BaseModel):
 def _canon(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
+
+def _safe_source_uri(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 2048:
+        raise SuggestionError("SOURCE_URI_INVALID")
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise SuggestionError("SOURCE_URI_INVALID") from exc
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise SuggestionError("SOURCE_URI_INVALID")
+    host = parsed.hostname.lower()
+    host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    authority = host_text + (f":{port}" if port is not None else "")
+    query = f"?{parsed.query}" if parsed.query else ""
+    fragment = f"#{parsed.fragment}" if parsed.fragment else ""
+    return f"{parsed.scheme.lower()}://{authority}{parsed.path or ''}{query}{fragment}"
 
 class PublicKnowledgeSuggestionService:
     def __init__(self, repository, *, evidence_intake, candidate_intake,
