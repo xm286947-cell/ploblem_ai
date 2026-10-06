@@ -781,15 +781,15 @@
       return;
     }
     if (decision === 'CONFIRM' && !window.confirm(
-      '确认保存人工修正并将 Candidate 标记为已审核？Source / Evidence 不会被修改。'
+      '确认保存人工修正并将这份知识标记为“人工确认完成”？原始资料和证据不会被修改。'
     )) return;
     if (decision === 'REJECT' && !window.confirm(
-      '拒绝后 Candidate 会保留但继续阻断 Promotion。确认？'
+      '拒绝后知识草稿会保留，但不能继续正式发布。确认拒绝？'
     )) return;
     try {
       reviewMessage.hidden = false;
       reviewMessage.classList.remove('hc-error');
-      reviewMessage.textContent = '正在保存人工 Review…';
+      reviewMessage.textContent = '正在保存人工确认…';
       const payload = await request(
         '/items/' + encodeURIComponent(state.item.item_id) + '/human-review',
         {
@@ -807,14 +807,14 @@
       renderDetail(payload, {scroll: false});
       setMessage(
         decision === 'CONFIRM'
-          ? '人工修正已写入 Durable Candidate，可继续 Promotion。'
-          : '人工 Review 已记录，Candidate 保持阻断状态。'
+          ? '人工修正确认已保存，可继续正式知识发布。'
+          : '人工确认结果已记录，当前知识仍不能进入正式发布。'
       );
     } catch (error) {
       reviewMessage.hidden = false;
       reviewMessage.classList.add('hc-error');
-      reviewMessage.textContent = '人工 Review 保存失败：' + error.message;
-      setMessage('人工 Review 保存失败：' + error.message, true);
+      reviewMessage.textContent = '人工确认保存失败：' + error.message;
+      setMessage('人工确认保存失败：' + error.message, true);
     }
   }
 
@@ -1137,7 +1137,7 @@
     );
     const label = reviewSourceLabel(decisionSource);
     const value = selected?.value ?? '—';
-    if (!window.confirm('确认采用' + label + '「' + value + '」？确认后无需重跑 Stage A/B。')) {
+    if (!window.confirm('确认采用' + label + '「' + value + '」？确认后无需重新执行 AI 分析。')) {
       return;
     }
 
@@ -1159,8 +1159,8 @@
       renderDetail(item);
       setMessage(
         item.result === 'CANDIDATE_READY'
-          ? '人工确认已保存，Case 已转为 CANDIDATE_READY。'
-          : '人工确认已保存，仍有其他冲突待确认。'
+          ? '人工确认已保存，当前知识已进入“待发布”状态。'
+          : '人工确认已保存，仍有其他内容需要确认。'
       );
     } catch (error) {
       setMessage('人工确认保存失败：' + error.message, true);
@@ -1275,7 +1275,6 @@
   q('[data-promotion-publish]').addEventListener('click', () => promotionAction('publish'));
   q('[data-promotion-verify]').addEventListener('click', verifyPublication);
   q('[data-project-consumption]').addEventListener('click', projectConsumption);
-  });
 
   const params = new URL(window.location.href).searchParams;
   resultFilter.value = params.get('status') || '';
