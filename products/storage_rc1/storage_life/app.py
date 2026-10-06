@@ -278,6 +278,7 @@ def product_device_mvp_summary(device_id: str):
         pk = {
             "connected": False,
             "search_ready": False,
+            "citation_ready": False,
             "retrieval_ready": False,
             "source_count": 0,
             "error_status": exc.status_code,
@@ -288,6 +289,7 @@ def product_device_mvp_summary(device_id: str):
         **dict(result.get("public_knowledge") or {}),
         "connected": bool(pk.get("connected")),
         "search_ready": bool(pk.get("search_ready")),
+        "citation_ready": bool(pk.get("citation_ready")),
         "retrieval_ready": pk_ready,
         "source_count": int(pk.get("source_count") or 0),
     }
