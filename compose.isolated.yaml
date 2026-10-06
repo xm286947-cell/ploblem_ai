@@ -3,7 +3,7 @@ services:
     build:
       context: .
     image: storage-public-knowledge:w4-isolated
-    container_name: storage-public-knowledge-w4-isolated
+    container_name: ${PKR_ISOLATED_CONTAINER}
     restart: unless-stopped
     env_file:
       - path: public_knowledge_rag/.env
@@ -12,7 +12,7 @@ services:
       PKR_DATA_DIR: /var/lib/public-knowledge
       PKR_RESTART_STRATEGY: supervised_process_exit
     ports:
-      - "127.0.0.1:19000:8080"
+      - "127.0.0.1:${PKR_ISOLATED_PORT}:8080"
     volumes:
       - public_knowledge_w4_isolated_data:/var/lib/public-knowledge
     mem_limit: 4g
@@ -26,4 +26,4 @@ services:
 
 volumes:
   public_knowledge_w4_isolated_data:
-    name: storage_public_knowledge_w4_isolated_data
+    name: ${PKR_ISOLATED_VOLUME}
