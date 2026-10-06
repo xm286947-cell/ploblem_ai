@@ -635,6 +635,7 @@ function downloadMvpSummary(){
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
 let RUNTIME_PARSE_RESULT=null;
+let RUNTIME_PARSED_RAW_TEXT='';
 let RUNTIME_SNAPSHOT_ID=null;
 let RUNTIME_TREND=null;
 function runtimeLocalInputValue(date){
@@ -652,6 +653,11 @@ function runtimeImportConfirmed(){return !!$('#runtimeObservationConfirmed')?.ch
 function renderRuntimeImportPanel(d){
   let host=$('#deviceDetail');
   if(!host||!d?.id)return;
+  // Parsed runtime values are device/page-local working state. Never carry a
+  // previous device's parsed observations into a newly opened device.
+  RUNTIME_PARSE_RESULT=null;
+  RUNTIME_PARSED_RAW_TEXT='';
+  RUNTIME_SNAPSHOT_ID=null;
   host.insertAdjacentHTML('beforeend',
     '<div id="runtimeImportPanel" class="card"><div class="pagehead"><div><div class="kicker">RUNTIME DATA INPUT</div><h3>运行数据快速导入</h3>'+
     '<div class="muted">粘贴 SMART / NVMe Health / EXT_CSD / ECC / Bit Flip / Bad Block / MTD 输出；只提取显式字段，不做诊断推测。</div></div></div>'+
@@ -671,15 +677,28 @@ async function parseRuntimeImport(){
   box.innerHTML='<div class="card">正在识别显式运行指标…</div>';
   try{
     RUNTIME_PARSE_RESULT=await api('/api/product/runtime-observations/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_type:d.device_type,text,source_label:source})});
+    RUNTIME_PARSED_RAW_TEXT=text;
     let items=RUNTIME_PARSE_RESULT.observations||[];
     let diagCount=items.filter(x=>x.diagnostic_supported).length,lifeCount=items.filter(x=>x.suggested_lifetime_metric).length;
     box.innerHTML=items.length?'<div class="row" style="margin-bottom:10px"><span class="badge CONFIRMED">识别 '+items.length+' 项</span><span class="badge TRUSTED">诊断可用 '+diagCount+' 项</span><span class="badge TRUSTED">寿命可用 '+lifeCount+' 项</span>'+((diagCount||lifeCount)?'<button class="primary" onclick="executeParsedHealthAnalysis()">一键分析本次运行数据</button>':'')+'</div><div class="tablewrap"><table><tr><th>指标</th><th>值</th><th>原始行</th><th>可进入场景</th></tr>'+items.map((x,i)=>'<tr><td><b>'+esc(x.metric_name)+'</b></td><td>'+esc(x.normalized_value)+' '+esc(x.unit||'')+'<br><small>Raw '+esc(x.raw_value)+'</small></td><td><small>'+esc(x.source_line||'')+'</small></td><td><div class="row">'+(x.suggested_lifetime_metric?'<button class="secondary" onclick="applyParsedToLifetime('+i+')">带入寿命评估</button>':'')+(x.diagnostic_supported?'<button class="primary" onclick="applyParsedToDiagnosis('+i+')">带入运行诊断</button>':'')+'</div></td></tr>').join('')+'</table></div><div id="runtimeBatchDiagnosisResult"></div>':'<div class="warning card"><b>没有识别到已支持的显式指标</b><p>当前解析只识别常见 NVMe SMART / eMMC EXT_CSD / ECC / Bit Flip / Bad Block / P/E / Erase Count 字段，不会猜测未知字段。</p></div>';
-  }catch(e){box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
+  }catch(e){RUNTIME_PARSE_RESULT=null;RUNTIME_PARSED_RAW_TEXT='';box.innerHTML='<div class="danger card"><b>运行数据识别失败</b><p>'+esc(e.message)+'</p></div>'}
+}
+function runtimeParsedInputCurrent(){
+  let current=$('#runtimeImportText')?.value||'';
+  return !!RUNTIME_PARSE_RESULT&&current===RUNTIME_PARSED_RAW_TEXT;
+}
+function requireCurrentRuntimeParse(){
+  if(!runtimeParsedInputCurrent()){
+    msg('原始运行数据在识别后发生了变化，请重新“识别运行指标”后再保存或分析。',true);
+    return false;
+  }
+  return true;
 }
 async function saveRuntimeSnapshot(){
   let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],text=$('#runtimeImportText')?.value||'',source=$('#runtimeImportSource')?.value.trim()||RUNTIME_PARSE_RESULT?.source_label||'PASTED_RUNTIME_OUTPUT',capturedAt=runtimeCaptureIso(),confirmed=runtimeImportConfirmed();
   if(!d)return;
   if(!items.length)return msg('请先识别运行指标',true);
+  if(!requireCurrentRuntimeParse())return;
   if(!capturedAt)return msg('请填写有效的实际采集时间',true);
   if(RUNTIME_SNAPSHOT_ID)return msg('本次运行快照已保存：'+RUNTIME_SNAPSHOT_ID);
   let snapshotItems=items.map(x=>({...x,quality_status:confirmed?'VALID':'UNKNOWN',availability_status:'AVAILABLE',confirmed_by_user:confirmed}));
@@ -778,6 +797,7 @@ function parsedRuntimeObservationPayload(x,d,index){
 async function executeParsedHealthAnalysis(){
   let d=CURRENT?.device,items=RUNTIME_PARSE_RESULT?.observations||[],box=$('#runtimeBatchDiagnosisResult');
   if(!d||!box)return;
+  if(!requireCurrentRuntimeParse())return;
   let diagItems=items.filter(x=>x.diagnostic_supported),lifeItems=items.filter(x=>x.suggested_lifetime_metric);
   if(!diagItems.length&&!lifeItems.length)return msg('当前运行数据没有可进入寿命或诊断场景的指标',true);
   if(!runtimeImportConfirmed())return msg('请先确认运行数据来源和实际采集时间，再执行正式健康分析',true);
@@ -846,6 +866,7 @@ async function executeParsedBatchDiagnosis(){
   let d=CURRENT?.device,items=(RUNTIME_PARSE_RESULT?.observations||[]).filter(x=>x.diagnostic_supported),box=$('#runtimeBatchDiagnosisResult');
   if(!d||!box)return;
   if(!items.length)return msg('当前运行数据没有可诊断指标',true);
+  if(!requireCurrentRuntimeParse())return;
   if(!runtimeImportConfirmed())return msg('请先确认运行数据来源和实际采集时间',true);
   let observations=items.map((x,i)=>parsedRuntimeObservationPayload(x,d,'B'+i));
   box.innerHTML='<div class="card">正在用 Existing Diagnostic Skill 分析 '+items.length+' 个运行指标…</div>';
