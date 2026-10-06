@@ -2198,10 +2198,31 @@ def list_runtime_snapshots(device_id, limit=20):
 def runtime_metric_trends(device_id, limit=40):
     """Return validated per-metric history and simple deltas without interpreting risk."""
     snapshots = list_runtime_snapshots(device_id, limit=limit)
+    with connect() as con:
+        total_snapshot_count = int(
+            con.execute(
+                "SELECT COUNT(*) FROM runtime_snapshot_batches WHERE device_id=?",
+                (device_id,),
+            ).fetchone()[0]
+        )
+        formal_row = con.execute(
+            """SELECT COUNT(DISTINCT b.id) AS formal_count,
+                      MAX(b.created_at) AS latest_created_at,
+                      MAX(b.captured_at) AS latest_captured_at
+               FROM runtime_snapshot_batches b
+               JOIN runtime_snapshot_observations o ON o.batch_id=b.id
+               WHERE b.device_id=?
+                 AND UPPER(COALESCE(o.quality_status,''))='VALID'
+                 AND UPPER(COALESCE(o.availability_status,''))='AVAILABLE'
+                 AND COALESCE(o.confirmed_by_user,0)=1
+                 AND TRIM(COALESCE(b.source_label,''))<>''
+                 AND TRIM(COALESCE(o.source_line,''))<>''""",
+            (device_id,),
+        ).fetchone()
+    total_formal_snapshot_count = int(formal_row["formal_count"] or 0)
     series = {}
-    formal_batch_ids_all = set()
-    latest_formal_snapshot_created_at = None
-    latest_formal_capture_time = None
+    latest_formal_snapshot_created_at = formal_row["latest_created_at"]
+    latest_formal_capture_time = formal_row["latest_captured_at"]
     for batch in reversed(snapshots):
         batch_has_formal = False
         for obs in batch.get("observations") or []:
@@ -2215,7 +2236,6 @@ def runtime_metric_trends(device_id, limit=40):
             )
             if formally_consumable:
                 batch_has_formal = True
-                formal_batch_ids_all.add(str(batch.get("id") or ""))
             point = {
                 "batch_id": batch["id"],
                 "captured_at": batch["captured_at"],
@@ -2263,8 +2283,9 @@ def runtime_metric_trends(device_id, limit=40):
         })
     return {
         "device_id": device_id,
-        "snapshot_count": len(snapshots),
-        "formal_snapshot_count": len({x for x in formal_batch_ids_all if x}),
+        "snapshot_count": total_snapshot_count,
+        "trend_window_snapshot_count": len(snapshots),
+        "formal_snapshot_count": total_formal_snapshot_count,
         "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
         "latest_formal_capture_time": latest_formal_capture_time,
         "metrics": result,
