@@ -830,6 +830,10 @@
     const reviewRequired =
       result === 'REVIEW' ||
       item.candidate_asset?.production_review_status === 'REQUIRED';
+    const publishReconciliationRequired = Boolean(
+      promotion?.reconciliation_required &&
+      promotion?.reconciliation_operation_type === 'PUBLISH'
+    );
     const consumptionReady = state.consumptionReadyItemId === item.item_id;
 
     let active = 0;
@@ -848,6 +852,10 @@
       active = 1;
       titleText = '下一步：完成人工确认';
       bodyText = '对照 AI 识别结果和原文证据，确认或修正后即可进入正式知识发布。';
+    } else if (publishReconciliationRequired) {
+      active = 2;
+      titleText = '下一步：处理发布对账';
+      bodyText = '上一次发布请求结果不确定。请先查询远端正式知识状态并完成对账，不要重复点击“发布正式知识”。';
     } else if (consumptionReady) {
       active = 5;
       titleText = '已完成：正式知识可以检索使用';
@@ -951,12 +959,29 @@
       VERIFIED: '发布验证通过',
       BLOCKED: '流程被阻断',
     };
+    const publishReconciliationRequired = Boolean(
+      promotion.reconciliation_required &&
+      promotion.reconciliation_operation_type === 'PUBLISH'
+    );
+    const reconciliationError =
+      promotion.reconciliation_error_code || promotion.error_code || '';
     q('[data-promotion-status]').textContent = [
       '当前状态：' + (promotionLabels[status] || status) + (status ? '（' + status + '）' : ''),
       promotion.knowledge_id ? '正式知识编号：' + promotion.knowledge_id : '',
-      promotion.error_code ? '错误：' + promotion.error_code : '',
+      reconciliationError ? '错误：' + reconciliationError : '',
       note,
     ].filter(Boolean).join(' · ');
+    const reconciliationPanel = q('[data-promotion-reconciliation]');
+    if (reconciliationPanel) {
+      reconciliationPanel.hidden = !publishReconciliationRequired;
+      const detail = q('[data-promotion-reconciliation-detail]');
+      if (detail && publishReconciliationRequired) {
+        detail.textContent =
+          '上一次发布请求的远端结果无法确认（' +
+          (promotion.reconciliation_error_code || 'PUBLISH_RECONCILIATION_REQUIRED') +
+          '）。请先执行“处理发布对账”；系统只查询/核对既有发布结果，不会再次发起发布。';
+      }
+    }
     renderNextStep(state.item, promotion);
     const canAct = Boolean(
       state.item &&
@@ -966,9 +991,18 @@
     q('[data-promotion-precheck]').disabled = !canAct || !['NOT_STARTED', 'PRECHECK_PASS'].includes(status);
     q('[data-promotion-intake]').disabled = !canAct || !['PRECHECK_PASS', 'INTAKE_FAILED'].includes(status);
     q('[data-promotion-review]').disabled = !canAct || status !== 'CANDIDATE_INTAKED';
-    q('[data-promotion-publish]').disabled = !canAct || !['REVIEW_CONFIRMED', 'PUBLISH_FAILED'].includes(status);
-    q('[data-promotion-verify]').disabled = !canAct || !['PUBLISHED_PENDING_QUERY_BACK', 'VERIFY_FAILED'].includes(status);
-    q('[data-project-consumption]').disabled = !canAct || status !== 'VERIFIED';
+    q('[data-promotion-publish]').disabled =
+      !canAct ||
+      publishReconciliationRequired ||
+      !['REVIEW_CONFIRMED', 'PUBLISH_FAILED'].includes(status);
+    q('[data-promotion-reconcile]').disabled =
+      !canAct || !publishReconciliationRequired;
+    q('[data-promotion-verify]').disabled =
+      !canAct ||
+      publishReconciliationRequired ||
+      !['PUBLISHED_PENDING_QUERY_BACK', 'VERIFY_FAILED'].includes(status);
+    q('[data-project-consumption]').disabled =
+      !canAct || publishReconciliationRequired || status !== 'VERIFIED';
   }
 
   async function refreshPromotion(itemId = state.item?.item_id) {
@@ -1006,8 +1040,51 @@
       paintPromotion(payload);
       setMessage('正式知识发布步骤已完成：' + action);
     } catch (error) {
-      paintPromotion(state.promotion || {}, '操作被阻止：' + error.message);
-      setMessage('正式知识发布步骤失败：' + error.message, true);
+      const promotion = error.message === 'PUBLISH_RECONCILIATION_REQUIRED'
+        ? {
+            ...(state.promotion || {}),
+            reconciliation_required: true,
+            reconciliation_operation_type: 'PUBLISH',
+            reconciliation_error_code: error.message,
+          }
+        : (state.promotion || {});
+      paintPromotion(promotion, '操作被阻止：' + error.message);
+      setMessage(
+        error.message === 'PUBLISH_RECONCILIATION_REQUIRED'
+          ? '发布结果暂时无法确认。请使用“处理发布对账”，不要重复发布。'
+          : '正式知识发布步骤失败：' + error.message,
+        true
+      );
+    }
+  }
+
+  async function reconcilePublication() {
+    if (!state.item) return;
+    if (!window.confirm(
+      '确认处理发布对账？系统只会查询并核对上一次发布结果，不会再次发起“发布正式知识”。'
+    )) return;
+    try {
+      const reconciled = await request(
+        '/items/' + encodeURIComponent(state.item.item_id) + '/promotion/reconcile',
+        {method: 'POST'}
+      );
+      paintPromotion(reconciled, reconciled.reconciled ? '发布对账完成' : '当前案例无需对账');
+      if (reconciled.reconciled) {
+        setMessage('发布对账完成。下一步：验证发布结果。');
+      } else {
+        setMessage('当前案例没有待处理的发布对账。');
+      }
+    } catch (error) {
+      paintPromotion(
+        {
+          ...(state.promotion || {}),
+          reconciliation_required: true,
+          reconciliation_operation_type: 'PUBLISH',
+          reconciliation_error_code: error.message,
+        },
+        '发布对账仍未完成：' + error.message
+      );
+      setMessage('发布对账未完成：' + error.message, true);
     }
   }
 
@@ -1273,6 +1350,7 @@
   q('[data-promotion-intake]').addEventListener('click', () => promotionAction('intake'));
   q('[data-promotion-review]').addEventListener('click', () => promotionAction('review'));
   q('[data-promotion-publish]').addEventListener('click', () => promotionAction('publish'));
+  q('[data-promotion-reconcile]').addEventListener('click', reconcilePublication);
   q('[data-promotion-verify]').addEventListener('click', verifyPublication);
   q('[data-project-consumption]').addEventListener('click', projectConsumption);
 
