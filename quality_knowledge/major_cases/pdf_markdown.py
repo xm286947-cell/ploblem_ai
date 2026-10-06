@@ -132,6 +132,8 @@ def _convert_with_pymupdf4llm(path: Path) -> list[MarkdownPage]:
                 )
             elif isinstance(markdown, dict):
                 markdown = str(markdown.get("text") or "")
+            if not str(markdown or "").strip() and raw_text:
+                markdown, _ = _pymupdf_text_as_markdown(page)
             pages.append(
                 MarkdownPage(
                     pdf_page=index + 1,
@@ -254,10 +256,13 @@ def _quality_check(pages: list[MarkdownPage]) -> tuple[str, list[str]]:
     if len(numeric_lines) >= 12 and len(numeric_lines) / max(len(nonempty_lines), 1) >= 0.25:
         warnings.append("MARKDOWN_NUMERIC_FLATTENING_SUSPECTED")
 
-    table_signature = all(
-        re.search(rf"(?i)\b{term}\b", raw_combined or combined)
+    corpus = raw_combined or combined
+    english_table_signature = all(
+        re.search(rf"(?i)\b{term}\b", corpus)
         for term in ("parameter", "typ", "max", "unit")
     )
+    chinese_table_signature = all(term in corpus for term in ("参数", "典型", "最大", "单位"))
+    table_signature = english_table_signature or chinese_table_signature
     has_markdown_table = bool(re.search(r"(?m)^\s*\|.+\|\s*$", combined))
     if table_signature and not has_markdown_table:
         warnings.append("MARKDOWN_TABLE_STRUCTURE_SUSPECTED")
