@@ -1,0 +1,211 @@
+name: Storage MVP Public Knowledge Container Hotfix
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-pkr-container-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hotfix:
+    runs-on: ubuntu-latest
+    env:
+      BASE_PKR_SHA: 9c9ed9d4007bcaec3cf12133e33f5580b3499f90
+      TARGET_PKR_SHA: e18ad017f05812fd38ed6a6838b8fcc9e0034703
+      PATCH_ID: STORAGE_PKR_CONTAINER_HOTFIX_20261006
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE"
+
+          git fetch --no-tags origin "$BASE_PKR_SHA" "$TARGET_PKR_SHA"
+          git show "$TARGET_PKR_SHA:start.sh" > "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+          chmod +x "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+
+          BASE_HASH="$(git show "$BASE_PKR_SHA:start.sh" | sha256sum | awk '{print $1}')"
+          TARGET_HASH="$(sha256sum "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/start.sh" | awk '{print $1}')"
+
+          cat > "$ROOT/PATCH_MANIFEST.json" <<EOF
+          {
+            "patch_id": "$PATCH_ID",
+            "scope": "PUBLIC_KNOWLEDGE_SERVICE/start.sh only",
+            "base_pkr_sha": "$BASE_PKR_SHA",
+            "target_pkr_sha": "$TARGET_PKR_SHA",
+            "base_sha256": "$BASE_HASH",
+            "target_sha256": "$TARGET_HASH",
+            "user_data_touched": false,
+            "docker_volume_touched": false
+          }
+          EOF
+
+          cat > "$ROOT/apply_patch.command" <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          choose_target() {
+            if [ "$#" -ge 1 ] && [ -d "$1" ]; then
+              printf '%s' "$1"
+              return
+            fi
+            if [ -f "$PWD/PUBLIC_KNOWLEDGE_SERVICE/start.sh" ]; then
+              printf '%s' "$PWD"
+              return
+            fi
+            if [ -f "$(dirname "$PATCH_DIR")/PUBLIC_KNOWLEDGE_SERVICE/start.sh" ]; then
+              printf '%s' "$(dirname "$PATCH_DIR")"
+              return
+            fi
+            if command -v osascript >/dev/null 2>&1; then
+              osascript -e 'POSIX path of (choose folder with prompt "选择你当前正在测试的 Storage 包根目录")' 2>/dev/null || true
+            fi
+          }
+
+          TARGET="$(choose_target "${1:-}")"
+          TARGET="${TARGET%/}"
+          if [ -z "$TARGET" ] || [ ! -f "$TARGET/PUBLIC_KNOWLEDGE_SERVICE/start.sh" ]; then
+            echo "没有找到 Storage 包根目录。"
+            echo "请选择包含 PUBLIC_KNOWLEDGE_SERVICE 文件夹的目录。"
+            read -r -p "按回车退出..."
+            exit 2
+          fi
+
+          python3 "$PATCH_DIR/patch_apply.py" "$TARGET"
+
+          echo
+          echo "[2/2] 立即重启 Public Knowledge..."
+          (cd "$TARGET/PUBLIC_KNOWLEDGE_SERVICE" && bash ./start.sh)
+
+          echo
+          echo "补丁完成。"
+          echo "现在回到浏览器，刷新 Storage 页面，再点“删除资料”。"
+          read -r -p "按回车关闭..."
+          SH
+
+          cat > "$ROOT/patch_apply.py" <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+
+          patch_dir = Path(__file__).resolve().parent
+          manifest = json.loads((patch_dir / "PATCH_MANIFEST.json").read_text(encoding="utf-8"))
+
+          def digest(path: Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          if len(sys.argv) != 2:
+              raise SystemExit("usage: patch_apply.py <storage-package-root>")
+
+          root = Path(sys.argv[1]).expanduser().resolve()
+          target = root / "PUBLIC_KNOWLEDGE_SERVICE" / "start.sh"
+          payload = patch_dir / "payload" / "PUBLIC_KNOWLEDGE_SERVICE" / "start.sh"
+
+          if not target.is_file():
+              raise SystemExit("PATCH_TARGET_MISSING: " + str(target))
+
+          current = digest(target)
+          base_hash = manifest["base_sha256"]
+          target_hash = manifest["target_sha256"]
+
+          if current == target_hash:
+              print("ALREADY_PATCHED=YES")
+              raise SystemExit(0)
+
+          if current != base_hash:
+              raise SystemExit(
+                  "PATCH_BASE_MISMATCH\n"
+                  "当前 start.sh 不是本补丁支持的旧版本。为避免覆盖其他版本，补丁已停止。"
+              )
+
+          backup_dir = root / ".storage_hotfix_backup" / manifest["patch_id"]
+          backup_dir.mkdir(parents=True, exist_ok=True)
+          backup = backup_dir / "start.sh"
+          shutil.copy2(target, backup)
+
+          tmp = target.with_name("start.sh.hotfix_tmp")
+          shutil.copy2(payload, tmp)
+          os.chmod(tmp, 0o755)
+          if digest(tmp) != target_hash:
+              tmp.unlink(missing_ok=True)
+              raise SystemExit("PATCH_PAYLOAD_HASH_MISMATCH")
+          os.replace(tmp, target)
+          os.chmod(target, 0o755)
+
+          if digest(target) != target_hash:
+              raise SystemExit("PATCH_VERIFY_FAILED")
+
+          print("PATCH_RESULT=PASS")
+          print("USER_DATA_TOUCHED=NO")
+          print("DOCKER_VOLUME_TOUCHED=NO")
+          print("BACKUP=" + str(backup))
+          PY
+
+          cat > "$ROOT/README_双击这个.txt" <<EOF
+          这是针对你当前 b8dcdf54... 验证包的 Public Knowledge 删除修复补丁。
+
+          用法：
+          1. 双击 apply_patch.command。
+          2. 弹窗时选择你当前解压出来的 Storage 包根目录。
+          3. 补丁只替换 PUBLIC_KNOWLEDGE_SERVICE/start.sh。
+          4. 随后自动重建 Public Knowledge 容器，并检查 DELETE 接口存在。
+          5. 回浏览器刷新，再点“删除资料”。
+
+          不会修改：
+          - Public Knowledge SQLite 数据
+          - Docker named volume
+          - Storage 数据库
+          - 已导入资料
+          - Formal Knowledge
+          - Runtime 数据
+          EOF
+
+          chmod +x "$ROOT/apply_patch.command"
+
+      - name: Self-test patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          TEST="/tmp/pkr-hotfix-test"
+          rm -rf "$TEST"
+          mkdir -p "$TEST/PUBLIC_KNOWLEDGE_SERVICE"
+          git show "$BASE_PKR_SHA:start.sh" > "$TEST/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+          python3 "$ROOT/patch_apply.py" "$TEST"
+          python3 "$ROOT/patch_apply.py" "$TEST" | grep -q "ALREADY_PATCHED=YES"
+          test "$(sha256sum "$TEST/PUBLIC_KNOWLEDGE_SERVICE/start.sh" | awk '{print $1}')" = "$(jq -r .target_sha256 "$ROOT/PATCH_MANIFEST.json")"
+          echo "HOTFIX_SELFTEST=PASS"
+
+      - name: Package patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp
+          zip -qr "${PATCH_ID}.zip" "${PATCH_ID}"
+          sha256sum "${PATCH_ID}.zip" > "${PATCH_ID}.zip.sha256"
+
+      - name: Upload patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PATCH_ID }}
+          path: |
+            /tmp/${{ env.PATCH_ID }}.zip
+            /tmp/${{ env.PATCH_ID }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
