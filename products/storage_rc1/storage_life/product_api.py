@@ -470,7 +470,7 @@ def _require_lifetime_metric_applicable(detail: dict[str, Any], requested_metric
     if formal in {"NVME_DATA_UNITS_WRITTEN_V1", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"}:
         if not _confirmed_nvme_interface(detail):
             raise ValueError(
-                f"NVME_PROTOCOL_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE:{formal}"
+                f"NVME_PROTOCOL_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE_OR_PROTOCOL:{formal}"
             )
     return formal
 
@@ -1258,14 +1258,18 @@ EMMC_RUNTIME_METRICS = {
 
 
 def _confirmed_nvme_interface(detail: dict[str, Any]) -> bool:
-    interface_fact = next(
-        (
-            fact for fact in (detail.get("device_facts") or [])
-            if str(fact.get("canonical_name") or "") == "interface"
-        ),
-        None,
-    )
-    return "nvme" in str((interface_fact or {}).get("value") or "").lower()
+    """Return True when S1 confirmed facts establish NVMe protocol applicability.
+
+    SSD datasheets commonly encode PCIe under Interface and NVMe under Protocol,
+    so requiring the literal token NVMe in Interface alone would incorrectly
+    block valid NVMe devices.
+    """
+    values = [
+        str(fact.get("value") or "").lower()
+        for fact in (detail.get("device_facts") or [])
+        if str(fact.get("canonical_name") or "") in {"interface", "protocol"}
+    ]
+    return any("nvme" in value for value in values)
 
 
 def _runtime_metric_applicability(
@@ -1279,9 +1283,9 @@ def _runtime_metric_applicability(
         if dtype != "SSD":
             return False, "NVME_METRIC_REQUIRES_SSD"
         if detail is not None and not _confirmed_nvme_interface(detail):
-            return False, "NVME_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE"
+            return False, "NVME_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE_OR_PROTOCOL"
         if detail is None:
-            return False, "SELECT_DEVICE_AND_CONFIRM_NVME_INTERFACE"
+            return False, "SELECT_DEVICE_AND_CONFIRM_NVME_INTERFACE_OR_PROTOCOL"
     if metric in EMMC_RUNTIME_METRICS and dtype != "eMMC":
         return False, "EMMC_METRIC_REQUIRES_EMMC"
     return True, None
