@@ -226,7 +226,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
+        with:
+          name: major-repeat-agent-ci488-${{ github.run_id }}
+          path: artifact
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: POSIX launcher
@@ -249,7 +251,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
+        with:
+          name: major-repeat-agent-ci488-${{ github.run_id }}
+          path: artifact
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: macOS launcher
@@ -272,7 +276,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: major-repeat-agent-ci488-${{ github.run_id }}, path: artifact}
+        with:
+          name: major-repeat-agent-ci488-${{ github.run_id }}
+          path: artifact
       - uses: actions/setup-python@v5
         with: {python-version: "3.11"}
       - name: Windows launcher
