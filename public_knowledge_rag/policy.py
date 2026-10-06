@@ -14,9 +14,29 @@ _SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
 ]
 _PRIVATE_QUERY_PATTERNS = [
-    re.compile(r"\b(?:customer|project|internal|confidential|restricted|serial\s*(?:number|no\.?|#))\b", re.I),
-    re.compile(r"\b[A-Z0-9]{2,}-[A-Z0-9]{4,}-[A-Z0-9]{3,}\b", re.I),
-    re.compile(r"\b(?:S/?N|serial)\s*[:#-]?\s*[A-Z0-9-]{4,}\b", re.I),
+    # Block explicit private business identifiers, not ordinary public
+    # engineering terminology.  Phrases such as "internal ECC" describe a
+    # device capability and must remain searchable.
+    re.compile(
+        r"\b(?:customer|project|internal|confidential|restricted)"
+        r"(?:[_\s-]*(?:id|name|code|ticket|case))?\s*[:=#]\s*\S+",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:customer|project|internal)\s+(?:id|name|code|ticket|case)\s+[A-Za-z0-9._-]{3,}\b",
+        re.I,
+    ),
+    re.compile(
+        r"(?:客户|项目|内部|机密|保密|工单|问题单|现场问题)"
+        r"(?:名|名称|编号|ID|id|号)?\s*[:：=#]\s*\S+"
+    ),
+    re.compile(
+        r"(?:客户|项目|工单|问题单)(?:名|名称|编号|ID|id|号)\s+[A-Za-z0-9._-]{3,}"
+    ),
+    re.compile(
+        r"\b(?:S/?N|serial(?:\s*(?:number|no\.?))?)\s*[:#=]\s*[A-Z0-9-]{4,}\b",
+        re.I,
+    ),
     re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"),
 ]
 
