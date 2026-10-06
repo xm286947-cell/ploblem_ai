@@ -253,9 +253,7 @@ class PublicKnowledgeSuggestionService:
                     "domain": "OTHER",
                     "source_type": str(source.get("media_type") or "PUBLIC_SOURCE"),
                     "source_ref": str(
-                        ref.get("source_uri")
-                        or source.get("source_uri")
-                        or source.get("official_url")
+                        source.get("_validated_source_uri")
                         or f"public-knowledge://sources/{source_id}"
                     ),
                     "source_revision": revision,
@@ -268,7 +266,7 @@ class PublicKnowledgeSuggestionService:
                         "citation_id": ref["citation_id"],
                         "locator": ref["locator"],
                         "classification": "PUBLIC",
-                        "source_uri": ref.get("source_uri") or source.get("source_uri") or source.get("official_url"),
+                        "source_uri": source.get("_validated_source_uri"),
                         "immutable_identity": ref.get("immutable_identity"),
                         "origin_workspace": suggestion["origin_workspace"],
                         "origin_mode": "LIVE",
@@ -348,6 +346,7 @@ class PublicKnowledgeSuggestionService:
             "SOURCE_LOCATOR_MISMATCH": "EVIDENCE_UNRESOLVED",
             "SOURCE_ID_MISMATCH": "EVIDENCE_UNRESOLVED",
             "SOURCE_IDENTITY_MISMATCH": "EVIDENCE_UNRESOLVED",
+            "SOURCE_URI_INVALID": "EVIDENCE_UNRESOLVED",
             "SOURCE_REVISION_MISMATCH": "REVISION_MISMATCH",
             "SOURCE_UNAVAILABLE": "SOURCE_UNAVAILABLE",
             "SOURCE_NOT_PUBLIC": "HANDOFF_FAILED",
