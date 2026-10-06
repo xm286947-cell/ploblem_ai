@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
@@ -626,6 +626,20 @@ def create_v2_router(
             restored = _repeat_service().restore_result(knowledge_id)
             return restored or {"state": "NOT_RUN", "result": None}
         except (RepeatITRContractError, RepeatSearchContractError, RepeatResultContractError, HistoricalCaseContractError, KeyError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.get("/repeat-risk/queries/{query_id}/report")
+    def repeat_risk_report(
+        query_id: str,
+        format: str = "markdown",
+    ) -> Response:
+        try:
+            report = _repeat_service().report(query_id, format=format)
+            return Response(
+                content=report["content"],
+                media_type=report["content_type"],
+            )
+        except (KeyError, ValueError) as error:
             raise _repeat_http_error(error) from error
 
     @router.post("/repeat-risk/queries/{query_id}/decision")
