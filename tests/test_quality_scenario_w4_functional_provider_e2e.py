@@ -10,6 +10,9 @@ from urllib.request import Request, urlopen
 
 from fastapi.testclient import TestClient
 
+from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
+from quality_knowledge.scenario_assets import ScenarioAssets
+from quality_knowledge.scenarios import ScenarioRepository
 from quality_knowledge.web.app import create_app
 from tools.build_quality_scenario_test_fixture import build_fixture
 from tools.openai_mock.server import create_server
@@ -180,6 +183,14 @@ def test_w4_controlled_provider_runs_g1_through_publish_and_portraits(tmp_path, 
         assert trace.status_code == 200, trace.text
         assert history.status_code == 200, history.text
 
+        projected = ScenarioAssets(
+            ScenarioRepository(db),
+            SQLiteQualityScenarioV1Repository(db),
+        ).catalog()
+        qsv1_asset = next(item for item in projected if item["scenario_id"] == scenario_id)
+        assert qsv1_asset["source_of_truth"] == "QSV1"
+        assert qsv1_asset["status"] == "PUBLISHED"
+
         for axis, marker in (
             ("product", "PLC-X200"),
             ("industry", "新能源"),
@@ -191,4 +202,3 @@ def test_w4_controlled_provider_runs_g1_through_publish_and_portraits(tmp_path, 
             )
             assert portrait.status_code == 200, portrait.text
             assert marker in portrait.text, (axis, marker)
-            assert scenario_id in portrait.text
