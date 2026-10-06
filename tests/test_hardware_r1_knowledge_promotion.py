@@ -1116,6 +1116,14 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     original_transition = promotion._transition
     original_add_reference = promotion.bridge.add_source_reference
     original_journal_transition = promotion._journal_transition
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        promotion.bridge.adapter,
+        release_prefix=RELEASE,
+    )
+    stale_release = controller.ensure_queryable_release()
+    stale_release_version = str(stale_release["release_version"])
+    assert stale_release_version.startswith(RELEASE + "-R")
     publish_operation_id = promotion._operation_id(
         intake["asset_candidate_id"], "PUBLISH", 1
     )
@@ -1154,16 +1162,12 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     assert pending["reconciliation_operation_type"] == "PUBLISH"
     assert pending["reconciliation_error_code"] == "PUBLISH_RECONCILIATION_REQUIRED"
 
-    controller = ManagedNonProdReleaseController(
-        JsonArtifactRepository(knowledge_root),
-        restarted.bridge.adapter,
-        release_prefix=RELEASE,
-    )
-    assert controller.status()["release_version"] is None
     startup = restarted.reconcile_startup(
         prepare_publication_query=controller.ensure_queryable_release
     )
-    assert str(controller.status()["release_version"]).startswith(RELEASE + "-R")
+    refreshed_release_version = str(controller.status()["release_version"])
+    assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
     repaired = restarted.get_item("HWI-RECOVERY")
     assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
@@ -1189,6 +1193,14 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     )
     intake = _prepare_reviewed_promotion(promotion, candidate)
     original_transition = promotion._transition
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        promotion.bridge.adapter,
+        release_prefix=RELEASE,
+    )
+    stale_release = controller.ensure_queryable_release()
+    stale_release_version = str(stale_release["release_version"])
+    assert stale_release_version.startswith(RELEASE + "-R")
 
     def crash_after_remote_publish(item, asset, record, target, **kwargs):
         if target == "PUBLISHED_PENDING_QUERY_BACK":
@@ -1213,7 +1225,9 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     app = FastAPI()
     app.include_router(
         create_hardware_r1_workbench_router(
-            workbench, promotion_service=promotion
+            workbench,
+            promotion_service=promotion,
+            release_controller=controller,
         )
     )
     client = TestClient(app)
@@ -1239,7 +1253,9 @@ def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not
     monkeypatch.undo()
     reconcile = client.post(promotion_path + "/reconcile", headers=headers)
     assert reconcile.status_code == 200, reconcile.text
-    assert str(controller.status()["release_version"]).startswith(RELEASE + "-R")
+    refreshed_release_version = str(controller.status()["release_version"])
+    assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
     assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert reconcile.json()["reconciled"] is True
     assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
