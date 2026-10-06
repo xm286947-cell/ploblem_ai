@@ -109,6 +109,9 @@ class StorageDomainSkillAdapter:
         *,
         device_type: str = "",
         top_k: int = 12,
+        semantic_classes: list[str] | tuple[str, ...] | None = None,
+        canonical_parameters: list[str] | tuple[str, ...] | None = None,
+        scenario_consumer: str = "",
     ) -> dict[str, Any]:
         pack = _load_pack(pack_id)
         status = self.knowledge_consumer.status()
@@ -133,13 +136,140 @@ class StorageDomainSkillAdapter:
                     f"RELEASE_VERSION_MISMATCH:expected={pack.current_release_version},actual={release_version}"
                 ],
             }
-        try:
-            result = self.knowledge_consumer.query(
+        requested_semantics = {
+            str(value).strip()
+            for value in (semantic_classes or [])
+            if str(value or "").strip()
+        }
+        requested_parameters = {
+            str(value).strip()
+            for value in (canonical_parameters or [])
+            if str(value or "").strip()
+        }
+        requested_consumer = str(scenario_consumer or "").strip()
+        structured_requested = bool(
+            requested_semantics
+            or requested_parameters
+            or requested_consumer
+        )
+
+        def legacy_query() -> dict[str, Any]:
+            return self.knowledge_consumer.query(
                 question,
                 device_type=device_type,
                 top_k=top_k,
                 knowledge_release_version=release_version,
             )
+
+        def is_reviewed_storage(item: dict[str, Any]) -> bool:
+            metadata = item.get("metadata")
+            storage = (
+                metadata.get("storage_lifetime")
+                if isinstance(metadata, dict)
+                else None
+            )
+            return bool(
+                isinstance(storage, dict)
+                and storage.get("formal_consumable") is True
+                and str(
+                    storage.get("semantic_class_status") or ""
+                ).upper()
+                == "REVIEWED"
+            )
+
+        selection_mode = "TEXT_AND_DEVICE"
+        try:
+            if not structured_requested:
+                result = legacy_query()
+            else:
+                try:
+                    structured = self.knowledge_consumer.query(
+                        "",
+                        device_type=device_type,
+                        top_k=50,
+                        knowledge_release_version=release_version,
+                        scenario_consumer=requested_consumer,
+                    )
+                    structured_supported = True
+                except TypeError:
+                    # Compatibility with older consumer implementations used by
+                    # historical releases/tests. Production current consumer
+                    # supports the structured Storage query contract.
+                    structured = {"results": []}
+                    structured_supported = False
+
+                if structured_supported:
+                    reviewed_items: list[dict[str, Any]] = []
+                    for item in structured.get("results") or []:
+                        if not is_reviewed_storage(item):
+                            continue
+                        storage = item["metadata"]["storage_lifetime"]
+                        if (
+                            requested_semantics
+                            and str(storage.get("semantic_class") or "")
+                            not in requested_semantics
+                        ):
+                            continue
+                        if requested_parameters:
+                            parameters = {
+                                str(value).strip()
+                                for value in (
+                                    storage.get("canonical_parameters") or []
+                                )
+                                if str(value or "").strip()
+                            }
+                            for tag in item.get("tags") or []:
+                                if (
+                                    isinstance(tag, str)
+                                    and tag.startswith("storage-parameter:")
+                                ):
+                                    value = tag.split(":", 1)[1].strip()
+                                    if value:
+                                        parameters.add(value)
+                            if requested_parameters.isdisjoint(parameters):
+                                continue
+                        reviewed_items.append(item)
+
+                    if reviewed_items:
+                        result = {
+                            **structured,
+                            "results": reviewed_items[:top_k],
+                            "selection_mode": "REVIEWED_STORAGE_SEMANTIC",
+                        }
+                        selection_mode = "REVIEWED_STORAGE_SEMANTIC"
+                    else:
+                        # Migration rule: if this release already contains
+                        # reviewed Storage-lifetime knowledge, a missing class/
+                        # parameter is a real knowledge gap and must not silently
+                        # fall back to prose matching.  Legacy releases with no
+                        # reviewed Storage metadata keep their old Formal
+                        # Knowledge behavior until migrated.
+                        broad = self.knowledge_consumer.query(
+                            "",
+                            device_type=device_type,
+                            top_k=50,
+                            knowledge_release_version=release_version,
+                        )
+                        has_reviewed_model = any(
+                            is_reviewed_storage(item)
+                            for item in (broad.get("results") or [])
+                        )
+                        if has_reviewed_model:
+                            result = {
+                                **structured,
+                                "results": [],
+                                "selection_mode": "REVIEWED_STORAGE_SEMANTIC",
+                                "unknowns_or_gaps": [
+                                    "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                                ],
+                            }
+                            selection_mode = "REVIEWED_STORAGE_SEMANTIC"
+                        else:
+                            result = legacy_query()
+                            selection_mode = "LEGACY_FORMAL_COMPATIBILITY"
+                else:
+                    result = legacy_query()
+                    selection_mode = "LEGACY_FORMAL_COMPATIBILITY"
         except KnowledgeReleaseError as exc:
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
@@ -148,6 +278,7 @@ class StorageDomainSkillAdapter:
                 "evidence_refs": [],
                 "items": [],
                 "missing_information": [str(exc)],
+                "selection_mode": selection_mode,
             }
 
         items: list[dict[str, Any]] = []
@@ -163,6 +294,11 @@ class StorageDomainSkillAdapter:
             items.append({**item, "canonical_object_type": canonical})
 
         if not items:
+            missing_code = (
+                "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE_WITH_EVIDENCE"
+                if selection_mode == "REVIEWED_STORAGE_SEMANTIC"
+                else "NO_MATCHING_RELEASED_KNOWLEDGE_WITH_EVIDENCE"
+            )
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
                 "pack_id": pack_id,
@@ -170,7 +306,8 @@ class StorageDomainSkillAdapter:
                 "knowledge_refs": [],
                 "evidence_refs": [],
                 "items": [],
-                "missing_information": ["NO_MATCHING_RELEASED_KNOWLEDGE_WITH_EVIDENCE"],
+                "missing_information": [missing_code],
+                "selection_mode": selection_mode,
             }
 
         return {
@@ -181,6 +318,7 @@ class StorageDomainSkillAdapter:
             "evidence_refs": sorted({str(ref) for x in items for ref in x.get("evidence_refs") or [] if ref}),
             "items": items,
             "missing_information": [],
+            "selection_mode": selection_mode,
         }
 
     @staticmethod
@@ -239,7 +377,17 @@ class StorageDomainSkillAdapter:
         if isinstance(runtime_context, list) and runtime_context:
             query_parts.append(f"runtime trend context {runtime_context[:12]}"[:2400])
         question = " ".join(x for x in query_parts if x.strip())
-        knowledge = self.query_pack("PACK_WRITE_GOVERNANCE", question, device_type=device_type)
+        knowledge = self.query_pack(
+            "PACK_WRITE_GOVERNANCE",
+            question,
+            device_type=device_type,
+            semantic_classes=[
+                "MECHANISM_CONCEPT",
+                "DESIGN_RULE",
+                "TEST_RULE",
+            ],
+            scenario_consumer="S5",
+        )
         items = knowledge.get("items") or []
         mechanisms = [
             _text(x) for x in items
@@ -683,6 +831,14 @@ class StorageDomainSkillAdapter:
             "PACK_DIAGNOSTIC_VALIDATION",
             knowledge_query,
             device_type=device_type,
+            semantic_classes=[
+                "PARAMETER_DEFINITION",
+                "DIAGNOSTIC_RULE",
+                "TEST_RULE",
+                "APPLICABILITY_RULE",
+            ],
+            canonical_parameters=semantic_terms,
+            scenario_consumer="S4",
         )
         items = knowledge.get("items") or []
         current: list[dict[str, Any]] = []
@@ -793,7 +949,19 @@ class StorageDomainSkillAdapter:
                 " ".join(delta_terms[:30]),
             ] if x
         )
-        knowledge = self.query_pack("PACK_CHANGE_IMPACT", knowledge_query, device_type=device_type)
+        knowledge = self.query_pack(
+            "PACK_CHANGE_IMPACT",
+            knowledge_query,
+            device_type=device_type,
+            semantic_classes=[
+                "MECHANISM_CONCEPT",
+                "CHANGE_IMPACT_RULE",
+                "APPLICABILITY_RULE",
+                "TEST_RULE",
+            ],
+            canonical_parameters=delta_terms,
+            scenario_consumer="S2",
+        )
         items = knowledge.get("items") or []
         impacts = []
         impact_refs: list[str] = []
