@@ -391,6 +391,44 @@ def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[
         })
     return refs
 
+def _require_lifetime_metric_applicable(detail: dict[str, Any], requested_metric: str) -> str:
+    from .lifetime_engine import FormulaRegistry
+
+    formal = FormulaRegistry.canonicalize(requested_metric)
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    allowed_types = {
+        "SSD_TBW_CONSUMPTION_V1": {"SSD"},
+        "SSD_DWPD_OBSERVED_V1": {"SSD"},
+        "NVME_DATA_UNITS_WRITTEN_V1": {"SSD"},
+        "NVME_PERCENTAGE_USED_INTERPRETATION_V1": {"SSD"},
+        "EMMC_DEVICE_LIFE_TIME_A_V1": {"eMMC"},
+        "EMMC_DEVICE_LIFE_TIME_B_V1": {"eMMC"},
+        "EMMC_PRE_EOL_V1": {"eMMC"},
+        "NAND_PE_MARGIN_V1": {"NAND Flash"},
+        "NAND_ERASE_COUNT_MARGIN_V1": {"NAND Flash"},
+        "NAND_WEAR_DISTRIBUTION_V1": {"NAND Flash"},
+        "GENERIC_ENDURANCE_MARGIN_V1": {"NOR Flash"},
+    }
+    expected = allowed_types.get(formal)
+    if expected is not None and dtype not in expected:
+        raise ValueError(f"LIFETIME_METRIC_NOT_APPLICABLE:{formal}:{dtype}")
+
+    if formal in {"NVME_DATA_UNITS_WRITTEN_V1", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"}:
+        interface_fact = next(
+            (
+                fact for fact in (detail.get("device_facts") or [])
+                if str(fact.get("canonical_name") or "") == "interface"
+            ),
+            None,
+        )
+        interface_value = str((interface_fact or {}).get("value") or "").lower()
+        if "nvme" not in interface_value:
+            raise ValueError(
+                f"NVME_PROTOCOL_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE:{formal}"
+            )
+    return formal
+
+
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
     mapping = {
@@ -1391,6 +1429,7 @@ def execute_device_skill(
         requested_metric = str(request.get("requested_metric") or "").strip()
         if not requested_metric:
             raise ValueError("REQUESTED_METRIC_REQUIRED")
+        _require_lifetime_metric_applicable(detail, requested_metric)
         assessment = dict(request.get("assessment_request") or {})
         assessment["device_id"] = device_id
         # Product-side formal semantics are always rebound to the current
