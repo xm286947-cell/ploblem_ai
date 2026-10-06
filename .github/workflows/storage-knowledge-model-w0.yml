@@ -12,6 +12,9 @@ on:
       - "products/storage_rc1/storage_life/knowledge_product.py"
       - "products/storage_rc1/storage_life/knowledge_release.py"
       - "products/storage_rc1/storage_life/product_api.py"
+      - "products/storage_rc1/tests/test_storage_domain_skills_v01.py"
+      - "products/storage_rc1/skills/packs/lifetime_engineering.yaml"
+      - "products/storage_rc1/skills/runtime_adapter.py"
       - "products/storage_rc1/storage_life/index.html"
       - "knowledge_production/extraction.py"
       - "knowledge_production/publish.py"
@@ -50,6 +53,7 @@ jobs:
             products/storage_rc1/storage_life/knowledge_product.py \
             products/storage_rc1/storage_life/knowledge_release.py \
             products/storage_rc1/storage_life/product_api.py \
+            products/storage_rc1/skills/runtime_adapter.py \
             knowledge_production/extraction.py \
             knowledge_production/publish.py \
             knowledge_production/web.py
@@ -78,3 +82,6 @@ jobs:
           python -m pytest -q tests/test_kp_d05_processing_ui.py \
             -k "edit_uses_domain_review_and_preserves_original_candidate or storage_semantic_review_ui_to_publish"
           python -m pytest -q products/storage_rc1/tests/test_storage_knowledge_semantic_query.py
+
+          python -m pytest -q products/storage_rc1/tests/test_storage_domain_skills_v01.py \
+            -k "reviewed_semantic_pack_query_selects_parameter_without_prose_guess or reviewed_model_release_missing_scenario_does_not_fall_back_to_legacy_prose or legacy_release_without_structured_contract_remains_compatible or gs03_emmc_diagnostic_separates_capability_from_current_observation or gs05_change_impact_unknown_never_becomes_safe"
