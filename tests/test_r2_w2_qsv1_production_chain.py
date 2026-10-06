@@ -287,6 +287,34 @@ def test_w3_concurrent_same_bundle_creation_is_atomic(tmp_path: Path):
     assert len(repository.list()) == 1
 
 
+def test_w3_preflight_race_reuses_compatible_deterministic_candidate(tmp_path: Path):
+    repository = SQLiteQualityScenarioV1Repository(tmp_path / "preflight-race.db")
+    service = CandidateV1Service(repository)
+    first = service.create_from_reverse(
+        reverse_result(run="RQRUN-RACE-1"),
+        taxonomy(),
+        trigger_source="HIGH_PERCEPTION",
+        trigger_reason="customer issue",
+    )
+    assert first.created is True
+
+    original_list = repository.list
+    repository.list = lambda **_kwargs: []
+    try:
+        reused = service.create_from_reverse(
+            reverse_result(run="RQRUN-RACE-2"),
+            taxonomy(),
+            trigger_source="HIGH_PERCEPTION",
+            trigger_reason="customer issue",
+        )
+    finally:
+        repository.list = original_list
+
+    assert reused.created is False
+    assert reused.scenario.scenario_id == first.scenario.scenario_id
+    assert len(repository.list()) == 1
+
+
 def test_r2_w2_qsv1_namespace_does_not_mutate_legacy_scenario_table(tmp_path: Path):
     db = tmp_path / "coexist.db"
     with sqlite3.connect(db) as connection:

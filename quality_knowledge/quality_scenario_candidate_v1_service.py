@@ -286,8 +286,26 @@ class CandidateV1Service:
             raise ValueError("QSV1_CANDIDATE_PROVENANCE_AMBIGUOUS")
         existing = matches[0] if matches else self.repository.get(scenario_id)
         if existing is not None:
+            # The preflight read is intentionally outside the repository's
+            # BEGIN IMMEDIATE create transaction.  Under concurrent creation,
+            # list() can observe no match and get(scenario_id) can immediately
+            # observe the just-committed deterministic row.  Treat that state
+            # as a normal idempotent reuse when its frozen Bundle provenance
+            # and trigger identity match; only fail closed on an actual
+            # deterministic-ID collision.
             if self._bundle_identity(candidate) and not matches:
-                raise ValueError("QSV1_CANDIDATE_IDENTITY_CONFLICT")
+                existing_locators = {
+                    item.content_ref
+                    for item in existing.evidence_refs
+                    if item.evidence_type == "QSV1_PRODUCTION_PROVENANCE"
+                }
+                if self._bundle_locator(candidate) not in existing_locators:
+                    raise ValueError("QSV1_CANDIDATE_IDENTITY_CONFLICT")
+                if (
+                    existing.trigger_source != candidate.trigger_source
+                    or existing.trigger_reason.strip() != candidate.trigger_reason.strip()
+                ):
+                    raise ValueError("QSV1_CANDIDATE_IDENTITY_CONFLICT")
             return CandidateV1ProductionResult(
                 candidate=candidate,
                 scenario=existing,
