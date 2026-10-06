@@ -968,19 +968,12 @@ def test_promotion_recovery_diagnostics_route_is_maintainer_only(tmp_path):
     promotion, workbench, *_ = setup_case(
         tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
     )
-    controller = ManagedNonProdReleaseController(
-        JsonArtifactRepository(knowledge_root),
-        promotion.bridge.adapter,
-        release_prefix=RELEASE,
-    )
-    assert controller.status()["release_version"] is None
 
     app = FastAPI()
     app.include_router(
         create_hardware_r1_workbench_router(
             workbench,
             promotion_service=promotion,
-            release_controller=controller,
         )
     )
     client = TestClient(app)
