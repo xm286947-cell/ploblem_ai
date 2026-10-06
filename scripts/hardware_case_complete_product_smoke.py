@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import sys
 import tempfile
@@ -358,6 +359,11 @@ def main() -> int:
             ):
                 if client.get(route).status_code != 200:
                     raise SystemExit("PRODUCT_PAGE_ENTRY_FAIL=" + route)
+
+        # Windows keeps SQLite files locked while app and TestClient objects
+        # remain referenced, even after the client context has exited.
+        del client, app, structurer
+        gc.collect()
 
     print("WORD_IMPORT_ENTRY=PASS")
     print("GOLDEN_PREVIEW_ENTRY=PASS")
