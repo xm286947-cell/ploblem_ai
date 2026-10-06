@@ -121,3 +121,13 @@ def test_mature_qsv1_shell_returns_to_mature_routes_without_p0_duplicates(tmp_pa
         "/settings/scenario-taxonomy",
     ):
         assert client.get(path).status_code == 200, path
+
+
+def test_mature_qsv1_local_nav_returns_to_reachable_mature_host(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
+    client = TestClient(create_app(tmp_path / "quality_issue_v1.db"))
+
+    response = client.get("/p0/quality-scenario-insights")
+    assert response.status_code == 200
+    assert 'href="/issues">返回问题工作台</a>' in response.text
+    assert 'href="/p0/overall">返回总体工作台</a>' not in response.text

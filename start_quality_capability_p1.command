@@ -66,6 +66,9 @@ PY
 fi
 
 echo "DEPENDENCY_PREFLIGHT=PASS"
+"$VENV_PYTHON" "$SCRIPT_DIR/tools/quality_scenario_real_data_preflight.py" --db "$QUALITY_DB"
+echo "For Browser Golden, require real data with:"
+echo "  $VENV_PYTHON tools/quality_scenario_real_data_preflight.py --db \"$QUALITY_DB\" --require"
 "$VENV_PYTHON" "$SCRIPT_DIR/main.py" knowledge-web --db "$QUALITY_DB" "$@"
 EXIT_CODE=$?
 echo

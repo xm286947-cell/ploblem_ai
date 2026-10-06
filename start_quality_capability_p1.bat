@@ -61,6 +61,8 @@ if errorlevel 1 (
 )
 
 echo DEPENDENCY_PREFLIGHT=PASS
+"%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\quality_scenario_real_data_preflight.py" --db "%QUALITY_DB%"
+echo For Browser Golden, run the preflight with --require before testing.
 "%VENV_PYTHON%" "%PACKAGE_ROOT%\main.py" knowledge-web --db "%QUALITY_DB%" %*
 set "EXIT_CODE=%errorlevel%"
 echo.
