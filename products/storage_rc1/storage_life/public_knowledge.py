@@ -371,11 +371,24 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
         revision = str(hit.get("source_revision") or "")
         if not source_id:
             continue
+        source_detail_status = "AVAILABLE"
         if source_id not in source_cache:
-            source_cache[source_id] = _source_for_context(mode, source_id, base_url)
+            try:
+                source_cache[source_id] = _source_for_context(mode, source_id, base_url)
+            except HTTPException:
+                # Search/Citation is the required product baseline.  Failure of
+                # optional Source Detail enrichment must not discard a valid hit.
+                source_cache[source_id] = {}
         source = source_cache[source_id]
-        title = str(source.get("title") or source_id)
-        source_uri = source.get("source_uri") or source.get("official_url")
+        if not source:
+            source_detail_status = "UNAVAILABLE"
+        title = str(source.get("title") or hit.get("source_title") or hit.get("title") or source_id)
+        source_uri = (
+            source.get("source_uri")
+            or source.get("official_url")
+            or hit.get("source_uri")
+            or hit.get("official_url")
+        )
         locator = _normalize_citation_locator({"locator": hit.get("locator")}).get("locator")
         if not isinstance(locator, dict):
             locator = {"raw": str(locator or "")}
@@ -399,7 +412,12 @@ def context_search(body: ContextSearchBody, mode: str = "LIVE", base_url: str | 
             "citation_id": citation_id,
             "source_id": source_id,
             "source_title": title,
-            "publisher": _publisher_from_source(source),
+            "publisher": (
+                _publisher_from_source(source)
+                if source else
+                str(hit.get("publisher") or "Not provided")
+            ),
+            "source_detail_status": source_detail_status,
             "source_uri": source_uri,
             "source_revision": revision,
             "original_snippet": hit.get("text") or "",
