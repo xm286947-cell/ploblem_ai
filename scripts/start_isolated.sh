@@ -7,12 +7,6 @@ if [ -d /Applications/Docker.app/Contents/Resources/bin ]; then
   export PATH
 fi
 
-ISOLATED_PROJECT="storage-pkr-w4-isolated"
-ISOLATED_CONTAINER="storage-public-knowledge-w4-isolated"
-ISOLATED_VOLUME="storage_public_knowledge_w4_isolated_data"
-ISOLATED_PORT="19000"
-SOURCE_VOLUME="${PKR_SOURCE_VOLUME:-}"
-
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -25,6 +19,7 @@ if [ -z "$PYTHON_BIN" ]; then
   fi
 fi
 
+SOURCE_VOLUME="${PKR_SOURCE_VOLUME:-}"
 if [ -z "$SOURCE_VOLUME" ]; then
   if docker volume inspect public_knowledge_service_public_knowledge_data >/dev/null 2>&1; then
     SOURCE_VOLUME="public_knowledge_service_public_knowledge_data"
@@ -40,25 +35,90 @@ if [ -z "$SOURCE_VOLUME" ]; then
     fi
   fi
 fi
-
 docker volume inspect "$SOURCE_VOLUME" >/dev/null
 
-# Only the isolated resources are ever replaced. The source container/volume
-# are read-only inputs and are never stopped, removed, or modified.
-docker rm -f "$ISOLATED_CONTAINER" >/dev/null 2>&1 || true
-docker volume rm -f "$ISOLATED_VOLUME" >/dev/null 2>&1 || true
-docker volume create "$ISOLATED_VOLUME" >/dev/null
+INSTANCE_ID="${PKR_ISOLATED_INSTANCE_ID:-$(date +%Y%m%d%H%M%S)-$$}"
+case "$INSTANCE_ID" in
+  *[!A-Za-z0-9_.-]*|"")
+    echo "ERROR: PKR_ISOLATED_INSTANCE_ID may contain only letters, numbers, dot, dash, underscore."
+    exit 2
+    ;;
+esac
 
-docker run --rm \
-  -v "$SOURCE_VOLUME:/from:ro" \
-  -v "$ISOLATED_VOLUME:/to" \
-  alpine:3.20 \
-  sh -c 'cp -a /from/. /to/'
+ISOLATED_PROJECT="storage-pkr-w4-$INSTANCE_ID"
+PKR_ISOLATED_CONTAINER="storage-public-knowledge-w4-$INSTANCE_ID"
+PKR_ISOLATED_VOLUME="storage_public_knowledge_w4_${INSTANCE_ID}_data"
 
-docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml up -d --build --force-recreate
+if [ -n "${PKR_ISOLATED_PORT:-}" ]; then
+  PORT_CANDIDATE="$PKR_ISOLATED_PORT"
+  "$PYTHON_BIN" - "$PORT_CANDIDATE" <<'PY'
+import socket, sys
+port = int(sys.argv[1])
+if not 1024 <= port <= 65535:
+    raise SystemExit("ISOLATED_PORT_INVALID")
+with socket.socket() as sock:
+    try:
+        sock.bind(("127.0.0.1", port))
+    except OSError:
+        raise SystemExit("ISOLATED_PORT_IN_USE")
+PY
+else
+  PKR_ISOLATED_PORT="$("$PYTHON_BIN" - <<'PY'
+import socket
+for port in range(19000, 19050):
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+        print(port)
+        break
+else:
+    raise SystemExit("NO_FREE_ISOLATED_PORT")
+PY
+)"
+fi
 
-echo "Waiting for isolated Public Knowledge: http://127.0.0.1:$ISOLATED_PORT"
-"$PYTHON_BIN" - "$ISOLATED_PORT" <<'PY'
+export PKR_ISOLATED_CONTAINER PKR_ISOLATED_VOLUME PKR_ISOLATED_PORT
+
+if docker inspect "$PKR_ISOLATED_CONTAINER" >/dev/null 2>&1; then
+  echo "ERROR: generated isolated container already exists; refusing to replace it."
+  exit 2
+fi
+if docker volume inspect "$PKR_ISOLATED_VOLUME" >/dev/null 2>&1; then
+  echo "ERROR: generated isolated volume already exists; refusing to replace it."
+  exit 2
+fi
+
+STATE_FILE="$PWD/.pkr_isolated_last.env"
+umask 077
+cat > "$STATE_FILE" <<EOF
+ISOLATED_PROJECT='$ISOLATED_PROJECT'
+PKR_ISOLATED_CONTAINER='$PKR_ISOLATED_CONTAINER'
+PKR_ISOLATED_VOLUME='$PKR_ISOLATED_VOLUME'
+PKR_ISOLATED_PORT='$PKR_ISOLATED_PORT'
+PKR_SOURCE_VOLUME='$SOURCE_VOLUME'
+EOF
+
+cleanup_on_error() {
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "Isolated startup failed; cleaning only resources created by this run."
+    docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml down >/dev/null 2>&1 || true
+    docker volume rm -f "$PKR_ISOLATED_VOLUME" >/dev/null 2>&1 || true
+  fi
+  exit "$code"
+}
+trap cleanup_on_error EXIT HUP INT TERM
+
+docker volume create "$PKR_ISOLATED_VOLUME" >/dev/null
+
+docker run --rm   -v "$SOURCE_VOLUME:/from:ro"   -v "$PKR_ISOLATED_VOLUME:/to"   alpine:3.20   sh -c 'cp -a /from/. /to/'
+
+docker compose -p "$ISOLATED_PROJECT" -f compose.isolated.yaml up -d --build
+
+echo "Waiting for isolated Public Knowledge: http://127.0.0.1:$PKR_ISOLATED_PORT"
+"$PYTHON_BIN" - "$PKR_ISOLATED_PORT" <<'PY'
 import json, sys, time, urllib.request
 port = sys.argv[1]
 base = f"http://127.0.0.1:{port}"
@@ -95,7 +155,7 @@ print("ISOLATED_PKR_MODEL=" + str(config.get("openai_model") or config.get("olla
 PY
 
 if [ "${PKR_ALLOW_REAL_PROVIDER_TEST:-0}" = "1" ]; then
-  "$PYTHON_BIN" - "$ISOLATED_PORT" <<'PY'
+  "$PYTHON_BIN" - "$PKR_ISOLATED_PORT" <<'PY'
 import json, sys, urllib.request, urllib.error
 port = sys.argv[1]
 url = f"http://127.0.0.1:{port}/providers/active/health"
@@ -111,8 +171,13 @@ print("ISOLATED_PKR_ACTIVE_MODEL=" + str(payload.get("model") or ""))
 PY
 else
   echo "ISOLATED_PKR_REAL_PROVIDER_TEST=SKIPPED"
-  echo "To run one real provider health probe: PKR_ALLOW_REAL_PROVIDER_TEST=1 bash scripts/start_isolated.sh"
 fi
 
+trap - EXIT HUP INT TERM
+
 echo "Original Public Knowledge service was not stopped or modified."
-echo "Isolated Public Knowledge: http://127.0.0.1:$ISOLATED_PORT"
+echo "ISOLATED_STATE_FILE=$STATE_FILE"
+echo "ISOLATED_PROJECT=$ISOLATED_PROJECT"
+echo "ISOLATED_CONTAINER=$PKR_ISOLATED_CONTAINER"
+echo "ISOLATED_VOLUME=$PKR_ISOLATED_VOLUME"
+echo "Isolated Public Knowledge: http://127.0.0.1:$PKR_ISOLATED_PORT"
