@@ -263,6 +263,22 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
         raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
 
 
+def _delete_request(mode: str, path: str, base_url: str | None = None):
+    if mode == "FIXTURE_REPLAY":
+        raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能删除公开资料。")
+    if mode != "LIVE":
+        raise HTTPException(422, "未知运行模式。")
+    req = Request(_url(base_url) + path, method="DELETE")
+    try:
+        with _NO_REDIRECT_OPENER.open(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:1000]
+        raise HTTPException(exc.code, detail or f"Public Knowledge API 返回 HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
+        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+
+
 def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, content: bytes,
                   media_type: str, base_url: str | None = None):
     if mode != "LIVE":
@@ -430,6 +446,21 @@ def source_detail(source_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | 
             raise HTTPException(404, "演示资料不存在")
         return {"source": item, "revisions": [{"source_revision": item["version"], "media_type": item["media_type"]}], "mode": mode}
     return {**_request(mode, "/sources/" + quote(source_id, safe=""), base_url=base_url), "mode": mode}
+
+
+@router.delete("/sources/{source_id}/revisions/{revision_id}")
+def delete_source_revision(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    path = (
+        "/sources/" + quote(source_id, safe="")
+        + "/revisions/" + quote(revision_id, safe="")
+    )
+    return {**_delete_request(mode, path, base_url=base_url), "mode": mode}
+
+
+@router.delete("/sources/{source_id}")
+def delete_source(source_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+    path = "/sources/" + quote(source_id, safe="")
+    return {**_delete_request(mode, path, base_url=base_url), "mode": mode}
 
 
 @router.post("/sources/import")
