@@ -420,7 +420,7 @@ async function loadMvpSummary(){
     MVP_SUMMARY=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/mvp-summary');
     MVP_PUBLIC_KNOWLEDGE_READY=MVP_SUMMARY.public_knowledge?.retrieval_ready===true;
     let f=MVP_SUMMARY.facts||{},sc=MVP_SUMMARY.scenarios||[],actions=MVP_SUMMARY.remaining_actions||[];
-    let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{},overallReady=!!MVP_SUMMARY.mvp_ready_for_demo&&MVP_PUBLIC_KNOWLEDGE_READY;
+    let rt=MVP_SUMMARY.runtime||{},ac=MVP_SUMMARY.action_checklist||{},fk=MVP_SUMMARY.formal_knowledge_readiness||{},contentBlockers=fk.content_blockers||[],overallReady=!!MVP_SUMMARY.mvp_ready_for_demo&&MVP_PUBLIC_KNOWLEDGE_READY;
     body.innerHTML='<div class="grid4">'+
       '<div class="card"><small>Device Fact</small><div class="metric">'+esc(f.confirmed||0)+'</div><small>适用槽位 '+esc(f.applicable||0)+' · Fact Coverage '+Math.round((f.fact_coverage_ratio||0)*100)+'%</small></div>'+
       '<div class="card"><small>Runtime</small><div class="metric">'+esc(rt.formal_snapshot_count||0)+'</div><small>Formal Snapshots / Total '+esc(rt.snapshot_count||0)+' · '+esc(rt.metric_count||0)+' Formal Metrics</small></div>'+
@@ -431,6 +431,7 @@ async function loadMvpSummary(){
       '</div>'+
       '<div class="grid3">'+sc.map(mvpScenarioCard).join('')+'</div>'+
       (!MVP_PUBLIC_KNOWLEDGE_READY?'<div class="card warning"><b>Public Knowledge 未就绪</b><p>不能把 Storage S1～S5 已形成结果误判为完整 MVP Ready；恢复 RAG 后再确认。</p></div>':'')+
+      (contentBlockers.length?'<div class="card warning"><b>Formal Knowledge 内容缺口</b><p>以下是知识生产/来源验证缺口，不是 Storage 页面代码错误；系统保持 Fail-Closed，不会用 Public Knowledge 或模型猜测替代正式知识。</p><ul>'+contentBlockers.map(x=>'<li><b>'+esc(x.scenario)+' · '+esc(x.pack_id)+'</b> · '+esc(x.status)+' · '+esc(x.owner||'')+(x.missing_critical_knowledge?.length?'<br><small>Missing: '+esc(x.missing_critical_knowledge.join(' / '))+'</small>':'')+'</li>').join('')+'</ul></div>':'')+
       (actions.length?'<div class="card warning"><b>继续完成</b><ul>'+actions.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">寿命评估</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">运行诊断</button><button class="secondary" onclick="scrollDeviceSection(\'optimizationPanel\')">优化建议</button></div></div>':(overallReady?'<div class="fact card"><b>当前器件 MVP 核心分析链与 Public Knowledge 均已就绪。</b><p>可导出摘要，或继续查看 Evidence / Engineering Action。</p></div>':''));
   }catch(e){
     body.innerHTML='<div class="danger">综合评估摘要暂不可用：'+esc(e.message)+'</div>';
