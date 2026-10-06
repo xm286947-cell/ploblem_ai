@@ -254,6 +254,16 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
                     "TEST_RULE",
                 ],
                 "scenario_consumers": ["S1", "S2", "S3", "S4", "S5"],
+                "hits": [
+                    {
+                        "source_id": "source-1",
+                        "source_revision": "rev-1",
+                        "locator": {
+                            "page": 10,
+                            "section": "Reliability",
+                        },
+                    }
+                ],
             },
             {
                 "canonical_name": "retention",
@@ -265,6 +275,16 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
                     "TEST_RULE",
                 ],
                 "scenario_consumers": ["S1", "S2", "S3", "S4", "S5"],
+                "hits": [
+                    {
+                        "source_id": "source-1",
+                        "source_revision": "rev-1",
+                        "locator": {
+                            "page": 25,
+                            "section": "Data Retention",
+                        },
+                    }
+                ],
             },
         ],
     }
@@ -371,6 +391,7 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
     assert metadata["public_source_revision"] == "rev-1"
     assert metadata["canonical_parameters"] == ["pe_cycles"]
     assert metadata["parameter_binding_status"] == "BOUND"
+    assert metadata["parameter_binding_basis"] == "CANDIDATE_TEXT"
     assert metadata["formal_consumable"] is False
     assert metadata["semantic_class_status"] == "NEEDS_REVIEW"
     assert set(metadata["semantic_class_candidates"]) == {
@@ -382,6 +403,33 @@ def test_model_extract_bridges_exact_public_pdf_into_existing_kp(monkeypatch):
         "storage-semantic-candidate:CALCULATION_RULE"
         in enrichment["tags"]
     )
+
+    class Location:
+        page = 10
+        section = "Reliability"
+        source_anchor = "page:10"
+
+    class EvidenceBoundDraft:
+        title = "Endurance qualification guidance"
+        summary = "Qualification limits for the memory technology."
+        content = "The qualification guidance is evidence backed."
+        tags = []
+        object_type = ObjectType()
+        evidence_locations = [Location()]
+
+    evidence_enrichment = seen["extract"]["candidate_enricher"](
+        EvidenceBoundDraft()
+    )
+    evidence_metadata = evidence_enrichment["metadata"][
+        "storage_lifetime"
+    ]
+    assert evidence_metadata["canonical_parameters"] == ["pe_cycles"]
+    assert evidence_metadata["parameter_binding_status"] == "BOUND"
+    assert (
+        evidence_metadata["parameter_binding_basis"]
+        == "EVIDENCE_LOCATOR"
+    )
+    assert "storage-parameter:pe_cycles" in evidence_enrichment["tags"]
 
 
 def test_model_extract_never_runs_in_fixture_mode(monkeypatch):
