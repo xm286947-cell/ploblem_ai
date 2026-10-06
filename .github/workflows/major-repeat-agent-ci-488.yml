@@ -78,7 +78,8 @@ jobs:
           git reset --hard "$PRODUCT_SOURCE_SHA"
           git clean -fdx
           test -z "$(git status --porcelain --untracked-files=all)"
-          python scripts/build_major_mvp_product_candidate.py --output-dir dist | tee build.log
+          python scripts/build_major_mvp_product_candidate.py --output-dir dist | tee /tmp/build.log
+          cp /tmp/build.log build.log
           PREFIX="$(echo "$PRODUCT_SOURCE_SHA" | cut -c1-12)"
           ZIP="dist/MAJOR_MVP_PRODUCT_CANDIDATE_$PREFIX.zip"
           test -f "$ZIP"
