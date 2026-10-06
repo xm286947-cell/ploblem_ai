@@ -290,8 +290,8 @@ class RealKnowledgeAssessmentService:
         )
         rg04 = self.adapter.query_pack(
             "PACK_DIAGNOSTIC_VALIDATION",
-            "NAND P/E page erase block erase count wear distribution ECC bad block",
-            device_type="NAND",
+            "NAND Flash P/E page erase block erase count wear distribution ECC bad block",
+            device_type="NAND Flash",
         )
         rg05 = self.adapter.query_pack(
             "PACK_CHANGE_IMPACT",
