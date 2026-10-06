@@ -1184,8 +1184,18 @@ class HardwareR1KnowledgePromotionService:
             return self._reconcile_publish(item, asset, evidence_ids, record, entry)
         raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
 
-    def reconcile_startup(self, *, max_remote_queries: int = 2) -> dict[str, Any]:
-        """Use a bounded read-only reconciliation budget during app startup."""
+    def reconcile_startup(
+        self,
+        *,
+        max_remote_queries: int = 2,
+        prepare_publication_query: Any | None = None,
+    ) -> dict[str, Any]:
+        """Use a bounded read-only reconciliation budget during app startup.
+
+        LOCAL_NON_PROD callers may provide a release refresher.  It is invoked
+        only immediately before reconciling a pending PUBLISH operation so the
+        read-only publication lookup sees the latest immutable release.
+        """
         budget = max(0, min(int(max_remote_queries), 4))
         try:
             entries = self.operation_journal.list_nonterminal()
@@ -1219,6 +1229,8 @@ class HardwareR1KnowledgePromotionService:
                     continue
                 item_id = str(promotion_record.get("origin_item_id") or "")
                 item = self._workbench_item(item_id)
+                if prepare_publication_query is not None:
+                    prepare_publication_query()
                 evidence_ids = [
                     str(value.get("evidence_id") or "")
                     for value in asset.get("evidence_refs") or []
