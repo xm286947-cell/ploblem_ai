@@ -38,6 +38,31 @@ def test_candidate_runtime_model_templates_have_no_literal_credentials() -> None
         assert re.search(r"(?im)^\s*secret\s*:", text) is None
 
 
+def test_candidate_branch_is_audit_metadata_not_product_identity(monkeypatch) -> None:
+    calls = []
+
+    def fake_git(_root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "HEAD"):
+            return "a" * 40
+        if args == ("branch", "--show-current"):
+            return ""
+        if args == ("status", "--porcelain", "--untracked-files=all"):
+            return ""
+        if args == ("merge-base", "--is-ancestor", builder.SOURCE_BASE, "HEAD"):
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(builder, "_git", fake_git)
+    monkeypatch.setenv("GITHUB_REF_NAME", "ci/major-mvp-gate-execution")
+    commit, branch, dirty = builder._git_metadata(ROOT, require_clean=True)
+
+    assert commit == "a" * 40
+    assert branch == "ci/major-mvp-gate-execution"
+    assert dirty == "NO"
+    assert ("merge-base", "--is-ancestor", builder.SOURCE_BASE, "HEAD") in calls
+
+
 def test_built_candidate_package_gate() -> None:
     archive = os.getenv("MAJOR_MVP_CANDIDATE_PATH", "").strip()
     if not archive:
