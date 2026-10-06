@@ -64,6 +64,41 @@ def test_source_versioning_and_citation_resolution(monkeypatch, tmp_path):
     assert citation["text"]
 
 
+def test_delete_mistaken_revision_and_source(monkeypatch, tmp_path):
+    client = setup_client(monkeypatch, tmp_path)
+    first = public_source(client)
+    assert first.status_code == 200
+    first_data = first.json()
+
+    revised = public_source(client, "NAND data retention is 5 years at 85 C.")
+    assert revised.status_code == 200
+    revised_data = revised.json()
+    assert revised_data["source_id"] == first_data["source_id"]
+    assert revised_data["source_revision"] != first_data["source_revision"]
+
+    hits = client.post("/search", json={"query": "85 C", "top_k": 5}).json()["hits"]
+    assert hits
+    mistaken_citation = hits[0]["hit_id"]
+
+    deleted_revision = client.delete(
+        f"/sources/{first_data['source_id']}/revisions/{revised_data['source_revision']}"
+    )
+    assert deleted_revision.status_code == 200
+    assert deleted_revision.json()["formal_knowledge_affected"] is False
+    assert deleted_revision.json()["source_deleted"] is False
+    assert client.get("/citations/" + mistaken_citation).status_code == 404
+
+    source = client.get("/sources/" + first_data["source_id"])
+    assert source.status_code == 200
+    assert len(source.json()["revisions"]) == 1
+
+    deleted_source = client.delete("/sources/" + first_data["source_id"])
+    assert deleted_source.status_code == 200
+    assert deleted_source.json()["formal_knowledge_affected"] is False
+    assert client.get("/sources/" + first_data["source_id"]).status_code == 404
+    assert client.post("/search", json={"query": "retention", "top_k": 5}).json()["hits"] == []
+
+
 def test_live_contract_and_fixture_capture_replay(monkeypatch, tmp_path):
     client = setup_client(monkeypatch, tmp_path)
     imported = public_source(client).json()
