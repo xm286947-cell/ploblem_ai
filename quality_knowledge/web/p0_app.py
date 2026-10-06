@@ -416,6 +416,7 @@ def create_p0_app(
                 repeat_db_path=repeat_db,
                 project_root=root,
                 case_service=historical_case_service,
+                runtime_model_config=runtime_model_config,
             )
         app.state.repeat_risk_service = repeat_web
     else:
