@@ -1384,7 +1384,28 @@ def analyze_runtime_trend(
         start, end = _iso_datetime(previous.get("captured_at")), _iso_datetime(latest.get("captured_at"))
         elapsed_days = (end - start).total_seconds() / 86400 if start and end else None
         delta_units = float(duw["delta"])
-        if elapsed_days and elapsed_days > 0 and delta_units >= 0:
+        if not elapsed_days or elapsed_days <= 0:
+            results.append({
+                "kind": "TREND_DWPD",
+                "metric_name": "data_units_written",
+                "sample_count": duw.get("sample_count"),
+                "delta": delta_units,
+                "delta_unit": latest.get("unit") or "data_units",
+                "error": "RUNTIME_CAPTURE_WINDOW_INVALID",
+                "detail": "两次 Data Units Written 快照必须具有递增且不同的真实采集时间。",
+            })
+        elif delta_units < 0:
+            results.append({
+                "kind": "TREND_DWPD",
+                "metric_name": "data_units_written",
+                "sample_count": duw.get("sample_count"),
+                "elapsed_days": elapsed_days,
+                "delta": delta_units,
+                "delta_unit": latest.get("unit") or "data_units",
+                "error": "CUMULATIVE_COUNTER_DECREASED",
+                "detail": "累计写入计数发生回退，可能存在设备更换、控制器复位或计数器重置；禁止继续计算 DWPD。",
+            })
+        else:
             conversion = execute_device_skill(device_id, "storage-lifetime-budget", {
                 "requested_metric": "NVME_DATA_UNITS_WRITTEN_V1",
                 "runtime_observations": [
