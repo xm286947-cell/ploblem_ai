@@ -15,6 +15,7 @@ on:
       - "products/storage_rc1/tests/test_storage_domain_skills_v01.py"
       - "products/storage_rc1/skills/packs/lifetime_engineering.yaml"
       - "products/storage_rc1/skills/runtime_adapter.py"
+      - "products/storage_rc1/skills/real_knowledge.py"
       - "products/storage_rc1/storage_life/index.html"
       - "knowledge_production/release_binding.py"
       - "products/storage_rc1/tests/test_storage_release_binding_upgrade.py"
