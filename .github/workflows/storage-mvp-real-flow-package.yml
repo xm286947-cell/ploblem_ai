@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: f7fcb707b0d9c601e384bf08b2e81a03e5221aa7
+      STORAGE_SOURCE_SHA: 1b78e4d973600ea8c5c4897e220bca5b25fe134a
       PUBLIC_KNOWLEDGE_SOURCE_SHA: 78ccc746a9df97bb1842d154363a431b64756280
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
       PACKAGE_DATE: "20261006"
@@ -206,13 +206,16 @@ jobs:
           1. 在 Public Knowledge LIVE 重新导入该 PDF，并填写 Publisher
           2. 资料详情 -> 按寿命模型生产知识 -> NAND Flash -> 按模型分析
           3. pe_cycles 必须命中真实 Citation；未命中则记录断点，禁止手改 DB
-          4. 生成 Knowledge Candidate
-          5. Existing Knowledge Production 中核对 Evidence / Locator / Revision
-          6. Reviewer 将首条对象收敛到 pe_cycles，并确认 PARAMETER_DEFINITION
-          7. Publish
-          8. 生成 Release Candidate（此时不得切换 Consumer）
-          9. Reviewer 显式 Promote
-          10. 回 Storage 验证 structured Formal Knowledge consumption
+          4. 点击“检查 Knowledge Production AI”
+             - 必须显示 READY
+             - 若显示 NOT READY，先处理现有 Runtime / Provider；禁止用 Mock 代替 W4
+          5. 生成 Knowledge Candidate
+          6. Existing Knowledge Production 中核对 Evidence / Locator / Revision
+          7. Reviewer 将首条对象收敛到 pe_cycles，并确认 PARAMETER_DEFINITION
+          8. Publish
+          9. 生成 Release Candidate（此时不得切换 Consumer）
+          10. Reviewer 显式 Promote
+          11. 回 Storage 验证 structured Formal Knowledge consumption
 
           验证主链：
           S1 Device Fact / Evidence
@@ -264,29 +267,33 @@ jobs:
           6. 点击“按模型分析”
              - 查看 FOUND / NOT_FOUND
              - 查看关键参数、所需知识类型、S1~S5 消费场景、Citation 数
-          7. 点击“生成 Knowledge Candidate”
+          7. 点击“检查 Knowledge Production AI”
+             - READY 才允许继续
+             - NOT READY 时根据现有 Runtime / Provider 配置修正
+             - 不建立第二套 Agent Config
+          8. 点击“生成 Knowledge Candidate”
              - 系统必须使用 Exact Public Source Revision PDF
              - 不允许 Public QA 文本直接变 Formal Knowledge
-          8. 打开 Candidate
-          9. 执行 Evaluation
-          10. Human Review：
+          9. 打开 Candidate
+          10. 执行 Evaluation
+          11. Human Review：
               - 核对 Evidence
               - 核对 canonical parameter
               - 若同页多参数为 AMBIGUOUS，必须人工判断，不可自动任选
               - 选择唯一 Storage Knowledge Type
               - EDIT & CONFIRM
-          11. Publish
+          12. Publish
               - 未选 Storage Knowledge Type 必须禁止 Publish
               - Published metadata 应为 semantic_class_status=REVIEWED
-          12. 回到 Storage 公共知识工作台
-          13. 输入明确 Release Version，例如：
+          13. 回到 Storage 公共知识工作台
+          14. 输入明确 Release Version，例如：
               KP-STORAGE-LIFETIME-W4-20261006-R1
-          14. 构建 Release Candidate
+          15. 构建 Release Candidate
               - 当前 Active Release 此时不能变化
-          15. 输入批准人，执行“批准并切换到 Storage”
+          16. 输入批准人，执行“批准并切换到 Storage”
               - 禁止 latest
               - Release + Binding 必须同步切换
-          16. 验证 Formal Knowledge：
+          17. 验证 Formal Knowledge：
               - 只消费 REVIEWED / formal_consumable Knowledge
               - S2/S3/S4/S5 按 semantic_class + canonical_parameter + scenario 消费
               - 新模型知识缺失时 Fail-Closed，不允许悄悄回退成关键词猜测
@@ -307,6 +314,47 @@ jobs:
           发现断点：
           记录页面、操作、错误原文和当时 Source/Release 身份；
           不现场改 DB，不绕过 Review，不用测试脚本制造 PASS。
+          EOF
+
+          cat > "$PKG/PROVIDER_SETUP_README.txt" <<'EOF'
+          Knowledge Production AI Provider
+
+          Storage / Knowledge Production 复用同一个 Unified Agent Runtime 与 model_ref。
+          本包不创建第二套 Agent Config，也不保存真实密钥。
+
+          W4 开始前：
+          1. 打开 Storage -> 公开资料库 -> 资料详情
+          2. 点击“检查 Knowledge Production AI”
+          3. 只有 READY 才继续“生成 Knowledge Candidate”
+
+          默认 package config/model.local.yaml 只是本地 OpenAI-compatible Provider 示例。
+          如果实际 Provider 不是该地址，请按现有 Runtime model profile 合同修改配置。
+
+          推荐生产方式：
+          - base_url 使用 *_env 引用
+          - api_key 使用 *_env 引用
+          - 不把真实 key 写入包或 Git
+          - Knowledge Production Agent 固定复用 model_ref=qwen_prod
+
+          配置示例（环境变量名可按现场规范替换）：
+
+          active_model: qwen_prod
+          models:
+            qwen_prod:
+              provider: openai_compatible
+              base_url_env: STORAGE_AI_BASE_URL
+              api_key_env: STORAGE_AI_API_KEY
+              model: <your-openai-compatible-model>
+              temperature: 0
+              max_tokens: 8192
+
+          本地无认证 Provider 可使用直接 base_url，但仍不要在 YAML 中保存敏感凭据。
+
+          Provider 不可达时：
+          - Public Knowledge Search / Citation 仍可使用
+          - Knowledge Candidate Extraction Fail-Closed
+          - 不生成假 Candidate
+          - 不发布 Formal Knowledge
           EOF
 
           cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
