@@ -1,0 +1,72 @@
+{
+  "name": "QS W4 P04 Portrait Closure 037be19",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-p04-portrait-037be19"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-p04-portrait-037be19.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "focused": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "037be19dbe09e56146bdc993427de4590f83580b"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Focused P04/QSV1 closure regression",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m pytest -q tests/test_quality_scenario_w4_functional_provider_e2e.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_p04_quality_scenario_insight.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_openai_mock_runtime_integration.py::test_openai_mock_bind_does_not_require_reverse_dns"
+        }
+      ]
+    },
+    "mac": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 35,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "037be19dbe09e56146bdc993427de4590f83580b"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Mac focused E2E",
+          "shell": "bash",
+          "run": "python -m pytest -q tests/test_quality_scenario_w4_functional_provider_e2e.py"
+        }
+      ]
+    }
+  }
+}
