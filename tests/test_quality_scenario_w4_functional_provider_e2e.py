@@ -14,7 +14,7 @@ from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1R
 from quality_knowledge.scenario_assets import ScenarioAssets
 from quality_knowledge.scenarios import ScenarioRepository
 from quality_knowledge.web.app import create_app
-from tools.build_quality_scenario_test_fixture import build_fixture
+from tools.build_quality_scenario_test_fixture import advance_g5, build_fixture
 from tools.openai_mock.server import create_server
 from tools.quality_scenario_functional_provider import FUNCTIONAL_RESPONSE
 
@@ -260,3 +260,138 @@ def test_w4_controlled_provider_runs_g1_through_publish_and_portraits(tmp_path, 
         )
         assert archive_detail.status_code == 200, archive_detail.text
         assert archive_detail.json()["input_count"] == 1
+
+
+def _publish(client: TestClient, scenario: dict) -> dict:
+    scenario_id = scenario["scenario_id"]
+    reviewed = client.post(
+        f"/api/v2/quality-scenario-workflow/v1/quality-scenarios/{scenario_id}/review",
+        json={
+            "expected_scenario_version": scenario["scenario_version"],
+            "review_status": "CONFIRMED",
+            "reviewer": "W4 Functional Reviewer",
+            "comment": "W4 lineage validation",
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    scenario = reviewed.json()["scenario"]
+    confirmed = client.post(
+        f"/api/v2/quality-scenario-workflow/v1/quality-scenarios/{scenario_id}/confirm",
+        json={
+            "expected_scenario_version": scenario["scenario_version"],
+            "quality_confirmed_by": "W4 Quality",
+            "technical_confirmed_by": "W4 Technical",
+            "confirmation_note": "W4 lineage validation",
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    scenario = confirmed.json()["scenario"]
+    published = client.post(
+        f"/api/v2/quality-scenario-workflow/v1/quality-scenarios/{scenario_id}/publish",
+        json={
+            "expected_scenario_version": scenario["scenario_version"],
+            "published_by": "W4 Functional Golden",
+        },
+    )
+    assert published.status_code == 200, published.text
+    return published.json()["scenario"]
+
+
+def test_w4_fixture_g4_idempotency_and_g5_source_revision_use_product_flow(tmp_path, monkeypatch):
+    db = tmp_path / "w4-functional-lineage.db"
+    manifest = build_fixture(db)
+    by_case = {item["case_id"]: item for item in manifest["cases"]}
+
+    with running_mock() as (host, port):
+        configure_mock(host, port)
+        model_config = tmp_path / "model.w4-functional.yaml"
+        write_model_config(model_config, host, port)
+        monkeypatch.setenv("W4_FUNCTIONAL_MOCK_API_KEY", "mock-secret")
+        monkeypatch.setenv("REVERSE_QUALITY_MODEL_CONFIG", str(model_config))
+        monkeypatch.setenv("QUALITY_SCENARIO_V1_DB_PATH", str(db))
+
+        client = TestClient(create_app(db))
+
+        g4_payload = {
+            "material_ids": [by_case["G4_DUPLICATE_GENERATE"]["software_assessment_material_id"]],
+            "trigger_source": "HIGH_PERCEPTION",
+            "trigger_reason": "W4_MAC_FUNCTIONAL_GOLDEN",
+        }
+        g4_preview = client.post(
+            "/api/v2/software-assessment/quality-scenario/preview", json=g4_payload
+        )
+        assert g4_preview.status_code == 200, g4_preview.text
+        g4_item = g4_preview.json()["items"][0]
+        assert g4_item["state"] == "READY"
+        assert g4_item["bundle"]["source_status"]["ITR"] == "PRESENT"
+
+        first = client.post(
+            "/api/v2/software-assessment/quality-scenario/generations", json=g4_payload
+        )
+        assert first.status_code == 200, first.text
+        first_task = wait_task(client, first.json()["task_id"])
+        assert first_task["items"][0]["state"] == "CANDIDATE_CREATED", first_task
+        first_id = first_task["items"][0]["scenario"]["scenario_id"]
+
+        duplicate = client.post(
+            "/api/v2/software-assessment/quality-scenario/generations", json=g4_payload
+        )
+        assert duplicate.status_code == 200, duplicate.text
+        duplicate_item = duplicate.json()["items"][0]
+        assert duplicate_item["state"] == "EXISTING_CANDIDATE", duplicate_item
+        assert duplicate_item["scenario"]["scenario_id"] == first_id
+
+        g5_payload = {
+            "material_ids": [by_case["G5_SOURCE_REVISION"]["software_assessment_material_id"]],
+            "trigger_source": "HIGH_PERCEPTION",
+            "trigger_reason": "W4_MAC_FUNCTIONAL_GOLDEN",
+        }
+        before = client.post(
+            "/api/v2/software-assessment/quality-scenario/preview", json=g5_payload
+        )
+        assert before.status_code == 200, before.text
+        before_item = before.json()["items"][0]
+        assert before_item["state"] == "READY"
+        assert before_item["bundle"]["source_status"]["ITR"] == "PRESENT"
+        before_revision = before_item["bundle"]["bundle_revision"]
+
+        initial = client.post(
+            "/api/v2/software-assessment/quality-scenario/generations", json=g5_payload
+        )
+        assert initial.status_code == 200, initial.text
+        initial_task = wait_task(client, initial.json()["task_id"])
+        assert initial_task["items"][0]["state"] == "CANDIDATE_CREATED", initial_task
+        original = _publish(client, initial_task["items"][0]["scenario"])
+        original_id = original["scenario_id"]
+        assert original["status"] == "PUBLISHED"
+
+        advance_g5(db)
+
+        revised_preview = client.post(
+            "/api/v2/software-assessment/quality-scenario/preview", json=g5_payload
+        )
+        assert revised_preview.status_code == 200, revised_preview.text
+        revised_item = revised_preview.json()["items"][0]
+        assert revised_item["state"] == "SOURCE_CHANGED_REANALYSIS_AVAILABLE", revised_item
+        assert revised_item["bundle"]["source_status"]["ITR"] == "PRESENT"
+        assert revised_item["bundle"]["bundle_revision"] != before_revision
+
+        revised = client.post(
+            "/api/v2/software-assessment/quality-scenario/generations", json=g5_payload
+        )
+        assert revised.status_code == 200, revised.text
+        revised_task = wait_task(client, revised.json()["task_id"])
+        assert revised_task["items"][0]["state"] == "CANDIDATE_CREATED", revised_task
+        revised_id = revised_task["items"][0]["scenario"]["scenario_id"]
+        assert revised_id != original_id
+
+        old = client.get(
+            f"/api/v2/quality-scenario-workflow/v1/quality-scenarios/{original_id}"
+        )
+        history = client.get(
+            f"/api/v2/quality-scenario-workflow/v1/quality-scenarios/{original_id}/history"
+        )
+        assert old.status_code == 200
+        assert old.json()["status"] == "PUBLISHED"
+        assert history.status_code == 200
+        assert len(history.json()["versions"]) >= 4
