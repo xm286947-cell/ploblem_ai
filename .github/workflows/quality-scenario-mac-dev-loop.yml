@@ -1,0 +1,41 @@
+name: Quality Scenario macOS Dev Test Loop
+
+on:
+  pull_request:
+    branches:
+      - feature/quality-scenario-mature-integration-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-dev-test-loop:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare venv
+        run: |
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Validate mac development launcher syntax
+        run: |
+          zsh -n start_quality_scenario_mac_dev_loop.command
+          zsh -n start_w4_mac_functional_provider_golden.command
+          zsh -n advance_quality_scenario_mac_dev_g5.command
+      - name: Run exact mac development environment smoke
+        env:
+          QUALITY_SCENARIO_DEV_SMOKE_ONLY: "1"
+          QUALITY_SCENARIO_DEV_NO_BROWSER: "1"
+          QUALITY_SCENARIO_DEV_PORT: "18080"
+        run: zsh ./start_quality_scenario_mac_dev_loop.command
+      - name: Run G1-G5 functional development regression
+        run: |
+          .venv/bin/python -m pytest -q             tests/test_quality_scenario_w4_functional_fixture.py             tests/test_quality_scenario_w4_functional_provider_e2e.py             tests/test_quality_scenario_mature_integration.py             tests/test_quality_scenario_mac_dev_loop.py
