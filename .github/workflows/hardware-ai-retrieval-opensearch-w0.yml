@@ -120,8 +120,29 @@ jobs:
           $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "scripts\opensearch\start_windows.bat" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
           $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper.pid"
 
+      - name: Early Windows process diagnostics
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 8
+          Write-Host "=== OpenSearch/Java processes ==="
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match "java|cmd" -and $_.CommandLine -like "*opensearch*" } |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine |
+            Format-List
+          Write-Host "=== Port 9200 ==="
+          Get-NetTCPConnection -LocalPort 9200 -ErrorAction SilentlyContinue |
+            Format-Table -AutoSize
+          Write-Host "=== OPENSEARCH_HOME logs ==="
+          if (Test-Path "$env:OPENSEARCH_HOME\logs") {
+            Get-ChildItem "$env:OPENSEARCH_HOME\logs" -File -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                Write-Host "===== $($_.FullName) ====="
+                Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+              }
+          }
+
       - name: Bootstrap smoke
-        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 180
+        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 90
 
       - name: Restart native OpenSearch
         shell: pwsh
@@ -144,14 +165,21 @@ jobs:
         run: |
           $dest = "$env:RUNNER_TEMP\engine-logs"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          if (Test-Path "C:\hardware-search-w0-data\logs") {
-            Copy-Item "C:\hardware-search-w0-data\logs\*" $dest -Recurse -Force -ErrorAction SilentlyContinue
-            Get-ChildItem $dest -Recurse -File | ForEach-Object {
-              Write-Host "===== $($_.FullName) ====="
-              Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+          $sources = @(
+            "C:\hardware-search-w0-data\logs",
+            "$env:OPENSEARCH_HOME\logs"
+          )
+          foreach ($source in $sources) {
+            if (Test-Path $source) {
+              $leaf = Split-Path $source -Leaf
+              $target = Join-Path $dest $leaf
+              New-Item -ItemType Directory -Force -Path $target | Out-Null
+              Copy-Item "$source\*" $target -Recurse -Force -ErrorAction SilentlyContinue
             }
-          } else {
-            Write-Host "WINDOWS_ENGINE_LOG_DIR_MISSING"
+          }
+          Get-ChildItem $dest -Recurse -File | ForEach-Object {
+            Write-Host "===== $($_.FullName) ====="
+            Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
           }
 
       - name: Upload Windows logs
