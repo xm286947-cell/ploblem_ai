@@ -67,10 +67,6 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
 )
-from services.hardware_r1_e2e_nonprod_knowledge import (
-    HardwareR1ManagedNonProdError,
-    create_managed_nonprod_environment,
-)
 from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
@@ -678,6 +674,28 @@ def create_p0_app(
                 or ""
             ).strip()
             e2e_profile = os.getenv("HARDWARE_R1_E2E_PROFILE") == "1"
+
+            class _HardwareR1ManagedNonProdNotLoaded(RuntimeError):
+                pass
+
+            managed_nonprod_error_type: type[Exception] = (
+                _HardwareR1ManagedNonProdNotLoaded
+            )
+            create_managed_nonprod_environment_fn = None
+            if e2e_profile:
+                # E2E-only local Unified Knowledge must not enter the normal
+                # Hardware product startup dependency closure. Import it only
+                # when the explicit E2E profile is enabled.
+                from services.hardware_r1_e2e_nonprod_knowledge import (
+                    HardwareR1ManagedNonProdError,
+                    create_managed_nonprod_environment,
+                )
+
+                managed_nonprod_error_type = HardwareR1ManagedNonProdError
+                create_managed_nonprod_environment_fn = (
+                    create_managed_nonprod_environment
+                )
+
             e2e_knowledge_environment = os.getenv(
                 "HARDWARE_R1_E2E_KNOWLEDGE_ENV", ""
             ).strip().upper()
@@ -700,11 +718,11 @@ def create_p0_app(
                         effective_knowledge_adapter,
                         managed_nonprod_release_controller,
                         managed_nonprod_status,
-                    ) = create_managed_nonprod_environment(
+                    ) = create_managed_nonprod_environment_fn(
                         hardware_data_root / "nonprod_unified_knowledge",
                         release_prefix=knowledge_release_version,
                     )
-                except HardwareR1ManagedNonProdError as error:
+                except managed_nonprod_error_type as error:
                     effective_knowledge_adapter = None
                     managed_nonprod_release_controller = None
                     managed_nonprod_status = {
@@ -811,7 +829,7 @@ def create_p0_app(
                                 else None
                             ),
                         )
-                    except (HardwareR1PromotionError, HardwareR1ManagedNonProdError) as error:
+                    except (HardwareR1PromotionError, managed_nonprod_error_type) as error:
                         remote_recovery = {
                             "pending_remote_reconciliation_count": 0,
                             "blocked_asset_count": 0,
