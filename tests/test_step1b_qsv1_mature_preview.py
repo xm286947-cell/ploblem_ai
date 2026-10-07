@@ -18,10 +18,15 @@ def test_step1b_qsv1_preview_is_mounted_in_mature_host(tmp_path, monkeypatch):
         assert response.status_code == 200, path
 
     issues = client.get("/issues")
-    assert "新质量场景（预览）" in issues.text
-    assert 'href="/p0/quality-scenarios/workbench"' in issues.text
+    assert "质量场景工作台" in issues.text
+    assert 'href="/quality-scenarios/workbench"' in issues.text
+    assert 'href="/quality-scenarios/library"' in issues.text
+    assert 'href="/p0/quality-scenarios/workbench"' not in issues.text
 
     for path in (
+        "/quality-scenarios/workbench",
+        "/quality-scenarios/library",
+        "/quality-scenarios/library/QSV1-SMOKE-DETAIL",
         "/p0/quality-scenarios/workbench",
         "/p0/quality-scenarios",
         "/p0/quality-scenario-insights",

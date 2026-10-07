@@ -155,6 +155,7 @@ def test_software_assessment_page_mounts_w4_controls_and_reuses_qsv1_routes(tmp_
     )
     assert rejected.status_code == 400
     assert rejected.json()["detail"] == "SOFTWARE_ASSESSMENT_SELECTION_REQUIRED"
-    assert client.get("/p0/quality-scenarios/workbench").status_code == 200
-    assert client.get("/p0/quality-scenarios").status_code == 200
-    assert client.get("/p0/quality-scenarios/library/QSV1-NOT-FOUND").status_code == 200
+    assert client.get("/quality-scenarios/workbench").status_code == 200
+    assert client.get("/quality-scenarios/library").status_code == 200
+    assert client.get("/quality-scenarios/library/QSV1-NOT-FOUND").status_code == 200
+    assert client.get("/p0/quality-scenarios/workbench").status_code == 200  # compatibility only
