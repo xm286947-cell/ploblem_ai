@@ -25,6 +25,10 @@ jobs:
         run: |
           python3.12 -m venv .venv
           .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Install browser test dependency
+        run: |
+          .venv/bin/python -m pip install playwright
+          .venv/bin/python -m playwright install chromium
       - name: Validate mac development launcher syntax
         run: |
           zsh -n start_quality_scenario_mac_dev_loop.command
@@ -38,4 +42,5 @@ jobs:
         run: zsh ./start_quality_scenario_mac_dev_loop.command
       - name: Run G1-G5 functional development regression
         run: |
-          .venv/bin/python -m pytest -q             tests/test_quality_scenario_w4_functional_fixture.py             tests/test_quality_scenario_w4_functional_provider_e2e.py             tests/test_quality_scenario_mature_integration.py             tests/test_quality_scenario_mac_dev_loop.py
+          .venv/bin/python -m pytest -q             tests/test_quality_scenario_w4_functional_fixture.py             tests/test_quality_scenario_w4_functional_provider_e2e.py             tests/test_quality_scenario_mature_integration.py             tests/test_quality_scenario_mac_dev_loop.py \
+            tests/test_quality_scenario_mac_browser_golden.py
