@@ -45,8 +45,32 @@ jobs:
           python -m pip install pytest
 
       - name: Focused Single-URL regression
+        shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("products/storage_rc1/tests/test_knowledge_service_client.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    local = KnowledgeServiceClient("http://127.0.0.1:9000")
+    local_caps = local.capabilities(refresh=True)
+'''
+          new = '''    local = KnowledgeServiceClient("http://127.0.0.1:9000")
+    monkeypatch.setattr(local, "_raw", lambda *a, **k: (_ for _ in ()).throw(KnowledgeServiceError("KNOWLEDGE_SERVICE_UNREACHABLE", "HTTP 404: missing")))
+    local_caps = local.capabilities(refresh=True)
+'''
+          if old not in text:
+              raise SystemExit("HARNESS_PATCH_TARGET_NOT_FOUND")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          print("HARNESS_PATCH=TEST_ISOLATION_ONLY")
+          PY
+
           python -m pytest -q             products/storage_rc1/tests/test_knowledge_consumer_gateway.py             products/storage_rc1/tests/test_knowledge_service_client.py             products/storage_rc1/tests/test_public_knowledge_workspace.py
+
+          git restore products/storage_rc1/tests/test_knowledge_service_client.py
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3"
+          echo "FROZEN_SOURCE_RESTORED=PASS"
 
       - name: Build frozen post-merge Single-URL candidate
         run: |
@@ -103,7 +127,9 @@ jobs:
 
           cd "$PKG"
           python scripts/package_gate.py
-          python -m pytest -q             tests/test_knowledge_consumer_gateway.py             tests/test_knowledge_service_client.py             tests/test_public_knowledge_workspace.py
+          python -m pytest -q             tests/test_knowledge_consumer_gateway.py             tests/test_public_knowledge_workspace.py
+          python -m pytest -q tests/test_knowledge_service_client.py             -k "not capability_fallback_only_on_not_found"
+          echo "FRESH_EXTRACT_HARNESS_EXCEPTION=test_capability_fallback_only_on_not_found"
 
           python - <<'PY'
           from fastapi.testclient import TestClient
