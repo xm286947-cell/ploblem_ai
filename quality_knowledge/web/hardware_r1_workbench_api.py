@@ -21,7 +21,6 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1PromotionError,
 )
 from services.hardware_knowledge_consumption import HardwareKnowledgeConsumptionError, HardwareKnowledgeConsumptionService
-from services.hardware_r1_e2e_nonprod_knowledge import HardwareR1ManagedNonProdError
 
 
 class ReviewConflictDecisionRequest(BaseModel):
@@ -120,6 +119,22 @@ def create_hardware_r1_workbench_router(
     release_controller: Any | None = None,
     prefix: str = "/api/v2/hardware-cases/r1/workbench",
 ) -> APIRouter:
+    class _HardwareR1ManagedNonProdNotLoaded(RuntimeError):
+        pass
+
+    managed_nonprod_error_type: type[Exception] = (
+        _HardwareR1ManagedNonProdNotLoaded
+    )
+    if release_controller is not None:
+        # Managed Non-Prod is an E2E-only concern. Do not pull its
+        # knowledge_production/json_repository dependency chain into the
+        # standard Hardware product package.
+        from services.hardware_r1_e2e_nonprod_knowledge import (
+            HardwareR1ManagedNonProdError,
+        )
+
+        managed_nonprod_error_type = HardwareR1ManagedNonProdError
+
     router = APIRouter(prefix=prefix, tags=["hardware-r1-workbench"])
 
     def require_promotion_service() -> HardwareR1KnowledgePromotionService:
@@ -407,7 +422,7 @@ def create_hardware_r1_workbench_router(
             return result
         try:
             release = release_controller.ensure_queryable_release()
-        except HardwareR1ManagedNonProdError as error:
+        except managed_nonprod_error_type as error:
             raise HTTPException(status_code=503, detail=error.code) from error
         return {**result, "knowledge_release": release}
 
@@ -424,7 +439,7 @@ def create_hardware_r1_workbench_router(
         if release_controller is not None:
             try:
                 release_controller.ensure_queryable_release()
-            except HardwareR1ManagedNonProdError as error:
+            except managed_nonprod_error_type as error:
                 raise HTTPException(status_code=503, detail=error.code) from error
         try:
             return promotion.verify_item(item_id)
@@ -465,7 +480,7 @@ def create_hardware_r1_workbench_router(
             ):
                 release_controller.ensure_queryable_release()
             return promotion.reconcile_item(item_id)
-        except HardwareR1ManagedNonProdError as error:
+        except managed_nonprod_error_type as error:
             raise HTTPException(status_code=503, detail=error.code) from error
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
