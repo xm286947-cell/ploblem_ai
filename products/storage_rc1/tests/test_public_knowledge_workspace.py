@@ -954,3 +954,52 @@ def test_model_extract_surfaces_safe_provider_transport_action(
     serialized = str(detail)
     assert "secret.internal" not in serialized
     assert "must-not-escape" not in serialized
+
+
+def test_live_qa_can_scope_chinese_translation_to_public_source(monkeypatch):
+    seen = {}
+
+    def request(mode, path, payload=None, base_url=None):
+        seen.update(mode=mode, path=path, payload=payload)
+        return {"answer": "中文译文", "citations": []}
+
+    monkeypatch.setattr(public_knowledge, "_request", request)
+    response = client.post("/api/public-knowledge/ask?mode=LIVE", json={
+        "question": "program endurance",
+        "response_language": "zh-CN",
+        "include_citation_translations": True,
+        "allowed_source_ids": ["source-public-001"],
+    })
+    assert response.status_code == 200
+    assert seen["path"] == "/ask"
+    assert seen["payload"]["response_language"] == "zh-CN"
+    assert seen["payload"]["include_citation_translations"] is True
+    assert seen["payload"]["allowed_source_ids"] == ["source-public-001"]
+
+
+def test_live_qa_rejects_invalid_translation_source_id_before_forwarding(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid source id must not be forwarded")
+
+    monkeypatch.setattr(public_knowledge, "_request", forbidden)
+    response = client.post("/api/public-knowledge/ask?mode=LIVE", json={
+        "question": "program endurance",
+        "response_language": "zh-CN",
+        "include_citation_translations": True,
+        "allowed_source_ids": ["x" * 201],
+    })
+    assert response.status_code == 422
+
+
+def test_public_knowledge_ui_is_chinese_first_and_keeps_original_evidence():
+    from pathlib import Path
+
+    html = (Path(__file__).resolve().parents[1] / "storage_life" / "index.html").read_text(encoding="utf-8")
+    assert "独立问答（QA）" in html
+    assert "知识建议" in html
+    assert "服务健康" in html
+    assert "中文翻译与综合解读" in html
+    assert "翻译成中文" in html
+    assert "查看英文原文证据" in html
+    assert "allowed_source_ids:[sourceId]" in html
+    assert "英文 Citation 与原始文件仍是正式证据" in html

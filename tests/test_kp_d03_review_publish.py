@@ -686,3 +686,173 @@ def test_storage_model_publish_rejects_unproposed_semantic(
             published_by="publisher",
             published_at=PUBLISHED_AT,
         )
+
+
+
+def test_kp_d03_human_edit_can_change_object_type_under_review(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _business_candidate(repository, evidence_refs=[evidence_id])
+    evaluation = _evaluate(repository, candidate)
+
+    review = KnowledgeReviewService(repository).edit(
+        candidate.candidate_id,
+        evaluation.evaluation_id,
+        {"object_type": "CONCEPT"},
+        reviewed_by="reviewer-object-type",
+        reviewed_at=REVIEWED_AT,
+        review_note="Human semantic review reclassified the object.",
+    )
+    effective = KnowledgeReviewService(repository).load_effective_candidate(
+        review
+    )
+
+    assert candidate.object_type == "SOLUTION"
+    assert effective.object_type == "CONCEPT"
+    assert review.edit_fields == ["object_type"]
+
+
+def _storage_change_impact_candidate(
+    repository: JsonArtifactRepository,
+    evidence_id: str,
+    *,
+    candidate_id: str,
+) -> KnowledgeCandidate:
+    return BusinessCandidateIntakeService(repository).intake(
+        {
+            "candidate_id": candidate_id,
+            "candidate_source_type": "BUSINESS",
+            "business_source_type": "STORAGE",
+            "business_source_id": "PKR-SOURCE-KIOXIA",
+            "business_source_version": "REV-KIOXIA",
+            "object_type": "FACT",
+            "title": "Write Amplification and P/E Cycle Generation",
+            "content": (
+                "Higher write amplification increases NAND physical writes "
+                "and P/E cycle consumption."
+            ),
+            "device_type": "NAND Flash",
+            "scope": ["storage_lifetime"],
+            "conditions": [],
+            "limitations": [],
+            "tags": [
+                "storage-lifetime",
+                "storage-parameter:pe_cycles",
+                "storage-semantic-candidate:PARAMETER_DEFINITION",
+                "storage-semantic-candidate:CALCULATION_RULE",
+            ],
+            "source_refs": [],
+            "evidence_refs": [evidence_id],
+            "confidence": 0.9,
+            "created_at": REVIEWED_AT.isoformat(),
+            "producer": "KNOWLEDGE_EXTRACTION",
+            "contract_version": "knowledge-candidate/v1",
+            "metadata": {
+                "storage_source_bridge": {
+                    "schema_version": "storage-lifetime-knowledge/v1",
+                    "semantic_class_candidates": [
+                        "PARAMETER_DEFINITION",
+                        "CALCULATION_RULE",
+                        "CHANGE_IMPACT_RULE",
+                    ],
+                },
+                "storage_lifetime": {
+                    "schema_version": "storage-lifetime-knowledge/v1",
+                    "model_driven_extraction": True,
+                    "device_type": "NAND Flash",
+                    "canonical_parameters": ["pe_cycles"],
+                    "parameter_binding_status": "BOUND",
+                    "semantic_class_candidates": [
+                        "PARAMETER_DEFINITION",
+                        "CALCULATION_RULE",
+                    ],
+                    "semantic_class_status": "NEEDS_REVIEW",
+                    "scenario_consumers": ["S2", "S3", "S5"],
+                    "formal_consumable": False,
+                },
+            },
+        }
+    )
+
+
+def test_storage_model_human_review_can_override_ai_semantic_after_object_type_change(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _storage_change_impact_candidate(
+        repository,
+        evidence_id,
+        candidate_id="STORAGE-KP-KIOXIA-OVERRIDE",
+    )
+    evaluation = _evaluate(repository, candidate)
+
+    KnowledgeReviewService(repository).edit(
+        candidate.candidate_id,
+        evaluation.evaluation_id,
+        {
+            "object_type": "CONCEPT",
+            "tags": [
+                *candidate.tags,
+                "storage-semantic:CHANGE_IMPACT_RULE",
+            ],
+        },
+        reviewed_by="reviewer-storage",
+        reviewed_at=REVIEWED_AT,
+        review_note="Human review corrected AI semantic classification.",
+    )
+
+    published = KnowledgePublishService(repository).publish(
+        candidate.candidate_id,
+        published_by="publisher",
+        published_at=PUBLISHED_AT,
+    )
+
+    assert published.object_type == "CONCEPT"
+    assert "storage-semantic:CHANGE_IMPACT_RULE" in published.tags
+    storage = published.metadata["storage_lifetime"]
+    assert storage["semantic_class"] == "CHANGE_IMPACT_RULE"
+    assert storage["semantic_class_status"] == "REVIEWED"
+    assert storage["formal_consumable"] is True
+    assert storage["semantic_class_review_override"] is True
+    assert storage["reviewed_object_type"] == "CONCEPT"
+    assert "CHANGE_IMPACT_RULE" in storage["semantic_class_review_options"]
+
+
+def test_storage_model_semantic_override_still_enforces_object_type_contract(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    evidence_id = _seed_business_evidence(repository)
+    candidate = _storage_change_impact_candidate(
+        repository,
+        evidence_id,
+        candidate_id="STORAGE-KP-KIOXIA-WRONG-TYPE",
+    )
+    evaluation = _evaluate(repository, candidate)
+
+    KnowledgeReviewService(repository).edit(
+        candidate.candidate_id,
+        evaluation.evaluation_id,
+        {
+            "tags": [
+                *candidate.tags,
+                "storage-semantic:CHANGE_IMPACT_RULE",
+            ],
+        },
+        reviewed_by="reviewer-storage",
+        reviewed_at=REVIEWED_AT,
+        review_note="Semantic class selected without correcting object type.",
+    )
+
+    with pytest.raises(
+        KnowledgePublishError,
+        match="STORAGE_SEMANTIC_OBJECT_TYPE_INVALID",
+    ):
+        KnowledgePublishService(repository).publish(
+            candidate.candidate_id,
+            published_by="publisher",
+            published_at=PUBLISHED_AT,
+        )

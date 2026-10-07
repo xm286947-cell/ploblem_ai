@@ -15,6 +15,54 @@ from .processing import KnowledgeProcessingError, KnowledgeProcessingService
 BASE = Path(__file__).parent
 TEMPLATES = Jinja2Templates(directory=BASE / "templates")
 
+_ENUM_ZH = {
+    "FACT": "事实",
+    "CONCEPT": "概念",
+    "SOLUTION": "解决方案",
+    "DIAGNOSTIC": "诊断",
+    "REQUIREMENT": "要求",
+    "EXTERNAL_SOURCE": "外部来源",
+    "BUSINESS": "业务来源",
+    "CONFIRM": "确认",
+    "EDIT": "编辑确认",
+    "REJECT": "拒绝",
+    "CONFIRMED": "已确认",
+    "REJECTED": "已拒绝",
+    "CANDIDATE": "候选",
+    "ACTIVE": "生效",
+    "STALE": "失效",
+    "DEPRECATED": "已弃用",
+    "RECEIVED": "已接收",
+    "PARSED": "已解析",
+    "FAILED": "失败",
+    "VALID": "有效",
+    "PARTIAL": "部分有效",
+    "INVALID": "无效",
+    "NEW": "新知识",
+    "POSSIBLE_DUPLICATE": "可能重复",
+    "DUPLICATE": "重复",
+    "NONE": "无冲突",
+    "CONFLICT": "冲突",
+    "PARAMETER_DEFINITION": "参数定义",
+    "MECHANISM_CONCEPT": "机理概念",
+    "CALCULATION_RULE": "计算规则",
+    "DIAGNOSTIC_RULE": "诊断规则",
+    "DESIGN_RULE": "设计规则",
+    "TEST_RULE": "测试规则",
+    "CHANGE_IMPACT_RULE": "变更影响规则",
+    "APPLICABILITY_RULE": "适用性规则",
+}
+
+
+def _enum_zh(value) -> str:
+    raw = getattr(value, "value", value)
+    raw = str(raw)
+    translated = _ENUM_ZH.get(raw)
+    return f"{translated}（{raw}）" if translated else raw
+
+
+TEMPLATES.env.globals["enum_zh"] = _enum_zh
+
 
 def create_processing_app(repository_root: str | Path) -> FastAPI:
     app = FastAPI(title="Knowledge Processing", version="0.1")
@@ -144,6 +192,7 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         candidate_id: str,
         evaluation_id: str = Form(...),
         reviewed_by: str = Form(...),
+        object_type: str | None = Form(None),
         title: str = Form(""),
         content: str = Form(...),
         scope: str | None = Form(None),
@@ -152,6 +201,8 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         review_note: str = Form(""),
     ):
         edits = {"content": content}
+        if object_type is not None and object_type.strip():
+            edits["object_type"] = object_type.strip()
         if scope is not None:
             parsed_scope = [
                 value.strip()
