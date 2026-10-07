@@ -650,6 +650,17 @@ def create_hardware_case_router(
         ),
     ) -> dict[str, Any]:
         role = _role(x_hardware_case_role)
+        if ai_search_service is not None:
+            try:
+                return ai_search_service.get_evidence(
+                    case_id,
+                    role=role,
+                    historical=historical,
+                )
+            except HardwareCaseAIRetrievalError as error:
+                raise _http_error(error) from error
+            except HardwareCaseContractError as error:
+                raise _http_error(error) from error
         try:
             return service.get_evidence(
                 case_id,
@@ -657,23 +668,6 @@ def create_hardware_case_router(
                 historical=historical,
             )
         except HardwareCaseContractError as error:
-            if ai_search_service is not None:
-                try:
-                    formal = ai_search_service.get_case(
-                        case_id,
-                        role=role,
-                        historical=historical,
-                    )
-                except HardwareCaseAIRetrievalError:
-                    formal = None
-                if formal and formal.get("source_kind") == "FORMAL_KNOWLEDGE":
-                    return {
-                        "contract_version": "hardware-case/v1",
-                        "case_id": case_id,
-                        "evidence": [],
-                        "formal_evidence_refs": list(formal.get("evidence_refs") or []),
-                        "formal_only": True,
-                    }
             raise _http_error(error) from error
 
     @router.post("/{case_id}/review")
@@ -762,16 +756,33 @@ def create_hardware_case_router(
             historical: bool,
         ) -> dict[str, Any]:
             try:
-                payload = service.get_evidence(
+                read_service = ai_search_service or service
+                payload = read_service.get_evidence(
                     case_id,
                     role=role,
                     historical=historical,
                 )
-            except HardwareCaseContractError as error:
+            except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
                 raise _http_error(error) from error
             for item in payload.get("evidence") or []:
-                if item.get("evidence_id") == evidence_id:
-                    return item
+                if item.get("evidence_id") != evidence_id:
+                    continue
+                if item.get("binding_mode") == "FORMAL_KNOWLEDGE_DIRECT":
+                    try:
+                        active_source = source_store.get_active_source(case_id)
+                    except HardwareCaseSourceError as error:
+                        raise _source_http(error) from error
+                    if (
+                        str(active_source.get("source_id") or "")
+                        != str(item.get("source_id") or "")
+                        or str(active_source.get("source_ref") or "")
+                        != str(item.get("source_ref") or "")
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="EVIDENCE_SOURCE_IDENTITY_MISMATCH",
+                        )
+                return item
             raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
 
         def _source_http(error: HardwareCaseSourceError) -> HTTPException:
