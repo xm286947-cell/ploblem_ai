@@ -302,7 +302,10 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
         "synthetic_business_data": True,
         "direct_qsv1_candidate_write": False,
         "direct_qsv1_publish_write": False,
-        "database": str(db_path),
+        # Persist only a manifest-relative locator. Absolute CI/build paths are
+        # not portable after ZIP extraction on another machine.
+        "database": db_path.name,
+        "database_path_semantics": "MANIFEST_RELATIVE",
         "cases": [],
         "g5_resolution_revision": 1,
     }
@@ -432,6 +435,10 @@ def advance_g5(db_path: Path) -> dict[str, Any]:
     manifest["g5_resolution_revision"] = 2
     manifest["g5_revision_material_id"] = material_id
     manifest["g5_revision_action"] = action
+    # Repair older packaged manifests that captured an absolute CI path.
+    # The command-line --db argument is the runtime source of truth.
+    manifest["database"] = db_path.name
+    manifest["database_path_semantics"] = "MANIFEST_RELATIVE"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -470,7 +477,7 @@ def main() -> int:
     parser.add_argument("--advance-g5", action="store_true")
     args = parser.parse_args()
 
-    db_path = Path(args.db)
+    db_path = Path(args.db).expanduser().resolve()
     if args.advance_g5:
         manifest = advance_g5(db_path)
         print("W4_FIXTURE_ACTION=ADVANCE_G5_SOURCE_REVISION")
@@ -482,9 +489,9 @@ def main() -> int:
     print("SYNTHETIC_BUSINESS_DATA=YES")
     print("DIRECT_QSV1_CANDIDATE_WRITE=NO")
     print("DIRECT_QSV1_PUBLISH_WRITE=NO")
-    print(f"FIXTURE_DB={Path(manifest['database']).resolve()}")
-    print(f"FIXTURE_MANIFEST={_manifest_path(Path(manifest['database'])).resolve()}")
-    for key, value in _counts(Path(manifest["database"])).items():
+    print(f"FIXTURE_DB={db_path}")
+    print(f"FIXTURE_MANIFEST={_manifest_path(db_path)}")
+    for key, value in _counts(db_path).items():
         print(f"{key.upper()}_COUNT={value}")
     print("W4_FUNCTIONAL_FIXTURE=READY")
     return 0
