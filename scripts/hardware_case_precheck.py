@@ -196,10 +196,11 @@ def check_real_ai() -> list[str]:
         else:
             emit("api_key_env", "PASS", api_key_env)
     elif profile.get("api_key"):
+        errors.append("PLAINTEXT_API_KEY_FORBIDDEN")
         emit(
             "api_key",
-            "WARN",
-            "local literal key is supported by Runtime but env reference is recommended",
+            "FAIL",
+            "use api_key_env and rotate any credential previously printed",
         )
     else:
         emit("provider_auth", "PASS", "none")
