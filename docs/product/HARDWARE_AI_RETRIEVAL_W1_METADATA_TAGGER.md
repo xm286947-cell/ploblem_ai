@@ -1,9 +1,9 @@
 # Hardware AI Retrieval W1 — Retrieval Metadata + AI Tagger
 
 TASK=HARDWARE-AI-RETRIEVAL-W1-RETRIEVAL-METADATA-TAGGER-001
-STATUS=W1C_DEVELOPMENT
+STATUS=W1D_DEVELOPMENT
 BASE_MERGE_COMMIT=107d5d3f34f3e9f25fb35d6bfa8228c4e3317629
-BRANCH=feature/hardware-ai-retrieval-w1c-opensearch-document
+BRANCH=feature/hardware-ai-retrieval-w1d-query-why-hit
 ARCH_BASELINE=HARDWARE_KNOWLEDGE_AI_RETRIEVAL_SYSTEM_ARCHITECTURE_V0.1
 
 ## Goal
@@ -215,5 +215,28 @@ W1C_EXPANSION_RECALL_ONLY=YES
 W1C_STRUCTURED_FILTER_FROM_EXPANSION=FORBIDDEN
 W1C_WHY_HIT_PROVENANCE_READY=YES
 
-W1C_TARGETED_CI=PENDING
+W1C_TARGETED_CI=25 passed
+W1_PASS=NO
+
+
+## W1D BM25 + Filter + WHY_HIT
+
+W1C_MERGE_COMMIT=e6faffd586bdabf7049f7797879a00d353827f54
+W1D_BRANCH=feature/hardware-ai-retrieval-w1d-query-why-hit
+
+W1D_REUSE_W0_SEARCH_ADAPTER=YES
+W1D_SEARCH_FIELDS=search_text^4 + recall_text
+W1D_MANDATORY_FILTERS=formal_status/source_domain/source_object_type
+W1D_USER_FILTERS=business_case_id/interface/signal/device
+
+WHY_HIT rules:
+- Formal source field / FACT / NORMALIZED => claim_safe=true
+- EXPANSION => reason_type=EXPANSION_RECALL, claim_safe=false
+- filter-only retrieval creates no fabricated reason
+- unknown filters fail closed
+- malformed index hits fail closed
+
+W1D_BM25_FILTER_WHY_HIT=IN_PROGRESS
+W1D_EXPANSION_AS_FORMAL_REASON=FORBIDDEN
+W1D_TARGETED_CI=PENDING
 W1_PASS=NO
