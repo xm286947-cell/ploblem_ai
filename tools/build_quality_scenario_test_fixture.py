@@ -301,7 +301,10 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
     bootstrap_router = create_legacy_quality_issue_router(
         db_path,
         initialize_schema=True,
-        qsv1_db_path=db_path,
+        # The fixture is the separately bound mature/source database only.
+        # QSV1 lifecycle state belongs to the Overall primary P0 database at
+        # runtime, so do not initialize the V1 store in this supporting DB.
+        qsv1_db_path=None,
     )
     # The bootstrap router owns closures over several SQLite-backed services.
     # Drop that temporary object graph immediately so Windows can relocate or
