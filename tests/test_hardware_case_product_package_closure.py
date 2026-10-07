@@ -39,3 +39,31 @@ def test_new_asset_migration_module_is_discovered_automatically(tmp_path: Path, 
     assert future in closure["asset_migration_modules"]
     assert future in closure["roots"]
     assert future in closure["files"]
+
+
+def test_standard_hardware_package_excludes_e2e_cross_domain_repository_chain():
+    closure = package_builder.dependency_closure(package_builder.ROOT)
+
+    assert closure["status"] == "PASS"
+    e2e_target = "services/hardware_r1_e2e_nonprod_knowledge.py"
+    e2e_edges = [
+        edge for edge in closure["edges"]
+        if edge["target"] == e2e_target
+    ]
+    assert not e2e_edges, e2e_edges
+    assert e2e_target not in closure["files"]
+    assert "knowledge_production/public_service.py" not in closure["files"]
+    assert "repositories/json_repository.py" not in closure["files"]
+
+
+def test_ai_retrieval_definition_is_packaged_but_provider_config_is_preserved():
+    assert (
+        "config/runtime/agents/hardware_retrieval.tag.yaml"
+        in package_builder.INCLUDE_FILES
+    )
+    assert (
+        "prompts/runtime/hardware_retrieval/tagger_v1.md"
+        in package_builder.INCLUDE_FILES
+    )
+    assert "config/hardware_search.example.yaml" in package_builder.INCLUDE_FILES
+    assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES

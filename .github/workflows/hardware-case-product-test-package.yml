@@ -258,6 +258,25 @@ jobs:
           --hardware-db data/ci_startup_hardware.db
           --tree-upload-dir data/ci_startup_tree_uploads
 
+      # The package is a test input. Once build/closure/manifest/smoke/startup
+      # gates pass, publish it before broader repository regressions. Historical
+      # unrelated regressions must not make an otherwise testable DUT disappear.
+      - name: Stage delivery files
+        run: |
+          mkdir -p dist/product-test-delivery
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip.sha256 dist/product-test-delivery/
+          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
+          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md dist/product-test-delivery/
+
+      - name: Upload product test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
+          path: dist/product-test-delivery/*
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Run Hardware Case and Tree Import regression
         run: >
           python -m pytest -q --noconftest
@@ -299,18 +318,3 @@ jobs:
           tests/test_hardware_data_reliability.py
           tests/test_hardware_data_reliability_http.py
 
-      - name: Stage delivery files
-        run: |
-          mkdir -p dist/product-test-delivery
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_R1_*.zip.sha256 dist/product-test-delivery/
-          cp dist/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1/PACKAGE_MANIFEST.json dist/product-test-delivery/
-          cp docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md dist/product-test-delivery/
-
-      - name: Upload product test package
-        uses: actions/upload-artifact@v4
-        with:
-          name: HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1
-          path: dist/product-test-delivery/*
-          if-no-files-found: error
-          retention-days: 14
