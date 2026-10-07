@@ -596,6 +596,15 @@ def create_hardware_case_router(
                 historical=historical,
             )
         except HardwareCaseContractError as error:
+            if ai_search_service is not None:
+                try:
+                    return ai_search_service.get_case(
+                        case_id,
+                        role=role,
+                        historical=historical,
+                    )
+                except HardwareCaseAIRetrievalError:
+                    pass
             raise _http_error(error) from error
 
     @router.get("/{case_id}/mappings")
@@ -614,6 +623,22 @@ def create_hardware_case_router(
                 historical=historical,
             )
         except HardwareCaseContractError as error:
+            if ai_search_service is not None:
+                try:
+                    formal = ai_search_service.get_case(
+                        case_id,
+                        role=role,
+                        historical=historical,
+                    )
+                except HardwareCaseAIRetrievalError:
+                    formal = None
+                if formal and formal.get("source_kind") == "FORMAL_KNOWLEDGE":
+                    return {
+                        "contract_version": "hardware-case/v1",
+                        "case_id": case_id,
+                        "mappings": [],
+                        "formal_only": True,
+                    }
             raise _http_error(error) from error
 
     @router.get("/{case_id}/evidence")
@@ -632,6 +657,23 @@ def create_hardware_case_router(
                 historical=historical,
             )
         except HardwareCaseContractError as error:
+            if ai_search_service is not None:
+                try:
+                    formal = ai_search_service.get_case(
+                        case_id,
+                        role=role,
+                        historical=historical,
+                    )
+                except HardwareCaseAIRetrievalError:
+                    formal = None
+                if formal and formal.get("source_kind") == "FORMAL_KNOWLEDGE":
+                    return {
+                        "contract_version": "hardware-case/v1",
+                        "case_id": case_id,
+                        "evidence": [],
+                        "formal_evidence_refs": list(formal.get("evidence_refs") or []),
+                        "formal_only": True,
+                    }
             raise _http_error(error) from error
 
     @router.post("/{case_id}/review")
