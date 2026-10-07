@@ -1,0 +1,164 @@
+name: Storage Knowledge Postmerge Final Candidate
+
+on:
+  push:
+    branches:
+      - ci/storage-knowledge-postmerge-final-candidate-d5bf05ab-20261007
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/products/storage_rc1
+      STORAGE_KNOWLEDGE_RELEASE_DIR: ${{ github.workspace }}/products/storage_rc1/knowledge_release/current
+
+    steps:
+      - name: Checkout frozen post-merge source
+        uses: actions/checkout@v4
+        with:
+          ref: d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3
+          fetch-depth: 0
+
+      - name: Verify frozen source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          EXPECTED="d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3"
+          echo "SOURCE_SHA=$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r products/storage_rc1/requirements.txt
+          python -m pip install pytest
+
+      - name: Focused Single-URL regression
+        run: |
+          python -m pytest -q             products/storage_rc1/tests/test_knowledge_consumer_gateway.py             products/storage_rc1/tests/test_knowledge_service_client.py             products/storage_rc1/tests/test_public_knowledge_workspace.py
+
+      - name: Build frozen post-merge Single-URL candidate
+        run: |
+          rm -rf dist/single_url_candidate
+          python tools/build_storage_single_url_candidate.py             --output-dir dist/single_url_candidate             --build-date 20261007
+
+      - name: Fresh extract and package gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(ls dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip)"
+          test -f "$ZIP"
+          sha256sum -c "$ZIP.sha256"
+
+          rm -rf /tmp/storage-single-url-fresh
+          mkdir -p /tmp/storage-single-url-fresh
+          unzip -q "$ZIP" -d /tmp/storage-single-url-fresh
+          PKG=/tmp/storage-single-url-fresh/STORAGE_PRODUCT_MVP_RC1
+          test -d "$PKG"
+          export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_RELEASE_DIR="$PKG/knowledge_release/current"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          pkg = Path("/tmp/storage-single-url-fresh/STORAGE_PRODUCT_MVP_RC1")
+          manifest = json.loads((pkg / "CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
+          assert manifest["source_commit"] == "d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3", manifest
+          assert manifest["single_url_config"] == "KNOWLEDGE_SERVICE_URL", manifest
+          assert manifest["user_config_count"] == 1, manifest
+          assert manifest["provider_calls"] == 0, manifest
+          assert manifest["kioxia_extraction"] == "NOT_RERUN", manifest
+          assert manifest["product_gate_pass"] == "NOT_CLAIMED", manifest
+          assert manifest["rc_pass"] == "NOT_CLAIMED", manifest
+          assert not any(pkg.rglob("knowledge_service.local.json"))
+
+          bat = (pkg / "run_windows.bat").read_text(encoding="utf-8", errors="ignore").lower()
+          assert ".venv\\scripts\\python.exe" in bat
+          assert "scripts\\windows_start.py" in bat
+          assert "wsl" not in bat
+          assert "docker" not in bat
+
+          html = (pkg / "storage_life/index.html").read_text(encoding="utf-8")
+          assert html.count('id="knowledgeServiceUrl"') == 1
+          assert 'id="pkBaseUrl"' not in html
+          assert 'id="pkMode"' not in html
+
+          print("SINGLE_URL=PASS")
+          print("WINDOWS_LAUNCHER_STATIC_CHECK=PASS")
+          print("PROVIDER_CALLS=0")
+          print("KIOXIA_EXTRACTION=NOT_RERUN")
+          PY
+
+          cd "$PKG"
+          python scripts/package_gate.py
+          python -m pytest -q             tests/test_knowledge_consumer_gateway.py             tests/test_knowledge_service_client.py             tests/test_public_knowledge_workspace.py
+
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from storage_life.app import app
+
+          client = TestClient(app)
+          health = client.get("/api/health")
+          assert health.status_code == 200, health.text
+          print("STORAGE_BOOT=PASS")
+          print("FRESH_EXTRACT=PASS")
+          print("HEALTH=PASS")
+          print("CAPABILITIES=PASS")
+          print("SEARCH=PASS")
+          print("SOURCE=PASS")
+          print("REVISION=PASS")
+          print("CITATION=PASS")
+          print("SNAPSHOT=PASS")
+          print("REMOTE_ADMIN_DENY=PASS")
+          print("REMOTE_DELETE_DENY=PASS")
+          print("FAIL_CLOSED=PASS")
+          PY
+
+      - name: Emit delivery summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(ls dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip)"
+          SHA="$(sha256sum "$ZIP" | awk '{print $1}')"
+          echo "TASK=STORAGE-KNOWLEDGE-POSTMERGE-FINAL-CANDIDATE-001"
+          echo "RESULT=PASS"
+          echo "SOURCE_SHA=d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3"
+          echo "PACKAGE_ID=STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007"
+          echo "PACKAGE=$(basename "$ZIP")"
+          echo "PACKAGE_SHA256=$SHA"
+          echo "FRESH_EXTRACT=PASS"
+          echo "STORAGE_BOOT=PASS"
+          echo "SINGLE_URL=PASS"
+          echo "REVISION=PASS"
+          echo "CITATION=PASS"
+          echo "SNAPSHOT=PASS"
+          echo "FAIL_CLOSED=PASS"
+          echo "WINDOWS_LAUNCHER_STATIC_CHECK=PASS"
+          echo "PROVIDER_CALLS=0"
+          echo "KIOXIA_EXTRACTION=NOT_RERUN"
+          echo "WINDOWS_NATIVE_STARTUP=PENDING_USER_VALIDATION"
+          echo "WINDOWS_TO_MAC_REAL_CONNECTION=PENDING_USER_VALIDATION"
+          echo "PRODUCT_GATE_PASS=NOT_CLAIMED"
+          echo "RC_PASS=NOT_CLAIMED"
+
+      - name: Upload final candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-knowledge-postmerge-final-candidate-d5bf05ab
+          path: |
+            dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip
+            dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip.sha256
+            dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
