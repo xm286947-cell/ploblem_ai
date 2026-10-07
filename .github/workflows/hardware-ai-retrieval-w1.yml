@@ -6,10 +6,12 @@ on:
       - "services/hardware_retrieval_metadata.py"
       - "services/hardware_retrieval_tagger.py"
       - "services/hardware_retrieval_tagger_runtime.py"
+      - "services/hardware_retrieval_index.py"
       - "config/runtime/agents/hardware_retrieval.tag.yaml"
       - "prompts/runtime/hardware_retrieval/tagger_v1.md"
       - "tests/test_hardware_retrieval_metadata.py"
       - "tests/test_hardware_retrieval_tagger_runtime.py"
+      - "tests/test_hardware_retrieval_index.py"
       - "docs/product/HARDWARE_AI_RETRIEVAL_W1_METADATA_TAGGER.md"
       - ".github/workflows/hardware-ai-retrieval-w1.yml"
   workflow_dispatch:
@@ -27,8 +29,9 @@ jobs:
           python-version: "3.11"
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt
-      - name: W1 metadata and Runtime binding tests
+      - name: W1 metadata, Runtime binding, and index document tests
         run: >-
           python -m pytest -q
           tests/test_hardware_retrieval_metadata.py
           tests/test_hardware_retrieval_tagger_runtime.py
+          tests/test_hardware_retrieval_index.py
