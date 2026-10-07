@@ -1,0 +1,131 @@
+name: Storage Single URL Post-Merge Candidate
+
+on:
+  push:
+    branches:
+      - packaging/storage-single-url-postmerge-d5bf
+    paths:
+      - ".github/workflows/storage-single-url-postmerge-d5bf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PRODUCT_SOURCE_SHA: d5bf05abf5f4b7f2ce7494aef819ea5da4f343f3
+      RUNTIME_PIN: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+      BUILD_DATE: "20261007"
+
+    steps:
+      - name: Checkout post-merge product source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_SOURCE_SHA }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch runtime pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$RUNTIME_PIN"
+
+      - name: Source focused regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --disable-pip-version-check -r products/storage_rc1/requirements.txt pytest==9.0.2 httpx==0.28.1
+          PYTHONPATH="products/storage_rc1:." python -m pytest -q             products/storage_rc1/tests/test_knowledge_service_client.py             products/storage_rc1/tests/test_knowledge_consumer_gateway.py             products/storage_rc1/tests/test_public_knowledge_workspace.py
+
+      - name: Build post-merge single URL candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist/postmerge_single_url
+          python tools/build_storage_single_url_candidate.py             --output-dir dist/postmerge_single_url             --build-date "$BUILD_DATE"
+
+      - name: Fresh Extract validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(find dist/postmerge_single_url -maxdepth 1 -type f -name '*.zip' | head -n1)"
+          test -n "$ZIP"
+          SHA_FILE="$ZIP.sha256"
+          DELIVERY="$ZIP.DELIVERY_MANIFEST.json"
+          test -f "$SHA_FILE"
+          test -f "$DELIVERY"
+
+          EXPECTED="$(awk '{print $1}' "$SHA_FILE")"
+          ACTUAL="$(sha256sum "$ZIP" | awk '{print $1}')"
+          test "$EXPECTED" = "$ACTUAL"
+
+          FRESH="$(mktemp -d)"
+          unzip -q "$ZIP" -d "$FRESH"
+          ROOT="$FRESH/STORAGE_PRODUCT_MVP_RC1"
+          test -d "$ROOT"
+
+          (
+            cd "$ROOT"
+            sha256sum -c FILE_SHA256SUMS.txt >/dev/null
+          )
+
+          python - "$ROOT" "$DELIVERY" "$PRODUCT_SOURCE_SHA" <<'PY'
+import json, pathlib, sys
+root=pathlib.Path(sys.argv[1])
+delivery=json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+expected=sys.argv[3]
+candidate=json.loads((root/"CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
+assert delivery["source_commit"] == expected, delivery
+assert candidate["source_commit"] == expected, candidate
+assert candidate["single_url_config"] == "KNOWLEDGE_SERVICE_URL"
+assert candidate["user_config_count"] == 1
+assert candidate["provider_calls"] == 0
+assert candidate["kioxia_extraction"] == "NOT_RERUN"
+assert not list(root.rglob("knowledge_service.local.json"))
+print("POSTMERGE_SOURCE_IDENTITY=PASS")
+print("SINGLE_URL_CONTRACT=PASS")
+print("LOCAL_URL_CONFIG_EXCLUDED=PASS")
+PY
+
+          python -m compileall -q "$ROOT/storage_life" "$ROOT/knowledge_consumer_gateway" "$ROOT/knowledge_production"
+          bash -n "$ROOT/knowledge_consumer_gateway/start_mac_gateway.command"
+
+          python -m pip install -q --disable-pip-version-check             -r "$ROOT/requirements.txt"             -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"             pytest==9.0.2 httpx==0.28.1
+
+          (
+            cd "$ROOT"
+            PYTHONPATH="$ROOT:$ROOT/vendor/unified_agent_runtime" python -m pytest -q               tests/test_knowledge_service_client.py               tests/test_knowledge_consumer_gateway.py               tests/test_public_knowledge_workspace.py
+          )
+
+          python - "$ROOT/run_windows.bat" <<'PY'
+from pathlib import Path
+import sys
+text=Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").lower()
+assert "docker" not in text
+assert "wsl" not in text
+print("WINDOWS_LAUNCHER_NO_DOCKER=PASS")
+print("WINDOWS_LAUNCHER_NO_WSL=PASS")
+PY
+
+          echo "FRESH_EXTRACT=PASS"
+          echo "PACKAGE_GATE=PASS"
+          echo "PROVIDER_CALLS=0"
+          echo "KIOXIA_EXTRACTION=NOT_RERUN"
+          echo "PACKAGE=$ZIP"
+          echo "SHA256=$ACTUAL"
+
+      - name: Upload post-merge candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-single-url-postmerge-d5bf
+          path: |
+            dist/postmerge_single_url/*.zip
+            dist/postmerge_single_url/*.zip.sha256
+            dist/postmerge_single_url/*.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
