@@ -29,6 +29,11 @@ def test_w2_synonyms_create_recall_only_variants_without_rewriting_literal() -> 
             for rule in variant["rules"]
         )
 
+    combined = understand_hardware_query("单片机供电问题")
+    combined_texts = {variant["text"] for variant in combined["search_queries"]}
+    assert "mcu 供电" in combined_texts
+    assert "mcu power" in combined_texts
+
 
 class FakeCaseService:
     def search_cases(
