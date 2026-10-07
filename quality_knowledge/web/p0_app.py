@@ -319,7 +319,13 @@ def create_p0_app(
     else:
         app.state.p04_provider = UnavailableP04Provider()
     app.state.p04_service = P04InsightService(app.state.p04_provider)
-    app.state.portrait_provider = portrait_provider or UnavailablePortraitProvider()
+    if portrait_provider is not None:
+        app.state.portrait_provider = portrait_provider
+    elif type(app.state.p04_provider).__name__ == "QualityScenarioV1P04Provider":
+        from quality_knowledge.p04.qsv1_provider import QualityScenarioV1PortraitProvider
+        app.state.portrait_provider = QualityScenarioV1PortraitProvider(app.state.p04_provider)
+    else:
+        app.state.portrait_provider = UnavailablePortraitProvider()
     portrait_db = (
         Path(portrait_db_path)
         if portrait_db_path is not None
