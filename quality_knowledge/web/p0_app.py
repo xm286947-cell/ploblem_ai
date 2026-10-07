@@ -52,6 +52,7 @@ from services.hardware_case_knowledge_adapter import (
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_knowledge_consumption import (
     PROJECTION_FILENAME,
+    HardwareKnowledgeConsumptionError,
     HardwareKnowledgeConsumptionProjectionStore,
     HardwareKnowledgeConsumptionService,
 )
@@ -808,6 +809,33 @@ def create_p0_app(
                 )
                 hardware_knowledge_consumption_service.assets = hardware_candidate_asset_repository
                 hardware_knowledge_consumption_service.adapter = effective_knowledge_adapter
+                try:
+                    projection_before = (
+                        hardware_knowledge_consumption_service.projection_status()
+                    )
+                    if int(projection_before.get("row_count") or 0) == 0:
+                        projection_bootstrap = (
+                            hardware_knowledge_consumption_service.rebuild_all_verified()
+                        )
+                    else:
+                        projection_bootstrap = {
+                            "projection_status": projection_before,
+                            "projected_count": int(
+                                projection_before.get("row_count") or 0
+                            ),
+                            "bootstrap_skipped": True,
+                        }
+                except HardwareKnowledgeConsumptionError as error:
+                    projection_bootstrap = {
+                        "projection_status": {
+                            "status": "DEGRADED",
+                            "error_code": error.code,
+                        },
+                        "projected_count": 0,
+                    }
+                app.state.hardware_knowledge_projection_bootstrap = (
+                    projection_bootstrap
+                )
                 app.state.hardware_r1_promotion_store = hardware_r1_promotion_store
                 try:
                     migration_status = hardware_r1_promotion_service.migrate_legacy_records()
