@@ -117,8 +117,17 @@ jobs:
         run: |
           $out = "$env:RUNNER_TEMP\opensearch-stdout.log"
           $err = "$env:RUNNER_TEMP\opensearch-stderr.log"
-          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "scripts\opensearch\start_windows.bat" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          $bat = (Resolve-Path "scripts\opensearch\start_windows.bat").Path
+          $args = "/d /s /c call `"$bat`""
+          $p = Start-Process -FilePath $env:ComSpec -ArgumentList $args -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
           $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper.pid"
+          Start-Sleep -Seconds 3
+          if ($p.HasExited) {
+            Write-Host "WINDOWS_LAUNCHER_EXIT_CODE=$($p.ExitCode)"
+            if (Test-Path $out) { Get-Content $out -ErrorAction SilentlyContinue }
+            if (Test-Path $err) { Get-Content $err -ErrorAction SilentlyContinue }
+            throw "WINDOWS_LAUNCHER_EXITED_EARLY"
+          }
 
       - name: Early Windows process diagnostics
         shell: pwsh
