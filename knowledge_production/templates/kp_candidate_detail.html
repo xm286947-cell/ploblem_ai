@@ -1,44 +1,80 @@
 {% extends "kp_base.html" %}
-{% block title %}{{ detail.candidate.title }}｜Candidate{% endblock %}
+{% block title %}{{ detail.display_candidate.title }}｜知识候选{% endblock %}
 {% block content %}
-{% if error %}<div class="error">操作被 Domain Gate 阻断：<strong>{{ error }}</strong></div>{% endif %}
+{% if error %}<div class="error">操作被领域门禁阻断：<strong>{{ error }}</strong></div>{% endif %}
 {% if message %}<div class="ok">{{ message }}</div>{% endif %}
 
 <div class="card">
-  <h2>Knowledge Candidate</h2>
+  <h2>知识候选（原始审计记录）</h2>
   <div class="grid">
     <div><strong>ID</strong><br><code>{{ detail.candidate.candidate_id }}</code></div>
-    <div><strong>Object Type</strong><br>{{ detail.candidate.object_type.value }}</div>
-    <div><strong>Source Type</strong><br>{% if detail.candidate.metadata.origin_workspace == "public-knowledge" %}Public Knowledge Suggestion{% else %}{{ detail.candidate.candidate_source_type.value }}{% endif %}</div>
-    <div><strong>Business Source</strong><br>
+    <div><strong>原始对象类型</strong><br>{{ enum_zh(detail.candidate.object_type.value) }}</div>
+    <div><strong>来源类型</strong><br>{% if detail.candidate.metadata.origin_workspace == "public-knowledge" %}公共知识建议（Public Knowledge Suggestion）{% else %}{{ enum_zh(detail.candidate.candidate_source_type.value) }}{% endif %}</div>
+    <div><strong>业务来源</strong><br>
       {% if detail.candidate.business_source_type %}
-      {{ detail.candidate.business_source_type.value }} / {{ detail.candidate.business_source_id }} / {{ detail.candidate.business_source_version or 'UNVERSIONED' }}
+      {{ enum_zh(detail.candidate.business_source_type.value) }} / {{ detail.candidate.business_source_id }} / {{ detail.candidate.business_source_version or 'UNVERSIONED' }}
       {% else %}—{% endif %}
     </div>
   </div>
   <h3>{{ detail.candidate.title }}</h3>
   <p>{{ detail.candidate.content }}</p>
-  <div><strong>Scope</strong> {{ detail.candidate.scope|join(", ") }}</div>
-  <div><strong>Tags</strong> {{ detail.candidate.tags|join(", ") }}</div>
-  {% if detail.candidate.metadata.storage_lifetime %}
-  <div class="card">
-    <strong>Storage Lifetime Model</strong>
-    <div>Device: {{ detail.candidate.metadata.storage_lifetime.device_type }}</div>
-    <div>Parameter: {{ detail.candidate.metadata.storage_lifetime.canonical_parameters|join(", ") or "UNRESOLVED" }}</div>
-    <div>Semantic Review: {{ detail.candidate.metadata.storage_lifetime.semantic_class_status }}</div>
-    <div>AI Suggested Knowledge Types: {{ detail.candidate.metadata.storage_lifetime.semantic_class_candidates|join(", ") or "UNRESOLVED" }}</div>
-    <div>Human Review Options: {{ (detail.candidate.metadata.storage_lifetime.semantic_class_review_options or detail.candidate.metadata.storage_lifetime.semantic_class_candidates)|join(", ") or "UNRESOLVED" }}</div>
-    <div>Consumers: {{ detail.candidate.metadata.storage_lifetime.scenario_consumers|join(", ") }}</div>
-    <div class="muted">必须由人工选择唯一 Knowledge Type 后才能 Publish；AI 候选标签本身不可成为 Formal Knowledge。</div>
+  <div><strong>适用范围</strong> {{ detail.candidate.scope|join(", ") }}</div>
+  <div><strong>标签</strong> {{ detail.candidate.tags|join(", ") }}</div>
+</div>
+
+{% if detail.effective_candidate %}
+{% set effective = detail.effective_candidate %}
+<div class="card">
+  <h2>当前有效审核快照</h2>
+  <p class="muted">这是人工审核后的有效快照；原始 Candidate 保持不可变。后续 Publish 使用该有效快照。</p>
+  <div class="grid">
+    <div><strong>有效对象类型</strong><br>{{ enum_zh(effective.object_type.value) }}</div>
+    <div><strong>审核状态</strong><br>{% if detail.latest_review %}{{ enum_zh(detail.latest_review.review_status.value) }} / {{ enum_zh(detail.latest_review.action.value) }}{% endif %}</div>
   </div>
-  {% endif %}
-  <div><strong>Source References</strong><pre>{{ detail.candidate.source_refs|join("\n") }}</pre></div>
+  <h3>{{ effective.title }}</h3>
+  <p>{{ effective.content }}</p>
+  <div><strong>适用范围</strong> {{ effective.scope|join(", ") }}</div>
+  <div><strong>有效标签</strong> {{ effective.tags|join(", ") }}</div>
+  <div><strong>有效知识类型</strong>
+    {% set selected = namespace(value="") %}
+    {% for tag in effective.tags %}
+      {% if tag.startswith("storage-semantic:") %}{% set selected.value = tag.split(":", 1)[1] %}{% endif %}
+    {% endfor %}
+    {% if selected.value %}{{ enum_zh(selected.value) }}{% else %}未选择{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if detail.candidate.metadata.storage_lifetime %}
+<div class="card">
+  <h2>Storage 寿命知识模型</h2>
+  <div>器件类型：{{ detail.candidate.metadata.storage_lifetime.device_type }}</div>
+  <div>参数：{{ detail.candidate.metadata.storage_lifetime.canonical_parameters|join(", ") or "UNRESOLVED" }}</div>
+  <div>语义审核状态：{{ detail.candidate.metadata.storage_lifetime.semantic_class_status }}</div>
+  <div>AI 建议知识类型：
+    {% for semantic in detail.candidate.metadata.storage_lifetime.semantic_class_candidates %}
+      {{ enum_zh(semantic) }}{% if not loop.last %}、{% endif %}
+    {% else %}UNRESOLVED{% endfor %}
+  </div>
+  <div>人工审核可选类型：
+    {% for semantic in detail.storage_semantic_review_options %}
+      {{ enum_zh(semantic) }}{% if not loop.last %}、{% endif %}
+    {% else %}UNRESOLVED{% endfor %}
+  </div>
+  <div>消费场景：{{ detail.candidate.metadata.storage_lifetime.scenario_consumers|join(", ") }}</div>
+  <div class="muted">必须由人工选择唯一知识类型后才能发布；AI 建议标签本身不可成为正式知识。</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>来源引用</h2>
+  <pre>{{ detail.candidate.source_refs|join("\n") }}</pre>
   {% if detail.candidate.metadata.origin_workspace == "public-knowledge" %}
   <div class="card">
-    <strong>Origin: Public Knowledge · AI assisted</strong>
-    <div>Suggestion: <code>{{ detail.candidate.metadata.suggestion_id }}</code> · Mode: {{ detail.candidate.metadata.origin_mode }}</div>
-    <div>Generated By: Public Knowledge / AI Assisted · Evidence State: {{ detail.candidate.metadata.evidence_status or "UNRESOLVED" }}</div>
-    <div><strong>Original Source / Revision / Locator / Citation</strong>
+    <strong>来源：公共知识 · AI 辅助</strong>
+    <div>建议 ID：<code>{{ detail.candidate.metadata.suggestion_id }}</code> · 模式：{{ detail.candidate.metadata.origin_mode }}</div>
+    <div>生成方式：Public Knowledge / AI Assisted · Evidence State：{{ detail.candidate.metadata.evidence_status or "UNRESOLVED" }}</div>
+    <div><strong>原始 Source / Revision / Locator / Citation</strong>
       {% for ref in detail.candidate.metadata.source_refs %}
       <pre>{{ ref.source_id }} · {{ ref.revision }} · {{ ref.locator }} · {{ ref.citation_id }}</pre>
       {% endfor %}
@@ -48,108 +84,112 @@
 </div>
 
 <div class="card">
-  <h2>Evidence</h2>
+  <h2>证据（Evidence）</h2>
   {% for e in detail.evidences %}
     <div class="card">
       <strong>{{ e.evidence_id }}</strong>
       {% if e.available %}
-        <div>Source: {{ e.payload.source.source_type }} / {{ e.payload.source.source_id }} / {{ e.payload.source.revision }}</div>
-        <div>Locator: {{ e.payload.locator.type }} — {{ e.payload.locator.value }}</div>
+        <div>来源：{{ e.payload.source.source_type }} / {{ e.payload.source.source_id }} / {{ e.payload.source.revision }}</div>
+        <div>定位：{{ e.payload.locator.type }} — {{ e.payload.locator.value }}</div>
         <blockquote>{{ e.payload.excerpt }}</blockquote>
       {% else %}
-        <div class="error">EVIDENCE_MISSING</div>
+        <div class="error">证据缺失（EVIDENCE_MISSING）</div>
       {% endif %}
     </div>
-  {% else %}<p class="muted">无 Evidence。</p>{% endfor %}
+  {% else %}<p class="muted">暂无证据。</p>{% endfor %}
 </div>
 
 <div class="card">
-  <h2>Evaluation / Dedup / Conflict</h2>
+  <h2>评估 / 去重 / 冲突检查</h2>
   {% if detail.latest_evaluation %}
     {% set ev = detail.latest_evaluation %}
     <div class="grid">
-      <div>Evidence <strong>{{ ev.evidence_status.value }}</strong></div>
-      <div>Source Valid <strong>{{ ev.source_valid }}</strong></div>
-      <div>Duplicate <strong>{{ ev.duplicate_status.value }}</strong></div>
-      <div>Conflict <strong>{{ ev.conflict_status.value }}</strong></div>
-      <div>Review Ready <strong>{{ ev.review_ready }}</strong></div>
-      <div>Publish Readiness <strong>{{ ev.publish_readiness }}</strong></div>
+      <div>证据状态 <strong>{{ enum_zh(ev.evidence_status.value) }}</strong></div>
+      <div>来源有效 <strong>{{ "是" if ev.source_valid else "否" }}</strong></div>
+      <div>重复状态 <strong>{{ enum_zh(ev.duplicate_status.value) }}</strong></div>
+      <div>冲突状态 <strong>{{ enum_zh(ev.conflict_status.value) }}</strong></div>
+      <div>可进入审核 <strong>{{ "是" if ev.review_ready else "否" }}</strong></div>
+      <div>发布就绪 <strong>{{ "是" if ev.publish_readiness else "否" }}</strong></div>
     </div>
-    <p>Reasons: {{ ev.reasons|join(", ") or "NONE" }}</p>
+    <p>原因：{{ ev.reasons|join(", ") or "NONE" }}</p>
   {% else %}
-    <p class="muted">尚未 Evaluation。</p>
+    <p class="muted">尚未评估（NOT_EVALUATED）。</p>
     <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/evaluate">
-      <button type="submit">执行 Evaluation</button>
+      <button type="submit">执行评估</button>
     </form>
   {% endif %}
 </div>
 
 {% if detail.latest_evaluation %}
+{% set edit_candidate = detail.effective_candidate or detail.candidate %}
 <div class="card">
-  <h2>Human Review</h2>
-  <p class="muted">页面只提交 Review 命令；状态迁移与校验均由 Domain/Application Service 执行。</p>
+  <h2>人工审核</h2>
+  <p class="muted">页面只提交审核命令；状态迁移与校验均由 Domain/Application Service 执行。</p>
   <div class="grid">
     <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/confirm">
       <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
-      <label>Reviewed By<input name="reviewed_by" required></label>
-      <label>Note<textarea name="review_note"></textarea></label>
-      <button type="submit">CONFIRM</button>
+      <label>审核人（Reviewed By）<input name="reviewed_by" required></label>
+      <label>审核备注（Note）<textarea name="review_note"></textarea></label>
+      <button type="submit">确认（CONFIRM）</button>
     </form>
     <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/reject">
       <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
-      <label>Reviewed By<input name="reviewed_by" required></label>
-      <label>Note<textarea name="review_note"></textarea></label>
-      <button class="danger" type="submit">REJECT</button>
+      <label>审核人（Reviewed By）<input name="reviewed_by" required></label>
+      <label>审核备注（Note）<textarea name="review_note"></textarea></label>
+      <button class="danger" type="submit">拒绝（REJECT）</button>
     </form>
   </div>
   <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/edit">
     <input type="hidden" name="evaluation_id" value="{{ detail.latest_evaluation.evaluation_id }}">
-    <h3>EDIT</h3>
-    <label>Reviewed By<input name="reviewed_by" required></label>
-    <label>Object Type
+    <h3>编辑并确认（EDIT & CONFIRM）</h3>
+    <label>审核人（Reviewed By）<input name="reviewed_by" required></label>
+    <label>对象类型
       <select name="object_type">
         {% for value in ["FACT", "CONCEPT", "SOLUTION", "DIAGNOSTIC", "REQUIREMENT"] %}
-        <option value="{{ value }}" {% if detail.candidate.object_type.value == value %}selected{% endif %}>{{ value }}</option>
+        <option value="{{ value }}" {% if edit_candidate.object_type.value == value %}selected{% endif %}>{{ enum_zh(value) }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>Title<input name="title" value="{{ detail.candidate.title }}"></label>
-    <label>Content<textarea name="content" rows="5" required>{{ detail.candidate.content }}</textarea></label>
-    <label>Scope<input name="scope" value="{{ detail.candidate.scope|join(', ') }}"></label>
-    <label>Tags<input name="tags" value="{{ detail.candidate.tags|join(', ') }}"></label>
+    <label>标题（保持知识内容原文）<input name="title" value="{{ edit_candidate.title }}"></label>
+    <label>内容（保持知识内容原文）<textarea name="content" rows="5" required>{{ edit_candidate.content }}</textarea></label>
+    <label>适用范围<input name="scope" value="{{ edit_candidate.scope|join(', ') }}"></label>
+    <label>标签<input name="tags" value="{{ edit_candidate.tags|join(', ') }}"></label>
     {% if detail.candidate.metadata.storage_lifetime %}
-    <label>Storage Knowledge Type
+    {% set selected_semantic = namespace(value="") %}
+    {% for tag in edit_candidate.tags %}
+      {% if tag.startswith("storage-semantic:") %}{% set selected_semantic.value = tag.split(":", 1)[1] %}{% endif %}
+    {% endfor %}
+    <label>Storage 知识类型
       <select name="storage_semantic_class">
         <option value="">请选择并人工确认</option>
-        {% set review_options = detail.candidate.metadata.storage_lifetime.semantic_class_review_options or detail.candidate.metadata.storage_lifetime.semantic_class_candidates %}
-        {% for semantic in review_options %}
-        <option value="{{ semantic }}">{{ semantic }}</option>
+        {% for semantic in detail.storage_semantic_review_options %}
+        <option value="{{ semantic }}" {% if selected_semantic.value == semantic %}selected{% endif %}>{{ enum_zh(semantic) }}</option>
         {% endfor %}
       </select>
     </label>
     {% endif %}
-    <label>Note<textarea name="review_note"></textarea></label>
-    <button class="secondary" type="submit">EDIT & CONFIRM</button>
+    <label>审核备注（Note）<textarea name="review_note"></textarea></label>
+    <button class="secondary" type="submit">编辑并确认（EDIT & CONFIRM）</button>
   </form>
 </div>
 {% endif %}
 
 <div class="card">
-  <h2>Review Status</h2>
+  <h2>审核状态</h2>
   {% if detail.latest_review %}
-    <p><strong>{{ detail.latest_review.review_status.value }}</strong> / {{ detail.latest_review.action.value }} / {{ detail.latest_review.reviewed_by }}</p>
+    <p><strong>{{ enum_zh(detail.latest_review.review_status.value) }}</strong> / {{ enum_zh(detail.latest_review.action.value) }} / {{ detail.latest_review.reviewed_by }}</p>
     <p>{{ detail.latest_review.review_note or "" }}</p>
-  {% else %}<p class="muted">NOT_REVIEWED</p>{% endif %}
+  {% else %}<p class="muted">未审核（NOT_REVIEWED）</p>{% endif %}
 </div>
 
 <div class="card">
-  <h2>Publish Gate</h2>
+  <h2>发布门禁</h2>
   {% if detail.published %}
-    <div class="ok">Published Knowledge：{{ detail.published.object_id }} / v{{ detail.published.object_version }} / {{ detail.published.status.value }}</div>
+    <div class="ok">已发布知识：{{ detail.published.object_id }} / v{{ detail.published.object_version }} / {{ enum_zh(detail.published.status.value) }}</div>
   {% else %}
     <form method="post" action="/knowledge-production/candidates/{{ detail.candidate.candidate_id }}/publish">
-      <label>Published By<input name="published_by" required></label>
-      <button type="submit">PUBLISH</button>
+      <label>发布人（Published By）<input name="published_by" required></label>
+      <button type="submit">发布（PUBLISH）</button>
     </form>
   {% endif %}
 </div>
