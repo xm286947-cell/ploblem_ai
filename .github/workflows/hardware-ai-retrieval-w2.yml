@@ -1,0 +1,31 @@
+name: Hardware AI Retrieval W2 Indexer
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_retrieval_indexer.py"
+      - "tests/test_hardware_retrieval_indexer.py"
+      - "services/hardware_retrieval_index.py"
+      - "services/hardware_retrieval_metadata.py"
+      - "docs/product/HARDWARE_AI_RETRIEVAL_W2_INDEXER.md"
+      - ".github/workflows/hardware-ai-retrieval-w2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: W2A metadata store and generation indexer tests
+        run: >-
+          python -m pytest -q
+          tests/test_hardware_retrieval_index.py
+          tests/test_hardware_retrieval_indexer.py
