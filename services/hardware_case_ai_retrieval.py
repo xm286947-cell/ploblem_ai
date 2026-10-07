@@ -161,6 +161,166 @@ class HardwareCaseAIRetrievalService:
     def _error_code(error: Exception) -> str:
         return str(getattr(error, "code", None) or type(error).__name__)
 
+    @staticmethod
+    def _projection_to_case(
+        projection: Mapping[str, Any],
+        *,
+        fallback_case_id: str = "",
+    ) -> dict[str, Any]:
+        business_case_id = str(
+            projection.get("business_case_id") or fallback_case_id or ""
+        ).strip()
+        knowledge_id = str(projection.get("knowledge_id") or "").strip()
+        case_id = business_case_id or knowledge_id
+        facts = {
+            field: projection.get(field)
+            for field in (
+                "symptom",
+                "impact",
+                "occurrence_condition",
+                "analysis_process",
+                "failure_mode",
+                "root_cause",
+                "failure_mechanism",
+                "actions",
+                "verification_result",
+                "conclusion",
+            )
+            if projection.get(field) not in (None, "", [], {})
+        }
+        return {
+            "case_id": case_id,
+            "business_case_id": business_case_id or case_id,
+            "knowledge_id": knowledge_id or None,
+            "title": str(projection.get("title") or case_id or "Formal Knowledge"),
+            "case_status": "PUBLISHED",
+            "processing_status": "FORMAL_KNOWLEDGE",
+            "product_context": {},
+            "facts": facts,
+            "mapping_paths": {
+                "CIRCUIT_FEATURE": [],
+                "MATERIAL_DEVICE": [],
+            },
+            "evidence_health": (
+                "AVAILABLE" if projection.get("evidence_refs") else "FORMAL_ONLY"
+            ),
+            "published_at": projection.get("projected_at"),
+            "updated_at": projection.get("projected_at"),
+            "source_kind": "FORMAL_KNOWLEDGE",
+            "formal_revision": projection.get("formal_revision"),
+            "formal_object_hash": projection.get("formal_object_hash"),
+            "interfaces": (
+                [projection.get("interface")]
+                if projection.get("interface")
+                else []
+            ),
+            "signals": (
+                [projection.get("signal")]
+                if projection.get("signal")
+                else []
+            ),
+            "device_refs": list(projection.get("device_refs") or []),
+            "evidence_refs": list(projection.get("evidence_refs") or []),
+        }
+
+    def _resolve_formal_case(
+        self,
+        hit: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        projection: Mapping[str, Any] | None = None
+        knowledge_id = str(hit.get("knowledge_id") or "").strip()
+        business_case_id = str(hit.get("business_case_id") or "").strip()
+
+        if self.consumption_service is not None and knowledge_id:
+            try:
+                candidate = self.consumption_service.get(knowledge_id)
+                if isinstance(candidate, Mapping):
+                    projection = candidate
+            except Exception:
+                projection = None
+
+        if projection is None and self.consumption_service is not None and business_case_id:
+            try:
+                payload = self.consumption_service.search(
+                    "",
+                    business_case_id=business_case_id,
+                    limit=2,
+                )
+                rows = payload.get("results") if isinstance(payload, Mapping) else None
+                if isinstance(rows, list) and rows and isinstance(rows[0], Mapping):
+                    projection = rows[0]
+            except Exception:
+                projection = None
+
+        if projection is None:
+            searchable_fields = {
+                key: hit.get(key)
+                for key in (
+                    "knowledge_id",
+                    "business_case_id",
+                    "title",
+                    "symptom",
+                    "impact",
+                    "occurrence_condition",
+                    "analysis_process",
+                    "failure_mode",
+                    "root_cause",
+                    "failure_mechanism",
+                    "actions",
+                    "verification_result",
+                    "conclusion",
+                    "interface",
+                    "signal",
+                    "device_refs",
+                    "evidence_refs",
+                    "formal_revision",
+                    "formal_object_hash",
+                    "projected_at",
+                )
+                if hit.get(key) not in (None, "", [], {})
+            }
+            if not searchable_fields:
+                return None
+            projection = searchable_fields
+
+        return self._projection_to_case(
+            projection,
+            fallback_case_id=business_case_id,
+        )
+
+    def get_case(
+        self,
+        case_id: str,
+        *,
+        role: str = "CONSUMER",
+        historical: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return self.case_service.get_case(
+                case_id,
+                role=role,
+                historical=historical,
+            )
+        except Exception as local_error:
+            if self.consumption_service is None:
+                raise local_error
+
+        try:
+            payload = self.consumption_service.search(
+                "",
+                business_case_id=case_id,
+                limit=2,
+            )
+            rows = payload.get("results") if isinstance(payload, Mapping) else None
+            if isinstance(rows, list) and rows and isinstance(rows[0], Mapping):
+                return self._projection_to_case(rows[0], fallback_case_id=case_id)
+            direct = self.consumption_service.get(case_id)
+            if isinstance(direct, Mapping):
+                return self._projection_to_case(direct, fallback_case_id=case_id)
+        except Exception:
+            pass
+        raise HardwareCaseAIRetrievalError("CASE_NOT_FOUND")
+
     def _visible_payload(
         self,
         *,
@@ -251,6 +411,8 @@ class HardwareCaseAIRetrievalService:
                     business_case_id = str(hit.get("business_case_id") or "").strip()
                     case = lookup.get(business_case_id)
                     if case is None:
+                        case = self._resolve_formal_case(hit)
+                    if case is None:
                         continue
                     case_id = str(case.get("case_id") or business_case_id)
                     if case_id in seen:
@@ -298,6 +460,8 @@ class HardwareCaseAIRetrievalService:
                         continue
                     business_case_id = str(hit.get("business_case_id") or "").strip()
                     case = lookup.get(business_case_id)
+                    if case is None:
+                        case = self._resolve_formal_case(hit)
                     if case is None:
                         continue
                     case_id = str(case.get("case_id") or business_case_id)
