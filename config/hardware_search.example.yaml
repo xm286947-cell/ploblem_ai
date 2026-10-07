@@ -1,0 +1,11 @@
+# W0 example only. Search remains a rebuildable sidecar and is not a source of truth.
+search:
+  mode: opensearch
+  base_url: http://127.0.0.1:9200
+  index_alias: hardware-knowledge-search-active
+  timeout_seconds: 5
+  fallback: sqlite_v0
+
+# Production security is intentionally not defined by this local-demo file.
+# The W0 native launchers bind to localhost and disable the Security plugin
+# only for isolated development/demo validation.
