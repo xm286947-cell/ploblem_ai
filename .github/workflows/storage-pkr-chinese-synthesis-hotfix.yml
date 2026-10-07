@@ -1,0 +1,305 @@
+name: Storage Public Knowledge Chinese Synthesis Hotfix
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-pkr-chinese-synthesis-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hotfix:
+    runs-on: ubuntu-latest
+    env:
+      STORAGE_BASE_OLD: 0b6e7c8bbecc7777a6f2cb9a79dbdd5e1751dd0c
+      STORAGE_BASE_USABILITY: b8dcdf54cd31a418a0ab195d9b0858688fac9742
+      STORAGE_TARGET: 661e4aa868c06c075520f4b48c71c01f545b92ac
+      PKR_BASE_OLD: 3ce389a9a8f8863aafd2405d53870cccff977838
+      PKR_BASE_DELETE: e18ad017f05812fd38ed6a6838b8fcc9e0034703
+      PKR_TARGET: ff0e04a6e9ed407a121078bf68c19876d8eb6e15
+      PATCH_ID: STORAGE_PKR_CHINESE_SYNTHESIS_HOTFIX_20261006
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build mixed-state-safe patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/payload/products/storage_rc1/storage_life"
+          mkdir -p "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+
+          git fetch --no-tags origin             "$STORAGE_BASE_OLD" "$STORAGE_BASE_USABILITY" "$STORAGE_TARGET"             "$PKR_BASE_OLD" "$PKR_BASE_DELETE" "$PKR_TARGET"
+
+          for f in index.html public_knowledge.py; do
+            git show "$STORAGE_TARGET:products/storage_rc1/storage_life/$f"               > "$ROOT/payload/products/storage_rc1/storage_life/$f"
+          done
+          git show "$PKR_TARGET:public_knowledge_rag/app.py"             > "$ROOT/payload/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+
+          python - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+
+          root=Path("/tmp")/os.environ["PATCH_ID"]
+          def blob(ref,path):
+              return subprocess.check_output(["git","show",f"{ref}:{path}"])
+          def sha(data): return hashlib.sha256(data).hexdigest()
+
+          entries=[]
+
+          for rel in ["index.html","public_knowledge.py"]:
+              repo_path=f"products/storage_rc1/storage_life/{rel}"
+              target=(root/"payload"/repo_path).read_bytes()
+              allowed=[]
+              for ref in [os.environ["STORAGE_BASE_OLD"],os.environ["STORAGE_BASE_USABILITY"]]:
+                  value=sha(blob(ref,repo_path))
+                  if value not in allowed:
+                      allowed.append(value)
+              entries.append({
+                  "path":repo_path,
+                  "allowed_base_sha256":allowed,
+                  "target_sha256":sha(target),
+              })
+
+          pkr_repo_path="public_knowledge_rag/app.py"
+          pkr_target=(root/"payload/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py").read_bytes()
+          pkr_allowed=[]
+          for ref in [os.environ["PKR_BASE_OLD"],os.environ["PKR_BASE_DELETE"]]:
+              value=sha(blob(ref,pkr_repo_path))
+              if value not in pkr_allowed:
+                  pkr_allowed.append(value)
+          entries.append({
+              "path":"PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py",
+              "allowed_base_sha256":pkr_allowed,
+              "target_sha256":sha(pkr_target),
+          })
+
+          manifest={
+              "patch_id":os.environ["PATCH_ID"],
+              "storage_target":os.environ["STORAGE_TARGET"],
+              "pkr_target":os.environ["PKR_TARGET"],
+              "scope":"Chinese grounded synthesis + citation translation display contract",
+              "user_data_touched":False,
+              "database_touched":False,
+              "docker_volume_touched":False,
+              "files":entries,
+          }
+          (root/"PATCH_MANIFEST.json").write_text(
+              json.dumps(manifest,ensure_ascii=False,indent=2),encoding="utf-8"
+          )
+          PY
+
+          cat > "$ROOT/patch_apply.py" <<'PY'
+          from __future__ import annotations
+          import hashlib, json, os, shutil, sys
+          from pathlib import Path
+
+          PATCH_DIR=Path(__file__).resolve().parent
+          MANIFEST=json.loads((PATCH_DIR/"PATCH_MANIFEST.json").read_text(encoding="utf-8"))
+
+          def digest(path:Path)->str:
+              h=hashlib.sha256()
+              with path.open("rb") as f:
+                  for chunk in iter(lambda:f.read(1024*1024),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          if len(sys.argv)!=2:
+              raise SystemExit("usage: patch_apply.py <storage-package-root>")
+
+          target_root=Path(sys.argv[1]).expanduser().resolve()
+          backup_root=target_root/".storage_hotfix_backup"/MANIFEST["patch_id"]
+          states=[]
+
+          for item in MANIFEST["files"]:
+              dst=target_root/item["path"]
+              if not dst.is_file():
+                  raise SystemExit("PATCH_TARGET_MISSING: "+item["path"])
+              current=digest(dst)
+              if current==item["target_sha256"]:
+                  states.append(("target",item,dst))
+              elif current in item["allowed_base_sha256"]:
+                  states.append(("base",item,dst))
+              else:
+                  raise SystemExit(
+                      "PATCH_BASE_MISMATCH: "+item["path"]
+                      +"\n当前文件不属于本补丁支持的现场版本，补丁已停止，不覆盖。"
+                  )
+
+          if all(state=="target" for state,_,__ in states):
+              print("ALREADY_PATCHED=YES")
+              raise SystemExit(0)
+
+          for state,item,dst in states:
+              if state!="base": continue
+              bak=backup_root/item["path"]
+              bak.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(dst,bak)
+
+          for state,item,dst in states:
+              if state!="base": continue
+              src=PATCH_DIR/"payload"/item["path"]
+              tmp=dst.with_name(dst.name+".hotfix_tmp")
+              shutil.copy2(src,tmp)
+              if digest(tmp)!=item["target_sha256"]:
+                  tmp.unlink(missing_ok=True)
+                  raise SystemExit("PATCH_PAYLOAD_HASH_MISMATCH: "+item["path"])
+              os.replace(tmp,dst)
+
+          for item in MANIFEST["files"]:
+              dst=target_root/item["path"]
+              if digest(dst)!=item["target_sha256"]:
+                  raise SystemExit("PATCH_VERIFY_FAILED: "+item["path"])
+
+          print("PATCH_RESULT=PASS")
+          print("UPDATED_FILES=3")
+          print("USER_DATA_TOUCHED=NO")
+          print("DATABASE_TOUCHED=NO")
+          print("DOCKER_VOLUME_TOUCHED=NO")
+          print("BACKUP_DIR="+str(backup_root))
+          PY
+
+          cat > "$ROOT/apply_patch.command" <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          choose_target() {
+            if [ "$#" -ge 1 ] && [ -d "$1" ]; then
+              printf '%s' "$1"; return
+            fi
+            if [ -f "$PWD/products/storage_rc1/storage_life/index.html" ]; then
+              printf '%s' "$PWD"; return
+            fi
+            if command -v osascript >/dev/null 2>&1; then
+              osascript -e 'POSIX path of (choose folder with prompt "选择当前正在测试的 Storage 包根目录")' 2>/dev/null || true
+            fi
+          }
+
+          TARGET="$(choose_target "${1:-}")"
+          TARGET="${TARGET%/}"
+          if [ -z "$TARGET" ] || [ ! -f "$TARGET/products/storage_rc1/storage_life/index.html" ]; then
+            echo "没有找到 Storage 包根目录。"
+            read -r -p "按回车退出..."
+            exit 2
+          fi
+
+          echo "[1/3] 应用中文综合与原文翻译补丁..."
+          python3 "$PATCH_DIR/patch_apply.py" "$TARGET"
+
+          echo "[2/3] 重建 Public Knowledge..."
+          (cd "$TARGET/PUBLIC_KNOWLEDGE_SERVICE" && bash ./start.sh)
+
+          echo "[3/3] 验证 Public Knowledge 中文回答契约..."
+          python3 - <<'PY'
+          import json, urllib.request
+          spec=json.load(urllib.request.urlopen("http://127.0.0.1:9000/openapi.json", timeout=10))
+          ask=spec.get("components",{}).get("schemas",{}).get("AskRequest",{}).get("properties",{})
+          required={"response_language","include_citation_translations"}
+          missing=sorted(required-set(ask))
+          if missing:
+              raise SystemExit("CHINESE_SYNTHESIS_CONTRACT_MISSING:"+",".join(missing))
+          print("PUBLIC_KNOWLEDGE_CHINESE_SYNTHESIS_CONTRACT=PASS")
+          PY
+
+          echo
+          echo "Public Knowledge 已更新。"
+          echo "Storage 服务端代码也已更新，因此请把当前 Storage 启动窗口关闭后重新启动一次。"
+          echo "重新打开页面后，“搜索并综合”将默认输出中文，并在综合结果中包含引用原文的中文翻译。"
+          read -r -p "按回车关闭..."
+          SH
+
+          cat > "$ROOT/README_双击_apply_patch.command.txt" <<EOF
+          目标：
+          - AI 综合默认中文
+          - 保留英文原始 Citation
+          - AI 在综合结果中按引用编号给出原文中文翻译
+          - 不改变 Formal Knowledge / Storage Diagnosis 边界
+
+          修改 3 个程序文件：
+          1. products/storage_rc1/storage_life/index.html
+          2. products/storage_rc1/storage_life/public_knowledge.py
+          3. PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py
+
+          不修改：
+          - Storage 数据库
+          - Public Knowledge SQLite 数据
+          - Docker 数据卷
+          - 已导入资料
+          - Formal Knowledge
+          - Runtime 数据
+
+          使用：
+          双击 apply_patch.command，选择当前 Storage 包根目录。
+          Public Knowledge 会自动重建。
+          最后请手动重启一次 Storage 服务。
+          EOF
+
+          chmod +x "$ROOT/apply_patch.command"
+
+      - name: Self-test current field state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/${PATCH_ID}"
+          TEST="/tmp/chinese-synthesis-hotfix-test"
+          rm -rf "$TEST"
+          mkdir -p "$TEST/products/storage_rc1/storage_life"
+          mkdir -p "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+
+          git show "$STORAGE_BASE_USABILITY:products/storage_rc1/storage_life/index.html"             > "$TEST/products/storage_rc1/storage_life/index.html"
+          git show "$STORAGE_BASE_USABILITY:products/storage_rc1/storage_life/public_knowledge.py"             > "$TEST/products/storage_rc1/storage_life/public_knowledge.py"
+          git show "$PKR_BASE_DELETE:public_knowledge_rag/app.py"             > "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+
+          python3 "$ROOT/patch_apply.py" "$TEST"
+          python3 "$ROOT/patch_apply.py" "$TEST" | grep -q "ALREADY_PATCHED=YES"
+
+          python3 -m py_compile             "$TEST/products/storage_rc1/storage_life/public_knowledge.py"             "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path("/tmp/chinese-synthesis-hotfix-test/products/storage_rc1/storage_life/index.html").read_text(encoding="utf-8")
+          start=html.index("<script>")+len("<script>")
+          end=html.index("</script>",start)
+          Path("/tmp/chinese-synthesis-hotfix.js").write_text(html[start:end],encoding="utf-8")
+          required=[
+              "response_language:'zh-CN'",
+              "include_citation_translations:true",
+              "中文综合解读 + 引用翻译",
+          ]
+          missing=[x for x in required if x not in html]
+          assert not missing, missing
+          print("CHINESE_SYNTHESIS_UI_STATIC=PASS")
+          PY
+          node --check /tmp/chinese-synthesis-hotfix.js
+
+          grep -q 'response_language: Literal\["AUTO", "zh-CN", "en"\]'             "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+          grep -q '逐条给出对应原文片段的忠实中文翻译'             "$TEST/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag/app.py"
+
+          echo "CHINESE_SYNTHESIS_HOTFIX_SELFTEST=PASS"
+
+      - name: Package patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp
+          zip -qr "${PATCH_ID}.zip" "${PATCH_ID}"
+          sha256sum "${PATCH_ID}.zip" > "${PATCH_ID}.zip.sha256"
+
+      - name: Upload patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PATCH_ID }}
+          path: |
+            /tmp/${{ env.PATCH_ID }}.zip
+            /tmp/${{ env.PATCH_ID }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30

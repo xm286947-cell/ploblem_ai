@@ -1,0 +1,612 @@
+name: Storage MVP Real Flow Validation Package
+# W4_CODEX_FORMAL_TEST_CANDIDATE_REFREEZE
+
+on:
+  push:
+    branches:
+      - feature/storage-public-knowledge-inline
+    paths:
+      - ".github/workflows/storage-mvp-real-flow-package.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STORAGE_SOURCE_SHA: fc52f990aed6fd61501799742ce7ea1d057b5aa3
+      PUBLIC_KNOWLEDGE_SOURCE_SHA: a9536f3814f9e3cd2b9e040e216f68ea61a07c15
+      RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
+      PACKAGE_DATE: "20261007"
+
+    steps:
+      - name: Checkout frozen Storage source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.STORAGE_SOURCE_SHA }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Focused usability fix verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile products/storage_rc1/storage_life/public_knowledge.py
+          grep -q 'MODEL_ANCHOR_REQUIRED' products/storage_rc1/storage_life/public_knowledge.py
+
+          PKR_START="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:start.sh")"
+          printf '%s\n' "$PKR_START" | grep -q -- "--force-recreate"
+          printf '%s\n' "$PKR_START" | grep -q "PUBLIC_KNOWLEDGE_DELETE_CONTRACT=PASS"
+
+          PKR_ISOLATED="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/start_isolated.sh")"
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'INSTANCE_ID='
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'storage-pkr-w4-$INSTANCE_ID'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'command -v python3'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker compose -p "$ISOLATED_PROJECT"'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'NO_FREE_ISOLATED_PORT'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q '.pkr_isolated_instances'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'PKR_ISOLATED_STATUS=.RUNNING.'
+          printf '%s\n' "$PKR_ISOLATED" | grep -q 'LATEST_FILE'
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q 'docker rm -f'; then
+            echo "ISOLATED_SCRIPT_UNSAFE_CONTAINER_DELETE"
+            exit 1
+          fi
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q -- '--remove-orphans'; then
+            echo "ISOLATED_SCRIPT_UNSAFE_REMOVE_ORPHANS"
+            exit 1
+          fi
+          if printf '%s\n' "$PKR_ISOLATED" | grep -q '.pkr_isolated_last.env'; then
+            echo "ISOLATED_SCRIPT_SINGLE_STATE_REGRESSION"
+            exit 1
+          fi
+
+          PKR_STOP="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/stop_isolated.sh")"
+          printf '%s\n' "$PKR_STOP" | grep -q 'multiple isolated instances are running'
+          printf '%s\n' "$PKR_STOP" | grep -q 'PKR_STOP_ALL_ISOLATED'
+          printf '%s\n' "$PKR_STOP" | grep -q 'scripts/list_isolated.sh'
+          printf '%s\n' "$PKR_STOP" | grep -q 'PKR_ISOLATED_INSTANCE_ID'
+
+          PKR_LIST="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:scripts/list_isolated.sh")"
+          printf '%s\n' "$PKR_LIST" | grep -q 'INSTANCE_ID'
+          printf '%s\n' "$PKR_LIST" | grep -q 'STATUS'
+
+          PKR_COMPOSE="$(git show "$PUBLIC_KNOWLEDGE_SOURCE_SHA:compose.isolated.yaml")"
+          printf '%s\n' "$PKR_COMPOSE" | grep -q 'container_name: ${PKR_ISOLATED_CONTAINER}'
+          printf '%s\n' "$PKR_COMPOSE" | grep -q '127.0.0.1:${PKR_ISOLATED_PORT}:8080'
+          printf '%s\n' "$PKR_COMPOSE" | grep -q 'name: ${PKR_ISOLATED_VOLUME}'
+
+          python - <<'PY'
+          from pathlib import Path
+          html = Path("products/storage_rc1/storage_life/index.html").read_text(encoding="utf-8")
+          start = html.index("<script>") + len("<script>")
+          end = html.index("</script>", start)
+          Path("/tmp/storage_inline.js").write_text(html[start:end], encoding="utf-8")
+          required = [
+              "$('#pkImportTitle').value=f.name;",
+              "async function pkDeleteSource",
+              "async function pkDeleteRevision",
+              "async function pkSynthesizeSearch",
+              "搜索并综合",
+              "按寿命模型生产知识",
+              "pkPublisher",
+              "/knowledge-production/extract",
+              "独立问答（QA）",
+              "知识建议",
+              "服务健康",
+              "中文翻译与综合解读",
+              "翻译成中文",
+              "查看英文原文证据",
+              "allowed_source_ids:[sourceId]",
+          ]
+          missing = [item for item in required if item not in html]
+          if missing:
+              raise SystemExit("STORAGE_USABILITY_FIX_MISSING:" + ",".join(missing))
+          print("STORAGE_USABILITY_FIX_STATIC=PASS")
+          PY
+          node --check /tmp/storage_inline.js
+
+          rm -rf /tmp/pkr-focused
+          mkdir -p /tmp/pkr-focused
+          git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
+          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA" public_knowledge_rag tests/pkr | tar -x -C /tmp/pkr-focused
+          python -m pip install -q --disable-pip-version-check \
+            -r /tmp/pkr-focused/public_knowledge_rag/requirements-runtime.txt \
+            httpx==0.28.1 pytest==9.0.2
+          (
+            cd /tmp/pkr-focused
+            python -m pytest -q tests/pkr/test_service.py
+          )
+
+      - name: Assemble formal W4 Codex test candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SHORT="${STORAGE_SOURCE_SHA:0:12}"
+          PKR_SHORT="${PUBLIC_KNOWLEDGE_SOURCE_SHA:0:12}"
+          PACKAGE_ID="STORAGE-KNOWLEDGE-W4-FORMAL-TEST-CANDIDATE-${SHORT}-PKR-${PKR_SHORT}-${PACKAGE_DATE}"
+          ZIP_NAME="STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_${SHORT}_PKR_${PKR_SHORT}_${PACKAGE_DATE}.zip"
+          WORK="dist/_storage_mvp_real_flow"
+          PKG="${WORK}/STORAGE_PRODUCT_MVP_RC1"
+
+          rm -rf "$WORK" "dist/$ZIP_NAME" "dist/$ZIP_NAME.sha256" "dist/$ZIP_NAME.DELIVERY_MANIFEST.json"
+          mkdir -p "$PKG"
+
+          cp -a products/storage_rc1/. "$PKG/"
+
+          # Keep the field package cross-platform: the historical Chinese
+          # convenience filename is the only non-ASCII path in Storage RC1,
+          # and Info-ZIP can materialize it as #Uxxxx on Linux fresh extract.
+          # Rename it in the package only; no product/runtime behavior depends
+          # on the filename.
+          if [ -f "$PKG/查看日志.bat" ]; then
+            mv "$PKG/查看日志.bat" "$PKG/view_logs.bat"
+          fi
+
+          for d in knowledge_production repositories parser contracts compatibility services quality_knowledge common models schema analysis builder knowledge parsing retriever; do
+            if [ -d "$d" ]; then
+              cp -a "$d" "$PKG/"
+            fi
+          done
+
+          mkdir -p "$PKG/config/runtime/agents" "$PKG/prompts/runtime/knowledge_production"
+          cp config/runtime/agents/knowledge.production.extract.yaml "$PKG/config/runtime/agents/knowledge.production.extract.yaml"
+          cp prompts/runtime/knowledge_production/knowledge_extract.md "$PKG/prompts/runtime/knowledge_production/knowledge_extract.md"
+
+          git fetch --no-tags origin "$RUNTIME_SOURCE_SHA"
+          RUNTIME_TMP="$(mktemp -d)"
+          git archive "$RUNTIME_SOURCE_SHA"             runtime             config/runtime/model.yaml             tools/openai_mock/server.py             requirements-runtime-p0-test.txt             | tar -x -C "$RUNTIME_TMP"
+
+          mkdir -p "$PKG/vendor/unified_agent_runtime/config/runtime" "$PKG/vendor/unified_agent_runtime/tools/openai_mock"
+          cp -a "$RUNTIME_TMP/runtime" "$PKG/vendor/unified_agent_runtime/"
+          cp "$RUNTIME_TMP/config/runtime/model.yaml" "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
+          cp "$RUNTIME_TMP/tools/openai_mock/server.py" "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
+          cp "$RUNTIME_TMP/requirements-runtime-p0-test.txt" "$PKG/vendor/unified_agent_runtime/"
+          printf '%s\n' "$RUNTIME_SOURCE_SHA" > "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
+
+          PKR_DIR="$PKG/PUBLIC_KNOWLEDGE_SERVICE"
+          mkdir -p "$PKR_DIR"
+          git fetch --no-tags origin "$PUBLIC_KNOWLEDGE_SOURCE_SHA"
+          git archive "$PUBLIC_KNOWLEDGE_SOURCE_SHA"             public_knowledge_rag             Dockerfile             compose.yaml             compose.isolated.yaml             start.sh             stop.sh             scripts             ISOLATED_VALIDATION_README.md             | tar -x -C "$PKR_DIR"
+
+          cat > "$PKG/START_MACOS.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT"
+          echo "[1/2] Starting Public Knowledge Service..."
+          (cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE" && bash ./start.sh)
+          echo "[2/2] Starting Storage MVP..."
+          echo "Storage: http://127.0.0.1:8765"
+          echo "Public Knowledge: http://127.0.0.1:9000"
+          exec bash "$ROOT/run_macos.sh"
+          EOF
+
+          cat > "$PKG/START_WINDOWS.bat" <<'EOF'
+          @echo off
+          setlocal EnableExtensions
+          for %%I in ("%~dp0.") do set "ROOT=%%~fI"
+          cd /d "%ROOT%"
+
+          echo [1/2] Starting Public Knowledge Service...
+          where docker >nul 2>&1
+          if errorlevel 1 (
+            echo ERROR: Docker Desktop / docker command not found.
+            pause
+            exit /b 2
+          )
+          docker compose -f "%ROOT%\PUBLIC_KNOWLEDGE_SERVICE\compose.yaml" up -d --build
+          if errorlevel 1 (
+            echo ERROR: Public Knowledge Service failed to start.
+            pause
+            exit /b 2
+          )
+
+          powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 30;$i++){try{$r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:9000/health;if($r.StatusCode -eq 200){$ok=$true;break}}catch{};Start-Sleep -Seconds 1};if(-not $ok){exit 2}"
+          if errorlevel 1 (
+            echo ERROR: Public Knowledge Service health check failed.
+            pause
+            exit /b 2
+          )
+
+          echo [2/2] Starting Storage MVP...
+          echo Storage: http://127.0.0.1:8765
+          echo Public Knowledge: http://127.0.0.1:9000
+          call "%ROOT%\run_windows.bat"
+          exit /b %ERRORLEVEL%
+          EOF
+
+          cat > "$PKG/START_PKR_ISOLATED.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE"
+          exec bash ./scripts/start_isolated.sh
+          EOF
+
+          cat > "$PKG/STOP_PKR_ISOLATED.command" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          ROOT="$(cd "$(dirname "$0")" && pwd)"
+          cd "$ROOT/PUBLIC_KNOWLEDGE_SERVICE"
+          exec bash ./scripts/stop_isolated.sh
+          EOF
+
+          cat > "$PKG/REAL_FLOW_README.txt" <<EOF
+          Storage Knowledge Production W4 正式提测包
+
+          PACKAGE_ID=$PACKAGE_ID
+          STORAGE_SOURCE_SHA=$STORAGE_SOURCE_SHA
+          PUBLIC_KNOWLEDGE_SOURCE_SHA=$PUBLIC_KNOWLEDGE_SOURCE_SHA
+          RUNTIME_SOURCE_SHA=$RUNTIME_SOURCE_SHA
+
+          目的：
+          - 作为 STORAGE-KNOWLEDGE-PRODUCTION-W4-REAL-GOLDEN-CODEX-001 的正式提测输入
+          - 由 Codex 在 Fresh Extract 真实环境执行 Real Golden
+          - 不是正式 Release 包
+          - 不声明 Product Gate / RC PASS
+
+          macOS：
+          1. 确保 Docker Desktop 已启动
+          2. 双击 START_MACOS.command，或终端执行 bash START_MACOS.command
+          3. 打开 http://127.0.0.1:8765
+
+          Windows：
+          1. 确保 Docker Desktop 已启动
+          2. 双击 START_WINDOWS.bat
+          3. 打开 http://127.0.0.1:8765
+
+          Public Knowledge：
+          http://127.0.0.1:9000
+          Settings: http://127.0.0.1:9000/settings
+
+          W4 第一条真实 NAND Golden：
+          Source: STDL-EXT-001_kioxia_endurance.pdf
+          Drive File ID: 1TiZsOz-3ohqKeat4JlyujgFaHJeirO_g
+          Publisher: KIOXIA Corporation
+          Device Type: NAND Flash
+          Canonical Parameter: pe_cycles
+          Preferred Knowledge Type: PARAMETER_DEFINITION
+
+          执行：
+          1. 在 Public Knowledge LIVE 重新导入该 PDF，并填写 Publisher
+          2. 资料详情 -> 按寿命模型生产知识 -> NAND Flash -> 按模型分析
+          3. pe_cycles 必须命中真实 Citation；未命中则记录断点，禁止手改 DB
+          4. 点击“检查 Knowledge Production AI”
+             - 必须显示 READY
+             - 若显示 NOT READY，先处理现有 Runtime / Provider；禁止用 Mock 代替 W4
+          5. 生成 Knowledge Candidate
+          6. Existing Knowledge Production 中核对 Evidence / Locator / Revision
+          7. Reviewer 将首条对象收敛到 pe_cycles，并确认 PARAMETER_DEFINITION
+          8. Publish
+          9. 生成 Release Candidate（此时不得切换 Consumer）
+          10. Reviewer 显式 Promote
+          11. 回 Storage 验证 structured Formal Knowledge consumption
+
+          验证主链：
+          S1 Device Fact / Evidence
+          -> Public Knowledge Search / Citation
+          -> S2 Compare / Change Impact
+          -> Runtime Snapshot / Trend
+          -> S3 Lifetime / Target Service Life
+          -> S4 Diagnosis
+          -> S5 Optimization
+          -> Engineering Actions
+          -> Unified MVP Summary
+
+          约束：
+          - 禁止手改 DB 制造 PASS
+          - 禁止测试 fixture 替代真实用户数据
+          - 发现真实断点后记录现场，再回代码做最小修复
+          EOF
+
+          chmod +x "$PKG/START_MACOS.command" "$PKG/START_PKR_ISOLATED.command" "$PKG/STOP_PKR_ISOLATED.command" "$PKG/run_macos.sh" "$PKG/run_macos_isolated_w4.sh" "$PKG/run_local.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/stop.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/health.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/list_isolated.sh"
+
+          cat > "$PKG/KNOWLEDGE_PRODUCTION_W4_GOLDEN_README.txt" <<'EOF'
+          Storage Knowledge Production W4 Real Golden
+
+          目标：
+          用一份真实 NAND Flash 公开 PDF，连续验证：
+          Public Source
+          -> Storage Lifetime Model Scan
+          -> Existing Knowledge Production Candidate + Evidence
+          -> Human Semantic Review
+          -> Publish
+          -> Immutable Release Candidate
+          -> Explicit Binding Promotion
+          -> Storage Formal Knowledge Consumption
+
+          推荐资料：
+          - 已有 KIOXIA NAND endurance / reliability 类公开 PDF
+          - 必须是真实公开资料，不用 fixture
+          - 导入时填写真实 Publisher；没有 Publisher/官方来源时 Formal Handoff 会 Fail-Closed
+
+          W4-A 知识生产真实链：
+          1. 启动包，打开 http://127.0.0.1:8765
+          2. 左侧 公共知识维护 -> 导入公开资料
+          3. 选择真实 PDF，填写：
+             - 资料标题
+             - 发布方 / Publisher
+             - PUBLIC
+          4. 提交后进入 公开资料库 -> 详情
+          5. 在“按寿命模型生产知识”选择 NAND Flash
+          6. 点击“按模型分析”
+             - 查看 FOUND / NOT_FOUND
+             - 查看关键参数、所需知识类型、S1~S5 消费场景、Citation 数
+          7. 点击“检查 Knowledge Production AI”
+             - READY 才允许继续
+             - NOT READY 时根据现有 Runtime / Provider 配置修正
+             - 不建立第二套 Agent Config
+          8. 点击“生成 Knowledge Candidate”
+             - 系统必须使用 Exact Public Source Revision PDF
+             - 不允许 Public QA 文本直接变 Formal Knowledge
+          9. 打开 Candidate
+          10. 执行 Evaluation
+          11. Human Review：
+              - 核对 Evidence
+              - 核对 canonical parameter
+              - 若同页多参数为 AMBIGUOUS，必须人工判断，不可自动任选
+              - 选择唯一 Storage Knowledge Type
+              - EDIT & CONFIRM
+          12. Publish
+              - 未选 Storage Knowledge Type 必须禁止 Publish
+              - Published metadata 应为 semantic_class_status=REVIEWED
+          13. 回到 Storage 公共知识工作台
+          14. 输入明确 Release Version，例如：
+              KP-STORAGE-LIFETIME-W4-20261006-R1
+          15. 构建 Release Candidate
+              - 当前 Active Release 此时不能变化
+          16. 输入批准人，执行“批准并切换到 Storage”
+              - 禁止 latest
+              - Release + Binding 必须同步切换
+          17. 验证 Formal Knowledge：
+              - 只消费 REVIEWED / formal_consumable Knowledge
+              - S2/S3/S4/S5 按 semantic_class + canonical_parameter + scenario 消费
+              - 新模型知识缺失时 Fail-Closed，不允许悄悄回退成关键词猜测
+
+          W4-A 判定：
+          PASS 仅当上述链路使用真实 PDF 连续完成，期间：
+          - NO_DB_MANUAL_WRITE
+          - NO_FIXTURE_AS_REAL
+          - NO_DIRECT_FORMAL_WRITE
+          - NO_AI_ARBITRARY_FORMULA
+          - NO_PUBLIC_KNOWLEDGE_AS_FORMAL_EVIDENCE
+          - NO_LATEST_FLOATING_RELEASE
+
+          W4-B 产品消费：
+          W4-A 完成后，再按 REAL_FLOW_README.txt 连续跑：
+          S1 -> Public Knowledge -> S2 -> Runtime -> S3 -> S4 -> S5 -> Actions -> Summary。
+
+          发现断点：
+          记录页面、操作、错误原文和当时 Source/Release 身份；
+          不现场改 DB，不绕过 Review，不用测试脚本制造 PASS。
+          EOF
+
+          cat > "$PKG/PROVIDER_SETUP_README.txt" <<'EOF'
+          Knowledge Production AI Provider
+
+          Storage / Knowledge Production 复用同一个 Unified Agent Runtime 与 model_ref。
+          本包不创建第二套 Agent Config，也不保存真实密钥。
+
+          W4 开始前：
+          1. 打开 Storage -> 公开资料库 -> 资料详情
+          2. 点击“检查 Knowledge Production AI”
+          3. 只有 READY 才继续“生成 Knowledge Candidate”
+
+          默认 package config/model.local.yaml 只是本地 OpenAI-compatible Provider 示例。
+          如果实际 Provider 不是该地址，请按现有 Runtime model profile 合同修改配置。
+
+          推荐生产方式：
+          - base_url 使用 *_env 引用
+          - api_key 使用 *_env 引用
+          - 不把真实 key 写入包或 Git
+          - Knowledge Production Agent 固定复用 model_ref=qwen_prod
+
+          配置示例（环境变量名可按现场规范替换）：
+
+          active_model: qwen_prod
+          models:
+            qwen_prod:
+              provider: openai_compatible
+              base_url_env: STORAGE_AI_BASE_URL
+              api_key_env: STORAGE_AI_API_KEY
+              model: <your-openai-compatible-model>
+              temperature: 0
+              max_tokens: 8192
+
+          本地无认证 Provider 可使用直接 base_url，但仍不要在 YAML 中保存敏感凭据。
+
+          Provider 不可达时：
+          - Public Knowledge Search / Citation 仍可使用
+          - Knowledge Candidate Extraction Fail-Closed
+          - 不生成假 Candidate
+          - 不发布 Formal Knowledge
+          EOF
+
+          cat > "$PKG/PACKAGE_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "package_type": "FORMAL_TEST_CANDIDATE",
+            "product": "Storage MVP",
+            "storage_source_sha": "$STORAGE_SOURCE_SHA",
+            "public_knowledge_source_sha": "$PUBLIC_KNOWLEDGE_SOURCE_SHA",
+            "runtime_source_sha": "$RUNTIME_SOURCE_SHA",
+            "validation_scope": "S1_TO_S5_REAL_USER_FLOW",
+            "product_gate_pass": "NOT_CLAIMED",
+            "release_candidate": false,
+            "fresh_extract_required": true
+          }
+          EOF
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          root = Path("dist/_storage_mvp_real_flow/STORAGE_PRODUCT_MVP_RC1")
+          patterns = [
+              re.compile(r"sk-proj-[A-Za-z0-9_-]{8,}"),
+              re.compile(r"BEGIN PRIVATE KEY"),
+              re.compile(r"AKIA[0-9A-Z]{12,}"),
+          ]
+          hits = []
+          for p in root.rglob("*"):
+              if not p.is_file() or p.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".zip", ".sqlite3", ".pyc"}:
+                  continue
+              try:
+                  txt = p.read_text(encoding="utf-8")
+              except Exception:
+                  continue
+              if any(rx.search(txt) for rx in patterns):
+                  hits.append(str(p.relative_to(root)))
+          if hits:
+              raise SystemExit("SECRET_SCAN_FAILED:" + ",".join(hits))
+          print("SECRET_SCAN=PASS")
+          PY
+
+          python -m compileall -q "$PKG/storage_life" "$PKG/PUBLIC_KNOWLEDGE_SERVICE/public_knowledge_rag"
+          bash -n "$PKG/START_MACOS.command"
+          bash -n "$PKG/START_PKR_ISOLATED.command"
+          bash -n "$PKG/STOP_PKR_ISOLATED.command"
+          bash -n "$PKG/run_macos.sh"
+          bash -n "$PKG/run_macos_isolated_w4.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/start.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/start_isolated.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/stop_isolated.sh"
+          bash -n "$PKG/PUBLIC_KNOWLEDGE_SERVICE/scripts/list_isolated.sh"
+
+          (
+            cd "$PKG"
+            find . -type f ! -name FILE_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > FILE_SHA256SUMS.txt
+          )
+
+          (
+            cd "$WORK"
+            zip -qr "../$ZIP_NAME" STORAGE_PRODUCT_MVP_RC1
+          )
+
+          # Fresh-extract package integrity check. This intentionally validates
+          # the bytes users will actually receive, not only the pre-zip tree.
+          FRESH="$(mktemp -d)"
+          unzip -q "dist/$ZIP_NAME" -d "$FRESH"
+          (
+            cd "$FRESH/STORAGE_PRODUCT_MVP_RC1"
+            sha256sum -c FILE_SHA256SUMS.txt >/dev/null
+            python -m compileall -q storage_life knowledge_production
+            bash -n START_MACOS.command
+            bash -n run_macos.sh
+            bash -n PUBLIC_KNOWLEDGE_SERVICE/start.sh
+          )
+          python - "dist/$ZIP_NAME" <<'PY'
+          import sys
+          import zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as archive:
+              non_ascii = [
+                  name for name in archive.namelist()
+                  if not name.isascii()
+              ]
+          if non_ascii:
+              raise SystemExit(
+                  "NON_ASCII_PACKAGE_PATHS:" + ",".join(non_ascii)
+              )
+          print("FRESH_EXTRACT_INTEGRITY=PASS")
+          print("PACKAGE_PATH_PORTABILITY=PASS")
+          PY
+
+          # Fresh Extract smoke for the actual user-facing product package.
+          # No Provider health, extraction, publish or release mutation is called.
+          export FRESH_ROOT="$FRESH/STORAGE_PRODUCT_MVP_RC1"
+          export PYTHONPATH="$FRESH_ROOT:$FRESH_ROOT/vendor/unified_agent_runtime"
+          export STORAGE_KNOWLEDGE_REPOSITORY_DIR="$FRESH_ROOT/.smoke-knowledge"
+          mkdir -p "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+          python -m pip install -q -r "$FRESH_ROOT/requirements.txt"
+
+          python - <<'PY'
+          import os
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          root = Path(os.environ["FRESH_ROOT"])
+          sys.path.insert(0, str(root))
+          sys.path.insert(0, str(root / "vendor" / "unified_agent_runtime"))
+
+          from fastapi.testclient import TestClient
+          from knowledge_production.web import create_processing_app
+          from storage_life.app import app as storage_app
+
+          # Storage product boots from Fresh Extract and serves its real root/health.
+          storage = TestClient(storage_app)
+          assert storage.get("/api/health").status_code == 200
+          home = storage.get("/")
+          assert home.status_code == 200
+          html = home.text
+          for marker in (
+              "独立问答（QA）",
+              "知识建议",
+              "服务健康",
+              "中文翻译与综合解读",
+              "翻译成中文",
+              "查看英文原文证据",
+          ):
+              assert marker in html, marker
+
+          # Existing Knowledge Production routes boot from the extracted bytes.
+          with tempfile.TemporaryDirectory() as tmp:
+              kp = TestClient(create_processing_app(tmp))
+              checks = {
+                  "/knowledge-production/sources": ("知识生产工作台", "资料｜来源文档"),
+                  "/knowledge-production/candidates": ("知识候选",),
+                  "/knowledge-production/reviews": ("人工审核",),
+                  "/knowledge-production/published": ("已发布知识",),
+              }
+              for route, markers in checks.items():
+                  response = kp.get(route)
+                  assert response.status_code == 200, (route, response.status_code)
+                  for marker in markers:
+                      assert marker in response.text, (route, marker)
+
+          print("FRESH_EXTRACT_STORAGE_BOOT=PASS")
+          print("FRESH_EXTRACT_KP_UI_SMOKE=PASS")
+          print("PROVIDER_CALLS=0")
+          PY
+
+          SHA="$(sha256sum "dist/$ZIP_NAME" | awk '{print $1}')"
+          SIZE="$(stat -c%s "dist/$ZIP_NAME")"
+          printf '%s  %s\n' "$SHA" "$ZIP_NAME" > "dist/$ZIP_NAME.sha256"
+
+          cat > "dist/$ZIP_NAME.DELIVERY_MANIFEST.json" <<EOF
+          {
+            "package_id": "$PACKAGE_ID",
+            "package": "$ZIP_NAME",
+            "storage_source_sha": "$STORAGE_SOURCE_SHA",
+            "public_knowledge_source_sha": "$PUBLIC_KNOWLEDGE_SOURCE_SHA",
+            "runtime_source_sha": "$RUNTIME_SOURCE_SHA",
+            "sha256": "$SHA",
+            "size_bytes": $SIZE,
+            "package_type": "FORMAL_TEST_CANDIDATE",
+            "fresh_extract_required": true,
+            "product_gate_pass": "NOT_CLAIMED",
+            "release_candidate": false
+          }
+          EOF
+
+          echo "PACKAGE_ID=$PACKAGE_ID"
+          echo "PACKAGE=$ZIP_NAME"
+          echo "SHA256=$SHA"
+          echo "SIZE=$SIZE"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-mvp-real-flow-validation
+          path: |
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip.sha256
+            dist/STORAGE_KNOWLEDGE_W4_FORMAL_TEST_CANDIDATE_*.zip.DELIVERY_MANIFEST.json
+          if-no-files-found: error
+          retention-days: 30

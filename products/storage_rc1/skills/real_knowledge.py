@@ -23,7 +23,7 @@ PACK_FILES = {
 }
 
 PRIORITY_SOURCE_GROUPS = {
-    "NAND_RAW_FLASH": ["EK-001", "EK-002", "EK-003", "EK-005", "EK-011", "EK-012", "EK-013"],
+    "NAND_FLASH": ["EK-001", "EK-002", "EK-003", "EK-005", "EK-011", "EK-012", "EK-013"],
     "EMMC_STANDARD_HEALTH": ["EK-007", "EK-025"],
     "NVME_SMART_HEALTH": ["EK-018", "EK-019"],
     "LINUX_WRITE_PATH": ["EK-004", "EK-020", "EK-021", "EK-022", "EK-028"],
@@ -184,20 +184,20 @@ class RealKnowledgeAssessmentService:
                 critical = PRIORITY_SOURCE_GROUPS["LINUX_WRITE_PATH"] + PRIORITY_SOURCE_GROUPS["SSD_ENDURANCE_WORKLOAD"]
             elif pack_id == "PACK_LIFETIME_ENGINEERING":
                 critical = (
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["SSD_ENDURANCE_WORKLOAD"]
                 )
             elif pack_id == "PACK_DIAGNOSTIC_VALIDATION":
                 critical = (
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                 )
             else:
                 critical = sorted(set(
-                    PRIORITY_SOURCE_GROUPS["NAND_RAW_FLASH"]
+                    PRIORITY_SOURCE_GROUPS["NAND_FLASH"]
                     + PRIORITY_SOURCE_GROUPS["EMMC_STANDARD_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["NVME_SMART_HEALTH"]
                     + PRIORITY_SOURCE_GROUPS["LINUX_WRITE_PATH"]
@@ -290,8 +290,8 @@ class RealKnowledgeAssessmentService:
         )
         rg04 = self.adapter.query_pack(
             "PACK_DIAGNOSTIC_VALIDATION",
-            "NAND P/E page erase block erase count wear distribution ECC bad block",
-            device_type="NAND",
+            "NAND Flash P/E page erase block erase count wear distribution ECC bad block",
+            device_type="NAND Flash",
         )
         rg05 = self.adapter.query_pack(
             "PACK_CHANGE_IMPACT",
@@ -340,7 +340,6 @@ class RealKnowledgeAssessmentService:
                 additional_missing=[
                     "CONFIRMED_DEVICE_ENDURANCE_FACTS_REQUIRED",
                     "RUNTIME_WRITE_OBSERVATIONS_REQUIRED",
-                    "TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED",
                     "FORMAL_TBW_DWPD_DUW_KNOWLEDGE_NOT_RELEASED",
                 ],
                 supported=["NVMe Percentage Used released semantics"] if rg02.get("items") else [],
@@ -348,7 +347,7 @@ class RealKnowledgeAssessmentService:
                     "TBW/DWPD/Data Units Written full evidence-backed assessment",
                     "target-service-life daily write budget",
                 ],
-                formula_gap=True,
+                formula_gap=False,
             ),
             "RG03": result(
                 "RG03", rg03,
@@ -362,7 +361,7 @@ class RealKnowledgeAssessmentService:
             ),
             "RG04": result(
                 "RG04", rg04,
-                additional_missing=["FORMAL_RAW_NAND_DIAGNOSTIC_KNOWLEDGE_NOT_RELEASED"],
+                additional_missing=["FORMAL_NAND_FLASH_DIAGNOSTIC_KNOWLEDGE_NOT_RELEASED"],
                 supported=[],
                 unsupported=[
                     "P/E and erase-block evidence-backed interpretation",
@@ -389,8 +388,8 @@ class RealKnowledgeAssessmentService:
             "cases": cases,
             "formal_knowledge_object_count": readiness["formal_knowledge_object_count"],
             "evidence_drilldown": readiness["evidence_drilldown"],
-            "formula_gap": True,
-            "formula_task_required": True,
+            "formula_gap": False,
+            "formula_task_required": False,
             "decision_boundary": "NO_AUTO_REPLACEMENT_DECISION",
             "unknown_not_safe": True,
         }

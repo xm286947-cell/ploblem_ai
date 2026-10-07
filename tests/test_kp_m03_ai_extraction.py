@@ -10,6 +10,7 @@ from typing import Iterator
 from urllib.request import Request, urlopen
 
 import pytest
+from pydantic import ValidationError
 
 from knowledge_production import (
     KnowledgeExtractionError,
@@ -293,10 +294,12 @@ class FakeRuntime:
         *,
         status: RuntimeStatus = RuntimeStatus.COMPLETED,
         raises: Exception | None = None,
+        error: object | None = None,
     ) -> None:
         self.data = data
         self.status = status
         self.raises = raises
+        self.error = error
 
     def invoke(self, request):
         if self.raises is not None:
@@ -305,6 +308,7 @@ class FakeRuntime:
             status=self.status,
             data=self.data,
             task_id="task-kp-m03",
+            error=self.error,
         )
 
 
@@ -389,3 +393,256 @@ def test_kp_m03_non_completed_runtime_result_fails_closed(
         KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"
     ):
         service.extract(source, structured)
+
+
+
+def test_kp_m03_provider_transport_identity_is_preserved(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=SimpleNamespace(
+                code="PROVIDER_TRANSPORT",
+                message=(
+                    "provider transport failure at "
+                    "http://secret.internal/v1?api_key=must-not-escape"
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        KnowledgeExtractionError,
+        match="^PROVIDER_TRANSPORT$",
+    ):
+        service.extract(source, structured)
+
+
+def test_kp_m03_unknown_runtime_error_stays_generic(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=SimpleNamespace(
+                code="PRIVATE_INTERNAL_FAILURE",
+                message="secret provider detail",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        KnowledgeExtractionError,
+        match="^KNOWLEDGE_EXTRACTION_FAILED$",
+    ):
+        service.extract(source, structured)
+
+
+def test_kp_m03_w4_list_type_failure_is_losslessly_normalized(
+    tmp_path: Path,
+) -> None:
+    prompt = (
+        ROOT / "prompts/runtime/knowledge_production/knowledge_extract.md"
+    ).read_text(encoding="utf-8")
+    assert "scope, conditions, limitations, and tags MUST be JSON arrays of strings" in prompt
+    assert "Use [] when there are no values; never emit null or a scalar" in prompt
+
+    fixture_path = (
+        ROOT / "tests/fixtures/w4_kp_list_type_contract_failure.json"
+    )
+    sanitized_failure = json.loads(fixture_path.read_text(encoding="utf-8"))
+    normalized = KnowledgeExtractionOutput.model_validate(sanitized_failure)
+    draft = normalized.candidates[0]
+    canonical_object = '{"redacted_non_array_shape":true}'
+    assert draft.scope == [canonical_object]
+    assert draft.conditions == [canonical_object]
+    assert draft.limitations == [canonical_object]
+    assert draft.tags == []
+
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["scope"] = {"device_family": "eMMC"}
+    payload["candidates"][0]["conditions"] = {"mode": "health"}
+    payload["candidates"][0]["limitations"] = {"review": "required"}
+    payload["candidates"][0]["tags"] = {"source": "official"}
+
+    candidates = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(payload),
+    ).extract(source, structured)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.scope == ['{"device_family":"eMMC"}']
+    assert candidate.conditions == ['{"mode":"health"}']
+    assert candidate.limitations == ['{"review":"required"}']
+    assert candidate.tags == ['{"source":"official"}']
+    assert candidate.evidence_refs
+
+
+def test_kp_m03_w4_list_normalization_keeps_unknown_scalars_fail_closed() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["scope"] = 123
+
+    with pytest.raises(ValidationError) as exc_info:
+        KnowledgeExtractionOutput.model_validate(payload)
+
+    observed = {
+        (tuple(error["loc"]), error["type"])
+        for error in exc_info.value.errors(include_input=False)
+    }
+    assert (("candidates", 0, "scope"), "list_type") in observed
+
+
+
+def test_kp_m03_w4_safe_cardinality_normalization_is_bounded() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = payload["candidates"][0]
+    payload["candidates"]["scope"] = "device_health"
+    payload["candidates"]["conditions"] = {"mode": "monitoring"}
+    payload["candidates"]["limitations"] = None
+    payload["candidates"]["tags"] = "health"
+    payload["candidates"]["evidence_locations"] = payload["candidates"]["evidence_locations"][0]
+    payload["unknowns_or_gaps"] = "needs human review"
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert len(parsed.candidates) == 1
+    draft = parsed.candidates[0]
+    assert draft.scope == ["device_health"]
+    assert draft.conditions == ['{"mode":"monitoring"}']
+    assert draft.limitations == []
+    assert draft.tags == ["health"]
+    assert len(draft.evidence_locations) == 1
+    assert parsed.unknowns_or_gaps == ["needs human review"]
+
+    payload["candidates"] = {
+        **payload["candidates"],
+        "scope": 123,
+    }
+    with pytest.raises(ValidationError):
+        KnowledgeExtractionOutput.model_validate(payload)
+
+
+def test_kp_m03_provider_schema_error_exposes_only_safe_paths(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path)
+    source, structured = _seed_source(repository)
+    runtime_error = SimpleNamespace(
+        code="PROVIDER_SCHEMA_INVALID",
+        details={
+            "errors": [
+                {
+                    "loc": ("candidates", 0, "confidence"),
+                    "type": "float_parsing",
+                    "msg": "Input should be a valid number",
+                    "input": "SECRET_RAW_PROVIDER_VALUE",
+                    "url": "https://secret.invalid/error",
+                }
+            ]
+        },
+    )
+    service = KnowledgeExtractionService(
+        repository,
+        FakeRuntime(
+            _runtime_payload(),
+            status=RuntimeStatus.FAILED,
+            error=runtime_error,
+        ),
+    )
+
+    with pytest.raises(KnowledgeExtractionError) as exc_info:
+        service.extract(source, structured)
+
+    assert exc_info.value.code == "PROVIDER_SCHEMA_INVALID"
+    assert exc_info.value.details == {
+        "schema_errors": [
+            {
+                "loc": ["candidates", 0, "confidence"],
+                "type": "float_parsing",
+                "message": "Input should be a valid number",
+            }
+        ]
+    }
+    serialized = json.dumps(exc_info.value.details)
+    assert "SECRET_RAW_PROVIDER_VALUE" not in serialized
+    assert "secret.invalid" not in serialized
+
+
+
+def test_kp_m03_w4_device_type_singleton_list_is_normalized() -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = ["NAND Flash"]
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert parsed.candidates[0].device_type == "NAND Flash"
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        {"device_type": "NAND Flash"},
+        {"device_family": "NAND Flash"},
+        {"family": "NAND Flash"},
+        {"name": "NAND Flash"},
+        {"value": "NAND Flash"},
+        {"type": "NAND Flash"},
+        {"family": "NAND Flash", "name": "NAND Flash"},
+    ],
+)
+def test_kp_m03_w4_device_type_unambiguous_object_is_normalized(wrapped) -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = wrapped
+
+    parsed = KnowledgeExtractionOutput.model_validate(payload)
+
+    assert parsed.candidates[0].device_type == "NAND Flash"
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        ["NAND Flash", "eMMC"],
+        {"family": "NAND Flash", "name": "eMMC"},
+        {"family": 123},
+        123,
+        True,
+    ],
+)
+def test_kp_m03_w4_device_type_ambiguous_or_semantic_coercion_fails_closed(invalid) -> None:
+    payload = _runtime_payload()
+    payload["candidates"] = [payload["candidates"][0]]
+    payload["candidates"][0]["device_type"] = invalid
+
+    with pytest.raises(ValidationError) as exc_info:
+        KnowledgeExtractionOutput.model_validate(payload)
+
+    assert any(
+        tuple(error["loc"]) == ("candidates", 0, "device_type")
+        for error in exc_info.value.errors(include_input=False)
+    )
+
+
+def test_kp_m03_prompt_requires_scalar_device_type() -> None:
+    prompt = (
+        ROOT / "prompts/runtime/knowledge_production/knowledge_extract.md"
+    ).read_text(encoding="utf-8")
+
+    assert 'device_type MUST be one JSON string such as "NAND Flash" or null' in prompt
+    assert "NEVER emit an object or array for device_type" in prompt

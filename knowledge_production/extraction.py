@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -30,11 +30,96 @@ from .models import (
 
 
 class KnowledgeExtractionError(RuntimeError):
-    """Stable knowledge-extraction failure."""
+    """Stable knowledge-extraction failure with bounded safe diagnostics."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, details: dict[str, Any] | None = None):
         self.code = code
+        self.details = details or {}
         super().__init__(code)
+
+
+SAFE_RUNTIME_FAILURE_CODES = frozenset({
+    "PROVIDER_TRANSPORT",
+    "PROVIDER_HTTP_ERROR",
+    "PROVIDER_BASE_URL_INVALID",
+    "PROVIDER_CONFIG_INCOMPLETE",
+    "PROVIDER_NOT_BOUND",
+    "PROVIDER_TYPE_UNSUPPORTED",
+    "PROVIDER_OUTPUT_SHAPE_INVALID",
+    "PROVIDER_SCHEMA_INVALID",
+    "PROVIDER_ENVELOPE_INVALID",
+})
+
+
+def _runtime_error(value: Any) -> Any:
+    error = getattr(value, "error", None)
+    if error is not None:
+        return error
+    if isinstance(value, dict) and "code" in value:
+        return value
+    if getattr(value, "code", None) is not None:
+        return value
+    return None
+
+
+def _stable_runtime_failure_code(value: Any) -> str | None:
+    """Return only safe, stable Runtime error identities.
+
+    Provider URLs, credentials, raw responses and exception strings remain
+    inside Runtime evidence. Knowledge Production only surfaces a bounded code
+    that the product can turn into an actionable, non-secret message.
+    """
+    error = _runtime_error(value)
+    if isinstance(error, dict):
+        raw = error.get("code")
+    else:
+        raw = getattr(error, "code", None)
+    code = str(raw or "").strip().upper()
+    return code if code in SAFE_RUNTIME_FAILURE_CODES else None
+
+
+def _safe_runtime_failure_details(value: Any) -> dict[str, Any]:
+    """Expose validation paths/types only; never raw provider input or secrets."""
+    error = _runtime_error(value)
+    if isinstance(error, dict):
+        details = error.get("details")
+    else:
+        details = getattr(error, "details", None)
+    if not isinstance(details, dict):
+        return {}
+
+    safe: dict[str, Any] = {}
+    errors = details.get("errors")
+    if isinstance(errors, list):
+        safe_errors: list[dict[str, Any]] = []
+        for item in errors[:20]:
+            if not isinstance(item, dict):
+                continue
+            loc = item.get("loc")
+            safe_loc = []
+            if isinstance(loc, (list, tuple)):
+                for part in loc[:12]:
+                    if isinstance(part, int):
+                        safe_loc.append(part)
+                    elif isinstance(part, str):
+                        safe_loc.append(part[:120])
+            error_type = str(item.get("type") or "")[:120]
+            message = str(item.get("msg") or "")[:240]
+            record = {
+                "loc": safe_loc,
+                "type": error_type,
+                "message": message,
+            }
+            safe_errors.append(record)
+        if safe_errors:
+            safe["schema_errors"] = safe_errors
+
+    path = details.get("json_schema_path")
+    if isinstance(path, list):
+        safe["json_schema_path"] = [
+            str(item)[:120] for item in path[:12]
+        ]
+    return safe
 
 
 def _candidate_id(
@@ -118,6 +203,8 @@ class KnowledgeExtractionService:
         structured_document: StructuredDocument,
         *,
         requested_topics: list[str] | None = None,
+        candidate_metadata: dict[str, Any] | None = None,
+        candidate_enricher: Callable[[Any], dict[str, Any]] | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -198,12 +285,29 @@ class KnowledgeExtractionService:
         try:
             result = self.runtime.invoke(request)
         except Exception as exc:
+            safe_code = _stable_runtime_failure_code(exc)
             raise KnowledgeExtractionError(
-                "KNOWLEDGE_EXTRACTION_FAILED"
+                safe_code or "KNOWLEDGE_EXTRACTION_FAILED",
+                details=(
+                    _safe_runtime_failure_details(exc)
+                    if safe_code == "PROVIDER_SCHEMA_INVALID"
+                    else None
+                ),
             ) from exc
 
         if getattr(result, "status", None) != RuntimeStatus.COMPLETED:
-            raise KnowledgeExtractionError("KNOWLEDGE_EXTRACTION_FAILED")
+            safe_code = (
+                _stable_runtime_failure_code(result)
+                or "KNOWLEDGE_EXTRACTION_FAILED"
+            )
+            raise KnowledgeExtractionError(
+                safe_code,
+                details=(
+                    _safe_runtime_failure_details(result)
+                    if safe_code == "PROVIDER_SCHEMA_INVALID"
+                    else None
+                ),
+            )
 
         try:
             output = KnowledgeExtractionOutput.model_validate(result.data)
@@ -249,6 +353,27 @@ class KnowledgeExtractionService:
                 raise KnowledgeExtractionError("EVIDENCE_MISSING")
 
             draft_payload = draft.model_dump(mode="json")
+            enrichment: dict[str, Any] = {}
+            if candidate_enricher is not None:
+                raw_enrichment = candidate_enricher(draft)
+                if not isinstance(raw_enrichment, dict):
+                    raise KnowledgeExtractionError(
+                        "CANDIDATE_ENRICHMENT_INVALID"
+                    )
+                enrichment = raw_enrichment
+            extra_tags = enrichment.get("tags") or []
+            extra_metadata = enrichment.get("metadata") or {}
+            if not isinstance(extra_tags, list) or not all(
+                isinstance(item, str) and item.strip()
+                for item in extra_tags
+            ):
+                raise KnowledgeExtractionError(
+                    "CANDIDATE_ENRICHMENT_INVALID"
+                )
+            if not isinstance(extra_metadata, dict):
+                raise KnowledgeExtractionError(
+                    "CANDIDATE_ENRICHMENT_INVALID"
+                )
             candidate = KnowledgeCandidate(
                 candidate_id=_candidate_id(
                     source_document.source_id,
@@ -265,7 +390,14 @@ class KnowledgeExtractionService:
                 scope=draft.scope,
                 conditions=draft.conditions,
                 limitations=draft.limitations,
-                tags=draft.tags,
+                tags=list(
+                    dict.fromkeys(
+                        [
+                            *draft.tags,
+                            *[item.strip() for item in extra_tags],
+                        ]
+                    )
+                ),
                 evidence_refs=list(dict.fromkeys(evidence_ids)),
                 source_refs=list(dict.fromkeys(source_refs)),
                 extraction_version=self.extraction_version,
@@ -275,6 +407,8 @@ class KnowledgeExtractionService:
                 contract_version="knowledge-candidate/v1",
                 created_at=source_document.created_at,
                 metadata={
+                    **dict(candidate_metadata or {}),
+                    **extra_metadata,
                     "runtime_task_id": getattr(
                         result, "task_id", None
                     ),

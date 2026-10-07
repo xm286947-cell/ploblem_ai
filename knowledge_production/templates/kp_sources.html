@@ -1,12 +1,12 @@
 {% extends "kp_base.html" %}
-{% block title %}资料｜Knowledge Processing{% endblock %}
+{% block title %}资料｜知识生产{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>资料｜Source Document</h2>
-  <p class="muted">这里展示原始资料事实层；资料本身不是正式 Knowledge Object。</p>
+  <h2>资料｜来源文档</h2>
+  <p class="muted">这里展示原始资料事实层；来源资料本身不是正式知识对象。</p>
 </div>
 <table>
-<thead><tr><th>Source ID</th><th>Publisher</th><th>Title</th><th>Version</th><th>Parse</th><th>Hash</th></tr></thead>
+<thead><tr><th>来源 ID</th><th>发布方</th><th>标题</th><th>版本</th><th>解析状态</th><th>内容哈希</th></tr></thead>
 <tbody>
 {% for s in sources %}
 <tr>
@@ -14,11 +14,11 @@
   <td>{{ s.publisher }}</td>
   <td>{{ s.title }}</td>
   <td>{{ s.source_version }}</td>
-  <td><span class="badge">{{ s.retrieval_status.value }}</span></td>
+  <td><span class="badge">{{ enum_zh(s.retrieval_status.value) }}</span></td>
   <td><code>{{ s.content_hash[:16] }}…</code></td>
 </tr>
 {% else %}
-<tr><td colspan="6" class="muted">暂无 Source Document。</td></tr>
+<tr><td colspan="6" class="muted">暂无来源文档。</td></tr>
 {% endfor %}
 </tbody>
 </table>

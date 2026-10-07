@@ -1,0 +1,22 @@
+{
+  "candidates": [
+    {
+      "object_type": "FACT",
+      "title": "Sanitized schema-contract fixture",
+      "content": "Sanitized content; no source text or provider output retained.",
+      "scope": {"redacted_non_array_shape": true},
+      "conditions": {"redacted_non_array_shape": true},
+      "limitations": {"redacted_non_array_shape": true},
+      "tags": [],
+      "evidence_locations": [
+        {
+          "source_id": "REDACTED-SOURCE-ID",
+          "source_version": "REDACTED-SOURCE-REVISION",
+          "page": 1
+        }
+      ],
+      "confidence": 0.5
+    }
+  ],
+  "unknowns_or_gaps": []
+}

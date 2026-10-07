@@ -56,6 +56,9 @@ def _seed_business_candidate(
     *,
     candidate_id: str = "BC-UI-001",
     with_evidence: bool = True,
+    tags: list[str] | None = None,
+    metadata: dict | None = None,
+    device_type: str = "GENERIC",
 ) -> str:
     evidence_refs: list[str] = []
     if with_evidence:
@@ -93,18 +96,18 @@ def _seed_business_candidate(
             "object_type": "SOLUTION",
             "title": "Merge small writes",
             "content": "Merge or cache small writes to reduce write amplification.",
-            "device_type": "GENERIC",
+            "device_type": device_type,
             "scope": ["storage_lifetime"],
             "conditions": ["high-frequency small writes"],
             "limitations": ["requires durability design"],
-            "tags": ["write_amplification"],
+            "tags": tags or ["write_amplification"],
             "source_refs": [],
             "evidence_refs": evidence_refs,
             "confidence": 0.9,
             "created_at": CREATED_AT.isoformat(),
             "producer": "historical-case/v1",
             "contract_version": "knowledge-candidate/v1",
-            "metadata": {},
+            "metadata": metadata or {},
         }
     )
     return candidate_id
@@ -128,11 +131,11 @@ def test_kp_d05_four_views_are_visually_and_semantically_distinct(
     published = client.get("/knowledge-production/published")
 
     assert sources.status_code == 200
-    assert "Source Document" in sources.text
-    assert "资料本身不是正式 Knowledge Object" in sources.text
-    assert "Knowledge Candidate" in candidates.text
+    assert "资料｜来源文档" in sources.text
+    assert "来源资料本身不是正式知识对象" in sources.text
+    assert "知识候选｜统一候选队列" in candidates.text
     assert "Human Gate" in reviews.text
-    assert "Published Knowledge" in published.text
+    assert "已发布知识" in published.text
 
 
 def test_kp_d05_source_ui_shows_source_version_and_parse_status(
@@ -179,8 +182,8 @@ def test_kp_d05_candidate_detail_read_has_no_evaluation_side_effect(
         f"knowledge/production/evaluations/{candidate_id}"
     )
     assert response.status_code == 200
-    assert "Evaluation / Dedup / Conflict" in response.text
-    assert "执行 Evaluation" in response.text
+    assert "评估 / 去重 / 冲突检查" in response.text
+    assert "执行评估" in response.text
     assert before == after == []
 
 
@@ -356,7 +359,7 @@ def test_kp_d05_published_view_excludes_unpublished_candidates(
     page = _client(repository).get("/knowledge-production/published")
 
     assert "Merge small writes" not in page.text
-    assert "暂无 Published Knowledge" in page.text
+    assert "暂无已发布知识" in page.text
 
 
 def test_kp_d05_web_layer_does_not_implement_repository_state_machine() -> None:
@@ -368,3 +371,87 @@ def test_kp_d05_web_layer_does_not_implement_repository_state_machine() -> None:
     assert "KnowledgeReviewService" not in source
     assert "KnowledgePublishService" not in source
     assert "KnowledgeProcessingService" in source
+
+
+def test_kp_d05_storage_semantic_review_ui_to_publish(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    candidate_id = _seed_business_candidate(
+        repository,
+        candidate_id="BC-UI-STORAGE-001",
+        device_type="NAND Flash",
+        tags=[
+            "storage-lifetime",
+            "storage-parameter:pe_cycles",
+            "storage-semantic-candidate:DESIGN_RULE",
+            "storage-semantic-candidate:TEST_RULE",
+        ],
+        metadata={
+            "storage_lifetime": {
+                "schema_version": "storage-lifetime-knowledge/v1",
+                "model_driven_extraction": True,
+                "device_type": "NAND Flash",
+                "canonical_parameters": ["pe_cycles"],
+                "parameter_binding_status": "BOUND",
+                "semantic_class_candidates": [
+                    "DESIGN_RULE",
+                    "TEST_RULE",
+                ],
+                "semantic_class_status": "NEEDS_REVIEW",
+                "scenario_consumers": ["S4", "S5"],
+                "formal_consumable": False,
+            }
+        },
+    )
+    app = create_processing_app(repository.root)
+    client = TestClient(app)
+    service: KnowledgeProcessingService = (
+        app.state.knowledge_processing_service
+    )
+    evaluation = service.evaluate(candidate_id)
+
+    detail_page = client.get(
+        f"/knowledge-production/candidates/{candidate_id}"
+    )
+    assert detail_page.status_code == 200
+    assert "Storage 知识类型" in detail_page.text
+    assert "DESIGN_RULE" in detail_page.text
+    assert "TEST_RULE" in detail_page.text
+
+    reviewed = client.post(
+        f"/knowledge-production/candidates/{candidate_id}/edit",
+        data={
+            "evaluation_id": evaluation.evaluation_id,
+            "reviewed_by": "storage-reviewer",
+            "title": "Merge small writes",
+            "content": (
+                "Merge or cache small writes to reduce write amplification."
+            ),
+            "storage_semantic_class": "DESIGN_RULE",
+            "review_note": "classified for Storage lifetime consumption",
+        },
+        follow_redirects=False,
+    )
+    assert reviewed.status_code == 303
+
+    detail = service.get_candidate_detail(candidate_id)
+    effective = service.reviews.load_effective_candidate(
+        detail["latest_review"]
+    )
+    assert effective.scope == ["storage_lifetime"]
+    assert "storage-parameter:pe_cycles" in effective.tags
+    assert "storage-semantic:DESIGN_RULE" in effective.tags
+
+    published = client.post(
+        f"/knowledge-production/candidates/{candidate_id}/publish",
+        data={"published_by": "storage-publisher"},
+        follow_redirects=False,
+    )
+    assert published.status_code == 303
+
+    object_ = service.list_published()[0]
+    storage = object_.metadata["storage_lifetime"]
+    assert storage["semantic_class"] == "DESIGN_RULE"
+    assert storage["semantic_class_status"] == "REVIEWED"
+    assert storage["formal_consumable"] is True

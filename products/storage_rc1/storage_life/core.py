@@ -6,7 +6,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -112,6 +112,51 @@ def connect():
       facts_json TEXT DEFAULT '[]', expected_fields_json TEXT DEFAULT '[]', searched_pages_json TEXT DEFAULT '[]',
       searched_sections_json TEXT DEFAULT '[]', searched_fields_json TEXT DEFAULT '{}', coverage_json TEXT DEFAULT '{}',
       coverage_layers_json TEXT DEFAULT '{}', document_analysis_json TEXT DEFAULT '{}', created_at TEXT);
+    CREATE TABLE IF NOT EXISTS device_assessments(id TEXT PRIMARY KEY, device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      assessment_type TEXT, status TEXT, input_json TEXT DEFAULT '{}', result_json TEXT DEFAULT '{}',
+      created_by TEXT DEFAULT 'Storage MVP', created_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_device_assessments_device_time
+      ON device_assessments(device_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS runtime_snapshot_batches(id TEXT PRIMARY KEY,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      source_label TEXT DEFAULT '', raw_text TEXT DEFAULT '', captured_at TEXT,
+      created_by TEXT DEFAULT 'Storage MVP', created_at TEXT);
+    CREATE TABLE IF NOT EXISTS runtime_snapshot_observations(id TEXT PRIMARY KEY,
+      batch_id TEXT REFERENCES runtime_snapshot_batches(id) ON DELETE CASCADE,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      metric_name TEXT, raw_value TEXT, normalized_value TEXT, unit TEXT DEFAULT '',
+      source_line TEXT DEFAULT '', quality_status TEXT DEFAULT 'UNKNOWN',
+      availability_status TEXT DEFAULT 'NOT_AVAILABLE', confirmed_by_user INTEGER DEFAULT 0,
+      created_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_device_time
+      ON runtime_snapshot_batches(device_id,captured_at DESC,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runtime_snapshot_metric_time
+      ON runtime_snapshot_observations(device_id,metric_name,created_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_actions(id TEXT PRIMARY KEY,
+      device_id TEXT REFERENCES devices(id) ON DELETE CASCADE,
+      source_assessment_id TEXT,
+      action_type TEXT, title TEXT, detail TEXT DEFAULT '',
+      status TEXT DEFAULT 'OPEN',
+      evidence_refs_json TEXT DEFAULT '[]',
+      knowledge_refs_json TEXT DEFAULT '[]',
+      created_by TEXT DEFAULT 'Storage MVP', updated_by TEXT DEFAULT '',
+      created_at TEXT, updated_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_engineering_actions_device_status
+      ON engineering_actions(device_id,status,updated_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_action_history(id TEXT PRIMARY KEY,
+      action_id TEXT REFERENCES engineering_actions(id) ON DELETE CASCADE,
+      prior_status TEXT, new_status TEXT, updated_by TEXT DEFAULT '', updated_at TEXT);
+    CREATE INDEX IF NOT EXISTS idx_engineering_action_history_action
+      ON engineering_action_history(action_id,updated_at DESC);
+    CREATE TABLE IF NOT EXISTS engineering_action_sources(id TEXT PRIMARY KEY,
+      action_id TEXT REFERENCES engineering_actions(id) ON DELETE CASCADE,
+      source_assessment_id TEXT,
+      evidence_refs_json TEXT DEFAULT '[]',
+      knowledge_refs_json TEXT DEFAULT '[]',
+      linked_at TEXT,
+      UNIQUE(action_id,source_assessment_id));
+    CREATE INDEX IF NOT EXISTS idx_engineering_action_sources_action
+      ON engineering_action_sources(action_id,linked_at DESC);
     """)
     columns = {row[1] for row in con.execute("PRAGMA table_info(candidates)")}
     if "extraction_method" not in columns:
@@ -136,6 +181,17 @@ def connect():
     history_columns = {row[1] for row in con.execute("PRAGMA table_info(candidate_review_history)")}
     if "confirm_mode" not in history_columns:
         con.execute("ALTER TABLE candidate_review_history ADD COLUMN confirm_mode TEXT DEFAULT 'single'")
+    runtime_obs_columns = {row[1] for row in con.execute("PRAGMA table_info(runtime_snapshot_observations)")}
+    for column, declaration in (
+        ("quality_status", "TEXT DEFAULT 'UNKNOWN'"),
+        ("availability_status", "TEXT DEFAULT 'NOT_AVAILABLE'"),
+        ("confirmed_by_user", "INTEGER DEFAULT 0"),
+    ):
+        if column not in runtime_obs_columns:
+            con.execute(f"ALTER TABLE runtime_snapshot_observations ADD COLUMN {column} {declaration}")
+    engineering_action_columns = {row[1] for row in con.execute("PRAGMA table_info(engineering_actions)")}
+    if "updated_by" not in engineering_action_columns:
+        con.execute("ALTER TABLE engineering_actions ADD COLUMN updated_by TEXT DEFAULT ''")
         # Older V0.5.x databases allowed only SSD/eMMC/Raw NAND. Rebuild the three dependent
     # tables once so NOR Flash and the user-facing NAND Flash name can coexist with legacy data.
     device_sql = (con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='devices'").fetchone() or [""])[0] or ""
@@ -1101,12 +1157,28 @@ def specification_workflow_status(device_id, specs=None):
         if field and field not in pending_key:
             pending_key.append(field)
 
+    missing_evidence = []
+    for x in confirmed:
+        if x.get("priority") not in {"P0", "P1"}:
+            continue
+        traceable = any(
+            str(ev.get("source_id") or "").strip()
+            and int(ev.get("source_page") or 0) >= 1
+            and str(ev.get("source_text") or "").strip()
+            for ev in (x.get("evidence") or [])
+            if isinstance(ev, dict)
+        )
+        if not traceable:
+            field = x.get("canonical_name") or ""
+            if field and field not in missing_evidence:
+                missing_evidence.append(field)
+
     extraction = get_extraction_run(device_id)
     final_review = get_final_review(device_id)
     gate_required = bool(extraction and extraction.get("review_required"))
     gate_resolved = not gate_required or bool(final_review and final_review.get("overall_status") == "ready_for_human_review")
     review_attention = gate_required and not gate_resolved
-    formal_ready = bool(items) and not review_attention and not missing_critical and not pending_key
+    formal_ready = bool(items) and not review_attention and not missing_critical and not pending_key and not missing_evidence
 
     if review_attention:
         status = "attention_required"
@@ -1129,6 +1201,7 @@ def specification_workflow_status(device_id, specs=None):
         "missing_critical_fields": [label(f) for f in missing_critical],
         "pending_critical_fields": [label(f) for f in pending_critical],
         "pending_key_fields": [label(f) for f in pending_key],
+        "missing_evidence_fields": [label(f) for f in missing_evidence],
         "review_gate_required": gate_required,
         "review_gate_resolved": gate_resolved,
         "final_review_status": (final_review or {}).get("overall_status", "not_run"),
@@ -1651,6 +1724,228 @@ def list_candidates(device_id):
         return out
 
 
+
+def _validate_manual_evidence_text(local_path, source_page, source_text):
+    """Require human-entered Evidence to be locatable on the declared source page."""
+    path = Path(str(local_path or ""))
+    if not path.is_file():
+        raise ValueError("Evidence 来源文件不可用，不能创建正式事实")
+    text = str(source_text or "").strip()
+    if not text:
+        raise ValueError("Evidence 原文不能为空")
+    if path.suffix.lower() != ".pdf":
+        try:
+            page_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise ValueError("Evidence 来源文件无法读取") from exc
+    else:
+        try:
+            pages = extract_pdf_pages(path.read_bytes(), [source_page])
+        except (OSError, ValueError) as exc:
+            raise ValueError("无法重新读取指定 Evidence 页；不能确认正式事实") from exc
+        page_text = pages[0][1] if pages else ""
+
+    normalize = lambda value: " ".join(str(value or "").replace("\u00a0", " ").split()).casefold()
+    expected = normalize(text)
+    actual = normalize(page_text)
+    if not expected or expected not in actual:
+        raise ValueError("Evidence 原文与指定来源页内容不匹配；请从原始资料复制可定位原文")
+
+
+def add_manual_fact(device_id, canonical_name, parameter_name, value, unit, by, *,
+                    source_page, source_text, source_section="", condition="", scope=""):
+    """Create one human-confirmed Device Fact when AI did not produce a usable candidate.
+
+    The manual fact still enters through the existing candidate/evidence/reviewed-specification
+    data model so downstream compare, lifetime, diagnostics and change-impact consume the same
+    Formal Device Fact surface. Search coverage is intentionally not rewritten.
+    """
+    import json
+
+    canonical_name = str(canonical_name or "").strip()
+    parameter_name = str(parameter_name or canonical_name).strip()
+    value = str(value or "").strip()
+    unit = str(unit or "").strip()
+    reviewer = str(by or "").strip()
+    source_text = str(source_text or "").strip()
+    source_section = str(source_section or "").strip()
+    condition = str(condition or "").strip()
+    scope = str(scope or "").strip()
+
+    if not canonical_name or not parameter_name:
+        raise ValueError("参数名不能为空")
+    if not value:
+        raise ValueError("人工补充的事实值不能为空")
+    if not reviewer:
+        raise ValueError("请填写核对人")
+    if not source_text:
+        raise ValueError("人工补充事实必须绑定规格书原文证据")
+    try:
+        source_page = int(source_page)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("证据页码必须是正整数") from exc
+    if source_page < 1:
+        raise ValueError("证据页码必须从 1 开始")
+
+    reviewed_at = now()
+    candidate_id = uuid4().hex
+    evidence_id = uuid4().hex
+    history_id = uuid4().hex
+
+    with connect() as con:
+        row = con.execute("""SELECT d.*,s.id AS source_id,s.page_count,s.filename,s.local_path
+            FROM devices d JOIN sources s ON s.id=d.source_id WHERE d.id=?""", (device_id,)).fetchone()
+        if not row:
+            raise KeyError(device_id)
+        if row["page_count"] and source_page > int(row["page_count"]):
+            raise ValueError(f"证据页码超出规格书范围：1-{row['page_count']}")
+        _validate_manual_evidence_text(row["local_path"], source_page, source_text)
+        conflict = con.execute("""SELECT id FROM candidates
+            WHERE device_id=? AND canonical_name=? AND condition=? AND scope=?
+              AND verify_status='confirmed' LIMIT 1""",
+            (device_id, canonical_name, condition, scope)).fetchone()
+        if conflict:
+            raise ConfirmationConflict("该字段在相同条件/范围下已有已确认事实；请先修改或驳回原记录")
+
+        con.execute("""INSERT INTO candidates(
+            id,device_id,canonical_name,parameter_name,ai_value,ai_unit,
+            final_value,final_unit,condition,scope,source_page,source_section,source_text,
+            confidence,extraction_method,verify_status,verified_by,verified_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (candidate_id, device_id, canonical_name, parameter_name, "", "",
+         value, unit, condition, scope, source_page, source_section, source_text,
+         1.0, "manual_user", "confirmed", reviewer, reviewed_at))
+
+        con.execute("""INSERT INTO candidate_evidence
+            (id,candidate_id,source_page,source_section,source_text,confidence,extraction_method,scope)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (evidence_id, candidate_id, source_page, source_section, source_text, 1.0, "manual_user", scope))
+        con.execute("""INSERT INTO candidate_evidence_provenance(evidence_id,source_id)
+            VALUES (?,?)""", (evidence_id, row["source_id"]))
+
+        evidence_ref = {
+            "evidence_id": evidence_id,
+            "source_id": row["source_id"],
+            "source_page": source_page,
+            "source_section": source_section,
+            "source_text": source_text,
+        }
+        con.execute("""INSERT INTO candidate_review_history(
+            id,candidate_id,device_id,version,action,prior_status,new_status,ai_value,ai_unit,
+            old_final_value,old_final_unit,old_condition,old_scope,new_final_value,new_final_unit,
+            new_condition,new_scope,evidence_refs_json,confirm_mode,reviewed_by,reviewed_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (history_id, candidate_id, device_id, 1, "manual_add_confirm", "none", "confirmed", "", "",
+         "", "", "", "", value, unit, condition, scope, json.dumps([evidence_ref], ensure_ascii=False),
+         "single", reviewer, reviewed_at))
+
+    rebuild_reviewed_specifications(device_id)
+    return {
+        "id": candidate_id,
+        "device_id": device_id,
+        "canonical_name": canonical_name,
+        "parameter_name": parameter_name,
+        "value": value,
+        "unit": unit,
+        "condition": condition,
+        "scope": scope,
+        "verify_status": "confirmed",
+        "verified_by": reviewer,
+        "verified_at": reviewed_at,
+        "evidence": [evidence_ref],
+        "extraction_method": "manual_user",
+        "manual_fact": True,
+    }
+
+
+def replace_candidate_evidence(candidate_id, by, *, source_page, source_text, source_section=""):
+    """Human correction of the Evidence bound to an existing candidate/fact."""
+    import json
+
+    reviewer = str(by or "").strip()
+    source_text = str(source_text or "").strip()
+    source_section = str(source_section or "").strip()
+    if not reviewer:
+        raise ValueError("请填写核对人")
+    if not source_text:
+        raise ValueError("Evidence 原文不能为空")
+    try:
+        source_page = int(source_page)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("证据页码必须是正整数") from exc
+    if source_page < 1:
+        raise ValueError("证据页码必须从 1 开始")
+
+    changed_at = now()
+    with connect() as con:
+        candidate = con.execute("""SELECT c.*,d.source_id,s.page_count,s.local_path
+            FROM candidates c JOIN devices d ON d.id=c.device_id
+            JOIN sources s ON s.id=d.source_id WHERE c.id=?""", (candidate_id,)).fetchone()
+        if not candidate:
+            raise KeyError(candidate_id)
+        if candidate["page_count"] and source_page > int(candidate["page_count"]):
+            raise ValueError(f"证据页码超出规格书范围：1-{candidate['page_count']}")
+        _validate_manual_evidence_text(candidate["local_path"], source_page, source_text)
+
+        old_evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,
+            e.source_text,e.confidence,e.extraction_method,e.scope
+            FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
+            WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (candidate_id,))
+        version = int(con.execute(
+            "SELECT COUNT(*) FROM candidate_review_history WHERE candidate_id=?", (candidate_id,)
+        ).fetchone()[0]) + 1
+
+        con.execute("DELETE FROM candidate_evidence WHERE candidate_id=?", (candidate_id,))
+        evidence_id = uuid4().hex
+        con.execute("""INSERT INTO candidate_evidence
+            (id,candidate_id,source_page,source_section,source_text,confidence,extraction_method,scope)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (evidence_id, candidate_id, source_page, source_section, source_text, 1.0,
+             "manual_evidence_rebind", candidate["scope"] or ""))
+        con.execute("""INSERT INTO candidate_evidence_provenance(evidence_id,source_id)
+            VALUES (?,?)""", (evidence_id, candidate["source_id"]))
+
+        new_evidence = {
+            "evidence_id": evidence_id,
+            "source_id": candidate["source_id"],
+            "source_page": source_page,
+            "source_section": source_section,
+            "source_text": source_text,
+            "confidence": 1.0,
+            "extraction_method": "manual_evidence_rebind",
+        }
+        history_evidence = [
+            *[{"change": "OLD", **item} for item in old_evidence],
+            {"change": "NEW", **new_evidence},
+        ]
+        current_value = candidate["final_value"] if candidate["final_value"] is not None else candidate["ai_value"]
+        current_unit = candidate["final_unit"] if candidate["final_unit"] is not None else candidate["ai_unit"]
+        con.execute("""INSERT INTO candidate_review_history(
+            id,candidate_id,device_id,version,action,prior_status,new_status,ai_value,ai_unit,
+            old_final_value,old_final_unit,old_condition,old_scope,new_final_value,new_final_unit,
+            new_condition,new_scope,evidence_refs_json,confirm_mode,reviewed_by,reviewed_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (uuid4().hex, candidate_id, candidate["device_id"], version, "evidence_rebind",
+         candidate["verify_status"], candidate["verify_status"], candidate["ai_value"], candidate["ai_unit"],
+         current_value, current_unit, candidate["condition"], candidate["scope"],
+         current_value, current_unit, candidate["condition"], candidate["scope"],
+         json.dumps(history_evidence, ensure_ascii=False), "single", reviewer, changed_at))
+
+        con.execute("""UPDATE candidates SET source_page=?,source_section=?,source_text=?
+            WHERE id=?""", (source_page, source_section, source_text, candidate_id))
+
+    rebuild_reviewed_specifications(candidate["device_id"])
+    return {
+        "candidate_id": candidate_id,
+        "device_id": candidate["device_id"],
+        "evidence": [new_evidence],
+        "review_action": "evidence_rebind",
+        "review_version": version,
+        "reviewed_by": reviewer,
+        "reviewed_at": changed_at,
+    }
+
+
 def verify(candidate_id, status, value, unit, by, condition=None, scope=None, confirm_mode="single"):
     """Human review of one extracted candidate.
 
@@ -1694,6 +1989,15 @@ def verify(candidate_id, status, value, unit, by, condition=None, scope=None, co
         evidence = rows(con, """SELECT e.id AS evidence_id,p.source_id,e.source_page,e.source_section,e.source_text
           FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
           WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (candidate_id,))
+        persistent_evidence = [
+            item for item in evidence
+            if item.get("evidence_id")
+            and str(item.get("source_id") or "").strip()
+            and int(item.get("source_page") or 0) >= 1
+            and str(item.get("source_text") or "").strip()
+        ]
+        if status == "confirmed" and not persistent_evidence:
+            raise ValueError("确认参数必须绑定可追溯 Evidence（Source / Page / 原文）；请先修正 Evidence")
         if not evidence:
             evidence = [{"evidence_id": None, "source_id": None, "source_page": candidate["source_page"],
                          "source_section": candidate["source_section"], "source_text": candidate["source_text"]}]
@@ -1775,6 +2079,423 @@ def compare(device_ids):
         matrix.setdefault(spec["canonical_name"], {})[spec["device_id"]] = spec
     return {"devices": list(devices.values()), "fields": matrix,
             "missing": {field: [d for d in device_ids if d not in values] for field, values in matrix.items()}}
+
+
+def save_runtime_snapshot(device_id, observations, *, source_label="", raw_text="", captured_at=None, created_by="Storage MVP"):
+    """Persist one explicit runtime-health snapshot for trend review.
+
+    This store records only values the parser/user explicitly supplied. It does
+    not infer diagnosis, remaining life or missing metrics.
+    """
+    import json
+    batch_id = uuid4().hex
+    created_at = now()
+    captured_raw = str(captured_at or created_at).strip()
+    try:
+        captured_dt = datetime.fromisoformat(captured_raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("RUNTIME_CAPTURE_TIME_INVALID") from exc
+    if captured_dt.tzinfo is None:
+        raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
+    captured_utc = captured_dt.astimezone(timezone.utc)
+    if captured_utc > datetime.now(timezone.utc) + timedelta(minutes=5):
+        raise ValueError("RUNTIME_CAPTURE_TIME_IN_FUTURE")
+    captured_at = captured_utc.isoformat()
+    source_label = str(source_label or "").strip()[:500]
+    placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
+    raw_text = str(raw_text or "")
+    if len(raw_text) > 200_000:
+        raise ValueError("RUNTIME_TEXT_TOO_LARGE")
+    rows_to_save = []
+    for index, item in enumerate(observations or []):
+        metric_name = str(item.get("metric_name") or "").strip()
+        if not metric_name:
+            continue
+        raw_value = item.get("raw_value")
+        normalized = item.get("normalized_value", raw_value)
+        source_line = str(item.get("source_line") or item.get("evidence_ref") or "").strip()[:4000]
+        requested_quality = str(item.get("quality_status") or "UNKNOWN").upper()
+        requested_availability = str(item.get("availability_status") or "NOT_AVAILABLE").upper()
+        if requested_quality not in {"VALID", "INVALID", "UNKNOWN"}:
+            requested_quality = "UNKNOWN"
+        if requested_availability not in {"AVAILABLE", "NOT_AVAILABLE", "NOT_SUPPORTED", "STALE", "INVALID"}:
+            requested_availability = "NOT_AVAILABLE"
+        requested_confirmed = item.get("confirmed_by_user") is True
+        source_is_explicit = bool(source_label and source_label.upper() not in placeholder_sources)
+        evidence_ready = bool(source_is_explicit and source_line)
+        formal_confirmed = bool(
+            requested_confirmed
+            and evidence_ready
+            and requested_quality == "VALID"
+            and requested_availability == "AVAILABLE"
+        )
+        rows_to_save.append({
+            "id": uuid4().hex,
+            "metric_name": metric_name,
+            "raw_value": "" if raw_value is None else str(raw_value),
+            "normalized_value": "" if normalized is None else str(normalized),
+            "unit": str(item.get("unit") or ""),
+            "source_line": source_line,
+            "quality_status": requested_quality if formal_confirmed or requested_quality == "INVALID" else "UNKNOWN",
+            "availability_status": requested_availability if evidence_ready else "NOT_AVAILABLE",
+            "confirmed_by_user": 1 if formal_confirmed else 0,
+            "ordinal": index,
+        })
+    if not rows_to_save:
+        raise ValueError("NO_RUNTIME_OBSERVATIONS")
+
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        con.execute("""INSERT INTO runtime_snapshot_batches
+          (id,device_id,source_label,raw_text,captured_at,created_by,created_at)
+          VALUES (?,?,?,?,?,?,?)""",
+          (batch_id, device_id, source_label, raw_text, captured_at, str(created_by or "Storage MVP"), created_at))
+        for item in rows_to_save:
+            con.execute("""INSERT INTO runtime_snapshot_observations
+              (id,batch_id,device_id,metric_name,raw_value,normalized_value,unit,source_line,
+               quality_status,availability_status,confirmed_by_user,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (item["id"], batch_id, device_id, item["metric_name"], item["raw_value"],
+               item["normalized_value"], item["unit"], item["source_line"],
+               item["quality_status"], item["availability_status"], item["confirmed_by_user"], created_at))
+
+    return get_runtime_snapshot(batch_id)
+
+
+def get_runtime_snapshot(batch_id):
+    with connect() as con:
+        batch = con.execute("SELECT * FROM runtime_snapshot_batches WHERE id=?", (batch_id,)).fetchone()
+        if not batch:
+            raise KeyError(batch_id)
+        observations = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,
+          quality_status,availability_status,confirmed_by_user,created_at
+          FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch_id,))
+    item = dict(batch)
+    item["observations"] = observations
+    item["observation_count"] = len(observations)
+    return item
+
+
+def list_runtime_snapshots(device_id, limit=20):
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 20
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        batches = rows(con, """SELECT * FROM runtime_snapshot_batches WHERE device_id=?
+          ORDER BY captured_at DESC,created_at DESC,id DESC LIMIT ?""", (device_id, limit))
+        for batch in batches:
+            batch["observations"] = rows(con, """SELECT id,metric_name,raw_value,normalized_value,unit,source_line,
+              quality_status,availability_status,confirmed_by_user,created_at
+              FROM runtime_snapshot_observations WHERE batch_id=? ORDER BY created_at,id""", (batch["id"],))
+            batch["observation_count"] = len(batch["observations"])
+    return batches
+
+
+def runtime_metric_trends(device_id, limit=40):
+    """Return validated per-metric history and simple deltas without interpreting risk."""
+    snapshots = list_runtime_snapshots(device_id, limit=limit)
+    with connect() as con:
+        total_snapshot_count = int(
+            con.execute(
+                "SELECT COUNT(*) FROM runtime_snapshot_batches WHERE device_id=?",
+                (device_id,),
+            ).fetchone()[0]
+        )
+        formal_row = con.execute(
+            """SELECT COUNT(DISTINCT b.id) AS formal_count,
+                      MAX(b.created_at) AS latest_created_at,
+                      MAX(b.captured_at) AS latest_captured_at
+               FROM runtime_snapshot_batches b
+               JOIN runtime_snapshot_observations o ON o.batch_id=b.id
+               WHERE b.device_id=?
+                 AND UPPER(COALESCE(o.quality_status,''))='VALID'
+                 AND UPPER(COALESCE(o.availability_status,''))='AVAILABLE'
+                 AND COALESCE(o.confirmed_by_user,0)=1
+                 AND TRIM(COALESCE(b.source_label,''))<>''
+                 AND TRIM(COALESCE(o.source_line,''))<>''""",
+            (device_id,),
+        ).fetchone()
+    total_formal_snapshot_count = int(formal_row["formal_count"] or 0)
+    series = {}
+    latest_formal_snapshot_created_at = formal_row["latest_created_at"]
+    latest_formal_capture_time = formal_row["latest_captured_at"]
+    for batch in reversed(snapshots):
+        batch_has_formal = False
+        for obs in batch.get("observations") or []:
+            metric = obs["metric_name"]
+            formally_consumable = bool(
+                str(obs.get("quality_status") or "").upper() == "VALID"
+                and str(obs.get("availability_status") or "").upper() == "AVAILABLE"
+                and int(obs.get("confirmed_by_user") or 0) == 1
+                and str(batch.get("source_label") or "").strip()
+                and str(obs.get("source_line") or "").strip()
+            )
+            if formally_consumable:
+                batch_has_formal = True
+            point = {
+                "batch_id": batch["id"],
+                "captured_at": batch["captured_at"],
+                "snapshot_created_at": batch.get("created_at"),
+                "normalized_value": obs.get("normalized_value"),
+                "raw_value": obs.get("raw_value"),
+                "unit": obs.get("unit") or "",
+                "source_label": batch.get("source_label") or "",
+                "source_line": obs.get("source_line") or "",
+                "quality_status": obs.get("quality_status") or "UNKNOWN",
+                "availability_status": obs.get("availability_status") or "NOT_AVAILABLE",
+                "confirmed_by_user": bool(obs.get("confirmed_by_user")),
+                "formally_consumable": formally_consumable,
+            }
+            try:
+                point["numeric_value"] = float(str(obs.get("normalized_value")).replace(",", "").rstrip("%"))
+            except (TypeError, ValueError):
+                point["numeric_value"] = None
+            series.setdefault(metric, []).append(point)
+        if batch_has_formal:
+            created_at = str(batch.get("created_at") or "")
+            captured_at = str(batch.get("captured_at") or "")
+            if created_at and (latest_formal_snapshot_created_at is None or created_at > latest_formal_snapshot_created_at):
+                latest_formal_snapshot_created_at = created_at
+            if captured_at and (latest_formal_capture_time is None or captured_at > latest_formal_capture_time):
+                latest_formal_capture_time = captured_at
+
+    result = []
+    for metric, all_points in sorted(series.items()):
+        points = [x for x in all_points if x.get("formally_consumable")]
+        latest = points[-1] if points else None
+        previous = points[-2] if len(points) > 1 else None
+        delta = None
+        if previous and latest and latest.get("numeric_value") is not None and previous.get("numeric_value") is not None:
+            delta = latest["numeric_value"] - previous["numeric_value"]
+        result.append({
+            "metric_name": metric,
+            "sample_count": len(points),
+            "raw_sample_count": len(all_points),
+            "unverified_count": len(all_points) - len(points),
+            "latest": latest,
+            "previous": previous,
+            "delta": delta,
+            "points": points[-12:],
+        })
+    return {
+        "device_id": device_id,
+        "snapshot_count": total_snapshot_count,
+        "trend_window_snapshot_count": len(snapshots),
+        "formal_snapshot_count": total_formal_snapshot_count,
+        "latest_formal_snapshot_created_at": latest_formal_snapshot_created_at,
+        "latest_formal_capture_time": latest_formal_capture_time,
+        "metrics": result,
+        "interpretation_performed": False,
+        "formal_trend_only": True,
+    }
+
+
+def create_engineering_actions(device_id, source_assessment_id, actions, *,
+                               evidence_refs=None, knowledge_refs=None,
+                               source_assessment_ids=None,
+                               created_by="Storage MVP"):
+    """Persist user-facing engineering actions from an existing assessment result."""
+    import json
+    allowed_types = {"SOFTWARE_CONTROL", "TEST_VALIDATION", "MONITORING", "FOLLOW_UP"}
+    source_ids = []
+    for value in [source_assessment_id, *(source_assessment_ids or [])]:
+        value = str(value or "").strip()
+        if value and value not in source_ids:
+            source_ids.append(value)
+    created = []
+    timestamp = now()
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        for item in actions or []:
+            action_type = str(item.get("action_type") or "FOLLOW_UP").upper()
+            if action_type not in allowed_types:
+                action_type = "FOLLOW_UP"
+            title = str(item.get("title") or item.get("detail") or "").strip()
+            detail = str(item.get("detail") or title).strip()
+            if not title:
+                continue
+            duplicate = con.execute("""SELECT * FROM engineering_actions
+              WHERE device_id=? AND action_type=? AND title=?
+                AND status IN ('OPEN','IN_PROGRESS')
+              ORDER BY updated_at DESC,id DESC LIMIT 1""",
+              (device_id, action_type, title)).fetchone()
+            if duplicate:
+                action_id = duplicate["id"]
+                old_evidence = set(json.loads(duplicate["evidence_refs_json"] or "[]"))
+                old_knowledge = set(json.loads(duplicate["knowledge_refs_json"] or "[]"))
+                merged_evidence = sorted(old_evidence | {str(x) for x in (evidence_refs or []) if str(x)})
+                merged_knowledge = sorted(old_knowledge | {str(x) for x in (knowledge_refs or []) if str(x)})
+                con.execute("""UPDATE engineering_actions
+                  SET evidence_refs_json=?,knowledge_refs_json=?,updated_at=?,updated_by=?
+                  WHERE id=?""", (
+                    json.dumps(merged_evidence, ensure_ascii=False),
+                    json.dumps(merged_knowledge, ensure_ascii=False),
+                    timestamp,
+                    str(created_by or "Storage MVP"),
+                    action_id,
+                ))
+                for source_id in source_ids:
+                    con.execute("""INSERT OR IGNORE INTO engineering_action_sources
+                      (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
+                      VALUES (?,?,?,?,?,?)""", (
+                        uuid4().hex, action_id, source_id,
+                        json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                        json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                        timestamp,
+                    ))
+                continue
+            action_id = uuid4().hex
+            actor = str(created_by or "Storage MVP")
+            con.execute("""INSERT INTO engineering_actions(
+              id,device_id,source_assessment_id,action_type,title,detail,status,
+              evidence_refs_json,knowledge_refs_json,created_by,updated_by,created_at,updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                action_id, device_id, source_assessment_id, action_type, title, detail, "OPEN",
+                json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                actor, actor, timestamp, timestamp,
+            ))
+            for source_id in source_ids:
+                con.execute("""INSERT OR IGNORE INTO engineering_action_sources
+                  (id,action_id,source_assessment_id,evidence_refs_json,knowledge_refs_json,linked_at)
+                  VALUES (?,?,?,?,?,?)""", (
+                    uuid4().hex, action_id, source_id,
+                    json.dumps(list(evidence_refs or []), ensure_ascii=False),
+                    json.dumps(list(knowledge_refs or []), ensure_ascii=False),
+                    timestamp,
+                ))
+            created.append(action_id)
+    return list_engineering_actions(device_id)
+
+
+def list_engineering_actions(device_id, include_closed=True):
+    import json
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        sql = """SELECT * FROM engineering_actions WHERE device_id=?"""
+        params = [device_id]
+        if not include_closed:
+            sql += " AND status IN ('OPEN','IN_PROGRESS')"
+        sql += " ORDER BY CASE status WHEN 'IN_PROGRESS' THEN 0 WHEN 'OPEN' THEN 1 WHEN 'DONE' THEN 2 ELSE 3 END, updated_at DESC,id"
+        items = rows(con, sql, tuple(params))
+    with connect() as con:
+        for item in items:
+            item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
+            item["knowledge_refs"] = json.loads(item.pop("knowledge_refs_json") or "[]")
+            item["history"] = rows(con, """SELECT prior_status,new_status,updated_by,updated_at
+              FROM engineering_action_history WHERE action_id=? ORDER BY updated_at,id""", (item["id"],))
+            item["sources"] = rows(con, """SELECT s.source_assessment_id,s.evidence_refs_json,s.knowledge_refs_json,s.linked_at,
+                     a.assessment_type,a.status AS assessment_status,a.created_at AS assessment_created_at
+              FROM engineering_action_sources s
+              LEFT JOIN device_assessments a ON a.id=s.source_assessment_id
+              WHERE s.action_id=? ORDER BY s.linked_at,s.id""", (item["id"],))
+            for source in item["sources"]:
+                source["evidence_refs"] = json.loads(source.pop("evidence_refs_json") or "[]")
+                source["knowledge_refs"] = json.loads(source.pop("knowledge_refs_json") or "[]")
+    return items
+
+
+def update_engineering_action(action_id, status, *, updated_by="Storage MVP"):
+    allowed = {"OPEN", "IN_PROGRESS", "DONE", "WAIVED"}
+    status = str(status or "").upper()
+    if status not in allowed:
+        raise ValueError("ACTION_STATUS_INVALID")
+    timestamp = now()
+    actor = str(updated_by or "Storage MVP")
+    with connect() as con:
+        row = con.execute("SELECT * FROM engineering_actions WHERE id=?", (action_id,)).fetchone()
+        if not row:
+            raise KeyError(action_id)
+        prior_status = str(row["status"] or "OPEN")
+        if prior_status != status:
+            con.execute("""INSERT INTO engineering_action_history
+              (id,action_id,prior_status,new_status,updated_by,updated_at)
+              VALUES (?,?,?,?,?,?)""",
+              (uuid4().hex, action_id, prior_status, status, actor, timestamp))
+        con.execute("""UPDATE engineering_actions
+          SET status=?,updated_at=?,updated_by=?
+          WHERE id=?""", (status, timestamp, actor, action_id))
+        device_id = row["device_id"]
+    return {
+        "action": next(x for x in list_engineering_actions(device_id) if x["id"] == action_id),
+        "device_id": device_id,
+    }
+
+
+def save_device_assessment(device_id, assessment_type, status, input_payload, result_payload, created_by="Storage MVP"):
+    """Persist one user-visible Storage assessment for later review/reuse."""
+    import json
+    assessment_type = str(assessment_type or "").strip().upper()
+    if assessment_type not in {"COMPARE", "LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+        raise ValueError("assessment_type 仅支持 COMPARE / LIFETIME / DIAGNOSIS / OPTIMIZATION")
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        assessment_id = uuid4().hex
+        con.execute("""INSERT INTO device_assessments
+          (id,device_id,assessment_type,status,input_json,result_json,created_by,created_at)
+          VALUES (?,?,?,?,?,?,?,?)""", (
+            assessment_id,
+            device_id,
+            assessment_type,
+            str(status or "UNKNOWN"),
+            json.dumps(input_payload or {}, ensure_ascii=False, default=str),
+            json.dumps(result_payload or {}, ensure_ascii=False, default=str),
+            str(created_by or "Storage MVP"),
+            now(),
+        ))
+    return get_device_assessment(assessment_id)
+
+
+def get_device_assessment(assessment_id):
+    import json
+    with connect() as con:
+        row = con.execute("SELECT * FROM device_assessments WHERE id=?", (assessment_id,)).fetchone()
+    if not row:
+        raise KeyError(assessment_id)
+    item = dict(row)
+    item["input"] = json.loads(item.pop("input_json") or "{}")
+    item["result"] = json.loads(item.pop("result_json") or "{}")
+    return item
+
+
+def list_device_assessments(device_id, limit=20):
+    import json
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 20
+    with connect() as con:
+        if not con.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            raise KeyError(device_id)
+        items = rows(con, """SELECT * FROM device_assessments WHERE device_id=?
+          ORDER BY created_at DESC,id DESC LIMIT ?""", (device_id, limit))
+    for item in items:
+        item["input"] = json.loads(item.pop("input_json") or "{}")
+        item["result"] = json.loads(item.pop("result_json") or "{}")
+    return items
+
+
+def list_recent_device_assessments(limit=12):
+    import json
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 12
+    with connect() as con:
+        items = rows(con, """SELECT a.*,d.vendor,d.model,d.device_type
+          FROM device_assessments a JOIN devices d ON d.id=a.device_id
+          ORDER BY a.created_at DESC,a.id DESC LIMIT ?""", (limit,))
+    for item in items:
+        item["input"] = json.loads(item.pop("input_json") or "{}")
+        item["result"] = json.loads(item.pop("result_json") or "{}")
+    return items
 
 
 def query_knowledge(q):

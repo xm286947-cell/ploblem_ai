@@ -4,6 +4,8 @@ from pathlib import Path
 import json
 import threading
 import time
+import socket
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -24,6 +26,7 @@ from .knowledge_release import KnowledgeReleaseConsumer, KnowledgeReleaseError
 from .engineering_insight import StorageEngineeringInsightService, create_engineering_insight_router
 from .skill_api import create_storage_skill_router
 from .public_knowledge import router as public_knowledge_router
+from . import public_knowledge as public_knowledge_api
 
 app = FastAPI(title="存储器件寿命知识库 MVP", version="0.8.0-rc3-runtime-rc2.1")
 engineering_insight_service = StorageEngineeringInsightService()
@@ -69,6 +72,25 @@ class BatchReview(BaseModel):
     verified_by: str
 
 
+class ManualDeviceFact(BaseModel):
+    canonical_name: str
+    value: str
+    unit: str = ""
+    condition: str = ""
+    scope: str = ""
+    source_page: int
+    source_section: str = ""
+    source_text: str
+    verified_by: str
+
+
+class CandidateEvidenceEdit(BaseModel):
+    source_page: int
+    source_section: str = ""
+    source_text: str
+    verified_by: str
+
+
 class Comparison(BaseModel):
     device_ids: list[str]
 
@@ -101,6 +123,10 @@ class KnowledgeReleaseBuildRequest(BaseModel):
     release_version: str
 
 
+class KnowledgeReleasePromoteRequest(BaseModel):
+    approved_by: str
+
+
 
 @app.get("/api/product/dashboard", tags=["Storage Product MVP"])
 def product_dashboard():
@@ -121,6 +147,34 @@ def product_device_facts(device_id: str):
         return product_api.confirmed_device_facts(device_id)
     except KeyError:
         raise HTTPException(404, "器件不存在")
+
+
+@app.post("/api/product/devices/{device_id}/facts/manual", status_code=201, tags=["Storage Product MVP"])
+def product_add_manual_fact(device_id: str, body: ManualDeviceFact):
+    try:
+        return product_api.add_manual_device_fact(device_id, body.model_dump())
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except core.ConfirmationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.patch("/api/product/candidates/{candidate_id}/evidence", tags=["Storage Product MVP"])
+def product_replace_candidate_evidence(candidate_id: str, body: CandidateEvidenceEdit):
+    try:
+        return core.replace_candidate_evidence(
+            candidate_id,
+            body.verified_by,
+            source_page=body.source_page,
+            source_section=body.source_section,
+            source_text=body.source_text,
+        )
+    except KeyError:
+        raise HTTPException(404, "候选参数不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/product/devices/{device_id}/review-workbench", tags=["Storage Product MVP"])
@@ -149,8 +203,11 @@ def product_complete_review(device_id: str):
         raise HTTPException(404, "器件不存在")
     if not result["completed"]:
         blockers = result.get("blockers") or []
+        evidence_blockers = result.get("evidence_blockers") or []
         non_actionable_missing = result.get("non_actionable_missing") or []
-        if blockers:
+        if evidence_blockers:
+            message = "仍有已确认参数缺少可追溯 Evidence；请补齐 Source / Page / 原文后再完成确认"
+        elif blockers:
             message = "仍有需要人工处理或确认的必需/建议参数，不能完成确认"
         elif non_actionable_missing:
             message = "确认门禁尚未满足；以下规格书未声明项不要求逐项人工判断"
@@ -160,6 +217,7 @@ def product_complete_review(device_id: str):
             "code": "REVIEW_NOT_COMPLETE",
             "message": message,
             "blockers": blockers,
+            "evidence_blockers": evidence_blockers,
             "non_actionable_missing": non_actionable_missing,
             "workflow": result["workflow"],
         })
@@ -174,12 +232,142 @@ def product_compare(body: ProductCompareRequest):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/product/devices/{device_id}/runtime-snapshots", status_code=201, tags=["Storage Product MVP"])
+def product_save_runtime_snapshot(device_id: str, body: dict):
+    try:
+        return product_api.save_runtime_snapshot(device_id, body)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/product/devices/{device_id}/runtime-snapshots", tags=["Storage Product MVP"])
+def product_runtime_snapshots(device_id: str, limit: int = 20):
+    try:
+        return product_api.runtime_snapshot_history(device_id, limit=limit)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+
+@app.post("/api/product/devices/{device_id}/runtime-trend-lifetime", tags=["Storage Product MVP"])
+def product_runtime_trend_lifetime(device_id: str, body: dict | None = None):
+    try:
+        return product_api.analyze_runtime_trend(
+            device_id,
+            target_service_life=dict((body or {}).get("target_service_life") or {}),
+        )
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/product/devices/{device_id}/assessments", tags=["Storage Product MVP"])
+def product_device_assessments(device_id: str, limit: int = 20):
+    try:
+        return product_api.device_assessment_history(device_id, limit=limit)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+
+@app.get("/api/product/devices/{device_id}/mvp-summary", tags=["Storage Product MVP"])
+def product_device_mvp_summary(device_id: str):
+    try:
+        result = product_api.device_mvp_summary(device_id)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+    try:
+        pk = public_knowledge_api.status(mode="LIVE")
+    except HTTPException as exc:
+        pk = {
+            "connected": False,
+            "search_ready": False,
+            "citation_ready": False,
+            "retrieval_ready": False,
+            "source_count": 0,
+            "error_status": exc.status_code,
+        }
+
+    pk_ready = bool(pk.get("retrieval_ready"))
+    result["public_knowledge"] = {
+        **dict(result.get("public_knowledge") or {}),
+        "connected": bool(pk.get("connected")),
+        "search_ready": bool(pk.get("search_ready")),
+        "citation_ready": bool(pk.get("citation_ready")),
+        "retrieval_ready": pk_ready,
+        "source_count": int(pk.get("source_count") or 0),
+    }
+    if not pk_ready:
+        remaining = list(result.get("remaining_actions") or [])
+        if "恢复 Public Knowledge 检索与公开资料源" not in remaining:
+            remaining.append("恢复 Public Knowledge 检索与公开资料源")
+        result["remaining_actions"] = remaining
+    result["mvp_ready_for_demo"] = bool(result.get("mvp_ready_for_demo")) and pk_ready
+    return result
+
+
+@app.post("/api/product/devices/{device_id}/engineering-actions/from-optimization/{assessment_id}", tags=["Storage Product MVP"])
+def product_persist_engineering_actions_from_optimization(device_id: str, assessment_id: str, body: dict | None = None):
+    try:
+        return product_api.persist_engineering_actions_from_optimization(
+            device_id,
+            assessment_id,
+            updated_by=str((body or {}).get("updated_by") or "Storage MVP UI"),
+        )
+    except KeyError:
+        raise HTTPException(404, "优化评估不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/product/devices/{device_id}/engineering-actions", tags=["Storage Product MVP"])
+def product_engineering_actions(device_id: str):
+    try:
+        return product_api.engineering_action_checklist(device_id)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+
+
+@app.patch("/api/product/engineering-actions/{action_id}", tags=["Storage Product MVP"])
+def product_update_engineering_action(action_id: str, body: dict):
+    try:
+        return product_api.update_engineering_action(action_id, body)
+    except KeyError:
+        raise HTTPException(404, "执行项不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/devices/{device_id}/integrated-action-plan", tags=["Storage Product MVP"])
+def product_integrated_action_plan(device_id: str, body: dict):
+    try:
+        return product_api.integrated_action_plan(device_id, body)
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/product/devices/{device_id}/skills/{skill_id}/execute", tags=["Storage Product MVP"])
 def product_execute_device_skill(device_id: str, skill_id: str, payload: dict):
     try:
         return product_api.execute_device_skill(device_id, skill_id, payload)
     except KeyError:
         raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/runtime-observations/parse", tags=["Storage Product MVP"])
+def product_parse_runtime_observations(body: dict):
+    try:
+        return product_api.parse_runtime_observation_text(
+            str(body.get("device_type") or ""),
+            str(body.get("text") or ""),
+            str(body.get("source_label") or "PASTED_RUNTIME_OUTPUT"),
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -196,6 +384,18 @@ def product_diagnostics(device_type: str = "", device_id: str = ""):
 def product_change_impact(old_id: str, new_id: str):
     try:
         return product_api.change_impact(old_id, new_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/change-impact/record", tags=["Storage Product MVP"])
+def product_record_change_impact(old_id: str, new_id: str, body: dict | None = None):
+    try:
+        return product_api.record_change_impact(
+            old_id,
+            new_id,
+            assessment_author=str((body or {}).get("assessment_author") or "Storage MVP UI"),
+        )
     except (KeyError, ValueError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -271,12 +471,55 @@ async def knowledge_production_extract(source_id: str, source_version: str, requ
 
 @app.post("/api/product/knowledge-production/releases", tags=["Storage Product MVP"])
 async def knowledge_production_release(body: KnowledgeReleaseBuildRequest):
+    """Build an immutable Knowledge Release candidate.
+
+    Building never changes the active Storage consumer binding.
+    """
     try:
         result = await run_in_threadpool(
-            knowledge_product.build_and_activate_release,
+            knowledge_product.build_release_candidate,
             body.release_version,
         )
-        return {**result, "consumer_status": KnowledgeReleaseConsumer.current().status()}
+        return {
+            **result,
+            "consumer_status": KnowledgeReleaseConsumer.current().status(),
+        }
+    except Exception as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post(
+    "/api/product/knowledge-production/releases/{release_version}/promote",
+    tags=["Storage Product MVP"],
+)
+async def knowledge_production_release_promote(
+    release_version: str,
+    body: KnowledgeReleasePromoteRequest,
+):
+    """Explicitly select a reviewed immutable release + pinned binding."""
+    try:
+        result = await run_in_threadpool(
+            knowledge_product.promote_release_candidate,
+            release_version,
+            approved_by=body.approved_by,
+        )
+        consumer = KnowledgeReleaseConsumer.current()
+        binding = consumer.validate_storage_binding()
+        return {
+            **result,
+            "consumer_status": consumer.status(),
+            "binding": {
+                "knowledge_release_version": binding.get(
+                    "knowledge_release_version"
+                ),
+                "compatibility_status": binding.get(
+                    "compatibility_status"
+                ),
+                "latest_floating_dependency": binding.get(
+                    "latest_floating_dependency"
+                ),
+            },
+        }
     except Exception as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -615,6 +858,89 @@ def runtime_status(device_type: str = ""):
         return runtime_bridge.status(device_type or None)
     except runtime_bridge.RuntimeBridgeUnavailable as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.get(
+    "/api/product/knowledge-production/provider-status",
+    tags=["Storage Product MVP"],
+)
+def knowledge_production_provider_status():
+    """Expose a safe preflight for the existing Knowledge Production Provider.
+
+    This is read-only. It does not create a second Agent Config surface and it
+    never returns credentials. The transport probe only checks the endpoint
+    selected by the server-owned Runtime model configuration.
+    """
+    from . import runtime_bridge
+
+    info = runtime_bridge.status()
+    boundary = dict(info.get("knowledge_production") or {})
+    configured = bool(info.get("configured"))
+    base_url = str(info.get("base_url") or "").strip()
+    parsed = urlsplit(base_url) if base_url else None
+    host = parsed.hostname if parsed is not None else None
+    port = (
+        parsed.port
+        if parsed is not None and parsed.port
+        else 443
+        if parsed is not None and parsed.scheme == "https"
+        else 80
+        if parsed is not None and parsed.scheme == "http"
+        else None
+    )
+
+    transport_status = "NOT_CHECKED"
+    if configured and host and port:
+        try:
+            with socket.create_connection((host, port), timeout=0.7):
+                pass
+            transport_status = "REACHABLE"
+        except OSError:
+            transport_status = "UNREACHABLE"
+
+    model_ref = str(info.get("profile") or "")
+    execution_ready = bool(
+        configured
+        and model_ref
+        and transport_status == "REACHABLE"
+    )
+    return {
+        "configured": configured,
+        "execution_ready": execution_ready,
+        "agent_id": boundary.get("agent_id"),
+        "model_ref": model_ref or None,
+        "provider": info.get("provider"),
+        "model": info.get("model"),
+        "endpoint": {
+            "scheme": parsed.scheme if parsed is not None else None,
+            "host": host,
+            "port": port,
+        },
+        "transport_status": transport_status,
+        "credential_present": bool(info.get("api_key_present")),
+        "credential_name": info.get("api_key_env"),
+        "model_config_source": (
+            "user"
+            if str(info.get("execution_mode_source") or "") == "environment"
+            and bool(str((info.get("runtime") or {}).get("model_config") or ""))
+            else "package_or_server_config"
+        ),
+        "boundary": {
+            "runtime_owner": "UNIFIED_AGENT_RUNTIME",
+            "second_agent_config": False,
+            "secret_exposed": False,
+            "transport_probe_only": True,
+        },
+        "next_action": (
+            "READY_TO_EXTRACT"
+            if execution_ready
+            else (
+                "START_OR_FIX_AI_PROVIDER"
+                if configured
+                else "FIX_RUNTIME_AGENT_CONFIG"
+            )
+        ),
+    }
 
 
 @app.get("/api/v1/runtime/route", tags=["Runtime Integration"])

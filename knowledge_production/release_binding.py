@@ -15,7 +15,6 @@ class ReleaseBindingError(ValueError):
 
 REQUIRED_BINDING = {
     "storage_product_version": "STORAGE_PRODUCT_MVP_RC1",
-    "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
     "knowledge_object_contract_version": "knowledge-object/v1",
     "knowledge_query_contract_version": "knowledge-query/v1",
     "common_evidence_contract_version": "common-evidence/v1.0",
@@ -37,6 +36,20 @@ def validate_release_binding(
     for field, expected in REQUIRED_BINDING.items():
         if binding.get(field) != expected:
             raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", field)
+
+    release_version = str(
+        binding.get("knowledge_release_version") or ""
+    ).strip()
+    if (
+        not release_version
+        or release_version.lower() == "latest"
+        or any(ch.isspace() for ch in release_version)
+    ):
+        raise ReleaseBindingError(
+            "RELEASE_BINDING_INVALID",
+            "knowledge_release_version",
+        )
+
     if binding.get("compatibility_status") != "PASS":
         raise ReleaseBindingError("RELEASE_BINDING_INVALID", "compatibility status")
     if binding.get("latest_floating_dependency") is not False:
@@ -63,9 +76,24 @@ def validate_release_binding(
         raise ReleaseBindingError("KNOWLEDGE_RELEASE_NOT_FOUND")
     if not isinstance(release_manifest, Mapping):
         raise ReleaseBindingError("KNOWLEDGE_RELEASE_INVALID")
-    if release_manifest.get("knowledge_release_version") != REQUIRED_BINDING["knowledge_release_version"]:
-        raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", "release version")
-    if release_manifest.get("contract_version") != REQUIRED_BINDING["knowledge_query_contract_version"]:
-        raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", "query contract")
-    if release_manifest.get("object_contract_version") != REQUIRED_BINDING["knowledge_object_contract_version"]:
-        raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", "object contract")
+    if release_manifest.get("knowledge_release_version") != release_version:
+        raise ReleaseBindingError(
+            "RELEASE_VERSION_MISMATCH",
+            "release version",
+        )
+    if (
+        release_manifest.get("contract_version")
+        != binding.get("knowledge_query_contract_version")
+    ):
+        raise ReleaseBindingError(
+            "RELEASE_VERSION_MISMATCH",
+            "query contract",
+        )
+    if (
+        release_manifest.get("object_contract_version")
+        != binding.get("knowledge_object_contract_version")
+    ):
+        raise ReleaseBindingError(
+            "RELEASE_VERSION_MISMATCH",
+            "object contract",
+        )

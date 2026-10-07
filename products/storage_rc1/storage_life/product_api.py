@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime, timezone, timedelta
+from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+import json
+import re
 
 from . import ai, core, templates, parameter_baseline
 from .knowledge_release import KnowledgeReleaseConsumer
@@ -58,13 +63,38 @@ DIAGNOSTIC_METHODS = {
     "media_errors": ("SMART / NVMe Health", "读取介质错误计数", "持续增长需结合日志与业务负载分析"),
     "critical_warning": ("NVMe SMART / Health", "读取 Critical Warning 位", "任一关键告警均进入人工诊断"),
     "available_spare": ("NVMe SMART / Health", "读取 Available Spare / Threshold", "低于阈值进入寿命风险关注"),
+    "available_spare_threshold": ("NVMe SMART / Health", "读取 Available Spare Threshold", "仅与同次 Available Spare 观测比较，不单独形成诊断"),
     "ecc_status": ("器件状态寄存器/驱动统计", "读取 ECC corrected/uncorrectable 状态", "观察纠错压力与不可纠正错误趋势"),
+    "bit_flip_count": ("NAND Controller / ECC 统计", "读取检测到的 Bit Flip / Corrected Bit 数量", "单次非零不直接判故障；结合 ECC 能力、阈值和时间趋势判断裕量变化"),
+    "bit_flip_threshold": ("Datasheet / Controller 阈值", "读取同次采集提供的 Bit Flip / ECC 告警阈值", "仅与同次 Bit Flip 观测比较，不单独形成诊断"),
     "runtime_bad_block": ("MTD/UBI/驱动统计", "读取运行期坏块数量与增长", "坏块增长需结合擦写分布和 ECC 判断"),
     "read_retry": ("NAND Controller / 驱动统计", "统计 Read Retry 触发", "频繁触发提示读取裕量下降"),
     "program_fail": ("状态寄存器/驱动日志", "统计 Program Fail", "重复失败进入介质/电源/时序诊断"),
     "erase_fail": ("状态寄存器/驱动日志", "统计 Erase Fail", "重复失败进入坏块与磨损诊断"),
     "lifetime_counter": ("厂商寄存器", "按 Datasheet 读取寿命计数", "严格按厂商定义解释"),
 }
+
+RUNTIME_DIAGNOSTIC_OPTION_LABELS = {
+    "critical_warning": "NVMe Critical Warning",
+    "media_errors": "NVMe Media / Data Integrity Errors",
+    "available_spare": "NVMe Available Spare",
+    "available_spare_threshold": "NVMe Available Spare Threshold",
+    "percentage_used": "NVMe Percentage Used",
+    "data_units_written": "NVMe Data Units Written",
+    "device_life_time_est_typ_a": "eMMC Life Time A",
+    "device_life_time_est_typ_b": "eMMC Life Time B",
+    "pre_eol_info": "eMMC PRE_EOL_INFO",
+    "runtime_bad_block": "Runtime / Grown Bad Block Count",
+    "program_fail": "Program Fail Count",
+    "erase_fail": "Erase Fail Count",
+    "erase_count": "Erase Count",
+    "pe_cycle": "P/E Cycle",
+    "ecc_corrected": "ECC Corrected Count",
+    "ecc_uncorrectable": "ECC Uncorrectable Count",
+    "bit_flip_count": "Bit Flip Count",
+    "bit_flip_threshold": "Bit Flip Threshold",
+}
+
 
 IMPACT_RULES = {
     "pe_cycles": ("写入耐久边界变化", "重新核对写入预算、合并写/缓存策略", "增加寿命/高频写场景验证", "复核擦写计数或寿命监控"),
@@ -218,6 +248,245 @@ def _engineering_result_view(skill_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _knowledge_release_identity() -> dict[str, Any]:
+    status = KnowledgeReleaseConsumer.current().status()
+    return {
+        "available": bool(status.get("available")),
+        "knowledge_release_version": str(status.get("knowledge_release_version") or ""),
+        "snapshot_hash": str(status.get("snapshot_hash") or ""),
+    }
+
+
+def _device_fact_fingerprint(detail: dict[str, Any]) -> str:
+    """Stable identity for the currently consumable Device Fact set.
+
+    Downstream S2-S5 assessments store this fingerprint so a later S1 fact/evidence
+    change cannot silently leave stale results marked as current.
+    """
+    rows = []
+    for fact in detail.get("device_facts") or []:
+        evidence = [
+            {
+                "evidence_id": e.get("evidence_id"),
+                "source_id": e.get("source_id"),
+                "source_page": e.get("source_page"),
+                "source_section": e.get("source_section"),
+            }
+            for e in (fact.get("evidence") or [])
+        ]
+        rows.append({
+            "canonical_name": fact.get("canonical_name"),
+            "value": fact.get("value"),
+            "unit": fact.get("unit"),
+            "condition": fact.get("condition"),
+            "scope": fact.get("scope"),
+            "evidence": evidence,
+        })
+    payload = json.dumps(
+        sorted(rows, key=lambda x: str(x.get("canonical_name") or "")),
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _runtime_dependency_state(
+    device_id: str,
+    metric_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Stable identity for only the formal Runtime metrics a scenario consumed.
+
+    S3/S4 must not become stale merely because an unrelated telemetry metric was
+    added later.  S5 intentionally passes no metric filter because its integrated
+    plan consumes the whole current runtime context.
+    """
+    selected = {
+        str(x).strip()
+        for x in (metric_names or [])
+        if str(x or "").strip()
+    }
+    trend = core.runtime_metric_trends(device_id, limit=40)
+    payload = []
+    captures: list[datetime] = []
+    for metric in trend.get("metrics") or []:
+        metric_name = str(metric.get("metric_name") or "")
+        if selected and metric_name not in selected:
+            continue
+        for point in metric.get("points") or []:
+            payload.append({
+                "metric_name": metric_name,
+                "batch_id": point.get("batch_id"),
+                "captured_at": point.get("captured_at"),
+                "normalized_value": point.get("normalized_value"),
+                "unit": point.get("unit"),
+                "source_label": point.get("source_label"),
+            })
+            captured = _iso_datetime(point.get("captured_at"))
+            if captured is not None:
+                captures.append(captured)
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return {
+        "fingerprint": sha256(raw.encode("utf-8")).hexdigest(),
+        "metric_names": sorted(selected),
+        "latest_capture_time": max(captures).isoformat() if captures else None,
+        "point_count": len(payload),
+    }
+
+
+def _runtime_trend_fingerprint(
+    device_id: str,
+    metric_names: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> str:
+    return str(_runtime_dependency_state(device_id, metric_names)["fingerprint"])
+
+
+LIFETIME_FORMAL_KNOWLEDGE_QUERIES = {
+    "NVME_PERCENTAGE_USED_INTERPRETATION_V1": {
+        "query": "NVMe Percentage Used",
+        "semantic_tokens": ("percentage used", "percentage_used"),
+        "canonical_parameter": "percentage_used",
+    },
+    "NVME_DATA_UNITS_WRITTEN_V1": {
+        "query": "NVMe Data Units Written bytes per data unit",
+        "semantic_tokens": ("data units written", "data_units_written", "bytes_per_data_unit"),
+        "canonical_parameter": "data_units_written",
+    },
+    "EMMC_DEVICE_LIFE_TIME_A_V1": {
+        "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_A",
+        "semantic_tokens": ("device_life_time_est_typ_a", "life time a", "life_time_a"),
+        "canonical_parameter": "life_time_a",
+    },
+    "EMMC_DEVICE_LIFE_TIME_B_V1": {
+        "query": "eMMC DEVICE_LIFE_TIME_EST_TYP_B",
+        "semantic_tokens": ("device_life_time_est_typ_b", "life time b", "life_time_b"),
+        "canonical_parameter": "life_time_b",
+    },
+    "EMMC_PRE_EOL_V1": {
+        "query": "eMMC PRE_EOL_INFO",
+        "semantic_tokens": ("pre_eol_info", "pre eol", "pre_eol"),
+        "canonical_parameter": "pre_eol",
+    },
+}
+
+
+def _formal_lifetime_knowledge(requested_metric: str, device_type: str) -> list[dict[str, Any]]:
+    """Map only PACK_LIFETIME_ENGINEERING released objects into LifetimeEngine.
+
+    Public Knowledge/RAG is deliberately excluded.  The existing Skill Pack
+    performs release-version/object-type/evidence filtering first.  Protocol
+    parameters are copied only from explicit structured fields; prose is never
+    parsed into constants.
+    """
+    from .lifetime_engine import FormulaRegistry
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+
+    formal_metric = FormulaRegistry.canonicalize(requested_metric)
+    config = LIFETIME_FORMAL_KNOWLEDGE_QUERIES.get(formal_metric)
+    if not config:
+        return []
+
+    service = RealKnowledgeAssessmentService.current()
+    result = service.adapter.query_pack(
+        "PACK_LIFETIME_ENGINEERING",
+        config["query"],
+        device_type=device_type,
+        top_k=8,
+        semantic_classes=[
+            "PARAMETER_DEFINITION",
+            "CALCULATION_RULE",
+            "APPLICABILITY_RULE",
+        ],
+        canonical_parameters=[config["canonical_parameter"]],
+        scenario_consumer="S3",
+    )
+    if result.get("status") != "READY":
+        return []
+
+    release_version = str(result.get("knowledge_release_version") or "")
+    refs: list[dict[str, Any]] = []
+    for obj in result.get("items") or []:
+        evidence_refs = [
+            str(x).strip()
+            for x in (obj.get("evidence_refs") or [])
+            if str(x).strip()
+        ]
+        if not evidence_refs:
+            continue
+
+        semantic_text = " ".join([
+            str(obj.get("title") or ""),
+            str(obj.get("summary") or ""),
+            str(obj.get("content") or ""),
+            " ".join(str(x) for x in (obj.get("tags") or [])),
+            " ".join(str(x) for x in (obj.get("scope") or [])),
+        ]).lower()
+        if not any(token in semantic_text for token in config["semantic_tokens"]):
+            continue
+
+        parameters: dict[str, Any] = {}
+        explicit_parameters = obj.get("parameters")
+        if isinstance(explicit_parameters, dict):
+            parameters.update(explicit_parameters)
+        structured_content = obj.get("content")
+        if isinstance(structured_content, dict):
+            nested_parameters = structured_content.get("parameters")
+            if isinstance(nested_parameters, dict):
+                parameters.update(nested_parameters)
+
+        semantic_scope = " ".join(
+            str(x).strip()
+            for x in [
+                obj.get("title"),
+                *(obj.get("scope") or []),
+                *(obj.get("tags") or []),
+            ]
+            if str(x or "").strip()
+        )
+        knowledge_id = str(obj.get("object_id") or "")
+        object_release_version = str(obj.get("knowledge_release_version") or release_version)
+        if not knowledge_id or not object_release_version:
+            continue
+        refs.append({
+            "knowledge_id": knowledge_id,
+            "release_version": object_release_version,
+            "release_status": "RELEASED",
+            "semantic_scope": semantic_scope or formal_metric,
+            "evidence_refs": evidence_refs,
+            "parameters": parameters,
+        })
+    return refs
+
+def _require_lifetime_metric_applicable(detail: dict[str, Any], requested_metric: str) -> str:
+    from .lifetime_engine import FormulaRegistry
+
+    formal = FormulaRegistry.canonicalize(requested_metric)
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    allowed_types = {
+        "SSD_TBW_CONSUMPTION_V1": {"SSD"},
+        "SSD_DWPD_OBSERVED_V1": {"SSD"},
+        "NVME_DATA_UNITS_WRITTEN_V1": {"SSD"},
+        "NVME_PERCENTAGE_USED_INTERPRETATION_V1": {"SSD"},
+        "EMMC_DEVICE_LIFE_TIME_A_V1": {"eMMC"},
+        "EMMC_DEVICE_LIFE_TIME_B_V1": {"eMMC"},
+        "EMMC_PRE_EOL_V1": {"eMMC"},
+        "NAND_PE_MARGIN_V1": {"NAND Flash"},
+        "NAND_ERASE_COUNT_MARGIN_V1": {"NAND Flash"},
+        "NAND_WEAR_DISTRIBUTION_V1": {"NAND Flash"},
+        "GENERIC_ENDURANCE_MARGIN_V1": {"NOR Flash"},
+    }
+    expected = allowed_types.get(formal)
+    if expected is not None and dtype not in expected:
+        raise ValueError(f"LIFETIME_METRIC_NOT_APPLICABLE:{formal}:{dtype}")
+
+    if formal in {"NVME_DATA_UNITS_WRITTEN_V1", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"}:
+        if not _confirmed_nvme_interface(detail):
+            raise ValueError(
+                f"NVME_PROTOCOL_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE_OR_PROTOCOL:{formal}"
+            )
+    return formal
+
+
 def _safe_lifetime_facts(detail: dict[str, Any]) -> list[dict[str, Any]]:
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
     mapping = {
@@ -296,6 +565,7 @@ def _formal_knowledge(
     *,
     context: str = "",
     top_k: int = 3,
+    scenario_consumer: str = "",
 ) -> dict[str, Any]:
     consumer = KnowledgeReleaseConsumer.current()
     status = consumer.status()
@@ -313,11 +583,38 @@ def _formal_knowledge(
         if str(item or "").strip()
     )
     try:
-        result = consumer.query(
-            query,
+        structured = consumer.query(
+            "",
             device_type=device_type,
             top_k=top_k,
+            canonical_parameter=canonical_name,
+            scenario_consumer=scenario_consumer,
         )
+        if structured.get("results"):
+            result = structured
+        else:
+            # Compatibility bridge is allowed only for a wholly legacy Formal
+            # Knowledge release.  Current KnowledgeReleaseConsumer exposes a
+            # metadata probe so this decision never depends on search text.
+            probe = getattr(
+                consumer,
+                "has_reviewed_storage_knowledge",
+                None,
+            )
+            has_reviewed_storage = (
+                bool(probe(device_type=device_type))
+                if callable(probe)
+                else False
+            )
+            result = (
+                structured
+                if has_reviewed_storage
+                else consumer.query(
+                    query,
+                    device_type=device_type,
+                    top_k=top_k,
+                )
+            )
     except Exception as exc:
         return {
             "status": "UNKNOWN",
@@ -335,10 +632,31 @@ def _formal_knowledge(
                 evidence_refs.append(evidence_id)
     return {
         "status": "MATCHED" if rows else "NO_MATCH",
-        "code": None if rows else "NO_MATCHING_PUBLISHED_KNOWLEDGE",
+        "code": (
+            None
+            if rows
+            else (
+                "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                if result.get("selection_mode")
+                == "REVIEWED_STORAGE_SEMANTIC"
+                else "NO_MATCHING_PUBLISHED_KNOWLEDGE"
+            )
+        ),
         "knowledge_release_version": result.get("knowledge_release_version"),
         "results": rows,
         "evidence_refs": evidence_refs,
+        "selection_mode": result.get(
+            "selection_mode",
+            "TEXT_AND_DEVICE",
+        ),
+        "compatibility_mode": (
+            "LEGACY_FORMAL_COMPATIBILITY"
+            if rows
+            and result.get("selection_mode", "TEXT_AND_DEVICE")
+            == "TEXT_AND_DEVICE"
+            and not structured.get("results")
+            else None
+        ),
     }
 
 
@@ -381,6 +699,7 @@ def device_slots(device_id: str) -> dict[str, Any]:
                 field.get("parameter_name") or key,
                 device["device_type"],
                 context="engineering meaning diagnostic lifetime",
+                scenario_consumer="S4" if is_diagnostic else "",
             )
             if is_diagnostic or review_status == "CONFIRMED"
             else {
@@ -466,6 +785,505 @@ def device_slots(device_id: str) -> dict[str, Any]:
     }
 
 
+def add_manual_device_fact(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    device = devices[device_id]
+    requested = str(payload.get("canonical_name") or "").strip()
+    if not requested:
+        raise ValueError("CANONICAL_NAME_REQUIRED")
+
+    fields = parameter_baseline.product_fields(
+        device["device_type"], ai.expected_fields(device["device_type"], device.get("vendor", ""))
+    )
+    target = None
+    for field in fields:
+        aliases = [field.get("canonical_name"), *(field.get("aliases") or [])]
+        if requested in {str(x) for x in aliases if x}:
+            target = field
+            break
+    if target is None:
+        raise ValueError(f"UNKNOWN_DEVICE_FIELD:{requested}")
+
+    fact = core.add_manual_fact(
+        device_id,
+        target["canonical_name"],
+        target.get("parameter_name") or target["canonical_name"],
+        payload.get("value"),
+        payload.get("unit"),
+        payload.get("verified_by"),
+        source_page=payload.get("source_page"),
+        source_text=payload.get("source_text"),
+        source_section=payload.get("source_section") or "",
+        condition=payload.get("condition") or "",
+        scope=payload.get("scope") or "",
+    )
+    detail = device_slots(device_id)
+    slot = next(
+        (x for x in detail["slots"] if x.get("canonical_name") == target["canonical_name"]),
+        None,
+    )
+    return {
+        "fact": fact,
+        "slot": slot,
+        "workflow": detail["workflow"],
+        "lifecycle": detail["lifecycle"],
+        "conclusion": detail["conclusion"],
+    }
+
+
+def save_runtime_snapshot(device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+
+    source_label = str(payload.get("source_label") or "").strip()
+    captured_at = payload.get("captured_at")
+    raw_text = str(payload.get("raw_text") or "")
+    placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
+    explicit_source = bool(source_label and source_label.upper() not in placeholder_sources)
+    observations = []
+    for raw in list(payload.get("observations") or []):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        source_line = str(item.get("source_line") or item.get("evidence_ref") or "").strip()
+        user_confirmed = item.get("confirmed_by_user") is True
+        source_line_matches_raw = bool(raw_text and source_line and source_line in raw_text)
+        if user_confirmed and source_line and raw_text and not source_line_matches_raw:
+            raise ValueError("RUNTIME_SOURCE_LINE_NOT_IN_RAW_TEXT")
+        # Formal trend eligibility is issued at the server boundary. Browser
+        # supplied quality_status / availability_status are ignored. A pasted
+        # observation becomes formal only when its exact evidence line is still
+        # present in the persisted raw capture.
+        provenance_ready = bool(
+            user_confirmed
+            and captured_at
+            and explicit_source
+            and source_line_matches_raw
+        )
+        item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
+        item["availability_status"] = "AVAILABLE" if captured_at else "NOT_AVAILABLE"
+        item["confirmed_by_user"] = provenance_ready
+        observations.append(item)
+
+    return core.save_runtime_snapshot(
+        device_id,
+        observations,
+        source_label=source_label or "PASTED_RUNTIME_OUTPUT",
+        raw_text=raw_text,
+        captured_at=captured_at,
+        created_by=str(payload.get("created_by") or "Storage MVP UI"),
+    )
+
+
+def runtime_snapshot_history(device_id: str, limit: int = 20) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    return {
+        "device": devices[device_id],
+        "items": core.list_runtime_snapshots(device_id, limit=limit),
+        "trend": core.runtime_metric_trends(device_id, limit=max(limit, 40)),
+    }
+
+
+def device_assessment_history(device_id: str, limit: int = 20) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    items = core.list_device_assessments(device_id, limit=limit)
+    return {
+        "device": devices[device_id],
+        "count": len(items),
+        "items": items,
+    }
+
+
+def _is_supporting_lifetime_assessment(item: dict[str, Any] | None) -> bool:
+    if not item:
+        return False
+    request = item.get("input") or {}
+    metric = str(request.get("requested_metric") or "")
+    return metric in {
+        "NVME_DATA_UNITS_WRITTEN_V1",
+        "nvme.data_units_written",
+        "GENERIC_WAF_V1",
+        "generic.waf",
+    }
+
+
+def _latest_product_assessments(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Select the newest product assessment per scenario.
+
+    A conversion-only Lifetime record must not hide an earlier user-facing
+    lifetime/risk assessment created in the same workflow.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    for item in items:
+        kind = str(item.get("assessment_type") or "").upper()
+        if not kind:
+            continue
+        if kind not in latest:
+            latest[kind] = item
+            continue
+        if (
+            kind == "LIFETIME"
+            and _is_supporting_lifetime_assessment(latest[kind])
+            and not _is_supporting_lifetime_assessment(item)
+        ):
+            latest[kind] = item
+    return latest
+
+
+def device_mvp_summary(device_id: str) -> dict[str, Any]:
+    """Compose the current Storage MVP state into one user-facing device summary.
+
+    This function does not create a new conclusion engine. It only assembles
+    confirmed Device Facts, the existing device conclusion, and the latest
+    persisted Lifetime / Diagnosis / Optimization assessments.
+    """
+    detail = device_slots(device_id)
+    assessments = core.list_device_assessments(device_id, limit=50)
+    latest = _latest_product_assessments(assessments)
+
+    runtime_trend = core.runtime_metric_trends(device_id, limit=40)
+    latest_formal_runtime_at = _iso_datetime(runtime_trend.get("latest_formal_capture_time"))
+    latest_formal_snapshot_created_at = _iso_datetime(runtime_trend.get("latest_formal_snapshot_created_at"))
+    current_knowledge_release = _knowledge_release_identity()
+    current_runtime_trend_fingerprint = _runtime_trend_fingerprint(device_id)
+    completed_statuses = {"ANSWERED", "CALCULATED", "READY", "COMPLETED", "CONFIRMED"}
+    current_fact_fingerprint = _device_fact_fingerprint(detail)
+
+    def scenario(kind: str, label: str) -> dict[str, Any]:
+        item = latest.get(kind)
+        if not item:
+            return {
+                "type": kind,
+                "label": label,
+                "status": "NOT_RUN",
+                "effective_status": "NOT_RUN",
+                "complete": False,
+                "assessment_id": None,
+                "created_at": None,
+                "direct_answer": None,
+                "next_action": None,
+            }
+        result = item.get("result") or {}
+        skill = result.get("skill_result") or {}
+        engineering = result.get("engineering_result") or {}
+        status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
+        complete = status in completed_statuses
+        next_action = engineering.get("next_action")
+        structured = skill.get("structured_result") or {}
+        recorded_input = item.get("input") or {}
+        recorded_knowledge_release = dict(recorded_input.get("_knowledge_release_identity") or {})
+        if recorded_knowledge_release != current_knowledge_release:
+            complete = False
+            next_action = "Formal Knowledge Release 已变化；请基于当前发布知识重新执行该场景。"
+
+        if kind == "COMPARE":
+            current_new = current_fact_fingerprint
+            recorded_new = str(recorded_input.get("_new_device_fact_fingerprint") or "")
+            old_id = str(recorded_input.get("old_id") or "")
+            recorded_old = str(recorded_input.get("_old_device_fact_fingerprint") or "")
+            old_current = ""
+            old_formal_ready = False
+            if old_id:
+                try:
+                    old_detail = device_slots(old_id)
+                    old_current = _device_fact_fingerprint(old_detail)
+                    old_formal_ready = bool((old_detail.get("lifecycle") or {}).get("formal_ready"))
+                except KeyError:
+                    old_current = ""
+            new_formal_ready = bool((detail.get("lifecycle") or {}).get("formal_ready"))
+            compare_unknowns = list(result.get("unknowns") or [])
+            low_confidence = any(
+                str(x.get("confidence") or "").upper() != "EVIDENCED"
+                for x in (result.get("items") or [])
+            )
+            if (
+                not recorded_new
+                or not recorded_old
+                or recorded_new != current_new
+                or recorded_old != old_current
+            ):
+                complete = False
+                next_action = "S1 Device Fact 已变化或基准器件不可用；请基于当前事实重新执行 S2 参数差异与影响。"
+            elif not old_formal_ready or not new_formal_ready:
+                complete = False
+                next_action = "S2 需要新旧器件都达到 FORMAL_READY；请先完成两侧 S1 参数事实确认。"
+            elif compare_unknowns or low_confidence:
+                complete = False
+                next_action = "S2 仍存在未确认/缺失事实；请消除待验证项后重新执行参数差异与影响。"
+        else:
+            recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
+            if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
+                complete = False
+                next_action = "S1 Device Fact 已变化；请基于当前正式事实重新执行该场景。"
+
+        if kind == "LIFETIME":
+            requested_metric = str((item.get("input") or {}).get("requested_metric") or "")
+            supporting_only = {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}
+            if requested_metric in supporting_only:
+                complete = False
+                next_action = "继续执行寿命消耗 / 裕量 / 健康解释类评估；当前记录仅为支撑计算。"
+            elif requested_metric in {"SSD_DWPD_OBSERVED_V1", "ssd.dwpd"}:
+                projection = structured.get("target_service_life_projection") or {}
+                if projection.get("budget_status") not in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}:
+                    complete = False
+                    next_action = "补充目标服役寿命和已确认 TBW，使实际 DWPD 能形成目标寿命预算判断。"
+        elif kind == "OPTIMIZATION":
+            workload = recorded_input.get("workload_software_facts") or []
+            has_behavior = any(
+                str(x.get("description") or "").strip()
+                for x in workload
+                if isinstance(x, dict)
+            )
+            controls = structured.get("engineering_control_options") or []
+            validation = structured.get("suggested_validation") or []
+            chain_context = dict((recorded_input.get("user_context") or {}).get("assessment_context") or {})
+            chain_lifetime = dict(chain_context.get("latest_lifetime") or {})
+            chain_diagnosis = dict(chain_context.get("latest_diagnosis") or {})
+            current_lifetime = latest.get("LIFETIME") or {}
+            current_diagnosis = latest.get("DIAGNOSIS") or {}
+            current_lifetime_id = current_lifetime.get("id")
+            current_diagnosis_id = current_diagnosis.get("id")
+            current_lifetime_status = str(current_lifetime.get("status") or "").upper()
+            current_diagnosis_status = str(current_diagnosis.get("status") or "").upper()
+            chain_current = bool(
+                current_lifetime_id and current_diagnosis_id
+                and chain_lifetime.get("assessment_id") == current_lifetime_id
+                and chain_diagnosis.get("assessment_id") == current_diagnosis_id
+                and current_lifetime_status in {"ANSWERED", "CALCULATED"}
+                and current_diagnosis_status == "ANSWERED"
+                and str(chain_lifetime.get("status") or "").upper() == current_lifetime_status
+                and str(chain_diagnosis.get("status") or "").upper() == current_diagnosis_status
+            )
+            if not has_behavior:
+                complete = False
+                next_action = "补充当前软件写入 / 日志 / 持久化行为后重新生成针对性优化建议。"
+            elif not chain_current:
+                complete = False
+                next_action = "基于最新 S3 寿命结果和 S4 诊断结果重新生成综合优化方案。"
+            elif status in completed_statuses and not controls:
+                complete = False
+                next_action = "当前优化结果没有形成可执行软件控制；补充软件行为/风险上下文或正式知识后重新生成。"
+            elif status in completed_statuses and not validation:
+                complete = False
+                next_action = "当前优化结果缺少独立测试/验证方法；补齐 DiagnosticMethod / 验证知识后重新生成，不能把软件控制项复制成测试项。"
+        elif kind == "DIAGNOSIS":
+            current_observation = structured.get("current_observation") or []
+            diagnosis_status = str(structured.get("diagnosis_status") or "")
+            signals = structured.get("abnormality_signal") or []
+            missing_information = list(skill.get("missing_information") or structured.get("missing_information") or [])
+            if not current_observation:
+                complete = False
+                next_action = "提供可正式消费的当前运行观测后重新执行诊断。"
+            elif diagnosis_status == "ABNORMAL_SIGNAL_PRESENT" and signals:
+                # Explicit deterministic signals are a valid S4 diagnosis even
+                # when richer mechanism knowledge is still missing.
+                complete = status == "ANSWERED"
+            elif diagnosis_status == "NO_REGISTERED_SIGNAL":
+                semantic_gaps = [
+                    str(x) for x in missing_information
+                    if any(token in str(x) for token in (
+                        "NO_MATCHING_RELEASED_KNOWLEDGE",
+                        "FORMAL_DIAGNOSTIC_KNOWLEDGE",
+                        "INSUFFICIENT_KNOWLEDGE",
+                    ))
+                ]
+                if semantic_gaps:
+                    complete = False
+                    next_action = "当前观测未触发确定性异常，但相关正式诊断语义仍不完整；补齐 Formal Knowledge 后重新判读。"
+            else:
+                complete = False
+                next_action = "当前运行观测尚未形成可完成的 S4 诊断结果。"
+
+        if kind in {"LIFETIME", "DIAGNOSIS", "OPTIMIZATION"}:
+            dependency_metrics = [
+                str(x).strip()
+                for x in (recorded_input.get("_runtime_dependency_metrics") or [])
+                if str(x or "").strip()
+            ]
+            current_runtime_fingerprint = _runtime_trend_fingerprint(
+                device_id,
+                dependency_metrics if kind in {"LIFETIME", "DIAGNOSIS"} else None,
+            )
+            recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
+            if (
+                not recorded_runtime_fingerprint
+                or recorded_runtime_fingerprint != current_runtime_fingerprint
+            ):
+                complete = False
+                next_action = (
+                    "该场景依赖的 Runtime Snapshot / Trend 已变化；请基于当前相关运行数据重新执行。"
+                    if kind != "OPTIMIZATION"
+                    else "Runtime Snapshot / Trend 已变化；请先刷新 S3/S4，再重新生成 S5 优化方案。"
+                )
+
+        return {
+            "type": kind,
+            "label": label,
+            "status": status,
+            "effective_status": (
+                "READY"
+                if complete else
+                "NOT_RUN"
+                if status == "NOT_RUN" else
+                "NEEDS_ATTENTION"
+            ),
+            "complete": complete,
+            "assessment_id": item.get("id"),
+            "created_at": item.get("created_at"),
+            "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
+            "next_action": next_action,
+        }
+
+    facts = detail.get("device_facts") or []
+    slots = detail.get("slots") or []
+    applicable = [x for x in slots if x.get("coverage_status") != "NOT_APPLICABLE"]
+    missing_critical = list((detail.get("conclusion") or {}).get("missing_critical_fields") or [])
+    lifecycle_ready = bool((detail.get("lifecycle") or {}).get("formal_ready"))
+    fact_status = "READY" if lifecycle_ready else ("PARTIAL" if facts else "NOT_RUN")
+    fact_scenario = {
+        "type": "FACT",
+        "label": "S1 参数事实",
+        "status": fact_status,
+        "effective_status": "READY" if lifecycle_ready else ("NOT_RUN" if fact_status == "NOT_RUN" else "NEEDS_ATTENTION"),
+        "complete": lifecycle_ready,
+        "assessment_id": None,
+        "created_at": None,
+        "direct_answer": (
+            f"已确认 {len(facts)} 项 Device Fact"
+            if facts else "尚无已确认 Device Fact"
+        ),
+        "next_action": (
+            "补齐关键 Device Fact"
+            if missing_critical else
+            "完成剩余 P0/P1 参数确认并达到 FORMAL_READY"
+            if facts and not lifecycle_ready else
+            None
+        ),
+    }
+    scenario_items = [
+        fact_scenario,
+        scenario("COMPARE", "S2 参数差异与影响"),
+        scenario("LIFETIME", "S3 寿命 / 风险"),
+        scenario("DIAGNOSIS", "S4 运行诊断"),
+        scenario("OPTIMIZATION", "S5 软件优化"),
+    ]
+    remaining = []
+    if missing_critical:
+        remaining.append(f"补齐关键 Device Fact：{'、'.join(str(x) for x in missing_critical[:8])}")
+    elif facts and not lifecycle_ready:
+        remaining.append("完成剩余 P0/P1 参数确认，使 S1 达到 FORMAL_READY")
+    for item in scenario_items:
+        if item["type"] == "FACT":
+            continue
+        if not item.get("complete"):
+            if item["status"] == "NOT_RUN":
+                remaining.append(f"执行{item['label']}")
+            else:
+                remaining.append(f"{item['label']} 尚未形成可完成结果：{item['status']}")
+    action_items = core.list_engineering_actions(device_id)
+    from skills.real_knowledge import RealKnowledgeAssessmentService
+    try:
+        knowledge_readiness = RealKnowledgeAssessmentService.current().readiness()
+    except Exception as exc:
+        # Summary remains usable when the Formal Knowledge package is missing or
+        # unreadable, but readiness must fail closed and expose the content/runtime gap.
+        knowledge_readiness = {
+            "knowledge_release": {"status": "UNAVAILABLE", "code": str(exc)},
+            "formal_knowledge_object_count": 0,
+            "packs": {},
+        }
+    required_packs = {
+        "S2": "PACK_CHANGE_IMPACT",
+        "S3": "PACK_LIFETIME_ENGINEERING",
+        "S4": "PACK_DIAGNOSTIC_VALIDATION",
+        "S5": "PACK_WRITE_GOVERNANCE",
+    }
+    pack_rows = {}
+    content_blockers = []
+    readiness_packs = knowledge_readiness.get("packs") or {}
+    for scenario_id, pack_id in required_packs.items():
+        row = dict(readiness_packs.get(pack_id) or {})
+        pack_status = row.get("status") or "UNAVAILABLE"
+        pack_rows[scenario_id] = {
+            "pack_id": pack_id,
+            "status": pack_status,
+            "formal_knowledge_object_count": row.get("formal_knowledge_object_count") or 0,
+            "missing_critical_knowledge": list(row.get("missing_critical_knowledge") or []),
+            "recommended_next_owner": row.get("recommended_next_owner"),
+        }
+        if str(pack_status).upper() in {"BLOCKED", "PARTIAL", "UNAVAILABLE", "UNKNOWN"}:
+            content_blockers.append({
+                "scenario": scenario_id,
+                "pack_id": pack_id,
+                "status": row.get("status") or "UNKNOWN",
+                "missing_critical_knowledge": list(row.get("missing_critical_knowledge") or []),
+                "owner": row.get("recommended_next_owner") or "Knowledge Production / Source Verification",
+            })
+    return {
+        "device": detail["device"],
+        "lifecycle": detail["lifecycle"],
+        "conclusion": detail["conclusion"],
+        "facts": {
+            "confirmed": len(facts),
+            "applicable": len(applicable),
+            "fact_coverage_ratio": detail.get("fact_coverage_ratio") or 0,
+            "search_coverage_ratio": detail.get("search_coverage_ratio") or 0,
+            "missing_critical_fields": missing_critical,
+        },
+        "scenarios": scenario_items,
+        "runtime": {
+            "snapshot_count": runtime_trend.get("snapshot_count") or 0,
+            "formal_snapshot_count": runtime_trend.get("formal_snapshot_count") or 0,
+            "metric_count": sum(1 for x in (runtime_trend.get("metrics") or []) if x.get("latest")),
+            "raw_metric_count": len(runtime_trend.get("metrics") or []),
+            "unverified_metric_count": sum(
+                1 for x in (runtime_trend.get("metrics") or [])
+                if not x.get("latest") and (x.get("raw_sample_count") or 0) > 0
+            ),
+            "latest_metrics": [
+                {
+                    "metric_name": x.get("metric_name"),
+                    "sample_count": x.get("sample_count"),
+                    "latest": x.get("latest"),
+                    "delta": x.get("delta"),
+                }
+                for x in (runtime_trend.get("metrics") or [])
+                if x.get("latest")
+            ][:12],
+            "interpretation_performed": False,
+            "formal_trend_only": bool(runtime_trend.get("formal_trend_only")),
+        },
+        "action_checklist": {
+            "items": action_items,
+            "open_count": sum(
+                1 for x in action_items
+                if x.get("status") in {"OPEN", "IN_PROGRESS"}
+            ),
+        },
+        "formal_knowledge_readiness": {
+            "knowledge_release": knowledge_readiness.get("knowledge_release") or {},
+            "formal_knowledge_object_count": knowledge_readiness.get("formal_knowledge_object_count") or 0,
+            "packs": pack_rows,
+            "content_blockers": content_blockers,
+        },
+        "public_knowledge": {
+            "integration": "IN_CONTEXT",
+            "role": "ENGINEERING_CONTEXT_AND_CITATION",
+            "formal_evidence": False,
+            "storage_diagnosis": False,
+        },
+        "remaining_actions": remaining,
+        "mvp_ready_for_demo": all(bool(x.get("complete")) for x in scenario_items),
+    }
+
+
 def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     detail = device_slots(device_id)
     return {
@@ -477,7 +1295,200 @@ def confirmed_device_facts(device_id: str) -> dict[str, Any]:
     }
 
 
-def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+NVME_RUNTIME_METRICS = {
+    "critical_warning",
+    "media_errors",
+    "available_spare",
+    "available_spare_threshold",
+    "spare_threshold",
+    "percentage_used",
+    "data_units_written",
+}
+EMMC_RUNTIME_METRICS = {
+    "life_time_a",
+    "life_time_b",
+    "device_life_time_a",
+    "device_life_time_b",
+    "device_life_time_est_typ_a",
+    "device_life_time_est_typ_b",
+    "pre_eol",
+    "pre_eol_info",
+    "bkops",
+    "bkops_status",
+    "ext_csd_health_report",
+}
+
+
+def _confirmed_nvme_interface(detail: dict[str, Any]) -> bool:
+    """Return True when S1 confirmed facts establish NVMe protocol applicability.
+
+    SSD datasheets commonly encode PCIe under Interface and NVMe under Protocol,
+    so requiring the literal token NVMe in Interface alone would incorrectly
+    block valid NVMe devices.
+    """
+    values = [
+        str(fact.get("value") or "").lower()
+        for fact in (detail.get("device_facts") or [])
+        if str(fact.get("canonical_name") or "") in {"interface", "protocol"}
+    ]
+    return any("nvme" in value for value in values)
+
+
+def _runtime_metric_applicability(
+    detail: dict[str, Any] | None,
+    device_type: str,
+    metric: str,
+) -> tuple[bool, str | None]:
+    dtype = templates.normalize_device_type(device_type)
+    metric = str(metric or "").strip()
+    if metric in NVME_RUNTIME_METRICS:
+        if dtype != "SSD":
+            return False, "NVME_METRIC_REQUIRES_SSD"
+        if detail is not None and not _confirmed_nvme_interface(detail):
+            return False, "NVME_METRIC_REQUIRES_CONFIRMED_NVME_INTERFACE_OR_PROTOCOL"
+        if detail is None:
+            return False, "SELECT_DEVICE_AND_CONFIRM_NVME_INTERFACE_OR_PROTOCOL"
+    if metric in EMMC_RUNTIME_METRICS and dtype != "eMMC":
+        return False, "EMMC_METRIC_REQUIRES_EMMC"
+    return True, None
+
+
+def _require_runtime_metrics_applicable(
+    detail: dict[str, Any],
+    observations: list[dict[str, Any]],
+) -> None:
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    for raw in observations or []:
+        metric = str((raw or {}).get("metric_name") or "").strip()
+        if not metric:
+            continue
+        applicable, reason = _runtime_metric_applicability(detail, dtype, metric)
+        if not applicable:
+            raise ValueError(f"RUNTIME_METRIC_NOT_APPLICABLE:{metric}:{reason}")
+
+
+def _verify_runtime_snapshot_evidence(device_id: str, item: dict[str, Any]) -> bool:
+    ref = str(item.get("evidence_ref") or "").strip()
+    if not ref.startswith("runtime-snapshot:"):
+        return False
+    parts = ref.split(":")
+    if len(parts) not in {2, 3} or not parts[1]:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_REF_INVALID")
+    batch_id = parts[1]
+    observation_id = parts[2] if len(parts) == 3 else ""
+    try:
+        snapshot = core.get_runtime_snapshot(batch_id)
+    except KeyError as exc:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_NOT_FOUND") from exc
+    if str(snapshot.get("device_id") or "") != device_id:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_DEVICE_MISMATCH")
+    candidates = list(snapshot.get("observations") or [])
+    if observation_id:
+        candidates = [x for x in candidates if str(x.get("id") or "") == observation_id]
+    metric = str(item.get("metric_name") or "").strip()
+    candidates = [x for x in candidates if str(x.get("metric_name") or "").strip() == metric]
+    if not candidates:
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_OBSERVATION_MISMATCH")
+    stored = candidates[0]
+    if (
+        str(stored.get("quality_status") or "").upper() != "VALID"
+        or str(stored.get("availability_status") or "").upper() != "AVAILABLE"
+        or int(stored.get("confirmed_by_user") or 0) != 1
+    ):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_NOT_FORMAL")
+    claimed_value = item.get("normalized_value", item.get("raw_value"))
+    stored_value = stored.get("normalized_value", stored.get("raw_value"))
+    if str(claimed_value) != str(stored_value):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_VALUE_MISMATCH")
+    claimed_source = str(item.get("source_command_or_interface") or "").strip()
+    if claimed_source and claimed_source != str(snapshot.get("source_label") or "").strip():
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_SOURCE_MISMATCH")
+    claimed_time = _iso_datetime(item.get("capture_time"))
+    stored_time = _iso_datetime(snapshot.get("captured_at"))
+    if claimed_time is None or stored_time is None or claimed_time.astimezone(timezone.utc) != stored_time.astimezone(timezone.utc):
+        raise ValueError("RUNTIME_SNAPSHOT_EVIDENCE_TIME_MISMATCH")
+    return True
+
+
+def _bind_runtime_observations(
+    device_id: str,
+    device_type: str,
+    observations: list[dict[str, Any]],
+    *,
+    trusted_runtime: bool = False,
+) -> list[dict[str, Any]]:
+    """Bind client/runtime observations to the selected device at the server boundary.
+
+    Browser/client claims such as quality_status=VALID are not trusted by
+    themselves.  A client observation becomes formally consumable only when it
+    explicitly confirms provenance and supplies capture/source/evidence.  Server
+    derived trend observations use trusted_runtime=True after the snapshot store
+    has already enforced those requirements.
+    """
+    raw_items = list(observations or [])
+    if len(raw_items) > 128:
+        raise ValueError("RUNTIME_OBSERVATION_LIMIT_EXCEEDED:128")
+    bound: list[dict[str, Any]] = []
+    normalized_type = templates.normalize_device_type(device_type)
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise ValueError("RUNTIME_OBSERVATION_OBJECT_REQUIRED")
+        item = dict(raw)
+        claimed_device = str(item.get("device_id") or "").strip()
+        if claimed_device and claimed_device != device_id:
+            raise ValueError("RUNTIME_OBSERVATION_DEVICE_MISMATCH")
+        claimed_type = str(item.get("device_type") or "").strip()
+        if claimed_type and templates.normalize_device_type(claimed_type) != normalized_type:
+            raise ValueError("RUNTIME_OBSERVATION_DEVICE_TYPE_MISMATCH")
+
+        capture_time = item.get("capture_time")
+        capture_dt = _iso_datetime(capture_time)
+        if capture_time and (capture_dt is None or capture_dt.tzinfo is None):
+            raise ValueError("RUNTIME_CAPTURE_TIME_TIMEZONE_REQUIRED")
+        if capture_dt is not None and capture_dt.astimezone(timezone.utc) > datetime.now(timezone.utc) + timedelta(minutes=5):
+            raise ValueError("RUNTIME_CAPTURE_TIME_IN_FUTURE")
+        source = str(item.get("source_command_or_interface") or "").strip()
+        evidence = str(item.get("evidence_ref") or item.get("raw_output_ref") or "").strip()
+        placeholder_sources = {"PASTED_RUNTIME_OUTPUT", "UNKNOWN", "N/A", "NA"}
+        source_is_explicit = bool(source and source.upper() not in placeholder_sources)
+        if len(source) > 500:
+            raise ValueError("RUNTIME_SOURCE_LABEL_TOO_LONG")
+        if len(evidence) > 4000:
+            raise ValueError("RUNTIME_EVIDENCE_REF_TOO_LONG")
+        metric_name = str(item.get("metric_name") or "").strip()
+        if not metric_name or len(metric_name) > 160:
+            raise ValueError("RUNTIME_METRIC_NAME_INVALID")
+        confirmed = item.pop("confirmed_by_user", False) is True
+        snapshot_verified = _verify_runtime_snapshot_evidence(device_id, item) if evidence.startswith("runtime-snapshot:") else False
+        provenance_ready = bool(
+            capture_time
+            and source_is_explicit
+            and evidence
+            and (trusted_runtime or snapshot_verified or confirmed)
+        )
+
+        item["device_id"] = device_id
+        item["device_type"] = normalized_type
+        item["metric_name"] = metric_name
+        item["source_command_or_interface"] = source or None
+        item["evidence_ref"] = evidence or None
+        item["raw_output_ref"] = str(item.get("raw_output_ref") or evidence or "").strip() or None
+        # Drop caller-supplied derived trust claims and re-issue them server-side.
+        item.pop("is_formally_consumable", None)
+        item["quality_status"] = "VALID" if provenance_ready else "UNKNOWN"
+        item["availability_status"] = "AVAILABLE" if capture_time else "NOT_AVAILABLE"
+        bound.append(item)
+    return bound
+
+
+def execute_device_skill(
+    device_id: str,
+    skill_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    trusted_runtime: bool = False,
+    trusted_assessment_context: bool = False,
+) -> dict[str, Any]:
     """Bind one selected device to the existing four Storage Domain Skill contracts."""
     allowed = {
         "storage-write-governance",
@@ -491,12 +1502,21 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
     detail = device_slots(device_id)
     request = dict(payload or {})
     dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    raw_runtime = list(request.get("runtime_observations") or [])
+    _require_runtime_metrics_applicable(detail, raw_runtime)
+    bound_runtime = _bind_runtime_observations(
+        device_id,
+        dtype,
+        raw_runtime,
+        trusted_runtime=trusted_runtime,
+    )
+    request["runtime_observations"] = bound_runtime
     context = {
         "device_id": device_id,
         "device_type": dtype,
         "confirmed_device_facts": detail.get("device_facts") or [],
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
-        "runtime_observations": list(request.get("runtime_observations") or []),
+        "runtime_observations": bound_runtime,
     }
 
     from skills.real_knowledge import RealKnowledgeAssessmentService
@@ -504,6 +1524,13 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
 
     if skill_id == "storage-write-governance":
         user_context = dict(request.get("user_context") or {})
+        # S5 chain state is server-owned.  The generic product skill endpoint may
+        # accept a user question/workload description, but it must not let a
+        # browser fabricate "latest S3/S4" objects and persist a falsely complete
+        # optimization assessment.  Only the integrated action-plan orchestrator
+        # may inject the current validated assessment context.
+        if not trusted_assessment_context:
+            user_context.pop("assessment_context", None)
         user_context.setdefault("question", f"{dtype} software write behavior lifetime governance")
         user_context["device_context"] = context
         skill_payload = {
@@ -512,23 +1539,25 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
             "workload_software_facts": list(request.get("workload_software_facts") or []),
         }
     elif skill_id == "storage-diagnostic-validation":
-        capabilities = list(request.get("diagnostic_capabilities") or [])
-        if not capabilities:
-            capabilities = [
-                {
-                    "canonical_name": x["canonical_name"],
-                    "diagnostic_status": x.get("diagnostic_status"),
-                    "datasheet_fact": x.get("value"),
-                    "review_status": x.get("review_status"),
-                    "evidence_refs": [
-                        e.get("evidence_id") or e.get("source_id")
-                        for e in x.get("evidence") or []
-                        if e.get("evidence_id") or e.get("source_id")
-                    ],
-                }
-                for x in detail["slots"]
-                if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
-            ]
+        # Diagnostic capability is a server-owned projection of current Device
+        # Fact.  Product callers may provide Runtime Observation/question, but
+        # cannot claim unsupported datasheet capabilities or evidence refs.
+        capabilities = [
+            {
+                "canonical_name": x["canonical_name"],
+                "diagnostic_status": x.get("diagnostic_status"),
+                "datasheet_fact": x.get("value"),
+                "review_status": x.get("review_status"),
+                "evidence_refs": [
+                    e.get("evidence_id") or e.get("source_id")
+                    for e in x.get("evidence") or []
+                    if e.get("evidence_id") or e.get("source_id")
+                ],
+            }
+            for x in detail["slots"]
+            if x.get("group") == parameter_baseline.KEY_DIAGNOSTIC
+            and _runtime_metric_applicability(detail, dtype, x.get("canonical_name"))[0]
+        ]
         skill_payload = {
             "device_type": dtype,
             "target_question": str(
@@ -548,16 +1577,19 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         requested_metric = str(request.get("requested_metric") or "").strip()
         if not requested_metric:
             raise ValueError("REQUESTED_METRIC_REQUIRED")
+        _require_lifetime_metric_applicable(detail, requested_metric)
         assessment = dict(request.get("assessment_request") or {})
         assessment["device_id"] = device_id
-        existing = list(assessment.get("confirmed_facts") or [])
-        existing_names = {str(x.get("metric_name") or "") for x in existing if isinstance(x, dict)}
-        assessment["confirmed_facts"] = existing + [
-            x for x in _safe_lifetime_facts(detail)
-            if x["metric_name"] not in existing_names
-        ]
-        if "runtime_observations" not in assessment:
-            assessment["runtime_observations"] = list(request.get("runtime_observations") or [])
+        # Product-side formal semantics are always rebound to the current
+        # server-validated Knowledge Release.  Client-supplied RELEASED flags or
+        # protocol parameters are not trusted across this boundary.
+        assessment["formal_knowledge"] = _formal_lifetime_knowledge(requested_metric, dtype)
+        # Confirmed Device Facts are a server-owned boundary.  Do not merge
+        # caller-provided objects that merely claim source_type=CONFIRMED_DEVICE_FACT.
+        assessment["confirmed_facts"] = _safe_lifetime_facts(detail)
+        # Nested caller-provided observations are never trusted over the product
+        # boundary; only the server-bound top-level observations are consumed.
+        assessment["runtime_observations"] = bound_runtime
         skill_payload = {
             "assessment_request": assessment,
             "requested_metric": requested_metric,
@@ -565,7 +1597,7 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         }
 
     result = service.execute_skill(skill_id, skill_payload)
-    return {
+    response = {
         "device": detail["device"],
         "context": context,
         "skill_payload": skill_payload,
@@ -575,6 +1607,689 @@ def execute_device_skill(device_id: str, skill_id: str, payload: dict[str, Any] 
         "second_skill_stack": False,
         "second_knowledge_stack": False,
     }
+    if request.get("record_assessment") is True:
+        assessment_type = {
+            "storage-lifetime-budget": "LIFETIME",
+            "storage-diagnostic-validation": "DIAGNOSIS",
+            "storage-write-governance": "OPTIMIZATION",
+        }.get(skill_id)
+        if assessment_type:
+            record_input = dict(request)
+            record_input["_device_fact_fingerprint"] = _device_fact_fingerprint(detail)
+            record_input["_knowledge_release_identity"] = _knowledge_release_identity()
+
+            if assessment_type in {"LIFETIME", "DIAGNOSIS"}:
+                requested_dependencies = (
+                    list(request.get("_runtime_dependency_metrics") or [])
+                    if trusted_runtime else []
+                )
+                dependency_metrics = sorted({
+                    str(x).strip()
+                    for x in (
+                        requested_dependencies
+                        or [obs.get("metric_name") for obs in bound_runtime if isinstance(obs, dict)]
+                    )
+                    if str(x or "").strip()
+                })
+                record_input["_runtime_dependency_metrics"] = dependency_metrics
+                record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(
+                    device_id,
+                    dependency_metrics,
+                )
+            else:
+                # S5 consumes the complete current runtime context.
+                record_input["_runtime_dependency_metrics"] = []
+                record_input["_runtime_trend_fingerprint"] = _runtime_trend_fingerprint(device_id)
+            response["assessment_record"] = core.save_device_assessment(
+                device_id,
+                assessment_type,
+                result.get("status") if isinstance(result, dict) else "UNKNOWN",
+                record_input,
+                {
+                    "skill_id": skill_id,
+                    "skill_result": result,
+                    "engineering_result": response["engineering_result"],
+                },
+                created_by=str(request.get("assessment_author") or "Storage MVP"),
+            )
+    return response
+
+
+def _iso_datetime(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def analyze_runtime_trend(
+    device_id: str,
+    target_service_life: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Turn saved runtime snapshots into existing Lifetime Skill calls.
+
+    No new lifetime formula is introduced here.  The function only derives
+    explicit deltas/time windows from saved snapshots and feeds them into the
+    already-registered Lifetime Engine metrics.
+    """
+    trend = core.runtime_metric_trends(device_id, limit=40)
+    device = {x["id"]: x for x in core.list_devices()}.get(device_id)
+    if not device:
+        raise KeyError(device_id)
+    dtype = templates.normalize_device_type(device["device_type"])
+    results: list[dict[str, Any]] = []
+    primary_target_assessment_recorded = False
+
+    def observation(metric_name: str, point: dict[str, Any], value: Any | None = None, unit: str | None = None):
+        return {
+            "observation_id": f"trend-{point.get('batch_id')}-{metric_name}",
+            "device_id": device_id,
+            "device_type": dtype,
+            "metric_name": metric_name,
+            "raw_value": point.get("raw_value") if value is None else value,
+            "normalized_value": point.get("normalized_value") if value is None else value,
+            "unit": unit or point.get("unit") or "",
+            "capture_time": point.get("captured_at"),
+            "source_command_or_interface": point.get("source_label") or "SAVED_RUNTIME_SNAPSHOT",
+            "raw_output_ref": point.get("source_line") or point.get("batch_id"),
+            "evidence_ref": point.get("source_line") or point.get("batch_id"),
+            "collector": "STORAGE_MVP_RUNTIME_TREND",
+            # runtime_metric_trends() already filters to user-confirmed VALID/AVAILABLE
+            # snapshot points. Re-assert the canonical RuntimeObservation contract
+            # here so LifetimeEngine does not silently downgrade the derived point.
+            "quality_status": "VALID",
+            "availability_status": "AVAILABLE",
+        }
+
+    by_metric = {x["metric_name"]: x for x in trend.get("metrics") or []}
+
+    # NVMe cumulative Data Units Written -> delta bytes -> observed DWPD.
+    duw = by_metric.get("data_units_written")
+    if dtype == "SSD" and duw and duw.get("previous") and duw.get("delta") is not None:
+        latest, previous = duw["latest"], duw["previous"]
+        start, end = _iso_datetime(previous.get("captured_at")), _iso_datetime(latest.get("captured_at"))
+        elapsed_days = (end - start).total_seconds() / 86400 if start and end else None
+        delta_units = float(duw["delta"])
+        if not elapsed_days or elapsed_days <= 0:
+            results.append({
+                "kind": "TREND_DWPD",
+                "metric_name": "data_units_written",
+                "sample_count": duw.get("sample_count"),
+                "delta": delta_units,
+                "delta_unit": latest.get("unit") or "data_units",
+                "error": "RUNTIME_CAPTURE_WINDOW_INVALID",
+                "detail": "两次 Data Units Written 快照必须具有递增且不同的真实采集时间。",
+            })
+        elif delta_units < 0:
+            results.append({
+                "kind": "TREND_DWPD",
+                "metric_name": "data_units_written",
+                "sample_count": duw.get("sample_count"),
+                "elapsed_days": elapsed_days,
+                "delta": delta_units,
+                "delta_unit": latest.get("unit") or "data_units",
+                "error": "CUMULATIVE_COUNTER_DECREASED",
+                "detail": "累计写入计数发生回退，可能存在设备更换、控制器复位或计数器重置；禁止继续计算 DWPD。",
+            })
+        else:
+            conversion = execute_device_skill(device_id, "storage-lifetime-budget", {
+                "requested_metric": "NVME_DATA_UNITS_WRITTEN_V1",
+                "runtime_observations": [
+                    observation("data_units_written", latest, value=delta_units, unit=latest.get("unit") or "data_units")
+                ],
+                "assessment_request": {"assumptions": []},
+                "target_service_life": {},
+                "record_assessment": False,
+                "assessment_author": "Storage MVP Runtime Trend",
+            }, trusted_runtime=True)
+            structured = (conversion.get("skill_result") or {}).get("structured_result") or {}
+            converted = structured.get("measured_vs_budget") or {}
+            host_bytes = converted.get("value") if isinstance(converted, dict) else None
+            if host_bytes is not None:
+                dwpd = execute_device_skill(device_id, "storage-lifetime-budget", {
+                    "requested_metric": "SSD_DWPD_OBSERVED_V1",
+                    "runtime_observations": [
+                        observation("host_written_bytes", latest, value=host_bytes, unit="bytes")
+                    ],
+                    "assessment_request": {
+                        "assumptions": [{
+                            "name": "time_window_days",
+                            "value": elapsed_days,
+                            "unit": "days",
+                            "rationale": "Derived from two saved runtime snapshot timestamps",
+                            "evidence_refs": [previous.get("batch_id"), latest.get("batch_id")],
+                        }]
+                    },
+                    "target_service_life": dict(target_service_life or {}),
+                    "_runtime_dependency_metrics": ["data_units_written"],
+                    "record_assessment": True,
+                    "assessment_author": "Storage MVP Runtime Trend",
+                }, trusted_runtime=True)
+                projection = (
+                    ((dwpd.get("skill_result") or {}).get("structured_result") or {})
+                    .get("target_service_life_projection") or {}
+                )
+                primary_target_assessment_recorded = bool(
+                    target_service_life
+                    and projection.get("budget_status") in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}
+                )
+                results.append({
+                    "kind": "TREND_DWPD",
+                    "metric_name": "data_units_written",
+                    "sample_count": duw.get("sample_count"),
+                    "elapsed_days": elapsed_days,
+                    "delta": delta_units,
+                    "delta_unit": latest.get("unit") or "data_units",
+                    "conversion": conversion,
+                    "assessment": dwpd,
+                    "primary_s3_assessment": primary_target_assessment_recorded,
+                })
+
+    direct_metrics = {
+        "percentage_used": ("NVME_PERCENTAGE_USED_INTERPRETATION_V1", "percentage_used", "%"),
+        "device_life_time_est_typ_a": ("EMMC_DEVICE_LIFE_TIME_A_V1", "device_life_time_a", "code"),
+        "device_life_time_est_typ_b": ("EMMC_DEVICE_LIFE_TIME_B_V1", "device_life_time_b", "code"),
+        "pre_eol_info": ("EMMC_PRE_EOL_V1", "pre_eol_info", "code"),
+        "erase_count": ("NAND_ERASE_COUNT_MARGIN_V1", "erase_count", "cycles"),
+        "pe_cycle": ("NAND_PE_MARGIN_V1", "pe_cycle", "cycles"),
+    }
+    for source_metric, (formal_metric, runtime_metric, default_unit) in direct_metrics.items():
+        series = by_metric.get(source_metric)
+        if not series or not series.get("latest"):
+            continue
+        point = series["latest"]
+        try:
+            assessment = execute_device_skill(device_id, "storage-lifetime-budget", {
+                "requested_metric": formal_metric,
+                "runtime_observations": [
+                    observation(runtime_metric, point, unit=point.get("unit") or default_unit)
+                ],
+                "assessment_request": {"assumptions": []},
+                "target_service_life": {},
+                "_runtime_dependency_metrics": [source_metric],
+                "record_assessment": not primary_target_assessment_recorded,
+                "assessment_author": "Storage MVP Runtime Trend",
+            }, trusted_runtime=True)
+        except Exception as exc:
+            results.append({
+                "kind": "LATEST_SNAPSHOT",
+                "metric_name": source_metric,
+                "formal_metric": formal_metric,
+                "error": str(exc),
+            })
+            continue
+        results.append({
+            "kind": "LATEST_SNAPSHOT",
+            "metric_name": source_metric,
+            "formal_metric": formal_metric,
+            "sample_count": series.get("sample_count"),
+            "delta": series.get("delta"),
+            "assessment": assessment,
+        })
+
+    return {
+        "device": device,
+        "trend": trend,
+        "results": results,
+        "supported_result_count": len(results),
+        "target_service_life": dict(target_service_life or {}),
+        "new_formula_stack": False,
+        "public_knowledge_used": False,
+    }
+
+
+def integrated_action_plan(device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compose current Storage evidence into one optimization action plan.
+
+    This is orchestration only: current-state facts come from persisted
+    Lifetime/Diagnosis assessments and Runtime snapshots; engineering controls
+    come from the existing storage-write-governance Skill.
+    """
+    request = dict(payload or {})
+    detail = device_slots(device_id)
+    assessments = core.list_device_assessments(device_id, limit=50)
+    latest = _latest_product_assessments(assessments)
+
+    trend = core.runtime_metric_trends(device_id, limit=40)
+    current_fact_fingerprint = _device_fact_fingerprint(detail)
+    current_knowledge_release = _knowledge_release_identity()
+
+    def assessment_view(kind: str) -> dict[str, Any] | None:
+        item = latest.get(kind)
+        if not item:
+            return None
+        recorded_input = item.get("input") or {}
+        recorded_fact_fingerprint = str(recorded_input.get("_device_fact_fingerprint") or "")
+        recorded_knowledge_release = dict(recorded_input.get("_knowledge_release_identity") or {})
+        if not recorded_fact_fingerprint or recorded_fact_fingerprint != current_fact_fingerprint:
+            return None
+        if recorded_knowledge_release != current_knowledge_release:
+            return None
+        recorded_runtime_fingerprint = str(recorded_input.get("_runtime_trend_fingerprint") or "")
+        if kind in {"LIFETIME", "DIAGNOSIS"}:
+            dependency_metrics = [
+                str(x).strip()
+                for x in (recorded_input.get("_runtime_dependency_metrics") or [])
+                if str(x or "").strip()
+            ]
+            current_dependency_fingerprint = _runtime_trend_fingerprint(
+                device_id,
+                dependency_metrics,
+            )
+            if (
+                not recorded_runtime_fingerprint
+                or recorded_runtime_fingerprint != current_dependency_fingerprint
+            ):
+                return None
+        result = item.get("result") or {}
+        skill = result.get("skill_result") or {}
+        engineering = result.get("engineering_result") or {}
+        structured = skill.get("structured_result") or {}
+        status = str(item.get("status") or skill.get("status") or "UNKNOWN").upper()
+        if kind == "LIFETIME":
+            requested_metric = str(recorded_input.get("requested_metric") or "")
+            if requested_metric in {"NVME_DATA_UNITS_WRITTEN_V1", "nvme.data_units_written", "GENERIC_WAF_V1", "generic.waf"}:
+                return None
+            if status not in {"ANSWERED", "CALCULATED"}:
+                return None
+            if requested_metric in {"SSD_DWPD_OBSERVED_V1", "ssd.dwpd"}:
+                projection = structured.get("target_service_life_projection") or {}
+                if projection.get("budget_status") not in {"WITHIN_BUDGET", "EXCEEDS_BUDGET"}:
+                    return None
+        elif kind == "DIAGNOSIS":
+            current_observation = structured.get("current_observation") or []
+            diagnosis_status = str(structured.get("diagnosis_status") or "")
+            signals = structured.get("abnormality_signal") or []
+            missing_information = list(skill.get("missing_information") or structured.get("missing_information") or [])
+            if status != "ANSWERED" or not current_observation:
+                return None
+            if diagnosis_status == "ABNORMAL_SIGNAL_PRESENT" and signals:
+                pass
+            elif diagnosis_status == "NO_REGISTERED_SIGNAL":
+                if any(
+                    any(token in str(value) for token in (
+                        "NO_MATCHING_RELEASED_KNOWLEDGE",
+                        "FORMAL_DIAGNOSTIC_KNOWLEDGE",
+                        "INSUFFICIENT_KNOWLEDGE",
+                    ))
+                    for value in missing_information
+                ):
+                    return None
+            else:
+                return None
+        risk_context: dict[str, Any] = {}
+        if kind == "LIFETIME":
+            risk_context = {
+                "margin_status": structured.get("margin_status"),
+                "measured_vs_budget": structured.get("measured_vs_budget"),
+                "target_service_life_projection": structured.get("target_service_life_projection"),
+            }
+        elif kind == "DIAGNOSIS":
+            risk_context = {
+                "diagnosis_status": structured.get("diagnosis_status"),
+                "abnormality_signal": structured.get("abnormality_signal") or [],
+            }
+        runtime_evidence_refs = [
+            str(x.get("evidence_ref") or x.get("raw_output_ref") or "").strip()
+            for x in (structured.get("current_observation") or [])
+            if isinstance(x, dict)
+            and str(x.get("evidence_ref") or x.get("raw_output_ref") or "").strip()
+        ]
+        evidence_refs = sorted({
+            str(ref)
+            for ref in list(skill.get("evidence_refs") or []) + runtime_evidence_refs
+            if str(ref)
+        })
+        return {
+            "assessment_id": item.get("id"),
+            "status": status,
+            "created_at": item.get("created_at"),
+            "direct_answer": engineering.get("direct_answer") or skill.get("direct_answer"),
+            "next_action": engineering.get("next_action"),
+            "missing_information": skill.get("missing_information") or [],
+            "evidence_refs": evidence_refs,
+            "knowledge_refs": skill.get("knowledge_refs") or [],
+            "risk_context": risk_context,
+        }
+
+    lifetime = assessment_view("LIFETIME")
+    diagnosis = assessment_view("DIAGNOSIS")
+    software_behavior = str(request.get("software_behavior") or "").strip()
+
+    context_terms = [
+        "storage software write governance",
+        "write amplification cache batching persistence logging wear lifetime optimization",
+    ]
+    if lifetime:
+        context_terms.append(f"lifetime assessment status {lifetime['status']}")
+    if diagnosis:
+        context_terms.append(f"diagnosis assessment status {diagnosis['status']}")
+    metric_names = [
+        x.get("metric_name")
+        for x in (trend.get("metrics") or [])
+        if x.get("metric_name") and x.get("latest")
+    ]
+    runtime_context = [
+        {
+            "metric_name": x.get("metric_name"),
+            "latest_value": (x.get("latest") or {}).get("normalized_value"),
+            "unit": (x.get("latest") or {}).get("unit"),
+            "captured_at": (x.get("latest") or {}).get("captured_at"),
+            "delta": x.get("delta"),
+            "sample_count": x.get("sample_count"),
+        }
+        for x in (trend.get("metrics") or [])
+        if x.get("metric_name") and x.get("latest")
+    ][:12]
+    if metric_names:
+        context_terms.append("runtime metrics " + " ".join(metric_names[:12]))
+
+    workload_facts = []
+    if software_behavior:
+        workload_facts.append({
+            "source": "USER_DECLARED_WORKLOAD",
+            "description": software_behavior,
+        })
+
+    current_state = []
+    if lifetime:
+        current_state.append({"kind": "LIFETIME", **lifetime})
+    if diagnosis:
+        current_state.append({"kind": "DIAGNOSIS", **diagnosis})
+    if metric_names:
+        current_state.append({
+            "kind": "RUNTIME_TREND",
+            "snapshot_count": trend.get("snapshot_count") or 0,
+            "metric_names": metric_names[:12],
+            "runtime_context": runtime_context,
+            "interpretation": "EXPLICIT_VALUE_TREND_ONLY",
+        })
+
+    blockers = []
+    if not lifetime:
+        blockers.append("S3 寿命 / 风险结果缺失、未完成或已过期")
+    if not diagnosis:
+        blockers.append("S4 运行诊断结果缺失、未完成或已过期")
+    if not software_behavior:
+        blockers.append("尚未提供当前软件写入 / 日志 / 持久化行为")
+    if blockers:
+        return {
+            "device": detail["device"],
+            "current_state": current_state,
+            "engineering_controls": [],
+            "potential_risks": [],
+            "validation_actions": [],
+            "conditions_and_limits": [],
+            "remaining_information": blockers,
+            "knowledge_refs": [],
+            "evidence_refs": sorted({
+                str(ref)
+                for item in (lifetime, diagnosis)
+                if item
+                for ref in (item.get("evidence_refs") or [])
+                if str(ref)
+            }),
+            "upstream_assessment_ids": [
+                str(item.get("assessment_id"))
+                for item in (lifetime, diagnosis)
+                if item and item.get("assessment_id")
+            ],
+            "optimization_assessment": None,
+            "action_checklist": None,
+            "action_persistence_status": "BLOCKED_INCOMPLETE_CONTEXT",
+            "skill_result": {
+                "skill_id": "storage-write-governance",
+                "status": "INSUFFICIENT_DATA",
+                "direct_answer": "S5 需要当前有效的 S3、S4 结果和真实软件行为；当前上下文不足，未生成优化建议。",
+                "missing_information": blockers,
+                "structured_result": {},
+            },
+            "decision_boundary": "ENGINEERING_REVIEW_REQUIRED",
+            "orchestration_only": True,
+            "new_rule_stack": False,
+        }
+
+    optimization = execute_device_skill(device_id, "storage-write-governance", {
+        "user_context": {
+            "question": " ".join(context_terms),
+            "assessment_context": {
+                "latest_lifetime": lifetime,
+                "latest_diagnosis": diagnosis,
+                "runtime_snapshot_count": trend.get("snapshot_count") or 0,
+                "runtime_metrics": metric_names[:12],
+                "runtime_context": runtime_context,
+            },
+        },
+        "workload_software_facts": workload_facts,
+        "record_assessment": True,
+        "assessment_author": str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
+    }, trusted_assessment_context=True)
+    skill = optimization.get("skill_result") or {}
+    structured = skill.get("structured_result") or {}
+
+    remaining = []
+    if not lifetime:
+        remaining.append("尚无寿命 / 风险评估记录")
+    else:
+        lifetime_status = str(lifetime.get("status") or "UNKNOWN").upper()
+        if lifetime_status not in {"ANSWERED", "CALCULATED"}:
+            remaining.append(f"寿命 / 风险评估尚未形成可执行结果：{lifetime_status}")
+        remaining.extend(lifetime.get("missing_information") or [])
+    if not diagnosis:
+        remaining.append("尚无运行诊断记录")
+    else:
+        diagnosis_status = str(diagnosis.get("status") or "UNKNOWN").upper()
+        if diagnosis_status != "ANSWERED":
+            remaining.append(f"运行诊断尚未形成可执行结果：{diagnosis_status}")
+        remaining.extend(diagnosis.get("missing_information") or [])
+    if not software_behavior:
+        remaining.append("尚未提供当前软件写入 / 日志 / 持久化行为")
+    remaining.extend(skill.get("missing_information") or [])
+
+    controls = structured.get("engineering_control_options") or []
+    validation_actions = structured.get("suggested_validation") or []
+    upstream_ready = bool(
+        lifetime
+        and diagnosis
+        and software_behavior
+        and str(skill.get("status") or "").upper() == "ANSWERED"
+        and controls
+        and validation_actions
+    )
+    combined_evidence_refs = sorted({
+        str(ref)
+        for ref in (
+            list(skill.get("evidence_refs") or [])
+            + list((lifetime or {}).get("evidence_refs") or [])
+            + list((diagnosis or {}).get("evidence_refs") or [])
+        )
+        if str(ref)
+    })
+    combined_knowledge_refs = sorted({
+        str(ref)
+        for ref in (
+            list(skill.get("knowledge_refs") or [])
+            + list((lifetime or {}).get("knowledge_refs") or [])
+            + list((diagnosis or {}).get("knowledge_refs") or [])
+        )
+        if str(ref)
+    })
+    upstream_assessment_ids = [
+        str(x.get("assessment_id"))
+        for x in (lifetime, diagnosis)
+        if x and x.get("assessment_id")
+    ]
+    action_checklist = None
+    action_persistence_status = "NOT_REQUESTED"
+    if request.get("persist_actions") is True and upstream_ready:
+        action_persistence_status = "PERSISTED"
+        source_assessment_id = (optimization.get("assessment_record") or {}).get("id")
+        action_rows = [
+            {"action_type": "SOFTWARE_CONTROL", "title": str(x), "detail": str(x)}
+            for x in controls if str(x).strip()
+        ] + [
+            {"action_type": "TEST_VALIDATION", "title": str(x), "detail": str(x)}
+            for x in validation_actions if str(x).strip()
+        ]
+        if remaining:
+            action_rows.extend(
+                {"action_type": "FOLLOW_UP", "title": str(x), "detail": str(x)}
+                for x in remaining if str(x).strip()
+            )
+        action_checklist = core.create_engineering_actions(
+            device_id,
+            source_assessment_id,
+            action_rows,
+            evidence_refs=combined_evidence_refs,
+            knowledge_refs=combined_knowledge_refs,
+            source_assessment_ids=upstream_assessment_ids,
+            created_by=str(request.get("assessment_author") or "Storage MVP Integrated Action Plan"),
+        )
+    elif request.get("persist_actions") is True:
+        action_persistence_status = "BLOCKED_INCOMPLETE_CONTEXT"
+
+    return {
+        "device": detail["device"],
+        "current_state": current_state,
+        "engineering_controls": controls,
+        "potential_risks": structured.get("potential_risk") or [],
+        "validation_actions": validation_actions,
+        "conditions_and_limits": structured.get("conditions_and_limits") or [],
+        "remaining_information": sorted({str(x) for x in remaining if str(x)}),
+        "knowledge_refs": combined_knowledge_refs,
+        "evidence_refs": combined_evidence_refs,
+        "upstream_assessment_ids": upstream_assessment_ids,
+        "optimization_assessment": optimization.get("assessment_record"),
+        "upstream_ready": upstream_ready,
+        "action_persistence_status": action_persistence_status,
+        "action_checklist": action_checklist,
+        "skill_result": skill,
+        "decision_boundary": skill.get("decision_boundary") or "ENGINEERING_REVIEW_REQUIRED",
+        "orchestration_only": True,
+        "new_rule_stack": False,
+    }
+
+
+def persist_engineering_actions_from_optimization(
+    device_id: str,
+    assessment_id: str,
+    *,
+    updated_by: str = "Storage MVP UI",
+) -> dict[str, Any]:
+    """Persist the exact S5 plan the user already reviewed.
+
+    The plan is not re-generated here.  This prevents "save" from silently
+    executing the write-governance Skill a second time and changing the plan
+    that the user just saw.
+    """
+    assessment = core.get_device_assessment(assessment_id)
+    if assessment.get("device_id") != device_id:
+        raise ValueError("OPTIMIZATION_ASSESSMENT_DEVICE_MISMATCH")
+    if str(assessment.get("assessment_type") or "").upper() != "OPTIMIZATION":
+        raise ValueError("OPTIMIZATION_ASSESSMENT_REQUIRED")
+
+    summary = device_mvp_summary(device_id)
+    s5 = next(
+        (x for x in (summary.get("scenarios") or []) if x.get("type") == "OPTIMIZATION"),
+        None,
+    )
+    if (
+        not s5
+        or s5.get("assessment_id") != assessment_id
+        or not bool(s5.get("complete"))
+    ):
+        raise ValueError("OPTIMIZATION_ASSESSMENT_STALE_OR_INCOMPLETE")
+
+    result = assessment.get("result") or {}
+    skill = result.get("skill_result") or {}
+    structured = skill.get("structured_result") or {}
+    controls = [str(x) for x in (structured.get("engineering_control_options") or []) if str(x).strip()]
+    validation = [str(x) for x in (structured.get("suggested_validation") or []) if str(x).strip()]
+    missing = [str(x) for x in (skill.get("missing_information") or []) if str(x).strip()]
+    if not controls and not validation:
+        raise ValueError("OPTIMIZATION_ACTIONS_EMPTY")
+
+    recorded_input = assessment.get("input") or {}
+    chain_context = dict((recorded_input.get("user_context") or {}).get("assessment_context") or {})
+    upstream_ids = [
+        str((chain_context.get("latest_lifetime") or {}).get("assessment_id") or "").strip(),
+        str((chain_context.get("latest_diagnosis") or {}).get("assessment_id") or "").strip(),
+    ]
+    upstream_ids = [x for x in upstream_ids if x]
+
+    evidence_refs = {str(x) for x in (skill.get("evidence_refs") or []) if str(x)}
+    knowledge_refs = {str(x) for x in (skill.get("knowledge_refs") or []) if str(x)}
+    for upstream_id in upstream_ids:
+        try:
+            upstream = core.get_device_assessment(upstream_id)
+        except KeyError:
+            raise ValueError("UPSTREAM_ASSESSMENT_NOT_FOUND")
+        if upstream.get("device_id") != device_id:
+            raise ValueError("UPSTREAM_ASSESSMENT_DEVICE_MISMATCH")
+        upstream_skill = ((upstream.get("result") or {}).get("skill_result") or {})
+        evidence_refs.update(str(x) for x in (upstream_skill.get("evidence_refs") or []) if str(x))
+        knowledge_refs.update(str(x) for x in (upstream_skill.get("knowledge_refs") or []) if str(x))
+        structured_upstream = upstream_skill.get("structured_result") or {}
+        for obs in structured_upstream.get("current_observation") or []:
+            if not isinstance(obs, dict):
+                continue
+            ref = str(obs.get("evidence_ref") or obs.get("raw_output_ref") or "").strip()
+            if ref:
+                evidence_refs.add(ref)
+
+    action_rows = [
+        {"action_type": "SOFTWARE_CONTROL", "title": x, "detail": x}
+        for x in controls
+    ] + [
+        {"action_type": "TEST_VALIDATION", "title": x, "detail": x}
+        for x in validation
+    ]
+    action_rows.extend(
+        {"action_type": "FOLLOW_UP", "title": x, "detail": x}
+        for x in missing
+    )
+
+    checklist = core.create_engineering_actions(
+        device_id,
+        assessment_id,
+        action_rows,
+        evidence_refs=sorted(evidence_refs),
+        knowledge_refs=sorted(knowledge_refs),
+        source_assessment_ids=upstream_ids,
+        created_by=updated_by,
+    )
+    return {
+        "device_id": device_id,
+        "optimization_assessment_id": assessment_id,
+        "action_persistence_status": "PERSISTED",
+        "action_checklist": checklist,
+        "reexecuted_skill": False,
+    }
+
+
+def engineering_action_checklist(device_id: str) -> dict[str, Any]:
+    devices = {x["id"]: x for x in core.list_devices()}
+    if device_id not in devices:
+        raise KeyError(device_id)
+    items = core.list_engineering_actions(device_id)
+    summary = {
+        "open": sum(1 for x in items if x["status"] == "OPEN"),
+        "in_progress": sum(1 for x in items if x["status"] == "IN_PROGRESS"),
+        "done": sum(1 for x in items if x["status"] == "DONE"),
+        "waived": sum(1 for x in items if x["status"] == "WAIVED"),
+    }
+    return {"device": devices[device_id], "summary": summary, "items": items}
+
+
+def update_engineering_action(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return core.update_engineering_action(
+        action_id,
+        payload.get("status"),
+        updated_by=str(payload.get("updated_by") or "Storage MVP UI"),
+    )
 
 
 def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
@@ -596,7 +2311,12 @@ def _review_ux_state(row: dict[str, Any]) -> dict[str, Any]:
     evidence_valid = bool(row.get("persistent_evidence"))
     reasons: list[str] = []
 
-    if coverage_status == "NOT_APPLICABLE":
+    if review_status == "CONFIRMED" and has_value and evidence_valid:
+        # Human-confirmed facts are formal even when the extraction/search layer
+        # originally reported NOT_FOUND. Keep SEARCH_COVERAGE unchanged, but do
+        # not let it hide a later manual confirmation from the product workflow.
+        state = UX_CONFIRMED
+    elif coverage_status == "NOT_APPLICABLE":
         state = UX_NOT_APPLICABLE
         reasons.append("outside_device_profile")
     elif coverage_status == "NOT_FOUND":
@@ -816,12 +2536,21 @@ def complete_parameter_review(device_id: str) -> dict[str, Any]:
         for x in workbench["rows"]
         if x["ux_state"] == UX_UNKNOWN
     ]
-    workflow = {**workflow, "non_actionable_missing": non_actionable_missing}
+    evidence_blockers = [
+        str(x) for x in (workflow.get("missing_evidence_fields") or [])
+        if str(x).strip()
+    ]
+    workflow = {
+        **workflow,
+        "non_actionable_missing": non_actionable_missing,
+        "evidence_blockers": evidence_blockers,
+    }
     return {
         "device_id": device_id,
         "completed": bool(workflow.get("formal_ready")),
         "workflow": workflow,
         "blockers": blockers,
+        "evidence_blockers": evidence_blockers,
         "non_actionable_missing": non_actionable_missing,
         "gate": "CONFIRMED_DEVICE_FACT_GATE_UNCHANGED",
     }
@@ -857,13 +2586,95 @@ def dashboard() -> dict[str, Any]:
         "by_type": by_type,
         "attention_count": sum(x["attention"] for x in summaries),
         "devices": summaries,
+        "recent_assessments": core.list_recent_device_assessments(limit=10),
         "knowledge_release": KnowledgeReleaseConsumer.current().status(),
     }
 
+_COMPARE_SIZE_FACTORS = {
+    "B": Decimal(1),
+    "byte": Decimal(1),
+    "bytes": Decimal(1),
+    "KB": Decimal(1000),
+    "MB": Decimal(1000) ** 2,
+    "GB": Decimal(1000) ** 3,
+    "TB": Decimal(1000) ** 4,
+    "PB": Decimal(1000) ** 5,
+    "KiB": Decimal(1024),
+    "MiB": Decimal(1024) ** 2,
+    "GiB": Decimal(1024) ** 3,
+    "TiB": Decimal(1024) ** 4,
+    "Kb": Decimal(1000) / Decimal(8),
+    "Mb": (Decimal(1000) ** 2) / Decimal(8),
+    "Gb": (Decimal(1000) ** 3) / Decimal(8),
+    "Tb": (Decimal(1000) ** 4) / Decimal(8),
+}
+_COMPARE_TIME_FACTORS = {
+    "ns": Decimal("0.000000001"),
+    "us": Decimal("0.000001"),
+    "µs": Decimal("0.000001"),
+    "μs": Decimal("0.000001"),
+    "ms": Decimal("0.001"),
+    "s": Decimal(1),
+}
+
+
+def _compare_decimal(value: Any) -> Decimal | None:
+    try:
+        return Decimal(str(value).strip().replace(",", ""))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _comparison_fact_key(canonical_name: str, cell: dict[str, Any]) -> tuple[Any, ...]:
+    """Compare formal facts by engineering-equivalent value plus condition/scope.
+
+    Only explicit unit families are normalized. Unknown units stay literal so
+    the comparison never guesses a conversion.
+    """
+    value = cell.get("value")
+    unit = str(cell.get("unit") or "").strip()
+    number = _compare_decimal(value)
+    normalized_value: Any = str(value or "").strip()
+    normalized_unit = unit
+
+    if number is not None and canonical_name in {
+        "capacity", "tbw", "page_size", "block_size", "erase_granularity",
+    } and unit in _COMPARE_SIZE_FACTORS:
+        normalized_value = number * _COMPARE_SIZE_FACTORS[unit]
+        normalized_unit = "bytes"
+    elif number is not None and canonical_name in {"program_time", "erase_time"} and unit in _COMPARE_TIME_FACTORS:
+        normalized_value = number * _COMPARE_TIME_FACTORS[unit]
+        normalized_unit = "seconds"
+    elif number is not None and canonical_name in {"pe_cycles", "pages_per_block", "dwpd"}:
+        normalized_value = number
+        normalized_unit = "" if unit.lower() in {"", "cycle", "cycles", "x"} else unit
+
+    if isinstance(normalized_value, Decimal):
+        normalized_value = normalized_value.normalize()
+
+    condition = " ".join(str(cell.get("condition") or "").split())
+    scope = " ".join(str(cell.get("scope") or "").split())
+    return (
+        normalized_value,
+        normalized_unit,
+        condition,
+        scope,
+        str(cell.get("status") or ""),
+    )
+
+
 def compare_devices(device_ids: list[str]) -> dict[str, Any]:
-    if len(set(device_ids)) < 2:
-        raise ValueError("至少选择两个不同器件")
-    details = [device_slots(x) for x in device_ids]
+    ids = [str(x or "").strip() for x in device_ids if str(x or "").strip()]
+    if len(ids) < 2 or len(ids) > 4:
+        raise ValueError("器件对比仅支持 2～4 个器件")
+    if len(set(ids)) != len(ids):
+        raise ValueError("器件对比不能包含重复器件")
+    details = [device_slots(x) for x in ids]
+    normalized_types = {
+        templates.normalize_device_type(x["device"]["device_type"])
+        for x in details
+    }
+    comparable_types = len(normalized_types) == 1
     field_order = []
     by_device = {}
     for detail in details:
@@ -885,18 +2696,131 @@ def compare_devices(device_ids: list[str]) -> dict[str, Any]:
                 "condition": cell.get("condition") if formal else "", "scope": cell.get("scope") if formal else "",
                 "evidence": cell.get("evidence") if formal else [],
             }
-        values = {(str(c.get("value") or ""), str(c.get("unit") or ""), c.get("status")) for c in cells.values()}
-        missing = any(c.get("review_status") != "CONFIRMED" for c in cells.values())
+        values = {_comparison_fact_key(key, c) for c in cells.values()}
+        missing = any(
+            c.get("review_status") != "CONFIRMED"
+            and c.get("status") != "NOT_APPLICABLE"
+            for c in cells.values()
+        )
         exemplar = next((x for x in details[0]["slots"] if x.get("canonical_name") == key), {})
         parameter_name = next((c.get("parameter_name") for c in cells.values() if c.get("parameter_name")), key)
-        knowledge = _formal_knowledge(
-            key,
-            parameter_name,
-            details[0]["device"]["device_type"],
-            context="comparison difference engineering meaning",
+        knowledge = (
+            _formal_knowledge(
+                key,
+                parameter_name,
+                details[0]["device"]["device_type"],
+                context="comparison difference engineering meaning",
+                scenario_consumer="S2",
+            )
+            if comparable_types
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": "DEVICE_TYPE_MISMATCH_RAW_FACT_COMPARE_ONLY",
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
         )
         rows.append({"canonical_name": key, "parameter_name": parameter_name, "group": exemplar.get("group") or parameter_baseline.COMPREHENSIVE, "group_label": exemplar.get("group_label") or parameter_baseline.GROUP_LABELS[parameter_baseline.COMPREHENSIVE], "cells": cells, "is_difference": len(values) > 1, "has_missing": missing, "formal_knowledge": knowledge})
-    return {"devices": [x["device"] for x in details], "rows": rows}
+    return {
+        "devices": [x["device"] for x in details],
+        "rows": rows,
+        "comparison_scope": "ENGINEERING_COMPARABLE" if comparable_types else "RAW_FACT_ONLY",
+        "device_types": sorted(normalized_types),
+    }
+
+
+RUNTIME_TEXT_PATTERNS = [
+    ("percentage_used", r"\bpercentage[ _-]*used\b\s*[:=]\s*([^\s]+)", "%", "NVME_PERCENTAGE_USED_INTERPRETATION_V1"),
+    ("data_units_written", r"\bdata[ _-]*units[ _-]*written\b\s*[:=]\s*([^\s]+)", "data_units", "NVME_DATA_UNITS_WRITTEN_V1"),
+    ("critical_warning", r"\bcritical[ _-]*warning\b\s*[:=]\s*([^\s]+)", "code", None),
+    ("media_errors", r"\bmedia[ _-]*(?:and[ _-]*data[ _-]*integrity[ _-]*)?errors?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("available_spare", r"\bavailable[ _-]*spare\b\s*[:=]\s*([^\s]+)", "%", None),
+    ("available_spare_threshold", r"\bavailable[ _-]*spare[ _-]*threshold\b\s*[:=]\s*([^\s]+)", "%", None),
+    ("device_life_time_est_typ_a", r"\b(?:device[ _-]*life[ _-]*time[ _-]*(?:estimation|estimate|est)?[ _-]*(?:type|typ)[ _-]*a|device_life_time_est_typ_a|ext_csd_device_life_time_est_typ_a)\b[^\n:]{0,80}[:=]\s*([^\s\]]+)", "code", "EMMC_DEVICE_LIFE_TIME_A_V1"),
+    ("device_life_time_est_typ_b", r"\b(?:device[ _-]*life[ _-]*time[ _-]*(?:estimation|estimate|est)?[ _-]*(?:type|typ)[ _-]*b|device_life_time_est_typ_b|ext_csd_device_life_time_est_typ_b)\b[^\n:]{0,80}[:=]\s*([^\s\]]+)", "code", "EMMC_DEVICE_LIFE_TIME_B_V1"),
+    ("pre_eol_info", r"\b(?:pre[ _-]*eol(?:[ _-]*(?:info|information))?|ext_csd_pre_eol_info)\b[^\n:]{0,80}[:=]\s*([^\s\]]+)", "code", "EMMC_PRE_EOL_V1"),
+    ("runtime_bad_block", r"\b(?:runtime[ _-]*bad[ _-]*blocks?|grown[ _-]*bad[ _-]*blocks?|retired[ _-]*blocks?)\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("program_fail", r"\bprogram[ _-]*fails?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("erase_fail", r"\berase[ _-]*fails?\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("erase_count", r"\berase[ _-]*count\b\s*[:=]\s*([^\s]+)", "cycles", "NAND_ERASE_COUNT_MARGIN_V1"),
+    ("pe_cycle", r"\b(?:p[ _-]*/?[ _-]*e|pe)[ _-]*(?:cycle|count)s?\b\s*[:=]\s*([^\s]+)", "cycles", "NAND_PE_MARGIN_V1"),
+    ("ecc_corrected", r"\becc[ _-]*corrected\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("ecc_uncorrectable", r"\becc[ _-]*(?:uncorrectable|uncorrected)\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("bit_flip_count", r"\b(?:bit[ _-]*flips?|bitflip(?:[ _-]*count)?|corrected[ _-]*bits?)\b\s*[:=]\s*([^\s]+)", "count", None),
+    ("bit_flip_threshold", r"\b(?:bit[ _-]*flip|bitflip)[ _-]*(?:threshold|limit)\b\s*[:=]\s*([^\s]+)", "count", None),
+]
+
+
+def _runtime_text_value(raw: str) -> Any:
+    value = str(raw or "").strip().rstrip(",;")
+    clean = value.replace(",", "").rstrip("%")
+    try:
+        if clean.lower().startswith("0x"):
+            return int(clean, 16)
+        if "." in clean:
+            return float(clean)
+        return int(clean)
+    except ValueError:
+        return value
+
+
+def parse_runtime_observation_text(
+    device_type: str,
+    text: str,
+    source_label: str = "PASTED_RUNTIME_OUTPUT",
+) -> dict[str, Any]:
+    """Parse common runtime-health text without making a diagnosis.
+
+    The parser only extracts explicit named values from pasted tool output.
+    It does not infer missing metrics or convert vendor-specific semantics.
+    """
+    raw_text = str(text or "")
+    if not raw_text.strip():
+        raise ValueError("RUNTIME_TEXT_REQUIRED")
+    if len(raw_text) > 200_000:
+        raise ValueError("RUNTIME_TEXT_TOO_LARGE")
+
+    observations = []
+    seen = set()
+    for metric_name, pattern, unit, lifetime_metric in RUNTIME_TEXT_PATTERNS:
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE | re.MULTILINE)
+        if not match:
+            continue
+        raw_value = match.group(1).strip()
+        key = (metric_name, raw_value)
+        if key in seen:
+            continue
+        seen.add(key)
+        line_start = raw_text.rfind("\n", 0, match.start()) + 1
+        line_end = raw_text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(raw_text)
+        source_line = raw_text[line_start:line_end].strip()
+        observations.append({
+            "metric_name": metric_name,
+            "raw_value": raw_value,
+            "normalized_value": _runtime_text_value(raw_value),
+            "unit": unit,
+            "source_line": source_line,
+            "source_label": source_label,
+            "diagnostic_supported": (
+                metric_name in DIAGNOSTIC_METHODS
+                or metric_name.startswith("ecc_")
+                or metric_name == "available_spare_threshold"
+            ),
+            "suggested_lifetime_metric": lifetime_metric,
+        })
+
+    return {
+        "device_type": templates.normalize_device_type(device_type) if device_type else "",
+        "source_label": source_label,
+        "observation_count": len(observations),
+        "observations": observations,
+        "parser_scope": "EXPLICIT_NAMED_RUNTIME_VALUES_ONLY",
+        "diagnosis_performed": False,
+        "public_knowledge_used": False,
+    }
 
 
 def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
@@ -916,15 +2840,36 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
         key = field["canonical_name"]
         if field.get("role") != "diagnostic" and key not in DIAGNOSTIC_METHODS:
             continue
-        data_source, method, interpretation = DIAGNOSTIC_METHODS.get(key, ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"))
+        applicable, applicability_reason = _runtime_metric_applicability(detail, dtype, key)
+        data_source, method, interpretation = DIAGNOSTIC_METHODS.get(
+            key,
+            ("Datasheet / 运行接口", "按器件/控制器定义读取", "结合趋势、阈值和业务负载人工判读"),
+        )
         slot = evidence_by_field.get(key) or {}
         formal = slot.get("review_status") == "CONFIRMED"
-        knowledge = slot.get("formal_knowledge") or _formal_knowledge(
-            key,
-            field.get("parameter_name") or key,
-            dtype,
-            context="diagnostic read method interpretation lifetime health",
+        knowledge = (
+            slot.get("formal_knowledge")
+            or _formal_knowledge(
+                key,
+                field.get("parameter_name") or key,
+                dtype,
+                context="diagnostic read method interpretation lifetime health",
+                scenario_consumer="S4",
+            )
+            if applicable
+            else {
+                "status": "NOT_APPLICABLE",
+                "code": applicability_reason,
+                "knowledge_release_version": None,
+                "results": [],
+                "evidence_refs": [],
+            }
         )
+        diagnostic_status = slot.get("diagnostic_status") if device_id else None
+        diagnostic_label = slot.get("diagnostic_label") if device_id else None
+        if not applicable:
+            diagnostic_status = DIAG_NOT_APPLICABLE
+            diagnostic_label = DIAGNOSTIC_LABELS[DIAG_NOT_APPLICABLE]
         rows.append({
             "canonical_name": key,
             "indicator": field.get("parameter_name") or key,
@@ -932,20 +2877,28 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
             "data_source": data_source,
             "read_method": method,
             "interpretation": interpretation,
+            "runtime_applicable": applicable,
+            "applicability_reason": applicability_reason,
             "fact_status": slot.get("status", "NOT_CHECKED") if device_id else "REFERENCE",
             "review_status": slot.get("review_status", "NOT_REVIEWED") if device_id else "REFERENCE",
-            "diagnostic_status": slot.get("diagnostic_status") if device_id else None,
-            "diagnostic_label": slot.get("diagnostic_label") if device_id else None,
+            "diagnostic_status": diagnostic_status,
+            "diagnostic_label": diagnostic_label,
             "evidence": slot.get("evidence", []) if formal else [],
             "runtime_observation": {
-                "status": "UNKNOWN",
-                "code": "RUNTIME_OBSERVATION_UNAVAILABLE",
+                "status": "UNKNOWN" if applicable else "NOT_APPLICABLE",
+                "code": "RUNTIME_OBSERVATION_UNAVAILABLE" if applicable else applicability_reason,
                 "observed_at": None,
                 "value": None,
                 "source": None,
             },
             "formal_knowledge": knowledge,
-            "guidance_source": "FORMAL_KNOWLEDGE" if knowledge["status"] == "MATCHED" else "KNOWLEDGE_GAP",
+            "guidance_source": (
+                "NOT_APPLICABLE"
+                if not applicable
+                else "FORMAL_KNOWLEDGE"
+                if knowledge["status"] == "MATCHED"
+                else "KNOWLEDGE_GAP"
+            ),
         })
 
     skill_result = None
@@ -977,13 +2930,27 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
                 "runtime_observations": [],
             },
         )
-    knowledge_gap = any(x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP for x in rows)
+    knowledge_gap = any(
+        x.get("runtime_applicable") is not False
+        and x.get("diagnostic_status") == DIAG_KNOWLEDGE_GAP
+        for x in rows
+    )
+    runtime_metric_options = []
+    for metric_name, label in RUNTIME_DIAGNOSTIC_OPTION_LABELS.items():
+        applicable, reason = _runtime_metric_applicability(detail, dtype, metric_name)
+        runtime_metric_options.append({
+            "metric_name": metric_name,
+            "label": label,
+            "applicable": applicable,
+            "reason": reason,
+        })
     if skill_result and skill_result.get("status") == "INSUFFICIENT_KNOWLEDGE":
         knowledge_gap = True
     return {
         "device_type": dtype,
         "device_id": device_id or None,
         "items": rows,
+        "runtime_metric_options": runtime_metric_options,
         # Keep the RC1 response contract stable for existing consumers.
         "layers": ["DATASHEET_FACT", "RUNTIME_OBSERVATION", "KNOWLEDGE"],
         # #359 makes the product semantics explicit without mutating the frozen key.
@@ -1000,6 +2967,13 @@ def diagnostics(device_type: str = "", device_id: str = "") -> dict[str, Any]:
 
 def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
     comparison = compare_devices([old_id, new_id])
+    old_type = templates.normalize_device_type(comparison["devices"][0]["device_type"])
+    new_type = templates.normalize_device_type(comparison["devices"][1]["device_type"])
+    if old_type != new_type:
+        raise ValueError(
+            f"DEVICE_TYPE_MISMATCH_FOR_CHANGE_IMPACT:{old_type}->{new_type};"
+            " raw parameter compare remains available, but engineering impact requires comparable device types"
+        )
     rows = []
     unknowns = []
     for row in comparison["rows"]:
@@ -1007,10 +2981,10 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         b = row["cells"].get(new_id) or {}
         if not row["is_difference"] and not row["has_missing"]:
             continue
-        statuses = {a.get("status"), b.get("status")}
-        if statuses & {"NOT_FOUND", "NOT_CHECKED", "AMBIGUOUS", "UNREVIEWED"}:
+        statuses = {str(a.get("status") or ""), str(b.get("status") or "")}
+        if any(status not in {"CONFIRMED", "NOT_APPLICABLE"} for status in statuses):
             confidence = "LOW"
-            unknowns.append(f"{row['parameter_name']} 存在未确认/缺失事实，必须先验证")
+            unknowns.append(f"{row['parameter_name']} 存在未确认/缺失/已驳回事实，必须先验证")
         else:
             confidence = "EVIDENCED"
         meaning, sw, test, monitor = IMPACT_RULES.get(row["canonical_name"], ("参数能力发生变化或存在事实缺口", "复核相关软件配置、异常处理和持久化策略", "补充该参数相关边界与回归测试", "复核对应运行监控/告警"))
@@ -1019,6 +2993,7 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
             row["parameter_name"],
             comparison["devices"][0]["device_type"],
             context="change impact software test monitoring lifetime risk",
+            scenario_consumer="S2",
         )
         if knowledge["status"] == "MATCHED":
             first = knowledge["results"][0]
@@ -1073,6 +3048,68 @@ def change_impact(old_id: str, new_id: str) -> dict[str, Any]:
         "skill_result": skill_result,
         "engineering_result": _engineering_result_view(skill_result),
     }
+
+
+def record_change_impact(old_id: str, new_id: str, *, assessment_author: str = "Storage MVP UI") -> dict[str, Any]:
+    result = change_impact(old_id, new_id)
+    skill = result.get("skill_result") or {}
+    old_detail = device_slots(old_id)
+    new_detail = device_slots(new_id)
+    rows = list(result.get("items") or [])
+    unknowns = list(result.get("unknowns") or [])
+    facts_evidenced = all(
+        str(x.get("confidence") or "").upper() == "EVIDENCED"
+        for x in rows
+    )
+    # S2 may legitimately finish from deterministic Storage impact rules even
+    # when the current Formal Knowledge Release has no matching object.  This
+    # is still a DRAFT_FOR_ENGINEERING_REVIEW and never an auto replacement decision.
+    product_status = "ANSWERED" if facts_evidenced and not unknowns else (
+        skill.get("status") or result.get("status") or "UNKNOWN"
+    )
+    result["product_assessment_status"] = product_status
+    old_fingerprint = _device_fact_fingerprint(old_detail)
+    new_fingerprint = _device_fact_fingerprint(new_detail)
+    knowledge_identity = _knowledge_release_identity()
+    record_input = {
+        "old_id": old_id,
+        "new_id": new_id,
+        "_old_device_fact_fingerprint": old_fingerprint,
+        "_new_device_fact_fingerprint": new_fingerprint,
+        "_knowledge_release_identity": knowledge_identity,
+    }
+
+    # Compare is auto-triggered from the product flow.  Reopening the same
+    # unchanged A->B comparison must not create duplicate assessment history.
+    existing = next(
+        (
+            item for item in core.list_device_assessments(new_id, limit=50)
+            if str(item.get("assessment_type") or "").upper() == "COMPARE"
+            and str((item.get("input") or {}).get("old_id") or "") == old_id
+            and str((item.get("input") or {}).get("new_id") or "") == new_id
+            and str((item.get("input") or {}).get("_old_device_fact_fingerprint") or "") == old_fingerprint
+            and str((item.get("input") or {}).get("_new_device_fact_fingerprint") or "") == new_fingerprint
+            and dict((item.get("input") or {}).get("_knowledge_release_identity") or {}) == knowledge_identity
+            and str(item.get("status") or "").upper() == str(product_status or "").upper()
+        ),
+        None,
+    )
+    if existing is not None:
+        result["assessment_record"] = existing
+        result["assessment_reused"] = True
+        return result
+
+    record = core.save_device_assessment(
+        new_id,
+        "COMPARE",
+        product_status,
+        record_input,
+        result,
+        created_by=assessment_author,
+    )
+    result["assessment_record"] = record
+    result["assessment_reused"] = False
+    return result
 
 
 def maintenance() -> dict[str, Any]:

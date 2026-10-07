@@ -6,9 +6,11 @@ the shared Knowledge Production intake and repository.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal
+from urllib.parse import parse_qsl, urlparse
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -26,8 +28,8 @@ class SourceRef(BaseModel):
     revision: str = Field(min_length=1)
     locator: dict[str, Any]
     citation_id: str = Field(min_length=1)
-    source_uri: str | None = None
-    immutable_identity: str | None = None
+    source_uri: str | None = Field(default=None, max_length=2048)
+    immutable_identity: str | None = Field(default=None, max_length=256)
 
 
 class PublicKnowledgeSuggestionV1(BaseModel):
@@ -76,6 +78,47 @@ class SuggestionEdit(BaseModel):
 def _canon(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
+
+def _safe_source_uri(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 2048:
+        raise SuggestionError("SOURCE_URI_INVALID")
+    try:
+        parsed = urlparse(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise SuggestionError("SOURCE_URI_INVALID") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise SuggestionError("SOURCE_URI_INVALID")
+    sensitive_query_keys = {
+        "key", "api_key", "apikey", "token", "access_token", "auth",
+        "password", "secret", "credential", "signature", "sig",
+    }
+    if any(
+        str(key or "").lower() in sensitive_query_keys
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    ):
+        raise SuggestionError("SOURCE_URI_INVALID")
+    host = parsed.hostname.lower()
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith((".local", ".internal")):
+        raise SuggestionError("SOURCE_URI_INVALID")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise SuggestionError("SOURCE_URI_INVALID")
+    host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    authority = host_text + (f":{port}" if port is not None else "")
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{parsed.scheme.lower()}://{authority}{parsed.path or ''}{query}"
 
 class PublicKnowledgeSuggestionService:
     def __init__(self, repository, *, evidence_intake, candidate_intake,
@@ -232,9 +275,7 @@ class PublicKnowledgeSuggestionService:
                     "domain": "OTHER",
                     "source_type": str(source.get("media_type") or "PUBLIC_SOURCE"),
                     "source_ref": str(
-                        ref.get("source_uri")
-                        or source.get("source_uri")
-                        or source.get("official_url")
+                        source.get("_validated_source_uri")
                         or f"public-knowledge://sources/{source_id}"
                     ),
                     "source_revision": revision,
@@ -247,7 +288,7 @@ class PublicKnowledgeSuggestionService:
                         "citation_id": ref["citation_id"],
                         "locator": ref["locator"],
                         "classification": "PUBLIC",
-                        "source_uri": ref.get("source_uri") or source.get("source_uri") or source.get("official_url"),
+                        "source_uri": source.get("_validated_source_uri"),
                         "immutable_identity": ref.get("immutable_identity"),
                         "origin_workspace": suggestion["origin_workspace"],
                         "origin_mode": "LIVE",
@@ -327,6 +368,7 @@ class PublicKnowledgeSuggestionService:
             "SOURCE_LOCATOR_MISMATCH": "EVIDENCE_UNRESOLVED",
             "SOURCE_ID_MISMATCH": "EVIDENCE_UNRESOLVED",
             "SOURCE_IDENTITY_MISMATCH": "EVIDENCE_UNRESOLVED",
+            "SOURCE_URI_INVALID": "EVIDENCE_UNRESOLVED",
             "SOURCE_REVISION_MISMATCH": "REVISION_MISMATCH",
             "SOURCE_UNAVAILABLE": "SOURCE_UNAVAILABLE",
             "SOURCE_NOT_PUBLIC": "HANDOFF_FAILED",
@@ -373,9 +415,13 @@ class PublicKnowledgeSuggestionService:
         classification = source.get("classification") or source.get("source_class")
         if str(classification or "").upper() != "PUBLIC":
             raise SuggestionError("SOURCE_NOT_PUBLIC")
-        resolved_uri = source.get("source_uri") or source.get("official_url")
-        if ref.get("source_uri") and resolved_uri and ref["source_uri"] != resolved_uri:
+        resolved_uri = _safe_source_uri(source.get("source_uri") or source.get("official_url"))
+        requested_uri = _safe_source_uri(ref.get("source_uri"))
+        if requested_uri and not resolved_uri:
             raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
+        if requested_uri and resolved_uri and requested_uri != resolved_uri:
+            raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
+        source["_validated_source_uri"] = resolved_uri
         source_status = str(source.get("status") or source.get("source_status") or "ACTIVE").upper()
         if source_status not in {"ACTIVE", "AVAILABLE", "PUBLISHED"}:
             raise SuggestionError("SOURCE_UNAVAILABLE")
@@ -385,8 +431,26 @@ class PublicKnowledgeSuggestionService:
         if ref.get("revision") not in valid_revisions and ref.get("revision") != current_revision:
             raise SuggestionError("SOURCE_REVISION_MISMATCH")
         if ref.get("immutable_identity"):
-            actual_identity = source.get("immutable_identity") or source.get("content_hash")
-            if actual_identity != ref["immutable_identity"]:
+            matching_revision = next(
+                (
+                    row for row in revisions
+                    if isinstance(row, dict)
+                    and str(
+                        row.get("revision_id")
+                        or row.get("source_revision")
+                        or row.get("version")
+                        or ""
+                    ) == str(ref.get("revision") or "")
+                ),
+                None,
+            )
+            actual_identity = (
+                (matching_revision or {}).get("raw_sha256")
+                or (matching_revision or {}).get("content_sha256")
+                or source.get("immutable_identity")
+                or source.get("content_hash")
+            )
+            if not actual_identity or actual_identity != ref["immutable_identity"]:
                 raise SuggestionError("SOURCE_IDENTITY_MISMATCH")
         return citation, source
 

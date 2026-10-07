@@ -17,6 +17,7 @@ from storage_life.software_impact import (
     SoftwareImpactAnalysisStatus,
     SoftwareImpactEngine,
 )
+from runtime.contracts import RuntimeObservation
 
 
 SKILLS_ROOT = Path(__file__).resolve().parent
@@ -108,6 +109,9 @@ class StorageDomainSkillAdapter:
         *,
         device_type: str = "",
         top_k: int = 12,
+        semantic_classes: list[str] | tuple[str, ...] | None = None,
+        canonical_parameters: list[str] | tuple[str, ...] | None = None,
+        scenario_consumer: str = "",
     ) -> dict[str, Any]:
         pack = _load_pack(pack_id)
         status = self.knowledge_consumer.status()
@@ -120,8 +124,52 @@ class StorageDomainSkillAdapter:
                 "items": [],
                 "missing_information": [str(status.get("code") or "FORMAL_KNOWLEDGE_RELEASE_REQUIRED")],
             }
-        release_version = str(status.get("knowledge_release_version") or "")
-        if pack.current_release_version and release_version != pack.current_release_version:
+        release_version = str(
+            status.get("knowledge_release_version") or ""
+        )
+        binding_validator = getattr(
+            self.knowledge_consumer,
+            "validate_storage_binding",
+            None,
+        )
+        if callable(binding_validator):
+            try:
+                binding = binding_validator()
+            except KnowledgeReleaseError as exc:
+                return {
+                    "status": "INSUFFICIENT_KNOWLEDGE",
+                    "pack_id": pack_id,
+                    "knowledge_refs": [],
+                    "evidence_refs": [],
+                    "items": [],
+                    "missing_information": [str(exc)],
+                    "selection_mode": "CONTROLLED_BINDING",
+                }
+            bound_release = str(
+                (binding or {}).get("knowledge_release_version") or ""
+            )
+            if not bound_release or bound_release != release_version:
+                return {
+                    "status": "INSUFFICIENT_KNOWLEDGE",
+                    "pack_id": pack_id,
+                    "knowledge_refs": [],
+                    "evidence_refs": [],
+                    "items": [],
+                    "missing_information": [
+                        (
+                            "RELEASE_VERSION_MISMATCH:"
+                            f"expected={bound_release or 'MISSING'},"
+                            f"actual={release_version}"
+                        )
+                    ],
+                    "selection_mode": "CONTROLLED_BINDING",
+                }
+        elif (
+            pack.current_release_version
+            and release_version != pack.current_release_version
+        ):
+            # Legacy adapter compatibility: older/fake consumers do not expose
+            # the binding validator, so retain the previous pack pin.
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
                 "pack_id": pack_id,
@@ -129,16 +177,147 @@ class StorageDomainSkillAdapter:
                 "evidence_refs": [],
                 "items": [],
                 "missing_information": [
-                    f"RELEASE_VERSION_MISMATCH:expected={pack.current_release_version},actual={release_version}"
+                    (
+                        "RELEASE_VERSION_MISMATCH:"
+                        f"expected={pack.current_release_version},"
+                        f"actual={release_version}"
+                    )
                 ],
             }
-        try:
-            result = self.knowledge_consumer.query(
+        requested_semantics = {
+            str(value).strip()
+            for value in (semantic_classes or [])
+            if str(value or "").strip()
+        }
+        requested_parameters = {
+            str(value).strip()
+            for value in (canonical_parameters or [])
+            if str(value or "").strip()
+        }
+        requested_consumer = str(scenario_consumer or "").strip()
+        structured_requested = bool(
+            requested_semantics
+            or requested_parameters
+            or requested_consumer
+        )
+
+        def legacy_query() -> dict[str, Any]:
+            return self.knowledge_consumer.query(
                 question,
                 device_type=device_type,
                 top_k=top_k,
                 knowledge_release_version=release_version,
             )
+
+        def is_reviewed_storage(item: dict[str, Any]) -> bool:
+            metadata = item.get("metadata")
+            storage = (
+                metadata.get("storage_lifetime")
+                if isinstance(metadata, dict)
+                else None
+            )
+            return bool(
+                isinstance(storage, dict)
+                and storage.get("formal_consumable") is True
+                and str(
+                    storage.get("semantic_class_status") or ""
+                ).upper()
+                == "REVIEWED"
+            )
+
+        selection_mode = "TEXT_AND_DEVICE"
+        try:
+            if not structured_requested:
+                result = legacy_query()
+            else:
+                try:
+                    structured = self.knowledge_consumer.query(
+                        "",
+                        device_type=device_type,
+                        top_k=50,
+                        knowledge_release_version=release_version,
+                        scenario_consumer=requested_consumer,
+                    )
+                    structured_supported = True
+                except TypeError:
+                    # Compatibility with older consumer implementations used by
+                    # historical releases/tests. Production current consumer
+                    # supports the structured Storage query contract.
+                    structured = {"results": []}
+                    structured_supported = False
+
+                if structured_supported:
+                    reviewed_items: list[dict[str, Any]] = []
+                    for item in structured.get("results") or []:
+                        if not is_reviewed_storage(item):
+                            continue
+                        storage = item["metadata"]["storage_lifetime"]
+                        if (
+                            requested_semantics
+                            and str(storage.get("semantic_class") or "")
+                            not in requested_semantics
+                        ):
+                            continue
+                        if requested_parameters:
+                            parameters = {
+                                str(value).strip()
+                                for value in (
+                                    storage.get("canonical_parameters") or []
+                                )
+                                if str(value or "").strip()
+                            }
+                            for tag in item.get("tags") or []:
+                                if (
+                                    isinstance(tag, str)
+                                    and tag.startswith("storage-parameter:")
+                                ):
+                                    value = tag.split(":", 1)[1].strip()
+                                    if value:
+                                        parameters.add(value)
+                            if requested_parameters.isdisjoint(parameters):
+                                continue
+                        reviewed_items.append(item)
+
+                    if reviewed_items:
+                        result = {
+                            **structured,
+                            "results": reviewed_items[:top_k],
+                            "selection_mode": "REVIEWED_STORAGE_SEMANTIC",
+                        }
+                        selection_mode = "REVIEWED_STORAGE_SEMANTIC"
+                    else:
+                        # Migration rule: if this release already contains
+                        # reviewed Storage-lifetime knowledge, a missing class/
+                        # parameter is a real knowledge gap and must not silently
+                        # fall back to prose matching.  Legacy releases with no
+                        # reviewed Storage metadata keep their old Formal
+                        # Knowledge behavior until migrated.
+                        broad = self.knowledge_consumer.query(
+                            "",
+                            device_type=device_type,
+                            top_k=50,
+                            knowledge_release_version=release_version,
+                        )
+                        has_reviewed_model = any(
+                            is_reviewed_storage(item)
+                            for item in (broad.get("results") or [])
+                        )
+                        if has_reviewed_model:
+                            result = {
+                                **structured,
+                                "results": [],
+                                "selection_mode": "REVIEWED_STORAGE_SEMANTIC",
+                                "unknowns_or_gaps": [
+                                    "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                                ],
+                            }
+                            selection_mode = "REVIEWED_STORAGE_SEMANTIC"
+                        else:
+                            result = legacy_query()
+                            selection_mode = "LEGACY_FORMAL_COMPATIBILITY"
+                else:
+                    result = legacy_query()
+                    selection_mode = "LEGACY_FORMAL_COMPATIBILITY"
         except KnowledgeReleaseError as exc:
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
@@ -147,6 +326,7 @@ class StorageDomainSkillAdapter:
                 "evidence_refs": [],
                 "items": [],
                 "missing_information": [str(exc)],
+                "selection_mode": selection_mode,
             }
 
         items: list[dict[str, Any]] = []
@@ -162,6 +342,11 @@ class StorageDomainSkillAdapter:
             items.append({**item, "canonical_object_type": canonical})
 
         if not items:
+            missing_code = (
+                "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE_WITH_EVIDENCE"
+                if selection_mode == "REVIEWED_STORAGE_SEMANTIC"
+                else "NO_MATCHING_RELEASED_KNOWLEDGE_WITH_EVIDENCE"
+            )
             return {
                 "status": "INSUFFICIENT_KNOWLEDGE",
                 "pack_id": pack_id,
@@ -169,7 +354,8 @@ class StorageDomainSkillAdapter:
                 "knowledge_refs": [],
                 "evidence_refs": [],
                 "items": [],
-                "missing_information": ["NO_MATCHING_RELEASED_KNOWLEDGE_WITH_EVIDENCE"],
+                "missing_information": [missing_code],
+                "selection_mode": selection_mode,
             }
 
         return {
@@ -180,6 +366,7 @@ class StorageDomainSkillAdapter:
             "evidence_refs": sorted({str(ref) for x in items for ref in x.get("evidence_refs") or [] if ref}),
             "items": items,
             "missing_information": [],
+            "selection_mode": selection_mode,
         }
 
     @staticmethod
@@ -205,15 +392,90 @@ class StorageDomainSkillAdapter:
     def execute_write_governance(self, *, device_type: str, user_context: dict[str, Any],
                                  workload_software_facts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         behaviors = list(workload_software_facts or [])
-        question = str(user_context.get("question") or "software write amplification persistence wear controls")
-        knowledge = self.query_pack("PACK_WRITE_GOVERNANCE", question, device_type=device_type)
+        assessment_context = dict(user_context.get("assessment_context") or {})
+        query_parts = [
+            str(user_context.get("question") or "software write amplification persistence wear controls")
+        ]
+        for item in behaviors:
+            description = str(item.get("description") or "").strip()
+            if description:
+                query_parts.append(description[:1200])
+        for key in ("latest_lifetime", "latest_diagnosis"):
+            item = assessment_context.get(key)
+            if isinstance(item, dict):
+                query_parts.append(
+                    " ".join(
+                        str(x)
+                        for x in (
+                            key,
+                            item.get("status"),
+                            item.get("direct_answer"),
+                            item.get("next_action"),
+                        )
+                        if str(x or "").strip()
+                    )[:1600]
+                )
+                risk_context = item.get("risk_context")
+                if isinstance(risk_context, dict) and risk_context:
+                    query_parts.append(f"{key} risk context {risk_context}"[:2200])
+        metrics = assessment_context.get("runtime_metrics")
+        if isinstance(metrics, list) and metrics:
+            query_parts.append("runtime metrics " + " ".join(str(x) for x in metrics[:20]))
+        runtime_context = assessment_context.get("runtime_context")
+        if isinstance(runtime_context, list) and runtime_context:
+            query_parts.append(f"runtime trend context {runtime_context[:12]}"[:2400])
+        question = " ".join(x for x in query_parts if x.strip())
+        knowledge = self.query_pack(
+            "PACK_WRITE_GOVERNANCE",
+            question,
+            device_type=device_type,
+            semantic_classes=[
+                "MECHANISM_CONCEPT",
+                "DESIGN_RULE",
+                "TEST_RULE",
+            ],
+            scenario_consumer="S5",
+        )
         items = knowledge.get("items") or []
-        mechanisms = [_text(x) for x in items if _text(x)]
+        mechanisms = [
+            _text(x) for x in items
+            if x.get("canonical_object_type") in {"KnowledgeFact", "TechnicalConcept"} and _text(x)
+        ]
         controls = [
             _text(x) for x in items
             if x.get("canonical_object_type") in {"TechnicalSolution", "SoftwareRequirementKnowledge"} and _text(x)
         ]
+        validation = []
+        for item in items:
+            # A DiagnosticMethod object may still be only a semantic definition
+            # (for example "Percentage Used").  Create TEST_VALIDATION actions
+            # only from explicitly structured validation/test method fields;
+            # never reinterpret arbitrary diagnostic prose as a test procedure.
+            explicit = []
+            for key in ("validation_method", "validation", "test_method", "verification_method"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    explicit.append(value.strip())
+                elif isinstance(value, list):
+                    explicit.extend(str(x).strip() for x in value if str(x).strip())
+            content = item.get("content")
+            if isinstance(content, dict):
+                for key in ("validation_method", "validation", "test_method", "verification_method"):
+                    value = content.get(key)
+                    if isinstance(value, str) and value.strip():
+                        explicit.append(value.strip())
+                    elif isinstance(value, list):
+                        explicit.extend(str(x).strip() for x in value if str(x).strip())
+            for value in explicit:
+                if value not in validation:
+                    validation.append(value)
+        # Keep control and validation semantics separate.  If the current
+        # release has engineering controls but no explicit validation method,
+        # do not copy the same control text into TEST_VALIDATION; surface the
+        # missing validation method instead so S5 remains reviewable/fail-closed.
         missing = list(knowledge.get("missing_information") or [])
+        if controls and not validation:
+            missing.append("EXPLICIT_TEST_VALIDATION_METHOD_NOT_FOUND")
         status = "ANSWERED" if items else "INSUFFICIENT_KNOWLEDGE"
         answer = (
             "已基于正式知识与证据给出写入机制、工程控制与验证关注点。"
@@ -229,7 +491,7 @@ class StorageDomainSkillAdapter:
                 "engineering_control_options": controls,
                 "conditions_and_limits": [str(x.get("limitations") or []) for x in items if x.get("limitations")],
                 "missing_information": missing,
-                "suggested_validation": controls,
+                "suggested_validation": validation,
                 "evidence_refs": knowledge.get("evidence_refs") or [],
                 "confidence_basis": ["FORMAL_KNOWLEDGE_RELEASE", "EVIDENCE_TRACEABLE"] if items else [],
                 "review_roles": ["Storage Engineering", "Software", "Test"],
@@ -245,9 +507,104 @@ class StorageDomainSkillAdapter:
         result = self.lifetime_engine.assess(request, requested_metric)
         missing = list(result.missing_inputs) + list(result.error_details)
         target = dict(target_service_life or {})
+        # Target service-life projection is only defined for observed SSD DWPD.
+        # It reuses the existing DWPD result plus the confirmed rated TBW Device Fact;
+        # no second lifetime formula/engine is introduced.
+        target_supported_metrics = {"ssd.dwpd", "SSD_DWPD_OBSERVED_V1"}
+        target_projection: dict[str, Any] = {}
         target_supported = not bool(target)
-        if target and requested_metric not in {"ssd.dwpd"}:
-            missing.append("TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED")
+
+        if target:
+            if requested_metric not in target_supported_metrics:
+                missing.append("TARGET_SERVICE_LIFE_BUDGET_FORMULA_NOT_REGISTERED")
+            elif result.status == LifetimeAssessmentStatus.CALCULATED:
+                try:
+                    target_value = float(target.get("value"))
+                    target_unit = str(target.get("unit") or "").strip().lower()
+                    if target_unit not in {"year", "years", "yr", "yrs"}:
+                        raise ValueError("TARGET_SERVICE_LIFE_UNIT_UNSUPPORTED")
+                    if target_value <= 0:
+                        raise ValueError("TARGET_SERVICE_LIFE_OUT_OF_RANGE")
+                    observed_dwpd = float(result.result)
+                    capacity_bytes = float(result.inputs["capacity_bytes"])
+                    target_days = target_value * 365.25
+                    projected_host_bytes = observed_dwpd * capacity_bytes * target_days
+
+                    rated_fact = next(
+                        (fact for fact in request.confirmed_facts if fact.metric_name == "rated_tbw_bytes"),
+                        None,
+                    )
+                    if rated_fact is None:
+                        missing.append("rated_tbw_bytes:CONFIRMED_DEVICE_FACT_REQUIRED_FOR_TARGET_LIFE")
+                        target_projection = {
+                            "target_service_life": {"value": target_value, "unit": "years"},
+                            "target_days": target_days,
+                            "observed_dwpd": observed_dwpd,
+                            "projected_host_written_bytes": projected_host_bytes,
+                            "budget_status": "BUDGET_UNAVAILABLE",
+                        }
+                    else:
+                        try:
+                            rated_tbw_bytes, _ = self.lifetime_engine._normalize(
+                                rated_fact.value,
+                                rated_fact.unit,
+                                "bytes",
+                                "rated_tbw_bytes",
+                            )
+                        except Exception as exc:
+                            details = getattr(exc, "details", None)
+                            if details:
+                                missing.extend(str(x) for x in details)
+                            else:
+                                missing.append("RATED_TBW_NORMALIZATION_FAILED")
+                            rated_tbw_bytes = None
+                        if rated_tbw_bytes is None:
+                            target_projection = {
+                                "target_service_life": {"value": target_value, "unit": "years"},
+                                "target_days": target_days,
+                                "observed_dwpd": observed_dwpd,
+                                "projected_host_written_bytes": projected_host_bytes,
+                                "budget_status": "BUDGET_UNAVAILABLE",
+                            }
+                        elif rated_tbw_bytes <= 0:
+                            raise ValueError("RATED_TBW_OUT_OF_RANGE")
+                        else:
+                            consumed_ratio_at_target = projected_host_bytes / rated_tbw_bytes
+                            remaining_bytes_at_target = rated_tbw_bytes - projected_host_bytes
+                            max_allowable_dwpd = rated_tbw_bytes / capacity_bytes / target_days
+                            dwpd_margin = max_allowable_dwpd - observed_dwpd
+                            target_projection = {
+                                "target_service_life": {"value": target_value, "unit": "years"},
+                                "target_days": target_days,
+                                "observed_dwpd": observed_dwpd,
+                                "max_allowable_dwpd": max_allowable_dwpd,
+                                "dwpd_margin": dwpd_margin,
+                                "capacity_bytes": capacity_bytes,
+                                "projected_host_written_bytes": projected_host_bytes,
+                                "rated_tbw_bytes": rated_tbw_bytes,
+                                "consumed_ratio_at_target": consumed_ratio_at_target,
+                                "remaining_bytes_at_target": remaining_bytes_at_target,
+                                "projection_basis": "FULL_RATED_TBW_BUDGET_FROM_ZERO",
+                                "existing_consumption_included": False,
+                                "boundary_note": (
+                                    "目标寿命预算按完整额定 TBW 从零基线投影；"
+                                    "若评估的是已服役器件，必须另行计入既有累计写入量。"
+                                ),
+                                "budget_status": (
+                                    "WITHIN_BUDGET"
+                                    if projected_host_bytes <= rated_tbw_bytes
+                                    else "EXCEEDS_BUDGET"
+                                ),
+                                "evidence_refs": sorted(
+                                    set(list(result.evidence_refs) + list(rated_fact.evidence_refs))
+                                ),
+                            }
+                            target_supported = True
+                except (TypeError, ValueError, KeyError) as exc:
+                    missing.append(str(exc))
+            else:
+                missing.append("TARGET_SERVICE_LIFE_REQUIRES_CALCULATED_DWPD")
+
         status_map = {
             LifetimeAssessmentStatus.CALCULATED: "ANSWERED" if target_supported else "PARTIAL",
             LifetimeAssessmentStatus.INSUFFICIENT_DATA: "INSUFFICIENT_DATA",
@@ -258,11 +615,21 @@ class StorageDomainSkillAdapter:
         write_budget = {}
         if "rated_tbw_bytes" in result.inputs:
             write_budget["rated_tbw_bytes"] = result.inputs["rated_tbw_bytes"]
-        answer = (
-            "已通过现有确定性 Lifetime Engine 计算；目标服役期若无已注册公式则不自行外推。"
-            if result.status == LifetimeAssessmentStatus.CALCULATED
-            else "现有 Lifetime Engine 无法在当前输入下形成确定性结果，保持 Fail-Closed。"
-        )
+        if target_projection.get("rated_tbw_bytes") is not None:
+            write_budget["rated_tbw_bytes"] = target_projection["rated_tbw_bytes"]
+
+        if result.status == LifetimeAssessmentStatus.CALCULATED:
+            if target and target_projection.get("budget_status") == "WITHIN_BUDGET":
+                answer = "已按当前观测 DWPD 投影到目标服役期，预计累计写入未超过已确认 TBW 预算。"
+            elif target and target_projection.get("budget_status") == "EXCEEDS_BUDGET":
+                answer = "已按当前观测 DWPD 投影到目标服役期，预计累计写入将超过已确认 TBW 预算。"
+            elif target:
+                answer = "已计算当前 DWPD，但目标服役期预算仍缺少已确认 TBW 或有效目标寿命输入。"
+            else:
+                answer = "已通过现有确定性 Lifetime Engine 计算；未提供目标服役期时不自行外推剩余寿命年限。"
+        else:
+            answer = "现有 Lifetime Engine 无法在当前输入下形成确定性结果，保持 Fail-Closed。"
+
         return self._base_result(
             "storage-lifetime-budget", status, answer,
             {
@@ -270,61 +637,379 @@ class StorageDomainSkillAdapter:
                 "endurance_basis": [result.inputs],
                 "write_budget": write_budget,
                 "measured_vs_budget": result.result if isinstance(result.result, dict) else {"value": result.result, "unit": result.unit},
-                "margin_status": result.status.value,
+                "target_service_life_projection": target_projection,
+                "margin_status": (
+                    target_projection.get("budget_status")
+                    or result.status.value
+                ),
                 "assumptions": [x.model_dump(mode="json") for x in result.assumptions],
                 "missing_information": sorted(set(missing)),
-                "evidence_refs": list(result.evidence_refs),
+                "evidence_refs": sorted(
+                    set(
+                        list(result.evidence_refs)
+                        + list(target_projection.get("evidence_refs") or [])
+                    )
+                ),
                 "formula_replay_refs": [result.replay_trace],
             },
             knowledge_refs=result.knowledge_refs,
-            evidence_refs=result.evidence_refs,
+            evidence_refs=sorted(
+                set(
+                    list(result.evidence_refs)
+                    + list(target_projection.get("evidence_refs") or [])
+                )
+            ),
             missing=missing,
             separation={
                 "facts": [result.inputs],
-                "derived": [result.result] if result.result is not None else [],
+                "derived": [
+                    x for x in (result.result, target_projection or None)
+                    if x is not None
+                ],
                 "hypotheses": [],
                 "unknowns": sorted(set(missing)),
             },
         )
 
+    @staticmethod
+    def _runtime_number(value: Any) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        raw = str(value).strip().replace(",", "").rstrip("%")
+        try:
+            if raw.lower().startswith("0x"):
+                return float(int(raw, 16))
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _deterministic_abnormality_signals(
+        cls,
+        observations: list[dict[str, Any]],
+        *,
+        released_semantics: set[str],
+        diagnostic_capabilities: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Evaluate only explicit, fail-closed runtime signals.
+
+        No vendor threshold is invented here.  Signals either use explicit
+        counter/flag semantics or a threshold supplied in the same observation
+        set.  Protocol-tier interpretations that require released semantics are
+        gated by the diagnostic knowledge release.
+        """
+        by_name = {str(x.get("metric_name") or ""): x for x in observations}
+
+        def number(name: str) -> float | None:
+            item = by_name.get(name) or {}
+            return cls._runtime_number(item.get("normalized_value", item.get("raw_value")))
+
+        def confirmed_fact_threshold(*names: str) -> tuple[float | None, dict[str, Any] | None]:
+            wanted = {str(x) for x in names}
+            for capability in diagnostic_capabilities or []:
+                if str(capability.get("canonical_name") or "") not in wanted:
+                    continue
+                if str(capability.get("review_status") or "").upper() != "CONFIRMED":
+                    continue
+                refs = [str(x) for x in (capability.get("evidence_refs") or []) if str(x)]
+                if not refs:
+                    continue
+                value = cls._runtime_number(capability.get("datasheet_fact"))
+                if value is not None:
+                    return value, capability
+            return None, None
+
+        def signal(name: str, code: str, severity: str, rationale: str) -> dict[str, Any]:
+            item = by_name.get(name) or {}
+            return {
+                "metric_name": name,
+                "code": code,
+                "severity": severity,
+                "observed_value": item.get("normalized_value", item.get("raw_value")),
+                "unit": item.get("unit"),
+                "evidence_ref": item.get("evidence_ref") or item.get("raw_output_ref"),
+                "rationale": rationale,
+            }
+
+        signals: list[dict[str, Any]] = []
+        critical_warning = number("critical_warning")
+        if critical_warning is not None and critical_warning != 0:
+            signals.append(signal(
+                "critical_warning",
+                "NVME_CRITICAL_WARNING_NONZERO",
+                "CRITICAL",
+                "Critical Warning 为非零显式告警位；需进入人工诊断。",
+            ))
+
+        for metric, code, severity in (
+            ("media_errors", "MEDIA_ERROR_PRESENT", "WARNING"),
+            ("ecc_uncorrectable", "UNCORRECTABLE_ECC_PRESENT", "CRITICAL"),
+            ("runtime_bad_block", "RUNTIME_BAD_BLOCK_PRESENT", "WARNING"),
+            ("program_fail", "PROGRAM_FAIL_PRESENT", "WARNING"),
+            ("erase_fail", "ERASE_FAIL_PRESENT", "WARNING"),
+        ):
+            value = number(metric)
+            if value is not None and value > 0:
+                signals.append(signal(
+                    metric,
+                    code,
+                    severity,
+                    f"{metric} 显式计数大于 0；需要结合时间趋势、负载和原始日志继续判定。",
+                ))
+
+        spare = number("available_spare")
+        spare_threshold = number("available_spare_threshold")
+        spare_threshold_source = "RUNTIME_OBSERVATION"
+        spare_threshold_refs: list[str] = []
+        if spare_threshold is not None:
+            threshold_obs = by_name.get("available_spare_threshold") or {}
+            ref = threshold_obs.get("evidence_ref") or threshold_obs.get("raw_output_ref")
+            if ref:
+                spare_threshold_refs.append(str(ref))
+        else:
+            spare_threshold, spare_capability = confirmed_fact_threshold("spare_threshold")
+            if spare_threshold is not None and spare_capability is not None:
+                spare_threshold_source = "CONFIRMED_DEVICE_FACT"
+                spare_threshold_refs = [
+                    str(x) for x in (spare_capability.get("evidence_refs") or []) if str(x)
+                ]
+        if spare is not None and spare_threshold is not None and spare < spare_threshold:
+            item = signal(
+                "available_spare",
+                "AVAILABLE_SPARE_BELOW_THRESHOLD",
+                "CRITICAL",
+                "Available Spare 低于显式阈值；阈值来自同次运行观测或已确认 Device Fact。",
+            )
+            item.update({
+                "threshold_value": spare_threshold,
+                "threshold_source": spare_threshold_source,
+                "threshold_evidence_refs": spare_threshold_refs,
+            })
+            signals.append(item)
+
+        bit_flips = number("bit_flip_count")
+        bit_flip_threshold = number("bit_flip_threshold")
+        bit_flip_threshold_source = "RUNTIME_OBSERVATION"
+        bit_flip_threshold_refs: list[str] = []
+        if bit_flip_threshold is not None:
+            threshold_obs = by_name.get("bit_flip_threshold") or {}
+            ref = threshold_obs.get("evidence_ref") or threshold_obs.get("raw_output_ref")
+            if ref:
+                bit_flip_threshold_refs.append(str(ref))
+        else:
+            bit_flip_threshold, bit_flip_capability = confirmed_fact_threshold("bit_flip_threshold")
+            if bit_flip_threshold is not None and bit_flip_capability is not None:
+                bit_flip_threshold_source = "CONFIRMED_DEVICE_FACT"
+                bit_flip_threshold_refs = [
+                    str(x) for x in (bit_flip_capability.get("evidence_refs") or []) if str(x)
+                ]
+        if (
+            bit_flips is not None
+            and bit_flip_threshold is not None
+            and bit_flips >= bit_flip_threshold
+        ):
+            item = signal(
+                "bit_flip_count",
+                "BIT_FLIP_AT_OR_ABOVE_EXPLICIT_THRESHOLD",
+                "WARNING",
+                "Bit Flip 数量达到或超过显式阈值；需结合 ECC 裕量和趋势继续诊断。",
+            )
+            item.update({
+                "threshold_value": bit_flip_threshold,
+                "threshold_source": bit_flip_threshold_source,
+                "threshold_evidence_refs": bit_flip_threshold_refs,
+            })
+            signals.append(item)
+
+        if "pre_eol_info" in released_semantics:
+            pre_eol = number("pre_eol_info")
+            if pre_eol == 3:
+                signals.append(signal(
+                    "pre_eol_info",
+                    "EMMC_PRE_EOL_URGENT",
+                    "CRITICAL",
+                    "PRE_EOL_INFO 精确匹配已发布语义中的紧急状态。",
+                ))
+            elif pre_eol == 2:
+                signals.append(signal(
+                    "pre_eol_info",
+                    "EMMC_PRE_EOL_WARNING",
+                    "WARNING",
+                    "PRE_EOL_INFO 精确匹配已发布语义中的预警状态。",
+                ))
+
+        if "percentage_used" in released_semantics:
+            percentage_used = number("percentage_used")
+            if percentage_used is not None and percentage_used >= 100:
+                signals.append(signal(
+                    "percentage_used",
+                    "NVME_PERCENTAGE_USED_AT_OR_ABOVE_100",
+                    "WARNING",
+                    "Percentage Used 已达到或超过已发布语义中的额定耐久消耗边界；仍需结合厂商规格与工作负载判断。",
+                ))
+
+        return signals
+
     def execute_diagnostic_validation(self, *, device_type: str, target_question: str,
                                       diagnostic_capabilities: list[dict[str, Any]] | None = None,
                                       runtime_observations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        knowledge = self.query_pack("PACK_DIAGNOSTIC_VALIDATION", target_question, device_type=device_type)
-        items = knowledge.get("items") or []
         observations = list(runtime_observations or [])
-        current = [x for x in observations if x.get("is_formally_consumable") is True]
-        stale = [x for x in observations if x.get("is_formally_consumable") is not True]
-        missing = list(knowledge.get("missing_information") or [])
-        if stale:
-            missing.append("STALE_OR_NONCONSUMABLE_RUNTIME_OBSERVATION_EXCLUDED")
+        capabilities = list(diagnostic_capabilities or [])
+        metric_terms = [
+            str(x.get("metric_name") or "").strip()
+            for x in observations
+            if isinstance(x, dict) and str(x.get("metric_name") or "").strip()
+        ]
+        capability_terms = [
+            str(x.get("canonical_name") or "").strip()
+            for x in capabilities
+            if isinstance(x, dict) and str(x.get("canonical_name") or "").strip()
+        ]
+        # For an actual runtime diagnosis, retrieve semantics for the metrics
+        # that were observed.  Do not let an unrelated supported capability
+        # (for example Percentage Used) make another metric look evidenced.
+        semantic_terms = metric_terms if metric_terms else capability_terms
+        knowledge_query = " ".join(
+            x for x in [
+                str(target_question or "").strip(),
+                " ".join(semantic_terms[:20]),
+            ] if x
+        )
+        knowledge = self.query_pack(
+            "PACK_DIAGNOSTIC_VALIDATION",
+            knowledge_query,
+            device_type=device_type,
+            semantic_classes=[
+                "PARAMETER_DEFINITION",
+                "DIAGNOSTIC_RULE",
+                "TEST_RULE",
+                "APPLICABILITY_RULE",
+            ],
+            canonical_parameters=semantic_terms,
+            scenario_consumer="S4",
+        )
+        items = knowledge.get("items") or []
+        current: list[dict[str, Any]] = []
+        excluded: list[str] = []
+
+        for raw in observations:
+            try:
+                observation = RuntimeObservation(**dict(raw))
+            except Exception:
+                excluded.append("INVALID_RUNTIME_OBSERVATION_CONTRACT")
+                continue
+            if observation.is_formally_consumable:
+                current.append(observation.model_dump(mode="json"))
+            else:
+                excluded.append("STALE_OR_NONCONSUMABLE_RUNTIME_OBSERVATION_EXCLUDED")
+
+        missing = list(knowledge.get("missing_information") or []) + excluded
         methods = [_text(x) for x in items if x.get("canonical_object_type") == "DiagnosticMethod" and _text(x)]
-        status = "ANSWERED" if items else "INSUFFICIENT_KNOWLEDGE"
+        semantic_text = " ".join(_text(x).lower() for x in items if _text(x))
+        released_semantics: set[str] = set()
+        if "pre_eol" in semantic_text or "pre eol" in semantic_text:
+            released_semantics.add("pre_eol_info")
+        if "percentage used" in semantic_text or "percentage_used" in semantic_text:
+            released_semantics.add("percentage_used")
+        signals = self._deterministic_abnormality_signals(
+            current,
+            released_semantics=released_semantics,
+            diagnostic_capabilities=capabilities,
+        )
+
+        if not current:
+            status = "INSUFFICIENT_DATA"
+            missing.append("FORMALLY_CONSUMABLE_RUNTIME_OBSERVATION_REQUIRED")
+            answer = "当前没有可正式消费的 Runtime Observation，不能形成运行诊断结果。"
+        elif signals:
+            status = "ANSWERED"
+            if not items:
+                missing.append("FORMAL_DIAGNOSTIC_KNOWLEDGE_REQUIRED_FOR_FULL_INTERPRETATION")
+            answer = (
+                f"检测到 {len(signals)} 个确定性异常/退化信号；详细机理与处置边界仍需结合 Evidence、趋势和正式知识。"
+            )
+        elif not items:
+            status = "INSUFFICIENT_KNOWLEDGE"
+            answer = "已有当前运行观测，但没有触发无需协议语义即可判定的显式异常信号，且缺少正式诊断知识，保持 Fail-Closed。"
+        else:
+            status = "ANSWERED"
+            answer = "当前可正式消费观测未触发已注册的确定性异常信号；这不等同于证明介质无风险。"
+
+        diagnosis_status = (
+            "ABNORMAL_SIGNAL_PRESENT"
+            if signals else
+            "NO_REGISTERED_SIGNAL"
+            if current and items else
+            "INCOMPLETE"
+        )
+        signal_evidence_refs = sorted({
+            str(ref)
+            for item in signals
+            for ref in (
+                [item.get("evidence_ref")]
+                + list(item.get("threshold_evidence_refs") or [])
+            )
+            if str(ref or "").strip()
+        })
+        combined_evidence_refs = sorted({
+            str(ref)
+            for ref in list(knowledge.get("evidence_refs") or []) + signal_evidence_refs
+            if str(ref or "").strip()
+        })
         return self._base_result(
             "storage-diagnostic-validation", status,
-            "已区分诊断能力与当前观测；只使用可正式消费的 Runtime Observation。"
-            if items else "缺少可发布、可追溯的诊断知识，无法解释字段语义。",
+            answer,
             {
                 "supported_metrics": list(diagnostic_capabilities or []),
                 "acquisition_method": methods,
                 "data_source": [x.get("source_refs") or [] for x in items],
                 "current_observation": current,
+                "diagnosis_status": diagnosis_status,
                 "interpretation_boundary": [_text(x) for x in items if _text(x)],
-                "abnormality_signal": [],
+                "abnormality_signal": signals,
                 "validation_method": methods,
                 "missing_information": sorted(set(missing)),
-                "evidence_refs": knowledge.get("evidence_refs") or [],
+                "evidence_refs": combined_evidence_refs,
             },
             knowledge_refs=knowledge.get("knowledge_refs") or [],
-            evidence_refs=knowledge.get("evidence_refs") or [],
+            evidence_refs=combined_evidence_refs,
             missing=missing,
-            separation={"facts": current, "derived": [], "hypotheses": [], "unknowns": missing},
+            separation={
+                "facts": current,
+                "derived": signals,
+                "hypotheses": [],
+                "unknowns": sorted(set(missing)),
+            },
         )
 
     def execute_change_impact(self, *, device_type: str, parameter_delta: list[dict[str, Any]],
                               question: str = "device parameter change lifetime software monitoring validation impact",
                               software_impact_request: SoftwareImpactAnalysisRequest | None = None) -> dict[str, Any]:
-        knowledge = self.query_pack("PACK_CHANGE_IMPACT", question, device_type=device_type)
+        delta = list(parameter_delta or [])
+        delta_terms = [
+            str(x.get("canonical_name") or "").strip()
+            for x in delta
+            if isinstance(x, dict) and str(x.get("canonical_name") or "").strip()
+        ]
+        knowledge_query = " ".join(
+            x for x in [
+                str(question or "").strip(),
+                " ".join(delta_terms[:30]),
+            ] if x
+        )
+        knowledge = self.query_pack(
+            "PACK_CHANGE_IMPACT",
+            knowledge_query,
+            device_type=device_type,
+            semantic_classes=[
+                "MECHANISM_CONCEPT",
+                "CHANGE_IMPACT_RULE",
+                "APPLICABILITY_RULE",
+                "TEST_RULE",
+            ],
+            canonical_parameters=delta_terms,
+            scenario_consumer="S2",
+        )
         items = knowledge.get("items") or []
         impacts = []
         impact_refs: list[str] = []
@@ -339,15 +1024,15 @@ class StorageDomainSkillAdapter:
             if analyzed.status not in {SoftwareImpactAnalysisStatus.EVIDENCED, SoftwareImpactAnalysisStatus.NOT_APPLICABLE}:
                 missing.append(f"SOFTWARE_IMPACT:{analyzed.status.value}")
         classifications = ["KNOWLEDGE_BACKED" for _ in items]
-        if parameter_delta and not items:
-            classifications = ["UNKNOWN" for _ in parameter_delta]
+        if delta and not items:
+            classifications = ["UNKNOWN" for _ in delta]
         status = "ANSWERED" if items or impacts else "INSUFFICIENT_KNOWLEDGE"
         return self._base_result(
             "storage-change-impact", status,
             "参数差异已按正式知识/既有影响分析边界投影；未知项保持 UNKNOWN，需工程评审。"
             if status == "ANSWERED" else "当前没有足够正式知识支撑该变更影响，未知项不得视为安全。",
             {
-                "parameter_changes": list(parameter_delta),
+                "parameter_changes": delta,
                 "technical_meaning": [_text(x) for x in items if _text(x)],
                 "lifetime_impact": [_text(x) for x in items if _text(x)],
                 "software_impact": impacts,
@@ -362,7 +1047,7 @@ class StorageDomainSkillAdapter:
             evidence_refs=(knowledge.get("evidence_refs") or []) + impact_evidence,
             missing=missing,
             separation={
-                "facts": list(parameter_delta),
+                "facts": delta,
                 "derived": impacts,
                 "hypotheses": [],
                 "unknowns": sorted(set(missing)),

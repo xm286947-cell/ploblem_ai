@@ -138,8 +138,32 @@ def test_gs03_emmc_diagnostic_separates_capability_from_current_observation():
         target_question="DEVICE_LIFE_TIME_EST_TYP_A PRE_EOL health interpretation",
         diagnostic_capabilities=[{"metric": "DEVICE_LIFE_TIME_EST_TYP_A", "supported": True}],
         runtime_observations=[
-            {"metric": "DEVICE_LIFE_TIME_EST_TYP_A", "value": "0x03", "is_formally_consumable": True},
-            {"metric": "PRE_EOL_INFO", "value": "0x02", "is_formally_consumable": False},
+            {
+                "observation_id": "OBS-LIFE-A",
+                "device_id": "emmc-golden",
+                "device_type": "eMMC",
+                "metric_name": "DEVICE_LIFE_TIME_EST_TYP_A",
+                "raw_value": "0x03",
+                "normalized_value": "0x03",
+                "capture_time": "2026-10-06T08:00:00Z",
+                "source_command_or_interface": "mmc extcsd read /dev/mmcblk0",
+                "evidence_ref": "EVD-LIFE-A",
+                "quality_status": "VALID",
+                "availability_status": "AVAILABLE",
+            },
+            {
+                "observation_id": "OBS-PRE-EOL",
+                "device_id": "emmc-golden",
+                "device_type": "eMMC",
+                "metric_name": "PRE_EOL_INFO",
+                "raw_value": "0x02",
+                "normalized_value": "0x02",
+                "capture_time": "2026-10-06T07:00:00Z",
+                "source_command_or_interface": "mmc extcsd read /dev/mmcblk0",
+                "evidence_ref": "EVD-PRE-EOL",
+                "quality_status": "UNKNOWN",
+                "availability_status": "AVAILABLE",
+            },
         ],
     )
     assert result["status"] == "ANSWERED"
@@ -190,3 +214,275 @@ def test_fail_closed_without_matching_formal_knowledge():
     assert result["status"] == "INSUFFICIENT_KNOWLEDGE"
     assert result["evidence_refs"] == []
     assert "NO_MATCHING_RELEASED_KNOWLEDGE_WITH_EVIDENCE" in result["missing_information"]
+
+
+
+class ReviewedSemanticKnowledgeConsumer:
+    def __init__(self, *, include_s4=True):
+        self.include_s4 = include_s4
+        self.calls = []
+
+    def status(self):
+        return {
+            "available": True,
+            "status": "READY",
+            "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
+        }
+
+    @staticmethod
+    def _item(
+        object_id,
+        *,
+        semantic_class,
+        parameter,
+        consumers,
+        object_type="DIAGNOSTIC",
+    ):
+        return {
+            "object_id": object_id,
+            "object_type": object_type,
+            "status": "ACTIVE",
+            "device_type": "NAND Flash",
+            "title": object_id,
+            "content": f"{semantic_class} for {parameter}",
+            "tags": [
+                "storage-lifetime",
+                f"storage-parameter:{parameter}",
+                f"storage-semantic:{semantic_class}",
+            ],
+            "evidence_refs": [f"EVD-{object_id}"],
+            "source_refs": [f"SRC-{object_id}"],
+            "metadata": {
+                "storage_lifetime": {
+                    "schema_version": "storage-lifetime-knowledge/v1",
+                    "semantic_class": semantic_class,
+                    "semantic_class_status": "REVIEWED",
+                    "formal_consumable": True,
+                    "canonical_parameters": [parameter],
+                    "scenario_consumers": list(consumers),
+                }
+            },
+        }
+
+    def query(
+        self,
+        text,
+        *,
+        device_type="",
+        top_k=8,
+        knowledge_release_version=None,
+        semantic_class="",
+        canonical_parameter="",
+        scenario_consumer="",
+    ):
+        self.calls.append({
+            "text": text,
+            "device_type": device_type,
+            "scenario_consumer": scenario_consumer,
+            "semantic_class": semantic_class,
+            "canonical_parameter": canonical_parameter,
+        })
+        reviewed = [
+            self._item(
+                "KO-S3-PE",
+                semantic_class="CALCULATION_RULE",
+                parameter="pe_cycles",
+                consumers=["S3"],
+                object_type="FACT",
+            ),
+        ]
+        if self.include_s4:
+            reviewed.extend([
+                self._item(
+                    "KO-S4-ECC",
+                    semantic_class="DIAGNOSTIC_RULE",
+                    parameter="ecc_status",
+                    consumers=["S4"],
+                ),
+                self._item(
+                    "KO-S4-PERCENTAGE",
+                    semantic_class="DIAGNOSTIC_RULE",
+                    parameter="percentage_used",
+                    consumers=["S4"],
+                ),
+            ])
+
+        if scenario_consumer:
+            reviewed = [
+                item for item in reviewed
+                if scenario_consumer
+                in item["metadata"]["storage_lifetime"]["scenario_consumers"]
+            ]
+        if semantic_class:
+            reviewed = [
+                item for item in reviewed
+                if item["metadata"]["storage_lifetime"]["semantic_class"]
+                == semantic_class
+            ]
+        if canonical_parameter:
+            reviewed = [
+                item for item in reviewed
+                if canonical_parameter
+                in item["metadata"]["storage_lifetime"][
+                    "canonical_parameters"
+                ]
+            ]
+
+        if text:
+            # A legacy prose hit that must never be used once this release
+            # already contains reviewed Storage-lifetime metadata.
+            legacy = {
+                "object_id": "KO-LEGACY-PROSE",
+                "object_type": "DIAGNOSTIC",
+                "status": "ACTIVE",
+                "device_type": device_type or "NAND Flash",
+                "title": "Legacy diagnostic prose",
+                "content": text,
+                "evidence_refs": ["EVD-LEGACY"],
+                "source_refs": ["SRC-LEGACY"],
+                "metadata": {},
+            }
+            return {
+                "knowledge_release_version": (
+                    "KP-STORAGE-RC1-VALIDATION-001"
+                ),
+                "results": [legacy],
+            }
+
+        return {
+            "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
+            "results": reviewed[:top_k],
+        }
+
+
+def test_reviewed_semantic_pack_query_selects_parameter_without_prose_guess():
+    consumer = ReviewedSemanticKnowledgeConsumer()
+    adapter = StorageDomainSkillAdapter(knowledge_consumer=consumer)
+
+    result = adapter.query_pack(
+        "PACK_DIAGNOSTIC_VALIDATION",
+        "this prose should not drive selection",
+        device_type="NAND Flash",
+        semantic_classes=["DIAGNOSTIC_RULE"],
+        canonical_parameters=["ecc_status"],
+        scenario_consumer="S4",
+    )
+
+    assert result["status"] == "READY"
+    assert result["selection_mode"] == "REVIEWED_STORAGE_SEMANTIC"
+    assert [x["object_id"] for x in result["items"]] == ["KO-S4-ECC"]
+    assert consumer.calls[0]["text"] == ""
+    assert consumer.calls[0]["scenario_consumer"] == "S4"
+    assert not any(call["text"] for call in consumer.calls)
+
+
+def test_reviewed_model_release_missing_scenario_does_not_fall_back_to_legacy_prose():
+    consumer = ReviewedSemanticKnowledgeConsumer(include_s4=False)
+    adapter = StorageDomainSkillAdapter(knowledge_consumer=consumer)
+
+    result = adapter.query_pack(
+        "PACK_DIAGNOSTIC_VALIDATION",
+        "legacy prose would have matched",
+        device_type="NAND Flash",
+        semantic_classes=["DIAGNOSTIC_RULE"],
+        canonical_parameters=["ecc_status"],
+        scenario_consumer="S4",
+    )
+
+    assert result["status"] == "INSUFFICIENT_KNOWLEDGE"
+    assert result["selection_mode"] == "REVIEWED_STORAGE_SEMANTIC"
+    assert result["items"] == []
+    assert (
+        "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE_WITH_EVIDENCE"
+        in result["missing_information"]
+    )
+    assert not any(call["text"] for call in consumer.calls)
+
+
+def test_legacy_release_without_structured_contract_remains_compatible():
+    adapter = StorageDomainSkillAdapter(
+        knowledge_consumer=FakeKnowledgeConsumer()
+    )
+
+    result = adapter.query_pack(
+        "PACK_CHANGE_IMPACT",
+        "change impact",
+        device_type="SSD",
+        semantic_classes=["CHANGE_IMPACT_RULE"],
+        canonical_parameters=["tbw"],
+        scenario_consumer="S2",
+    )
+
+    assert result["status"] == "READY"
+    assert result["selection_mode"] == "LEGACY_FORMAL_COMPATIBILITY"
+    assert result["items"]
+
+
+
+class UpgradedBindingKnowledgeConsumer(
+    ReviewedSemanticKnowledgeConsumer
+):
+    def status(self):
+        return {
+            "available": True,
+            "status": "READY",
+            "knowledge_release_version": "KP-STORAGE-LIFETIME-20261006-R2",
+        }
+
+    def validate_storage_binding(self):
+        return {
+            "knowledge_release_version": (
+                "KP-STORAGE-LIFETIME-20261006-R2"
+            )
+        }
+
+    def query(
+        self,
+        text,
+        *,
+        device_type="",
+        top_k=8,
+        knowledge_release_version=None,
+        semantic_class="",
+        canonical_parameter="",
+        scenario_consumer="",
+    ):
+        assert (
+            knowledge_release_version
+            == "KP-STORAGE-LIFETIME-20261006-R2"
+        )
+        result = super().query(
+            text,
+            device_type=device_type,
+            top_k=top_k,
+            knowledge_release_version=knowledge_release_version,
+            semantic_class=semantic_class,
+            canonical_parameter=canonical_parameter,
+            scenario_consumer=scenario_consumer,
+        )
+        result["knowledge_release_version"] = (
+            "KP-STORAGE-LIFETIME-20261006-R2"
+        )
+        return result
+
+
+def test_controlled_binding_supersedes_legacy_pack_release_pin():
+    adapter = StorageDomainSkillAdapter(
+        knowledge_consumer=UpgradedBindingKnowledgeConsumer()
+    )
+
+    result = adapter.query_pack(
+        "PACK_DIAGNOSTIC_VALIDATION",
+        "ECC status",
+        device_type="NAND Flash",
+        semantic_classes=["DIAGNOSTIC_RULE"],
+        canonical_parameters=["ecc_status"],
+        scenario_consumer="S4",
+    )
+
+    assert result["status"] == "READY"
+    assert (
+        result["knowledge_release_version"]
+        == "KP-STORAGE-LIFETIME-20261006-R2"
+    )
+    assert result["selection_mode"] == "REVIEWED_STORAGE_SEMANTIC"

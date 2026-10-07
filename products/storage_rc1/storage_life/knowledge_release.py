@@ -25,9 +25,36 @@ def _root() -> Path:
     return (Path(__file__).resolve().parents[1] / "knowledge_release" / "current").resolve()
 
 
-def _binding_path() -> Path:
+def _binding_path(release_root: Path | None = None) -> Path:
+    configured = os.environ.get(
+        "STORAGE_KNOWLEDGE_BINDING_PATH", ""
+    ).strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if release_root is not None:
+        local = release_root / "release_binding.json"
+        if local.is_file():
+            return local.resolve()
+
+    # Repository and distributable-package layouts have different parent
+    # depths. Resolve the controlled default binding by searching upward for
+    # the packaged contracts tree instead of assuming a source-tree layout.
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = (
+            parent
+            / "contracts"
+            / "release_binding"
+            / "v1"
+            / "release_binding.json"
+        )
+        if candidate.is_file():
+            return candidate.resolve()
+
+    # Return the nearest expected path so the existing _json() path reports a
+    # deterministic fail-closed error without leaking arbitrary locations.
     return (
-        Path(__file__).resolve().parents[3]
+        here.parent.parent
         / "contracts"
         / "release_binding"
         / "v1"
@@ -54,6 +81,23 @@ def _sha256(path: Path) -> str:
 
 def _terms(text: str) -> list[str]:
     return [x for x in re.split(r"[^a-zA-Z0-9_./+\-\u4e00-\u9fff]+", text.lower()) if len(x) >= 2]
+
+
+def _device_type_aliases(value: str) -> set[str]:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return set()
+    groups = [
+        {"ssd", "nvme", "nvme ssd"},
+        {"emmc", "e-mmc"},
+        {"nand", "nand flash", "raw nand"},
+        {"nor", "nor flash"},
+        {"generic"},
+    ]
+    for group in groups:
+        if raw in group:
+            return group
+    return {raw}
 
 
 @dataclass
@@ -98,7 +142,7 @@ class KnowledgeReleaseConsumer:
         """
 
         manifest = self._validated_manifest()
-        binding = _json(_binding_path())
+        binding = _json(_binding_path(self.root))
         try:
             validate_release_binding(binding, release_manifest=manifest)
         except (ReleaseBindingError, TypeError) as exc:
@@ -134,6 +178,49 @@ class KnowledgeReleaseConsumer:
         src_by_ref = {str(x.get("source_ref") or ""): x for x in sources if x.get("source_ref")}
         return manifest, objects, ev_by_id, src_by_ref
 
+    def has_reviewed_storage_knowledge(
+        self,
+        *,
+        device_type: str = "",
+    ) -> bool:
+        """Return whether this immutable release has reviewed Storage metadata.
+
+        This is a migration/provenance probe, not a search. It prevents
+        product consumers from falling back to legacy prose once the release
+        has started publishing storage-lifetime-knowledge/v1 objects.
+        """
+        _, objects, _, _ = self._payload()
+        requested_types = _device_type_aliases(device_type)
+        for obj in objects:
+            if str(obj.get("status") or "ACTIVE") != "ACTIVE":
+                continue
+            if device_type:
+                object_types = _device_type_aliases(
+                    str(obj.get("device_type") or "")
+                )
+                if (
+                    object_types
+                    and "generic" not in object_types
+                    and requested_types.isdisjoint(object_types)
+                ):
+                    continue
+            metadata = obj.get("metadata")
+            storage = (
+                metadata.get("storage_lifetime")
+                if isinstance(metadata, dict)
+                else None
+            )
+            if (
+                isinstance(storage, dict)
+                and storage.get("formal_consumable") is True
+                and str(
+                    storage.get("semantic_class_status") or ""
+                ).upper()
+                == "REVIEWED"
+            ):
+                return True
+        return False
+
     def query(
         self,
         text: str,
@@ -141,17 +228,88 @@ class KnowledgeReleaseConsumer:
         device_type: str = "",
         top_k: int = 8,
         knowledge_release_version: str | None = None,
+        semantic_class: str = "",
+        canonical_parameter: str = "",
+        scenario_consumer: str = "",
     ) -> dict[str, Any]:
         manifest, objects, ev_by_id, src_by_ref = self._payload()
         if knowledge_release_version is not None and knowledge_release_version != manifest.get("knowledge_release_version"):
             raise KnowledgeReleaseError("RELEASE_VERSION_MISMATCH")
         terms = _terms(text)
         ranked = []
+        structured_filter = any(
+            str(value or "").strip()
+            for value in (
+                semantic_class,
+                canonical_parameter,
+                scenario_consumer,
+            )
+        )
         for obj in objects:
             if str(obj.get("status") or "ACTIVE") != "ACTIVE":
                 continue
-            if device_type and str(obj.get("device_type") or "").lower() not in {device_type.lower(), "generic", ""}:
-                continue
+            if structured_filter:
+                metadata = obj.get("metadata")
+                storage = (
+                    metadata.get("storage_lifetime")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                if (
+                    not isinstance(storage, dict)
+                    or storage.get("formal_consumable") is not True
+                    or str(
+                        storage.get("semantic_class_status") or ""
+                    ).upper()
+                    != "REVIEWED"
+                ):
+                    continue
+                requested_semantic = str(semantic_class or "").strip()
+                if requested_semantic and str(
+                    storage.get("semantic_class") or ""
+                ) != requested_semantic:
+                    continue
+
+                requested_parameter = str(
+                    canonical_parameter or ""
+                ).strip()
+                if requested_parameter:
+                    parameters = {
+                        str(value).strip()
+                        for value in (
+                            storage.get("canonical_parameters") or []
+                        )
+                        if str(value or "").strip()
+                    }
+                    for tag in obj.get("tags") or []:
+                        if (
+                            isinstance(tag, str)
+                            and tag.startswith("storage-parameter:")
+                        ):
+                            parameters.add(
+                                tag.split(":", 1)[1].strip()
+                            )
+                    if requested_parameter not in parameters:
+                        continue
+
+                requested_consumer = str(
+                    scenario_consumer or ""
+                ).strip()
+                if requested_consumer:
+                    consumers = {
+                        str(value).strip()
+                        for value in (
+                            storage.get("scenario_consumers") or []
+                        )
+                        if str(value or "").strip()
+                    }
+                    if requested_consumer not in consumers:
+                        continue
+            if device_type:
+                requested_types = _device_type_aliases(device_type)
+                object_types = _device_type_aliases(str(obj.get("device_type") or ""))
+                if object_types and "generic" not in object_types and requested_types.isdisjoint(object_types):
+                    continue
             hay = " ".join(str(obj.get(k) or "") for k in ("title", "summary", "content", "device_type"))
             hay += " " + " ".join(map(str, obj.get("tags") or [])) + " " + " ".join(map(str, obj.get("scope") or []))
             lower = hay.lower()
@@ -168,7 +326,20 @@ class KnowledgeReleaseConsumer:
             "knowledge_release_version": manifest.get("knowledge_release_version"),
             "results": items,
             "total": len(items),
-            "unknowns_or_gaps": [] if items else ["NO_MATCHING_PUBLISHED_KNOWLEDGE"],
+            "selection_mode": (
+                "REVIEWED_STORAGE_SEMANTIC"
+                if structured_filter
+                else "TEXT_AND_DEVICE"
+            ),
+            "unknowns_or_gaps": (
+                []
+                if items
+                else [
+                    "NO_MATCHING_REVIEWED_STORAGE_KNOWLEDGE"
+                    if structured_filter
+                    else "NO_MATCHING_PUBLISHED_KNOWLEDGE"
+                ]
+            ),
         }
 
     def evidence(self, evidence_id: str) -> dict[str, Any]:
