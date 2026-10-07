@@ -2,7 +2,7 @@
 {% block title %}{{ page_title }}{% endblock %}
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-ai-search-v1">{% endblock %}
 {% block breadcrumb %}案例搜索{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
@@ -12,7 +12,7 @@
   </header>
   <section class="hc-card hc-search-panel">
     <form class="hc-search-row" data-search-form>
-      <input type="search" placeholder="输入关键词" data-search-query>
+      <input type="search" placeholder="直接描述问题，例如：有哪些 MCU 的问题" data-search-query>
       <button type="submit" class="hc-button primary">搜索</button>
     </form>
     <div class="hc-filter-row">
@@ -29,4 +29,4 @@
   <div class="hc-toast" data-hc-toast hidden></div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-m3-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case.js?v=hc-ai-search-v1"></script>{% endblock %}
