@@ -1,0 +1,43 @@
+name: Hardware AI Retrieval W1B Real Provider
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/hardware-ai-retrieval-w1b-runtime-binding
+    paths:
+      - ".github/workflows/hardware-ai-retrieval-w1b-real-provider.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  real-provider-tagging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HARDWARE_RETRIEVAL_REAL_E2E: "1"
+      DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Require existing real-provider profile
+        shell: bash
+        run: |
+          if [ -z "$DASHSCOPE_BASE_URL" ]; then
+            echo "::error::Repository variable DASHSCOPE_BASE_URL is not configured."
+            exit 2
+          fi
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::Repository secret DASHSCOPE_API_KEY is not configured."
+            exit 2
+          fi
+      - name: Install Runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run W1B real-provider tagging
+        run: >-
+          python -m pytest -q
+          tests/test_hardware_retrieval_tagger_real_provider.py::test_w1b_real_provider_tagging
