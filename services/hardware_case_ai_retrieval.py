@@ -97,6 +97,74 @@ _ENGLISH_STOP = {
     "an",
 }
 
+# These aliases only create additional retrieval queries. They are never
+# persisted to Formal Knowledge, used as structured filters, or treated as
+# product facts. Keeping the alternatives separate is important because the
+# Formal Consumption search requires every query token to be supported.
+_RECALL_ONLY_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("单片机", ("mcu",)),
+    ("微控制器", ("mcu",)),
+    ("复位", ("reset", "reset_n")),
+    ("reset_n", ("复位", "reset")),
+    ("reset", ("复位", "reset_n")),
+    ("供电", ("电源", "power", "vcc")),
+    ("电源", ("供电", "power", "vcc")),
+    ("power", ("供电", "电源", "vcc")),
+    ("vcc", ("供电", "电源", "power")),
+)
+
+
+def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
+    """Return literal plus bounded synonym variants, with their provenance."""
+
+    variants: list[dict[str, Any]] = [
+        {"text": retrieval_text, "kind": "LITERAL", "rules": []}
+    ]
+    seen = {retrieval_text}
+    normalized = retrieval_text.casefold()
+
+    for trigger, alternatives in _RECALL_ONLY_ALIAS_GROUPS:
+        if re.fullmatch(r"[a-z0-9_]+", trigger):
+            trigger_pattern = rf"(?<![a-z0-9_]){re.escape(trigger)}(?![a-z0-9_])"
+            matches_trigger = re.search(trigger_pattern, normalized) is not None
+        else:
+            trigger_pattern = re.escape(trigger)
+            matches_trigger = trigger in normalized
+        if not matches_trigger:
+            continue
+        current = list(variants)
+        for variant in current:
+            for alternative in alternatives:
+                if len(variants) >= 32:
+                    break
+                text = normalize_search_text(
+                    re.sub(
+                        trigger_pattern,
+                        lambda _match: f" {alternative} ",
+                        variant["text"],
+                    )
+                )
+                if text == variant["text"] or text in seen:
+                    continue
+                seen.add(text)
+                rule = {
+                    "rule_id": f"RECALL_ALIAS_{trigger.upper()}",
+                    "matched_phrase": trigger,
+                    "expanded_term": alternative,
+                    "use": "RECALL_ONLY",
+                }
+                variants.append(
+                    {
+                        "text": text,
+                        "kind": "RECALL_ONLY",
+                        "rules": [*variant["rules"], rule],
+                    }
+                )
+            if len(variants) >= 32:
+                break
+
+    return variants
+
 
 def understand_hardware_query(text: str) -> dict[str, Any]:
     """Extract a high-signal engineering retrieval phrase from user wording.
@@ -108,11 +176,14 @@ def understand_hardware_query(text: str) -> dict[str, Any]:
 
     raw = normalize_search_text(text)
     if not raw:
+        variants = _recall_only_query_variants("")
         return {
             "intent": "LIST_OR_SEARCH",
             "original_query": str(text or ""),
             "retrieval_text": "",
             "terms": [],
+            "search_queries": variants,
+            "recall_only_expansions": [],
         }
 
     cleaned = raw
@@ -127,12 +198,19 @@ def understand_hardware_query(text: str) -> dict[str, Any]:
         parts.append(token)
     parts = list(dict.fromkeys(parts))
     retrieval_text = " ".join(parts).strip() or raw
+    variants = _recall_only_query_variants(retrieval_text)
+    for variant in variants:
+        variant["original_query"] = str(text or "")
 
     return {
         "intent": "LIST_OR_SEARCH",
         "original_query": str(text or ""),
         "retrieval_text": retrieval_text,
         "terms": parts or [raw],
+        "search_queries": variants,
+        "recall_only_expansions": [
+            variant for variant in variants if variant["kind"] == "RECALL_ONLY"
+        ],
     }
 
 
@@ -506,13 +584,21 @@ class HardwareCaseAIRetrievalService:
         score: Any,
         why_hit: Mapping[str, Any] | None,
         knowledge_id: str | None = None,
+        query_variant: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         row = dict(case)
+        explanation = dict(why_hit or {})
+        if query_variant and query_variant.get("kind") == "RECALL_ONLY":
+            explanation["query_expansion"] = {
+                "policy": "RECALL_ONLY",
+                "original_query": query_variant.get("original_query"),
+                "rules": list(query_variant.get("rules") or []),
+            }
         row["retrieval"] = {
             "mode": mode,
             "score": score,
             "knowledge_id": knowledge_id,
-            "why_hit": dict(why_hit or {}),
+            "why_hit": explanation,
         }
         return row
 
@@ -550,19 +636,26 @@ class HardwareCaseAIRetrievalService:
         )
         lookup = self._case_lookup(visible["results"])
         errors: list[str] = []
-        retrieval_text = str(understood["retrieval_text"])
+        search_queries = list(understood.get("search_queries") or []) or [
+            {"text": str(understood["retrieval_text"]), "kind": "LITERAL", "rules": []}
+        ]
 
         if self.retrieval_query_service is not None:
             try:
-                payload = self.retrieval_query_service.search(
-                    retrieval_text,
-                    limit=100,
-                )
-                hits = payload.get("results")
-                if not isinstance(hits, list):
-                    raise HardwareCaseAIRetrievalError(
-                        "RETRIEVAL_QUERY_RESPONSE_INVALID"
+                hits: list[dict[str, Any]] = []
+                for variant in search_queries:
+                    payload = self.retrieval_query_service.search(
+                        str(variant["text"]),
+                        limit=100,
                     )
+                    variant_hits = payload.get("results")
+                    if not isinstance(variant_hits, list):
+                        raise HardwareCaseAIRetrievalError(
+                            "RETRIEVAL_QUERY_RESPONSE_INVALID"
+                        )
+                    for hit in variant_hits:
+                        if isinstance(hit, Mapping):
+                            hits.append({**dict(hit), "_query_variant": variant})
                 mapped: list[dict[str, Any]] = []
                 seen: set[str] = set()
                 for hit in hits:
@@ -587,6 +680,9 @@ class HardwareCaseAIRetrievalService:
                             if isinstance(hit.get("why_hit"), Mapping)
                             else None,
                             knowledge_id=str(hit.get("knowledge_id") or "") or None,
+                            query_variant=hit.get("_query_variant")
+                            if isinstance(hit.get("_query_variant"), Mapping)
+                            else None,
                         )
                     )
                 if mapped:
@@ -604,15 +700,20 @@ class HardwareCaseAIRetrievalService:
 
         if self.consumption_service is not None:
             try:
-                projection_payload = self.consumption_service.search(
-                    retrieval_text,
-                    limit=100,
-                )
-                hits = projection_payload.get("results")
-                if not isinstance(hits, list):
-                    raise HardwareCaseAIRetrievalError(
-                        "CONSUMPTION_SEARCH_RESPONSE_INVALID"
+                hits = []
+                for variant in search_queries:
+                    projection_payload = self.consumption_service.search(
+                        str(variant["text"]),
+                        limit=100,
                     )
+                    variant_hits = projection_payload.get("results")
+                    if not isinstance(variant_hits, list):
+                        raise HardwareCaseAIRetrievalError(
+                            "CONSUMPTION_SEARCH_RESPONSE_INVALID"
+                        )
+                    for hit in variant_hits:
+                        if isinstance(hit, Mapping):
+                            hits.append({**dict(hit), "_query_variant": variant})
                 mapped = []
                 seen: set[str] = set()
                 for hit in hits:
@@ -639,6 +740,9 @@ class HardwareCaseAIRetrievalService:
                                 "reasons": list(hit.get("match_reasons") or []),
                             },
                             knowledge_id=str(hit.get("knowledge_id") or "") or None,
+                            query_variant=hit.get("_query_variant")
+                            if isinstance(hit.get("_query_variant"), Mapping)
+                            else None,
                         )
                     )
                 if mapped:
@@ -654,12 +758,42 @@ class HardwareCaseAIRetrievalService:
             except Exception as error:
                 errors.append(self._error_code(error))
 
-        legacy = self.case_service.search_cases(
-            retrieval_text,
-            role=role,
-            statuses=statuses,
-            historical=historical,
-        )
+        legacy_rows: list[dict[str, Any]] = []
+        for variant in search_queries:
+            legacy = self.case_service.search_cases(
+                str(variant["text"]),
+                role=role,
+                statuses=statuses,
+                historical=historical,
+            )
+            if not isinstance(legacy, Mapping) or not isinstance(
+                legacy.get("results"), list
+            ):
+                raise HardwareCaseAIRetrievalError(
+                    "HARDWARE_CASE_SEARCH_RESPONSE_INVALID"
+                )
+            for case in legacy["results"]:
+                if not isinstance(case, Mapping):
+                    continue
+                legacy_rows.append(
+                    self._attach_retrieval(
+                        case,
+                        mode="LEGACY_NORMALIZED",
+                        score=None,
+                        why_hit={"status": "LEGACY_QUERY_MATCH", "claim_safe": True},
+                        query_variant=variant,
+                    )
+                )
+        deduped_legacy: list[dict[str, Any]] = []
+        legacy_seen: set[str] = set()
+        for case in legacy_rows:
+            case_id = str(case.get("case_id") or case.get("business_case_id") or "")
+            if case_id in legacy_seen:
+                continue
+            legacy_seen.add(case_id)
+            deduped_legacy.append(case)
+        legacy = dict(visible)
+        legacy["results"] = deduped_legacy
         result = dict(legacy)
         result["retrieval"] = {
             "mode": "LEGACY_NORMALIZED",
