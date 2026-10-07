@@ -131,11 +131,11 @@ def test_kp_d05_four_views_are_visually_and_semantically_distinct(
     published = client.get("/knowledge-production/published")
 
     assert sources.status_code == 200
-    assert "Source Document" in sources.text
-    assert "资料本身不是正式 Knowledge Object" in sources.text
-    assert "Knowledge Candidate" in candidates.text
+    assert "资料｜来源文档" in sources.text
+    assert "来源资料本身不是正式知识对象" in sources.text
+    assert "知识候选｜统一候选队列" in candidates.text
     assert "Human Gate" in reviews.text
-    assert "Published Knowledge" in published.text
+    assert "已发布知识" in published.text
 
 
 def test_kp_d05_source_ui_shows_source_version_and_parse_status(
@@ -182,8 +182,8 @@ def test_kp_d05_candidate_detail_read_has_no_evaluation_side_effect(
         f"knowledge/production/evaluations/{candidate_id}"
     )
     assert response.status_code == 200
-    assert "Evaluation / Dedup / Conflict" in response.text
-    assert "执行 Evaluation" in response.text
+    assert "评估 / 去重 / 冲突检查" in response.text
+    assert "执行评估" in response.text
     assert before == after == []
 
 
@@ -359,7 +359,7 @@ def test_kp_d05_published_view_excludes_unpublished_candidates(
     page = _client(repository).get("/knowledge-production/published")
 
     assert "Merge small writes" not in page.text
-    assert "暂无 Published Knowledge" in page.text
+    assert "暂无已发布知识" in page.text
 
 
 def test_kp_d05_web_layer_does_not_implement_repository_state_machine() -> None:
@@ -415,7 +415,7 @@ def test_kp_d05_storage_semantic_review_ui_to_publish(
         f"/knowledge-production/candidates/{candidate_id}"
     )
     assert detail_page.status_code == 200
-    assert "Storage Knowledge Type" in detail_page.text
+    assert "Storage 知识类型" in detail_page.text
     assert "DESIGN_RULE" in detail_page.text
     assert "TEST_RULE" in detail_page.text
 

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>{% block title %}Knowledge Processing{% endblock %}</title>
+  <title>{% block title %}知识生产{% endblock %}</title>
   <style>
     body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f5f7fa;color:#1f2937}
     header{background:#0f4c81;color:#fff;padding:18px 28px}
@@ -24,12 +24,15 @@
   </style>
 </head>
 <body>
-<header><h1>Knowledge Production 工作台</h1><div>Source Document ≠ Knowledge Candidate ≠ Human Review ≠ Published Knowledge</div></header>
+<header>
+  <h1>知识生产工作台</h1>
+  <div>来源资料 ≠ 知识候选 ≠ 人工审核 ≠ 已发布知识</div>
+</header>
 <nav>
   <a href="/knowledge-production/sources">资料</a>
-  <a href="/knowledge-production/candidates">Candidate</a>
-  <a href="/knowledge-production/reviews">Review</a>
-  <a href="/knowledge-production/published">Published Knowledge</a>
+  <a href="/knowledge-production/candidates">知识候选</a>
+  <a href="/knowledge-production/reviews">人工审核</a>
+  <a href="/knowledge-production/published">已发布知识</a>
 </nav>
 <main>{% block content %}{% endblock %}</main>
 </body>

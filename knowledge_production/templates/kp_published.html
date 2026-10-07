@@ -1,20 +1,23 @@
 {% extends "kp_base.html" %}
-{% block title %}Published Knowledge{% endblock %}
+{% block title %}已发布知识｜知识生产{% endblock %}
 {% block content %}
-<div class="card"><h2>Published Knowledge</h2><p class="muted">这里只展示已通过 Human Review + Publish Gate 的正式知识；Candidate 不会自动出现在这里。</p></div>
+<div class="card">
+  <h2>已发布知识</h2>
+  <p class="muted">这里只展示已通过人工审核与发布门禁的正式知识；知识候选不会自动进入这里。</p>
+</div>
 <table>
-<thead><tr><th>Object</th><th>Version</th><th>Status</th><th>Type</th><th>Source</th><th>Evidence</th></tr></thead>
+<thead><tr><th>知识对象</th><th>版本</th><th>状态</th><th>对象类型</th><th>来源</th><th>证据数量</th></tr></thead>
 <tbody>
 {% for o in objects %}
 <tr>
   <td>{{ o.title }}<br><code>{{ o.object_id }}</code></td>
   <td>v{{ o.object_version }}</td>
-  <td>{{ o.status.value }}</td>
-  <td>{{ o.object_type.value }}</td>
-  <td>{{ o.candidate_source_type.value }}{% if o.business_source_type %} / {{ o.business_source_type.value }}{% endif %}</td>
+  <td>{{ enum_zh(o.status.value) }}</td>
+  <td>{{ enum_zh(o.object_type.value) }}</td>
+  <td>{{ enum_zh(o.candidate_source_type.value) }}{% if o.business_source_type %} / {{ enum_zh(o.business_source_type.value) }}{% endif %}</td>
   <td>{{ o.evidence_refs|length }}</td>
 </tr>
-{% else %}<tr><td colspan="6" class="muted">暂无 Published Knowledge。</td></tr>{% endfor %}
+{% else %}<tr><td colspan="6" class="muted">暂无已发布知识。</td></tr>{% endfor %}
 </tbody>
 </table>
 {% endblock %}
