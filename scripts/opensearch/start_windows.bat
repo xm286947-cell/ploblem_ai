@@ -59,13 +59,6 @@ set "YAML_DATA_DIR=%HARDWARE_SEARCH_DATA_DIR:\=/%"
 >> "%W0_CONFIG_FILE%" echo path.data: %YAML_DATA_DIR%/data
 >> "%W0_CONFIG_FILE%" echo path.logs: %YAML_DATA_DIR%/logs
 
-rem Required by the official Windows ZIP installer when the Security plugin is
-rem present. This is a fixed, local-only W0 bootstrap value; Security is disabled
-rem for the localhost demo process immediately afterward by opensearch.yml.
-if "%OPENSEARCH_INITIAL_ADMIN_PASSWORD%"=="" (
-  set "OPENSEARCH_INITIAL_ADMIN_PASSWORD=W0-OpenSearch_Admin-2026!"
-)
-
 echo Starting OpenSearch W0 on http://127.0.0.1:%HARDWARE_SEARCH_PORT%
 echo Config: %W0_CONFIG_FILE%
 echo Data: %HARDWARE_SEARCH_DATA_DIR%\data
