@@ -29,3 +29,5 @@ def test_software_assessment_is_still_qsv1_production_entry(tmp_path):
     assert page.status_code == 200
     assert "data-sa-qsv1" in page.text
     assert "quality-scenario-production" in page.text
+
+# Package candidate sync marker
