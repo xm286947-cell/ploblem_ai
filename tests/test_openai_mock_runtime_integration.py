@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -174,6 +175,20 @@ def run_raw_provider(
         )
     )
     return store, result
+
+
+def test_openai_mock_bind_does_not_require_reverse_dns(monkeypatch):
+    def forbidden_getfqdn(_host=""):
+        raise AssertionError("OPENAI_MOCK_REVERSE_DNS_MUST_NOT_RUN")
+
+    monkeypatch.setattr(socket, "getfqdn", forbidden_getfqdn)
+    server = create_server("127.0.0.1", 0)
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+        assert server.server_port > 0
+        assert server.server_name == "127.0.0.1"
+    finally:
+        server.server_close()
 
 
 def test_runtime_real_http_429_then_success_is_owned_by_runtime(tmp_path, monkeypatch):

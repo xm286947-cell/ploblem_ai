@@ -13,8 +13,27 @@
 <body class="p0-page">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
-    <a class="brand" href="{{ '/p0/overall' if request.app.state.overall_shell_enabled|default(false) else '/p0/issues' }}"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
+    <a class="brand" href="{{ '/issues' if request.app.state.mature_quality_host|default(false) else ('/p0/overall' if request.app.state.overall_shell_enabled|default(false) else '/p0/issues') }}"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
     <nav class="main-nav">
+      {% if request.app.state.mature_quality_host|default(false) %}
+      <a class="nav-item {% if request.url.path.startswith('/issues') %}active{% endif %}" href="/issues">问题工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/analysis') %}active{% endif %}" href="/analysis">问题分析</a>
+      <a class="nav-item {% if request.url.path.startswith('/itr/recovery-workbench') %}active{% endif %}" href="/itr/recovery-workbench">ITR工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/itr/resolution-workbench') %}active{% endif %}" href="/itr/resolution-workbench">彻底解决工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/software-assessment') %}active{% endif %}" href="/software-assessment">软件考核工作台</a>
+      <a class="nav-item {% if request.url.path.startswith('/software-assessment') %}active{% endif %}" href="/software-assessment#quality-scenario-production">质量场景生产</a>
+      <a class="nav-item {% if request.url.path.startswith('/missed-test-analysis') %}active{% endif %}" href="/missed-test-analysis">漏测分析</a>
+      <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
+      <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
+      <a class="nav-item {% if request.url.path == '/quality-scenarios' or (request.url.path.startswith('/quality-scenarios/') and not request.url.path.startswith('/quality-scenarios/insights')) %}active{% endif %}" href="/quality-scenarios">原质量场景库</a>
+      <a class="nav-item {% if request.url.path == '/quality-scenario-assets' %}active{% endif %}" href="/quality-scenario-assets">场景资产与画像</a>
+      <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets/portrait') and request.query_params.get('portrait_axis') == 'product' %}active{% endif %}" href="/quality-scenario-assets/portrait?portrait_axis=product">产品质量画像</a>
+      <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets/portrait') and request.query_params.get('portrait_axis') == 'industry' %}active{% endif %}" href="/quality-scenario-assets/portrait?portrait_axis=industry">行业质量画像</a>
+      <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets/portrait') and request.query_params.get('portrait_axis') == 'customer' %}active{% endif %}" href="/quality-scenario-assets/portrait?portrait_axis=customer">客户质量画像</a>
+      <a class="nav-item {% if request.url.path.startswith('/quality-scenarios/insights') %}active{% endif %}" href="/quality-scenarios/insights">场景业务洞察</a>
+      <a class="nav-item {% if request.url.path.startswith('/p0/quality-scenarios') or request.url.path.startswith('/p0/quality-scenario-insights') %}active{% endif %}" href="/p0/quality-scenarios/workbench">新质量场景（预览）</a>
+      <a class="nav-item {% if request.url.path.startswith('/settings/scenario-taxonomy') %}active{% endif %}" href="/settings/scenario-taxonomy">场景词典与分类配置</a>
+      {% else %}
       {% if request.app.state.overall_shell_enabled|default(false) %}
       <a class="nav-item {% if request.url.path == '/p0/overall' %}active{% endif %}" href="/p0/overall">总体工作台</a>
       <a class="nav-item {% if request.url.path == '/p0/overall/areas/current-problem' %}active{% endif %}" href="/p0/overall/areas/current-problem">当前问题</a>
@@ -51,13 +70,26 @@
       {% endif %}
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
+      {% endif %}
     </nav>
-    <div class="side-foot"><a href="/p0/batch-analysis">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a></div>
+    <div class="side-foot">
+      {% if request.app.state.mature_quality_host|default(false) %}
+      <a href="/analysis">批量 AI 分析</a><a href="/export">数据导出</a>
+      {% else %}
+      <a href="/p0/batch-analysis">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a>
+      {% endif %}
+    </div>
   </aside>
   <div class="app-main">
     <header class="top-bar">
       <div class="breadcrumb">{% block shell_product %}质量问题分析{% endblock %} <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div>
-      <div class="top-actions"><a href="/p0/data-intake">导入数据</a><a href="{{ '/p0/overall/areas/management' if request.app.state.overall_shell_enabled|default(false) else '/p0/settings' }}">系统配置</a></div>
+      <div class="top-actions">
+        {% if request.app.state.mature_quality_host|default(false) %}
+        <a href="/import">导入数据</a><a href="/settings/scenario-taxonomy">场景配置</a>
+        {% else %}
+        <a href="/p0/data-intake">导入数据</a><a href="{{ '/p0/overall/areas/management' if request.app.state.overall_shell_enabled|default(false) else '/p0/settings' }}">系统配置</a>
+        {% endif %}
+      </div>
     </header>
     <main class="content">{% block body %}{% endblock %}</main>
   </div>

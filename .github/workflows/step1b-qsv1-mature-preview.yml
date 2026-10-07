@@ -1,0 +1,87 @@
+name: STEP1B QSV1 Mature Preview Gate
+
+on:
+  pull_request:
+    branches:
+      - integration/overall-r2
+      - feature/quality-scenario-fast-mvp-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run focused regression
+        run: python -m pytest -q tests/test_r2_w2_qsv1_production_chain.py tests/test_step1b_qsv1_mature_preview.py
+
+  windows-startup:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare venv
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run exact Windows launcher smoke
+        shell: pwsh
+        run: .venv\Scripts\python.exe tools\step1b_qsv1_launcher_smoke.py --platform windows --port 8082
+
+  macos-startup:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare venv
+        run: |
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Run exact macOS launcher smoke
+        run: .venv/bin/python tools/step1b_qsv1_launcher_smoke.py --platform macos --port 8093
+
+  preview-package:
+    needs:
+      - focused-regression
+      - windows-startup
+      - macos-startup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Build preview ZIP
+        run: python tools/build_step1b_qsv1_preview_package.py --output-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STEP1B_QSV1_MATURE_PREVIEW
+          path: dist/STEP1B_QSV1_MATURE_PREVIEW_*.zip
+          if-no-files-found: error
+          retention-days: 30

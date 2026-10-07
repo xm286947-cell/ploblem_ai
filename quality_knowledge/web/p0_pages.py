@@ -189,6 +189,7 @@ def create_p0_insights_router(
     static_dir: str | Path | None = None,
     api_prefix: str = "/api/v2",
     scenario_detail_service: Any | None = None,
+    qs_workflow_api_prefix: str = "/api/v2/quality-scenario-workflow/v1",
     hardware_case_host_role: str | None = None,
 ) -> APIRouter:
     """Return an isolated router for ``/p0/insights``.
@@ -528,6 +529,40 @@ def create_p0_insights_router(
                 "page_title": "问题详情 · 质量能力",
                 "return_to": return_to,
                 "current_problem_associations": associations,
+            },
+        )
+
+    @router.get("/p0/quality-scenarios/workbench", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_workbench(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_workbench.html",
+            {
+                "api_prefix": qs_workflow_api_prefix.rstrip("/"),
+                "page_title": "新质量场景工作台（预览） · QualityScenario V1",
+            },
+        )
+
+    @router.get("/p0/quality-scenarios", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_library(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_library.html",
+            {
+                "api_prefix": qs_workflow_api_prefix.rstrip("/"),
+                "page_title": "新质量场景库（预览） · QualityScenario V1",
+            },
+        )
+
+    @router.get("/p0/quality-scenarios/library/{scenario_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def p0_quality_scenario_v1_detail(request: Request, scenario_id: str) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "p0_quality_scenario_v1_detail.html",
+            {
+                "api_prefix": qs_workflow_api_prefix.rstrip("/"),
+                "scenario_id": scenario_id,
+                "page_title": "场景详情 · QualityScenario V1",
             },
         )
 

@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS issue_material_link(
  link_id TEXT PRIMARY KEY,knowledge_id TEXT NOT NULL,material_id TEXT NOT NULL REFERENCES source_material(material_id),
  rule_id TEXT REFERENCES association_rule(rule_id),link_status TEXT NOT NULL,match_value TEXT,
  created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(knowledge_id,material_id));
+CREATE TABLE IF NOT EXISTS source_material_reporting_year(
+ material_id TEXT PRIMARY KEY REFERENCES source_material(material_id) ON DELETE CASCADE,
+ reporting_year TEXT NOT NULL,year_source TEXT NOT NULL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_source_material_reporting_year ON source_material_reporting_year(reporting_year,material_id);
 """
 
 
@@ -53,6 +57,32 @@ def _clean(value: Any) -> str:
 def normalize_itr(value: Any) -> str:
     text = re.sub(r"\s+", "", _clean(value)).upper()
     return text[:-2] if text.endswith("CS") else text
+
+
+def year_from_itr(value: Any) -> str:
+    match = re.match(r"^ITR(20\d{2})", normalize_itr(value))
+    return match.group(1) if match else ""
+
+
+def _first(raw: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = _clean(raw.get(name))
+        if value:
+            return value
+    return ""
+
+
+def effective_reporting_year(raw: dict[str, Any], business_key: Any, reporting_year: Any = "", year_source: Any = "") -> str:
+    """Software KPI year: manual override > KPI date > file year > ITR fallback."""
+    stored=_clean(reporting_year);source=_clean(year_source)
+    if stored and source in {"BATCH_MANUAL", "IMPORT_MANUAL"}:
+        return stored
+    kpi_month=_first(raw, "数据运营_KPI计入月份", "KPI计入月份")
+    dated=re.search(r"(20\d{2})\s*(?:年|[-/.])", kpi_month)
+    if dated:
+        return dated.group(1)
+    file_year=_first(raw, "数据运营_KPI计入年份", "数据运营_KPI计入年度", "KPI计入年份", "考核年份")
+    return file_year or stored or year_from_itr(business_key)
 
 
 def combine_headers(parent_row, child_row) -> list[str]:
@@ -242,22 +272,25 @@ class MaterialImportService:
         if not group: raise ValueError("DATA_GROUP_NOT_FOUND")
         if group["material_type"] not in {"ITR_SOURCE","ITR_CS","SOFTWARE_OPERATION"}: raise ValueError("MATERIAL_IMPORT_NOT_ENABLED")
         workbook=load_workbook(path,read_only=True,data_only=True)
-        sheets=[sheet_name] if sheet_name else workbook.sheetnames
-        stats={"total":0,"new":0,"updated":0,"skipped":0,"failed":0,"errors":[]}
-        for name in sheets:
-            sheet=workbook[name]
-            rows=sheet.iter_rows(values_only=True)
-            first=next(rows,())
-            if int(header_rows)==2:
-                second=next(rows,());headers=combine_headers(first,second);start=3
-            else:
-                headers=[_clean(x) or f"未命名字段{i+1}" for i,x in enumerate(first)];start=2
-            for row_number,values in enumerate(rows,start=start):
-                if not any(_clean(x) for x in values):continue
-                raw={headers[i]:values[i] for i in range(min(len(headers),len(values)))};stats["total"]+=1
-                key=next((_clean(raw.get(alias)) for alias in self.KEY_ALIASES[group["material_type"]] if _clean(raw.get(alias))),"")
-                if not key:
-                    stats["failed"]+=1;stats["errors"].append({"sheet":name,"row":row_number,"error":"BUSINESS_KEY_MISSING"});continue
-                _,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
-        self.repository.refresh_links()
-        return stats
+        try:
+            sheets=[sheet_name] if sheet_name else workbook.sheetnames
+            stats={"total":0,"new":0,"updated":0,"skipped":0,"failed":0,"errors":[]}
+            for name in sheets:
+                sheet=workbook[name]
+                rows=sheet.iter_rows(values_only=True)
+                first=next(rows,())
+                if int(header_rows)==2:
+                    second=next(rows,());headers=combine_headers(first,second);start=3
+                else:
+                    headers=[_clean(x) or f"未命名字段{i+1}" for i,x in enumerate(first)];start=2
+                for row_number,values in enumerate(rows,start=start):
+                    if not any(_clean(x) for x in values):continue
+                    raw={headers[i]:values[i] for i in range(min(len(headers),len(values)))};stats["total"]+=1
+                    key=next((_clean(raw.get(alias)) for alias in self.KEY_ALIASES[group["material_type"]] if _clean(raw.get(alias))),"")
+                    if not key:
+                        stats["failed"]+=1;stats["errors"].append({"sheet":name,"row":row_number,"error":"BUSINESS_KEY_MISSING"});continue
+                    _,action=self.repository.add_material(group,key,raw,Path(path).name,name,row_number);stats[action.lower()]+=1
+            self.repository.refresh_links()
+            return stats
+        finally:
+            workbook.close()
