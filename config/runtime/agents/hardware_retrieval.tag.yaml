@@ -1,0 +1,30 @@
+agent_id: hardware_retrieval.tag
+version: w1-v1
+label: Hardware Retrieval Metadata Tagger
+
+prompt:
+  ref: prompts/runtime/hardware_retrieval/tagger_v1.md
+  version: HW-RETRIEVAL-TAGGER-W1-V1
+
+output_schema:
+  ref: HardwareRetrievalTaggerOutput
+  version: v1
+
+execution:
+  timeout_seconds: 120
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 4096
+
+metadata:
+  business_domain: HARDWARE_CASE
+  pipeline_stage: RETRIEVAL_METADATA_TAGGING
+  provider_response_shape: json_object
+  formal_knowledge_write: false
+  search_metadata_only: true
