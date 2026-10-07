@@ -590,12 +590,13 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         role = _role(x_hardware_case_role)
         try:
-            return service.get_case(
+            read_service = ai_search_service or service
+            return read_service.get_case(
                 case_id,
                 role=role,
                 historical=historical,
             )
-        except HardwareCaseContractError as error:
+        except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
 
     @router.get("/{case_id}/mappings")
@@ -608,12 +609,13 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         role = _role(x_hardware_case_role)
         try:
-            return service.get_mappings(
+            read_service = ai_search_service or service
+            return read_service.get_mappings(
                 case_id,
                 role=role,
                 historical=historical,
             )
-        except HardwareCaseContractError as error:
+        except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
 
     @router.get("/{case_id}/evidence")
@@ -626,12 +628,13 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         role = _role(x_hardware_case_role)
         try:
-            return service.get_evidence(
+            read_service = ai_search_service or service
+            return read_service.get_evidence(
                 case_id,
                 role=role,
                 historical=historical,
             )
-        except HardwareCaseContractError as error:
+        except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
 
     @router.post("/{case_id}/review")
@@ -720,12 +723,13 @@ def create_hardware_case_router(
             historical: bool,
         ) -> dict[str, Any]:
             try:
-                payload = service.get_evidence(
+                read_service = ai_search_service or service
+                payload = read_service.get_evidence(
                     case_id,
                     role=role,
                     historical=historical,
                 )
-            except HardwareCaseContractError as error:
+            except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
                 raise _http_error(error) from error
             for item in payload.get("evidence") or []:
                 if item.get("evidence_id") == evidence_id:
