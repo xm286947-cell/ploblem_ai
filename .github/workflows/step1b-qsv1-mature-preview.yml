@@ -1,4 +1,4 @@
-name: STEP1B QSV1 Mature Preview Gate
+name: QUALITY_SCENARIO_MATURE_INTEGRATION_GATE
 
 on:
   pull_request:
@@ -80,7 +80,7 @@ jobs:
         run: python tools/build_step1b_qsv1_preview_package.py --output-dir dist
       - uses: actions/upload-artifact@v4
         with:
-          name: STEP1B_QSV1_MATURE_PREVIEW
-          path: dist/STEP1B_QSV1_MATURE_PREVIEW_*.zip
+          name: QUALITY_SCENARIO_MATURE_INTEGRATION_CANDIDATE
+          path: dist/QUALITY_SCENARIO_MATURE_INTEGRATION_CANDIDATE_*.zip
           if-no-files-found: error
           retention-days: 30
