@@ -1,25 +1,33 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
-from storage_life import public_knowledge
+from storage_life import knowledge_service_client, public_knowledge
 from storage_life.app import app
 
 
 client = TestClient(app)
 
 
+def _use_env_service_url(monkeypatch, value: str):
+    # These route tests explicitly exercise environment fallback. A developer's
+    # or extracted package's saved local URL must not leak into the fixture.
+    monkeypatch.setattr(knowledge_service_client, "_config_file_value", lambda: None)
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", value)
+
+
 def test_fixture_replay_supports_sources_search_detail_and_citation():
-    assert client.get("/api/public-knowledge/status").json()["mode"] == "FIXTURE_REPLAY"
-    sources = client.get("/api/public-knowledge/sources").json()["sources"]
+    assert client.get("/api/public-knowledge/status?mode=FIXTURE_REPLAY").json()["mode"] == "FIXTURE_REPLAY"
+    sources = client.get("/api/public-knowledge/sources?mode=FIXTURE_REPLAY").json()["sources"]
     assert sources and all(x["classification"] == "PUBLIC" for x in sources)
-    hit = client.post("/api/public-knowledge/search", json={"query": "GD25Q64E page size"}).json()["hits"][0]
+    hit = client.post("/api/public-knowledge/search?mode=FIXTURE_REPLAY", json={"query": "GD25Q64E page size"}).json()["hits"][0]
     assert hit["source_id"] == "fixture-gd25q64e"
-    assert client.get("/api/public-knowledge/sources/fixture-gd25q64e").status_code == 200
-    citation = client.get("/api/public-knowledge/citations/fixture-citation-page1").json()
+    assert client.get("/api/public-knowledge/sources/fixture-gd25q64e?mode=FIXTURE_REPLAY").status_code == 200
+    citation = client.get("/api/public-knowledge/citations/fixture-citation-page1?mode=FIXTURE_REPLAY").json()
     assert citation["text"] and citation["locator"]["page"] == 1
 
 
 def test_fixture_qa_is_explicitly_synthetic_and_cited():
-    result = client.post("/api/public-knowledge/ask", json={"question": "GD25Q64E page size?"}).json()
+    result = client.post("/api/public-knowledge/ask?mode=FIXTURE_REPLAY", json={"question": "GD25Q64E page size?"}).json()
     assert result["answer_scope"] == "SYNTHETIC_DEMO_ONLY"
     assert result["citations"][0]["citation_id"] == "fixture-citation-page1"
 
@@ -29,53 +37,146 @@ def test_fixture_health_does_not_call_model_provider():
     assert result["status"] == "not_called"
 
 
-def test_live_status_exposes_only_model_identity_and_safe_status(monkeypatch):
-    def request(mode, path, payload=None, base_url=None):
-        if path == "/health":
-            return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
-        if path == "/sources":
+def test_live_status_uses_consumer_capability_without_provider_config(monkeypatch):
+    class FakeClient:
+        def health(self): return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
+        def capabilities(self, refresh=False):
+            return public_knowledge.ServiceCapabilities({
+                "service": "public-knowledge", "service_version": "0.1",
+                "contract": "knowledge-consumer/v1",
+                "endpoints": {"search": "/search", "ask": "/ask"},
+                "citation": True, "generation": True,
+            }, "DISCOVERED")
+        def request(self, path, payload=None):
+            assert path == "/sources"
             return {"sources": []}
-        if path == "/config":
-            return {"config": {
-                "provider_type": "openai_compatible",
-                "openai_model": "GLM-5.3-Flash",
-                "ollama_model": "stale-ollama-model",
-                "credential_status": {"secret": "must not escape"},
-                "parser_status": "ready",
-                "api_key": "secret-value",
-            }, "config_hash": "safe-hash"}
-        raise AssertionError(path)
 
-    monkeypatch.setattr(public_knowledge, "_request", request)
+    monkeypatch.setattr(public_knowledge, "_client", lambda *a, **k: FakeClient())
     result = client.get("/api/public-knowledge/status?mode=LIVE").json()
-    assert result["model_name"] == "GLM-5.3-Flash"
+    assert result["contract"] == "knowledge-consumer/v1"
+    assert result["capability_discovery_mode"] == "DISCOVERED"
     assert result["credential_status"] == "not_reported"
-    assert result["parser_status"] == "ready"
-    assert "stale-ollama-model" not in str(result)
-    assert "secret" not in str(result)
-    assert "api_key" not in result
+    assert "model_name" not in result
+    assert "api_key" not in str(result)
 
 
-def test_live_provider_health_probes_active_provider_not_ollama(monkeypatch):
-    seen = {}
+def test_live_status_marks_remote_host_as_read_only_consumer(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "https://mac.example:9443")
 
-    def request(mode, path, payload=None, base_url=None):
-        seen["path"] = path
-        return {
-            "status": "ok",
-            "provider": "openai_compatible",
-            "protocol": "chat_completions",
-            "model": "GLM-5.3-Flash",
-            "test_response_received": True,
-        }
+    class FakeClient:
+        base_url = "https://mac.example:9443"
+        def health(self): return {"status": "ok", "service": "public-knowledge", "version": "0.1"}
+        def capabilities(self, refresh=False):
+            return public_knowledge.ServiceCapabilities({
+                "service": "public-knowledge", "service_version": "0.1",
+                "contract": "knowledge-consumer/v1",
+                "endpoints": {"search": "/search", "ask": "/ask"},
+                "citation": True, "generation": True,
+            }, "DISCOVERED")
+        def request(self, path, payload=None): return {"sources": []}
 
-    monkeypatch.setattr(public_knowledge, "_request", request)
+    monkeypatch.setattr(public_knowledge, "_client", lambda *a, **k: FakeClient())
+    result = client.get("/api/public-knowledge/status?mode=LIVE").json()
+    assert result["read_only_consumer_api"] is True
+
+
+def test_live_provider_health_is_not_exposed_to_consumer(monkeypatch):
+    monkeypatch.setattr(public_knowledge, "_request", lambda *a, **k: (_ for _ in ()).throw(AssertionError("provider route called")))
     result = client.get("/api/public-knowledge/provider-health?mode=LIVE").json()
-    assert seen["path"] == "/providers/active/health"
-    assert result["status"] == "ok"
-    assert result["provider"] == "openai_compatible"
-    assert result["model"] == "GLM-5.3-Flash"
-    assert result["test_response_received"] is True
+    assert result["status"] == "not_exposed"
+    assert "provider" not in result
+
+
+def test_t03_t04_test_connection_discovers_health_capabilities_sources_and_search(monkeypatch):
+    calls = []
+    class FakeClient:
+        def health(self):
+            calls.append("/health")
+            return {"status": "ok", "service": "public-knowledge", "version": "1"}
+        def capabilities(self, refresh=False):
+            calls.append("/capabilities")
+            return public_knowledge.ServiceCapabilities({
+                "service": "public-knowledge", "service_version": "1",
+                "contract": "knowledge-consumer/v1",
+                "endpoints": {"search": "/search", "ask": "/ask"},
+                "citation": True, "source_revision": True,
+            }, "DISCOVERED")
+        def request(self, path, payload=None):
+            calls.append(path)
+            if path == "/sources": return {"sources": [{"title": "KIOXIA"}]}
+            if path == "/search": return {"hits": []}
+            raise AssertionError(path)
+    monkeypatch.setattr(public_knowledge, "_client", lambda: FakeClient())
+    result = client.post("/api/public-knowledge/test-connection")
+    assert result.status_code == 200
+    assert result.json()["contract"] == "knowledge-consumer/v1"
+    assert result.json()["search_available"] is True
+    assert calls == ["/health", "/capabilities", "/sources", "/search"]
+
+
+def test_settings_update_persists_single_url_and_overrides_environment(monkeypatch, tmp_path):
+    config_path = tmp_path / "storage_local_config.json"
+    monkeypatch.setattr(knowledge_service_client, "config_file_path", lambda: config_path)
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://env.example:9001")
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_SERVICE_URL", "http://legacy.example:9001")
+    response = client.put("/api/public-knowledge/settings", json={"url": "http://mac.example:9001"})
+    assert response.status_code == 200
+    assert response.json()["user_config_count"] == 1
+    assert response.json()["environment_managed"] is False
+    assert config_path.is_file()
+    after_reload = client.get("/api/public-knowledge/settings")
+    assert after_reload.status_code == 200
+    assert after_reload.json()["knowledge_service_url"] == "http://mac.example:9001"
+
+
+def test_settings_ui_exposes_exactly_one_editable_service_url():
+    html = (Path(__file__).parents[1] / "storage_life" / "index.html").read_text(encoding="utf-8")
+    assert html.count('id="knowledgeServiceUrl"') == 1
+    assert 'id="knowledgeServiceUrl" type="url"' in html
+    assert 'id="pkMode"' not in html
+    assert 'id="pkBaseUrl"' not in html
+    assert "localStorage.setItem('pk.url'" not in html
+
+
+def test_invalid_or_credential_bearing_url_is_rejected_before_persistence(monkeypatch, tmp_path):
+    config_path = tmp_path / "storage_local_config.json"
+    monkeypatch.setattr(knowledge_service_client, "config_file_path", lambda: config_path)
+    for value in ("ftp://mac.example", "http://user:pass@mac.example:9001", "http://mac.example/path"):
+        response = client.put("/api/public-knowledge/settings", json={"url": value})
+        assert response.status_code == 422
+    assert not config_path.exists()
+
+
+def test_remote_request_cannot_override_configured_host(monkeypatch):
+    _use_env_service_url(monkeypatch, "http://mac.example:9001")
+    response = client.post("/api/public-knowledge/search?mode=LIVE&base_url=http://attacker.example", json={"query": "WAF"})
+    assert response.status_code == 403
+
+
+def test_remote_consumer_cannot_import_public_source(monkeypatch):
+    _use_env_service_url(monkeypatch, "https://mac.example:9443")
+    response = client.post("/api/public-knowledge/sources/import?mode=LIVE", json={
+        "title": "public source", "content": "public text", "classification": "PUBLIC"
+    })
+    assert response.status_code == 403
+
+
+def test_remote_consumer_cannot_delete_source(monkeypatch):
+    _use_env_service_url(monkeypatch, "https://mac.example:9443")
+    response = client.delete("/api/public-knowledge/sources/source-1?mode=LIVE")
+    assert response.status_code == 403
+
+
+def test_live_default_fails_closed_instead_of_fixture_replay(monkeypatch):
+    class UnavailableClient:
+        def health(self):
+            raise public_knowledge.KnowledgeServiceError("KNOWLEDGE_SERVICE_UNREACHABLE", "offline")
+    monkeypatch.setattr(public_knowledge, "_client", lambda *a, **k: UnavailableClient())
+    result = client.get("/api/public-knowledge/status")
+    assert result.status_code == 200
+    assert result.json()["connected"] is False
+    assert result.json()["error_code"] == "KNOWLEDGE_SERVICE_UNREACHABLE"
+    assert result.json()["mode"] == "LIVE"
 
 
 def test_import_rejects_non_public_before_forwarding(monkeypatch):
@@ -149,7 +250,7 @@ def test_live_qa_failure_is_passed_as_fail_closed(monkeypatch):
 def test_generation_request_uses_longer_bounded_timeout(monkeypatch):
     assert public_knowledge._request_timeout_seconds("/search") == 8.0
     assert public_knowledge._request_timeout_seconds("/health") == 8.0
-    assert public_knowledge._request_timeout_seconds("/ask") == 60.0
+    assert public_knowledge._request_timeout_seconds("/ask") == 120.0
 
     monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "120")
     assert public_knowledge._request_timeout_seconds("/ask") == 120.0
@@ -158,7 +259,7 @@ def test_generation_request_uses_longer_bounded_timeout(monkeypatch):
     assert public_knowledge._request_timeout_seconds("/ask") == 180.0
 
     monkeypatch.setenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "invalid")
-    assert public_knowledge._request_timeout_seconds("/ask") == 60.0
+    assert public_knowledge._request_timeout_seconds("/ask") == 120.0
 
 
 def test_model_scan_uses_frozen_storage_model_and_source_filter(monkeypatch):

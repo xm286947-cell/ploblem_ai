@@ -71,7 +71,7 @@
   <pre>{{ detail.candidate.source_refs|join("\n") }}</pre>
   {% if detail.candidate.metadata.origin_workspace == "public-knowledge" %}
   <div class="card">
-    <strong>来源：公共知识 · AI 辅助</strong>
+    <strong>来源：公共知识（Origin: Public Knowledge） · AI 辅助</strong>
     <div>建议 ID：<code>{{ detail.candidate.metadata.suggestion_id }}</code> · 模式：{{ detail.candidate.metadata.origin_mode }}</div>
     <div>生成方式：Public Knowledge / AI Assisted · Evidence State：{{ detail.candidate.metadata.evidence_status or "UNRESOLVED" }}</div>
     <div><strong>原始 Source / Revision / Locator / Citation</strong>

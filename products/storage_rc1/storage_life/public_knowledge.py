@@ -13,9 +13,10 @@ import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlparse
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import Request as UrlRequest, HTTPRedirectHandler, build_opener
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -26,6 +27,14 @@ from .knowledge_suggestions import (
     SuggestionError,
 )
 from .knowledge_model import StorageLifetimeKnowledgeModel, StorageLifetimeKnowledgeModelError
+from .knowledge_service_client import (
+    KnowledgeServiceClient,
+    KnowledgeServiceError,
+    ServiceCapabilities,
+    canonicalize_service_url,
+    resolve_service_url,
+    save_service_url,
+)
 
 router = APIRouter(prefix="/api/public-knowledge", tags=["Public Knowledge Workspace"])
 
@@ -45,11 +54,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
 
 _NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler())
 
-DEFAULT_URL = (
-    os.getenv("PUBLIC_KNOWLEDGE_SERVICE_URL")
-    or os.getenv("PUBLIC_KNOWLEDGE_API_URL")
-    or "http://127.0.0.1:9000"
-)
+DEFAULT_URL = "http://127.0.0.1:9000"
 
 FIXTURE_SOURCES = [
     {"source_id": "fixture-gd25q64e", "title": "GD25Q64E Datasheet · 演示资料", "publisher": "GigaDevice", "classification": "PUBLIC", "media_type": "text/markdown", "version": "Rev1.6", "revision": "Rev1.6", "updated_at": "2026-10-05", "summary": "演示资料，仅用于验证 Public Knowledge 页面操作。", "content": "# GD25Q64E\n\nPublic demonstration record. Program page size: 256 bytes. Sector erase size: 4 KB. This synthetic example is not a product specification.", "structure": [{"type": "heading", "text": "GD25Q64E"}, {"type": "paragraph", "text": "演示记录；不得作为正式规格事实。"}]},
@@ -138,6 +143,10 @@ class ContextSearchBody(BaseModel):
     top_k: int = Field(default=6, ge=1, le=12)
 
 
+class KnowledgeServiceUrlUpdate(BaseModel):
+    url: str = Field(min_length=1, max_length=512)
+
+
 class ModelScanBody(BaseModel):
     source_id: str = Field(min_length=1, max_length=200)
     device_type: str = Field(min_length=1, max_length=100)
@@ -209,70 +218,40 @@ def _public_source_uri(value: str | None) -> str | None:
 
 
 def _canonical_service_url(value: str) -> str:
-    base = str(value or "").strip().rstrip("/")
-    parsed = urlparse(base)
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-        or parsed.path not in {"", "/"}
-    ):
-        raise HTTPException(
-            422,
-            "Public Knowledge API 地址必须是服务端批准的 HTTP(S) 根地址，且不能包含凭证、路径、查询或片段。",
-        )
     try:
-        port = parsed.port
-    except ValueError as exc:
-        raise HTTPException(422, "Public Knowledge API 端口无效。") from exc
-    host = (parsed.hostname or "").lower()
-    if not host:
-        raise HTTPException(422, "Public Knowledge API 主机无效。")
-    default_port = 443 if parsed.scheme == "https" else 80
-    effective_port = port or default_port
-    host_text = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    return f"{parsed.scheme}://{host_text}:{effective_port}"
+        return canonicalize_service_url(value)
+    except KnowledgeServiceError as exc:
+        raise HTTPException(422, exc.detail or exc.code) from exc
 
 
 def _allowed_service_urls() -> set[str]:
-    configured = [DEFAULT_URL]
-    configured.extend(
-        item.strip()
-        for item in os.getenv("PUBLIC_KNOWLEDGE_ALLOWED_URLS", "").split(",")
-        if item.strip()
-    )
-    allowed: set[str] = set()
-    for item in configured:
-        try:
-            allowed.add(_canonical_service_url(item))
-        except HTTPException:
-            # Invalid server configuration must never broaden browser access.
-            continue
-    return allowed
+    # The configured single URL is its own trust anchor. Legacy allowlists are
+    # intentionally ignored so a browser cannot select a second service.
+    return {_canonical_service_url(resolve_service_url())}
 
 
 def _url(value: str | None) -> str:
-    requested = _canonical_service_url(value or DEFAULT_URL)
-    allowed = _allowed_service_urls()
-    if requested not in allowed:
+    configured = _canonical_service_url(resolve_service_url())
+    if value is not None and _canonical_service_url(value) != configured:
         raise HTTPException(
             403,
-            "Public Knowledge API 地址未被服务端批准；请使用部署配置中的 Public Knowledge 服务地址。",
+            "浏览器不能覆盖 KNOWLEDGE_SERVICE_URL；请在连接设置中保存唯一服务地址。",
         )
-    return requested
+    return configured
+
+
+def _client(base_url: str | None = None) -> KnowledgeServiceClient:
+    return KnowledgeServiceClient(_url(base_url))
 
 
 def _request_timeout_seconds(path: str) -> float:
     """Keep retrieval fast while allowing model-backed synthesis to finish."""
     if path == "/ask":
-        raw = os.getenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "60")
+        raw = os.getenv("PUBLIC_KNOWLEDGE_GENERATION_TIMEOUT_SECONDS", "120")
         try:
             value = float(raw)
         except (TypeError, ValueError):
-            value = 60.0
+            value = 120.0
         # The Public Knowledge provider has its own fail-closed timeout (45s by
         # default). The Storage proxy must not abort earlier, but it must also
         # never wait without a bound.
@@ -285,9 +264,27 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
         return None
     if mode != "LIVE":
         raise HTTPException(422, "未知运行模式。")
-    url = _url(base_url) + path
+    client = _client(base_url)
+    consumer_path = (
+        path in {"/health", "/sources", "/search", "/ask"}
+        or (path.startswith("/sources/") and path not in {"/sources/import", "/sources/import-file"})
+        or path.startswith("/citations/")
+    )
+    if consumer_path:
+        try:
+            return client.request(path, payload)
+        except KnowledgeServiceError as exc:
+            status_code = 504 if exc.code == "KNOWLEDGE_SERVICE_TIMEOUT" else 503
+            raise HTTPException(status_code, f"{exc.code}: {exc.detail or exc.code}") from exc
+
+    # Management routes remain available only for an explicitly local legacy
+    # setup. A remote one-URL consumer cannot reach Admin/import/provider APIs.
+    host = urlparse(client.base_url).hostname or ""
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(403, "远程 Knowledge Consumer 不开放管理或 Provider 路由。")
+    url = client.base_url + path
     data = json.dumps(payload).encode() if payload is not None else None
-    req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
+    req = UrlRequest(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=_request_timeout_seconds(path)) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -303,7 +300,11 @@ def _delete_request(mode: str, path: str, base_url: str | None = None):
         raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能删除公开资料。")
     if mode != "LIVE":
         raise HTTPException(422, "未知运行模式。")
-    req = Request(_url(base_url) + path, method="DELETE")
+    client = _client(base_url)
+    host = urlparse(client.base_url).hostname or ""
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(403, "远程 Knowledge Consumer 禁止删除来源。")
+    req = UrlRequest(client.base_url + path, method="DELETE")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -329,7 +330,11 @@ def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, c
                   f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'.encode(),
                   f"Content-Type: {media_type}\r\n\r\n".encode(), content, b"\r\n",
                   f"--{boundary}--\r\n".encode()])
-    req = Request(_url(base_url) + path, data=b"".join(parts),
+    client = _client(base_url)
+    host = urlparse(client.base_url).hostname or ""
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        raise HTTPException(403, "远程 Knowledge Consumer 不开放资料导入。")
+    req = UrlRequest(client.base_url + path, data=b"".join(parts),
                   headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=60) as response:
@@ -342,7 +347,7 @@ def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, c
 
 
 @router.get("/status")
-def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
+def status(mode: str = "LIVE", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         return {
             "mode": mode,
@@ -357,128 +362,110 @@ def status(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
             "credential_status": "not_reported",
             "parser_status": "not_reported",
         }
-    h = _request(mode, "/health", base_url=base_url)
-    connected = h.get("status") == "ok"
-
-    # Retrieval/Search readiness must not depend on the generation provider
-    # configuration endpoint.  Query the source catalog independently so the
-    # UI can distinguish "service process is alive" from "Public Knowledge is
-    # actually usable with indexed public material".
-    source_count = 0
-    search_ready = False
-    citation_ready = False
-    retrieval_ready = False
+    client = _client(base_url)
     try:
-        source_result = _request(mode, "/sources", base_url=base_url)
-        source_items = source_result.get("sources") if isinstance(source_result, dict) else None
-        if isinstance(source_items, list):
-            source_count = len(source_items)
-
-        # MVP readiness requires an actual indexed source -> Search hit ->
-        # resolvable Citation path.  A source title is not guaranteed to appear
-        # verbatim inside parsed chunks, so probe several real source identities
-        # instead of letting the first catalog row create a false negative.
-        probe_candidates: list[str] = []
-        for raw_source in (source_items or [])[:5]:
-            if not isinstance(raw_source, dict):
-                continue
-            values = [
-                raw_source.get("title"),
-                raw_source.get("source_uri"),
-                raw_source.get("source_id"),
-            ]
-            query = " ".join(
-                str(value).strip()
-                for value in values
-                if isinstance(value, str) and value.strip()
-            )[:600]
-            if query and query not in probe_candidates:
-                probe_candidates.append(query)
-
-        for probe_query in probe_candidates:
-            probe = _request(
-                mode,
-                "/search",
-                {"query": probe_query, "top_k": 1},
-                base_url=base_url,
-            )
-            hits = probe.get("hits") if isinstance(probe, dict) else None
-            if not isinstance(hits, list) or not hits:
-                continue
-            search_ready = True
-            first_hit = hits[0] if isinstance(hits[0], dict) else {}
-            citation_id = str(first_hit.get("hit_id") or first_hit.get("citation_id") or "")
-            if not citation_id:
-                continue
-            citation_probe = _request(
-                mode,
-                "/citations/" + quote(citation_id, safe=""),
-                base_url=base_url,
-            )
-            citation_ready = bool(
-                isinstance(citation_probe, dict)
-                and citation_probe.get("source_id")
-                and citation_probe.get("source_revision")
-                and citation_probe.get("locator") is not None
-                and citation_probe.get("text") is not None
-            )
-            if citation_ready:
-                break
-
-        retrieval_ready = connected and source_count > 0 and search_ready and citation_ready
-    except HTTPException:
-        retrieval_ready = False
-
-    cfg: dict[str, Any] = {}
-    try:
-        cfg = _request(mode, "/config", base_url=base_url)
-    except HTTPException:
-        # Generation/config observability is optional for Search + Citation.
-        cfg = {}
-    config = cfg.get("config") if isinstance(cfg.get("config"), dict) else {}
-    provider_type = str(config.get("provider_type") or "").strip().lower()
-    if provider_type == "openai_compatible":
-        model_name = str(config.get("openai_model") or "").strip() or None
-    elif provider_type == "ollama":
-        model_name = str(config.get("ollama_model") or "").strip() or None
-    else:
-        model_name = next((
-            config.get(key)
-            for key in ("generation_model", "model_name", "openai_model", "ollama_model")
-            if isinstance(config.get(key), str) and config.get(key).strip()
-        ), None)
-    credential_status = next((config.get(key) for key in ("credential_status", "provider_credential_status") if isinstance(config.get(key), str) and config.get(key) in {"configured", "missing", "not_required", "not_reported"}), "not_reported")
-    parser_status = next((config.get(key) for key in ("parser_status", "document_parser_status") if isinstance(config.get(key), str) and config.get(key) in {"ready", "degraded", "unavailable", "not_reported"}), "not_reported")
-    # Never return provider URLs, environment values, or credentials to the UI.
+        health = client.health()
+        caps = client.capabilities(refresh=True)
+        source_result = client.request("/sources")
+        source_items = source_result["sources"]
+        search_ready = bool(caps.payload.get("endpoints", {}).get("search"))
+        citation_ready = bool(caps.payload.get("citation"))
+        connected = True
+    except KnowledgeServiceError as exc:
+        return {
+            "mode": "LIVE", "connected": False, "search_ready": False,
+            "citation_ready": False, "retrieval_ready": False, "source_count": 0,
+                "service": "public-knowledge", "version": None,
+                "capability_discovery_mode": "UNAVAILABLE", "error_code": exc.code,
+                "error": exc.detail or exc.code,
+                "read_only_consumer_api": urlparse(getattr(client, "base_url", resolve_service_url())).hostname not in {"localhost", "127.0.0.1", "::1"},
+            }
     return {
         "mode": "LIVE",
         "connected": connected,
         "search_ready": search_ready,
         "citation_ready": citation_ready,
-        "retrieval_ready": retrieval_ready,
-        "source_count": source_count,
-        "service": h.get("service"),
-        "version": h.get("version"),
-        "config_hash": cfg.get("config_hash"),
-        "llm": "Generation 配置与 Retrieval 分离；未读取或展示凭证",
-        "model_name": model_name or "Not Reported",
-        "credential_status": credential_status,
-        "parser_status": parser_status,
+        "retrieval_ready": connected and search_ready and citation_ready,
+        "source_count": len(source_items),
+        "service": caps.payload.get("service") or health.get("service"),
+        "version": caps.payload.get("service_version") or health.get("version"),
+        "capability_discovery_mode": caps.mode,
+        "generation_available": bool(caps.payload.get("generation")),
+        "contract": caps.payload.get("contract"),
+            "read_only_consumer_api": bool(caps.payload.get("read_only_consumer_api")) or urlparse(getattr(client, "base_url", resolve_service_url())).hostname not in {"localhost", "127.0.0.1", "::1"},
+        "credential_status": "not_reported",
+        "parser_status": "not_reported",
     }
+
+
+@router.get("/capabilities")
+def capabilities(mode: str = "LIVE"):
+    if mode != "LIVE":
+        raise HTTPException(409, "Capability Discovery 只对真实服务执行；不会用演示数据伪装连接状态。")
+    try:
+        result = _client().capabilities(refresh=True)
+        return {**result.payload, "capability_discovery_mode": result.mode}
+    except KnowledgeServiceError as exc:
+        raise HTTPException(503, f"{exc.code}: {exc.detail or exc.code}") from exc
+
+
+@router.get("/settings")
+def knowledge_service_settings():
+    try:
+        value = resolve_service_url()
+    except KnowledgeServiceError as exc:
+        raise HTTPException(422, f"{exc.code}: {exc.detail}") from exc
+    return {"knowledge_service_url": value, "environment_managed": False, "user_config_count": 1}
+
+
+@router.put("/settings")
+def update_knowledge_service_settings(request: Request, body: KnowledgeServiceUrlUpdate):
+    peer = request.client.host if request.client else ""
+    if peer not in {"127.0.0.1", "::1", "testclient"}:
+        raise HTTPException(403, "Knowledge 服务地址只能由 Storage 本机设置；远程浏览器不能覆盖。")
+    try:
+        value = save_service_url(body.url)
+    except KnowledgeServiceError as exc:
+        raise HTTPException(422, f"{exc.code}: {exc.detail}") from exc
+    return {"knowledge_service_url": value, "environment_managed": False, "user_config_count": 1}
+
+
+@router.post("/test-connection")
+def test_knowledge_service_connection():
+    try:
+        client = _client()
+        health = client.health()
+        caps = client.capabilities(refresh=True)
+        sources_result = client.request("/sources")
+        first_source = next(
+            (item for item in sources_result["sources"] if isinstance(item, dict)),
+            None,
+        )
+        search_probe = str((first_source or {}).get("title") or (first_source or {}).get("source_id") or "Public Knowledge")[:300]
+        client.request("/search", {"query": search_probe, "top_k": 1})
+        return {
+            "connected": True,
+            "service": caps.payload.get("service") or health.get("service"),
+            "service_version": caps.payload.get("service_version") or health.get("version"),
+            "contract": caps.payload.get("contract"),
+            "capability_discovery_mode": caps.mode,
+            "search_available": bool(caps.payload.get("endpoints", {}).get("search")),
+            "qa_available": bool(caps.payload.get("endpoints", {}).get("ask")),
+            "citation_available": bool(caps.payload.get("citation")),
+            "source_revision_available": bool(caps.payload.get("source_revision")),
+            "source_count": len(sources_result["sources"]),
+        }
+    except KnowledgeServiceError as exc:
+        raise HTTPException(503, f"{exc.code}: {exc.detail or exc.code}") from exc
 
 
 @router.get("/provider-health")
 def provider_health(mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         return {"status": "not_called", "message": "演示模式不调用模型"}
-    result = _request(mode, "/providers/active/health", base_url=base_url)
     return {
-        "status": result.get("status", "unknown"),
-        "provider": result.get("provider"),
-        "version": result.get("version"),
-        "protocol": result.get("protocol"),
-        "model": result.get("model"),
-        "test_response_received": result.get("test_response_received"),
+        "status": "not_exposed",
+        "message": "Remote Consumer API 不暴露 Provider/Admin 状态。",
     }
 
 
@@ -562,57 +549,24 @@ async def import_file(title: str = Form(...), classification: str = Form(...), f
 def source_snapshot(source_id: str, revision_id: str, mode: str = "FIXTURE_REPLAY", base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         raise HTTPException(404, "演示资料没有原始文件快照。")
-    path = (
-        "/sources/" + quote(source_id, safe="")
-        + "/revisions/" + quote(revision_id, safe="")
-        + "/snapshot"
-    )
-    url = _url(base_url) + path
     try:
-        with _NO_REDIRECT_OPENER.open(Request(url, method="GET"), timeout=20) as upstream:
-            content = upstream.read(25 * 1024 * 1024 + 1)
-            if len(content) > 25 * 1024 * 1024:
-                raise HTTPException(413, "原始快照超过 Storage 下载上限 25 MiB。")
-
-            upstream_type = upstream.headers.get_content_type()
-            active_types = {
-                "text/html",
-                "application/xhtml+xml",
-                "image/svg+xml",
-                "application/xml",
-                "text/xml",
-            }
-            disposition = upstream.headers.get("Content-Disposition", "inline")
-            if "\r" in disposition or "\n" in disposition:
-                disposition = "attachment"
-            # Public Knowledge may legitimately contain HTML/SVG/XML source
-            # documents.  Never replay active content inline under the Storage
-            # product origin; that would turn a public source snapshot into a
-            # same-origin script surface.
-            media_type = upstream_type
-            if upstream_type in active_types:
-                media_type = "application/octet-stream"
-                disposition = (
-                    'attachment; filename="public-knowledge-source-'
-                    + quote(source_id, safe="")[:80]
-                    + '"'
-                )
-
-            return Response(
-                content,
-                media_type=media_type,
-                headers={
-                    "Content-Disposition": disposition,
-                    "X-Content-Type-Options": "nosniff",
-                    "Content-Security-Policy": "sandbox; default-src 'none'",
-                    "X-Source-Snapshot": upstream.headers.get("X-Source-Snapshot", "unknown"),
-                    "X-Source-SHA256": upstream.headers.get("X-Source-SHA256", ""),
-                },
-            )
-    except HTTPError as exc:
-        raise HTTPException(exc.code, "Public Knowledge 原始快照不可用。") from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
+        content, upstream_type, upstream_disposition = _client(base_url).get_snapshot(source_id, revision_id)
+        active_types = {"text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "text/xml"}
+        disposition = upstream_disposition or "inline"
+        if "\r" in disposition or "\n" in disposition:
+            disposition = "attachment"
+        media_type = upstream_type
+        if upstream_type in active_types:
+            media_type = "application/octet-stream"
+            disposition = 'attachment; filename="public-knowledge-source-' + quote(source_id, safe="")[:80] + '"'
+        return Response(
+            content, media_type=media_type,
+            headers={"Content-Disposition": disposition, "X-Content-Type-Options": "nosniff",
+                     "Content-Security-Policy": "sandbox; default-src 'none'"},
+        )
+    except KnowledgeServiceError as exc:
+        status_code = 504 if exc.code == "KNOWLEDGE_SERVICE_TIMEOUT" else 503
+        raise HTTPException(status_code, f"{exc.code}: {exc.detail or exc.code}") from exc
 
 
 def _model_scan_terms(parameter: dict[str, Any]) -> list[str]:
