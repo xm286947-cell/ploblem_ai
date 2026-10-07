@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -89,6 +90,37 @@ def test_fixture_drives_g1_g2_g3_preview_states_without_writing_candidates(tmp_p
 
     workflow = client.get("/api/v2/quality-scenario-workflow/v1/quality-scenarios")
     assert workflow.json()["total"] == 0
+
+
+def test_g5_advance_uses_runtime_db_path_after_fresh_extract_relocation(tmp_path):
+    build_dir = tmp_path / "ci-build" / "validation"
+    source_db = build_dir / "quality_scenario_w4_fixture.db"
+    manifest = build_fixture(source_db)
+    source_manifest = source_db.with_suffix(source_db.suffix + ".fixture.json")
+
+    # Simulate an older candidate that captured the CI absolute path.
+    stale = json.loads(source_manifest.read_text(encoding="utf-8"))
+    stale["database"] = str(source_db.resolve())
+    stale.pop("database_path_semantics", None)
+    source_manifest.write_text(json.dumps(stale, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    extract_dir = tmp_path / "mac-fresh-extract" / "validation"
+    extract_dir.mkdir(parents=True)
+    relocated_db = extract_dir / source_db.name
+    relocated_manifest = relocated_db.with_suffix(relocated_db.suffix + ".fixture.json")
+    shutil.copy2(source_db, relocated_db)
+    shutil.copy2(source_manifest, relocated_manifest)
+
+    shutil.rmtree(tmp_path / "ci-build")
+
+    advanced = advance_g5(relocated_db)
+    assert advanced["g5_resolution_revision"] == 2
+    assert advanced["database"] == relocated_db.name
+    assert advanced["database_path_semantics"] == "MANIFEST_RELATIVE"
+
+    persisted = json.loads(relocated_manifest.read_text(encoding="utf-8"))
+    assert persisted["database"] == relocated_db.name
+    assert persisted["database_path_semantics"] == "MANIFEST_RELATIVE"
 
 
 def test_g5_source_revision_changes_bundle_revision_and_preserves_source_only_contract(tmp_path, monkeypatch):
