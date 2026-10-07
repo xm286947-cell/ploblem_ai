@@ -118,8 +118,7 @@ jobs:
           $out = "$env:RUNNER_TEMP\opensearch-stdout.log"
           $err = "$env:RUNNER_TEMP\opensearch-stderr.log"
           $bat = (Resolve-Path "scripts\opensearch\start_windows.bat").Path
-          $args = "/d /s /c call `"$bat`""
-          $p = Start-Process -FilePath $env:ComSpec -ArgumentList $args -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          $p = Start-Process -FilePath $env:ComSpec -ArgumentList @("/d", "/c", $bat) -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
           $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper.pid"
           Start-Sleep -Seconds 3
           if ($p.HasExited) {
