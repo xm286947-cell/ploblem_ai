@@ -78,6 +78,7 @@ def build(output_dir: Path, build_date: str | None = None) -> tuple[Path, Path, 
             with archive.open("wb") as stream:
                 subprocess.run(
                     ["git", "archive", "--format=tar", RUNTIME_PIN, "runtime",
+                     "contracts",
                      "config/runtime/model.yaml", "tools/openai_mock/server.py",
                      "requirements-runtime-p0-test.txt"],
                     cwd=ROOT, check=True, stdout=stream,
@@ -86,7 +87,7 @@ def build(output_dir: Path, build_date: str | None = None) -> tuple[Path, Path, 
             extracted.mkdir()
             with zipfile.ZipFile(archive) if archive.suffix == ".zip" else _tar_open(archive) as tar:
                 tar.extractall(extracted)
-            for rel in ("runtime", "config/runtime/model.yaml", "tools/openai_mock/server.py", "requirements-runtime-p0-test.txt"):
+            for rel in ("runtime", "contracts", "config/runtime/model.yaml", "tools/openai_mock/server.py", "requirements-runtime-p0-test.txt"):
                 copy_tree(extracted / rel, runtime_root / rel) if (extracted / rel).is_dir() else copy_file(extracted / rel, runtime_root / rel)
         (runtime_root / "RUNTIME_COMMIT").write_text(RUNTIME_PIN + "\n", encoding="utf-8")
         copy_file(ROOT / "config/runtime/agents/knowledge.production.extract.yaml",
@@ -95,7 +96,9 @@ def build(output_dir: Path, build_date: str | None = None) -> tuple[Path, Path, 
                   package_root / "prompts/runtime/knowledge_production")
 
         actual_pin = (runtime_root / "RUNTIME_COMMIT").read_text(encoding="utf-8").strip()
-        if actual_pin != RUNTIME_PIN or not (runtime_root / "runtime/__init__.py").is_file():
+        if (actual_pin != RUNTIME_PIN
+                or not (runtime_root / "runtime/__init__.py").is_file()
+                or not (runtime_root / "contracts/__init__.py").is_file()):
             raise SystemExit("RUNTIME_PIN_CLOSURE_FAILED")
         if not (package_root / "config/knowledge_service.local.json").exists():
             pass
