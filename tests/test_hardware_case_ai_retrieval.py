@@ -88,6 +88,26 @@ class BrokenQuery:
         raise error
 
 
+class FakeAdapter:
+    def resolve_evidence(self, evidence_id: str):
+        assert evidence_id == "EV-FORMAL-01"
+        return {
+            "evidence_id": evidence_id,
+            "excerpt": "MCU 复位与 RESET_N 瞬态相关",
+            "source": {
+                "source_id": "SRC-A-MCU-001",
+                "uri": "word:A-MCU-001.docx",
+                "source_type": "WORD",
+                "metadata": {
+                    "hardware_locator": {
+                        "section": "原因分析",
+                        "block_id": "B0008",
+                    }
+                },
+            },
+        }
+
+
 class FakeConsumption:
     class Store:
         def list_all(self):
@@ -99,6 +119,7 @@ class FakeConsumption:
             ]
 
     store = Store()
+    adapter = FakeAdapter()
 
     def get(self, knowledge_id: str):
         if knowledge_id != "KO-A-MCU-001":
@@ -140,9 +161,18 @@ class FakeConsumption:
 
 
 def test_query_understanding_removes_conversational_scaffolding() -> None:
-    result = understand_hardware_query("有哪些mcu的问题")
-    assert result["retrieval_text"] == "mcu"
-    assert result["terms"] == ["mcu"]
+    cases = [
+        ("有哪些mcu的问题", "mcu"),
+        ("有没有mcu相关案例", "mcu"),
+        ("查一下mcu的问题", "mcu"),
+        ("mcu有什么历史问题", "mcu"),
+        ("单片机这块以前出过什么问题？", "单片机"),
+        ("有没有跟 MCU 供电有关的案例？", "mcu 供电"),
+    ]
+    for query, expected in cases:
+        result = understand_hardware_query(query)
+        assert result["retrieval_text"] == expected
+        assert result["terms"] == expected.split()
 
 
 def test_product_search_uses_opensearch_and_maps_back_to_published_case() -> None:
@@ -240,3 +270,23 @@ def test_formal_only_result_can_open_case_detail() -> None:
     item = service.get_case("A-MCU-001")
     assert item["source_kind"] == "FORMAL_KNOWLEDGE"
     assert item["title"] == "MCU intermittent reset"
+
+
+def test_formal_only_detail_resolves_evidence_to_original_source() -> None:
+    service = HardwareCaseAIRetrievalService(
+        EmptyCaseService(),
+        consumption_service=FakeConsumption(),
+    )
+
+    payload = service.get_evidence("A-MCU-001")
+
+    assert payload["formal_only"] is True
+    assert payload["binding_mode"] == "FORMAL_KNOWLEDGE_DIRECT"
+    assert payload["formal_evidence_refs"] == ["EV-FORMAL-01"]
+    assert len(payload["evidence"]) == 1
+    evidence = payload["evidence"][0]
+    assert evidence["evidence_id"] == "EV-FORMAL-01"
+    assert evidence["source_id"] == "SRC-A-MCU-001"
+    assert evidence["source_ref"] == "word:A-MCU-001.docx"
+    assert evidence["locator"]["block_id"] == "B0008"
+    assert evidence["evidence_status"] == "AVAILABLE"
