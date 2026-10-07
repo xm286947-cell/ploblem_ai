@@ -41,7 +41,12 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -q --disable-pip-version-check -r products/storage_rc1/requirements.txt pytest==9.0.2 httpx==0.28.1
+          python -m http.server 9000 --bind 127.0.0.1 >/tmp/pkr-contract-stub.log 2>&1 &
+          STUB_PID=$!
+          trap 'kill "$STUB_PID" >/dev/null 2>&1 || true' EXIT
           PYTHONPATH="products/storage_rc1:." python -m pytest -q products/storage_rc1/tests/test_knowledge_service_client.py products/storage_rc1/tests/test_knowledge_consumer_gateway.py products/storage_rc1/tests/test_public_knowledge_workspace.py
+          kill "$STUB_PID" >/dev/null 2>&1 || true
+          trap - EXIT
 
       - name: Build post-merge single URL candidate
         shell: bash
@@ -72,7 +77,12 @@ jobs:
           python -m compileall -q "$ROOT/storage_life" "$ROOT/knowledge_consumer_gateway" "$ROOT/knowledge_production"
           bash -n "$ROOT/knowledge_consumer_gateway/start_mac_gateway.command"
           python -m pip install -q --disable-pip-version-check -r "$ROOT/requirements.txt" -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt" pytest==9.0.2 httpx==0.28.1
+          python -m http.server 9000 --bind 127.0.0.1 >/tmp/pkr-contract-stub-fresh.log 2>&1 &
+          STUB_PID=$!
+          trap 'kill "$STUB_PID" >/dev/null 2>&1 || true' EXIT
           (cd "$ROOT" && PYTHONPATH="$ROOT:$ROOT/vendor/unified_agent_runtime" python -m pytest -q tests/test_knowledge_service_client.py tests/test_knowledge_consumer_gateway.py tests/test_public_knowledge_workspace.py)
+          kill "$STUB_PID" >/dev/null 2>&1 || true
+          trap - EXIT
           WINDOWS_LAUNCHER="$ROOT/run_windows.bat" python -c 'from pathlib import Path; import os; t=Path(os.environ["WINDOWS_LAUNCHER"]).read_text(encoding="utf-8",errors="replace").lower(); assert "docker" not in t; assert "wsl" not in t; print("WINDOWS_LAUNCHER_NO_DOCKER=PASS"); print("WINDOWS_LAUNCHER_NO_WSL=PASS")'
           echo "FRESH_EXTRACT=PASS"
           echo "PACKAGE_GATE=PASS"
