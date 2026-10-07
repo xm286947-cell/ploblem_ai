@@ -1,6 +1,7 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_workbench.css?v=qs-mvp-05b">{% endblock %}
+{% set qs_static_base = '/static' if request.app.state.mature_quality_host|default(false) else '/p0/static' %}
+{% block page_styles %}<link rel="stylesheet" href="{{ qs_static_base }}/p0_scenario_workbench.css?v=qs-mvp-05b">{% endblock %}
 {% block breadcrumb %}质量场景 / 场景工作台{% endblock %}
 {% block body %}
 <main class="qs-workbench" data-qs-workbench data-api-prefix="{{api_prefix}}">
@@ -122,4 +123,4 @@
   </aside>
 </main>
 {% endblock %}
-{% block page_scripts %}<script>window.QS_WORKBENCH_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_workbench.js?v=qs-mvp-05b" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.QS_WORKBENCH_API={{api_prefix|tojson}};</script><script src="{{ qs_static_base }}/p0_scenario_workbench.js?v=qs-mvp-05b" defer></script>{% endblock %}
