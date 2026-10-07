@@ -120,25 +120,26 @@ jobs:
           }
           $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $stage "FULL_PLATFORM_MANIFEST.json") -Encoding utf8NoBOM
 
-          @"
-OVERALL CURRENT PLATFORM WINDOWS FUNCTIONAL CANDIDATE
-
-SOURCE_SHA=$env:PRODUCT_SOURCE_SHA
-PACKAGE_SCOPE=FULL_CURRENT_PLATFORM
-QUALITY_SCENARIO_STANDALONE_PACKAGE=NO
-DEFAULT_ENTRY=http://127.0.0.1:18080/p0/overall
-DOMAINS=MAJOR_REPEAT_RISK,HARDWARE_CASE,QUALITY_SCENARIO,STORAGE_LIFETIME
-QS_W4_FIXTURE_ROLE=SUPPORTING_TEST_SOURCE
-DIRECT_QSV1_CANDIDATE_WRITE=NO
-DIRECT_QSV1_PUBLISH_WRITE=NO
-REAL_MATURE_DATA_COMPATIBILITY=DEFERRED
-
-START:
-START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat --host 127.0.0.1 --port 18080
-
-DO NOT USE AS PRODUCT ENTRY:
-start_quality_capability_p1.bat
-"@ | Set-Content -Path (Join-Path $stage "00_README_FIRST.txt") -Encoding utf8NoBOM
+          $readme = @(
+            "OVERALL CURRENT PLATFORM WINDOWS FUNCTIONAL CANDIDATE",
+            "",
+            "SOURCE_SHA=$env:PRODUCT_SOURCE_SHA",
+            "PACKAGE_SCOPE=FULL_CURRENT_PLATFORM",
+            "QUALITY_SCENARIO_STANDALONE_PACKAGE=NO",
+            "DEFAULT_ENTRY=http://127.0.0.1:18080/p0/overall",
+            "DOMAINS=MAJOR_REPEAT_RISK,HARDWARE_CASE,QUALITY_SCENARIO,STORAGE_LIFETIME",
+            "QS_W4_FIXTURE_ROLE=SUPPORTING_TEST_SOURCE",
+            "DIRECT_QSV1_CANDIDATE_WRITE=NO",
+            "DIRECT_QSV1_PUBLISH_WRITE=NO",
+            "REAL_MATURE_DATA_COMPATIBILITY=DEFERRED",
+            "",
+            "START:",
+            "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat --host 127.0.0.1 --port 18080",
+            "",
+            "DO NOT USE AS PRODUCT ENTRY:",
+            "start_quality_capability_p1.bat"
+          ) -join [Environment]::NewLine
+          Set-Content -Path (Join-Path $stage "00_README_FIRST.txt") -Value $readme -Encoding utf8NoBOM
 
           $zip = Join-Path $dist "$env:PACKAGE_BASENAME.zip"
           Remove-Item -Force $zip -ErrorAction SilentlyContinue
