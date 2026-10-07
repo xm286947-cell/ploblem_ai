@@ -1,9 +1,9 @@
 # Hardware AI Retrieval W1 — Retrieval Metadata + AI Tagger
 
 TASK=HARDWARE-AI-RETRIEVAL-W1-RETRIEVAL-METADATA-TAGGER-001
-STATUS=W1A_PASS
+STATUS=W1C_DEVELOPMENT
 BASE_MERGE_COMMIT=107d5d3f34f3e9f25fb35d6bfa8228c4e3317629
-BRANCH=feature/hardware-ai-retrieval-w1-metadata-tagger
+BRANCH=feature/hardware-ai-retrieval-w1c-opensearch-document
 ARCH_BASELINE=HARDWARE_KNOWLEDGE_AI_RETRIEVAL_SYSTEM_ARCHITECTURE_V0.1
 
 ## Goal
@@ -150,7 +150,7 @@ W1B_RUNTIME_CORE_CHANGE=NO
 W1B_REAL_PROVIDER_GITHUB_PROFILE=BLOCKED_DASHSCOPE_BASE_URL_NOT_CONFIGURED
 W1B_REAL_PROVIDER_LOCAL_EXTERNAL_CONFIG=SUPPORTED
 W1B_REAL_PROVIDER_BLOCKS_DEVELOPMENT=NO
-W1C_OPENSEARCH_INDEX_DOCUMENT=NEXT
+W1C_OPENSEARCH_INDEX_DOCUMENT=IN_PROGRESS
 
 W1_PASS=NO
 
@@ -187,5 +187,33 @@ failure. The workflow is left manual-only via workflow_dispatch to prevent
 repeated provider attempts on ordinary branch pushes.
 
 W1_PASS=NO
-W1C_OPENSEARCH_INDEX_DOCUMENT=NOT_STARTED
-NEXT=CONFIGURE_EXISTING_REAL_PROVIDER_PROFILE_AND_RERUN_W1B
+W1C_OPENSEARCH_INDEX_DOCUMENT=IN_PROGRESS
+NEXT=W1C_TARGETED_CI
+
+
+## W1C OpenSearch Index Document
+
+W1B_MERGE_COMMIT=3e93ae1428ed7ee79301f483ee54078144747166
+W1C_BRANCH=feature/hardware-ai-retrieval-w1c-opensearch-document
+W1C_INDEX_CONTRACT=hardware-retrieval-index-document/v1
+W1C_INDEX_SCHEMA_VERSION=1
+
+W1C_REUSE_W0_HTTP_ADAPTER=YES
+W1C_SECOND_SEARCH_CLIENT=NO
+W1C_FORMAL_WRITEBACK=NO
+
+Index separation is mandatory:
+
+- search_text = Formal-derived values + FACT/NORMALIZED tags
+- recall_text = search_text + EXPANSION tags
+- structured scope filters = explicit Formal-derived interface/signal/device values only
+- EXPANSION is never copied into scope filters
+- tag_provenance preserves source_term/source_fields/derived/claim_safe for later WHY_HIT
+
+W1C_SEARCH_TEXT_CLAIM_SAFE=YES
+W1C_EXPANSION_RECALL_ONLY=YES
+W1C_STRUCTURED_FILTER_FROM_EXPANSION=FORBIDDEN
+W1C_WHY_HIT_PROVENANCE_READY=YES
+
+W1C_TARGETED_CI=PENDING
+W1_PASS=NO
