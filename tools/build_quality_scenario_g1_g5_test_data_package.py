@@ -41,11 +41,13 @@ def main() -> int:
     source_manifest_path = db.with_suffix(db.suffix + ".fixture.json")
 
     with sqlite3.connect(db) as conn:
-        counts = {
-            "quality_issue": count(conn, "quality_issue"),
-            "software_assessment_record": count(conn, "software_assessment_record"),
-            "analysis_run": count(conn, "analysis_run"),
-        }
+        table_names = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        ]
+        counts = {name: count(conn, name) for name in table_names}
 
     contract = {
         "contract": "quality-scenario-g1-g5-test-data/v1",
