@@ -1,0 +1,266 @@
+name: Overall Current Platform Windows Candidate 34829cf
+
+on:
+  push:
+    branches:
+      - ci/overall-current-platform-windows-34829cf
+    paths:
+      - .github/workflows/overall-current-platform-windows-34829cf.yml
+
+permissions:
+  contents: read
+
+env:
+  PRODUCT_SOURCE_SHA: 34829cf8c64708b60e09ab8475bc4b0280b09a1b
+  PACKAGE_BASENAME: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_34829cf8c647
+
+jobs:
+  package-and-smoke-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 34829cf8c64708b60e09ab8475bc4b0280b09a1b
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify exact source and Windows Overall launcher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:PRODUCT_SOURCE_SHA) {
+            throw "SOURCE_SHA_MISMATCH actual=$actual expected=$env:PRODUCT_SOURCE_SHA"
+          }
+          git diff --check "$env:PRODUCT_SOURCE_SHA^..$env:PRODUCT_SOURCE_SHA"
+          if (-not (Test-Path "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat")) {
+            throw "WINDOWS_OVERALL_LAUNCHER_MISSING"
+          }
+          $launcher = Get-Content "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat" -Raw
+          if ($launcher -notmatch "knowledge-p1-start") {
+            throw "WINDOWS_LAUNCHER_NOT_OVERALL_HOST"
+          }
+          if ($launcher -match "knowledge-web") {
+            throw "WINDOWS_LAUNCHER_POINTS_TO_QUALITY_ONLY_HOST"
+          }
+          Write-Host "SOURCE_SHA_MATCH=YES"
+          Write-Host "WINDOWS_OVERALL_LAUNCHER_IDENTITY=PASS"
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Focused regression
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_quality_scenario_w4_functional_fixture.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_step1b_qsv1_mature_preview.py tests/test_overall_frontend_shell.py tests/test_overall_legacy_capability_compatibility.py
+
+      - name: Build supporting fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force validation | Out-Null
+          python tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | Tee-Object -FilePath validation/fixture_build.txt
+          if (-not (Select-String -Path validation/fixture_build.txt -Pattern "W4_FUNCTIONAL_FIXTURE=READY" -Quiet)) {
+            throw "FIXTURE_NOT_READY"
+          }
+          if (-not (Select-String -Path validation/fixture_build.txt -Pattern "DIRECT_QSV1_CANDIDATE_WRITE=NO" -Quiet)) {
+            throw "FIXTURE_CANDIDATE_WRITE_POLICY_MISMATCH"
+          }
+          if (-not (Select-String -Path validation/fixture_build.txt -Pattern "DIRECT_QSV1_PUBLISH_WRITE=NO" -Quiet)) {
+            throw "FIXTURE_PUBLISH_WRITE_POLICY_MISMATCH"
+          }
+          python tools/quality_scenario_real_data_preflight.py --db validation/quality_scenario_w4_fixture.db --require | Tee-Object -FilePath validation/fixture_preflight.txt
+          if (-not (Select-String -Path validation/fixture_preflight.txt -Pattern "REAL_DATA_PREFLIGHT=PASS" -Quiet)) {
+            throw "FIXTURE_PREFLIGHT_FAIL"
+          }
+
+      - name: Build Windows Overall package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP "overall-current-platform-windows-stage"
+          $archive = Join-Path $env:RUNNER_TEMP "overall-current-platform-source.zip"
+          $dist = Join-Path $env:GITHUB_WORKSPACE "dist"
+          Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+          Remove-Item -Force $archive -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          New-Item -ItemType Directory -Force $dist | Out-Null
+
+          git archive --format=zip -o "$archive" $env:PRODUCT_SOURCE_SHA
+          Expand-Archive -Path "$archive" -DestinationPath "$stage" -Force
+
+          New-Item -ItemType Directory -Force (Join-Path $stage "validation") | Out-Null
+          Copy-Item validation/quality_scenario_w4_fixture.db (Join-Path $stage "validation/quality_scenario_w4_fixture.db")
+          Copy-Item validation/quality_scenario_w4_fixture.db.fixture.json (Join-Path $stage "validation/quality_scenario_w4_fixture.db.fixture.json")
+          Copy-Item validation/fixture_build.txt (Join-Path $stage "validation/fixture_build.txt")
+          Copy-Item validation/fixture_preflight.txt (Join-Path $stage "validation/fixture_preflight.txt")
+
+          Set-Content -Path (Join-Path $stage "PRODUCT_SOURCE_SHA") -Value $env:PRODUCT_SOURCE_SHA -Encoding utf8NoBOM
+
+          $manifest = [ordered]@{
+            package_type = "OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_CANDIDATE"
+            package_scope = "FULL_CURRENT_PLATFORM"
+            source_sha = $env:PRODUCT_SOURCE_SHA
+            default_entry = "/p0/overall"
+            overall_shell = $true
+            domains = @("MAJOR_REPEAT_RISK","HARDWARE_CASE","QUALITY_SCENARIO","STORAGE_LIFETIME")
+            quality_scenario_standalone_package = $false
+            qs_w4_fixture_included = $true
+            qs_w4_fixture_role = "SUPPORTING_TEST_SOURCE"
+            direct_qsv1_candidate_write = $false
+            direct_qsv1_publish_write = $false
+            real_mature_data_compatibility = "DEFERRED"
+            windows_entry = "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat"
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $stage "FULL_PLATFORM_MANIFEST.json") -Encoding utf8NoBOM
+
+          $readme = @(
+            "OVERALL CURRENT PLATFORM WINDOWS FUNCTIONAL CANDIDATE",
+            "",
+            "SOURCE_SHA=$env:PRODUCT_SOURCE_SHA",
+            "PACKAGE_SCOPE=FULL_CURRENT_PLATFORM",
+            "QUALITY_SCENARIO_STANDALONE_PACKAGE=NO",
+            "DEFAULT_ENTRY=http://127.0.0.1:18080/p0/overall",
+            "DOMAINS=MAJOR_REPEAT_RISK,HARDWARE_CASE,QUALITY_SCENARIO,STORAGE_LIFETIME",
+            "QS_W4_FIXTURE_ROLE=SUPPORTING_TEST_SOURCE",
+            "DIRECT_QSV1_CANDIDATE_WRITE=NO",
+            "DIRECT_QSV1_PUBLISH_WRITE=NO",
+            "REAL_MATURE_DATA_COMPATIBILITY=DEFERRED",
+            "",
+            "START:",
+            "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat --host 127.0.0.1 --port 18080",
+            "",
+            "DO NOT USE AS PRODUCT ENTRY:",
+            "start_quality_capability_p1.bat"
+          ) -join [Environment]::NewLine
+          Set-Content -Path (Join-Path $stage "00_README_FIRST.txt") -Value $readme -Encoding utf8NoBOM
+
+          $zip = Join-Path $dist "$env:PACKAGE_BASENAME.zip"
+          Remove-Item -Force $zip -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
+
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          "$hash  $env:PACKAGE_BASENAME.zip" | Set-Content -Path "$zip.sha256" -Encoding ascii
+          Write-Host "PACKAGE=$env:PACKAGE_BASENAME.zip"
+          Write-Host "PACKAGE_SHA256=$hash"
+
+      - name: Fresh Extract Windows native smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist/$env:PACKAGE_BASENAME.zip"
+          $fresh = Join-Path $env:RUNNER_TEMP "overall-current-platform-windows-fresh"
+          Remove-Item -Recurse -Force $fresh -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $fresh | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $fresh -Force
+
+          $source = (Get-Content (Join-Path $fresh "PRODUCT_SOURCE_SHA") -Raw).Trim()
+          if ($source -ne $env:PRODUCT_SOURCE_SHA) {
+            throw "PACKAGE_SOURCE_SHA_MISMATCH actual=$source expected=$env:PRODUCT_SOURCE_SHA"
+          }
+          $manifest = Get-Content (Join-Path $fresh "FULL_PLATFORM_MANIFEST.json") -Raw | ConvertFrom-Json
+          if ($manifest.package_scope -ne "FULL_CURRENT_PLATFORM") { throw "PACKAGE_SCOPE_MISMATCH" }
+          if ($manifest.quality_scenario_standalone_package -ne $false) { throw "STANDALONE_FLAG_MISMATCH" }
+          if ($manifest.default_entry -ne "/p0/overall") { throw "DEFAULT_ENTRY_MISMATCH" }
+          if ($manifest.windows_entry -ne "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat") { throw "WINDOWS_ENTRY_MISMATCH" }
+
+          $launcher = Join-Path $fresh "START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat"
+          $stdout = Join-Path $fresh "validation/windows_overall_stdout.log"
+          $stderr = Join-Path $fresh "validation/windows_overall_stderr.log"
+          $cmdLine = '"' + $launcher + '" --host 127.0.0.1 --port 18084'
+
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d","/c",$cmdLine) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          try {
+            $base = "http://127.0.0.1:18084"
+            $ready = $false
+            for ($i = 0; $i -lt 180; $i++) {
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing -Uri "$base/p0/overall" -TimeoutSec 2
+                if ($r.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) {
+              Write-Host "--- STDOUT ---"
+              if (Test-Path $stdout) { Get-Content $stdout -Tail 200 }
+              Write-Host "--- STDERR ---"
+              if (Test-Path $stderr) { Get-Content $stderr -Tail 200 }
+              throw "OVERALL_WINDOWS_HOST_NOT_READY"
+            }
+
+            $routes = @(
+              "/p0/overall",
+              "/p0/cases",
+              "/p0/hardware-cases",
+              "/storage-workspace/",
+              "/software-assessment",
+              "/p0/quality-scenarios/workbench",
+              "/p0/quality-scenarios",
+              "/p0/quality-scenario-insights",
+              "/quality-scenario-assets/portrait?portrait_axis=product"
+            )
+            foreach ($route in $routes) {
+              $resp = Invoke-WebRequest -UseBasicParsing -Uri "$base$route" -TimeoutSec 10
+              Write-Host "$route $($resp.StatusCode)"
+              if ($resp.StatusCode -ne 200) { throw "ROUTE_FAIL $route $($resp.StatusCode)" }
+            }
+
+            $overall = (Invoke-WebRequest -UseBasicParsing -Uri "$base/p0/overall" -TimeoutSec 10).Content
+            foreach ($marker in @("重大问题案例库","质量场景库","硬件案例库","存储器件寿命智能产品")) {
+              if (-not $overall.Contains($marker)) { throw "OVERALL_MARKER_MISSING=$marker" }
+            }
+
+            $assessment = (Invoke-WebRequest -UseBasicParsing -Uri "$base/software-assessment" -TimeoutSec 10).Content
+            if (-not $assessment.Contains("异常掉电后关键配方参数丢失")) {
+              throw "QS_TEST_SOURCE_NOT_VISIBLE"
+            }
+
+            $status = Invoke-RestMethod -Uri "$base/api/v2/quality-scenario-preview/status" -TimeoutSec 10
+            $legacy = [System.IO.Path]::GetFullPath((Join-Path $fresh "validation/quality_scenario_w4_fixture.db"))
+            $primary = [System.IO.Path]::GetFullPath($status.V1_DB_ABSOLUTE_PATH)
+            if ($primary -eq $legacy) { throw "QSV1_PRIMARY_STORE_NOT_SEPARATED" }
+            if ($status.SYNTHETIC_FIXTURE_USED -ne "NO") { throw "QSV1_STATUS_SYNTHETIC_FLAG_MISMATCH" }
+
+            $allLog = ""
+            if (Test-Path $stdout) { $allLog += (Get-Content $stdout -Raw) }
+            if (Test-Path $stderr) { $allLog += (Get-Content $stderr -Raw) }
+            if ($allLog -match "is not recognized as an internal or external command") {
+              throw "WINDOWS_BATCH_PARSE_ERROR"
+            }
+
+            Write-Host "FRESH_EXTRACT=PASS"
+            Write-Host "WINDOWS_NATIVE_START=PASS"
+            Write-Host "OVERALL_HOME=PASS"
+            Write-Host "MAJOR_DOMAIN=PASS"
+            Write-Host "HARDWARE_DOMAIN=PASS"
+            Write-Host "QUALITY_SCENARIO_DOMAIN=PASS"
+            Write-Host "STORAGE_DOMAIN=PASS"
+            Write-Host "QS_TEST_SOURCE_VISIBLE=YES"
+            Write-Host "QSV1_PRIMARY_STORE_SEPARATED=YES"
+            Write-Host "WINDOWS_BATCH_PARSE=PASS"
+            Write-Host "QUICK_SMOKE_GATE=PASS"
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) {
+              cmd /c "taskkill /PID $($proc.Id) /T /F" | Out-Null
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_34829cf8c647
+          path: |
+            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_34829cf8c647.zip
+            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_34829cf8c647.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
