@@ -8,6 +8,13 @@ from storage_life.app import app
 client = TestClient(app)
 
 
+def _use_env_service_url(monkeypatch, value: str):
+    # These route tests explicitly exercise environment fallback. A developer's
+    # or extracted package's saved local URL must not leak into the fixture.
+    monkeypatch.setattr(knowledge_service_client, "_config_file_value", lambda: None)
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", value)
+
+
 def test_fixture_replay_supports_sources_search_detail_and_citation():
     assert client.get("/api/public-knowledge/status?mode=FIXTURE_REPLAY").json()["mode"] == "FIXTURE_REPLAY"
     sources = client.get("/api/public-knowledge/sources?mode=FIXTURE_REPLAY").json()["sources"]
@@ -141,13 +148,13 @@ def test_invalid_or_credential_bearing_url_is_rejected_before_persistence(monkey
 
 
 def test_remote_request_cannot_override_configured_host(monkeypatch):
-    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://mac.example:9001")
+    _use_env_service_url(monkeypatch, "http://mac.example:9001")
     response = client.post("/api/public-knowledge/search?mode=LIVE&base_url=http://attacker.example", json={"query": "WAF"})
     assert response.status_code == 403
 
 
 def test_remote_consumer_cannot_import_public_source(monkeypatch):
-    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "https://mac.example:9443")
+    _use_env_service_url(monkeypatch, "https://mac.example:9443")
     response = client.post("/api/public-knowledge/sources/import?mode=LIVE", json={
         "title": "public source", "content": "public text", "classification": "PUBLIC"
     })
@@ -155,7 +162,7 @@ def test_remote_consumer_cannot_import_public_source(monkeypatch):
 
 
 def test_remote_consumer_cannot_delete_source(monkeypatch):
-    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "https://mac.example:9443")
+    _use_env_service_url(monkeypatch, "https://mac.example:9443")
     response = client.delete("/api/public-knowledge/sources/source-1?mode=LIVE")
     assert response.status_code == 403
 
