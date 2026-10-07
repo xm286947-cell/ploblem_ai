@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  PRODUCT_SOURCE_SHA: 1830fbba4f0674210423ee60d135b5b9733b432b
-  PACKAGE_BASENAME: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbba4f06
+  PRODUCT_SOURCE_SHA: 1830fbb28a527eb6374ba2e4d12c3c64e088e1da
+  PACKAGE_BASENAME: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbb28a52
 
 jobs:
   package-and-smoke-windows:
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 1830fbba4f0674210423ee60d135b5b9733b432b
+          ref: 1830fbb28a527eb6374ba2e4d12c3c64e088e1da
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -257,10 +257,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbba4f06
+          name: OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbb28a52
           path: |
-            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbba4f06.zip
-            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbba4f06.zip.sha256
+            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbb28a52.zip
+            dist/OVERALL_CURRENT_PLATFORM_WINDOWS_FUNCTIONAL_1830fbb28a52.zip.sha256
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
