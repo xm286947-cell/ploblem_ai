@@ -374,10 +374,11 @@ def status(mode: str = "LIVE", base_url: str | None = None):
         return {
             "mode": "LIVE", "connected": False, "search_ready": False,
             "citation_ready": False, "retrieval_ready": False, "source_count": 0,
-            "service": "public-knowledge", "version": None,
-            "capability_discovery_mode": "UNAVAILABLE", "error_code": exc.code,
-            "error": exc.detail or exc.code,
-        }
+                "service": "public-knowledge", "version": None,
+                "capability_discovery_mode": "UNAVAILABLE", "error_code": exc.code,
+                "error": exc.detail or exc.code,
+                "read_only_consumer_api": urlparse(getattr(client, "base_url", resolve_service_url())).hostname not in {"localhost", "127.0.0.1", "::1"},
+            }
     return {
         "mode": "LIVE",
         "connected": connected,
