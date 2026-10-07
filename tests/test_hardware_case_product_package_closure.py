@@ -45,7 +45,13 @@ def test_standard_hardware_package_excludes_e2e_cross_domain_repository_chain():
     closure = package_builder.dependency_closure(package_builder.ROOT)
 
     assert closure["status"] == "PASS"
-    assert "services/hardware_r1_e2e_nonprod_knowledge.py" not in closure["files"]
+    e2e_target = "services/hardware_r1_e2e_nonprod_knowledge.py"
+    e2e_edges = [
+        edge for edge in closure["edges"]
+        if edge["target"] == e2e_target
+    ]
+    assert not e2e_edges, e2e_edges
+    assert e2e_target not in closure["files"]
     assert "knowledge_production/public_service.py" not in closure["files"]
     assert "repositories/json_repository.py" not in closure["files"]
 
