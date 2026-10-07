@@ -101,16 +101,33 @@ _ENGLISH_STOP = {
 # persisted to Formal Knowledge, used as structured filters, or treated as
 # product facts. Keeping the alternatives separate is important because the
 # Formal Consumption search requires every query token to be supported.
-_RECALL_ONLY_ALIAS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("单片机", ("mcu",)),
-    ("微控制器", ("mcu",)),
-    ("复位", ("reset", "reset_n")),
-    ("reset_n", ("复位", "reset")),
-    ("reset", ("复位", "reset_n")),
-    ("供电", ("电源", "power", "vcc")),
-    ("电源", ("供电", "power", "vcc")),
-    ("power", ("供电", "电源", "vcc")),
-    ("vcc", ("供电", "电源", "power")),
+_ALIAS_TIER_RANK = {
+    "LITERAL": 0,
+    "DIRECT_SYNONYM": 1,
+    "ENGINEERING_ALIAS": 2,
+    "NARROW_SIGNAL_ALIAS": 3,
+}
+_ALIAS_TIER_COST = {
+    "LITERAL": 0,
+    "DIRECT_SYNONYM": 1,
+    "ENGINEERING_ALIAS": 2,
+    "NARROW_SIGNAL_ALIAS": 4,
+}
+
+# Each entry is (expanded term, relevance tier). Narrow signal tokens such as
+# VCC and RESET_N are recall-only and intentionally carry the highest cost.
+_RECALL_ONLY_ALIAS_GROUPS: tuple[
+    tuple[str, tuple[tuple[str, str], ...]], ...
+] = (
+    ("单片机", (("mcu", "DIRECT_SYNONYM"),)),
+    ("微控制器", (("mcu", "DIRECT_SYNONYM"),)),
+    ("复位", (("reset", "DIRECT_SYNONYM"), ("reset_n", "NARROW_SIGNAL_ALIAS"))),
+    ("reset_n", (("复位", "DIRECT_SYNONYM"), ("reset", "ENGINEERING_ALIAS"))),
+    ("reset", (("复位", "DIRECT_SYNONYM"), ("reset_n", "NARROW_SIGNAL_ALIAS"))),
+    ("供电", (("电源", "DIRECT_SYNONYM"), ("power", "ENGINEERING_ALIAS"), ("vcc", "NARROW_SIGNAL_ALIAS"))),
+    ("电源", (("供电", "DIRECT_SYNONYM"), ("power", "ENGINEERING_ALIAS"), ("vcc", "NARROW_SIGNAL_ALIAS"))),
+    ("power", (("供电", "DIRECT_SYNONYM"), ("电源", "DIRECT_SYNONYM"), ("vcc", "NARROW_SIGNAL_ALIAS"))),
+    ("vcc", (("供电", "ENGINEERING_ALIAS"), ("电源", "ENGINEERING_ALIAS"), ("power", "ENGINEERING_ALIAS"))),
 )
 
 
@@ -134,7 +151,7 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
             continue
         current = list(variants)
         for variant in current:
-            for alternative in alternatives:
+            for alternative, tier in alternatives:
                 if len(variants) >= 32:
                     break
                 text = normalize_search_text(
@@ -152,18 +169,39 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
                     "matched_phrase": trigger,
                     "expanded_term": alternative,
                     "use": "RECALL_ONLY",
+                    "tier": tier,
+                    "cost": _ALIAS_TIER_COST[tier],
                 }
+                rules = [*variant["rules"], rule]
+                tier_rank = max(
+                    (_ALIAS_TIER_RANK[item["tier"]] for item in rules),
+                    default=0,
+                )
+                expansion_cost = sum(int(item["cost"]) for item in rules)
                 variants.append(
                     {
                         "text": text,
                         "kind": "RECALL_ONLY",
-                        "rules": [*variant["rules"], rule],
+                        "rules": rules,
+                        "tier": next(
+                            name for name, rank in _ALIAS_TIER_RANK.items()
+                            if rank == tier_rank
+                        ),
+                        "priority_rank": tier_rank,
+                        "expansion_cost": expansion_cost,
                     }
                 )
             if len(variants) >= 32:
                 break
 
-    return variants
+    return sorted(
+        variants,
+        key=lambda item: (
+            int(item.get("priority_rank", 0)),
+            int(item.get("expansion_cost", 0)),
+            str(item["text"]),
+        ),
+    )
 
 
 def understand_hardware_query(text: str) -> dict[str, Any]:
@@ -588,10 +626,13 @@ class HardwareCaseAIRetrievalService:
     ) -> dict[str, Any]:
         row = dict(case)
         explanation = dict(why_hit or {})
-        if query_variant and query_variant.get("kind") == "RECALL_ONLY":
+        if query_variant:
             explanation["query_expansion"] = {
-                "policy": "RECALL_ONLY",
+                "policy": str(query_variant.get("kind") or "LITERAL"),
                 "original_query": query_variant.get("original_query"),
+                "tier": str(query_variant.get("tier") or "LITERAL"),
+                "priority_rank": int(query_variant.get("priority_rank") or 0),
+                "expansion_cost": int(query_variant.get("expansion_cost") or 0),
                 "rules": list(query_variant.get("rules") or []),
             }
         row["retrieval"] = {
@@ -601,6 +642,81 @@ class HardwareCaseAIRetrievalService:
             "why_hit": explanation,
         }
         return row
+
+    @staticmethod
+    def _ranked_case_hits(
+        hits: list[Mapping[str, Any]],
+        *,
+        lookup: Mapping[str, Mapping[str, Any]],
+        mode: str,
+        resolver: Callable[[Mapping[str, Any]], dict[str, Any] | None],
+    ) -> list[dict[str, Any]]:
+        best_by_case: dict[
+            str,
+            tuple[tuple[int, int, float, str], Mapping[str, Any], dict[str, Any]],
+        ] = {}
+        for hit in hits:
+            business_case_id = str(hit.get("business_case_id") or "").strip()
+            case = lookup.get(business_case_id)
+            if case is None:
+                case = resolver(hit)
+            if case is None:
+                continue
+            case_id = str(case.get("case_id") or business_case_id).strip()
+            if not case_id:
+                continue
+            variant = hit.get("_query_variant")
+            variant = variant if isinstance(variant, Mapping) else {}
+            try:
+                score = float(
+                    hit.get("score")
+                    if hit.get("score") is not None
+                    else hit.get("match_score") or 0
+                )
+            except (TypeError, ValueError):
+                score = 0.0
+            order = (
+                int(variant.get("priority_rank") or 0),
+                int(variant.get("expansion_cost") or 0),
+                -score,
+                case_id,
+            )
+            previous = best_by_case.get(case_id)
+            if previous is None or order < previous[0]:
+                best_by_case[case_id] = (order, hit, dict(case))
+
+        ranked: list[dict[str, Any]] = []
+        for _order, hit, case in sorted(
+            best_by_case.values(), key=lambda item: item[0]
+        ):
+            variant = hit.get("_query_variant")
+            formal_why = {
+                "status": "FORMAL_PROJECTION_MATCH",
+                "claim_safe": True,
+                "reasons": list(hit.get("match_reasons") or []),
+            }
+            why_hit = (
+                hit.get("why_hit")
+                if isinstance(hit.get("why_hit"), Mapping)
+                else formal_why if mode == "SQLITE_FORMAL" else None
+            )
+            ranked.append(
+                HardwareCaseAIRetrievalService._attach_retrieval(
+                    case,
+                    mode=mode,
+                    score=(
+                        hit.get("score")
+                        if hit.get("score") is not None
+                        else hit.get("match_score")
+                    ),
+                    why_hit=why_hit,
+                    knowledge_id=str(hit.get("knowledge_id") or "") or None,
+                    query_variant=(
+                        variant if isinstance(variant, Mapping) else None
+                    ),
+                )
+            )
+        return ranked
 
     def search_cases(
         self,
@@ -656,35 +772,12 @@ class HardwareCaseAIRetrievalService:
                     for hit in variant_hits:
                         if isinstance(hit, Mapping):
                             hits.append({**dict(hit), "_query_variant": variant})
-                mapped: list[dict[str, Any]] = []
-                seen: set[str] = set()
-                for hit in hits:
-                    if not isinstance(hit, Mapping):
-                        continue
-                    business_case_id = str(hit.get("business_case_id") or "").strip()
-                    case = lookup.get(business_case_id)
-                    if case is None:
-                        case = self._resolve_formal_case(hit)
-                    if case is None:
-                        continue
-                    case_id = str(case.get("case_id") or business_case_id)
-                    if case_id in seen:
-                        continue
-                    seen.add(case_id)
-                    mapped.append(
-                        self._attach_retrieval(
-                            case,
-                            mode="OPENSEARCH",
-                            score=hit.get("score"),
-                            why_hit=hit.get("why_hit")
-                            if isinstance(hit.get("why_hit"), Mapping)
-                            else None,
-                            knowledge_id=str(hit.get("knowledge_id") or "") or None,
-                            query_variant=hit.get("_query_variant")
-                            if isinstance(hit.get("_query_variant"), Mapping)
-                            else None,
-                        )
-                    )
+                mapped = self._ranked_case_hits(
+                    hits,
+                    lookup=lookup,
+                    mode="OPENSEARCH",
+                    resolver=self._resolve_formal_case,
+                )
                 if mapped:
                     result = dict(visible)
                     result["results"] = mapped
@@ -714,37 +807,12 @@ class HardwareCaseAIRetrievalService:
                     for hit in variant_hits:
                         if isinstance(hit, Mapping):
                             hits.append({**dict(hit), "_query_variant": variant})
-                mapped = []
-                seen: set[str] = set()
-                for hit in hits:
-                    if not isinstance(hit, Mapping):
-                        continue
-                    business_case_id = str(hit.get("business_case_id") or "").strip()
-                    case = lookup.get(business_case_id)
-                    if case is None:
-                        case = self._resolve_formal_case(hit)
-                    if case is None:
-                        continue
-                    case_id = str(case.get("case_id") or business_case_id)
-                    if case_id in seen:
-                        continue
-                    seen.add(case_id)
-                    mapped.append(
-                        self._attach_retrieval(
-                            case,
-                            mode="SQLITE_FORMAL",
-                            score=hit.get("match_score"),
-                            why_hit={
-                                "status": "FORMAL_PROJECTION_MATCH",
-                                "claim_safe": True,
-                                "reasons": list(hit.get("match_reasons") or []),
-                            },
-                            knowledge_id=str(hit.get("knowledge_id") or "") or None,
-                            query_variant=hit.get("_query_variant")
-                            if isinstance(hit.get("_query_variant"), Mapping)
-                            else None,
-                        )
-                    )
+                mapped = self._ranked_case_hits(
+                    hits,
+                    lookup=lookup,
+                    mode="SQLITE_FORMAL",
+                    resolver=self._resolve_formal_case,
+                )
                 if mapped:
                     result = dict(visible)
                     result["results"] = mapped
