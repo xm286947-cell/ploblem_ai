@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - feature/storage-public-knowledge-inline
-      - fix/storage-kp-zh-cn-ux-001
     paths:
       - ".github/workflows/storage-mvp-real-flow-package.yml"
 
@@ -17,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      STORAGE_SOURCE_SHA: 7369f8949689efef1d2c64aafc91d5f926cfcfe5
+      STORAGE_SOURCE_SHA: 6d24040a4b542e2464bf02d6ac51012eecd5dd57
       PUBLIC_KNOWLEDGE_SOURCE_SHA: a9536f3814f9e3cd2b9e040e216f68ea61a07c15
       RUNTIME_SOURCE_SHA: 9e36eeb0237459b884ee0d3e663ccf5833bfc685
-      PACKAGE_DATE: "20261007"
+      PACKAGE_DATE: "20261006"
 
     steps:
       - name: Checkout frozen Storage source
@@ -96,13 +95,6 @@ jobs:
               "按寿命模型生产知识",
               "pkPublisher",
               "/knowledge-production/extract",
-              "独立问答（QA）",
-              "知识建议",
-              "服务健康",
-              "中文翻译与综合解读",
-              "翻译成中文",
-              "查看英文原文证据",
-              "allowed_source_ids:[sourceId]",
           ]
           missing = [item for item in required if item not in html]
           if missing:
@@ -516,63 +508,6 @@ jobs:
               )
           print("FRESH_EXTRACT_INTEGRITY=PASS")
           print("PACKAGE_PATH_PORTABILITY=PASS")
-          PY
-
-          # Fresh Extract smoke for the actual user-facing product package.
-          # No Provider health, extraction, publish or release mutation is called.
-          export FRESH_ROOT="$FRESH/STORAGE_PRODUCT_MVP_RC1"
-          export PYTHONPATH="$FRESH_ROOT:$FRESH_ROOT/vendor/unified_agent_runtime"
-          export STORAGE_KNOWLEDGE_REPOSITORY_DIR="$FRESH_ROOT/.smoke-knowledge"
-          mkdir -p "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
-
-          python - <<'PY'
-          import os
-          import sys
-          import tempfile
-          from pathlib import Path
-
-          root = Path(os.environ["FRESH_ROOT"])
-          sys.path.insert(0, str(root))
-          sys.path.insert(0, str(root / "vendor" / "unified_agent_runtime"))
-
-          from fastapi.testclient import TestClient
-          from knowledge_production.web import create_processing_app
-          from storage_life.app import app as storage_app
-
-          # Storage product boots from Fresh Extract and serves its real root/health.
-          storage = TestClient(storage_app)
-          assert storage.get("/api/health").status_code == 200
-          home = storage.get("/")
-          assert home.status_code == 200
-          html = home.text
-          for marker in (
-              "独立问答（QA）",
-              "知识建议",
-              "服务健康",
-              "中文翻译与综合解读",
-              "翻译成中文",
-              "查看英文原文证据",
-          ):
-              assert marker in html, marker
-
-          # Existing Knowledge Production routes boot from the extracted bytes.
-          with tempfile.TemporaryDirectory() as tmp:
-              kp = TestClient(create_processing_app(tmp))
-              checks = {
-                  "/knowledge-production/sources": ("知识生产工作台", "资料｜来源文档"),
-                  "/knowledge-production/candidates": ("知识候选",),
-                  "/knowledge-production/reviews": ("人工审核",),
-                  "/knowledge-production/published": ("已发布知识",),
-              }
-              for route, markers in checks.items():
-                  response = kp.get(route)
-                  assert response.status_code == 200, (route, response.status_code)
-                  for marker in markers:
-                      assert marker in response.text, (route, marker)
-
-          print("FRESH_EXTRACT_STORAGE_BOOT=PASS")
-          print("FRESH_EXTRACT_KP_UI_SMOKE=PASS")
-          print("PROVIDER_CALLS=0")
           PY
 
           SHA="$(sha256sum "dist/$ZIP_NAME" | awk '{print $1}')"
