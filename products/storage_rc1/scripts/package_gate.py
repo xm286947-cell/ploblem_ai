@@ -8,12 +8,16 @@ for p in range(1,9): checks[f'P{p:02d}_UI']=f'P{p:02d} ' in html
 checks['RUN_WINDOWS']=(ROOT/'run_windows.bat').is_file()
 checks['RUNTIME']=(ROOT/'vendor/unified_agent_runtime/runtime/__init__.py').is_file()
 checks['KNOWLEDGE_CONSUMER']=(ROOT/'storage_life/knowledge_release.py').is_file()
+checks['SINGLE_URL_CLIENT']=(ROOT/'storage_life/knowledge_service_client.py').is_file()
+checks['SINGLE_URL_SETTINGS_UI']='id="knowledgeServiceUrl"' in html and 'test-connection' in (ROOT/'storage_life/public_knowledge.py').read_text(encoding='utf-8')
+checks['READ_ONLY_CONSUMER_GATEWAY']=(ROOT/'knowledge_consumer_gateway/app.py').is_file() and (ROOT/'knowledge_consumer_gateway/start_mac_gateway.command').is_file()
+checks['NO_BROWSER_SERVICE_OVERRIDE']='pkBaseUrl' not in html and 'KNOWLEDGE_SERVICE_URL' in (ROOT/'storage_life/knowledge_service_client.py').read_text(encoding='utf-8')
 checks['NO_SAMPLE_DEFAULT']='knowledge_release\\seed' not in (ROOT/'run_windows.bat').read_text(encoding='utf-8',errors='ignore')
 checks['FORMAL_RELEASE_AVAILABLE']=(ROOT/'knowledge_release/current/release_manifest.json').is_file()
 # Conservative secret scan over product config/source, ignoring examples/tests/baseline evidence.
 secret_patterns=[re.compile(r'(?i)authorization\s*[:=]\s*bearer\s+[A-Za-z0-9._-]{12,}'),re.compile(r'\bsk-[A-Za-z0-9_-]{16,}\b')]
 hits=[]
-for base in ('config','storage_life','scripts'):
+for base in ('config','storage_life','knowledge_consumer_gateway','scripts'):
  for p in (ROOT/base).rglob('*'):
   if not p.is_file() or p.suffix.lower() in {'.pdf','.sqlite3','.pyc'}: continue
   text=p.read_text(encoding='utf-8',errors='ignore')
