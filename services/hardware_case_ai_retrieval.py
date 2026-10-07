@@ -137,7 +137,13 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
             for alternative in alternatives:
                 if len(variants) >= 32:
                     break
-                text = re.sub(trigger_pattern, alternative, variant["text"])
+                text = normalize_search_text(
+                    re.sub(
+                        trigger_pattern,
+                        lambda _match: f" {alternative} ",
+                        variant["text"],
+                    )
+                )
                 if text == variant["text"] or text in seen:
                     continue
                 seen.add(text)
