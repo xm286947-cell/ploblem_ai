@@ -97,6 +97,9 @@ class KnowledgeIssueService:
         except NoRecordsFoundError:raise
         except Exception:
             self.repository.finish_import(batch_id,stats,'FAILED',diagnostics);raise
+        finally:
+            wb.close()
+            wb_raw.close()
     def get_import_batch(self,batch_id):return self.repository.get_import_batch(batch_id)
     def list_import_batches(self,limit=50):return self.repository.list_import_batches(limit)
     def get_issue(self,knowledge_id):return self.repository.get_current_issue(knowledge_id)
