@@ -1,6 +1,8 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_detail.css?v=qs-mvp-06">{% endblock %}
+{% set qs_page_base = page_base|default('/p0/quality-scenarios') %}
+{% set qs_static_base = '/static' if request.app.state.mature_quality_host|default(false) else '/p0/static' %}
+{% block page_styles %}<link rel="stylesheet" href="{{ qs_static_base }}/p0_scenario_detail.css?v=qs-mvp-06">{% endblock %}
 {% block breadcrumb %}质量场景 / 场景详情{% endblock %}
 {% block body %}
 <main class="qsd-page" data-qsd-page data-api-prefix="{{api_prefix}}" data-scenario-id="{{scenario_id}}">
@@ -9,17 +11,17 @@
   <section class="qsd-state qsd-error" data-error hidden>
     <strong data-error-title>场景详情读取失败</strong>
     <span data-error-message>请稍后重试。</span>
-    <div><a class="btn" href="/p0/quality-scenarios">返回质量场景库</a><button class="btn btn-primary" type="button" data-retry>重新加载</button></div>
+    <div><a class="btn" href="{{ qs_page_base }}/library">返回质量场景库</a><button class="btn btn-primary" type="button" data-retry>重新加载</button></div>
   </section>
 
   <div data-detail hidden>
     <header class="qsd-head">
       <div>
-        <a class="qsd-back" href="/p0/quality-scenarios">← 返回 QualityScenario V1 场景库</a>
+        <a class="qsd-back" href="{{ qs_page_base }}/library">← 返回 QualityScenario V1 场景库</a>
         <div class="qsd-title-line"><h1 data-title>—</h1><span class="qsd-status" data-status>—</span><span class="qsd-version" data-version>V—</span></div>
         <div class="qsd-tags" data-tags></div>
       </div>
-      <a class="btn" href="/p0/quality-scenarios/workbench" data-workbench-link>进入 Candidate 工作台</a>
+      <a class="btn" href="{{ qs_page_base }}/workbench" data-workbench-link>进入 Candidate 工作台</a>
     </header>
 
     <section class="qsd-trigger">
@@ -75,4 +77,4 @@
   </div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script>window.QS_DETAIL_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_detail.js?v=qs-mvp-06" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.QS_DETAIL_API={{api_prefix|tojson}};</script><script src="{{ qs_static_base }}/p0_scenario_detail.js?v=qs-mvp-06" defer></script>{% endblock %}
