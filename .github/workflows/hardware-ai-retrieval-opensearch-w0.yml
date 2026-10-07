@@ -1,0 +1,158 @@
+name: Hardware AI Retrieval OpenSearch W0
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_search_adapter.py"
+      - "config/hardware_search.example.yaml"
+      - "scripts/opensearch/**"
+      - "tests/test_hardware_search_adapter.py"
+      - "docs/product/HARDWARE_AI_RETRIEVAL_W0_OPENSEARCH_SPIKE.md"
+      - ".github/workflows/hardware-ai-retrieval-opensearch-w0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENSEARCH_VERSION: "3.9.0"
+  HARDWARE_SEARCH_BASE_URL: "http://127.0.0.1:9200"
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: python -m pip install "pytest>=8,<9"
+      - name: Adapter unit tests
+        run: python -m pytest -q tests/test_hardware_search_adapter.py
+
+  macos-native:
+    runs-on: macos-latest
+    env:
+      HARDWARE_SEARCH_DATA_DIR: \${{ runner.temp }}/hardware-search-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download native tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) ARCH="arm64" ;;
+            x86_64|amd64) ARCH="x64" ;;
+            *) echo "unsupported architecture: $(uname -m)"; exit 2 ;;
+          esac
+          ARCHIVE="$RUNNER_TEMP/opensearch-\${OPENSEARCH_VERSION}-linux-\${ARCH}.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://artifacts.opensearch.org/releases/bundle/opensearch/\${OPENSEARCH_VERSION}/opensearch-\${OPENSEARCH_VERSION}-linux-\${ARCH}.tar.gz" \
+            --output "$ARCHIVE"
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
+          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-\${OPENSEARCH_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Start native OpenSearch
+        shell: bash
+        run: |
+          chmod +x scripts/opensearch/start_macos.command
+          nohup bash scripts/opensearch/start_macos.command > "$RUNNER_TEMP/opensearch-stdout.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/opensearch-wrapper.pid"
+
+      - name: Bootstrap smoke
+        shell: bash
+        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 180
+
+      - name: Restart native OpenSearch
+        shell: bash
+        run: |
+          pkill -f 'org.opensearch.bootstrap.OpenSearch' || true
+          for i in {1..30}; do
+            if ! curl --silent --fail http://127.0.0.1:9200 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          nohup bash scripts/opensearch/start_macos.command > "$RUNNER_TEMP/opensearch-restart.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/opensearch-wrapper-restart.pid"
+
+      - name: Verify persistence after restart
+        shell: bash
+        run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
+
+      - name: Upload macOS logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-search-w0-macos
+          path: |
+            \${{ runner.temp }}/opensearch-stdout.log
+            \${{ runner.temp }}/opensearch-restart.log
+          if-no-files-found: warn
+
+  windows-native:
+    runs-on: windows-latest
+    env:
+      HARDWARE_SEARCH_DATA_DIR: C:\hardware-search-w0-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download native Windows ZIP
+        shell: pwsh
+        run: |
+          $archive = "C:\opensearch-$env:OPENSEARCH_VERSION-windows-x64.zip"
+          $url = "https://artifacts.opensearch.org/releases/bundle/opensearch/$env:OPENSEARCH_VERSION/opensearch-$env:OPENSEARCH_VERSION-windows-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath C:\ -Force
+          "OPENSEARCH_HOME=C:\opensearch-$env:OPENSEARCH_VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Start native OpenSearch through BAT launcher
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\opensearch-stdout.log"
+          $err = "$env:RUNNER_TEMP\opensearch-stderr.log"
+          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "scripts\opensearch\start_windows.bat" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper.pid"
+
+      - name: Bootstrap smoke
+        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 180
+
+      - name: Restart native OpenSearch
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.CommandLine -like "*org.opensearch.bootstrap.OpenSearch*" } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Start-Sleep -Seconds 5
+          $out = "$env:RUNNER_TEMP\opensearch-restart.log"
+          $err = "$env:RUNNER_TEMP\opensearch-restart-stderr.log"
+          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "scripts\opensearch\start_windows.bat" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+          $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper-restart.pid"
+
+      - name: Verify persistence after restart
+        run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
+
+      - name: Upload Windows logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-search-w0-windows
+          path: |
+            \${{ runner.temp }}\opensearch-stdout.log
+            \${{ runner.temp }}\opensearch-stderr.log
+            \${{ runner.temp }}\opensearch-restart.log
+            \${{ runner.temp }}\opensearch-restart-stderr.log
+          if-no-files-found: warn
