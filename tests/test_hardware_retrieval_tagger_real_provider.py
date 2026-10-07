@@ -66,11 +66,16 @@ def projection() -> dict:
 )
 def test_w1b_real_provider_tagging(tmp_path: Path) -> None:
     env = dict(os.environ)
+    configured = str(env.get("HARDWARE_RETRIEVAL_MODEL_CONFIG") or "").strip()
+    if configured:
+        model_config = Path(configured).expanduser()
+        if not model_config.is_absolute():
+            model_config = ROOT / model_config
+    else:
+        model_config = ROOT / "config/runtime/model.yaml"
     env.update(
         {
-            "HARDWARE_RETRIEVAL_MODEL_CONFIG": str(
-                ROOT / "config/runtime/model.yaml"
-            ),
+            "HARDWARE_RETRIEVAL_MODEL_CONFIG": str(model_config.resolve()),
             "HARDWARE_RETRIEVAL_RUNTIME_DB": str(tmp_path / "runtime.db"),
         }
     )
