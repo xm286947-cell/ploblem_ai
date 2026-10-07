@@ -13,7 +13,7 @@ import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlparse
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import Request as UrlRequest, HTTPRedirectHandler, build_opener
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi import Request
@@ -283,7 +283,7 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
         raise HTTPException(403, "远程 Knowledge Consumer 不开放管理或 Provider 路由。")
     url = client.base_url + path
     data = json.dumps(payload).encode() if payload is not None else None
-    req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
+    req = UrlRequest(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None else "GET")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=_request_timeout_seconds(path)) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -303,7 +303,7 @@ def _delete_request(mode: str, path: str, base_url: str | None = None):
     host = urlparse(client.base_url).hostname or ""
     if host not in {"localhost", "127.0.0.1", "::1"}:
         raise HTTPException(403, "远程 Knowledge Consumer 禁止删除来源。")
-    req = Request(client.base_url + path, method="DELETE")
+    req = UrlRequest(client.base_url + path, method="DELETE")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -333,7 +333,7 @@ def _request_file(mode: str, path: str, fields: dict[str, str], filename: str, c
     host = urlparse(client.base_url).hostname or ""
     if host not in {"localhost", "127.0.0.1", "::1"}:
         raise HTTPException(403, "远程 Knowledge Consumer 不开放资料导入。")
-    req = Request(client.base_url + path, data=b"".join(parts),
+    req = UrlRequest(client.base_url + path, data=b"".join(parts),
                   headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
     try:
         with _NO_REDIRECT_OPENER.open(req, timeout=60) as response:

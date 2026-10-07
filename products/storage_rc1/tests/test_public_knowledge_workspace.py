@@ -127,6 +127,14 @@ def test_remote_request_cannot_override_configured_host(monkeypatch):
     assert response.status_code == 403
 
 
+def test_remote_consumer_cannot_import_public_source(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "https://mac.example:9443")
+    response = client.post("/api/public-knowledge/sources/import?mode=LIVE", json={
+        "title": "public source", "content": "public text", "classification": "PUBLIC"
+    })
+    assert response.status_code == 403
+
+
 def test_live_default_fails_closed_instead_of_fixture_replay(monkeypatch):
     class UnavailableClient:
         def health(self):
