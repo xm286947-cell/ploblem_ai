@@ -22,6 +22,7 @@ on:
       - "tests/test_hardware_retrieval_index.py"
       - "tests/test_hardware_retrieval_query.py"
       - "tests/test_hardware_case_ai_retrieval.py"
+      - "tests/test_hardware_case_ai_retrieval_w2.py"
       - "docs/product/HARDWARE_AI_RETRIEVAL_W1_METADATA_TAGGER.md"
       - ".github/workflows/hardware-ai-retrieval-w1.yml"
   workflow_dispatch:
@@ -48,3 +49,4 @@ jobs:
           tests/test_hardware_retrieval_index.py
           tests/test_hardware_retrieval_query.py
           tests/test_hardware_case_ai_retrieval.py
+          tests/test_hardware_case_ai_retrieval_w2.py
