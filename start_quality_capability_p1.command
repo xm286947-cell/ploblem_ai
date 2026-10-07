@@ -66,9 +66,14 @@ PY
 fi
 
 echo "DEPENDENCY_PREFLIGHT=PASS"
-"$VENV_PYTHON" "$SCRIPT_DIR/tools/quality_scenario_real_data_preflight.py" --db "$QUALITY_DB"
-echo "For Browser Golden, require real data with:"
-echo "  $VENV_PYTHON tools/quality_scenario_real_data_preflight.py --db \"$QUALITY_DB\" --require"
+if [[ "${W4_FUNCTIONAL_FIXTURE:-}" == "1" ]]; then
+  "$VENV_PYTHON" "$SCRIPT_DIR/tools/quality_scenario_w4_functional_preflight.py" --db "$QUALITY_DB" --require || exit 3
+  echo "W4_FUNCTIONAL_PROVIDER_CONFIG=$REVERSE_QUALITY_MODEL_CONFIG"
+else
+  "$VENV_PYTHON" "$SCRIPT_DIR/tools/quality_scenario_real_data_preflight.py" --db "$QUALITY_DB"
+  echo "For Browser Golden, require real data with:"
+  echo "  $VENV_PYTHON tools/quality_scenario_real_data_preflight.py --db \"$QUALITY_DB\" --require"
+fi
 "$VENV_PYTHON" "$SCRIPT_DIR/main.py" knowledge-web --db "$QUALITY_DB" "$@"
 EXIT_CODE=$?
 echo
