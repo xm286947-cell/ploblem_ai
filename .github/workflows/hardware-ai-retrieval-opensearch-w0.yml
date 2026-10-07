@@ -34,7 +34,7 @@ jobs:
   macos-native:
     runs-on: macos-latest
     env:
-      HARDWARE_SEARCH_DATA_DIR: \${{ runner.temp }}/hardware-search-data
+      HARDWARE_SEARCH_DATA_DIR: ${{ runner.temp }}/hardware-search-data
     steps:
       - uses: actions/checkout@v4
 
@@ -56,12 +56,12 @@ jobs:
             x86_64|amd64) ARCH="x64" ;;
             *) echo "unsupported architecture: $(uname -m)"; exit 2 ;;
           esac
-          ARCHIVE="$RUNNER_TEMP/opensearch-\${OPENSEARCH_VERSION}-linux-\${ARCH}.tar.gz"
+          ARCHIVE="$RUNNER_TEMP/opensearch-${OPENSEARCH_VERSION}-linux-${ARCH}.tar.gz"
           curl --fail --location --retry 3 \
-            "https://artifacts.opensearch.org/releases/bundle/opensearch/\${OPENSEARCH_VERSION}/opensearch-\${OPENSEARCH_VERSION}-linux-\${ARCH}.tar.gz" \
+            "https://artifacts.opensearch.org/releases/bundle/opensearch/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}-linux-${ARCH}.tar.gz" \
             --output "$ARCHIVE"
           tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
-          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-\${OPENSEARCH_VERSION}" >> "$GITHUB_ENV"
+          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-${OPENSEARCH_VERSION}" >> "$GITHUB_ENV"
 
       - name: Start native OpenSearch
         shell: bash
@@ -95,8 +95,8 @@ jobs:
         with:
           name: hardware-search-w0-macos
           path: |
-            \${{ runner.temp }}/opensearch-stdout.log
-            \${{ runner.temp }}/opensearch-restart.log
+            ${{ runner.temp }}/opensearch-stdout.log
+            ${{ runner.temp }}/opensearch-restart.log
           if-no-files-found: warn
 
   windows-native:
@@ -151,8 +151,8 @@ jobs:
         with:
           name: hardware-search-w0-windows
           path: |
-            \${{ runner.temp }}\opensearch-stdout.log
-            \${{ runner.temp }}\opensearch-stderr.log
-            \${{ runner.temp }}\opensearch-restart.log
-            \${{ runner.temp }}\opensearch-restart-stderr.log
+            ${{ runner.temp }}\opensearch-stdout.log
+            ${{ runner.temp }}\opensearch-stderr.log
+            ${{ runner.temp }}\opensearch-restart.log
+            ${{ runner.temp }}\opensearch-restart-stderr.log
           if-no-files-found: warn
