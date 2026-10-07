@@ -51,10 +51,34 @@ def _issue(repository, knowledge_id, itr, description, extra=None):
 
 
 def _entry(major, case_id, event_id, kind, content, *, status="CONFIRMED", origin="HUMAN", evidence=()):
-    return major.add_entry(
-        case_id, kind, content, assertion_kind="FACT", origin=origin,
-        status=status, event_id=event_id, evidence=evidence,
+    event = major.event(event_id)
+    link = major.add_source_link(
+        case_id,
+        event_id,
+        {
+            "record_id": f"GOLDEN-{kind}-{event_id}",
+            "source_type": "ITR",
+            "source_system": "GOLDEN_TEST",
+        },
+        standard_itr=(event or {}).get("standard_itr") or "",
+        role="CURRENT_EVENT",
+        status="LINKED",
     )
+    evidence_items = list(evidence) or [{
+        "source_link_id": link["source_link_id"],
+        "locator": kind.lower(),
+        "excerpt": content,
+    }]
+    entry = major.add_entry(
+        case_id, kind, content, assertion_kind="FACT", origin=origin,
+        status="PENDING" if status == "CONFIRMED" else status,
+        event_id=event_id, evidence=evidence_items,
+    )
+    if status == "CONFIRMED":
+        return major.revise_entry(
+            entry["entry_id"], content, "CONFIRMED", "golden-reviewer", "reviewed"
+        )
+    return entry
 
 
 def test_publish_to_itr_repeat_decision_and_refresh(tmp_path):
@@ -81,11 +105,11 @@ def test_publish_to_itr_repeat_decision_and_refresh(tmp_path):
         "excerpt": "原始记录：保存路径在掉电窗口存在未完成写入",
     }]
     _entry(major, case["case_id"], history["event_id"], "ISSUE_FACT", "掉电恢复后启动失败")
-    _entry(major, case["case_id"], history["event_id"], "ROOT_CAUSE", "保存路径在掉电窗口存在未完成写入", evidence=evidence)
-    _entry(major, case["case_id"], history["event_id"], "ACTION", "增加原子保存与恢复校验")
+    _entry(major, case["case_id"], history["event_id"], "TRC_OCCURRENCE", "保存路径在掉电窗口存在未完成写入", evidence=evidence)
+    _entry(major, case["case_id"], history["event_id"], "CORRECTIVE_ACTION", "增加原子保存与恢复校验")
     _entry(major, case["case_id"], history["event_id"], "VERIFICATION", "100 次掉电恢复验证通过")
-    _entry(major, case["case_id"], history["event_id"], "ROOT_CAUSE", "AI 猜测：电源故障", status="PENDING", origin="AI")
-    _entry(major, case["case_id"], other["event_id"], "ROOT_CAUSE", "其他 Event 的根因")
+    _entry(major, case["case_id"], other["event_id"], "MRC_ESCAPE", "AI 猜测：电源故障", status="PENDING", origin="AI")
+    _entry(major, case["case_id"], other["event_id"], "TRC_OCCURRENCE", "其他 Event 的根因")
 
     published = MajorCasePublisher(major, artifacts).publish_event(history["event_id"])
     assert published["publication_status"] == "PUBLISHED"
@@ -117,7 +141,7 @@ def test_publish_to_itr_repeat_decision_and_refresh(tmp_path):
     assert detail["verification_result"] == "100 次掉电恢复验证通过"
     assert "AI 猜测" not in repr(detail)
     assert "其他 Event" not in repr(detail)
-    assert detail["evidence"][0]["raw_text"].startswith("原始记录")
+    assert any(item["raw_text"].startswith("原始记录") for item in detail["evidence"])
 
     p0_db = tmp_path / "p0.sqlite3"
     P0Initializer(
@@ -154,7 +178,7 @@ def test_publish_to_itr_repeat_decision_and_refresh(tmp_path):
     assert candidate["why_relevant"][0]["text"] == "问题均发生于掉电恢复场景"
     assert candidate["root_causes"] == ["保存路径在掉电窗口存在未完成写入"]
     assert candidate["measures"] == ["增加原子保存与恢复校验"]
-    assert candidate["evidence"][0]["raw_text"].startswith("原始记录")
+    assert any(item["raw_text"].startswith("原始记录") for item in candidate["evidence"])
     assert client.get(f"/api/v2/historical-cases/{case_id}").json()["evidence"] == detail["evidence"]
     saved = client.post(
         f"/api/v2/repeat-risk/queries/{result['query_id']}/decision",

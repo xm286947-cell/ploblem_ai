@@ -6,6 +6,9 @@ from typing import Any, Protocol
 from retriever.case_retriever import QueryInput
 from services.historical_case_contract import (
     CONTRACT_VERSION as HISTORICAL_CASE_CONTRACT_VERSION,
+    REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+    SEMANTIC_PROJECTION_CONTRACT_VERSION,
+    REPEAT_SEMANTIC_TYPES,
     HistoricalCaseContractError,
 )
 
@@ -29,6 +32,8 @@ class HistoricalCaseSearchClient(Protocol):
     ) -> dict[str, Any]: ...
 
     def get_case(self, case_id: str) -> dict[str, Any]: ...
+
+    def get_repeat_risk_context(self, case_id: str) -> dict[str, Any]: ...
 
 
 class RepeatSearchContractError(RuntimeError):
@@ -142,28 +147,50 @@ class RepeatHistoricalCaseSearchService:
             candidate = self._base_candidate(item)
             case_id = candidate["case_id"]
             try:
+                semantic_context = self.case_client.get_repeat_risk_context(case_id)
+                semantic_projection = self._semantic_projection(semantic_context, case_id)
+            except HistoricalCaseContractError as exc:
+                candidate["detail_status"] = SEARCH_INCOMPLETE
+                candidate["detail_error"] = exc.code
+                candidate.update(self._incomplete_semantic_projection())
+                candidates.append(candidate)
+                incomplete = True
+                continue
+            except Exception:
+                candidate["detail_status"] = SEARCH_INCOMPLETE
+                candidate["detail_error"] = "CASE_SEMANTIC_CONTEXT_UNAVAILABLE"
+                candidate.update(self._incomplete_semantic_projection())
+                candidates.append(candidate)
+                incomplete = True
+                continue
+
+            try:
                 detail = self.case_client.get_case(case_id)
             except HistoricalCaseContractError as exc:
                 candidate["detail_status"] = SEARCH_INCOMPLETE
                 candidate["detail_error"] = exc.code
+                candidate.update(self._incomplete_semantic_projection())
                 candidates.append(candidate)
                 incomplete = True
                 continue
             except Exception:
                 candidate["detail_status"] = SEARCH_INCOMPLETE
                 candidate["detail_error"] = "CASE_SERVICE_UNAVAILABLE"
+                candidate.update(self._incomplete_semantic_projection())
                 candidates.append(candidate)
                 incomplete = True
                 continue
 
-            if detail.get("contract_version") != HISTORICAL_CASE_CONTRACT_VERSION:
+            if not isinstance(detail, dict) or detail.get("contract_version") != HISTORICAL_CASE_CONTRACT_VERSION:
                 candidate["detail_status"] = SEARCH_INCOMPLETE
                 candidate["detail_error"] = "CASE_CONTRACT_INVALID"
+                candidate.update(self._incomplete_semantic_projection())
                 candidates.append(candidate)
                 incomplete = True
                 continue
 
             candidate.update(self._detail_projection(detail))
+            candidate.update(semantic_projection)
             candidate["detail_status"] = SEARCH_SUCCESS
             candidate["detail_error"] = None
             candidates.append(candidate)
@@ -225,8 +252,15 @@ class RepeatHistoricalCaseSearchService:
             text=text,
             cause_description="\n".join(dict.fromkeys(cause_parts)),
             solution="\n".join(dict.fromkeys(solution_parts)),
+            ipmt=_text(snapshot.get("ipmt")),
+            spdt=_text(snapshot.get("spdt")),
+            responsible_department_level2=_text(
+                snapshot.get("responsible_department_level2")
+            ),
             product=_text(snapshot.get("product")),
             domain=_text(existing.get("domain")),
+            cause_level1=_text(snapshot.get("cause_level1")),
+            cause_level2=_text(snapshot.get("cause_level2")),
         )
 
     @staticmethod
@@ -239,6 +273,118 @@ class RepeatHistoricalCaseSearchService:
             "rank": item.get("rank"),
             "retrieval_reason": deepcopy(item.get("retrieval_reason") or []),
             "matched_fields": deepcopy(item.get("matched_fields") or []),
+        }
+
+    @staticmethod
+    def _incomplete_semantic_projection() -> dict[str, Any]:
+        return {
+            "semantic_mode": "INCOMPLETE",
+            "semantic_contract_version": None,
+            "typed_causes": [],
+            "typed_actions": [],
+            "semantic_coverage": {},
+            "semantic_evidence_status": "INCOMPLETE",
+        }
+
+    @staticmethod
+    def _semantic_projection(context: Any, case_id: str) -> dict[str, Any]:
+        if (
+            not isinstance(context, dict)
+            or context.get("contract_version") != REPEAT_RISK_CONTEXT_CONTRACT_VERSION
+            or context.get("case_id") != case_id
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_CONTRACT_INVALID")
+        mode = context.get("semantic_mode")
+        causes = context.get("typed_causes")
+        actions = context.get("typed_actions")
+        coverage = context.get("semantic_coverage")
+        evidence_status = context.get("semantic_evidence_status")
+        if (
+            not isinstance(mode, str)
+            or mode not in {"TYPED", "LEGACY_GENERIC_ONLY"}
+            or not isinstance(causes, list)
+            or not isinstance(actions, list)
+            or not isinstance(coverage, dict)
+            or not isinstance(evidence_status, str)
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+
+        if mode == "LEGACY_GENERIC_ONLY":
+            if causes or actions or context.get("semantic_contract_version") is not None:
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            return {
+                "semantic_mode": mode,
+                "semantic_contract_version": None,
+                "typed_causes": [],
+                "typed_actions": [],
+                "semantic_coverage": {
+                    entry_type: "LEGACY_GENERIC_ONLY" for entry_type in REPEAT_SEMANTIC_TYPES
+                },
+                "semantic_evidence_status": "LEGACY_GENERIC_ONLY",
+            }
+
+        if context.get("semantic_contract_version") != SEMANTIC_PROJECTION_CONTRACT_VERSION:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_CONTRACT_INVALID")
+        if set(coverage) != set(REPEAT_SEMANTIC_TYPES):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if any(
+            not isinstance(value, str) or value not in {"PRESENT", "MISSING"}
+            for value in coverage.values()
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        typed_items = causes + actions
+        if any(not isinstance(item, dict) for item in typed_items):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        cause_types = set(REPEAT_SEMANTIC_TYPES[:4])
+        action_types = set(REPEAT_SEMANTIC_TYPES[4:])
+        if any(
+            not isinstance(item.get("semantic_type"), str)
+            or item.get("semantic_type") not in cause_types for item in causes
+        ) or any(
+            not isinstance(item.get("semantic_type"), str)
+            or item.get("semantic_type") not in action_types for item in actions
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("semantic_type"), str)
+            or item.get("semantic_type") not in REPEAT_SEMANTIC_TYPES
+            or not isinstance(item.get("value"), str)
+            or not item.get("value", "").strip()
+            or not isinstance(item.get("evidence"), list)
+            or not item.get("evidence")
+            or (
+                item.get("source_type") is not None
+                and (
+                    not isinstance(item.get("source_type"), str)
+                    or item.get("source_type") not in {"EXCEL", "PDF", "FUSED"}
+                )
+            )
+            for item in typed_items
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        by_type: dict[str, int] = {}
+        for item in typed_items:
+            by_type[item["semantic_type"]] = by_type.get(item["semantic_type"], 0) + 1
+            if any(not isinstance(evidence, dict) for evidence in item["evidence"]):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if any(by_type.get(entry_type, 0) != 1 for entry_type in cause_types if coverage[entry_type] == "PRESENT"):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if any(by_type.get(entry_type, 0) for entry_type in cause_types if coverage[entry_type] == "MISSING"):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if any((by_type.get(entry_type, 0) > 0) != (coverage[entry_type] == "PRESENT") for entry_type in action_types):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if evidence_status not in {"COMPLETE", "NO_TYPED_SEMANTICS"}:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if evidence_status != ("COMPLETE" if typed_items else "NO_TYPED_SEMANTICS"):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        return {
+            "semantic_mode": mode,
+            "semantic_contract_version": SEMANTIC_PROJECTION_CONTRACT_VERSION,
+            "typed_causes": deepcopy(causes),
+            "typed_actions": deepcopy(actions),
+            "semantic_coverage": deepcopy(coverage),
+            "semantic_evidence_status": evidence_status,
         }
 
     @staticmethod

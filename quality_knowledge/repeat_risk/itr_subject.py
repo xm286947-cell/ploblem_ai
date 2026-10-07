@@ -164,6 +164,33 @@ class RepeatITRService:
             ),
             "source": ITR_RESOLUTION_WORKBENCH,
         }
+
+        optional_context = {
+            "ipmt": _text(_first(raw, "ipmt", "IPMT")),
+            "spdt": _text(_first(raw, "spdt", "SPDT")),
+            "responsible_department_level2": _text(
+                _first(
+                    raw,
+                    "responsible_department_level2",
+                    "责任部门二级",
+                    "二级责任部门",
+                    "责任部门",
+                )
+            ),
+            "cause_level1": _text(
+                _first(raw, "cause_level1", "cause_level_1", "原因一级分类", "一级原因分类")
+            ),
+            "cause_level2": _text(
+                _first(raw, "cause_level2", "cause_level_2", "原因二级分类", "二级原因分类")
+            ),
+        }
+        snapshot.update(
+            {
+                key: value
+                for key, value in optional_context.items()
+                if value is not None
+            }
+        )
         if not snapshot["problem_description"]:
             raise RepeatITRContractError("ITR_PROBLEM_DESCRIPTION_REQUIRED")
         return RepeatQuerySubject(itr_ref=ref, itr_snapshot=snapshot)

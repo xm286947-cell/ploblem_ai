@@ -52,6 +52,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install 'httpx>=0.23,<1'
 
       - name: Compile promoted modules
         run: |
@@ -65,3 +66,9 @@ jobs:
 
       - name: Run CASE-PUBLISH publisher gate
         run: python -m pytest -q tests/test_case_publish_service.py
+
+      - name: Run canonical Major intake convergence regression
+        run: >
+          python -m pytest -q
+          tests/test_major_canonical_intake_convergence.py
+          tests/test_major_excel_import_restore.py

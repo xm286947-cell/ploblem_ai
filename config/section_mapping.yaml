@@ -82,6 +82,12 @@ section_types:
     - 措施闭环状态
     - 闭环状态
     - 完成状态
+  verification_result:
+    titles:
+    - 验证结果
+    - 验证结论
+    - 效果验证
+    - Verification Result
 classifier:
   exact_title_score: 1.0
   prefix_title_score: 0.95

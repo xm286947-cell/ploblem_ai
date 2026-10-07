@@ -355,7 +355,7 @@
     root.querySelector('[data-repeat-context-summary]').textContent = '本次查询：' + repeatContextLabel();
   }
 
-  function evidenceHtml(item, index) {
+  function evidenceHtml(item, index, typedSupport) {
     const evidenceId = item.evidence_id || item.id || '';
     const source = [item.source_type, item.source_id].filter(Boolean).join(' / ') || '未提供';
     const location = [
@@ -364,7 +364,7 @@
       item.section ? 'Section ' + item.section : ''
     ].filter(Boolean).join(' · ') || '未提供';
     const raw = item.raw_text || item.excerpt || item.content || '';
-    const support = item.target_path || item.supports || item.field_path || '';
+    const support = typedSupport || item.target_path || item.supports || item.field_path || '';
     const sourceLink = item.url
       ? '<a href="' + esc(item.url) + '" target="_blank" rel="noopener">查看来源</a>'
       : '<span>无可用来源链接</span>';
@@ -372,23 +372,28 @@
       '<div class="p0-evidence-index">Evidence ' + esc(index + 1) + '</div>' +
       '<dl><dt>Evidence ID</dt><dd>' + esc(evidenceId || '未提供') + '</dd>' +
       '<dt>来源</dt><dd>' + esc(source) + '</dd>' +
+      '<dt>Source Version</dt><dd>' + esc(item.source_version || '未提供') + '</dd>' +
+      '<dt>Source Ref</dt><dd>' + esc(item.source_ref || '未提供') + '</dd>' +
+      '<dt>Origin Source</dt><dd>' + esc([item.origin_source_id, item.origin_source_version].filter(Boolean).join(' / ') || '未提供') + '</dd>' +
+      '<dt>Origin Source Ref</dt><dd>' + esc(item.origin_source_ref || '未提供') + '</dd>' +
       '<dt>文档 / 位置</dt><dd>' + esc(location) + '</dd>' +
       '<dt>支撑字段 / 结论</dt><dd>' + esc(support || '未确认 / 无已确认内容') + '</dd></dl>' +
       '<blockquote>' + esc(raw || '当前知识存在，但没有可用原始 Evidence。') + '</blockquote>' +
       '<div class="p0-source-link">' + sourceLink + '</div></article>';
   }
 
-  function openEvidence(candidate) {
+  function openEvidence(candidate, semanticItem) {
     const drawer = root.querySelector('[data-repeat-evidence-drawer]');
     const body = root.querySelector('[data-evidence-body]');
-    const evidence = arr(candidate.evidence);
+    const evidence = semanticItem ? arr(semanticItem.evidence) : arr(candidate.evidence);
     drawer.hidden = false;
     document.body.classList.add('p0-drawer-open');
     body.innerHTML =
-      '<div class="p0-drawer-context"><strong>' + esc(candidate.title || candidate.case_id || '历史案例') + '</strong>' +
+      '<div class="p0-drawer-context"><strong>' + esc(candidate.title || candidate.case_id || '历史案例') +
+      (semanticItem ? ' · ' + esc(semanticLabel(semanticItem.semantic_type)) : '') + '</strong>' +
       '<span>' + esc(candidate.case_id || '') + '</span></div>' +
       (evidence.length
-        ? evidence.map(evidenceHtml).join('')
+        ? evidence.map((item, index) => evidenceHtml(item, index, semanticItem && semanticItem.semantic_type)).join('')
         : '<div class="p0-evidence-missing"><strong>当前知识存在，但没有可用原始 Evidence。</strong><p>系统不会补造 Evidence。</p></div>');
   }
 
@@ -397,10 +402,158 @@
     document.body.classList.remove('p0-drawer-open');
   }
 
+  const SEMANTIC_LABELS = {
+    TRC_OCCURRENCE: 'TRC 发生',
+    TRC_ESCAPE: 'TRC 流出',
+    MRC_OCCURRENCE: 'MRC 发生',
+    MRC_ESCAPE: 'MRC 流出',
+    TECHNICAL_ACTION: '技术措施',
+    MANAGEMENT_ACTION: '管理措施',
+    CORRECTIVE_ACTION: '纠正措施',
+    PREVENTIVE_ACTION: '预防措施'
+  };
+
+  function semanticLabel(type) {
+    return SEMANTIC_LABELS[type] || type || '语义结论';
+  }
+
+  function candidateSemanticItems(candidate, type) {
+    return arr(candidate.typed_causes).concat(arr(candidate.typed_actions))
+      .filter(item => item && item.semantic_type === type);
+  }
+
+  function candidateSemanticMode(candidate) {
+    return candidate.semantic_mode || 'LEGACY_GENERIC_ONLY';
+  }
+
+  function semanticProjectionHtml(candidate, candidateIndex) {
+    const mode = candidateSemanticMode(candidate);
+    if (mode === 'LEGACY_GENERIC_ONLY') {
+      return '<section class="p0-repeat-semantic-legacy"><span class="p0-badge">LEGACY_GENERIC_ONLY</span>' +
+        '<p>此历史案例没有八类 Typed Semantic 投影；以下仅显示旧版通用字段，不对其重新分类。</p></section>';
+    }
+    if (mode !== 'TYPED') {
+      return '<section class="p0-repeat-semantic-incomplete"><strong>语义上下文不完整</strong>' +
+        '<p>已保留检索候选，但不回退到通用根因或措施字段，也不据此形成 Repeat 判断。</p></section>';
+    }
+
+    const coverage = obj(candidate.semantic_coverage);
+    const slots = Object.keys(SEMANTIC_LABELS).map(type => {
+      const items = candidateSemanticItems(candidate, type);
+      const state = coverage[type];
+      let content;
+      if (state === 'MISSING' && !items.length) {
+        content = '<p class="p0-semantic-missing">MISSING · 未确认 / 无已确认内容</p>';
+      } else if (!items.length) {
+        content = '<p class="p0-semantic-missing">语义数据不可用</p>';
+      } else {
+        content = items.map((item, itemIndex) =>
+          '<div class="p0-semantic-item"><p>' + esc(item.value) + '</p>' +
+          '<small>' + esc(item.source_type || '来源类型未确认') + ' · ' + esc(arr(item.evidence).length) + ' 条 Evidence</small>' +
+          '<button class="p0-semantic-evidence" type="button" data-repeat-semantic-evidence ' +
+          'data-semantic-candidate="' + esc(candidateIndex) + '" data-semantic-type="' + esc(type) + '" ' +
+          'data-semantic-item-index="' + esc(itemIndex) + '">查看本条 Evidence</button></div>'
+        ).join('');
+      }
+      return '<section class="p0-semantic-slot" data-repeat-semantic="' + esc(type) + '"><label>' +
+        esc(semanticLabel(type)) + '</label>' + content + '</section>';
+    }).join('');
+    return '<section class="p0-repeat-semantics"><div class="p0-repeat-semantic-head"><strong>Typed Semantic</strong>' +
+      '<span>' + esc(candidate.semantic_contract_version || '') + '</span></div><div class="p0-semantic-grid">' +
+      slots + '</div></section>';
+  }
+
+  function repeatAgentAnalysisHtml(candidate) {
+    const similarityEnvelope = obj(candidate.agent_similarity);
+    const similarity = obj(similarityEnvelope.analysis);
+    const solutionEnvelope = obj(candidate.agent_solution);
+    const solution = obj(solutionEnvelope.analysis);
+    const recommendation = obj(candidate.ai_recommendation);
+    const status = candidate.agent_analysis_status || '';
+
+    if (!status && !similarityEnvelope.analysis_status && !solutionEnvelope.analysis_status && !recommendation.status) {
+      return '';
+    }
+
+    const keySimilarities = arr(similarity.key_similarities);
+    const keyDifferences = arr(similarity.key_differences);
+    const reusable = arr(solution.reusable_actions);
+    const reuseRisks = arr(solution.reuse_risks);
+    const recommendationBlock = recommendation.status === 'SUCCESS'
+      ? '<section><label>AI Repeat 建议 · 非最终结论</label><p><strong>' +
+        esc(recommendation.decision || 'INSUFFICIENT_EVIDENCE') + '</strong> · ' +
+        esc(recommendation.decision_reason || '未提供说明') +
+        '</p><small>该建议仅辅助人工判断，不会写入 HUMAN DECISION。</small></section>'
+      : '<section><label>AI Repeat 建议</label><p>' +
+        esc(recommendation.status === 'DISABLED'
+          ? '当前配置未启用 M8.4；最终结论仍由人工判断。'
+          : recommendation.status === 'UNAVAILABLE' || recommendation.status === 'FAILED'
+            ? 'AI Repeat 建议当前不可用；不会生成自动结论。'
+            : '本次未生成 AI Repeat 建议。') +
+        '</p></section>';
+
+    return '<section class="p0-repeat-agent-analysis">' +
+      '<div class="p0-card-head"><div><span class="p0-kicker">AGENT ANALYSIS</span>' +
+      '<h4>Repeat 智能分析</h4><p>基于当前 ITR、历史 Typed Semantic 与原始 Evidence；不改变检索排名。</p></div>' +
+      '<span>' + esc(status || 'NOT_RUN') + '</span></div>' +
+      '<div class="p0-repeat-case-grid">' +
+      '<section><label>AI 相似性分析</label><p>' +
+      esc(similarity.analysis_summary || (similarityEnvelope.analysis_status === 'UNAVAILABLE'
+        ? 'Provider / Runtime 当前不可用，保留原检索结果。'
+        : '暂无分析结果')) +
+      '</p>' +
+      (keySimilarities.length ? '<small>相同点：' + esc(keySimilarities.join('；')) + '</small>' : '') +
+      (keyDifferences.length ? '<small>差异点：' + esc(keyDifferences.join('；')) + '</small>' : '') +
+      '</section>' +
+      '<section><label>历史措施复用分析</label><p>' +
+      esc(solution.analysis_summary || (solutionEnvelope.analysis_status === 'UNAVAILABLE'
+        ? 'Provider / Runtime 当前不可用，未生成措施复用判断。'
+        : '暂无分析结果')) +
+      '</p>' +
+      (solution.applicability ? '<small>适用性：' + esc(solution.applicability) + '</small>' : '') +
+      (reusable.length ? '<small>可复用：' + esc(reusable.join('；')) + '</small>' : '') +
+      (reuseRisks.length ? '<small>风险：' + esc(reuseRisks.join('；')) + '</small>' : '') +
+      '</section>' +
+      recommendationBlock +
+      '</div></section>';
+  }
+
+  function repeatAnalysisReportHtml(result) {
+    const agent = obj(result.agent_analysis);
+    const report = obj(result.analysis_report);
+    if (!agent.status && !report.status) return '';
+
+    const reportHref = result.query_id
+      ? '/api/v2/repeat-risk/queries/' + encodeURIComponent(result.query_id) + '/report?format=markdown'
+      : '';
+    const reportText = report.status === 'AVAILABLE'
+      ? '综合分析报告已生成'
+      : report.status === 'FAILED'
+        ? '综合分析报告生成失败：' + (report.reason || '')
+        : report.status === 'NOT_GENERATED'
+          ? '本次没有候选案例，不生成分析报告。'
+          : '综合分析报告尚未生成';
+
+    return '<section class="p0-repeat-report">' +
+      '<div><span class="p0-kicker">REPEAT ANALYSIS REPORT</span><h3>' +
+      esc(reportText) + '</h3>' +
+      '<p>M8.2=' + esc(agent.m82_similarity || '-') +
+      ' · M8.3=' + esc(agent.m83_solution || '-') +
+      ' · M8.4=' + esc(agent.m84_recommendation || '-') +
+      ' · Provider=' + esc(agent.provider_boundary || '-') + '</p></div>' +
+      (report.status === 'AVAILABLE' && reportHref
+        ? '<p><a class="p0-ghost" href="' + esc(reportHref) +
+          '" target="_blank" rel="noopener">打开 Markdown 分析报告</a></p>'
+        : '') +
+      '</section>';
+  }
+
   function candidateHtml(candidate, index) {
     const rationale = arr(candidate.why_relevant);
-    const rootCauses = arr(candidate.root_causes);
-    const measures = arr(candidate.measures);
+    const semanticMode = candidateSemanticMode(candidate);
+    const legacyOnly = semanticMode === 'LEGACY_GENERIC_ONLY';
+    const rootCauses = legacyOnly ? arr(candidate.root_causes) : [];
+    const measures = legacyOnly ? arr(candidate.measures) : [];
     const score = typeof candidate.retrieval_score === 'number'
       ? Math.round(candidate.retrieval_score * 100) + '%'
       : '-';
@@ -419,9 +572,13 @@
       '</section>' +
       '<div class="p0-repeat-case-grid">' +
       '<section><label>历史问题现象</label><p>' + esc(candidate.historical_phenomenon || '未确认 / 无已确认内容') + '</p></section>' +
-      '<section><label>历史根因</label><p>' + esc(rootCauses.join('；') || '未确认 / 无已确认内容') + '</p></section>' +
-      '<section><label>历史措施</label><p>' + esc(measures.join('；') || '未确认 / 无已确认内容') + '</p></section>' +
+      (legacyOnly
+        ? '<section><label>旧版通用根因</label><p>' + esc(rootCauses.join('；') || '未确认 / 无已确认内容') + '</p></section>' +
+          '<section><label>旧版通用措施</label><p>' + esc(measures.join('；') || '未确认 / 无已确认内容') + '</p></section>'
+        : '<section><label>语义结果</label><p>' + esc(semanticMode === 'TYPED' ? '按八类 Typed Semantic 展示' : '不展示未验证的通用语义') + '</p></section>') +
       '</div>' +
+      semanticProjectionHtml(candidate, index) +
+      repeatAgentAnalysisHtml(candidate) +
       '<div class="p0-repeat-secondary"><span><b>Verification</b> ' + esc(candidate.verification || '未确认 / 无已确认内容') + '</span>' +
       '<span><b>Similarity</b> ' + esc(score) + '</span>' +
       '<span><b>Evidence</b> ' + esc(evidenceCount) + '</span></div>' +
@@ -456,6 +613,15 @@
         if (candidate) openEvidence(candidate);
       });
     });
+    root.querySelectorAll('[data-repeat-semantic-evidence]').forEach(button => {
+      button.addEventListener('click', () => {
+        const candidate = arr(result.candidates)[Number(button.dataset.semanticCandidate)];
+        if (!candidate) return;
+        const items = candidateSemanticItems(candidate, button.dataset.semanticType);
+        const item = items[Number(button.dataset.semanticItemIndex)];
+        if (item) openEvidence(candidate, item);
+      });
+    });
     const save = root.querySelector('[data-repeat-decision-save]');
     if (save) save.addEventListener('click', saveRepeatDecision);
   }
@@ -470,6 +636,7 @@
       esc(contextText) + '</strong></div><span>Query ' + esc(result.query_id || '-') + '</span></div>' +
       '<div class="p0-repeat-result-title">找到 <b>' + esc(result.candidate_count || 0) + '</b> 个值得关注的历史案例</div>' +
       candidates.map(candidateHtml).join('') +
+      repeatAnalysisReportHtml(result) +
       decisionHtml(result);
   }
 

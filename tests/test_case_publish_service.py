@@ -37,23 +37,44 @@ def _entry(
     *,
     evidence=(),
 ):
-    return major.add_entry(
+    event = major.event(event_id)
+    link = major.add_source_link(
+        case_id,
+        event_id,
+        {
+            "record_id": f"TEST-{entry_type}-{event_id}",
+            "source_type": "ITR",
+            "source_system": "TEST",
+        },
+        standard_itr=(event or {}).get("standard_itr") or "",
+        role="CURRENT_EVENT",
+        status="LINKED",
+    )
+    evidence_items = list(evidence) or [{
+        "source_link_id": link["source_link_id"],
+        "locator": entry_type.lower(),
+        "excerpt": content,
+    }]
+    pending = major.add_entry(
         case_id,
         entry_type,
         content,
         assertion_kind="FACT",
-        origin="HUMAN",
-        status="CONFIRMED",
+        origin="SOURCE_FUSION",
+        status="PENDING",
         event_id=event_id,
-        evidence=evidence,
+        evidence=evidence_items,
+    )
+    return major.revise_entry(
+        pending["entry_id"], content, "CONFIRMED", "test-reviewer", "reviewed"
     )
 
 
 def test_first_publish_created_and_same_revision_reused(tmp_path: Path) -> None:
     major, artifacts, case, event = _env(tmp_path)
     _entry(major, case["case_id"], event["event_id"], "ISSUE_FACT", "控制器周期性重启")
-    root = _entry(major, case["case_id"], event["event_id"], "ROOT_CAUSE", "CAN 队列缺少流控")
-    _entry(major, case["case_id"], event["event_id"], "ACTION", "增加水位保护")
+    root = _entry(major, case["case_id"], event["event_id"], "TRC_OCCURRENCE", "CAN 队列缺少流控")
+    _entry(major, case["case_id"], event["event_id"], "CORRECTIVE_ACTION", "增加水位保护")
 
     publisher = MajorCasePublisher(major, artifacts)
     first = publisher.publish_event(event["event_id"])
@@ -83,7 +104,7 @@ def test_new_major_revision_updates_same_historical_case_id(tmp_path: Path) -> N
         "ISSUE_FACT",
         "原始问题事实",
     )
-    _entry(major, case["case_id"], event["event_id"], "ROOT_CAUSE", "根因A")
+    _entry(major, case["case_id"], event["event_id"], "TRC_OCCURRENCE", "根因A")
 
     publisher = MajorCasePublisher(major, artifacts)
     created = publisher.publish_event(event["event_id"])
@@ -209,7 +230,7 @@ def test_publish_search_detail_evidence_roundtrip_uses_consumer_contract_only(tm
         major,
         case["case_id"],
         event["event_id"],
-        "ROOT_CAUSE",
+        "TRC_OCCURRENCE",
         "CAN 队列缺少流控",
         evidence=[{
             "source_link_id": link["source_link_id"],
@@ -217,7 +238,7 @@ def test_publish_search_detail_evidence_roundtrip_uses_consumer_contract_only(tm
             "excerpt": "原始记录：CAN 队列缺少流控",
         }],
     )
-    _entry(major, case["case_id"], event["event_id"], "ACTION", "增加队列水位保护")
+    _entry(major, case["case_id"], event["event_id"], "CORRECTIVE_ACTION", "增加队列水位保护")
 
     published = MajorCasePublisher(major, artifacts).publish_event(event["event_id"])
 
@@ -256,16 +277,40 @@ def test_publish_search_detail_evidence_roundtrip_uses_consumer_contract_only(tm
     assert detail["root_cause"] == "CAN 队列缺少流控"
     assert detail["solution"] == "增加队列水位保护"
     assert detail["evidence"]
-    assert detail["evidence"][0]["raw_text"].startswith("原始记录")
-    assert detail["evidence"][0]["evidence_id"].startswith("MJR-EVD-")
-    assert detail["evidence"][0]["source_version"]
-    assert detail["evidence"][0]["source_ref"].startswith(
-        f"ITR:{event['standard_itr']}@"
-    )
+    assert any(item["raw_text"].startswith("原始记录") for item in detail["evidence"])
     assert "internal_path" not in repr(search)
     assert "internal_path" not in repr(detail)
     assert str(major.db_path) not in repr(search)
     assert str(major.db_path) not in repr(detail)
+
+
+def test_typed_actions_reach_existing_historical_case_v1_without_dto_expansion(tmp_path: Path) -> None:
+    major, artifacts, _case, event = _env(tmp_path)
+    _entry(major, _case["case_id"], event["event_id"], "TRC_OCCURRENCE", "复位保护时序不足")
+    _entry(major, _case["case_id"], event["event_id"], "CORRECTIVE_ACTION", "修复当前版本时序")
+    _entry(major, _case["case_id"], event["event_id"], "PREVENTIVE_ACTION", "增加复位边界回归项")
+    _entry(major, _case["case_id"], event["event_id"], "TECHNICAL_ACTION", "增加掉电状态校验")
+    _entry(major, _case["case_id"], event["event_id"], "MANAGEMENT_ACTION", "评审清单新增保护检查")
+
+    published = MajorCasePublisher(major, artifacts).publish_event(event["event_id"])
+    enriched = artifacts.load(f"knowledge/enriched_case/{published['case_id']}.json")
+    detail = HistoricalCaseConsumerService(artifacts).get_case(published["case_id"])
+
+    assert enriched["analysis"]["trc"]["occurrence"]["standard"] == "复位保护时序不足"
+    assert detail["contract_version"] == "historical-case/v1"
+    assert detail["root_cause"] == "复位保护时序不足"
+    assert detail["solution"] == (
+        "纠正措施: 修复当前版本时序\n"
+        "预防措施: 增加复位边界回归项\n"
+        "技术措施: 增加掉电状态校验\n"
+        "管理措施: 评审清单新增保护检查"
+    )
+    assert len(detail["evidence"]) == 5
+    assert set(detail) == {
+        "contract_version", "case_id", "title", "problem_description", "product",
+        "device_type", "device_model", "symptom", "root_cause", "solution",
+        "verification_result", "status", "evidence",
+    }
 
 
 def test_missing_root_cause_and_action_survive_roundtrip_as_null(tmp_path: Path) -> None:

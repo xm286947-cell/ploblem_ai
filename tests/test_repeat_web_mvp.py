@@ -129,7 +129,7 @@ def _seed_case_artifacts(repo: JsonArtifactRepository) -> None:
     )
 
 
-def _client(tmp_path: Path):
+def _client(tmp_path: Path, *, agent_analysis=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "p0.db"
     _init(db)
@@ -139,7 +139,14 @@ def _client(tmp_path: Path):
         knowledge_id="K-ITR-1",
         business_id="ITR-1",
         title="当前控制器掉电后启动失败",
-        raw_extra={"关联漏测问题": "MISS-1"},
+        raw_extra={
+            "关联漏测问题": "MISS-1",
+            "IPMT": "IPMT-A",
+            "SPDT": "SPDT-A",
+            "责任部门二级": "研发二部",
+            "原因一级分类": "软件设计",
+            "原因二级分类": "资源管理",
+        },
     )
     _save_issue(
         p0,
@@ -161,6 +168,7 @@ def _client(tmp_path: Path):
 
     def repeat_search(query, top_k):
         mode["calls"] += 1
+        mode["last_query"] = query.to_dict()
         if mode["state"] == "unavailable":
             raise RuntimeError("synthetic search outage")
         if mode["state"] == "empty":
@@ -191,9 +199,90 @@ def _client(tmp_path: Path):
         issue_repository=p0,
         repeat_repository=RepeatQueryTraceRepository(tmp_path / "repeat.db"),
         case_service=case_service,
+        agent_analysis=agent_analysis,
     )
     app = create_p0_app(db, stage_runner=None, repeat_web=facade)
+    mode["artifacts"] = artifacts
     return TestClient(app), mode
+
+
+def _install_i4_typed_case(artifacts: JsonArtifactRepository, *, missing=(), corrupt=False):
+    case = artifacts.load("knowledge/enriched_case/HCASE-1.json")
+    case["metadata"]["semantic_projection_contract"] = "major-semantic-publish/v1"
+    analysis = case["analysis"]
+    analysis["trc"] = {}
+    analysis["mrc"] = {}
+    sections = []
+    cause_types = {
+        "TRC_OCCURRENCE": ("trc", "occurrence"),
+        "TRC_ESCAPE": ("trc", "escape"),
+        "MRC_OCCURRENCE": ("mrc", "occurrence"),
+        "MRC_ESCAPE": ("mrc", "escape"),
+    }
+    action_types = {
+        "TECHNICAL_ACTION": "technical_actions",
+        "MANAGEMENT_ACTION": "management_actions",
+        "CORRECTIVE_ACTION": "corrective_actions",
+        "PREVENTIVE_ACTION": "preventive_actions",
+    }
+
+    def projected(entry_type, value, sequence):
+        evidence_id = f"I4-EVD-{entry_type}-{sequence}"
+        raw_text = f"原始 Evidence {entry_type} {sequence}"
+        modality = "PDF" if sequence % 2 else "EXCEL"
+        source_type = "MAJOR_SOURCE_DOCUMENT" if modality == "PDF" else "MAJOR_EXCEL_SOURCE_FACT"
+        source_id = "ITR-H-1"
+        source_version = "PUB-REV-1"
+        origin_source_id = f"SRC-{sequence}"
+        origin_source_version = f"SRC-REV-{sequence}"
+        sections.append({
+            "evidence_id": evidence_id,
+            "entry_type": entry_type if not (corrupt and entry_type == "TRC_OCCURRENCE") else "TRC_ESCAPE",
+            "source_modality": modality,
+            "source_type": source_type,
+            "source_id": source_id,
+            "source_version": source_version,
+            "source_ref": f"{source_type}:{source_id}@{source_version}",
+            "origin_source_id": origin_source_id,
+            "origin_source_version": origin_source_version,
+            "origin_source_ref": f"{source_type}:{origin_source_id}@{origin_source_version}",
+            "file_name": "history.pdf" if modality == "PDF" else "history.xlsx",
+            "page": 7 if modality == "PDF" else None,
+            "section": entry_type,
+            "raw_text": raw_text,
+            "url": None,
+        })
+        return {"value": value, "source_type": modality, "evidence_refs": [{
+            "source_type": modality,
+            "source_location": f"evidence://{evidence_id}",
+            "quote": raw_text,
+        }]}
+
+    sequence = 0
+    for entry_type, (family, side) in cause_types.items():
+        if entry_type in missing:
+            analysis[family][side] = {"standard": "", "evidence_refs": []}
+        else:
+            sequence += 1
+            entry = projected(entry_type, f"Typed {entry_type}", sequence)
+            analysis[family][side] = {"standard": entry["value"], "evidence_refs": entry["evidence_refs"]}
+
+    for entry_type, field in action_types.items():
+        if entry_type in missing:
+            case["solution"][field] = []
+            continue
+        sequence += 1
+        values = [projected(entry_type, f"Typed {entry_type}", sequence)]
+        if entry_type == "CORRECTIVE_ACTION":
+            sequence += 1
+            values.append(projected(entry_type, "Typed CORRECTIVE_ACTION second", sequence))
+        case["solution"][field] = values
+
+    artifacts.save("knowledge/enriched_case/HCASE-1.json", case)
+    artifacts.save("knowledge/raw_evidence/HCASE-1.json", {
+        "case_id": "HCASE-1",
+        "sections": sections,
+    })
 
 
 def _query(client: TestClient, knowledge_id: str, include: bool = False):
@@ -254,8 +343,89 @@ def test_success_candidate_evidence_roundtrip(tmp_path: Path):
     assert candidate["root_causes"] == ["保存路径在掉电窗口存在未完成写入"]
     assert candidate["measures"] == ["增加原子保存与恢复校验"]
     assert candidate["evidence"][0]["raw_text"] == "掉电窗口存在未完成写入。"
+    assert candidate["semantic_mode"] == "LEGACY_GENERIC_ONLY"
+    assert candidate["typed_causes"] == []
     detail = client.get("/api/v2/historical-cases/HCASE-1").json()
     assert detail["evidence"][0]["page"] == 7
+
+
+def test_query_input_restores_organization_and_classification_from_itr_workbench(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    response = _query(client, "K-ITR-1")
+    assert response.status_code == 201
+    assert mode["last_query"]["organization"] == {
+        "ipmt": "IPMT-A",
+        "spdt": "SPDT-A",
+        "responsible_department_level2": "研发二部",
+    }
+    assert mode["last_query"]["classification"] == {
+        "cause_level1": "软件设计",
+        "cause_level2": "资源管理",
+    }
+
+
+def test_web_main_path_invokes_agent_analysis_after_retrieval(tmp_path: Path):
+    class FakeAgentAnalysis:
+        def __init__(self):
+            self.calls = 0
+
+        def read_report(self, query_id, *, format="markdown"):
+            assert format == "markdown"
+            return {
+                "query_id": query_id,
+                "format": format,
+                "content_type": "text/markdown; charset=utf-8",
+                "content": "# Repeat Analysis Report\n\nAI preliminary only.",
+            }
+
+        def analyze(self, query_trace, search_result):
+            self.calls += 1
+            assert query_trace["subject_ref"] == "ITR-1"
+            assert search_result["status"] == "SUCCESS"
+            result = dict(search_result)
+            result["candidates"] = [dict(item) for item in search_result["candidates"]]
+            result["candidates"][0]["agent_analysis_status"] = "SUCCESS"
+            result["candidates"][0]["agent_similarity"] = {
+                "analysis_status": "SUCCESS",
+                "analysis": {"analysis_summary": "M8.2 reached from Web main path"},
+            }
+            result["candidates"][0]["agent_solution"] = {
+                "analysis_status": "SUCCESS",
+                "analysis": {"analysis_summary": "M8.3 reached from Web main path"},
+            }
+            result["candidates"][0]["ai_recommendation"] = {
+                "status": "DISABLED",
+                "decision": None,
+            }
+            result["agent_analysis"] = {
+                "status": "SUCCESS",
+                "m82_similarity": "RESTORED",
+                "m83_solution": "RESTORED",
+                "m84_recommendation": "DISABLED",
+                "provider_boundary": "UNIFIED_RUNTIME_ONLY",
+            }
+            result["analysis_report"] = {
+                "status": "AVAILABLE",
+                "report_markdown_ref": "data/repeat_reports/RQ/report.md",
+            }
+            return result
+
+    agent = FakeAgentAnalysis()
+    client, _ = _client(tmp_path, agent_analysis=agent)
+    result = _query(client, "K-ITR-1").json()["result"]
+
+    assert agent.calls == 1
+    assert result["candidates"][0]["agent_analysis_status"] == "SUCCESS"
+    assert result["agent_analysis"]["provider_boundary"] == "UNIFIED_RUNTIME_ONLY"
+    assert result["analysis_report"]["status"] == "AVAILABLE"
+    assert result["human_decision"]["decision"] == "PENDING"
+
+    report = client.get(
+        f"/api/v2/repeat-risk/queries/{result['query_id']}/report",
+        params={"format": "markdown"},
+    )
+    assert report.status_code == 200
+    assert "Repeat Analysis Report" in report.text
 
 
 def test_all_four_human_decisions_persist(tmp_path: Path):
@@ -317,6 +487,46 @@ def test_refresh_restores_existing_query_without_rerun(tmp_path: Path):
     assert restored.status_code == 200
     assert restored.json()["result"]["query_id"] == first["query_id"]
     assert mode["calls"] == calls_after_query
+
+
+def test_i4_typed_semantics_are_additive_with_fixed_coverage_and_bound_evidence(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    _install_i4_typed_case(mode["artifacts"], missing={"TRC_ESCAPE", "PREVENTIVE_ACTION"})
+
+    result = _query(client, "K-ITR-1").json()["result"]
+    candidate = result["candidates"][0]
+
+    assert result["result_status"] == "READY_FOR_REVIEW"
+    assert candidate["semantic_mode"] == "TYPED"
+    assert {item["semantic_type"] for item in candidate["typed_causes"]} == {
+        "TRC_OCCURRENCE", "MRC_OCCURRENCE", "MRC_ESCAPE"
+    }
+    assert candidate["semantic_coverage"]["TRC_ESCAPE"] == "MISSING"
+    assert candidate["semantic_coverage"]["PREVENTIVE_ACTION"] == "MISSING"
+    corrective = [item for item in candidate["typed_actions"] if item["semantic_type"] == "CORRECTIVE_ACTION"]
+    assert [item["value"] for item in corrective] == ["Typed CORRECTIVE_ACTION", "Typed CORRECTIVE_ACTION second"]
+    assert corrective[0]["evidence"][0]["evidence_id"] != corrective[1]["evidence"][0]["evidence_id"]
+    assert corrective[0]["evidence"][0]["origin_source_ref"].startswith("MAJOR_EXCEL_SOURCE_FACT:SRC-")
+    assert candidate["rank"] == 1 and candidate["retrieval_score"] == 0.87
+    assert candidate["why_relevant"][0]["text"] == "问题均发生于掉电恢复场景"
+
+
+def test_i4_corrupt_typed_evidence_keeps_ranked_candidate_incomplete_no_legacy_fallback(tmp_path: Path):
+    client, mode = _client(tmp_path)
+    _install_i4_typed_case(mode["artifacts"], corrupt=True)
+
+    result = _query(client, "K-ITR-1").json()["result"]
+    candidate = result["candidates"][0]
+
+    assert result["result_status"] == "INCOMPLETE"
+    assert result["search_status"] == "INCOMPLETE"
+    assert candidate["case_id"] == "HCASE-1"
+    assert candidate["rank"] == 1
+    assert candidate["detail_status"] == "INCOMPLETE"
+    assert candidate["detail_error"] == "CASE_SEMANTIC_EVIDENCE_INVALID"
+    assert candidate["root_causes"] == []
+    assert candidate["measures"] == []
+    assert result["human_decision"]["decision"] == "PENDING"
 
 
 def test_case_list_defaults_to_published_only(tmp_path: Path):
@@ -384,3 +594,5 @@ def test_static_contract_rationale_first_similarity_secondary_and_no_new_repeat_
     assert "data-repeat-evidence-drawer" in html
     assert "/p0/repeat" not in pages
     assert "Repeat App" not in pages
+    assert "打开 Markdown 分析报告" in js
+    assert js.index("AI Repeat 建议") < js.index("HUMAN DECISION")

@@ -16,6 +16,22 @@ from services.knowledge_service import KnowledgeArtifacts, KnowledgeService
 
 
 CONTRACT_VERSION = "historical-case/v1"
+REPEAT_RISK_CONTEXT_CONTRACT_VERSION = "historical-case/repeat-risk-context/v1"
+SEMANTIC_PROJECTION_CONTRACT_VERSION = "major-semantic-publish/v1"
+
+REPEAT_CAUSE_PATHS = {
+    "TRC_OCCURRENCE": ("trc", "occurrence"),
+    "TRC_ESCAPE": ("trc", "escape"),
+    "MRC_OCCURRENCE": ("mrc", "occurrence"),
+    "MRC_ESCAPE": ("mrc", "escape"),
+}
+REPEAT_ACTION_PATHS = {
+    "TECHNICAL_ACTION": "technical_actions",
+    "MANAGEMENT_ACTION": "management_actions",
+    "CORRECTIVE_ACTION": "corrective_actions",
+    "PREVENTIVE_ACTION": "preventive_actions",
+}
+REPEAT_SEMANTIC_TYPES = (*REPEAT_CAUSE_PATHS, *REPEAT_ACTION_PATHS)
 
 
 class HistoricalCaseContractError(RuntimeError):
@@ -224,6 +240,266 @@ class HistoricalCaseConsumerService:
         self._validate_identity(stable_case_id, artifacts)
         return self._detail(stable_case_id, artifacts)
 
+    def get_repeat_risk_context(self, case_id: str) -> dict[str, Any]:
+        """Return the additive typed projection consumed only by Repeat Risk.
+
+        This is intentionally a separate contract from ``historical-case/v1``.
+        Artifact access and exact Evidence resolution remain inside this
+        consumer boundary; Repeat Risk never sees repository paths or files.
+        """
+        stable_case_id = _text(case_id)
+        if not stable_case_id:
+            raise HistoricalCaseContractError("CASE_NOT_FOUND")
+        try:
+            artifacts = self.knowledge.load_case_artifacts(stable_case_id)
+        except RepositoryError as exc:
+            code = "CASE_ACCESS_DENIED" if "PATH_OUTSIDE" in str(exc) else "CASE_SERVICE_UNAVAILABLE"
+            raise HistoricalCaseContractError(code) from exc
+        except Exception as exc:
+            raise HistoricalCaseContractError("CASE_SERVICE_UNAVAILABLE") from exc
+
+        if not any((artifacts.retrieval_document, artifacts.enriched_case, artifacts.standard_case)):
+            raise HistoricalCaseContractError("CASE_NOT_FOUND")
+        try:
+            self._validate_identity(stable_case_id, artifacts)
+        except HistoricalCaseContractError:
+            raise
+        except Exception as exc:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID") from exc
+        case = artifacts.enriched_case or artifacts.standard_case or {}
+        if not isinstance(case, dict):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        metadata = case.get("metadata", {})
+        if metadata is None:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        declared_contract = metadata.get("semantic_projection_contract")
+
+        if declared_contract is None:
+            return {
+                "contract_version": REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+                "case_id": stable_case_id,
+                "semantic_mode": "LEGACY_GENERIC_ONLY",
+                "semantic_contract_version": None,
+                "typed_causes": [],
+                "typed_actions": [],
+                "semantic_coverage": {
+                    entry_type: "LEGACY_GENERIC_ONLY" for entry_type in REPEAT_SEMANTIC_TYPES
+                },
+                "semantic_evidence_status": "LEGACY_GENERIC_ONLY",
+            }
+        if declared_contract != SEMANTIC_PROJECTION_CONTRACT_VERSION:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_CONTRACT_UNSUPPORTED")
+
+        analysis = case.get("analysis")
+        solution = case.get("solution")
+        if not isinstance(analysis, dict) or not isinstance(solution, dict):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+
+        raw_artifact = artifacts.raw_evidence
+        if raw_artifact is not None and not isinstance(raw_artifact, dict):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+        raw_sections = (raw_artifact or {}).get("sections")
+        if raw_sections is None:
+            raw_sections = []
+        if not isinstance(raw_sections, list):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+        evidence_index: dict[str, list[dict[str, Any]]] = {}
+        for section in raw_sections:
+            if not isinstance(section, dict):
+                continue
+            evidence_id = _text(section.get("evidence_id"))
+            if evidence_id:
+                evidence_index.setdefault(evidence_id, []).append(section)
+
+        typed_causes: list[dict[str, Any]] = []
+        typed_actions: list[dict[str, Any]] = []
+        coverage: dict[str, str] = {}
+        for entry_type, (family, side) in REPEAT_CAUSE_PATHS.items():
+            group = analysis.get(family)
+            if group is not None and not isinstance(group, dict):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            slot = group.get(side) if isinstance(group, dict) else None
+            if slot is None:
+                coverage[entry_type] = "MISSING"
+                continue
+            if not isinstance(slot, dict):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            value = slot.get("standard")
+            refs = slot.get("evidence_refs")
+            if not isinstance(value, str) or not isinstance(refs, list):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            if not value.strip():
+                if refs:
+                    raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+                coverage[entry_type] = "MISSING"
+                continue
+            item = self._typed_semantic_item(
+                entry_type,
+                value,
+                slot.get("source_type"),
+                refs,
+                evidence_index,
+            )
+            typed_causes.append(item)
+            coverage[entry_type] = "PRESENT"
+
+        for entry_type, field in REPEAT_ACTION_PATHS.items():
+            values = solution.get(field)
+            if values is None:
+                coverage[entry_type] = "MISSING"
+                continue
+            if not isinstance(values, list):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            if not values:
+                coverage[entry_type] = "MISSING"
+                continue
+            for value_record in values:
+                if not isinstance(value_record, dict):
+                    raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+                value = value_record.get("value")
+                refs = value_record.get("evidence_refs")
+                if not isinstance(value, str) or not value.strip() or not isinstance(refs, list):
+                    raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+                typed_actions.append(
+                    self._typed_semantic_item(
+                        entry_type,
+                        value,
+                        value_record.get("source_type"),
+                        refs,
+                        evidence_index,
+                    )
+                )
+            coverage[entry_type] = "PRESENT"
+
+        return {
+            "contract_version": REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+            "case_id": stable_case_id,
+            "semantic_mode": "TYPED",
+            "semantic_contract_version": SEMANTIC_PROJECTION_CONTRACT_VERSION,
+            "typed_causes": typed_causes,
+            "typed_actions": typed_actions,
+            "semantic_coverage": coverage,
+            "semantic_evidence_status": "COMPLETE" if typed_causes or typed_actions else "NO_TYPED_SEMANTICS",
+        }
+
+    @staticmethod
+    def _typed_semantic_item(
+        entry_type: str,
+        value: str,
+        declared_source_type: Any,
+        refs: list[Any],
+        evidence_index: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        if not refs:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+        evidence: list[dict[str, Any]] = []
+        modalities: set[str] = set()
+        for reference in refs:
+            if not isinstance(reference, dict):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            source_location = _text(reference.get("source_location"))
+            quote = reference.get("quote")
+            if (
+                not source_location
+                or not source_location.startswith("evidence://")
+                or not isinstance(quote, str)
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            evidence_id = source_location.removeprefix("evidence://")
+            if not evidence_id or "/" in evidence_id:
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            matches = evidence_index.get(evidence_id, [])
+            if len(matches) != 1:
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            section = matches[0]
+            raw_text = section.get("raw_text")
+            if (
+                section.get("entry_type") != entry_type
+                or not isinstance(raw_text, str)
+                or not raw_text.strip()
+                or quote != raw_text
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+            modality = section.get("source_modality")
+            if not isinstance(modality, str) or modality not in {"EXCEL", "PDF"}:
+                raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+            reference_source_type = _text(reference.get("source_type"))
+            section_source_types = {
+                _text(section.get("source_modality")),
+                _text(section.get("source_type")),
+            } - {None}
+            if (
+                reference_source_type
+                and section_source_types
+                and reference_source_type not in section_source_types
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_EVIDENCE_INVALID")
+
+            modalities.add(modality)
+            raw_source_type = section.get("source_type")
+            source_id = section.get("source_id")
+            source_version = section.get("source_version")
+            source_ref = section.get("source_ref")
+            origin_source_id = section.get("origin_source_id")
+            origin_source_version = section.get("origin_source_version")
+            origin_source_ref = section.get("origin_source_ref")
+            lineage_fields = (
+                raw_source_type,
+                source_id,
+                source_version,
+                source_ref,
+                origin_source_id,
+                origin_source_version,
+                origin_source_ref,
+            )
+            if any(
+                not isinstance(field, str) or not field or field != field.strip()
+                for field in lineage_fields
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_SOURCE_MISMATCH")
+            if (
+                source_ref != f"{raw_source_type}:{source_id}@{source_version}"
+                or origin_source_ref != f"{raw_source_type}:{origin_source_id}@{origin_source_version}"
+            ):
+                raise HistoricalCaseContractError("CASE_SEMANTIC_SOURCE_MISMATCH")
+            evidence.append({
+                "evidence_id": evidence_id,
+                "source_type": modality,
+                "source_id": source_id,
+                "source_version": source_version,
+                "source_ref": source_ref,
+                "origin_source_id": origin_source_id,
+                "origin_source_version": origin_source_version,
+                "origin_source_ref": origin_source_ref,
+                "file_name": section.get("file_name"),
+                "page": section.get("page"),
+                "section": section.get("section"),
+                "raw_text": raw_text,
+                "url": section.get("url"),
+            })
+
+        projected_source_type = (
+            "FUSED" if modalities == {"EXCEL", "PDF"}
+            else next(iter(modalities)) if len(modalities) == 1
+            else None
+        )
+        if projected_source_type not in {"EXCEL", "PDF", "FUSED"}:
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        if declared_source_type is not None and (
+            not isinstance(declared_source_type, str)
+            or declared_source_type not in {"EXCEL", "PDF", "FUSED"}
+            or declared_source_type != projected_source_type
+        ):
+            raise HistoricalCaseContractError("CASE_SEMANTIC_PROJECTION_INVALID")
+        return {
+            "semantic_type": entry_type,
+            "value": value,
+            "source_type": projected_source_type,
+            "evidence": evidence,
+        }
+
     @staticmethod
     def _validate_identity(case_id: str, artifacts: KnowledgeArtifacts) -> None:
         for artifact in (
@@ -254,11 +530,25 @@ class HistoricalCaseConsumerService:
             _first_text(((analysis.get("trc") or {}).get("occurrence") or {}).get("standard")),
             _first_text(((analysis.get("mrc") or {}).get("occurrence") or {}).get("standard")),
         )
-        solution_text = _first_text(
-            *(_values(solution.get("corrective_actions"))),
-            *(_values(solution.get("preventive_actions"))),
-            *(_values(solution.get("reusable_actions"))),
-        )
+        solution_groups = [
+            ("纠正措施", _values(solution.get("corrective_actions"))),
+            ("预防措施", _values(solution.get("preventive_actions"))),
+            ("技术措施", _values(solution.get("technical_actions"))),
+            ("管理措施", _values(solution.get("management_actions"))),
+            ("可复用措施", _values(solution.get("reusable_actions"))),
+        ]
+        populated_solution_groups = [
+            (label, values) for label, values in solution_groups if values
+        ]
+        if len(populated_solution_groups) == 1:
+            solution_text = "\n".join(populated_solution_groups[0][1])
+        elif populated_solution_groups:
+            solution_text = "\n".join(
+                f"{label}: {'; '.join(values)}"
+                for label, values in populated_solution_groups
+            )
+        else:
+            solution_text = None
         symptom_values = _values(problem.get("phenomenon"))
         symptom = "\n".join(symptom_values) if symptom_values else None
 

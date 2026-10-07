@@ -1,0 +1,938 @@
+"""Excel batch restoration for the existing Major Case store.
+
+This module restores the original production mechanism without introducing a
+second generic Excel-import platform:
+- parser.ExcelParser remains the Excel parser/mapping implementation;
+- parser.ReportMatcher remains the document matching implementation;
+- MajorKnowledgeRepository remains the knowledge store;
+- this module only maps those existing capabilities into MAJOR_CASE semantics.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Iterable
+import hashlib
+import json
+import re
+import shutil
+import sqlite3
+import uuid
+import yaml
+
+from parser.excel_parser import ExcelParser, normalize_header
+from parser.report_matcher import ReportMatcher
+from quality_knowledge.problem_refs import normalize_itr
+from .document_parser import parse_document
+
+from .repository import MajorKnowledgeRepository
+from .identity import MajorCaseIdentityConflict, MajorCaseIdentityResolver
+from .import_governance import (
+    IMPORT_GOVERNANCE_CONTRACT,
+    MAPPING_CONTRACT,
+    inspect_template,
+    mapping_version,
+)
+
+
+def _id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex}"
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _hash(value: Any) -> str:
+    return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
+
+
+def _split_values(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    values: list[str] = []
+    for item in re.split(r"[,，;；\n\r|/]+", text):
+        item = item.strip()
+        if item and item not in values:
+            values.append(item)
+    return values
+
+
+def _pick_raw(raw: dict[str, Any], aliases: Iterable[str]) -> str:
+    lookup = {normalize_header(key): value for key, value in raw.items()}
+    for alias in aliases:
+        value = lookup.get(normalize_header(alias))
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+
+def _unique_report_event_itr(itrs: Iterable[Any], match: dict[str, Any]) -> str:
+    """Return the one Event ITR explicitly named by a matched report filename.
+
+    Multi-Event rows are case-shared at the Excel Source Fact level. A review
+    document may become Event-specific only when its filename uniquely names
+    one of those Event ITRs; otherwise the relation remains unresolved and the
+    governed import must fail closed instead of guessing the first Event.
+    """
+
+    canonical_itrs: list[str] = []
+    for value in itrs:
+        canonical = normalize_itr(value)
+        if canonical and canonical not in canonical_itrs:
+            canonical_itrs.append(canonical)
+    if len(canonical_itrs) <= 1:
+        return canonical_itrs[0] if canonical_itrs else ""
+
+    matched_path = str(match.get("matched_report_path") or "").strip()
+    if not matched_path:
+        return ""
+
+    names = [
+        Path(matched_path).name,
+        str(match.get("report_filename") or "").strip(),
+    ]
+    hits: list[str] = []
+    for itr in canonical_itrs:
+        pattern = re.compile(
+            rf"(?<![0-9A-Z]){re.escape(itr)}(?![0-9A-Z])",
+            re.IGNORECASE,
+        )
+        if any(name and pattern.search(Path(name).stem) for name in names):
+            hits.append(itr)
+    return hits[0] if len(hits) == 1 else ""
+
+
+EXTRA_ALIASES = {
+    "igr": ("IGR", "IGR号", "IGR编号", "重大问题编号", "重大问题单号"),
+    "title": ("重大问题标题", "问题标题", "Bug标题", "标题"),
+    "related_itrs": ("关联ITR", "关联ITR号", "关联ITR单号", "ITR列表", "关联问题单"),
+    "product": ("产品", "产品分类", "产品型号", "产品系列"),
+    "module": ("模块", "所属模块", "功能模块"),
+    "component": ("器件", "器件名称", "元器件", "物料型号", "器件型号"),
+    "failure_mode": ("Failure Mode", "失效模式"),
+    "failure_mechanism": ("Failure Mechanism", "失效机理", "失效机制"),
+    "trigger_condition": ("Trigger Condition", "触发条件", "复现条件"),
+}
+
+
+class MajorCaseRestoreService:
+    """MAJOR_CASE adapter over the existing Excel/report and knowledge layers."""
+
+    def __init__(
+        self,
+        repository: MajorKnowledgeRepository,
+        project_root: str | Path,
+    ) -> None:
+        self.repository = repository
+        self.identity_resolver = MajorCaseIdentityResolver(repository)
+        self.project_root = Path(project_root).resolve()
+        self.mapping_path = self.project_root / "config/field_mapping.yaml"
+        self.excel_parser = ExcelParser(self.mapping_path)
+        self.report_matcher = ReportMatcher(self.project_root / "config/report_matching.yaml")
+        self.staging_root = self.repository.attachment_root.parent / "import_staging"
+        self.staging_root.mkdir(parents=True, exist_ok=True)
+
+    def current_mapping_version(self) -> str:
+        config = yaml.safe_load(self.mapping_path.read_text(encoding="utf-8"))
+        return mapping_version(dict(config["excel"]["fields"]))
+
+    def parser_mapping_is_current(self) -> bool:
+        config = yaml.safe_load(self.mapping_path.read_text(encoding="utf-8"))
+        return dict(self.excel_parser.field_mapping) == dict(config["excel"]["fields"])
+
+    def _enrich_record(self, record: dict) -> dict:
+        raw = dict(record.get("raw_fields") or {})
+        mapped = dict(record.get("mapped_fields") or {})
+        igr = _pick_raw(raw, EXTRA_ALIASES["igr"])
+        related = _pick_raw(raw, EXTRA_ALIASES["related_itrs"])
+        itr_values = []
+        for value in [mapped.get("itr_id"), *_split_values(related)]:
+            canonical = normalize_itr(value)
+            if canonical and canonical not in itr_values:
+                itr_values.append(canonical)
+
+        for key in ("product", "module", "component", "failure_mode", "failure_mechanism", "trigger_condition"):
+            mapped[key] = _pick_raw(raw, EXTRA_ALIASES[key])
+        mapped["igr"] = igr
+        mapped["itrs"] = itr_values
+        title = _pick_raw(raw, EXTRA_ALIASES["title"])
+        description = str(mapped.get("original_description") or "").strip()
+        title = title or description[:80] or igr or (itr_values[0] if itr_values else f"重大问题-{record['excel_row']}")
+
+        if igr:
+            source_key = f"IGR:{igr}"
+        elif itr_values:
+            source_key = "ITR:" + "|".join(sorted(itr_values))
+        else:
+            source_key = (
+                f"ROW:{Path(record['source_excel']).name}:"
+                f"{record['sheet_name']}:{record['excel_row']}"
+            )
+
+        context_fields = [
+            mapped.get("product"),
+            mapped.get("module"),
+            mapped.get("component"),
+            mapped.get("trc_occurrence"),
+            mapped.get("trc_escape"),
+            mapped.get("mrc_occurrence"),
+            mapped.get("mrc_escape"),
+            mapped.get("cause_level1"),
+            mapped.get("cause_level2"),
+            mapped.get("cause_level3"),
+            mapped.get("cause_level4"),
+        ]
+        importable = bool(description or itr_values or igr)
+        retrieval_ready = bool(description and any(str(value or "").strip() for value in context_fields))
+        deep_ready = bool(
+            str(mapped.get("failure_mechanism") or "").strip()
+            and str(mapped.get("trigger_condition") or "").strip()
+        )
+        missing = []
+        if not description:
+            missing.append("issue_fact")
+        if not any(str(value or "").strip() for value in context_fields):
+            missing.append("retrieval_context")
+        if not mapped.get("failure_mechanism"):
+            missing.append("failure_mechanism")
+        if not mapped.get("trigger_condition"):
+            missing.append("trigger_condition")
+
+        return {
+            **record,
+            "title": title,
+            "source_key": source_key,
+            "igr": igr,
+            "itrs": itr_values,
+            "normalized_fields": mapped,
+            "completeness": {
+                "importable": importable,
+                "retrieval_ready": retrieval_ready,
+                "deep_analysis_ready": deep_ready,
+                "missing_features": missing,
+            },
+        }
+
+    def preview_excel(
+        self,
+        excel_path: str | Path,
+        *,
+        reports_dir: str | Path | None = None,
+        group_code: str,
+        domain: str = "",
+    ) -> dict:
+        if not self.parser_mapping_is_current():
+            raise ValueError("MAJOR_EXCEL_MAPPING_RESTART_REQUIRED")
+        template = inspect_template(excel_path)
+        current_mapping_version = self.current_mapping_version()
+        temp_out = self.staging_root / "_parse_preview" / uuid.uuid4().hex
+        records, summary = self.excel_parser.parse(excel_path, temp_out)
+        enriched = [self._enrich_record(record) for record in records]
+
+        matches: dict[str, dict] = {}
+        match_summary = {
+            "matched_count": 0,
+            "unmatched_count": len(enriched),
+            "ambiguous_count": 0,
+            "match_type_counts": {},
+        }
+        if reports_dir and Path(reports_dir).exists():
+            match_results, match_summary = self.report_matcher.match_all(
+                enriched,
+                reports_dir,
+                temp_out / "matches",
+            )
+            matches = {item["case_id"]: item for item in match_results}
+
+        rows = []
+        for item in enriched:
+            match = matches.get(item["case_id"]) or {
+                "match_type": "NO_REPORT_NAME" if not item["normalized_fields"].get("report_filename") else "NOT_FOUND",
+                "matched_report_path": "",
+                "candidate_paths": [],
+                "parse_status": "NO_REPORT" if not item["normalized_fields"].get("report_filename") else "REPORT_NOT_FOUND",
+                "parse_warnings": [],
+            }
+            match = dict(match)
+            blockers: list[str] = []
+            if not item["completeness"]["importable"]:
+                blockers.append("ROW_NOT_IMPORTABLE")
+            if match.get("match_type") == "AMBIGUOUS":
+                blockers.append("AMBIGUOUS_REPORT_MATCH")
+            matched_path = str(match.get("matched_report_path") or "").strip()
+            if matched_path and not Path(matched_path).is_file():
+                blockers.append("MATCHED_REPORT_NOT_FOUND")
+
+            event_itrs = list(item.get("itrs") or [])
+            if matched_path and len(event_itrs) > 1:
+                binding_itr = _unique_report_event_itr(event_itrs, match)
+                match["event_binding_itr"] = binding_itr
+                match["event_binding_status"] = (
+                    "BOUND" if binding_itr else "REVIEW_REQUIRED"
+                )
+                if not binding_itr:
+                    blockers.append("MULTI_EVENT_REPORT_BINDING_AMBIGUOUS")
+            elif matched_path and len(event_itrs) == 1:
+                match["event_binding_itr"] = normalize_itr(event_itrs[0])
+                match["event_binding_status"] = "BOUND"
+            try:
+                self.identity_resolver.inspect(
+                    group_code=group_code,
+                    igr=str(item.get("igr") or ""),
+                    source_key=str(item.get("source_key") or ""),
+                    standard_itrs=item.get("itrs") or [],
+                )
+            except MajorCaseIdentityConflict:
+                blockers.append("CASE_IDENTITY_CONFLICT")
+            rows.append({
+                **item,
+                "report_match": match,
+                "blocking_reasons": blockers,
+                "blocking_reason": "; ".join(blockers),
+            })
+
+        return {
+            "group_code": group_code,
+            "domain": domain,
+            "source_file": Path(excel_path).name,
+            "template_contract": template["template_contract"],
+            "template_version": template["template_version"],
+            "template_status": template["template_status"],
+            "mapping_contract": MAPPING_CONTRACT,
+            "mapping_version": current_mapping_version,
+            "parse_summary": summary.to_dict(),
+            "match_summary": match_summary,
+            "rows": rows,
+            "total": len(rows),
+            "importable": sum(1 for row in rows if row["completeness"]["importable"]),
+            "blocked": sum(1 for row in rows if row["blocking_reasons"]),
+            "retrieval_ready": sum(1 for row in rows if row["completeness"]["retrieval_ready"]),
+            "ambiguous": sum(1 for row in rows if row["report_match"]["match_type"] == "AMBIGUOUS"),
+        }
+
+    def stage_upload(
+        self,
+        excel_name: str,
+        excel_content: bytes,
+        materials: Iterable[tuple[str, bytes]],
+        *,
+        group_code: str,
+        domain: str = "",
+        actor: str = "web-user",
+    ) -> dict:
+        batch_id = f"MIMP-{uuid.uuid4().hex[:16]}"
+        root = self.staging_root / batch_id
+        reports_dir = root / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        excel_path = root / Path(excel_name or "major_cases.xlsx").name
+        excel_path.write_bytes(excel_content)
+
+        used_names: set[str] = set()
+        for index, (name, content) in enumerate(materials, 1):
+            safe = Path(name or f"material-{index}").name
+            candidate = safe
+            if candidate in used_names:
+                candidate = f"{Path(safe).stem}-{index}{Path(safe).suffix}"
+            used_names.add(candidate)
+            (reports_dir / candidate).write_bytes(content)
+
+        preview = self.preview_excel(
+            excel_path,
+            reports_dir=reports_dir,
+            group_code=group_code,
+            domain=domain,
+        )
+        preview["batch_id"] = batch_id
+        preview["staged_material_count"] = len(used_names)
+        preview["mapping"] = {
+            "contract": preview["mapping_contract"],
+            "version": preview["mapping_version"],
+            "detected_sheet": preview.get("parse_summary", {}).get("sheet_name"),
+            "header_row": preview.get("parse_summary", {}).get("header_row"),
+            "fields": dict(self.excel_parser.field_mapping),
+            "missing_columns": preview.get("parse_summary", {}).get("missing_columns", []),
+        }
+        actor = str(actor or "").strip() or "web-user"
+        preview["governance"] = {
+            "contract_version": IMPORT_GOVERNANCE_CONTRACT,
+            "template_contract": preview["template_contract"],
+            "template_version": preview["template_version"],
+            "template_status": preview["template_status"],
+            "mapping_contract": preview["mapping_contract"],
+            "mapping_version": preview["mapping_version"],
+            "preview_actor": actor,
+        }
+        preview_hash = _hash(preview)
+        source_sha256 = hashlib.sha256(excel_content).hexdigest()
+        with self.repository.transaction() as connection:
+            connection.execute(
+                """INSERT INTO kb_major_import_batch(
+                     batch_id,source_file,group_code,domain,status,staging_path,preview_json)
+                   VALUES(?,?,?,?, 'PREVIEW', ?,?)""",
+                (
+                    batch_id,
+                    excel_path.name,
+                    group_code,
+                    domain,
+                    str(root),
+                    _json(preview),
+                ),
+            )
+            connection.execute(
+                """INSERT INTO kb_major_import_governance(
+                     batch_id,contract_version,template_contract,template_version,
+                     template_status,mapping_contract,mapping_version,source_sha256,
+                     preview_sha256,preview_actor)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    batch_id,
+                    IMPORT_GOVERNANCE_CONTRACT,
+                    preview["template_contract"],
+                    preview["template_version"],
+                    preview["template_status"],
+                    preview["mapping_contract"],
+                    preview["mapping_version"],
+                    source_sha256,
+                    preview_hash,
+                    actor,
+                ),
+            )
+        return preview
+
+    def batch(self, batch_id: str) -> dict | None:
+        with self.repository.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM kb_major_import_batch WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            governance = connection.execute(
+                "SELECT * FROM kb_major_import_governance WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            runs = connection.execute(
+                """SELECT * FROM kb_major_import_run
+                   WHERE batch_id=? ORDER BY started_at,run_id""",
+                (batch_id,),
+            ).fetchall()
+        if not row:
+            return None
+        result = dict(row)
+        result["preview"] = json.loads(result.pop("preview_json") or "{}")
+        result["result"] = json.loads(result.pop("result_json") or "{}")
+        result["governance"] = dict(governance) if governance else None
+        result["runs"] = []
+        for run in runs:
+            item = dict(run)
+            item["result"] = json.loads(item.pop("result_json") or "{}")
+            result["runs"].append(item)
+        return result
+
+    def _identity_case(self, group_code: str, identity_type: str, value: str) -> str | None:
+        return self.identity_resolver.identity_owner(group_code, identity_type, value)
+
+    def _set_identity(
+        self,
+        case_id: str,
+        group_code: str,
+        identity_type: str,
+        value: str,
+        *,
+        primary: bool = False,
+    ) -> None:
+        self.identity_resolver.bind_identity(
+            case_id,
+            group_code,
+            identity_type,
+            value,
+            primary=primary,
+        )
+
+    def identities(self, case_id: str) -> list[dict]:
+        with self.repository.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM kb_case_identity WHERE case_id=? ORDER BY is_primary DESC,identity_type",
+                    (case_id,),
+                )
+            ]
+
+    def save_source_fact(
+        self,
+        case_id: str,
+        *,
+        raw: dict,
+        normalized: dict,
+        source_ref: str,
+        actor: str = "IMPORT",
+    ) -> dict:
+        """Route Excel into the shared Major Source Fact persistence primitive."""
+        return self.repository.add_source_fact_revision(
+            case_id,
+            source_type="EXCEL",
+            source_ref=source_ref,
+            raw=raw,
+            normalized=normalized,
+            actor=actor,
+        )
+
+    def source_fact_history(self, case_id: str) -> list[dict]:
+        with self.repository.connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM kb_source_fact_revision
+                   WHERE case_id=? ORDER BY revision_no DESC""",
+                (case_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["raw"] = json.loads(item.pop("raw_json") or "{}")
+            item["normalized"] = json.loads(item.pop("normalized_json") or "{}")
+            result.append(item)
+        return result
+
+    def _preflight_commit(self, batch: dict) -> list[dict]:
+        preview = batch["preview"]
+        rows = list(preview.get("rows") or [])
+        errors: list[dict] = []
+        if not rows:
+            return [{"row": None, "error": "MAJOR_EXCEL_BATCH_EMPTY"}]
+
+        for row in rows:
+            row_no = row.get("excel_row")
+            if not row.get("completeness", {}).get("importable"):
+                errors.append({"row": row_no, "error": "ROW_NOT_IMPORTABLE"})
+                continue
+            match = row.get("report_match") or {}
+            if match.get("match_type") == "AMBIGUOUS":
+                errors.append({"row": row_no, "error": "AMBIGUOUS_REPORT_MATCH"})
+            matched_path = str(match.get("matched_report_path") or "").strip()
+            if matched_path and not Path(matched_path).is_file():
+                errors.append({"row": row_no, "error": "MATCHED_REPORT_NOT_FOUND"})
+            if matched_path and len(row.get("itrs") or []) > 1:
+                binding_itr = normalize_itr(match.get("event_binding_itr"))
+                canonical_itrs = {
+                    normalize_itr(value)
+                    for value in row.get("itrs") or []
+                    if normalize_itr(value)
+                }
+                if not binding_itr or binding_itr not in canonical_itrs:
+                    errors.append({
+                        "row": row_no,
+                        "error": "MULTI_EVENT_REPORT_BINDING_AMBIGUOUS",
+                    })
+
+            group_code = str(preview.get("group_code") or "")
+            igr = str(row.get("igr") or "")
+            source_key = str(row.get("source_key") or "")
+            try:
+                self.identity_resolver.inspect(
+                    group_code=group_code,
+                    igr=igr,
+                    source_key=source_key,
+                    standard_itrs=row.get("itrs") or [],
+                )
+            except MajorCaseIdentityConflict:
+                errors.append({"row": row_no, "error": "CASE_IDENTITY_CONFLICT"})
+        return errors
+
+    def _record_failed_run(
+        self,
+        batch: dict,
+        *,
+        actor: str,
+        errors: list[dict],
+        error_code: str,
+    ) -> dict:
+        run_id = f"MIR-{uuid.uuid4().hex[:16]}"
+        result = {
+            "batch_id": batch["batch_id"],
+            "run_id": run_id,
+            "actor": actor,
+            "total": len(batch["preview"].get("rows") or []),
+            "imported": 0,
+            "rejected": len(errors),
+            "failed": 0 if errors else 1,
+            "errors": errors or [{"error": error_code}],
+            "case_ids": [],
+            "atomic_rollback": False,
+        }
+        with self.repository.transaction() as connection:
+            connection.execute(
+                """INSERT INTO kb_major_import_run(
+                     run_id,batch_id,actor,status,imported_count,rejected_count,
+                     failed_count,result_json,completed_at)
+                   VALUES(?,?,?,'FAILED',0,?,?,?,CURRENT_TIMESTAMP)""",
+                (
+                    run_id,
+                    batch["batch_id"],
+                    actor,
+                    result["rejected"],
+                    result["failed"],
+                    _json(result),
+                ),
+            )
+            connection.execute(
+                """UPDATE kb_major_import_batch
+                   SET status='FAILED',result_json=?,committed_at=CURRENT_TIMESTAMP
+                   WHERE batch_id=?""",
+                (_json(result), batch["batch_id"]),
+            )
+        return result
+
+    def _atomic_snapshot(self, batch: dict) -> Path:
+        snapshot_root = Path(batch["staging_path"]) / "_atomic_rollback"
+        shutil.rmtree(snapshot_root, ignore_errors=True)
+        snapshot_root.mkdir(parents=True, exist_ok=True)
+        db_backup = snapshot_root / "major.sqlite3"
+        with self.repository.connect() as source:
+            with sqlite3.connect(db_backup) as target:
+                source.backup(target)
+
+        attachment_backup = snapshot_root / "attachments"
+        if self.repository.attachment_root.exists():
+            shutil.copytree(
+                self.repository.attachment_root,
+                attachment_backup,
+                dirs_exist_ok=True,
+            )
+        return snapshot_root
+
+    def _restore_atomic_snapshot(self, snapshot_root: Path) -> None:
+        db_backup = snapshot_root / "major.sqlite3"
+        with sqlite3.connect(db_backup) as source:
+            target = self.repository.connect()
+            try:
+                source.backup(target)
+                target.commit()
+            finally:
+                target.close()
+
+        shutil.rmtree(self.repository.attachment_root, ignore_errors=True)
+        attachment_backup = snapshot_root / "attachments"
+        if attachment_backup.exists():
+            shutil.copytree(
+                attachment_backup,
+                self.repository.attachment_root,
+                dirs_exist_ok=True,
+            )
+        else:
+            self.repository.attachment_root.mkdir(parents=True, exist_ok=True)
+
+    def commit(self, batch_id: str, *, actor: str = "web-user") -> dict:
+        """Confirm one governed batch using the existing import implementation."""
+
+        batch = self.batch(batch_id)
+        if not batch:
+            raise KeyError(batch_id)
+        if batch["status"] in {"COMPLETED", "PARTIAL"}:
+            return batch["result"]
+        if batch["status"] != "PREVIEW":
+            raise ValueError("MAJOR_EXCEL_BATCH_NOT_CONFIRMABLE")
+
+        governance = batch.get("governance")
+        if not governance:
+            self._record_failed_run(
+                batch,
+                actor=str(actor or "web-user"),
+                errors=[],
+                error_code="MAJOR_EXCEL_GOVERNANCE_MISSING_REPREVIEW_REQUIRED",
+            )
+            raise ValueError("MAJOR_EXCEL_GOVERNANCE_MISSING_REPREVIEW_REQUIRED")
+
+        staged_excel = Path(batch["staging_path"]) / str(batch.get("source_file") or "")
+        if not staged_excel.is_file():
+            self._record_failed_run(
+                batch,
+                actor=str(actor or "web-user"),
+                errors=[],
+                error_code="MAJOR_EXCEL_STAGED_FILE_MISSING",
+            )
+            raise ValueError("MAJOR_EXCEL_STAGED_FILE_MISSING")
+        staged_source_sha256 = hashlib.sha256(staged_excel.read_bytes()).hexdigest()
+        if staged_source_sha256 != governance["source_sha256"]:
+            self._record_failed_run(
+                batch,
+                actor=str(actor or "web-user"),
+                errors=[],
+                error_code="MAJOR_EXCEL_SOURCE_CHANGED_AFTER_PREVIEW",
+            )
+            raise ValueError("MAJOR_EXCEL_SOURCE_CHANGED_AFTER_PREVIEW")
+
+        actor = str(actor or "").strip() or str(governance["preview_actor"])
+        if (
+            self.current_mapping_version() != governance["mapping_version"]
+            or not self.parser_mapping_is_current()
+        ):
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=[],
+                error_code="MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW",
+            )
+            raise ValueError("MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW")
+        if _hash(batch["preview"]) != governance["preview_sha256"]:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=[],
+                error_code="MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW",
+            )
+            raise ValueError("MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW")
+
+        preflight_errors = self._preflight_commit(batch)
+        if preflight_errors:
+            self._record_failed_run(
+                batch,
+                actor=actor,
+                errors=preflight_errors,
+                error_code="MAJOR_EXCEL_BATCH_PRECHECK_FAILED",
+            )
+            raise ValueError("MAJOR_EXCEL_BATCH_PRECHECK_FAILED")
+
+        preview = batch["preview"]
+        run_id = f"MIR-{uuid.uuid4().hex[:16]}"
+        stats = {
+            "batch_id": batch_id,
+            "run_id": run_id,
+            "actor": actor,
+            "template_version": governance["template_version"],
+            "mapping_version": governance["mapping_version"],
+            "total": len(preview.get("rows") or []),
+            "imported": 0,
+            "rejected": 0,
+            "created_cases": 0,
+            "reused_cases": 0,
+            "source_fact_revisions": 0,
+            "events": 0,
+            "documents": 0,
+            "ambiguous_documents": 0,
+            "failed": 0,
+            "errors": [],
+            "case_ids": [],
+            "atomic_rollback": False,
+        }
+        with self.repository.transaction() as connection:
+            connection.execute(
+                """INSERT INTO kb_major_import_run(
+                     run_id,batch_id,actor,status,result_json)
+                   VALUES(?,?,?,'RUNNING','{}')""",
+                (run_id, batch_id, actor),
+            )
+            connection.execute(
+                "UPDATE kb_major_import_batch SET status='COMMITTING' WHERE batch_id=?",
+                (batch_id,),
+            )
+
+        snapshot_root = self._atomic_snapshot(
+            {**batch, "status": "COMMITTING"}
+        )
+        try:
+            for row in preview.get("rows") or []:
+                group_code = preview["group_code"]
+                igr = str(row.get("igr") or "")
+                source_key = str(row["source_key"])
+                resolution = self.identity_resolver.resolve_or_create_case(
+                    group_code=group_code,
+                    title=str(row["title"]),
+                    domain=str(preview.get("domain") or ""),
+                    igr=igr,
+                    source_key=source_key,
+                    standard_itrs=row.get("itrs") or [],
+                    legacy_case_id=source_key,
+                )
+                case_id = resolution["case"]["case_id"]
+                if resolution["reused"]:
+                    stats["reused_cases"] += 1
+                else:
+                    stats["created_cases"] += 1
+                stats["case_ids"].append(case_id)
+
+                source_ref = (
+                    f"{preview['source_file']}#"
+                    f"{row.get('sheet_name')}:{row.get('excel_row')}"
+                )
+                source_fact = self.save_source_fact(
+                    case_id,
+                    raw=row.get("raw_fields") or {},
+                    normalized=row.get("normalized_fields") or {},
+                    source_ref=source_ref,
+                    actor=actor,
+                )
+                stats["source_fact_revisions"] += int(bool(source_fact.get("created", True)))
+
+                events = list(resolution["events"])
+                if not events:
+                    events.append(
+                        self.identity_resolver.resolve_or_create_event(
+                            case_id,
+                            internal_event_key=f"{case_id}:UNLINKED",
+                            title=row["title"],
+                        )
+                    )
+                stats["events"] += len(events)
+
+                source_link_snapshot = {
+                    "record_id": source_fact["source_fact_revision_id"],
+                    "source_type": "MAJOR_EXCEL_SOURCE_FACT",
+                    "source_system": "MAJOR_EXCEL_IMPORT",
+                    "group_code": group_code,
+                    "source_hash": source_fact["source_hash"],
+                    "source_ref": source_ref,
+                    "itrs": list(row.get("itrs") or []),
+                    "binding_scope": "CASE_SHARED" if len(events) > 1 else "EVENT",
+                    "batch_id": batch_id,
+                    "run_id": run_id,
+                    "template_version": governance["template_version"],
+                    "mapping_version": governance["mapping_version"],
+                }
+                if len(events) > 1:
+                    # A single Excel row can explicitly describe several ITRs.
+                    # The repository source-link key is unique per source fact
+                    # and role, so repeated event-specific upserts would leave
+                    # the fact attached only to the last Event. Preserve one
+                    # truthful Case-level relation instead of rebinding it.
+                    self.repository.add_source_link(
+                        case_id,
+                        None,
+                        source_link_snapshot,
+                        standard_itr="",
+                        role="CURRENT_EVENT",
+                        status="LINKED",
+                    )
+                else:
+                    event = events[0]
+                    self.repository.add_source_link(
+                        case_id,
+                        event["event_id"],
+                        source_link_snapshot,
+                        standard_itr=event.get("standard_itr") or "",
+                        role="CURRENT_EVENT",
+                        status="LINKED" if event.get("standard_itr") else "NOT_FOUND",
+                    )
+
+                match = row.get("report_match") or {}
+                if match.get("matched_report_path"):
+                    document = self.repository.ingest_file(
+                        case_id,
+                        match["matched_report_path"],
+                        role="PRIMARY",
+                    )
+                    if document.get("media_type") != "DOC":
+                        parsed = parse_document(
+                            self.repository.attachment_path(document["version_id"])
+                        )
+                        self.repository.save_parse_result(
+                            document["version_id"],
+                            parsed,
+                        )
+                    report_event = events[0]
+                    binding_basis = "SINGLE_EVENT"
+                    if len(events) > 1:
+                        binding_itr = normalize_itr(match.get("event_binding_itr"))
+                        report_event = next(
+                            (
+                                event
+                                for event in events
+                                if normalize_itr(event.get("standard_itr")) == binding_itr
+                            ),
+                            None,
+                        )
+                        if report_event is None:
+                            raise ValueError("MULTI_EVENT_REPORT_BINDING_AMBIGUOUS")
+                        binding_basis = "REPORT_FILENAME_ITR"
+                    self.repository.add_source_link(
+                        case_id,
+                        report_event["event_id"],
+                        {
+                            "record_id": document["version_id"],
+                            "source_type": "MAJOR_SOURCE_DOCUMENT",
+                            "source_system": "MAJOR_SOURCE_INTAKE",
+                            "group_code": group_code,
+                            "source_hash": document["content_hash"],
+                            "file_name": document["original_filename"],
+                            "version_id": document["version_id"],
+                            "document_id": document["document_id"],
+                            "batch_id": batch_id,
+                            "run_id": run_id,
+                            "event_binding_basis": binding_basis,
+                            "event_binding_itr": report_event.get("standard_itr") or "",
+                        },
+                        standard_itr=report_event.get("standard_itr") or "",
+                        role="CURRENT_EVENT",
+                        status="LINKED" if report_event.get("standard_itr") else "NOT_FOUND",
+                    )
+                    stats["documents"] += 1
+
+                self.repository.update_case_status(case_id, "ACTIVE")
+                stats["imported"] += 1
+
+            stats["case_ids"] = list(dict.fromkeys(stats["case_ids"]))
+            with self.repository.transaction() as connection:
+                connection.execute(
+                    """UPDATE kb_major_import_batch
+                       SET status='COMPLETED',result_json=?,
+                           committed_at=CURRENT_TIMESTAMP
+                       WHERE batch_id=?""",
+                    (_json(stats), batch_id),
+                )
+                connection.execute(
+                    """UPDATE kb_major_import_run
+                       SET status='COMPLETED',imported_count=?,rejected_count=0,
+                           failed_count=0,result_json=?,completed_at=CURRENT_TIMESTAMP
+                       WHERE run_id=?""",
+                    (stats["imported"], _json(stats), run_id),
+                )
+            return stats
+        except Exception as exc:
+            attempted = {
+                key: stats[key]
+                for key in (
+                    "created_cases",
+                    "reused_cases",
+                    "source_fact_revisions",
+                    "events",
+                    "documents",
+                    "imported",
+                )
+            }
+            try:
+                self._restore_atomic_snapshot(snapshot_root)
+            except Exception as rollback_error:
+                raise ValueError("MAJOR_EXCEL_ATOMIC_ROLLBACK_FAILED") from rollback_error
+
+            stats.update(
+                {
+                    "imported": 0,
+                    "created_cases": 0,
+                    "reused_cases": 0,
+                    "source_fact_revisions": 0,
+                    "events": 0,
+                    "documents": 0,
+                    "failed": 1,
+                    "case_ids": [],
+                    "atomic_rollback": True,
+                    "attempted_before_rollback": attempted,
+                    "errors": [{"error": str(exc) or type(exc).__name__}],
+                }
+            )
+            with self.repository.transaction() as connection:
+                connection.execute(
+                    """UPDATE kb_major_import_batch
+                       SET status='FAILED',result_json=?,
+                           committed_at=CURRENT_TIMESTAMP
+                       WHERE batch_id=?""",
+                    (_json(stats), batch_id),
+                )
+                connection.execute(
+                    """UPDATE kb_major_import_run
+                       SET status='FAILED',imported_count=0,rejected_count=0,
+                           failed_count=1,result_json=?,completed_at=CURRENT_TIMESTAMP
+                       WHERE run_id=?""",
+                    (_json(stats), run_id),
+                )
+            raise ValueError("MAJOR_EXCEL_ATOMIC_COMMIT_FAILED") from exc
+        finally:
+            shutil.rmtree(snapshot_root, ignore_errors=True)

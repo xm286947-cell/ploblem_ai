@@ -170,6 +170,9 @@ class MajorKnowledgePublicationAdapter:
             if exc.code in {
                 "MAJOR_CASE_NOT_ACTIVE",
                 "NO_PUBLISHABLE_CONFIRMED_FACT",
+                "NO_PUBLISHABLE_HUMAN_REVISION",
+                "PUBLISH_REVIEW_REQUIRED",
+                "PUBLISH_REVISION_NOT_HUMAN",
                 "KNOWLEDGE_REVISION_UNAVAILABLE",
             }:
                 raise MajorKnowledgePublicationError("MAJOR_NOT_CONFIRMED") from exc

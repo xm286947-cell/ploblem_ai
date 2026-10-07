@@ -40,7 +40,7 @@ class _ClosingSQLiteConnection(sqlite3.Connection):
 
 
 class MajorKnowledgeRepository:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, db_path: str | Path, attachment_root: str | Path):
         self.db_path = Path(db_path)
@@ -77,6 +77,56 @@ class MajorKnowledgeRepository:
     def schema_version(self) -> int:
         with self.connect() as connection:
             return int(connection.execute("SELECT MAX(version) FROM kb_schema_version").fetchone()[0] or 0)
+
+    def add_source_fact_revision(
+        self,
+        case_id: str,
+        *,
+        source_type: str,
+        source_ref: str,
+        raw: dict,
+        normalized: dict,
+        actor: str,
+    ) -> dict:
+        """Persist a versioned Source Fact in the existing Major store."""
+        if not self.get_case(case_id):
+            raise KeyError(case_id)
+        source_type = str(source_type or "").strip().upper()
+        source_ref = str(source_ref or "").strip()
+        actor = str(actor or "").strip()
+        if not source_type or not source_ref or not actor:
+            raise ValueError("SOURCE_FACT_GOVERNANCE_REQUIRED")
+        hash_payload = {"raw": raw, "normalized": normalized, "source_ref": source_ref}
+        if source_type != "EXCEL":
+            hash_payload["source_type"] = source_type
+        source_hash = hashlib.sha256(_json(hash_payload).encode("utf-8")).hexdigest()
+        with self.transaction() as connection:
+            existing = connection.execute(
+                "SELECT * FROM kb_source_fact_revision WHERE case_id=? AND source_hash=?",
+                (case_id, source_hash),
+            ).fetchone()
+            if existing:
+                return {**dict(existing), "created": False}
+            revision_no = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(revision_no),0)+1 FROM kb_source_fact_revision WHERE case_id=?",
+                    (case_id,),
+                ).fetchone()[0]
+            )
+            revision_id = _id("KSF")
+            connection.execute(
+                """INSERT INTO kb_source_fact_revision(
+                     source_fact_revision_id,case_id,revision_no,source_type,
+                     source_ref,source_hash,raw_json,normalized_json,created_by)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (revision_id, case_id, revision_no, source_type, source_ref,
+                 source_hash, _json(raw), _json(normalized), actor),
+            )
+            row = connection.execute(
+                "SELECT * FROM kb_source_fact_revision WHERE source_fact_revision_id=?",
+                (revision_id,),
+            ).fetchone()
+        return {**dict(row), "created": True}
 
     def create_case(self, title: str, group_code: str, domain: str = "", case_type: str = "MAJOR_REVIEW", legacy_case_id: str = "") -> dict:
         if not title.strip() or not group_code.strip():
@@ -453,6 +503,140 @@ class MajorKnowledgeRepository:
                     (_id("KEV"), revision_id, item.get("fragment_id"), item.get("source_link_id"), item.get("locator", ""), item.get("excerpt", "")),
                 )
         return self.entry(entry_id) or {}
+
+    def replace_pending_source_fusion_entries(
+        self,
+        case_id: str,
+        event_id: str,
+        candidates: Iterable[dict],
+    ) -> list[dict]:
+        """Atomically replace pending machine candidates for an event."""
+        event = self.event(event_id)
+        if not event or event.get("case_id") != case_id:
+            raise ValueError("SOURCE_FUSION_EVENT_CASE_MISMATCH")
+        candidate_items = list(candidates)
+        for candidate in candidate_items:
+            status = str(candidate.get("status") or "")
+            content = str(candidate.get("content") or "")
+            evidence = list(candidate.get("evidence") or [])
+            if status == "MISSING":
+                if content.strip() or evidence:
+                    raise ValueError("SOURCE_FUSION_MISSING_MUST_BE_EMPTY")
+            elif status == "PENDING":
+                if not content.strip() or not evidence:
+                    raise ValueError("SOURCE_FUSION_CANDIDATE_REQUIRES_CONTENT_AND_EVIDENCE")
+            else:
+                raise ValueError("INVALID_SOURCE_FUSION_CANDIDATE_STATUS")
+
+        entry_ids: list[str] = []
+        with self.transaction() as connection:
+            connection.execute(
+                """UPDATE kb_entry SET archived_at=CURRENT_TIMESTAMP
+                   WHERE case_id=? AND event_id=? AND archived_at IS NULL
+                     AND status IN ('PENDING','MISSING')
+                     AND current_revision_id IN (
+                       SELECT revision_id FROM kb_entry_revision WHERE origin IN ('SOURCE_FUSION','AI')
+                     )""",
+                (case_id, event_id),
+            )
+            for candidate in candidate_items:
+                entry_id, revision_id = _id("KENTRY"), _id("KREV")
+                status = str(candidate["status"])
+                content = str(candidate.get("content") or "")
+                assertion_kind = "FACT" if status == "PENDING" else "UNKNOWN"
+                metadata = candidate.get("analysis_metadata") or {}
+                connection.execute(
+                    "INSERT INTO kb_entry(entry_id,case_id,event_id,entry_type,status) VALUES(?,?,?,?,?)",
+                    (entry_id, case_id, event_id, str(candidate["entry_type"]), status),
+                )
+                connection.execute(
+                    """INSERT INTO kb_entry_revision(
+                         revision_id,entry_id,revision_no,content,applicability,limitations,
+                         assertion_kind,origin,created_by)
+                       VALUES(?,?,1,?,'','',?,'SOURCE_FUSION','SOURCE_FUSION')""",
+                    (revision_id, entry_id, content, assertion_kind),
+                )
+                connection.execute(
+                    "UPDATE kb_entry SET current_revision_id=? WHERE entry_id=?",
+                    (revision_id, entry_id),
+                )
+                connection.execute(
+                    """INSERT INTO kb_entry_analysis_meta(
+                         revision_id,confidence,explanation,mechanism,metadata_json)
+                       VALUES(?,NULL,?,'',?)""",
+                    (revision_id, str(candidate.get("explanation") or ""), _json(metadata)),
+                )
+                for item in candidate.get("evidence") or []:
+                    connection.execute(
+                        """INSERT INTO kb_evidence(
+                             evidence_id,revision_id,fragment_id,source_link_id,locator,excerpt)
+                           VALUES(?,?,?,?,?,?)""",
+                        (_id("KEV"), revision_id, item.get("fragment_id"), item.get("source_link_id"),
+                         str(item.get("locator") or ""), str(item.get("excerpt") or "")),
+                    )
+                entry_ids.append(entry_id)
+        return [self.entry(entry_id) or {} for entry_id in entry_ids]
+
+    def save_semantic_standardization_proposals(
+        self,
+        case_id: str,
+        event_id: str,
+        proposals: Iterable[dict],
+    ) -> list[dict]:
+        """Attach Unified Runtime suggestions to eligible source candidates only."""
+        event = self.event(event_id)
+        if not event or event.get("case_id") != case_id:
+            raise ValueError("SOURCE_FUSION_EVENT_CASE_MISMATCH")
+        proposal_items = list(proposals)
+        updated_ids: list[str] = []
+        allowed_types = {"TRC_OCCURRENCE", "TRC_ESCAPE", "MRC_OCCURRENCE", "MRC_ESCAPE"}
+        with self.transaction() as connection:
+            for proposal in proposal_items:
+                entry_id = str(proposal.get("entry_id") or "")
+                content = str(proposal.get("content") or "").strip()
+                row = connection.execute(
+                    """SELECT e.entry_id,e.entry_type,e.status,e.archived_at,e.current_revision_id,
+                              r.origin,m.metadata_json
+                       FROM kb_entry e
+                       JOIN kb_entry_revision r ON r.revision_id=e.current_revision_id
+                       JOIN kb_entry_analysis_meta m ON m.revision_id=e.current_revision_id
+                       WHERE e.entry_id=? AND e.case_id=? AND e.event_id=?""",
+                    (entry_id, case_id, event_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("SEMANTIC_STANDARDIZATION_ENTRY_NOT_FOUND")
+                metadata = json.loads(row["metadata_json"] or "{}")
+                if (
+                    row["archived_at"] is not None
+                    or row["status"] != "PENDING"
+                    or row["origin"] != "SOURCE_FUSION"
+                    or row["entry_type"] not in allowed_types
+                    or metadata.get("source_status") != "AVAILABLE"
+                    or metadata.get("review_status") != "NOT_REQUIRED"
+                ):
+                    raise ValueError("SEMANTIC_STANDARDIZATION_NOT_ALLOWED")
+                evidence_ids = [
+                    str(item[0]) for item in connection.execute(
+                        "SELECT evidence_id FROM kb_evidence WHERE revision_id=? ORDER BY evidence_id",
+                        (row["current_revision_id"],),
+                    )
+                ]
+                if not content or not evidence_ids:
+                    raise ValueError("SEMANTIC_STANDARDIZATION_REQUIRES_SOURCE_EVIDENCE")
+                metadata["standardization"] = {
+                    "status": "PROPOSED",
+                    "content": content,
+                    "runtime_task_id": str(proposal.get("runtime_task_id") or ""),
+                    "provider_calls": int(proposal.get("provider_calls") or 0),
+                    "source_revision_id": str(row["current_revision_id"]),
+                    "evidence_ids": evidence_ids,
+                }
+                connection.execute(
+                    "UPDATE kb_entry_analysis_meta SET metadata_json=? WHERE revision_id=?",
+                    (_json(metadata), row["current_revision_id"]),
+                )
+                updated_ids.append(entry_id)
+        return [self.entry(entry_id) or {} for entry_id in updated_ids]
 
     def _entry_scope_kind(self, connection: sqlite3.Connection, entry: dict) -> str:
         if entry.get("event_id"):

@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
 from quality_knowledge.p0.intake_service import P0IntakeError, P0IntakeService
 from quality_knowledge.p0.repository import P0RepositoryError
@@ -589,7 +589,7 @@ def create_v2_router(
 
     def _repeat_http_error(error: Exception) -> HTTPException:
         code = getattr(error, "code", None) or str(error)
-        if code in {"ISSUE_NOT_FOUND", "ITR_NOT_FOUND", "REPEAT_QUERY_NOT_FOUND", "REPEAT_RESULT_NOT_FOUND", "CASE_NOT_FOUND"}:
+        if code in {"ISSUE_NOT_FOUND", "ITR_NOT_FOUND", "REPEAT_QUERY_NOT_FOUND", "REPEAT_RESULT_NOT_FOUND", "REPEAT_REPORT_NOT_FOUND", "CASE_NOT_FOUND"}:
             return HTTPException(404, code)
         if code in {"CASE_SERVICE_UNAVAILABLE", "SEARCH_UNAVAILABLE", "REPEAT_RISK_NOT_CONFIGURED"}:
             return HTTPException(503, code)
@@ -626,6 +626,20 @@ def create_v2_router(
             restored = _repeat_service().restore_result(knowledge_id)
             return restored or {"state": "NOT_RUN", "result": None}
         except (RepeatITRContractError, RepeatSearchContractError, RepeatResultContractError, HistoricalCaseContractError, KeyError) as error:
+            raise _repeat_http_error(error) from error
+
+    @router.get("/repeat-risk/queries/{query_id}/report")
+    def repeat_risk_report(
+        query_id: str,
+        format: str = "markdown",
+    ) -> Response:
+        try:
+            report = _repeat_service().report(query_id, format=format)
+            return Response(
+                content=report["content"],
+                media_type=report["content_type"],
+            )
+        except (KeyError, ValueError) as error:
             raise _repeat_http_error(error) from error
 
     @router.post("/repeat-risk/queries/{query_id}/decision")

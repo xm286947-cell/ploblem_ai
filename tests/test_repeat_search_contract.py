@@ -11,9 +11,11 @@ from quality_knowledge.repeat_risk import (
     SEARCH_UNAVAILABLE,
     RepeatHistoricalCaseSearchService,
     RepeatQueryTraceRepository,
+    RepeatResultService,
     RepeatSearchContractError,
 )
 from services.historical_case_contract import HistoricalCaseContractError
+from services.historical_case_contract import REPEAT_RISK_CONTEXT_CONTRACT_VERSION, REPEAT_SEMANTIC_TYPES
 
 
 class FakeHistoricalCaseClient:
@@ -25,6 +27,8 @@ class FakeHistoricalCaseClient:
         self.details = {}
         self.search_error = None
         self.detail_errors = {}
+        self.semantic_contexts = {}
+        self.semantic_errors = {}
         self.last_query = None
         self.last_top_k = None
 
@@ -40,6 +44,21 @@ class FakeHistoricalCaseClient:
         if error:
             raise HistoricalCaseContractError(error)
         return deepcopy(self.details[case_id])
+
+    def get_repeat_risk_context(self, case_id):
+        error = self.semantic_errors.get(case_id)
+        if error:
+            raise HistoricalCaseContractError(error)
+        return deepcopy(self.semantic_contexts.get(case_id, {
+            "contract_version": REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+            "case_id": case_id,
+            "semantic_mode": "LEGACY_GENERIC_ONLY",
+            "semantic_contract_version": None,
+            "typed_causes": [],
+            "typed_actions": [],
+            "semantic_coverage": {entry_type: "LEGACY_GENERIC_ONLY" for entry_type in REPEAT_SEMANTIC_TYPES},
+            "semantic_evidence_status": "LEGACY_GENERIC_ONLY",
+        }))
 
 
 def _repository(tmp_path):
@@ -163,6 +182,8 @@ def test_search_uses_itr_snapshot_and_historical_case_contract(tmp_path):
     assert candidate["source_ref"] == "ITR-H-1"
     assert candidate["evidence_refs"][0]["page"] == 3
     assert candidate["evidence"][0]["raw_text"] == "接收队列缺少流控。"
+    assert candidate["semantic_mode"] == "LEGACY_GENERIC_ONLY"
+    assert candidate["typed_causes"] == []
 
 
 def test_unselected_missed_test_never_enters_search_query(tmp_path):
@@ -240,6 +261,7 @@ def test_candidate_detail_failure_keeps_candidate_and_marks_incomplete(tmp_path)
     assert result["candidates"][0]["case_id"] == "CASE-H-1"
     assert result["candidates"][0]["detail_status"] == SEARCH_INCOMPLETE
     assert result["candidates"][0]["detail_error"] == "CASE_NOT_FOUND"
+    assert result["candidates"][0]["semantic_mode"] == "INCOMPLETE"
 
 
 def test_missing_evidence_never_guesses_source_ref(tmp_path):
@@ -266,3 +288,73 @@ def test_unknown_query_id_fails_closed(tmp_path):
         RepeatHistoricalCaseSearchService(repository, client).search("RQ-NOT-FOUND")
 
     assert error.value.code == "REPEAT_QUERY_NOT_FOUND"
+
+
+def test_typed_context_is_additive_and_does_not_change_retrieval_identity(tmp_path):
+    repository = _repository(tmp_path)
+    _save_trace(repository)
+    client = FakeHistoricalCaseClient()
+    client.search_result["candidates"] = [_candidate()]
+    client.details["CASE-H-1"] = _detail()
+    typed = {
+        "contract_version": REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+        "case_id": "CASE-H-1",
+        "semantic_mode": "TYPED",
+        "semantic_contract_version": "major-semantic-publish/v1",
+        "typed_causes": [{
+            "semantic_type": "TRC_OCCURRENCE",
+            "value": "队列缺少流控",
+            "source_type": "FUSED",
+            "evidence": [{"evidence_id": "E-1", "source_id": "ITR-H-1", "raw_text": "队列缺少流控"}],
+        }],
+        "typed_actions": [],
+        "semantic_coverage": {
+            **{entry_type: "MISSING" for entry_type in REPEAT_SEMANTIC_TYPES},
+            "TRC_OCCURRENCE": "PRESENT",
+        },
+        "semantic_evidence_status": "COMPLETE",
+    }
+    client.semantic_contexts["CASE-H-1"] = typed
+
+    result = RepeatHistoricalCaseSearchService(repository, client).search("RQ-1")
+    candidate = result["candidates"][0]
+
+    assert result["status"] == SEARCH_SUCCESS
+    assert (candidate["case_id"], candidate["rank"], candidate["retrieval_score"]) == ("CASE-H-1", 1, 0.91)
+    assert candidate["retrieval_reason"] == _candidate()["retrieval_reason"]
+    assert candidate["semantic_mode"] == "TYPED"
+    assert candidate["typed_causes"] == typed["typed_causes"]
+    assert candidate["semantic_coverage"]["TRC_ESCAPE"] == "MISSING"
+
+
+@pytest.mark.parametrize("error_code", [
+    "CASE_SEMANTIC_CONTRACT_UNSUPPORTED",
+    "CASE_SEMANTIC_EVIDENCE_INVALID",
+    "CASE_SEMANTIC_PROJECTION_INVALID",
+    "CASE_SEMANTIC_SOURCE_MISMATCH",
+])
+def test_typed_context_error_preserves_candidate_but_never_falls_back_to_generic(tmp_path, error_code):
+    repository = _repository(tmp_path)
+    _save_trace(repository)
+    client = FakeHistoricalCaseClient()
+    client.search_result["candidates"] = [_candidate()]
+    client.details["CASE-H-1"] = _detail()
+    client.semantic_errors["CASE-H-1"] = error_code
+
+    result = RepeatHistoricalCaseSearchService(repository, client).search("RQ-1")
+    candidate = result["candidates"][0]
+
+    assert result["status"] == SEARCH_INCOMPLETE
+    assert candidate["case_id"] == "CASE-H-1"
+    assert candidate["rank"] == 1
+    assert candidate["detail_status"] == SEARCH_INCOMPLETE
+    assert candidate["detail_error"] == error_code
+    assert "root_causes" not in candidate
+    assert "measures" not in candidate
+    assert candidate["typed_causes"] == []
+    assert candidate["semantic_mode"] == "INCOMPLETE"
+    saved_result = RepeatResultService(repository).build(result)
+    assert saved_result["result_status"] == "INCOMPLETE"
+    assert saved_result["human_decision"]["decision"] == "PENDING"
+    assert saved_result["candidates"][0]["root_causes"] == []
+    assert saved_result["candidates"][0]["measures"] == []
