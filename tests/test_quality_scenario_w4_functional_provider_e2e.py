@@ -202,3 +202,61 @@ def test_w4_controlled_provider_runs_g1_through_publish_and_portraits(tmp_path, 
             )
             assert portrait.status_code == 200, portrait.text
             assert marker in portrait.text, (axis, marker)
+
+        p04 = client.post(
+            "/api/v2/quality-scenario-insights/v1/query",
+            json={"view": "PRODUCT"},
+        )
+        assert p04.status_code == 200, p04.text
+        p04_payload = p04.json()
+        assert p04_payload["total"] == 1
+        cards = {item["metric_key"]: item["value"] for item in p04_payload["stat_cards"]}
+        assert cards["SOURCE_PROBLEM_COUNT"] == 1
+        assert cards["CUSTOMER_COVERAGE_COUNT"] == 1
+        assert cards["QUALITY_FOCUS_TYPE_COUNT"] == 1
+        p04_item = p04_payload["scenario_list"][0]
+        assert p04_item["source_problem_count"] == 1
+        assert p04_item["product_context"] == "PLC-X200"
+        assert p04_item["customer_context"] == "客户A"
+        assert p04_item["industry_context"] == "新能源"
+        assert p04_item["quality_focus"]
+
+        for view in ("CUSTOMER", "INDUSTRY"):
+            result = client.post(
+                "/api/v2/quality-scenario-insights/v1/query",
+                json={"view": view},
+            )
+            assert result.status_code == 200, result.text
+            assert result.json()["total"] == 1
+
+        portrait_api = client.post(
+            "/api/v2/quality-scenario-insights/v1/customer-quality-portrait/v1/query",
+            json={},
+        )
+        assert portrait_api.status_code == 200, portrait_api.text
+        portrait_payload = portrait_api.json()
+        assert portrait_payload["state"] == "NORMAL"
+        assert portrait_payload["input_count"] == 1
+        assert portrait_payload["result"]["quality_focus_distribution"]
+
+        portrait_job = client.post(
+            "/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/jobs",
+            json={"filters": {"customer_ref": "客户A"}},
+        )
+        assert portrait_job.status_code == 201, portrait_job.text
+        job_id = portrait_job.json()["job_id"]
+        archived = client.post(
+            f"/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/jobs/{job_id}/archive"
+        )
+        assert archived.status_code == 200, archived.text
+        archive_id = archived.json()["archive_id"]
+        archive_list = client.get(
+            "/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1"
+        )
+        assert archive_list.status_code == 200
+        assert archive_list.json()["total"] == 1
+        archive_detail = client.get(
+            f"/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/{archive_id}"
+        )
+        assert archive_detail.status_code == 200, archive_detail.text
+        assert archive_detail.json()["input_count"] == 1
