@@ -14,6 +14,11 @@ if not errorlevel 1 (
 
 if "%HARDWARE_SEARCH_PORT%"=="" set "HARDWARE_SEARCH_PORT=9200"
 if "%HARDWARE_SEARCH_DATA_DIR%"=="" set "HARDWARE_SEARCH_DATA_DIR=%USERPROFILE%\.hardware-knowledge\search-w0"
+if "%OPENSEARCH_JAVA_HOME%"=="" set "OPENSEARCH_JAVA_HOME=%OPENSEARCH_HOME%\jdk"
+if not exist "%OPENSEARCH_JAVA_HOME%\bin\java.exe" (
+  echo SEARCH_JAVA_HOME_INVALID: %OPENSEARCH_JAVA_HOME%
+  exit /b 5
+)
 if "%OPENSEARCH_JAVA_OPTS%"=="" set "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
 
 if not exist "%HARDWARE_SEARCH_DATA_DIR%\data" mkdir "%HARDWARE_SEARCH_DATA_DIR%\data"
