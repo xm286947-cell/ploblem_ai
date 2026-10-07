@@ -1650,7 +1650,12 @@ def create_app(db_path):
     qsv1_db = Path(os.getenv("QUALITY_SCENARIO_V1_DB_PATH") or db_path).resolve()
 
     from quality_knowledge.p04.api import create_p04_router, create_public_scenario_router
-    from quality_knowledge.p04.qsv1_provider import QualityScenarioV1P04Provider
+    from quality_knowledge.p04.portrait import PortraitArchiveRepository, PortraitService
+    from quality_knowledge.p04.portrait_api import create_portrait_router
+    from quality_knowledge.p04.qsv1_provider import (
+        QualityScenarioV1P04Provider,
+        QualityScenarioV1PortraitProvider,
+    )
     from quality_knowledge.p04.service import P04InsightService
     from quality_knowledge.web.p0_pages import create_p0_insights_router
     from quality_knowledge.web.quality_scenario_v1_api import create_quality_scenario_v1_router
@@ -1658,8 +1663,16 @@ def create_app(db_path):
 
     qsv1_provider = QualityScenarioV1P04Provider(qsv1_db)
     p04_service = P04InsightService(qsv1_provider)
+    portrait_provider = QualityScenarioV1PortraitProvider(qsv1_provider)
+    portrait_repository = PortraitArchiveRepository(
+        qsv1_db.with_name(qsv1_db.stem + ".p04-portrait.db")
+    )
+    portrait_service = PortraitService(portrait_provider, portrait_repository)
     standalone.state.p04_provider = qsv1_provider
     standalone.state.p04_service = p04_service
+    standalone.state.portrait_provider = portrait_provider
+    standalone.state.portrait_repository = portrait_repository
+    standalone.state.portrait_service = portrait_service
     standalone.state.quality_scenario_v1_db_path = str(qsv1_db)
 
     standalone.include_router(create_quality_scenario_v1_router(str(qsv1_db)))
@@ -1672,6 +1685,7 @@ def create_app(db_path):
     )
     standalone.include_router(create_p04_router(p04_service))
     standalone.include_router(create_public_scenario_router(p04_service))
+    standalone.include_router(create_portrait_router(portrait_service))
     standalone.include_router(
         create_p0_insights_router(
             scenario_detail_service=p04_service,
