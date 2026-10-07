@@ -2,11 +2,6 @@ name: Hardware AI Retrieval W1B Real Provider
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/hardware-ai-retrieval-w1b-runtime-binding
-    paths:
-      - ".github/workflows/hardware-ai-retrieval-w1b-real-provider.yml"
 
 permissions:
   contents: read
