@@ -1630,6 +1630,53 @@ def create_app(db_path):
     """
     router, state = create_legacy_quality_issue_router(db_path, initialize_schema=True)
     standalone = FastAPI(title='Quality Issue Knowledge', version='1.0-RC4')
+
+    # QualityScenario V1 browser pages are mounted inside the existing mature
+    # /quality-scenarios product namespace.  They intentionally reuse the
+    # already-developed templates and workflow API; no second host or shell is
+    # created.  Include these specific routes before the legacy
+    # /quality-scenarios/{scenario_id} catch-all.
+    qsv1_templates = Jinja2Templates(directory=str(BASE / 'templates'))
+    qsv1_pages = APIRouter()
+
+    @qsv1_pages.get('/quality-scenarios/workbench', response_class=HTMLResponse, include_in_schema=False)
+    def mature_quality_scenario_workbench(request: Request):
+        return qsv1_templates.TemplateResponse(
+            request,
+            'p0_quality_scenario_workbench.html',
+            {
+                'api_prefix': '/api/v2/quality-scenario-workflow/v1',
+                'page_base': '/quality-scenarios',
+                'page_title': '质量场景工作台 · QualityScenario V1',
+            },
+        )
+
+    @qsv1_pages.get('/quality-scenarios/library', response_class=HTMLResponse, include_in_schema=False)
+    def mature_quality_scenario_library(request: Request):
+        return qsv1_templates.TemplateResponse(
+            request,
+            'p0_quality_scenario_library.html',
+            {
+                'api_prefix': '/api/v2/quality-scenario-workflow/v1',
+                'page_base': '/quality-scenarios',
+                'page_title': '质量场景库 · QualityScenario V1',
+            },
+        )
+
+    @qsv1_pages.get('/quality-scenarios/library/{scenario_id}', response_class=HTMLResponse, include_in_schema=False)
+    def mature_quality_scenario_v1_detail(request: Request, scenario_id: str):
+        return qsv1_templates.TemplateResponse(
+            request,
+            'p0_quality_scenario_v1_detail.html',
+            {
+                'api_prefix': '/api/v2/quality-scenario-workflow/v1',
+                'page_base': '/quality-scenarios',
+                'scenario_id': scenario_id,
+                'page_title': '场景详情 · QualityScenario V1',
+            },
+        )
+
+    standalone.include_router(qsv1_pages)
     standalone.include_router(router)
 
     for name, value in vars(state).items():
