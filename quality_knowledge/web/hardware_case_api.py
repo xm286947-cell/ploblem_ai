@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from fastapi.responses import FileResponse
 
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_ai_retrieval import HardwareCaseAIRetrievalError
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
@@ -73,6 +74,8 @@ def create_hardware_case_router(
     r1_structurer_factory: Callable[[], Any] | None = None,
     r1_preview_store: HardwareR1PreviewStore | None = None,
     r1_stage_cache_invalidator: Callable[[str], int] | None = None,
+    ai_search_service: Any | None = None,
+    retrieval_catalog_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -398,14 +401,42 @@ def create_hardware_case_router(
     ) -> dict[str, Any]:
         role = _role(x_hardware_case_role)
         try:
-            return service.search_cases(
+            search_service = ai_search_service or service
+            return search_service.search_cases(
                 q,
                 role=role,
                 statuses=status,
                 historical=historical,
             )
-        except HardwareCaseContractError as error:
+        except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
+
+    @router.get("/retrieval/status")
+    def retrieval_status() -> dict[str, Any]:
+        return {
+            "status": "READY" if ai_search_service is not None else "LEGACY_ONLY",
+            "ai_search_enabled": ai_search_service is not None,
+            "index_rebuild_available": retrieval_catalog_service is not None,
+            "formal_knowledge_write": False,
+        }
+
+    @router.post("/retrieval/rebuild")
+    def rebuild_retrieval_index(
+        generation_id: str | None = None,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if retrieval_catalog_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="HARDWARE_RETRIEVAL_REBUILD_UNAVAILABLE",
+            )
+        try:
+            return retrieval_catalog_service.rebuild_all(generation_id)
+        except HardwareCaseAIRetrievalError as error:
+            raise HTTPException(status_code=503, detail=error.code) from error
 
     @router.get("/trees/{tree_type}")
     def get_tree(tree_type: str) -> dict[str, Any]:
