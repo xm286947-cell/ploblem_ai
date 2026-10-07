@@ -14,10 +14,6 @@ on:
 permissions:
   contents: read
 
-env:
-  OPENSEARCH_VERSION: "3.9.0"
-  HARDWARE_SEARCH_BASE_URL: "http://127.0.0.1:9200"
-
 jobs:
   unit:
     runs-on: ubuntu-latest
@@ -33,15 +29,11 @@ jobs:
 
   macos-native:
     runs-on: macos-latest
-    env:
-      HARDWARE_SEARCH_DATA_DIR: ${{ runner.temp }}/hardware-search-data
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -51,17 +43,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="3.9.0"
           case "$(uname -m)" in
             arm64|aarch64) ARCH="arm64" ;;
             x86_64|amd64) ARCH="x64" ;;
             *) echo "unsupported architecture: $(uname -m)"; exit 2 ;;
           esac
-          ARCHIVE="$RUNNER_TEMP/opensearch-${OPENSEARCH_VERSION}-linux-${ARCH}.tar.gz"
-          curl --fail --location --retry 3 \
-            "https://artifacts.opensearch.org/releases/bundle/opensearch/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}-linux-${ARCH}.tar.gz" \
-            --output "$ARCHIVE"
+          ARCHIVE="$RUNNER_TEMP/opensearch-$VERSION-linux-$ARCH.tar.gz"
+          curl --fail --location --retry 3             "https://artifacts.opensearch.org/releases/bundle/opensearch/$VERSION/opensearch-$VERSION-linux-$ARCH.tar.gz"             --output "$ARCHIVE"
           tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
-          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-${OPENSEARCH_VERSION}" >> "$GITHUB_ENV"
+          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-$VERSION" >> "$GITHUB_ENV"
+          echo "HARDWARE_SEARCH_DATA_DIR=$RUNNER_TEMP/hardware-search-data" >> "$GITHUB_ENV"
+          echo "HARDWARE_SEARCH_BASE_URL=http://127.0.0.1:9200" >> "$GITHUB_ENV"
 
       - name: Start native OpenSearch
         shell: bash
@@ -101,11 +94,8 @@ jobs:
 
   windows-native:
     runs-on: windows-latest
-    env:
-      HARDWARE_SEARCH_DATA_DIR: C:\hardware-search-w0-data
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -113,11 +103,14 @@ jobs:
       - name: Download native Windows ZIP
         shell: pwsh
         run: |
-          $archive = "C:\opensearch-$env:OPENSEARCH_VERSION-windows-x64.zip"
-          $url = "https://artifacts.opensearch.org/releases/bundle/opensearch/$env:OPENSEARCH_VERSION/opensearch-$env:OPENSEARCH_VERSION-windows-x64.zip"
+          $version = "3.9.0"
+          $archive = "C:\opensearch-$version-windows-x64.zip"
+          $url = "https://artifacts.opensearch.org/releases/bundle/opensearch/$version/opensearch-$version-windows-x64.zip"
           Invoke-WebRequest -Uri $url -OutFile $archive
           Expand-Archive -Path $archive -DestinationPath C:\ -Force
-          "OPENSEARCH_HOME=C:\opensearch-$env:OPENSEARCH_VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OPENSEARCH_HOME=C:\opensearch-$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HARDWARE_SEARCH_DATA_DIR=C:\hardware-search-w0-data" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HARDWARE_SEARCH_BASE_URL=http://127.0.0.1:9200" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Start native OpenSearch through BAT launcher
         shell: pwsh
