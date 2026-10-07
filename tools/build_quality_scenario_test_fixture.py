@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from quality_knowledge.materials import MaterialRepository
 from quality_knowledge.repositories.v1_repository import IssueKnowledgeRepository
 from quality_knowledge.scenarios import ScenarioRepository
+from quality_knowledge.web.app import create_legacy_quality_issue_router
 
 
 FIXTURE_VERSION = "quality-scenario-w4-functional-fixture/v1"
@@ -292,6 +293,15 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
         raise RuntimeError("FIXTURE_DB_ALREADY_EXISTS_USE_RESET")
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Initialize the complete mature Quality host schema so the fixture can be
+    # bound read-only through Overall's strict legacy DB compatibility gate.
+    # This still creates only source/business-side structures; no QSV1 lifecycle
+    # outcome is pre-seeded.
+    create_legacy_quality_issue_router(
+        db_path,
+        initialize_schema=True,
+        qsv1_db_path=db_path,
+    )
     issues = IssueKnowledgeRepository(db_path)
     materials = MaterialRepository(db_path)
     ScenarioRepository(db_path)

@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.app import create_app
+from quality_knowledge.web.legacy_database_binding import validate_legacy_database
 from tools.build_quality_scenario_test_fixture import (
     FIXTURE_VERSION,
     advance_g5,
@@ -143,3 +144,11 @@ def test_g5_source_revision_changes_bundle_revision_and_preserves_source_only_co
 
     workflow = client.get("/api/v2/quality-scenario-workflow/v1/quality-scenarios")
     assert workflow.json()["total"] == 0
+
+
+def test_fixture_is_compatible_with_overall_legacy_binding_gate(tmp_path):
+    db = tmp_path / "w4-fixture.db"
+    build_fixture(db)
+    legacy_db, error = validate_legacy_database(tmp_path / "overall-p0.db", db)
+    assert error is None
+    assert legacy_db == db.resolve()
