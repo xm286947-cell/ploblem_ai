@@ -315,6 +315,12 @@ class HardwareCaseAIRetrievalService:
                         if isinstance(source, Mapping) and source.get("uri")
                         else None
                     ),
+                    "source_id": (
+                        str(source.get("source_id"))
+                        if isinstance(source, Mapping) and source.get("source_id")
+                        else None
+                    ),
+                    "binding_mode": "FORMAL_KNOWLEDGE_DIRECT",
                     "evidence_type": str(
                         resolved.get("evidence_type")
                         or (
