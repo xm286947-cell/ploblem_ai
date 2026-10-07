@@ -144,12 +144,11 @@ W1A_EVIDENCE_JOB=112640190622
 W1A_TEST_RESULT=13 passed in 0.30s
 
 W1B_RUNTIME_BINDING=PASS
-W1B_REAL_PROVIDER_TAGGING=EXTERNAL_ENV_PENDING
+W1B_REAL_AGENT_VALIDATION=CODEX_MANUAL_HARNESS_ONLY
 W1B_TARGETED_CI=17 passed
 W1B_RUNTIME_CORE_CHANGE=NO
-W1B_REAL_PROVIDER_GITHUB_PROFILE=BLOCKED_DASHSCOPE_BASE_URL_NOT_CONFIGURED
-W1B_REAL_PROVIDER_LOCAL_EXTERNAL_CONFIG=SUPPORTED
-W1B_REAL_PROVIDER_BLOCKS_DEVELOPMENT=NO
+W1B_PROVIDER_CONFIG=HARDWARE_CASE_MODEL_CONFIG_REUSE
+W1B_CI_PROVIDER_MODE=MOCK_ONLY
 W1C_OPENSEARCH_INDEX_DOCUMENT=IN_PROGRESS
 
 W1_PASS=NO
@@ -173,18 +172,25 @@ W1B_VALIDATOR_CHAIN=PASS
 RUNTIME_CORE_CHANGE=NO
 RUNTIME_CONTRACT_CHANGE=NO
 
-W1B_REAL_PROVIDER_RUN=37575096897
-W1B_REAL_PROVIDER_JOB=112642097283
-W1B_REAL_PROVIDER_TAGGING=BLOCKED_BY_REAL_PROVIDER_ENV
-W1B_REAL_PROVIDER_CALL_EXECUTED=NO
-BLOCKER=DASHSCOPE_BASE_URL_NOT_CONFIGURED
-CREDENTIAL_READ_OR_PRINT=NO
+W1B_REAL_PROVIDER_CI=REMOVED
+W1B_REAL_AGENT_VALIDATION=CODEX_MANUAL_HARNESS_ONLY
+W1B_REAL_AGENT_HARNESS=tools/hardware_retrieval_real_agent_validation.py
+W1B_REAL_AGENT_AUTHORIZATION=--execute-real_REQUIRED
+W1B_REAL_AGENT_RUN=NOT_RUN_BY_CI
+W1B_REAL_AGENT_SAMPLE_INPUT=tests/fixtures/hardware_retrieval_real_agent_cases.json
+W1B_AGENT_DEFINITION=INDEPENDENT
+W1B_PROVIDER_CONFIG=HARDWARE_CASE_MODEL_CONFIG_REUSE
 
-The real-provider workflow failed before dependency installation and before
-model invocation because the existing repository real-provider environment
-profile is not configured. This is an environment gate, not a product-code
-failure. The workflow is left manual-only via workflow_dispatch to prevent
-repeated provider attempts on ordinary branch pushes.
+The retrieval Agent, Prompt, and structured output Schema remain independent.
+Provider/model selection reuses the existing Hardware Case model configuration
+path; CI remains Mock / Contract / Regression only. The explicit Codex harness
+accepts a JSON array of Formal-derived `hardware-knowledge-consumption/v1`
+projections and refuses to construct Runtime unless `--execute-real` is given.
+Three synthetic engineering examples (MCU RESET_N reset, CAN interruption, and
+LDO output oscillation) are provided as harness input fixtures; they are not
+Formal Knowledge records or production data.
+This correction prepares the manual validation path but does not execute a
+real Agent or Provider call.
 
 W1_PASS=NO
 W1C_OPENSEARCH_INDEX_DOCUMENT=IN_PROGRESS

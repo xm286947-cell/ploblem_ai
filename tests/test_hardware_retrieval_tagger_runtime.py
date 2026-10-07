@@ -162,7 +162,7 @@ def test_w1b_reuses_unified_runtime_and_validator(tmp_path: Path):
         invoker = HardwareRetrievalTaggerRuntimeInvoker(
             root=ROOT,
             environ={
-                "HARDWARE_RETRIEVAL_MODEL_CONFIG": str(cfg),
+                "HARDWARE_CASE_MODEL_CONFIG": str(cfg),
                 "HARDWARE_RETRIEVAL_RUNTIME_DB": str(runtime_db),
             },
         )
@@ -195,7 +195,7 @@ def test_w1b_request_is_idempotent_for_same_tagger_input(tmp_path: Path):
         invoker = HardwareRetrievalTaggerRuntimeInvoker(
             root=ROOT,
             environ={
-                "HARDWARE_RETRIEVAL_MODEL_CONFIG": str(cfg),
+                "HARDWARE_CASE_MODEL_CONFIG": str(cfg),
                 "HARDWARE_RETRIEVAL_RUNTIME_DB": str(tmp_path / "runtime.db"),
             },
         )
@@ -228,7 +228,7 @@ def test_w1b_runtime_schema_rejects_invalid_tag_kind(tmp_path: Path):
         invoker = HardwareRetrievalTaggerRuntimeInvoker(
             root=ROOT,
             environ={
-                "HARDWARE_RETRIEVAL_MODEL_CONFIG": str(cfg),
+                "HARDWARE_CASE_MODEL_CONFIG": str(cfg),
                 "HARDWARE_RETRIEVAL_RUNTIME_DB": str(tmp_path / "runtime.db"),
             },
         )
