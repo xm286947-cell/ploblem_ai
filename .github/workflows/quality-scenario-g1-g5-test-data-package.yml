@@ -1,0 +1,32 @@
+name: Quality Scenario G1-G5 Test Data Package
+
+on:
+  push:
+    branches:
+      - test/quality-scenario-g1-g5-data-package-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Build deterministic G1-G5 source data package
+        run: python tools/build_quality_scenario_g1_g5_test_data_package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_SCENARIO_G1_G5_TEST_DATA
+          path: dist/QUALITY_SCENARIO_G1_G5_TEST_DATA_*.zip
+          if-no-files-found: error
+          retention-days: 30
