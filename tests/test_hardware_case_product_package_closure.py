@@ -52,9 +52,9 @@ def test_candidate_packages_local_nonprod_knowledge_binding_without_old_install(
     assert "knowledge_production/release.py" in closure["files"]
     assert not closure["unresolved_local_imports"]
 
-    # The Candidate reuses the existing Knowledge facade and data root. It
-    # must not bundle another repository implementation or store.
-    assert "repositories/json_repository.py" not in closure["files"]
+    # The Candidate reuses the existing Knowledge facade and artifact store;
+    # this is the same repository implementation, not a second store.
+    assert "repositories/json_repository.py" in closure["files"]
     assert package_builder.CLOSURE_ROOTS.count(binding) == 1
 
 

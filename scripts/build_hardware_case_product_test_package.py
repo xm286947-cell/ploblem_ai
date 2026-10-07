@@ -121,6 +121,9 @@ CLOSURE_ROOTS = [
     "quality_knowledge/web/p0_app.py",
     "services/hardware_case_runtime_adapter.py",
     "services/hardware_r1_e2e_nonprod_knowledge.py",
+    # JsonArtifactRepository is exported through repositories.__getattr__, so
+    # the AST scanner cannot discover this lazy import from the package root.
+    "repositories/json_repository.py",
 ]
 
 LOCAL_IMPORT_PREFIXES = {
@@ -372,7 +375,6 @@ def security_assertions(files: list[dict[str, object]]) -> None:
         "quality_knowledge/web/p1_pages.py",
         "services/historical_case_contract.py",
         "services/knowledge_service.py",
-        "repositories/json_repository.py",
         "main.py",
     }
     for entry in files:
