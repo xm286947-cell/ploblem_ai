@@ -40,6 +40,10 @@ from repositories.hardware_tree_import_repository import HardwareTreeImportRepos
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_ai_retrieval import (
+    HardwareCaseAIRetrievalService,
+    HardwareRetrievalCatalogService,
+)
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_knowledge_adapter import (
     HardwareCaseKnowledgeAdapter,
@@ -78,6 +82,17 @@ from services.hardware_durable_mutation_gate import (
     HardwareDurableMutationGate,
 )
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
+from services.hardware_search_adapter import HardwareSearchAdapter
+from services.hardware_retrieval_query import HardwareRetrievalQueryService
+from services.hardware_retrieval_indexer import (
+    METADATA_DB_FILENAME,
+    HardwareRetrievalGenerationIndexer,
+    HardwareRetrievalMetadataStore,
+)
+from services.hardware_retrieval_tagger import HardwareRetrievalTagger
+from services.hardware_retrieval_tagger_runtime import (
+    build_hardware_retrieval_tagger_runtime,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -508,6 +523,80 @@ def create_p0_app(
             app.state.hardware_case_repository = hardware_case_repository
             app.state.hardware_case_service = hardware_case_service
 
+            hardware_retrieval_query_service = None
+            hardware_retrieval_catalog_service = None
+            hardware_retrieval_status: dict[str, Any] = {
+                "ready": False,
+                "mode": "SQLITE_FORMAL_FALLBACK",
+                "code": "OPENSEARCH_NOT_CONFIGURED",
+            }
+            hardware_search_base_url = str(
+                os.getenv("HARDWARE_SEARCH_BASE_URL") or ""
+            ).strip()
+            if hardware_search_base_url:
+                try:
+                    hardware_search_adapter = HardwareSearchAdapter(
+                        hardware_search_base_url,
+                        timeout_seconds=float(
+                            os.getenv("HARDWARE_SEARCH_TIMEOUT_SECONDS") or "5"
+                        ),
+                    )
+                    hardware_search_alias = str(
+                        os.getenv("HARDWARE_SEARCH_INDEX_ALIAS")
+                        or "hardware-knowledge-search-active"
+                    ).strip()
+                    hardware_retrieval_query_service = HardwareRetrievalQueryService(
+                        hardware_search_adapter,
+                        index_alias=hardware_search_alias,
+                    )
+                    hardware_retrieval_metadata_store = HardwareRetrievalMetadataStore(
+                        hardware_data_root / "rebuildable" / METADATA_DB_FILENAME
+                    )
+                    hardware_retrieval_indexer = HardwareRetrievalGenerationIndexer(
+                        hardware_search_adapter,
+                        hardware_retrieval_metadata_store,
+                        alias=hardware_search_alias,
+                    )
+
+                    def hardware_retrieval_tagger_factory() -> HardwareRetrievalTagger:
+                        return HardwareRetrievalTagger(
+                            build_hardware_retrieval_tagger_runtime()
+                        )
+
+                    hardware_retrieval_catalog_service = (
+                        HardwareRetrievalCatalogService(
+                            hardware_knowledge_consumption_service,
+                            tagger_factory=hardware_retrieval_tagger_factory,
+                            indexer=hardware_retrieval_indexer,
+                        )
+                    )
+                    hardware_retrieval_status = {
+                        "ready": True,
+                        "mode": "OPENSEARCH_WITH_FALLBACK",
+                        "code": "READY",
+                        "index_alias": hardware_search_alias,
+                    }
+                except Exception as error:
+                    hardware_retrieval_status = {
+                        "ready": False,
+                        "mode": "SQLITE_FORMAL_FALLBACK",
+                        "code": str(
+                            getattr(error, "code", None)
+                            or "OPENSEARCH_CONFIGURATION_INVALID"
+                        ),
+                    }
+
+            hardware_ai_search_service = HardwareCaseAIRetrievalService(
+                hardware_case_service,
+                retrieval_query_service=hardware_retrieval_query_service,
+                consumption_service=hardware_knowledge_consumption_service,
+            )
+            app.state.hardware_ai_search_service = hardware_ai_search_service
+            app.state.hardware_retrieval_catalog_service = (
+                hardware_retrieval_catalog_service
+            )
+            app.state.hardware_retrieval_status = hardware_retrieval_status
+
             hardware_source_root = (
                 Path(hardware_case_source_root)
                 if hardware_case_source_root is not None
@@ -838,6 +927,8 @@ def create_p0_app(
                             root=project_root,
                         )
                     ),
+                    ai_search_service=hardware_ai_search_service,
+                    retrieval_catalog_service=hardware_retrieval_catalog_service,
                 )
             )
             app.include_router(
@@ -883,6 +974,13 @@ def create_p0_app(
         else:
             app.state.hardware_case_repository = None
             app.state.hardware_case_service = None
+            app.state.hardware_ai_search_service = None
+            app.state.hardware_retrieval_catalog_service = None
+            app.state.hardware_retrieval_status = {
+                "ready": False,
+                "mode": "UNAVAILABLE",
+                "code": "HARDWARE_DATA_NOT_READY",
+            }
             app.state.hardware_case_source_store = None
             app.state.hardware_case_intake_service = None
             app.state.hardware_r1_preview_store = None
