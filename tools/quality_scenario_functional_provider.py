@@ -8,8 +8,10 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-EVIDENCE_ID = "bundle.analysis.escape.verification_gap"
+EVIDENCE_ID = "bundle.analysis.occurrence.root_cause_summary"
 
+# Use evidence that exists for every G1-G5 source bundle. Missing MISSED_TEST in G2
+# must remain MISSING and must never be masked by a mock-only escape-analysis citation.
 FUNCTIONAL_RESPONSE = {
     "fields": {
         "customer_experience": {
