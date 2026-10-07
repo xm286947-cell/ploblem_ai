@@ -1,0 +1,133 @@
+{
+  "name": "QS W4 P04 Portrait Final Candidate 037be19",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-p04-final-037be19"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-p04-final-037be19.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PRODUCT_SOURCE_SHA": "037be19dbe09e56146bdc993427de4590f83580b",
+    "PACKAGE_BASENAME": "QUALITY_PLATFORM_W4_MAC_P04_CLOSURE_037be19dbe09"
+  },
+  "jobs": {
+    "validate": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "037be19dbe09e56146bdc993427de4590f83580b"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Focused closure regression",
+          "shell": "bash",
+          "run": "python -m pytest -q tests/test_quality_scenario_w4_functional_provider_e2e.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_p04_quality_scenario_insight.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_openai_mock_runtime_integration.py::test_openai_mock_bind_does_not_require_reverse_dns"
+        }
+      ]
+    },
+    "mac": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 35,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "037be19dbe09e56146bdc993427de4590f83580b"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Prepare package-like environment",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m venv --system-site-packages .venv\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db"
+        },
+        {
+          "name": "Mac native-host P04 closure",
+          "shell": "bash",
+          "run": "python - <<'PY'\nimport json,os,signal,subprocess,time,urllib.request\nfrom pathlib import Path\nroot=Path.cwd()\nlog_path=root/'validation'/'mac_p04_closure.log'\nlog=log_path.open('w+',encoding='utf-8',errors='replace')\nproc=subprocess.Popen(\n    ['./start_w4_mac_functional_provider_golden.command','--host','127.0.0.1','--port','18083'],\n    cwd=root,stdout=log,stderr=subprocess.STDOUT,text=True,start_new_session=True,\n)\nbase='http://127.0.0.1:18083'\ntry:\n    ok=False\n    for _ in range(720):\n        try:\n            urllib.request.urlopen(base+'/software-assessment',timeout=1)\n            ok=True\n            break\n        except Exception:\n            if proc.poll() is not None: break\n            time.sleep(.25)\n    if not ok:\n        log.flush(); log.seek(0)\n        raise AssertionError('MAC_HOST_NOT_READY\\n'+log.read()[-12000:])\n    manifest=json.load(open(root/'validation'/'quality_scenario_w4_fixture.db.fixture.json',encoding='utf-8'))\n    g1=next(x for x in manifest['cases'] if x['case_id']=='G1_COMPLETE')\n    def req(method,path,payload=None):\n        data=None if payload is None else json.dumps(payload,ensure_ascii=False).encode('utf-8')\n        r=urllib.request.Request(base+path,data=data,method=method,headers={'Content-Type':'application/json'})\n        with urllib.request.urlopen(r,timeout=30) as resp:\n            raw=resp.read()\n            return resp.status,(json.loads(raw.decode('utf-8')) if resp.headers.get_content_type()=='application/json' else raw.decode('utf-8'))\n    payload={'material_ids':[g1['software_assessment_material_id']],'trigger_source':'HIGH_PERCEPTION','trigger_reason':'W4_MAC_FUNCTIONAL_GOLDEN'}\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload); assert s==200 and p['items'][0]['state']=='READY',p\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload); assert s==200,start\n    tid=start['task_id']; task=None\n    for _ in range(300):\n        s,task=req('GET',f'/api/v2/software-assessment/quality-scenario/generations/{tid}')\n        if 'ANALYZING' not in {x.get('state') for x in task.get('items',[])}: break\n        time.sleep(.1)\n    assert task['items'][0]['state']=='CANDIDATE_CREATED',task\n    scenario=task['items'][0]['scenario']; sid=scenario['scenario_id']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/review',{'expected_scenario_version':scenario['scenario_version'],'review_status':'CONFIRMED','reviewer':'W4 Mac CI','comment':'P04 closure'}); assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/confirm',{'expected_scenario_version':scenario['scenario_version'],'quality_confirmed_by':'W4 Quality','technical_confirmed_by':'W4 Technical','confirmation_note':'P04 closure'}); assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/publish',{'expected_scenario_version':scenario['scenario_version'],'published_by':'W4 Mac CI'}); assert s==200 and r['scenario']['status']=='PUBLISHED',r\n    print('MAC_G1_SOURCE_TO_PUBLISH=PASS',flush=True)\n    s,p04=req('POST','/api/v2/quality-scenario-insights/v1/query',{'view':'PRODUCT'}); assert s==200,p04\n    cards={x['metric_key']:x['value'] for x in p04['stat_cards']}\n    assert cards['SOURCE_PROBLEM_COUNT']==1,cards\n    assert cards['CUSTOMER_COVERAGE_COUNT']==1,cards\n    assert cards['QUALITY_FOCUS_TYPE_COUNT']==1,cards\n    item=p04['scenario_list'][0]\n    assert item['product_context']=='PLC-X200',item\n    assert item['customer_context']=='客户A',item\n    assert item['industry_context']=='新能源',item\n    print('MAC_P04_MAPPING=PASS',flush=True)\n    for view in ('CUSTOMER','INDUSTRY'):\n        s,q=req('POST','/api/v2/quality-scenario-insights/v1/query',{'view':view}); assert s==200 and q['total']==1,q\n    print('MAC_P04_THREE_VIEWS=PASS',flush=True)\n    s,portrait=req('POST','/api/v2/quality-scenario-insights/v1/customer-quality-portrait/v1/query',{}); assert s==200,portrait\n    assert portrait['state']=='NORMAL' and portrait['input_count']==1,portrait\n    print('MAC_P04_PORTRAIT_QUERY=PASS',flush=True)\n    s,job=req('POST','/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/jobs',{'filters':{'customer_ref':'客户A'}}); assert s==201,job\n    jid=job['job_id']\n    s,arc=req('POST',f'/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/jobs/{jid}/archive',{}); assert s==200,arc\n    aid=arc['archive_id']\n    s,listing=req('GET','/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1'); assert s==200 and listing['total']==1,listing\n    s,detail=req('GET',f'/api/v2/quality-scenario-insights/v1/customer-quality-portrait-archive/v1/{aid}'); assert s==200 and detail['input_count']==1,detail\n    print('MAC_P04_PORTRAIT_ARCHIVE=PASS',flush=True)\n    for axis,marker in [('product','PLC-X200'),('industry','新能源'),('customer','客户A')]:\n        with urllib.request.urlopen(base+f'/quality-scenario-assets/portrait?portrait_axis={axis}',timeout=10) as resp:\n            html=resp.read().decode('utf-8')\n        assert marker in html,(axis,marker)\n    print('MAC_MATURE_PORTRAITS=PASS',flush=True)\nfinally:\n    try: os.killpg(proc.pid,signal.SIGTERM)\n    except ProcessLookupError: pass\n    try: proc.wait(timeout=8)\n    except subprocess.TimeoutExpired:\n        try: os.killpg(proc.pid,signal.SIGKILL)\n        except ProcessLookupError: pass\n        proc.wait(timeout=5)\n    log.close()\n\nPY"
+        }
+      ]
+    },
+    "package": {
+      "needs": [
+        "validate",
+        "mac"
+      ],
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 20,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "037be19dbe09e56146bdc993427de4590f83580b",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install product dependencies",
+          "run": "python -m pip install -r requirements.txt"
+        },
+        {
+          "name": "Build fixture",
+          "shell": "bash",
+          "run": "mkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt"
+        },
+        {
+          "name": "Build exact full-platform package",
+          "shell": "bash",
+          "run": "set -euo pipefail\nSTAGE=\"$RUNNER_TEMP/w4-p04\"\nrm -rf \"$STAGE\"; mkdir -p \"$STAGE\" dist\ngit archive \"$PRODUCT_SOURCE_SHA\" | tar -x -C \"$STAGE\"\nmkdir -p \"$STAGE/validation\"\ncp validation/quality_scenario_w4_fixture.db \"$STAGE/validation/\"\ncp validation/quality_scenario_w4_fixture.db.fixture.json \"$STAGE/validation/\"\ncp validation/fixture_build.txt \"$STAGE/validation/\"\npython -c \"from pathlib import Path; import os; Path('$STAGE/PRODUCT_SOURCE_SHA').write_text(os.environ['PRODUCT_SOURCE_SHA']+'\\\\n')\"\npython -c \"from pathlib import Path; import os,json; m={'package_type':'W4_MAC_P04_CLOSURE_CANDIDATE','package_scope':'FULL_CURRENT_QUALITY_PLATFORM','source_sha':os.environ['PRODUCT_SOURCE_SHA'],'test_fixture_included':True,'functional_provider':'CONTROLLED_OPENAI_MOCK','unified_runtime_reused':True,'p04_published_context_mapping':True,'p04_portrait_query_archive':True,'direct_qsv1_candidate_write':False,'direct_qsv1_publish_write':False,'real_provider_golden':False,'native_browser_golden':False,'macos_entry':'start_w4_mac_functional_provider_golden.command'}; Path('$STAGE/FULL_PLATFORM_MANIFEST.json').write_text(json.dumps(m,ensure_ascii=False,indent=2))\"\n(cd \"$STAGE\" && zip -q -r \"$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip\" .)\nsha256sum \"dist/${PACKAGE_BASENAME}.zip\" | tee \"dist/${PACKAGE_BASENAME}.zip.sha256\""
+        },
+        {
+          "name": "Verify package",
+          "shell": "bash",
+          "run": "python -c \"import json,os,pathlib,zipfile; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); assert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']; assert m['p04_published_context_mapping']; assert m['p04_portrait_query_archive']; assert not m['direct_qsv1_candidate_write']; assert not m['direct_qsv1_publish_write']; print('P04_CLOSURE_PACKAGE_IDENTITY=PASS')\""
+        },
+        {
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "QUALITY_PLATFORM_W4_MAC_P04_CLOSURE_037be19dbe09",
+            "path": "dist/QUALITY_PLATFORM_W4_MAC_P04_CLOSURE_037be19dbe09.zip\ndist/QUALITY_PLATFORM_W4_MAC_P04_CLOSURE_037be19dbe09.zip.sha256",
+            "if-no-files-found": "error",
+            "retention-days": 30,
+            "compression-level": 0
+          }
+        }
+      ]
+    }
+  }
+}
