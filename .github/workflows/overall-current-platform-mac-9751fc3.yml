@@ -1,0 +1,113 @@
+{
+  "name": "Overall Current Platform macOS Candidate 9751fc3",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/overall-current-platform-mac-9751fc3"
+      ],
+      "paths": [
+        ".github/workflows/overall-current-platform-mac-9751fc3.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PRODUCT_SOURCE_SHA": "9751fc3040564a02610600a20d84282945bd5187",
+    "PACKAGE_BASENAME": "OVERALL_CURRENT_PLATFORM_MAC_FUNCTIONAL_9751fc304056"
+  },
+  "jobs": {
+    "validate-and-package": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 40,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "9751fc3040564a02610600a20d84282945bd5187",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Verify exact source",
+          "shell": "bash",
+          "run": "set -euo pipefail\n[ \"$(git rev-parse HEAD)\" = \"$PRODUCT_SOURCE_SHA\" ]\ngit diff --check \"$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA\"\ntest -x START_OVERALL_CURRENT_PLATFORM_MAC.command\ntest ! -e start_w4_mac_functional_golden.command"
+        },
+        {
+          "name": "Focused regression",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m pytest -q tests/test_quality_scenario_w4_functional_fixture.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_step1b_qsv1_mature_preview.py tests/test_overall_frontend_shell.py tests/test_overall_legacy_capability_compatibility.py"
+        },
+        {
+          "name": "Build supporting fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt\ngrep -q 'W4_FUNCTIONAL_FIXTURE=READY' validation/fixture_build.txt\ngrep -q 'DIRECT_QSV1_CANDIDATE_WRITE=NO' validation/fixture_build.txt\ngrep -q 'DIRECT_QSV1_PUBLISH_WRITE=NO' validation/fixture_build.txt\npython tools/quality_scenario_real_data_preflight.py --db validation/quality_scenario_w4_fixture.db --require | tee validation/fixture_preflight.txt\ngrep -q 'REAL_DATA_PREFLIGHT=PASS' validation/fixture_preflight.txt"
+        },
+        {
+          "name": "Build Overall package",
+          "shell": "bash",
+          "run": "set -euo pipefail\nSTAGE=\"$RUNNER_TEMP/overall-current-platform\"\nrm -rf \"$STAGE\"\nmkdir -p \"$STAGE\" dist\ngit archive \"$PRODUCT_SOURCE_SHA\" | tar -x -C \"$STAGE\"\nmkdir -p \"$STAGE/validation\"\ncp validation/quality_scenario_w4_fixture.db \"$STAGE/validation/\"\ncp validation/quality_scenario_w4_fixture.db.fixture.json \"$STAGE/validation/\"\ncp validation/fixture_build.txt \"$STAGE/validation/\"\ncp validation/fixture_preflight.txt \"$STAGE/validation/\"\npython -c \"from pathlib import Path; import os; Path('$STAGE/PRODUCT_SOURCE_SHA').write_text(os.environ['PRODUCT_SOURCE_SHA']+'\\\\n',encoding='utf-8')\"\npython -c \"from pathlib import Path; import os,json; m={'package_type':'OVERALL_CURRENT_PLATFORM_MAC_FUNCTIONAL_CANDIDATE','package_scope':'FULL_CURRENT_PLATFORM','source_sha':os.environ['PRODUCT_SOURCE_SHA'],'default_entry':'/p0/overall','overall_shell':True,'domains':['MAJOR_REPEAT_RISK','HARDWARE_CASE','QUALITY_SCENARIO','STORAGE_LIFETIME'],'quality_scenario_standalone_package':False,'qs_w4_fixture_included':True,'qs_w4_fixture_role':'SUPPORTING_TEST_SOURCE','direct_qsv1_candidate_write':False,'direct_qsv1_publish_write':False,'real_mature_data_compatibility':'DEFERRED','macos_entry':'START_OVERALL_CURRENT_PLATFORM_MAC.command'}; Path('$STAGE/FULL_PLATFORM_MANIFEST.json').write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')\"\npython -c \"from pathlib import Path; import os; t='OVERALL CURRENT PLATFORM MAC FUNCTIONAL CANDIDATE\\\\n\\\\nSOURCE_SHA='+os.environ['PRODUCT_SOURCE_SHA']+'\\\\nPACKAGE_SCOPE=FULL_CURRENT_PLATFORM\\\\nQUALITY_SCENARIO_STANDALONE_PACKAGE=NO\\\\nDEFAULT_ENTRY=http://127.0.0.1:18080/p0/overall\\\\nDOMAINS=MAJOR_REPEAT_RISK,HARDWARE_CASE,QUALITY_SCENARIO,STORAGE_LIFETIME\\\\nQS_W4_FIXTURE_ROLE=SUPPORTING_TEST_SOURCE\\\\nDIRECT_QSV1_CANDIDATE_WRITE=NO\\\\nDIRECT_QSV1_PUBLISH_WRITE=NO\\\\nREAL_MATURE_DATA_COMPATIBILITY=DEFERRED\\\\n\\\\nSTART: ./START_OVERALL_CURRENT_PLATFORM_MAC.command --host 127.0.0.1 --port 18080\\\\n'; Path('$STAGE/00_README_FIRST.txt').write_text(t,encoding='utf-8')\"\ntest -x \"$STAGE/START_OVERALL_CURRENT_PLATFORM_MAC.command\"\ntest ! -e \"$STAGE/start_w4_mac_functional_golden.command\"\n(cd \"$STAGE\" && zip -q -r \"$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip\" .)\nsha256sum \"dist/${PACKAGE_BASENAME}.zip\" | tee \"dist/${PACKAGE_BASENAME}.zip.sha256\""
+        },
+        {
+          "name": "Verify Overall package identity",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -c \"import json,os,pathlib,zipfile; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); assert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']; assert m['package_scope']=='FULL_CURRENT_PLATFORM'; assert m['default_entry']=='/p0/overall'; assert m['overall_shell'] is True; assert m['quality_scenario_standalone_package'] is False; assert len(m['domains'])==4; assert 'START_OVERALL_CURRENT_PLATFORM_MAC.command' in z.namelist(); assert 'start_w4_mac_functional_golden.command' not in z.namelist(); print('OVERALL_PACKAGE_IDENTITY=PASS')\""
+        },
+        {
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "OVERALL_CURRENT_PLATFORM_MAC_FUNCTIONAL_9751fc304056",
+            "path": "dist/OVERALL_CURRENT_PLATFORM_MAC_FUNCTIONAL_9751fc304056.zip\ndist/OVERALL_CURRENT_PLATFORM_MAC_FUNCTIONAL_9751fc304056.zip.sha256",
+            "if-no-files-found": "error",
+            "retention-days": 30,
+            "compression-level": 0
+          }
+        }
+      ]
+    },
+    "smoke-macos-overall": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 40,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "9751fc3040564a02610600a20d84282945bd5187"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Create package-local runtime",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m venv .venv\n.venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt >/dev/null"
+        },
+        {
+          "name": "Build supporting fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\n.venv/bin/python tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db > validation/fixture_build.txt\nrm -f validation/overall_current_platform_p0.db"
+        },
+        {
+          "name": "Start Overall and smoke all four domains",
+          "shell": "bash",
+          "run": "set -euo pipefail\n./START_OVERALL_CURRENT_PLATFORM_MAC.command --host 127.0.0.1 --port 18083 > validation/overall_mac.log 2>&1 &\nPID=$!\ntrap 'kill $PID 2>/dev/null || true' EXIT\n.venv/bin/python -c \"import time,urllib.request,urllib.error,json,pathlib; base='http://127.0.0.1:18083'; ok=False\nfor _ in range(120):\n    try:\n        r=urllib.request.urlopen(base+'/p0/overall',timeout=2)\n        if r.status==200: ok=True; break\n    except Exception: time.sleep(.5)\nassert ok,'OVERALL_HOST_NOT_READY'\nroutes=['/p0/overall','/p0/cases','/p0/hardware-cases','/storage-workspace/','/software-assessment','/p0/quality-scenarios/workbench','/p0/quality-scenarios','/p0/quality-scenario-insights','/quality-scenario-assets/portrait?portrait_axis=product']\nfor p in routes:\n    try:\n        r=urllib.request.urlopen(base+p,timeout=5); print(p,r.status); assert r.status==200,(p,r.status)\n    except urllib.error.HTTPError as e:\n        print('ROUTE_FAIL',p,e.code,e.read().decode('utf-8','replace')[:500]); raise\nhtml=urllib.request.urlopen(base+'/p0/overall',timeout=5).read().decode('utf-8')\nfor marker in ['重大问题案例库','质量场景库','硬件案例库','存储器件寿命智能产品']:\n    assert marker in html,marker\nsa=urllib.request.urlopen(base+'/software-assessment',timeout=5).read().decode('utf-8')\nassert '异常掉电后关键配方参数丢失' in sa\nstatus=json.loads(urllib.request.urlopen(base+'/api/v2/quality-scenario-preview/status',timeout=5).read())\nprimary=pathlib.Path(status['V1_DB_ABSOLUTE_PATH']).resolve(); legacy=pathlib.Path('validation/quality_scenario_w4_fixture.db').resolve(); assert primary!=legacy,(primary,legacy); assert status['SYNTHETIC_FIXTURE_USED']=='NO'\nprint('OVERALL_MAC_START=PASS'); print('OVERALL_SHELL=/p0/overall'); print('MAJOR_DOMAIN=PASS'); print('HARDWARE_DOMAIN=PASS'); print('QUALITY_SCENARIO_DOMAIN=PASS'); print('STORAGE_DOMAIN=PASS'); print('LEGACY_FIXTURE_BOUND=PASS'); print('QSV1_PRIMARY_STORE_SEPARATED=PASS')\""
+        }
+      ]
+    }
+  }
+}
