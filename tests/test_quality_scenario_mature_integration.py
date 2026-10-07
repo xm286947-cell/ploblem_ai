@@ -30,4 +30,4 @@ def test_software_assessment_is_still_qsv1_production_entry(tmp_path):
     assert "data-sa-qsv1" in page.text
     assert "quality-scenario-production" in page.text
 
-# Package candidate sync marker
+# Package candidate sync marker v2
