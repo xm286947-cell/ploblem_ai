@@ -255,10 +255,21 @@ def _markdown(report: dict) -> str:
 
 
 def main() -> int:
-    if not os.environ.get("DASHSCOPE_BASE_URL"):
-        raise SystemExit("DASHSCOPE_BASE_URL_REQUIRED")
-    if not os.environ.get("DASHSCOPE_API_KEY"):
-        raise SystemExit("DASHSCOPE_API_KEY_REQUIRED")
+    model_config = Path(
+        os.environ.get("REVERSE_QUALITY_MODEL_CONFIG")
+        or os.environ.get("QS_SEMANTIC_MODEL_CONFIG")
+        or (ROOT / "config/runtime/model.yaml")
+    ).expanduser().resolve()
+    if not model_config.exists():
+        raise SystemExit(f"SEMANTIC_MODEL_CONFIG_NOT_FOUND:{model_config}")
+    # Local macOS acceptance may use a non-committed model.local.yaml with inline
+    # credentials. The shared config/runtime/model.yaml instead resolves its
+    # endpoint/key from environment variables. Never print either credential.
+    if model_config.name == "model.yaml":
+        if not os.environ.get("DASHSCOPE_BASE_URL"):
+            raise SystemExit("DASHSCOPE_BASE_URL_REQUIRED")
+        if not os.environ.get("DASHSCOPE_API_KEY"):
+            raise SystemExit("DASHSCOPE_API_KEY_REQUIRED")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -274,13 +285,14 @@ def main() -> int:
     manifest = build_fixture(source_db)
 
     os.environ["QUALITY_SCENARIO_V1_DB_PATH"] = str(qsv1_db)
-    os.environ["REVERSE_QUALITY_MODEL_CONFIG"] = str(ROOT / "config/runtime/model.yaml")
+    os.environ["REVERSE_QUALITY_MODEL_CONFIG"] = str(model_config)
 
     app_port = _free_port()
     report = {
         "contract": "quality-scenario-mac-real-provider-semantic-e2e/v1",
         "product_source_sha": os.environ.get("GITHUB_SHA") or "LOCAL",
-        "provider": "qwen_prod/openai_compatible/real",
+        "provider": "real/openai_compatible",
+        "model_config_name": model_config.name,
         "source_fixture_contract": manifest.get("contract"),
         "direct_qsv1_candidate_write": False,
         "direct_qsv1_publish_write": False,
