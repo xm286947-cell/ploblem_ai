@@ -732,8 +732,24 @@ def create_hardware_case_router(
             except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
                 raise _http_error(error) from error
             for item in payload.get("evidence") or []:
-                if item.get("evidence_id") == evidence_id:
-                    return item
+                if item.get("evidence_id") != evidence_id:
+                    continue
+                if item.get("binding_mode") == "FORMAL_KNOWLEDGE_DIRECT":
+                    try:
+                        active_source = source_store.get_active_source(case_id)
+                    except HardwareCaseSourceError as error:
+                        raise _source_http(error) from error
+                    if (
+                        str(active_source.get("source_id") or "")
+                        != str(item.get("source_id") or "")
+                        or str(active_source.get("source_ref") or "")
+                        != str(item.get("source_ref") or "")
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="EVIDENCE_SOURCE_IDENTITY_MISMATCH",
+                        )
+                return item
             raise HTTPException(status_code=404, detail="EVIDENCE_NOT_FOUND")
 
         def _source_http(error: HardwareCaseSourceError) -> HTTPException:
