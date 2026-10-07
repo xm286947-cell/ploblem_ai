@@ -56,6 +56,10 @@ set "YAML_DATA_DIR=%HARDWARE_SEARCH_DATA_DIR:\=/%"
 
 set "OPENSEARCH_PATH_CONF=%W0_CONFIG_DIR%"
 
+rem The official Windows distribution startup adds native plugin libraries to PATH.
+rem Keep those runtime paths while bypassing the demo Security installer.
+set "PATH=%PATH%;%OPENSEARCH_HOME%\plugins\opensearch-knn\lib;%OPENSEARCH_HOME%\plugins\opensearch-neural-search\lib"
+
 echo Starting OpenSearch W0 on http://127.0.0.1:%HARDWARE_SEARCH_PORT%
 echo Config: %OPENSEARCH_PATH_CONF%
 echo Data: %HARDWARE_SEARCH_DATA_DIR%\data
