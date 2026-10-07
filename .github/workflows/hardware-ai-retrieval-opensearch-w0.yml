@@ -113,20 +113,10 @@ jobs:
           "HARDWARE_SEARCH_BASE_URL=http://127.0.0.1:9200" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Start native OpenSearch through BAT launcher
-        shell: pwsh
-        run: |
-          $out = "$env:RUNNER_TEMP\opensearch-stdout.log"
-          $err = "$env:RUNNER_TEMP\opensearch-stderr.log"
-          $bat = (Resolve-Path "scripts\opensearch\start_windows.bat").Path
-          $p = Start-Process -FilePath $env:ComSpec -ArgumentList @("/d", "/c", $bat) -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
-          $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper.pid"
-          Start-Sleep -Seconds 3
-          if ($p.HasExited) {
-            Write-Host "WINDOWS_LAUNCHER_EXIT_CODE=$($p.ExitCode)"
-            if (Test-Path $out) { Get-Content $out -ErrorAction SilentlyContinue }
-            if (Test-Path $err) { Get-Content $err -ErrorAction SilentlyContinue }
-            throw "WINDOWS_LAUNCHER_EXITED_EARLY"
-          }
+        id: windows_search_first
+        shell: cmd
+        run: call scripts\opensearch\start_windows.bat ^> "%RUNNER_TEMP%\opensearch-stdout.log" 2^> "%RUNNER_TEMP%\opensearch-stderr.log"
+        background: true
 
       - name: Early Windows process diagnostics
         shell: pwsh
@@ -152,17 +142,23 @@ jobs:
       - name: Bootstrap smoke
         run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 60
 
-      - name: Restart native OpenSearch
+      - cancel: windows_search_first
+
+      - name: Wait for first native process to stop
         shell: pwsh
         run: |
-          Get-CimInstance Win32_Process |
-            Where-Object { $_.CommandLine -like "*org.opensearch.bootstrap.OpenSearch*" } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-          Start-Sleep -Seconds 5
-          $out = "$env:RUNNER_TEMP\opensearch-restart.log"
-          $err = "$env:RUNNER_TEMP\opensearch-restart-stderr.log"
-          $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "scripts\opensearch\start_windows.bat" -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
-          $p.Id | Out-File "$env:RUNNER_TEMP\opensearch-wrapper-restart.pid"
+          for ($i = 0; $i -lt 30; $i++) {
+            $listener = Get-NetTCPConnection -LocalPort 9200 -State Listen -ErrorAction SilentlyContinue
+            if (-not $listener) { exit 0 }
+            Start-Sleep -Seconds 1
+          }
+          throw "WINDOWS_NATIVE_STOP_TIMEOUT"
+
+      - name: Restart native OpenSearch
+        id: windows_search_restart
+        shell: cmd
+        run: call scripts\opensearch\start_windows.bat ^> "%RUNNER_TEMP%\opensearch-restart.log" 2^> "%RUNNER_TEMP%\opensearch-restart-stderr.log"
+        background: true
 
       - name: Verify persistence after restart
         run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
@@ -205,6 +201,8 @@ jobs:
             Write-Host "===== $($_.FullName) ====="
             Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
           }
+
+      - cancel: windows_search_restart
 
       - name: Upload Windows logs
         if: always()
