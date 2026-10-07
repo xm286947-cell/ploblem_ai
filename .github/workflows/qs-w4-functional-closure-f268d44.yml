@@ -1,0 +1,139 @@
+{
+  "name": "QS W4 Functional Closure f268d44",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-functional-closure-f268d44"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-functional-closure-f268d44.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PRODUCT_SOURCE_SHA": "f268d4422f0591b5f93b317211557ff94e4a1958",
+    "PACKAGE_BASENAME": "QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f268d4422f05"
+  },
+  "jobs": {
+    "validate": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 35,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "f268d4422f0591b5f93b317211557ff94e4a1958",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Focused regression",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m pytest -q tests/test_quality_scenario_w4_functional_fixture.py tests/test_quality_scenario_w4_functional_provider_e2e.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py tests/test_qsv1_portrait_consumption.py tests/test_openai_mock_runtime_integration.py::test_openai_mock_bind_does_not_require_reverse_dns"
+        },
+        {
+          "name": "Build and preflight fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\nrm -f validation/quality_scenario_w4_fixture.db validation/quality_scenario_w4_fixture.db.fixture.json\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt\npython tools/quality_scenario_w4_functional_preflight.py --db validation/quality_scenario_w4_fixture.db --require | tee validation/fixture_preflight.txt\ngrep -q 'ITR_SOURCE_COUNT=5' validation/fixture_build.txt\ngrep -q 'W4_FUNCTIONAL_PREFLIGHT=PASS' validation/fixture_preflight.txt"
+        }
+      ]
+    },
+    "mac": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 40,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "f268d4422f0591b5f93b317211557ff94e4a1958"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Prepare package-like environment",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m venv --system-site-packages .venv\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db\npython tools/quality_scenario_w4_functional_preflight.py --db validation/quality_scenario_w4_fixture.db --require"
+        },
+        {
+          "name": "Mac canonical launcher full functional Golden",
+          "shell": "bash",
+          "run": "python - <<'PY'\nimport json,os,signal,subprocess,time,urllib.request\nfrom pathlib import Path\nroot=Path.cwd()\nlog_path=root/'validation'/'mac_functional_full.log'\nlog=log_path.open('w+',encoding='utf-8',errors='replace')\nproc=subprocess.Popen(\n    ['./start_w4_mac_functional_golden.command','--host','127.0.0.1','--port','18083'],\n    cwd=root,stdout=log,stderr=subprocess.STDOUT,text=True,start_new_session=True,\n)\nbase='http://127.0.0.1:18083'\ndef req(method,path,payload=None):\n    data=None if payload is None else json.dumps(payload,ensure_ascii=False).encode('utf-8')\n    r=urllib.request.Request(base+path,data=data,method=method,headers={'Content-Type':'application/json'})\n    with urllib.request.urlopen(r,timeout=30) as resp:\n        raw=resp.read()\n        if resp.headers.get_content_type()=='application/json':\n            return resp.status,json.loads(raw.decode('utf-8'))\n        return resp.status,raw.decode('utf-8')\ndef wait_task(tid):\n    last=None\n    for _ in range(400):\n        s,last=req('GET',f'/api/v2/software-assessment/quality-scenario/generations/{tid}')\n        assert s==200,last\n        if 'ANALYZING' not in {x.get('state') for x in last.get('items',[])}:\n            return last\n        time.sleep(.05)\n    raise AssertionError(last)\ndef payload(case):\n    return {'material_ids':[case['software_assessment_material_id']],'trigger_source':'HIGH_PERCEPTION','trigger_reason':'W4_MAC_FUNCTIONAL_GOLDEN'}\ndef publish(scenario):\n    sid=scenario['scenario_id']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/review',{'expected_scenario_version':scenario['scenario_version'],'review_status':'CONFIRMED','reviewer':'W4 Mac CI','comment':'functional golden'}); assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/confirm',{'expected_scenario_version':scenario['scenario_version'],'quality_confirmed_by':'W4 Quality','technical_confirmed_by':'W4 Technical','confirmation_note':'functional golden'}); assert s==200,r\n    scenario=r['scenario']\n    s,r=req('POST',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{sid}/publish',{'expected_scenario_version':scenario['scenario_version'],'published_by':'W4 Mac CI'}); assert s==200,r\n    assert r['scenario']['status']=='PUBLISHED',r\n    return r['scenario']\ntry:\n    ok=False\n    for _ in range(720):\n        try:\n            urllib.request.urlopen(base+'/software-assessment',timeout=1)\n            ok=True\n            break\n        except Exception:\n            if proc.poll() is not None: break\n            time.sleep(.25)\n    if not ok:\n        log.flush(); log.seek(0)\n        raise AssertionError('MAC_HOST_NOT_READY\\n'+log.read()[-12000:])\n    manifest=json.load(open(root/'validation'/'quality_scenario_w4_fixture.db.fixture.json',encoding='utf-8'))\n    cases={x['case_id']:x for x in manifest['cases']}\n    # G1: complete source + provider + publish + portrait chain.\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G1_COMPLETE'])); assert s==200,p\n    g1=p['items'][0]; assert g1['state']=='READY',g1\n    assert g1['bundle']['source_status']=={'SOFTWARE_ASSESSMENT':'PRESENT','RESOLUTION':'PRESENT','ITR':'PRESENT','MISSED_TEST':'PRESENT'},g1\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload(cases['G1_COMPLETE'])); assert s==200,start\n    t=wait_task(start['task_id']); assert t['items'][0]['state']=='CANDIDATE_CREATED',t\n    g1_pub=publish(t['items'][0]['scenario']); sid=g1_pub['scenario_id']\n    print('MAC_G1_COMPLETE_SOURCE=PASS',flush=True)\n    print('MAC_G1_SOURCE_TO_PUBLISH=PASS',flush=True)\n    s,p04=req('POST','/api/v2/quality-scenario-insights/v1/query',{'view':'PRODUCT'}); assert s==200,p04\n    cards={x['metric_key']:x['value'] for x in p04['stat_cards']}\n    assert cards['SOURCE_PROBLEM_COUNT']==1,cards\n    assert cards['CUSTOMER_COVERAGE_COUNT']==1,cards\n    assert cards['QUALITY_FOCUS_TYPE_COUNT']==1,cards\n    s,portrait=req('POST','/api/v2/quality-scenario-insights/v1/customer-quality-portrait/v1/query',{}); assert s==200 and portrait['input_count']==1,portrait\n    print('MAC_G1_P04_PORTRAIT=PASS',flush=True)\n    # G2: only missed-test source may be absent.\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G2_NO_MISSED_TEST'])); assert s==200,p\n    g2=p['items'][0]; assert g2['state']=='READY',g2\n    assert g2['bundle']['source_status']['ITR']=='PRESENT',g2\n    assert g2['bundle']['source_status']['MISSED_TEST']=='MISSING',g2\n    assert any(x.get('code')=='MISSED_TEST_EFFECTIVE_ANALYSIS_MISSING' for x in g2['bundle']['missing_information']),g2\n    print('MAC_G2_NO_MISSED_TEST=PASS',flush=True)\n    # G3: conflict stays fail closed.\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G3_CONFLICT'])); assert s==200,p\n    g3=p['items'][0]; assert g3['state']=='INFORMATION_REQUIRED',g3\n    assert g3['bundle']['source_status']['ITR']=='PRESENT',g3\n    assert g3['bundle']['source_status']['RESOLUTION']=='CONFLICT',g3\n    print('MAC_G3_CONFLICT_FAIL_CLOSED=PASS',flush=True)\n    # G4: product flow idempotency, complete sources.\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G4_DUPLICATE_GENERATE'])); assert s==200,p\n    g4=p['items'][0]; assert g4['bundle']['source_status']['ITR']=='PRESENT',g4\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload(cases['G4_DUPLICATE_GENERATE'])); assert s==200,start\n    t=wait_task(start['task_id']); assert t['items'][0]['state']=='CANDIDATE_CREATED',t\n    first_id=t['items'][0]['scenario']['scenario_id']\n    s,dup=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload(cases['G4_DUPLICATE_GENERATE'])); assert s==200,dup\n    assert dup['items'][0]['state']=='EXISTING_CANDIDATE',dup\n    assert dup['items'][0]['scenario']['scenario_id']==first_id,dup\n    print('MAC_G4_IDEMPOTENCY=PASS',flush=True)\n    # G5: same assessment id, revised resolution => new bundle lineage.\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G5_SOURCE_REVISION'])); assert s==200,p\n    g5_before=p['items'][0]; assert g5_before['state']=='READY',g5_before\n    assert g5_before['bundle']['source_status']['ITR']=='PRESENT',g5_before\n    before_rev=g5_before['bundle']['bundle_revision']\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload(cases['G5_SOURCE_REVISION'])); assert s==200,start\n    t=wait_task(start['task_id']); assert t['items'][0]['state']=='CANDIDATE_CREATED',t\n    old=publish(t['items'][0]['scenario']); old_id=old['scenario_id']\n    adv=subprocess.run(['./advance_w4_g5_source_revision.command'],cwd=root,text=True,capture_output=True,timeout=30)\n    assert adv.returncode==0,(adv.stdout,adv.stderr)\n    print(adv.stdout,flush=True)\n    s,p=req('POST','/api/v2/software-assessment/quality-scenario/preview',payload(cases['G5_SOURCE_REVISION'])); assert s==200,p\n    g5_after=p['items'][0]; assert g5_after['state']=='SOURCE_CHANGED_REANALYSIS_AVAILABLE',g5_after\n    assert g5_after['bundle']['source_status']['ITR']=='PRESENT',g5_after\n    assert g5_after['bundle']['bundle_revision']!=before_rev,g5_after\n    s,start=req('POST','/api/v2/software-assessment/quality-scenario/generations',payload(cases['G5_SOURCE_REVISION'])); assert s==200,start\n    t2=wait_task(start['task_id']); assert t2['items'][0]['state']=='CANDIDATE_CREATED',t2\n    new_id=t2['items'][0]['scenario']['scenario_id']; assert new_id!=old_id,(old_id,new_id)\n    s,old_now=req('GET',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{old_id}'); assert s==200 and old_now['status']=='PUBLISHED',old_now\n    s,h=req('GET',f'/api/v2/quality-scenario-workflow/v1/quality-scenarios/{old_id}/history'); assert s==200 and len(h['versions'])>=4,h\n    print('MAC_G5_SOURCE_REVISION=PASS',flush=True)\n    print('MAC_PRODUCT_FUNCTIONAL_GOLDEN=PASS',flush=True)\nfinally:\n    try: os.killpg(proc.pid,signal.SIGTERM)\n    except ProcessLookupError: pass\n    try: proc.wait(timeout=8)\n    except subprocess.TimeoutExpired:\n        try: os.killpg(proc.pid,signal.SIGKILL)\n        except ProcessLookupError: pass\n        proc.wait(timeout=5)\n    log.close()\n\nPY"
+        }
+      ]
+    },
+    "package": {
+      "needs": [
+        "validate",
+        "mac"
+      ],
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 20,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "f268d4422f0591b5f93b317211557ff94e4a1958",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install product dependencies",
+          "run": "python -m pip install -r requirements.txt"
+        },
+        {
+          "name": "Build clean fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\nrm -f validation/quality_scenario_w4_fixture.db validation/quality_scenario_w4_fixture.db.fixture.json\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt\npython tools/quality_scenario_w4_functional_preflight.py --db validation/quality_scenario_w4_fixture.db --require | tee validation/fixture_preflight.txt"
+        },
+        {
+          "name": "Build full current quality platform",
+          "shell": "bash",
+          "run": "set -euo pipefail\nSTAGE=\"$RUNNER_TEMP/w4-final\"\nrm -rf \"$STAGE\"; mkdir -p \"$STAGE\" dist\ngit archive \"$PRODUCT_SOURCE_SHA\" | tar -x -C \"$STAGE\"\nmkdir -p \"$STAGE/validation\"\ncp validation/quality_scenario_w4_fixture.db \"$STAGE/validation/\"\ncp validation/quality_scenario_w4_fixture.db.fixture.json \"$STAGE/validation/\"\ncp validation/fixture_build.txt \"$STAGE/validation/\"\ncp validation/fixture_preflight.txt \"$STAGE/validation/\"\npython -c \"from pathlib import Path; import os; Path('$STAGE/PRODUCT_SOURCE_SHA').write_text(os.environ['PRODUCT_SOURCE_SHA']+'\\\\n')\"\npython -c \"from pathlib import Path; import os,json; m={'package_type':'W4_MAC_FUNCTIONAL_GOLDEN_CANDIDATE','package_scope':'FULL_CURRENT_QUALITY_PLATFORM','source_sha':os.environ['PRODUCT_SOURCE_SHA'],'synthetic_business_data':True,'fixture_itr_source_count':5,'canonical_macos_entry':'start_w4_mac_functional_golden.command','functional_provider':'CONTROLLED_OPENAI_MOCK','provider_owned_by_canonical_launcher':True,'g1_complete_source':True,'g2_no_missed_test':True,'g3_conflict_fail_closed':True,'g4_idempotency':True,'g5_source_revision_control':'advance_w4_g5_source_revision.command','direct_qsv1_candidate_write':False,'direct_qsv1_publish_write':False,'real_provider_golden':False,'native_browser_golden':False}; Path('$STAGE/FULL_PLATFORM_MANIFEST.json').write_text(json.dumps(m,ensure_ascii=False,indent=2))\"\npython -c \"from pathlib import Path; import os; t='QUALITY PLATFORM W4 MAC FUNCTIONAL GOLDEN\\\\n\\\\nSOURCE_SHA='+os.environ['PRODUCT_SOURCE_SHA']+'\\\\nCANONICAL_ENTRY=./start_w4_mac_functional_golden.command --port 18080\\\\nFUNCTIONAL_PROVIDER=CONTROLLED_OPENAI_MOCK\\\\nPROVIDER_STARTED_BY_CANONICAL_ENTRY=YES\\\\nG5_ADVANCE=./advance_w4_g5_source_revision.command\\\\nDIRECT_QSV1_CANDIDATE_WRITE=NO\\\\nDIRECT_QSV1_PUBLISH_WRITE=NO\\\\nREAL_PROVIDER_GOLDEN=NO\\\\n'; Path('$STAGE/00_README_FIRST.txt').write_text(t,encoding='utf-8')\"\ntest -x \"$STAGE/start_w4_mac_functional_golden.command\"\ntest -x \"$STAGE/start_w4_mac_functional_provider_golden.command\"\ntest -x \"$STAGE/advance_w4_g5_source_revision.command\"\ntest -f \"$STAGE/config/runtime/model.w4-functional.yaml\"\ntest -f \"$STAGE/validation/quality_scenario_w4_fixture.db\"\n(cd \"$STAGE\" && zip -q -r \"$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip\" .)\nsha256sum \"dist/${PACKAGE_BASENAME}.zip\" | tee \"dist/${PACKAGE_BASENAME}.zip.sha256\""
+        },
+        {
+          "name": "Verify package identity",
+          "shell": "bash",
+          "run": "python -c \"import json,os,pathlib,zipfile; p=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip'); z=zipfile.ZipFile(p); m=json.loads(z.read('FULL_PLATFORM_MANIFEST.json')); assert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']; assert m['fixture_itr_source_count']==5; assert m['provider_owned_by_canonical_launcher']; assert m['g1_complete_source']; assert m['g4_idempotency']; assert m['g5_source_revision_control']=='advance_w4_g5_source_revision.command'; assert not m['direct_qsv1_candidate_write']; assert not m['direct_qsv1_publish_write']; print('W4_FUNCTIONAL_PACKAGE_IDENTITY=PASS')\""
+        },
+        {
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f268d4422f05",
+            "path": "dist/QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f268d4422f05.zip\ndist/QUALITY_PLATFORM_W4_MAC_FUNCTIONAL_GOLDEN_f268d4422f05.zip.sha256",
+            "if-no-files-found": "error",
+            "retention-days": 30,
+            "compression-level": 0
+          }
+        }
+      ]
+    }
+  }
+}
