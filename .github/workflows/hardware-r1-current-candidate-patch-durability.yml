@@ -1,0 +1,201 @@
+name: Hardware R1 Current Candidate Patch Durability
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-r1-current-candidate-patch-durability.yml"
+      - "scripts/hardware_native_patch_durability.py"
+      - "tests/test_hardware_native_patch_durability.py"
+      - "docs/HARDWARE_R1_CURRENT_CANDIDATE_PATCH_DURABILITY.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-r1-current-patch-durability-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  OLD_SOURCE_COMMIT: 4a9cfdfc2c10366c86ab01efcc1c236da5942d38
+  NEW_SOURCE_COMMIT: ${{ github.sha }}
+
+jobs:
+  build-packages:
+    name: Build current-candidate exact-source ZIPs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Frozen-default and parameterized source-binding regressions
+        run: |
+          python -m pip install pytest
+          python -m pytest -q --noconftest tests/test_hardware_native_patch_durability.py
+
+      - name: Build OLD baseline and exact current-candidate ZIPs
+        run: >-
+          python scripts/hardware_native_patch_durability.py build-packages
+          --output-dir packages/current
+          --old-source-commit "$OLD_SOURCE_COMMIT"
+          --new-source-commit "$NEW_SOURCE_COMMIT"
+
+      - name: Verify exact source/package bindings and SHA256
+        run: >-
+          python scripts/hardware_native_patch_durability.py verify-packages
+          --manifest packages/current/package_manifest.json
+          --package-dir packages/current
+          --old-source-commit "$OLD_SOURCE_COMMIT"
+          --new-source-commit "$NEW_SOURCE_COMMIT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardware-current-patch-durability-packages
+          path: packages/current/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native-gates:
+    name: Current Candidate D1 Harness (${{ matrix.platform }})
+    needs: build-packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+          - platform: macos
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-current-patch-durability-packages
+          path: packages/current
+
+      - name: Verify exact source/package bindings and SHA256
+        run: >-
+          python scripts/hardware_native_patch_durability.py verify-packages
+          --manifest packages/current/package_manifest.json
+          --package-dir packages/current
+          --old-source-commit "$OLD_SOURCE_COMMIT"
+          --new-source-commit "$NEW_SOURCE_COMMIT"
+
+      - name: Resolve exact package IDs from manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          manifest = json.loads(pathlib.Path("packages/current/package_manifest.json").read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("OLD_PACKAGE_ID=" + manifest["packages"]["old"]["package_id"] + "\n")
+              stream.write("NEW_PACKAGE_ID=" + manifest["packages"]["new"]["package_id"] + "\n")
+          PY
+
+      - name: Run frozen D1 Harness on Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $dataRoot = Join-Path $env:RUNNER_TEMP "hardware-r1-current-patch\windows\persistent-data"
+          $evidenceRoot = Join-Path $env:GITHUB_WORKSPACE "CURRENT_PATCH_EVIDENCE\windows"
+          if (Test-Path $dataRoot) { throw "WINDOWS_DATA_ROOT_MUST_BE_FRESH" }
+          if (Test-Path $evidenceRoot) { throw "WINDOWS_EVIDENCE_ROOT_MUST_BE_FRESH" }
+          $oldPackage = Join-Path $env:GITHUB_WORKSPACE "packages\current\$env:OLD_PACKAGE_ID"
+          $newPackage = Join-Path $env:GITHUB_WORKSPACE "packages\current\$env:NEW_PACKAGE_ID"
+          python scripts/hardware_patch_durability_gate.py `
+            --old-package $oldPackage `
+            --new-package $newPackage `
+            --old-source-commit $env:OLD_SOURCE_COMMIT `
+            --new-source-commit $env:NEW_SOURCE_COMMIT `
+            --persistent-data-root $dataRoot `
+            --evidence-root $evidenceRoot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run frozen D1 Harness on macOS
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          data_root="$RUNNER_TEMP/hardware-r1-current-patch/macos/persistent-data"
+          evidence_root="$GITHUB_WORKSPACE/CURRENT_PATCH_EVIDENCE/macos"
+          test ! -e "$data_root" || { echo "MACOS_DATA_ROOT_MUST_BE_FRESH"; exit 2; }
+          test ! -e "$evidence_root" || { echo "MACOS_EVIDENCE_ROOT_MUST_BE_FRESH"; exit 2; }
+          python scripts/hardware_patch_durability_gate.py \
+            --old-package "$GITHUB_WORKSPACE/packages/current/$OLD_PACKAGE_ID" \
+            --new-package "$GITHUB_WORKSPACE/packages/current/$NEW_PACKAGE_ID" \
+            --old-source-commit "$OLD_SOURCE_COMMIT" \
+            --new-source-commit "$NEW_SOURCE_COMMIT" \
+            --persistent-data-root "$data_root" \
+            --evidence-root "$evidence_root"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-current-patch-durability-${{ matrix.platform }}
+          path: CURRENT_PATCH_EVIDENCE/${{ matrix.platform }}
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-summary:
+    name: Current candidate patch gate summary
+    if: always()
+    needs: [build-packages, native-gates]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: hardware-current-patch-durability-packages
+          path: packages/current
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: hardware-current-patch-durability-*
+          path: collected-evidence
+
+      - name: Validate both current-candidate platform reports
+        if: always()
+        run: >-
+          python scripts/hardware_native_patch_durability.py summarize
+          --windows-evidence collected-evidence/hardware-current-patch-durability-windows
+          --macos-evidence collected-evidence/hardware-current-patch-durability-macos
+          --package-manifest packages/current/package_manifest.json
+          --output current_candidate_patch_gate_summary.json
+          --package-job-result "${{ needs.build-packages.result }}"
+          --native-job-result "${{ needs.native-gates.result }}"
+          --old-source-commit "$OLD_SOURCE_COMMIT"
+          --new-source-commit "$NEW_SOURCE_COMMIT"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-current-patch-durability-summary
+          path: current_candidate_patch_gate_summary.json
+          if-no-files-found: warn
+          retention-days: 14

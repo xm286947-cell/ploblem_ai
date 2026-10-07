@@ -126,9 +126,15 @@ def _validate_zip(path: Path, *, require_d1_harness: bool) -> None:
             raise GateError("PACKAGE_CONTENT_MISSING:" + ",".join(missing))
 
 
-def build_packages(output_dir: Path, repo_root: Path = REPO_ROOT) -> dict[str, Any]:
-    old_commit = _resolve_commit(OLD_SOURCE, repo_root)
-    new_commit = _resolve_commit(NEW_SOURCE, repo_root)
+def build_packages(
+    output_dir: Path,
+    repo_root: Path = REPO_ROOT,
+    *,
+    old_source: str = OLD_SOURCE,
+    new_source: str = NEW_SOURCE,
+) -> dict[str, Any]:
+    old_commit = _resolve_commit(str(old_source), repo_root)
+    new_commit = _resolve_commit(str(new_source), repo_root)
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise GateError("PACKAGE_OUTPUT_DIR_MUST_BE_EMPTY_OR_NONEXISTENT")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -176,7 +182,13 @@ def build_packages(output_dir: Path, repo_root: Path = REPO_ROOT) -> dict[str, A
     return manifest
 
 
-def verify_package_manifest(manifest_path: Path, package_dir: Path) -> dict[str, Any]:
+def verify_package_manifest(
+    manifest_path: Path,
+    package_dir: Path,
+    *,
+    expected_old_source: str = OLD_SOURCE,
+    expected_new_source: str = NEW_SOURCE,
+) -> dict[str, Any]:
     manifest = _json_read(manifest_path)
     if manifest.get("task") != TASK:
         raise GateError("PACKAGE_TASK_MISMATCH")
@@ -186,13 +198,18 @@ def verify_package_manifest(manifest_path: Path, package_dir: Path) -> dict[str,
         or manifest.get("test_package_not_release") is not True
     ):
         raise GateError("PACKAGE_ACCEPTANCE_SCOPE_MISMATCH")
-    if manifest.get("old_source_commit") != OLD_SOURCE or manifest.get("new_source_commit") != NEW_SOURCE:
+    if (
+        manifest.get("old_source_commit") != expected_old_source
+        or manifest.get("new_source_commit") != expected_new_source
+    ):
         raise GateError("PACKAGE_SOURCE_COMMITS_MISMATCH")
     for role in ("old", "new"):
         entry = manifest.get("packages", {}).get(role)
         if not isinstance(entry, dict):
             raise GateError(f"PACKAGE_ENTRY_MISSING:{role}")
-        expected_commit = OLD_SOURCE if role == "old" else NEW_SOURCE
+        expected_commit = (
+            expected_old_source if role == "old" else expected_new_source
+        )
         if entry.get("source_commit") != expected_commit:
             raise GateError(f"PACKAGE_SOURCE_BINDING_MISMATCH:{role}")
         package_id = str(entry.get("package_id") or "")
@@ -207,7 +224,14 @@ def verify_package_manifest(manifest_path: Path, package_dir: Path) -> dict[str,
     return manifest
 
 
-def _platform_result(name: str, evidence_dir: Path, package_manifest: dict[str, Any]) -> dict[str, Any]:
+def _platform_result(
+    name: str,
+    evidence_dir: Path,
+    package_manifest: dict[str, Any],
+    *,
+    expected_old_source: str,
+    expected_new_source: str,
+) -> dict[str, Any]:
     errors: list[str] = []
     try:
         missing = [filename for filename in EVIDENCE_FILES if not (evidence_dir / filename).is_file()]
@@ -233,8 +257,8 @@ def _platform_result(name: str, evidence_dir: Path, package_manifest: dict[str, 
         checks: dict[str, bool] = {
             "gate_pass": gate.get("status") == "PASS",
             "source_commits_bound": (
-                gate.get("old_source_commit") == OLD_SOURCE
-                and gate.get("new_source_commit") == NEW_SOURCE
+                gate.get("old_source_commit") == expected_old_source
+                and gate.get("new_source_commit") == expected_new_source
             ),
             "packages_bound": (
                 gate.get("old_input_kind") == "PACKAGE"
@@ -349,6 +373,8 @@ def summarize(
     *,
     package_job_result: str = "success",
     native_job_result: str = "success",
+    expected_old_source: str = OLD_SOURCE,
+    expected_new_source: str = NEW_SOURCE,
 ) -> dict[str, Any]:
     global_errors: list[str] = []
     try:
@@ -361,12 +387,29 @@ def summarize(
             or package_manifest.get("test_package_not_release") is not True
         ):
             raise GateError("PACKAGE_ACCEPTANCE_SCOPE_MISMATCH")
+        if (
+            package_manifest.get("old_source_commit") != expected_old_source
+            or package_manifest.get("new_source_commit") != expected_new_source
+        ):
+            raise GateError("PACKAGE_SOURCE_COMMITS_MISMATCH")
     except (OSError, ValueError, GateError) as error:
         package_manifest = {"packages": {}}
         global_errors.append(str(error))
 
-    windows = _platform_result("windows", windows_evidence, package_manifest)
-    macos = _platform_result("macos", macos_evidence, package_manifest)
+    windows = _platform_result(
+        "windows",
+        windows_evidence,
+        package_manifest,
+        expected_old_source=expected_old_source,
+        expected_new_source=expected_new_source,
+    )
+    macos = _platform_result(
+        "macos",
+        macos_evidence,
+        package_manifest,
+        expected_old_source=expected_old_source,
+        expected_new_source=expected_new_source,
+    )
     if package_job_result != "success":
         global_errors.append(f"PACKAGE_JOB_{package_job_result.upper()}")
     if native_job_result != "success":
@@ -387,8 +430,8 @@ def summarize(
         "contract_version": "hardware-native-patch-durability-summary/v1",
         "task": TASK,
         "result": status,
-        "old_source": OLD_SOURCE,
-        "new_source": NEW_SOURCE,
+        "old_source": expected_old_source,
+        "new_source": expected_new_source,
         "package_type": "ZIP",
         "installer_type": "NONE",
         "test_package_not_release": True,
@@ -429,9 +472,13 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     build_parser = subparsers.add_parser("build-packages")
     build_parser.add_argument("--output-dir", required=True)
+    build_parser.add_argument("--old-source-commit", default=OLD_SOURCE)
+    build_parser.add_argument("--new-source-commit", default=NEW_SOURCE)
     verify_parser = subparsers.add_parser("verify-packages")
     verify_parser.add_argument("--manifest", required=True)
     verify_parser.add_argument("--package-dir", required=True)
+    verify_parser.add_argument("--old-source-commit", default=OLD_SOURCE)
+    verify_parser.add_argument("--new-source-commit", default=NEW_SOURCE)
     summary_parser = subparsers.add_parser("summarize")
     summary_parser.add_argument("--windows-evidence", required=True)
     summary_parser.add_argument("--macos-evidence", required=True)
@@ -439,11 +486,17 @@ def main(argv: list[str] | None = None) -> int:
     summary_parser.add_argument("--output", required=True)
     summary_parser.add_argument("--package-job-result", default="success")
     summary_parser.add_argument("--native-job-result", default="success")
+    summary_parser.add_argument("--old-source-commit", default=OLD_SOURCE)
+    summary_parser.add_argument("--new-source-commit", default=NEW_SOURCE)
     args = parser.parse_args(argv)
 
     try:
         if args.command == "build-packages":
-            result = build_packages(Path(args.output_dir).expanduser().resolve())
+            result = build_packages(
+                Path(args.output_dir).expanduser().resolve(),
+                old_source=args.old_source_commit,
+                new_source=args.new_source_commit,
+            )
             print("PACKAGE_BUILD=PASS")
             for role in ("old", "new"):
                 item = result["packages"][role]
@@ -454,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
             manifest = verify_package_manifest(
                 Path(args.manifest).expanduser().resolve(),
                 Path(args.package_dir).expanduser().resolve(),
+                expected_old_source=args.old_source_commit,
+                expected_new_source=args.new_source_commit,
             )
             print("PACKAGE_BINDING=PASS")
             print("OLD_SOURCE=" + manifest["old_source_commit"])
@@ -466,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.output).expanduser().resolve(),
             package_job_result=args.package_job_result,
             native_job_result=args.native_job_result,
+            expected_old_source=args.old_source_commit,
+            expected_new_source=args.new_source_commit,
         )
         print("NATIVE_PATCH_DURABILITY_GATE=" + summary["native_patch_durability_gate"])
         return 0 if summary["result"] == "PASS" else 2
