@@ -90,7 +90,11 @@ def _wait_ready(adapter: HardwareSearchAdapter, timeout_seconds: float) -> dict[
     while time.monotonic() < deadline:
         try:
             status = adapter.health()
-            if status["reachable"] and status["distribution"] == "opensearch":
+            if (
+                status["reachable"]
+                and status["distribution"] == "opensearch"
+                and status["cluster_status"] in {"green", "yellow"}
+            ):
                 return status
         except HardwareSearchAdapterError as error:
             last = error.code
