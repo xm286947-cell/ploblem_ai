@@ -76,7 +76,7 @@ jobs:
           FRESH_ROOT="$ROOT" DELIVERY="$DELIVERY" PRODUCT_SOURCE_SHA="$PRODUCT_SOURCE_SHA" python -c 'import json,pathlib,os; root=pathlib.Path(os.environ["FRESH_ROOT"]); delivery=json.loads(pathlib.Path(os.environ["DELIVERY"]).read_text()); candidate=json.loads((root/"CANDIDATE_MANIFEST.json").read_text()); expected=os.environ["PRODUCT_SOURCE_SHA"]; assert delivery["source_commit"]==expected; assert candidate["source_commit"]==expected; assert candidate["single_url_config"]=="KNOWLEDGE_SERVICE_URL"; assert candidate["user_config_count"]==1; assert candidate["provider_calls"]==0; assert candidate["kioxia_extraction"]=="NOT_RERUN"; assert not list(root.rglob("knowledge_service.local.json")); print("POSTMERGE_SOURCE_IDENTITY=PASS"); print("SINGLE_URL_CONTRACT=PASS"); print("LOCAL_URL_CONFIG_EXCLUDED=PASS")'
           python -m compileall -q "$ROOT/storage_life" "$ROOT/knowledge_consumer_gateway" "$ROOT/knowledge_production"
           bash -n "$ROOT/knowledge_consumer_gateway/start_mac_gateway.command"
-          python -m pip install -q --disable-pip-version-check -r "$ROOT/requirements.txt" -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt" pytest==9.0.2 httpx==0.28.1
+          python -m pip install -q --disable-pip-version-check -r "$ROOT/requirements.txt" -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt" httpx==0.28.1
           python -m http.server 9000 --bind 127.0.0.1 >/tmp/pkr-contract-stub-fresh.log 2>&1 &
           STUB_PID=$!
           trap 'kill "$STUB_PID" >/dev/null 2>&1 || true' EXIT
