@@ -1,7 +1,6 @@
 agent_id: reverse_quality.single_issue.analyze
 version: v1
 label: Reverse Quality Single Issue Analyze
-model_ref: qwen_prod
 
 prompt:
   ref: prompts/runtime/reverse_quality/single_issue_v01.md
