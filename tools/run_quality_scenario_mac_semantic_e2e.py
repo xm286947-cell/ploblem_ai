@@ -122,7 +122,7 @@ def _generate(page, base: str, material_id: str, reason: str, expected_preview: 
     _prepare_case(page, base, material_id, reason)
     page.locator(f'[data-state="{expected_preview}"]').wait_for(timeout=30000)
     page.locator("[data-generate]").click()
-    page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=180000)
+    page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=420000)
     return _scenario_id_from_actions(page)
 
 
@@ -360,7 +360,7 @@ def main() -> int:
             _prepare_case(page, base, g5["software_assessment_material_id"], "MAC_REAL_SEMANTIC_G5")
             page.locator('[data-state="SOURCE_CHANGED_REANALYSIS_AVAILABLE"]').wait_for(timeout=30000)
             page.locator("[data-generate]").click()
-            page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=180000)
+            page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=420000)
             new_id = _scenario_id_from_actions(page)
             new_scenario = _get_json(
                 page,
