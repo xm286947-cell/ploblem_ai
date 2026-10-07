@@ -59,7 +59,7 @@ async function load(){
   try{const x=await request('/quality-scenarios?'+query().toString());state.items=x.items||[];render();loadStatus.textContent='';}
   catch(e){state.items=[];count.textContent='—';rows.innerHTML='';setState('error',e.message);loadStatus.className='error';loadStatus.textContent='读取失败';}
 }
-function openDetail(id){window.location.href='/p0/quality-scenarios/library/'+encodeURIComponent(id)}
+function openDetail(id){var base=window.QS_LIBRARY_PAGE_BASE||'/p0/quality-scenarios';window.location.href=base+'/library/'+encodeURIComponent(id)}
 form.addEventListener('submit',e=>{e.preventDefault();load()});
 root.querySelector('[data-reset]').addEventListener('click',()=>{form.reset();form.elements.status.value='PUBLISHED';load()});
 root.querySelector('[data-retry]').addEventListener('click',load);
