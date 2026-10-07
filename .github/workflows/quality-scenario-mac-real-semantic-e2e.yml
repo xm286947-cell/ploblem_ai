@@ -1,0 +1,63 @@
+name: Quality Scenario macOS Real Semantic E2E
+
+on:
+  push:
+    branches:
+      - feature/quality-scenario-mac-semantic-e2e-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-real-semantic-e2e:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      DASHSCOPE_BASE_URL: ${{ vars.DASHSCOPE_BASE_URL }}
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      QS_SEMANTIC_EVIDENCE_DIR: validation/mac_semantic_e2e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require real provider configuration
+        shell: bash
+        run: |
+          if [ -z "$DASHSCOPE_BASE_URL" ]; then
+            echo "::error::DASHSCOPE_BASE_URL repository variable is not configured."
+            exit 2
+          fi
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::DASHSCOPE_API_KEY repository secret is not configured."
+            exit 2
+          fi
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+          .venv/bin/python -m pip install playwright
+          .venv/bin/python -m playwright install chromium
+      - name: Run mature UI semantic E2E with real provider
+        id: semantic
+        continue-on-error: true
+        run: .venv/bin/python tools/run_quality_scenario_mac_semantic_e2e.py
+      - name: Upload semantic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_SCENARIO_MAC_REAL_SEMANTIC_E2E_EVIDENCE
+          path: validation/mac_semantic_e2e
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Enforce hard gate
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.semantic.outcome }}" != "success" ]; then
+            echo "::error::Semantic E2E hard gate failed. Review the uploaded evidence artifact."
+            exit 1
+          fi
