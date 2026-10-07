@@ -51,3 +51,5 @@ def test_mature_software_assessment_still_exposes_controlled_product_entry(tmp_p
     assert page.status_code == 200
     assert "data-sa-qsv1" in page.text
     assert 'href="/p0/quality-scenarios/workbench"' not in page.text
+
+# Browser gate sync marker
