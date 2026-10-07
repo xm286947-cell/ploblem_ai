@@ -1,6 +1,8 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_scenario_library.css?v=qs-mvp-05b">{% endblock %}
+{% set qs_page_base = page_base|default('/p0/quality-scenarios') %}
+{% set qs_static_base = '/static' if request.app.state.mature_quality_host|default(false) else '/p0/static' %}
+{% block page_styles %}<link rel="stylesheet" href="{{ qs_static_base }}/p0_scenario_library.css?v=qs-mvp-05b">{% endblock %}
 {% block breadcrumb %}质量场景 / 质量场景库{% endblock %}
 {% block body %}
 <main class="qsl-page" data-qsl-page data-api-prefix="{{api_prefix}}">
@@ -28,7 +30,7 @@
   <section class="qsl-table-card">
     <div class="qsl-card-head">
       <div><h2>场景清单</h2><p>正式库默认显示 PUBLISHED；其他状态仅用于查询定位，不在本页修改。</p></div>
-      <a class="btn" href="/p0/quality-scenarios/workbench">进入场景工作台</a>
+      <a class="btn" href="{{ qs_page_base }}/workbench">进入场景工作台</a>
     </div>
     <div class="qsl-table-wrap">
       <table class="qsl-table">
@@ -51,4 +53,4 @@
   </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script>window.QS_LIBRARY_API={{api_prefix|tojson}};</script><script src="/p0/static/p0_scenario_library.js?v=qs-mvp-05b" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.QS_LIBRARY_API={{api_prefix|tojson}};window.QS_LIBRARY_PAGE_BASE={{qs_page_base|tojson}};</script><script src="{{ qs_static_base }}/p0_scenario_library.js?v=qs-mvp-05b" defer></script>{% endblock %}
