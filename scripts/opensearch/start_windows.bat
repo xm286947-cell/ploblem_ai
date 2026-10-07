@@ -23,6 +23,10 @@ if "%OPENSEARCH_JAVA_OPTS%"=="" set "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
 
 if not exist "%HARDWARE_SEARCH_DATA_DIR%\data" mkdir "%HARDWARE_SEARCH_DATA_DIR%\data"
 if not exist "%HARDWARE_SEARCH_DATA_DIR%\logs" mkdir "%HARDWARE_SEARCH_DATA_DIR%\logs"
+rem The bundled jvm.options writes GC logs to logs\gc.log relative to OPENSEARCH_HOME.
+rem The Windows ZIP can omit that directory, so create it explicitly.
+if not exist "%OPENSEARCH_HOME%\logs" mkdir "%OPENSEARCH_HOME%\logs"
+
 if not exist "%OPENSEARCH_HOME%\bin\opensearch.bat" (
   echo SEARCH_ENGINE_BINARY_NOT_FOUND: %OPENSEARCH_HOME%\bin\opensearch.bat
   exit /b 4
@@ -51,12 +55,12 @@ set "YAML_DATA_DIR=%HARDWARE_SEARCH_DATA_DIR:\=/%"
 >> "%W0_CONFIG_DIR%\opensearch.yml" echo path.logs: %YAML_DATA_DIR%/logs
 
 set "OPENSEARCH_PATH_CONF=%W0_CONFIG_DIR%"
-set "SERVICE_LOG_DIR=%HARDWARE_SEARCH_DATA_DIR%\logs"
 
 echo Starting OpenSearch W0 on http://127.0.0.1:%HARDWARE_SEARCH_PORT%
 echo Config: %OPENSEARCH_PATH_CONF%
 echo Data: %HARDWARE_SEARCH_DATA_DIR%\data
 echo Logs: %HARDWARE_SEARCH_DATA_DIR%\logs
+echo GC logs: %OPENSEARCH_HOME%\logs
 
 call "%OPENSEARCH_HOME%\bin\opensearch.bat"
 
