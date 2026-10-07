@@ -49,6 +49,8 @@ def test_current_platform_launchers_cannot_drift_back_to_p0_root():
         assert "knowledge-p1-start" not in text, platform
         assert "knowledge-p0-web" not in text, platform
         assert "knowledge-p1-web" not in text, platform
+        assert "P0_DB" not in text, platform
+        assert "overall_current_platform_p0.db" not in text, platform
         assert "start_quality_capability_p1" in text, platform
 
 
