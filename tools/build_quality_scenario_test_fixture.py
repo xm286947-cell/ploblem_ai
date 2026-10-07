@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import sqlite3
@@ -297,11 +298,16 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
     # bound read-only through Overall's strict legacy DB compatibility gate.
     # This still creates only source/business-side structures; no QSV1 lifecycle
     # outcome is pre-seeded.
-    create_legacy_quality_issue_router(
+    bootstrap_router = create_legacy_quality_issue_router(
         db_path,
         initialize_schema=True,
         qsv1_db_path=db_path,
     )
+    # The bootstrap router owns closures over several SQLite-backed services.
+    # Drop that temporary object graph immediately so Windows can relocate or
+    # delete the fixture DB after build without lingering file handles.
+    del bootstrap_router
+    gc.collect()
     issues = IssueKnowledgeRepository(db_path)
     materials = MaterialRepository(db_path)
     ScenarioRepository(db_path)
