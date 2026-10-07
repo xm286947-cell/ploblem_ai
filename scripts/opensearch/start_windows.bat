@@ -23,58 +23,59 @@ if "%OPENSEARCH_JAVA_OPTS%"=="" set "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
 
 if not exist "%HARDWARE_SEARCH_DATA_DIR%\data" mkdir "%HARDWARE_SEARCH_DATA_DIR%\data"
 if not exist "%HARDWARE_SEARCH_DATA_DIR%\logs" mkdir "%HARDWARE_SEARCH_DATA_DIR%\logs"
-rem The bundled jvm.options writes GC logs to logs\gc.log relative to OPENSEARCH_HOME.
-rem The Windows ZIP can omit that directory, so create it explicitly.
 if not exist "%OPENSEARCH_HOME%\logs" mkdir "%OPENSEARCH_HOME%\logs"
 
-if not exist "%OPENSEARCH_HOME%\bin\opensearch.bat" (
-  echo SEARCH_ENGINE_BINARY_NOT_FOUND: %OPENSEARCH_HOME%\bin\opensearch.bat
+if not exist "%OPENSEARCH_HOME%\opensearch-windows-install.bat" (
+  echo SEARCH_ENGINE_WINDOWS_INSTALLER_NOT_FOUND: %OPENSEARCH_HOME%\opensearch-windows-install.bat
   exit /b 4
 )
 
-rem W0 follows the official Windows guidance: disable Security and configure
-rem single-node networking in opensearch.yml rather than relying on -E flags.
-rem Use a disposable config copy so the extracted distribution remains pristine.
-set "W0_CONFIG_DIR=%HARDWARE_SEARCH_DATA_DIR%\config-w0"
-if exist "%W0_CONFIG_DIR%" rmdir /s /q "%W0_CONFIG_DIR%"
-mkdir "%W0_CONFIG_DIR%"
-xcopy "%OPENSEARCH_HOME%\config\*" "%W0_CONFIG_DIR%\" /E /I /Y >nul
+rem The official Windows ZIP entrypoint prepares the Security plugin and native
+rem plugin runtime paths before launching OpenSearch. W0 uses that entrypoint,
+rem but appends localhost-only settings and disables Security for the demo HTTP
+rem adapter after the demo config is installed.
+set "W0_CONFIG_FILE=%OPENSEARCH_HOME%\config\opensearch.yml"
+set "W0_CONFIG_BASE=%HARDWARE_SEARCH_DATA_DIR%\opensearch.base.yml"
+if not exist "%W0_CONFIG_BASE%" (
+  copy /Y "%W0_CONFIG_FILE%" "%W0_CONFIG_BASE%" >nul
+  if errorlevel 1 (
+    echo SEARCH_CONFIG_BACKUP_FAILED
+    exit /b 6
+  )
+)
+copy /Y "%W0_CONFIG_BASE%" "%W0_CONFIG_FILE%" >nul
 if errorlevel 1 (
-  echo SEARCH_CONFIG_COPY_FAILED
-  exit /b 6
+  echo SEARCH_CONFIG_RESTORE_FAILED
+  exit /b 7
 )
 
 set "YAML_DATA_DIR=%HARDWARE_SEARCH_DATA_DIR:\=/%"
->> "%W0_CONFIG_DIR%\opensearch.yml" echo.
->> "%W0_CONFIG_DIR%\opensearch.yml" echo # Hardware Knowledge W0 local-only overrides
->> "%W0_CONFIG_DIR%\opensearch.yml" echo discovery.type: single-node
->> "%W0_CONFIG_DIR%\opensearch.yml" echo network.host: 127.0.0.1
->> "%W0_CONFIG_DIR%\opensearch.yml" echo http.port: %HARDWARE_SEARCH_PORT%
->> "%W0_CONFIG_DIR%\opensearch.yml" echo plugins.security.disabled: true
->> "%W0_CONFIG_DIR%\opensearch.yml" echo path.data: %YAML_DATA_DIR%/data
->> "%W0_CONFIG_DIR%\opensearch.yml" echo path.logs: %YAML_DATA_DIR%/logs
+>> "%W0_CONFIG_FILE%" echo.
+>> "%W0_CONFIG_FILE%" echo # Hardware Knowledge W0 local-only overrides
+>> "%W0_CONFIG_FILE%" echo discovery.type: single-node
+>> "%W0_CONFIG_FILE%" echo network.host: 127.0.0.1
+>> "%W0_CONFIG_FILE%" echo http.port: %HARDWARE_SEARCH_PORT%
+>> "%W0_CONFIG_FILE%" echo plugins.security.disabled: true
+>> "%W0_CONFIG_FILE%" echo path.data: %YAML_DATA_DIR%/data
+>> "%W0_CONFIG_FILE%" echo path.logs: %YAML_DATA_DIR%/logs
 
-set "OPENSEARCH_PATH_CONF=%W0_CONFIG_DIR%"
-
-rem The official Windows distribution startup adds native plugin libraries to PATH.
-rem Keep those runtime paths while bypassing the demo Security installer.
-set "PATH=%PATH%;%OPENSEARCH_HOME%\plugins\opensearch-knn\lib;%OPENSEARCH_HOME%\plugins\opensearch-neural-search\lib"
+rem Required by the official Windows ZIP installer when the Security plugin is
+rem present. This is a fixed, local-only W0 bootstrap value; Security is disabled
+rem for the localhost demo process immediately afterward by opensearch.yml.
+if "%OPENSEARCH_INITIAL_ADMIN_PASSWORD%"=="" (
+  set "OPENSEARCH_INITIAL_ADMIN_PASSWORD=W0-OpenSearch_Admin-2026!"
+)
 
 echo Starting OpenSearch W0 on http://127.0.0.1:%HARDWARE_SEARCH_PORT%
-echo Config: %OPENSEARCH_PATH_CONF%
+echo Config: %W0_CONFIG_FILE%
 echo Data: %HARDWARE_SEARCH_DATA_DIR%\data
 echo Logs: %HARDWARE_SEARCH_DATA_DIR%\logs
 echo GC logs: %OPENSEARCH_HOME%\logs
 
-rem OpenSearch's Windows JVM options include relative log paths such as logs\gc.log.
-rem Run from OPENSEARCH_HOME, matching the official Windows startup guidance.
 pushd "%OPENSEARCH_HOME%"
-if errorlevel 1 (
-  echo SEARCH_ENGINE_HOME_ENTER_FAILED: %OPENSEARCH_HOME%
-  exit /b 7
-)
-call "%OPENSEARCH_HOME%\bin\opensearch.bat"
-set "SEARCH_ENGINE_EXIT_CODE=%ERRORLEVEL%"
+call "%OPENSEARCH_HOME%\opensearch-windows-install.bat"
+set "SEARCH_EXIT_CODE=%ERRORLEVEL%"
 popd
 
-exit /b %SEARCH_ENGINE_EXIT_CODE%
+echo SEARCH_ENGINE_EXIT_CODE=%SEARCH_EXIT_CODE%
+exit /b %SEARCH_EXIT_CODE%
