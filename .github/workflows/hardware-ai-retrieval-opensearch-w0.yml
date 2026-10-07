@@ -148,4 +148,5 @@ jobs:
             ${{ runner.temp }}\opensearch-stderr.log
             ${{ runner.temp }}\opensearch-restart.log
             ${{ runner.temp }}\opensearch-restart-stderr.log
+            C:\hardware-search-w0-data\logs\**
           if-no-files-found: warn
