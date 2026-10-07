@@ -58,6 +58,11 @@
     const material=mappingPaths(item,'MATERIAL_DEVICE');
     const health=evidenceHealth(item);
     const status=item.case_status||'—';
+    const retrieval=item.retrieval&&typeof item.retrieval==='object'?item.retrieval:null;
+    const why=retrieval&&retrieval.why_hit&&typeof retrieval.why_hit==='object'?retrieval.why_hit:null;
+    const reasons=why&&Array.isArray(why.reasons)?why.reasons:[];
+    const firstReason=reasons[0]||null;
+    const reasonText=firstReason?(firstReason.matched_value||firstReason.matched_text||firstReason.source_term||firstReason.query_term||''):'';
     return '<article class="hc-case-item">'+
       '<div><h3><a href="'+caseHref(item.case_id,maintainer)+'">'+esc(item.title||item.case_id)+'</a></h3>'+
       '<div class="hc-case-meta"><code>'+esc(item.case_id)+'</code><span>'+esc(productName(item.product_context))+'</span>'+
@@ -65,7 +70,8 @@
       '<span class="hc-status '+statusClass(health)+'">'+esc(health)+'</span></div>'+
       '<div class="hc-case-copy"><div><b>问题现象</b><p>'+esc(factValue(facts,'symptom'))+'</p></div><div><b>根因</b><p>'+esc(factValue(facts,'root_cause'))+'</p></div></div>'+
       '<div class="hc-path-row">'+circuit.slice(0,2).map(p=>'<span class="hc-path">电路 · '+esc(p)+'</span>').join('')+
-      material.slice(0,2).map(p=>'<span class="hc-path material">器件 · '+esc(p)+'</span>').join('')+'</div></div>'+
+      material.slice(0,2).map(p=>'<span class="hc-path material">器件 · '+esc(p)+'</span>').join('')+'</div>'+
+      (retrieval?'<div class="hc-case-meta"><span class="hc-status ok">'+esc(retrieval.mode||'AI_RETRIEVAL')+'</span>'+(reasonText?'<span>命中：'+esc(reasonText)+'</span>':'')+'</div>':'')+'</div>'+
       '<div class="hc-case-meta"><span>'+esc(fmtTime(item.published_at||item.updated_at))+'</span></div>'+
     '</article>';
   }
@@ -168,7 +174,7 @@
     await loadTree(treeState.type);
   }
 
-  let searchItems=[];
+  let searchItems=[];let searchMeta={};
   function applySearchFilters(){
     const product=(qs('[data-filter-product]').value||'').trim().toLowerCase();
     const circuit=(qs('[data-filter-circuit]').value||'').trim().toLowerCase();
@@ -179,12 +185,20 @@
       const m=mappingPaths(item,'MATERIAL_DEVICE').join(' ').toLowerCase();
       return (!product||p.includes(product))&&(!circuit||c.includes(circuit))&&(!material||m.includes(material));
     });
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；普通消费面只展示 PUBLISHED。';
+    const mode=searchMeta.mode||'LEGACY';
+    const modeLabel={OPENSEARCH:'AI 检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索'}[mode]||mode;
+    const understood=searchMeta.query_understanding||{};
+    const original=String(understood.original_query||'').trim();
+    const retrievalText=String(understood.retrieval_text||'').trim();
+    const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
     const payload=await safe('?q='+encodeURIComponent(q||''),{},'CONSUMER');
-    searchItems=(payload&&payload.results)||[];applySearchFilters();
+    searchItems=(payload&&payload.results)||[];
+    searchMeta=(payload&&payload.retrieval)||{};
+    applySearchFilters();
   }
   async function initSearch(){
     const params=new URLSearchParams(location.search);const initial=params.get('q')||'';
