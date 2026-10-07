@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - integration/overall-r2
+      - feature/mature-platform-foundation-v1
   workflow_dispatch:
 
 permissions:
