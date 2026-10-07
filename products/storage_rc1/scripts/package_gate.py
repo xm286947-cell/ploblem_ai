@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 checks={}
 html=(ROOT/'storage_life/index.html').read_text(encoding='utf-8')
-for p in range(1,9): checks[f'P{p:02d}_UI']=f'P{p:02d} ' in html
+for p in range(1,9): checks[f'P{p:02d}_UI']=f'id="p{p:02d}"' in html
 checks['RUN_WINDOWS']=(ROOT/'run_windows.bat').is_file()
 checks['RUNTIME']=(ROOT/'vendor/unified_agent_runtime/runtime/__init__.py').is_file()
 checks['KNOWLEDGE_CONSUMER']=(ROOT/'storage_life/knowledge_release.py').is_file()
