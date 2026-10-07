@@ -79,11 +79,9 @@ def resolve_runtime_paths(
     root_path = Path(root).resolve() if root is not None else package_root()
     env = os.environ if environ is None else environ
 
-    model_raw = str(
-        env.get("HARDWARE_RETRIEVAL_MODEL_CONFIG")
-        or env.get("HARDWARE_CASE_MODEL_CONFIG")
-        or ""
-    ).strip()
+    # Retrieval owns its Agent definition, but deliberately reuses the
+    # Hardware Case provider/model configuration path.
+    model_raw = str(env.get("HARDWARE_CASE_MODEL_CONFIG") or "").strip()
     model_path = (
         _resolved_path(root_path, model_raw)
         if model_raw
