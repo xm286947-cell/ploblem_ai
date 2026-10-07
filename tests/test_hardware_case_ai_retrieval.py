@@ -117,11 +117,18 @@ class FakeConsumption:
 
 
 def test_query_understanding_removes_conversational_scaffolding() -> None:
-    result = understand_hardware_query("有哪些mcu的问题")
-    assert result["retrieval_text"] == "mcu"
-    assert result["terms"] == ["mcu"]
-
-
+    cases = [
+        ("有哪些mcu的问题", "mcu"),
+        ("有没有mcu相关案例", "mcu"),
+        ("查一下mcu的问题", "mcu"),
+        ("mcu有什么历史问题", "mcu"),
+        ("单片机这块以前出过什么问题？", "单片机"),
+        ("有没有跟 MCU 供电有关的案例？", "mcu 供电"),
+    ]
+    for query, expected in cases:
+        result = understand_hardware_query(query)
+        assert result["retrieval_text"] == expected
+        assert result["terms"] == expected.split()
 def test_product_search_uses_opensearch_and_maps_back_to_published_case() -> None:
     service = HardwareCaseAIRetrievalService(
         FakeCaseService(),
