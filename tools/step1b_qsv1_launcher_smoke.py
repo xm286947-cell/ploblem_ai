@@ -117,17 +117,20 @@ def main() -> int:
             "/quality-scenario-assets/portrait",
             "/quality-scenarios/insights",
             "/settings/scenario-taxonomy",
-            "/p0/quality-scenarios/workbench",
-            "/p0/quality-scenarios",
-            "/p0/quality-scenarios/library/QSV1-SMOKE-DETAIL",
+            "/quality-scenarios/workbench",
+            "/quality-scenarios/library",
+            "/quality-scenarios/library/QSV1-SMOKE-DETAIL",
             "/p0/quality-scenario-insights",
         )
         for route in routes:
             code, body = get(base + route)
             if code != 200:
                 raise RuntimeError(f"{route} => {code}")
-            if route == "/issues" and "新质量场景（预览）".encode("utf-8") not in body:
-                raise RuntimeError("MATURE_SIDEBAR_PREVIEW_ENTRY_MISSING")
+            if route == "/issues":
+                if "质量场景工作台".encode("utf-8") not in body:
+                    raise RuntimeError("MATURE_QSV1_WORKBENCH_ENTRY_MISSING")
+                if b"/p0/quality-scenarios/workbench" in body:
+                    raise RuntimeError("P0_QSV1_PRODUCT_ENTRY_STILL_VISIBLE")
 
         code, body = get(base + "/api/v2/quality-scenario-preview/status")
         if code != 200:
