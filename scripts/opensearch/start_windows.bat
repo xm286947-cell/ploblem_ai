@@ -62,6 +62,15 @@ echo Data: %HARDWARE_SEARCH_DATA_DIR%\data
 echo Logs: %HARDWARE_SEARCH_DATA_DIR%\logs
 echo GC logs: %OPENSEARCH_HOME%\logs
 
+rem OpenSearch's Windows JVM options include relative log paths such as logs\gc.log.
+rem Run from OPENSEARCH_HOME, matching the official Windows startup guidance.
+pushd "%OPENSEARCH_HOME%"
+if errorlevel 1 (
+  echo SEARCH_ENGINE_HOME_ENTER_FAILED: %OPENSEARCH_HOME%
+  exit /b 7
+)
 call "%OPENSEARCH_HOME%\bin\opensearch.bat"
+set "SEARCH_ENGINE_EXIT_CODE=%ERRORLEVEL%"
+popd
 
-exit /b %ERRORLEVEL%
+exit /b %SEARCH_ENGINE_EXIT_CODE%
