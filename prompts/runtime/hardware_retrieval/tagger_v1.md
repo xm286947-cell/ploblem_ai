@@ -45,7 +45,7 @@ EXPANSION
 
 1. source_term must occur in at least one source_fields value.
 2. source_fields must name only fields present in the input.
-3. Prefer a small, high-signal tag set over exhaustive vocabulary.
+3. Prefer a small, high-signal tag set over exhaustive vocabulary. When any supplied field is non-empty, return at least one FACT using an exact literal source_term from that field.
 4. Do not fabricate vendor, manufacturer, MPN, protocol, component, root cause,
    parameter, failure mode, or operating condition that is not supplied.
 5. Never output filters, scores, evidence IDs, Formal Knowledge updates, or
