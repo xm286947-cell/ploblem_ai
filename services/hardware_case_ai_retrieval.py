@@ -47,6 +47,10 @@ _STOP_PHRASES = tuple(
             "帮我查一下",
             "请帮我找",
             "请帮我查",
+            "这块",
+            "以前出过什么",
+            "有没有跟",
+            "有关的",
             "有哪些",
             "有什么",
             "有没有",
@@ -320,6 +324,162 @@ class HardwareCaseAIRetrievalService:
         except Exception:
             pass
         raise HardwareCaseAIRetrievalError("CASE_NOT_FOUND")
+
+    def _formal_projection_for_case_id(
+        self,
+        case_id: str,
+    ) -> dict[str, Any] | None:
+        if self.consumption_service is None:
+            return None
+        try:
+            payload = self.consumption_service.search(
+                "",
+                business_case_id=case_id,
+                limit=2,
+            )
+            rows = payload.get("results") if isinstance(payload, Mapping) else None
+            if isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], Mapping):
+                return dict(rows[0])
+            if isinstance(rows, list) and len(rows) > 1:
+                raise HardwareCaseAIRetrievalError(
+                    "FORMAL_PRODUCT_BINDING_AMBIGUOUS"
+                )
+            direct = self.consumption_service.get(case_id)
+            if isinstance(direct, Mapping):
+                return dict(direct)
+        except HardwareCaseAIRetrievalError:
+            raise
+        except Exception:
+            return None
+        return None
+
+    def _resolve_formal_evidence_rows(
+        self,
+        projection: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        refs = projection.get("evidence_refs")
+        if not isinstance(refs, list):
+            return []
+        adapter = getattr(self.consumption_service, "adapter", None)
+        case_id = str(projection.get("business_case_id") or "").strip()
+        rows: list[dict[str, Any]] = []
+        for evidence_id in refs:
+            evidence_id = str(evidence_id)
+            if adapter is None:
+                rows.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "case_id": case_id,
+                        "source_id": None,
+                        "source_ref": None,
+                        "evidence_type": "FORMAL_EVIDENCE",
+                        "locator": {},
+                        "excerpt_or_caption": None,
+                        "evidence_status": "SOURCE_UNAVAILABLE",
+                        "binding_mode": "FORMAL_KNOWLEDGE_DIRECT",
+                    }
+                )
+                continue
+            try:
+                resolved = adapter.resolve_evidence(evidence_id)
+            except Exception as error:
+                rows.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "case_id": case_id,
+                        "source_id": None,
+                        "source_ref": None,
+                        "evidence_type": "FORMAL_EVIDENCE",
+                        "locator": {},
+                        "excerpt_or_caption": None,
+                        "evidence_status": "SOURCE_UNAVAILABLE",
+                        "binding_mode": "FORMAL_KNOWLEDGE_DIRECT",
+                        "resolution_error": self._error_code(error),
+                    }
+                )
+                continue
+            source = resolved.get("source") if isinstance(resolved, Mapping) else None
+            metadata = source.get("metadata") if isinstance(source, Mapping) else None
+            locator = (
+                metadata.get("hardware_locator")
+                if isinstance(metadata, Mapping)
+                else None
+            )
+            source_id = (
+                str(source.get("source_id"))
+                if isinstance(source, Mapping) and source.get("source_id")
+                else None
+            )
+            source_ref = (
+                str(source.get("uri"))
+                if isinstance(source, Mapping) and source.get("uri")
+                else None
+            )
+            available = bool(
+                source_id and source_ref and isinstance(locator, Mapping)
+            )
+            rows.append(
+                {
+                    "evidence_id": evidence_id,
+                    "case_id": case_id,
+                    "source_id": source_id,
+                    "source_ref": source_ref,
+                    "evidence_type": str(
+                        resolved.get("evidence_type")
+                        or (
+                            source.get("source_type")
+                            if isinstance(source, Mapping)
+                            else ""
+                        )
+                        or "FORMAL_EVIDENCE"
+                    ),
+                    "locator": dict(locator) if isinstance(locator, Mapping) else {},
+                    "excerpt_or_caption": (
+                        resolved.get("excerpt")
+                        if isinstance(resolved, Mapping)
+                        else None
+                    ),
+                    "evidence_status": (
+                        "AVAILABLE" if available else "SOURCE_UNAVAILABLE"
+                    ),
+                    "binding_mode": "FORMAL_KNOWLEDGE_DIRECT",
+                }
+            )
+        return rows
+
+    def get_evidence(
+        self,
+        case_id: str,
+        *,
+        role: str = "CONSUMER",
+        historical: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return self.case_service.get_evidence(
+                case_id,
+                role=role,
+                historical=historical,
+            )
+        except Exception as local_error:
+            if self.consumption_service is None:
+                raise local_error
+
+        projection = self._formal_projection_for_case_id(case_id)
+        if projection is None:
+            raise HardwareCaseAIRetrievalError("CASE_NOT_FOUND")
+        return {
+            "contract_version": "hardware-case/v1",
+            "case_id": str(
+                projection.get("business_case_id") or case_id
+            ),
+            "knowledge_id": projection.get("knowledge_id"),
+            "evidence": self._resolve_formal_evidence_rows(projection),
+            "formal_evidence_refs": list(
+                projection.get("evidence_refs") or []
+            ),
+            "formal_only": True,
+            "binding_mode": "FORMAL_KNOWLEDGE_DIRECT",
+        }
 
     def _visible_payload(
         self,
