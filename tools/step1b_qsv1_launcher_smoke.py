@@ -74,11 +74,11 @@ def main() -> int:
             "/d",
             "/s",
             "/c",
-            f"start_quality_capability_p1.bat --host 127.0.0.1 --port {args.port}",
+            f"START_OVERALL_CURRENT_PLATFORM_WINDOWS.bat --host 127.0.0.1 --port {args.port}",
         ]
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
-        launcher = ROOT / "start_quality_capability_p1.command"
+        launcher = ROOT / "START_OVERALL_CURRENT_PLATFORM_MAC.command"
         raw = launcher.read_bytes()
         if b"\r\n" in raw:
             raise RuntimeError("MAC_COMMAND_CRLF")
@@ -146,7 +146,7 @@ def main() -> int:
             if status.get(key) != value:
                 raise RuntimeError(f"{key}={status.get(key)!r}, expected {value!r}")
 
-        print(f"{args.platform.upper()}_START=PASS")
+        print(f"{args.platform.upper()}_MATURE_PLATFORM_FOUNDATION_START=PASS")
         print("MATURE_PLATFORM_BASE=PASS")
         print("NEW_QS_WORKBENCH_VISIBLE=PASS")
         print("NEW_QS_LIBRARY_VISIBLE=PASS")
