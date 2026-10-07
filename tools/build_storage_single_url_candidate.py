@@ -68,6 +68,8 @@ def build(output_dir: Path, build_date: str | None = None) -> tuple[Path, Path, 
         copy_tree(ROOT / "knowledge_production", package_root / "knowledge_production")
         copy_tree(ROOT / "repositories", package_root / "repositories")
         copy_tree(ROOT / "parser", package_root / "parser")
+        copy_tree(ROOT / "services", package_root / "services")
+        copy_tree(ROOT / "models", package_root / "models")
 
         runtime_root = package_root / "vendor" / "unified_agent_runtime"
         if runtime_root.exists():
