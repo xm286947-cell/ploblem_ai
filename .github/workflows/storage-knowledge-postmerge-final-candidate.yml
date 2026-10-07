@@ -87,7 +87,9 @@ jobs:
           set -euo pipefail
           ZIP="$(ls dist/single_url_candidate/STORAGE-SINGLE-URL-KNOWLEDGE-CANDIDATE-d5bf05abf5f4-20261007.zip)"
           test -f "$ZIP"
-          sha256sum -c "$ZIP.sha256"
+          ZIP_DIR="$(dirname "$ZIP")"
+          ZIP_NAME="$(basename "$ZIP")"
+          (cd "$ZIP_DIR" && sha256sum -c "$ZIP_NAME.sha256")
 
           rm -rf /tmp/storage-single-url-fresh
           mkdir -p /tmp/storage-single-url-fresh
