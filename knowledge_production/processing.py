@@ -89,12 +89,27 @@ class KnowledgeProcessingService:
             for obj in self.list_published()
             if obj.candidate_id == candidate_id
         ]
+        latest_review = reviews[-1] if reviews else None
+        effective_candidate = None
+        if latest_review is not None and latest_review.effective_snapshot_ref:
+            try:
+                effective_candidate = self.reviews.load_effective_candidate(
+                    latest_review
+                )
+            except KnowledgeReviewError as exc:
+                raise KnowledgeProcessingError(exc.code) from exc
+        display_candidate = effective_candidate or candidate
         return {
             "candidate": candidate,
+            "effective_candidate": effective_candidate,
+            "display_candidate": display_candidate,
+            "storage_semantic_review_options": (
+                self._storage_semantic_review_options(candidate)
+            ),
             "evaluations": evaluations,
             "latest_evaluation": evaluations[-1] if evaluations else None,
             "reviews": reviews,
-            "latest_review": reviews[-1] if reviews else None,
+            "latest_review": latest_review,
             "evidences": evidence,
             "published": published[-1] if published else None,
         }
@@ -227,6 +242,40 @@ class KnowledgeProcessingService:
             "evaluation": evaluations[-1] if evaluations else None,
             "review": reviews[-1] if reviews else None,
         }
+
+    @staticmethod
+    def _storage_semantic_review_options(
+        candidate: KnowledgeCandidate,
+    ) -> list[str]:
+        """Return governed human-review semantics without mutating Candidate.
+
+        New candidates carry storage_lifetime.semantic_class_review_options.
+        Older W4 candidates can recover the broader model-authorized set from
+        storage_source_bridge.semantic_class_candidates. AI suggestions are
+        only the final fallback.
+        """
+        metadata = candidate.metadata if isinstance(candidate.metadata, dict) else {}
+        storage = metadata.get("storage_lifetime")
+        bridge = metadata.get("storage_source_bridge")
+        storage = storage if isinstance(storage, dict) else {}
+        bridge = bridge if isinstance(bridge, dict) else {}
+
+        sources = (
+            storage.get("semantic_class_review_options"),
+            bridge.get("semantic_class_candidates"),
+            storage.get("semantic_class_candidates"),
+        )
+        for values in sources:
+            if not isinstance(values, list):
+                continue
+            normalized = [
+                str(value).strip()
+                for value in values
+                if str(value).strip()
+            ]
+            if normalized:
+                return list(dict.fromkeys(normalized))
+        return []
 
     def _load_candidate(self, candidate_id: str) -> KnowledgeCandidate:
         payload = self.repository.load(
