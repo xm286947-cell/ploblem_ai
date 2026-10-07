@@ -67,16 +67,25 @@ def test_fixture_drives_g1_g2_g3_preview_states_without_writing_candidates(tmp_p
     g1 = _preview(client, _case(manifest, "G1_COMPLETE")["software_assessment_material_id"])
     assert g1["state"] == "READY"
     assert g1["bundle"]["source_status"]["RESOLUTION"] == "PRESENT"
+    assert g1["bundle"]["source_status"]["ITR"] == "PRESENT"
     assert g1["bundle"]["source_status"]["MISSED_TEST"] == "PRESENT"
 
     g2 = _preview(client, _case(manifest, "G2_NO_MISSED_TEST")["software_assessment_material_id"])
     assert g2["state"] == "READY"
     assert g2["bundle"]["source_status"]["RESOLUTION"] == "PRESENT"
+    assert g2["bundle"]["source_status"]["ITR"] == "PRESENT"
     assert g2["bundle"]["source_status"]["MISSED_TEST"] == "MISSING"
 
     g3 = _preview(client, _case(manifest, "G3_CONFLICT")["software_assessment_material_id"])
     assert g3["state"] == "INFORMATION_REQUIRED"
     assert g3["bundle"]["source_status"]["RESOLUTION"] == "CONFLICT"
+    assert g3["bundle"]["source_status"]["ITR"] == "PRESENT"
+
+    g4 = _preview(client, _case(manifest, "G4_DUPLICATE_GENERATE")["software_assessment_material_id"])
+    assert g4["state"] == "READY"
+    assert g4["bundle"]["source_status"]["RESOLUTION"] == "PRESENT"
+    assert g4["bundle"]["source_status"]["ITR"] == "PRESENT"
+    assert g4["bundle"]["source_status"]["MISSED_TEST"] == "PRESENT"
 
     workflow = client.get("/api/v2/quality-scenario-workflow/v1/quality-scenarios")
     assert workflow.json()["total"] == 0
@@ -91,11 +100,13 @@ def test_g5_source_revision_changes_bundle_revision_and_preserves_source_only_co
 
     before = _preview(client, g5_id)
     assert before["state"] == "READY"
+    assert before["bundle"]["source_status"]["ITR"] == "PRESENT"
     before_revision = before["bundle"]["bundle_revision"]
 
     advance_g5(db)
     after = _preview(client, g5_id)
     assert after["state"] == "READY"
+    assert after["bundle"]["source_status"]["ITR"] == "PRESENT"
     assert after["bundle"]["bundle_revision"] != before_revision
 
     workflow = client.get("/api/v2/quality-scenario-workflow/v1/quality-scenarios")
