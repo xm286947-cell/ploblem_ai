@@ -13,8 +13,51 @@ def test_gateway_capabilities_are_consumer_only(monkeypatch):
     body = result.json()
     assert body["contract"] == "knowledge-consumer/v1"
     assert body["read_only_consumer_api"] is True
-    assert body["capabilities"] == {"health": True, "search": True, "ask": True, "sources": True, "revision": True, "citation": True}
+    assert body["capabilities"] == {
+        "health": True, "search": True, "ask": True, "sources": True,
+        "revision": True, "citation": True, "snapshot": True,
+    }
     assert body["endpoints"]["search"] == "/search"
+    assert body["endpoints"]["revision"] == "/sources/{source_id}/revisions/{revision_id}"
+    assert body["endpoints"]["snapshot"] == "/sources/{source_id}/revisions/{revision_id}/snapshot"
+
+
+def test_gateway_resolves_revision_from_read_only_source_metadata(monkeypatch):
+    calls = []
+
+    def fake(path, **kw):
+        calls.append(path)
+        return {
+            "source": {"source_id": "src-1", "title": "Reference"},
+            "revisions": [
+                {"revision_id": "rev-1", "content_sha256": "abc", "media_type": "application/pdf"},
+                {"revision_id": "rev-2", "content_sha256": "def", "media_type": "application/pdf"},
+            ],
+        }
+
+    monkeypatch.setattr(gateway_module, "_upstream", fake)
+    response = client.get("/sources/src-1/revisions/rev-2")
+    assert response.status_code == 200
+    assert response.json() == {
+        "revision_id": "rev-2", "content_sha256": "def",
+        "media_type": "application/pdf", "source_id": "src-1",
+    }
+    assert calls == ["/sources/src-1"]
+
+
+def test_gateway_revision_returns_404_for_unknown_revision(monkeypatch):
+    monkeypatch.setattr(gateway_module, "_upstream", lambda path, **kw: {
+        "source": {"source_id": "src-1"},
+        "revisions": [{"revision_id": "rev-1"}],
+    })
+    response = client.get("/sources/src-1/revisions/missing")
+    assert response.status_code == 404
+
+
+def test_gateway_revision_rejects_malformed_source_contract(monkeypatch):
+    monkeypatch.setattr(gateway_module, "_upstream", lambda path, **kw: {"sources": []})
+    response = client.get("/sources/src-1/revisions/rev-1")
+    assert response.status_code == 502
 
 
 def test_gateway_proxies_health_sources_search_and_ask(monkeypatch):

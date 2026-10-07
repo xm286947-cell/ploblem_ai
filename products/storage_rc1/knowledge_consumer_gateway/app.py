@@ -124,7 +124,7 @@ def capabilities():
         },
         "capabilities": {
             "health": True, "search": True, "ask": True,
-            "sources": True, "revision": True, "citation": True,
+            "sources": True, "revision": True, "citation": True, "snapshot": True,
         },
         "citation": True,
         "source_revision": True,
@@ -161,7 +161,28 @@ def citation(citation_id: str):
 
 @app.get("/sources/{source_id}/revisions/{revision_id}")
 def revision(source_id: str, revision_id: str):
-    return _upstream("/sources/" + _valid_id(source_id) + "/revisions/" + _valid_id(revision_id))
+    safe_source_id = _valid_id(source_id)
+    _valid_id(revision_id)
+    # The current Public Knowledge service exposes revision metadata as part
+    # of GET /sources/{source_id}; its standalone revision GET returns 405.
+    # Resolve from that read-only source response instead of advertising a
+    # route the upstream cannot serve.
+    result = _upstream("/sources/" + safe_source_id)
+    source_payload = result.get("source")
+    revisions = result.get("revisions")
+    if not isinstance(source_payload, dict) or not isinstance(revisions, list):
+        raise HTTPException(502, "Invalid Public Knowledge source revision response.")
+    if str(source_payload.get("source_id") or "") != source_id:
+        raise HTTPException(502, "Public Knowledge source identity mismatch.")
+    for item in revisions:
+        if not isinstance(item, dict):
+            continue
+        item_revision_id = str(
+            item.get("revision_id") or item.get("source_revision") or item.get("version") or ""
+        )
+        if item_revision_id == revision_id:
+            return {**item, "source_id": source_id, "revision_id": revision_id}
+    raise HTTPException(404, "Public Knowledge source revision not found.")
 
 
 @app.get("/sources/{source_id}/revisions/{revision_id}/snapshot")
