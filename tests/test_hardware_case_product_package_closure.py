@@ -41,19 +41,21 @@ def test_new_asset_migration_module_is_discovered_automatically(tmp_path: Path, 
     assert future in closure["files"]
 
 
-def test_standard_hardware_package_excludes_e2e_cross_domain_repository_chain():
+def test_candidate_packages_local_nonprod_knowledge_binding_without_old_install():
     closure = package_builder.dependency_closure(package_builder.ROOT)
 
     assert closure["status"] == "PASS"
-    e2e_target = "services/hardware_r1_e2e_nonprod_knowledge.py"
-    e2e_edges = [
-        edge for edge in closure["edges"]
-        if edge["target"] == e2e_target
-    ]
-    assert not e2e_edges, e2e_edges
-    assert e2e_target not in closure["files"]
-    assert "knowledge_production/public_service.py" not in closure["files"]
+    binding = "services/hardware_r1_e2e_nonprod_knowledge.py"
+    assert binding in closure["roots"]
+    assert binding in closure["files"]
+    assert "knowledge_production/public_service.py" in closure["files"]
+    assert "knowledge_production/release.py" in closure["files"]
+    assert not closure["unresolved_local_imports"]
+
+    # The Candidate reuses the existing Knowledge facade and data root. It
+    # must not bundle another repository implementation or store.
     assert "repositories/json_repository.py" not in closure["files"]
+    assert package_builder.CLOSURE_ROOTS.count(binding) == 1
 
 
 def test_ai_retrieval_definition_is_packaged_but_provider_config_is_preserved():

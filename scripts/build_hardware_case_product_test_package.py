@@ -31,6 +31,10 @@ INCLUDE_GLOBS = [
     "services/hardware_tree*.py",
     "services/hardware_migrations/*.py",
     "services/hardware_asset_migrations/*.py",
+    # The local NON_PROD Knowledge binding is an explicitly selected
+    # Hardware E2E profile dependency.  Its transitive closure is rooted below
+    # so a fresh extraction never borrows these modules from an older install.
+    "services/hardware_r1_e2e_nonprod_knowledge.py",
     "repositories/hardware_case*.py",
     "repositories/hardware_tree*.py",
     "schema/hardware_case*.json",
@@ -116,6 +120,7 @@ CLOSURE_ROOTS = [
     "scripts/hardware_case_product_test_smoke.py",
     "quality_knowledge/web/p0_app.py",
     "services/hardware_case_runtime_adapter.py",
+    "services/hardware_r1_e2e_nonprod_knowledge.py",
 ]
 
 LOCAL_IMPORT_PREFIXES = {
@@ -664,7 +669,11 @@ def main() -> int:
             "composition_profile": ["HARDWARE_CASE"],
             "platform_shared": ["runtime"],
             "package_policy": "EXPLICIT_HARDWARE_ALLOWLIST",
-            "cross_domain_business_code_bundled": False,
+            "cross_domain_business_code_bundled": True,
+            "cross_domain_scope": [
+                "Unified Knowledge public facade and immutable release reader",
+                "LOCAL_NON_PROD Hardware E2E binding; no second store or Runtime",
+            ],
         },
         "asset_migration_package": {
             "module_dir": ASSET_MIGRATION_MODULE_DIR,
@@ -675,7 +684,7 @@ def main() -> int:
         "known_gaps": [
             "Real company Word/Excel data is not bundled",
             "Real Provider acceptance still requires company-environment validation with approved endpoint/model",
-            "Unified Knowledge Promotion requires HARDWARE_KNOWLEDGE_BASE_URL and HARDWARE_KNOWLEDGE_RELEASE_VERSION in the target environment",
+            "External Unified Knowledge Promotion requires HARDWARE_KNOWLEDGE_BASE_URL and HARDWARE_KNOWLEDGE_RELEASE_VERSION; LOCAL_NON_PROD uses the packaged binding against the existing data root",
             "The repository-wide main.py CLI is intentionally not packaged; Hardware Case uses the dedicated launcher to avoid unrelated legacy builder dependencies",
         ],
         "frontend_gate": "P01_P07_FRONTEND_GATE_PASS",

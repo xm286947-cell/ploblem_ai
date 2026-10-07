@@ -8,6 +8,7 @@ top-level imports include unrelated Repeat Case builder modules.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -141,7 +142,11 @@ def main() -> int:
     if args.check:
         return _run_isolated_startup_check()
 
-    resolver = HardwareDataRootResolver(ROOT)
+    configured_bootstrap = str(os.getenv("HARDWARE_BOOTSTRAP_PATH") or "").strip()
+    resolver = HardwareDataRootResolver(
+        ROOT,
+        bootstrap_path=configured_bootstrap or None,
+    )
     resolution = resolver.resolve()
     print("DATA_ROOT_CLASSIFICATION=" + resolution.classification)
     startup_status = HardwareStartupCoordinator(
