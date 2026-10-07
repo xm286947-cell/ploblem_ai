@@ -41,14 +41,14 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -q --disable-pip-version-check -r products/storage_rc1/requirements.txt pytest==9.0.2 httpx==0.28.1
-          PYTHONPATH="products/storage_rc1:." python -m pytest -q             products/storage_rc1/tests/test_knowledge_service_client.py             products/storage_rc1/tests/test_knowledge_consumer_gateway.py             products/storage_rc1/tests/test_public_knowledge_workspace.py
+          PYTHONPATH="products/storage_rc1:." python -m pytest -q products/storage_rc1/tests/test_knowledge_service_client.py products/storage_rc1/tests/test_knowledge_consumer_gateway.py products/storage_rc1/tests/test_public_knowledge_workspace.py
 
       - name: Build post-merge single URL candidate
         shell: bash
         run: |
           set -euo pipefail
           rm -rf dist/postmerge_single_url
-          python tools/build_storage_single_url_candidate.py             --output-dir dist/postmerge_single_url             --build-date "$BUILD_DATE"
+          python tools/build_storage_single_url_candidate.py --output-dir dist/postmerge_single_url --build-date "$BUILD_DATE"
 
       - name: Fresh Extract validation
         shell: bash
@@ -60,59 +60,20 @@ jobs:
           DELIVERY="$ZIP.DELIVERY_MANIFEST.json"
           test -f "$SHA_FILE"
           test -f "$DELIVERY"
-
           EXPECTED="$(awk '{print $1}' "$SHA_FILE")"
           ACTUAL="$(sha256sum "$ZIP" | awk '{print $1}')"
           test "$EXPECTED" = "$ACTUAL"
-
           FRESH="$(mktemp -d)"
           unzip -q "$ZIP" -d "$FRESH"
           ROOT="$FRESH/STORAGE_PRODUCT_MVP_RC1"
           test -d "$ROOT"
-
-          (
-            cd "$ROOT"
-            sha256sum -c FILE_SHA256SUMS.txt >/dev/null
-          )
-
-          python - "$ROOT" "$DELIVERY" "$PRODUCT_SOURCE_SHA" <<'PY'
-import json, pathlib, sys
-root=pathlib.Path(sys.argv[1])
-delivery=json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-expected=sys.argv[3]
-candidate=json.loads((root/"CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
-assert delivery["source_commit"] == expected, delivery
-assert candidate["source_commit"] == expected, candidate
-assert candidate["single_url_config"] == "KNOWLEDGE_SERVICE_URL"
-assert candidate["user_config_count"] == 1
-assert candidate["provider_calls"] == 0
-assert candidate["kioxia_extraction"] == "NOT_RERUN"
-assert not list(root.rglob("knowledge_service.local.json"))
-print("POSTMERGE_SOURCE_IDENTITY=PASS")
-print("SINGLE_URL_CONTRACT=PASS")
-print("LOCAL_URL_CONFIG_EXCLUDED=PASS")
-PY
-
+          (cd "$ROOT" && sha256sum -c FILE_SHA256SUMS.txt >/dev/null)
+          python -c 'import json,pathlib,os; root=pathlib.Path(os.environ["FRESH_ROOT"]); delivery=json.loads(pathlib.Path(os.environ["DELIVERY"]).read_text()); candidate=json.loads((root/"CANDIDATE_MANIFEST.json").read_text()); expected=os.environ["PRODUCT_SOURCE_SHA"]; assert delivery["source_commit"]==expected; assert candidate["source_commit"]==expected; assert candidate["single_url_config"]=="KNOWLEDGE_SERVICE_URL"; assert candidate["user_config_count"]==1; assert candidate["provider_calls"]==0; assert candidate["kioxia_extraction"]=="NOT_RERUN"; assert not list(root.rglob("knowledge_service.local.json")); print("POSTMERGE_SOURCE_IDENTITY=PASS"); print("SINGLE_URL_CONTRACT=PASS"); print("LOCAL_URL_CONFIG_EXCLUDED=PASS")'             FRESH_ROOT="$ROOT" DELIVERY="$DELIVERY" PRODUCT_SOURCE_SHA="$PRODUCT_SOURCE_SHA"
           python -m compileall -q "$ROOT/storage_life" "$ROOT/knowledge_consumer_gateway" "$ROOT/knowledge_production"
           bash -n "$ROOT/knowledge_consumer_gateway/start_mac_gateway.command"
-
-          python -m pip install -q --disable-pip-version-check             -r "$ROOT/requirements.txt"             -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"             pytest==9.0.2 httpx==0.28.1
-
-          (
-            cd "$ROOT"
-            PYTHONPATH="$ROOT:$ROOT/vendor/unified_agent_runtime" python -m pytest -q               tests/test_knowledge_service_client.py               tests/test_knowledge_consumer_gateway.py               tests/test_public_knowledge_workspace.py
-          )
-
-          python - "$ROOT/run_windows.bat" <<'PY'
-from pathlib import Path
-import sys
-text=Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").lower()
-assert "docker" not in text
-assert "wsl" not in text
-print("WINDOWS_LAUNCHER_NO_DOCKER=PASS")
-print("WINDOWS_LAUNCHER_NO_WSL=PASS")
-PY
-
+          python -m pip install -q --disable-pip-version-check -r "$ROOT/requirements.txt" -r "$ROOT/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt" pytest==9.0.2 httpx==0.28.1
+          (cd "$ROOT" && PYTHONPATH="$ROOT:$ROOT/vendor/unified_agent_runtime" python -m pytest -q tests/test_knowledge_service_client.py tests/test_knowledge_consumer_gateway.py tests/test_public_knowledge_workspace.py)
+          python -c 'from pathlib import Path; import os; t=Path(os.environ["WINDOWS_LAUNCHER"]).read_text(encoding="utf-8",errors="replace").lower(); assert "docker" not in t; assert "wsl" not in t; print("WINDOWS_LAUNCHER_NO_DOCKER=PASS"); print("WINDOWS_LAUNCHER_NO_WSL=PASS")' WINDOWS_LAUNCHER="$ROOT/run_windows.bat"
           echo "FRESH_EXTRACT=PASS"
           echo "PACKAGE_GATE=PASS"
           echo "PROVIDER_CALLS=0"
