@@ -93,7 +93,7 @@ def test_ready_passes_with_valid_runtime_config_and_knowledge_probe(tmp_path, mo
     assert "127.0.0.1:19091" not in rendered
 
 
-def test_knowledge_dependency_unavailable_is_explicit_and_fail_closed(tmp_path, monkeypatch):
+def test_knowledge_dependency_unavailable_is_explicit_and_degraded(tmp_path, monkeypatch):
     model_config = _runtime_config(tmp_path)
     monkeypatch.setenv("HARDWARE_CASE_MODEL_CONFIG", str(model_config))
     monkeypatch.setenv("HARDWARE_CASE_API_KEY", "test-secret")
@@ -108,8 +108,13 @@ def test_knowledge_dependency_unavailable_is_explicit_and_fail_closed(tmp_path, 
 
     client = TestClient(_app(tmp_path))
     ready = client.get("/ready")
-    assert ready.status_code == 503
-    dependency = ready.json()["dependencies"]["UNIFIED_KNOWLEDGE"]
+    assert ready.status_code == 200
+    payload = ready.json()
+    assert payload["status"] == "READY_DEGRADED"
+    assert payload["degraded_dependencies"] == ["UNIFIED_KNOWLEDGE"]
+    assert payload["capabilities"]["local_case_search"] == "READY"
+    assert payload["capabilities"]["ai_retrieval"] == "LOCAL_FALLBACK"
+    dependency = payload["dependencies"]["UNIFIED_KNOWLEDGE"]
     assert dependency == {"status": "UNREADY", "error_code": "KNOWLEDGE_UNAVAILABLE"}
 
 
@@ -152,7 +157,7 @@ def test_ready_accepts_actual_local_nonprod_knowledge_binding_without_external_u
     assert dependency["managed_release"] is True
 
 
-def test_ready_keeps_local_nonprod_fail_closed_when_binding_is_incomplete(
+def test_ready_keeps_local_nonprod_explicit_but_product_stays_degraded(
     tmp_path, monkeypatch
 ):
     model_config = _runtime_config(tmp_path)
@@ -167,7 +172,9 @@ def test_ready_keeps_local_nonprod_fail_closed_when_binding_is_incomplete(
 
     client = TestClient(_app(tmp_path))
     ready = client.get("/ready")
-    assert ready.status_code == 503
-    dependency = ready.json()["dependencies"]["UNIFIED_KNOWLEDGE"]
+    assert ready.status_code == 200
+    payload = ready.json()
+    assert payload["status"] == "READY_DEGRADED"
+    dependency = payload["dependencies"]["UNIFIED_KNOWLEDGE"]
     assert dependency["status"] == "UNREADY"
     assert dependency["error_code"] == "BLOCKED_BY_ENVIRONMENT"
