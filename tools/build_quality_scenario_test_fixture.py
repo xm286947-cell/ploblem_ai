@@ -219,6 +219,23 @@ def _assessment_raw(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _itr_raw(case: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "问题信息_ITR单号": case["business_key"],
+        "ITR单号": case["business_key"],
+        "问题信息_问题描述": case["title"],
+        "问题信息_故障现象描述": case["title"],
+        "问题信息_产品编码": "PLC",
+        "问题信息_产品型号": case["product_model"],
+        "问题信息_客户行业": case["industry"],
+        "问题信息_客户名称": case["customer"],
+        "问题信息_IPMT": "工业自动化IPMT",
+        "问题信息_SPDT": "PLC平台SPDT",
+        "问题信息_问题发生阶段": "客户现场运行",
+        "问题信息_问题发生时间": "2026-10-05 10:00:00",
+    }
+
+
 def _resolution_raw(case: dict[str, Any], *, revision: int = 1) -> dict[str, Any]:
     suffix = "" if revision == 1 else "；复核后补充边界条件并更新验证策略"
     return {
@@ -300,6 +317,14 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
             "软件考核",
             index + 1,
         )
+        itr_id, _ = materials.add_material(
+            materials.group("ITR"),
+            case["business_key"],
+            _itr_raw(case),
+            "W4_FUNCTIONAL_FIXTURE.xlsx",
+            "ITR",
+            index + 1,
+        )
         resolution_id, _ = materials.add_material(
             materials.group("ITR-CS"),
             case["business_key"] + "CS",
@@ -363,9 +388,16 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
                 "knowledge_id": knowledge_id,
                 "issue_version_id": version_id,
                 "software_assessment_material_id": assessment_id,
+                "itr_material_id": itr_id,
                 "resolution_material_id": resolution_id,
                 "missed_test_material_id": missed_test_id,
                 "conflict_resolution_material_id": conflict_material_id,
+                "expected_source_status": {
+                    "SOFTWARE_ASSESSMENT": "PRESENT",
+                    "RESOLUTION": "CONFLICT" if case.get("conflicting_resolution") else "PRESENT",
+                    "ITR": "PRESENT",
+                    "MISSED_TEST": "PRESENT" if case.get("with_missed_test") else "MISSING",
+                },
             }
         )
 
@@ -416,6 +448,7 @@ def _counts(db_path: Path) -> dict[str, int]:
             "software_assessment": c(
                 "SELECT COUNT(*) FROM source_material WHERE material_type='SOFTWARE_OPERATION'"
             ),
+            "itr_source": c("SELECT COUNT(*) FROM source_material WHERE material_type='ITR_SOURCE'"),
             "resolution": c("SELECT COUNT(*) FROM source_material WHERE material_type='ITR_CS'"),
             "missed_test_material": c(
                 "SELECT COUNT(*) FROM source_material WHERE material_type='ESCAPE_ANALYSIS'"
