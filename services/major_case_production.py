@@ -15,6 +15,7 @@ from typing import Any
 from runtime import EvidenceLocator, EvidenceReference, LightweightExecutionEngine, SourceRef, SqliteTaskStore
 from runtime.adapters import MajorIssueD01RuntimeAdapter, MajorIssueObjectSpec
 from quality_knowledge.major_cases.document_parser import parse_document
+from quality_knowledge.major_cases.identity import MajorCaseIdentityConflict, MajorCaseIdentityResolver
 from quality_knowledge.major_cases.semantic_source_adapter import MajorSemanticSourceAdapter
 from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
@@ -46,6 +47,7 @@ class MajorCaseProductionService:
         project_root: str | Path | None = None,
     ) -> None:
         self.repository = repository
+        self.identity_resolver = MajorCaseIdentityResolver(repository)
         self.artifact_repository = artifact_repository
         self.publisher = MajorCasePublisher(repository, artifact_repository)
         self.provider = provider
@@ -79,14 +81,19 @@ class MajorCaseProductionService:
         if suffix not in {".pdf", ".docx", ".doc"}:
             raise MajorProductionError("MAJOR_SOURCE_TYPE_UNSUPPORTED")
 
-        case = self.repository.create_case(title, group_code, domain=domain)
+        try:
+            resolution = self.identity_resolver.resolve_or_create_case(
+                group_code=group_code,
+                title=title,
+                domain=domain,
+                source_key=f"ITR:{standard_itr}",
+                standard_itrs=[standard_itr],
+            )
+            case = resolution["case"]
+            event = resolution["events"][0]
+        except MajorCaseIdentityConflict as error:
+            raise MajorProductionError(error.code) from error
         self.repository.update_case_status(case["case_id"], "ACTIVE")
-        event = self.repository.upsert_event(
-            case["case_id"],
-            standard_itr=standard_itr,
-            internal_event_key=standard_itr,
-            title=title,
-        )
         with TemporaryDirectory(prefix="major-source-") as directory:
             source_path = Path(directory) / Path(source_name).name
             source_path.write_bytes(source_bytes)

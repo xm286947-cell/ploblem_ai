@@ -42,6 +42,7 @@ def _error(error: MajorProductionError) -> HTTPException:
         "MAJOR_ANALYSIS_EVENT_INVALID",
         "MAJOR_REVIEW_EVENT_SELECTION_REQUIRED",
         "MAJOR_REVIEW_EVENT_MISMATCH",
+        "CASE_IDENTITY_CONFLICT",
     } else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
     return HTTPException(status, error.code)
 
