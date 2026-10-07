@@ -81,7 +81,7 @@ jobs:
         run: python tools/build_step1b_qsv1_preview_package.py --output-dir dist
       - uses: actions/upload-artifact@v4
         with:
-          name: STEP1B_QSV1_MATURE_PREVIEW
+          name: QUALITY_SCENARIO_MATURE_INTEGRATION_GATE
           path: dist/STEP1B_QSV1_MATURE_PREVIEW_*.zip
           if-no-files-found: error
           retention-days: 30
