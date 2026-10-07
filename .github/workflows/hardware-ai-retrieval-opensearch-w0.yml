@@ -138,6 +138,22 @@ jobs:
       - name: Verify persistence after restart
         run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
 
+      - name: Collect Windows engine logs
+        if: always()
+        shell: pwsh
+        run: |
+          $dest = "$env:RUNNER_TEMP\engine-logs"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          if (Test-Path "C:\hardware-search-w0-data\logs") {
+            Copy-Item "C:\hardware-search-w0-data\logs\*" $dest -Recurse -Force -ErrorAction SilentlyContinue
+            Get-ChildItem $dest -Recurse -File | ForEach-Object {
+              Write-Host "===== $($_.FullName) ====="
+              Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+            }
+          } else {
+            Write-Host "WINDOWS_ENGINE_LOG_DIR_MISSING"
+          }
+
       - name: Upload Windows logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -148,5 +164,5 @@ jobs:
             ${{ runner.temp }}\opensearch-stderr.log
             ${{ runner.temp }}\opensearch-restart.log
             ${{ runner.temp }}\opensearch-restart-stderr.log
-            C:\hardware-search-w0-data\logs\**
+            ${{ runner.temp }}\engine-logs\**
           if-no-files-found: warn
