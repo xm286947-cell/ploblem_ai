@@ -5,12 +5,15 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import sys
 import zipfile
 from pathlib import Path
 
-from tools.build_quality_scenario_test_fixture import build_fixture
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.build_quality_scenario_test_fixture import build_fixture
 OUT = ROOT / "dist"
 WORK = ROOT / "validation" / "g1_g5_test_data_package"
 PRODUCT_SHA = "80c31f66550e3f9b5c13569da0abb411a526cf59"
