@@ -12,12 +12,25 @@ from storage_life.knowledge_service_client import (
 )
 
 
-def test_t01_single_url_has_highest_environment_precedence(monkeypatch):
+def test_t01_saved_single_url_has_highest_precedence(monkeypatch):
     monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "HTTPS://Knowledge.Example:443/")
     monkeypatch.setenv("PUBLIC_KNOWLEDGE_SERVICE_URL", "http://legacy:8080")
     monkeypatch.setenv("PUBLIC_KNOWLEDGE_API_URL", "http://old:7000")
     monkeypatch.setattr(client_module, "_config_file_value", lambda: "http://saved:9001")
-    assert resolve_service_url() == "https://knowledge.example"
+    assert resolve_service_url() == "http://saved:9001"
+
+
+def test_saved_url_persists_across_reload_and_overrides_environment(monkeypatch, tmp_path):
+    path = tmp_path / "storage_local_config.json"
+    monkeypatch.setattr(client_module, "config_file_path", lambda: path)
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://env.example:9001")
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_SERVICE_URL", "http://legacy.example:9001")
+    saved = client_module.save_service_url("http://mac.example:9001")
+    assert saved == "http://mac.example:9001"
+    assert path.is_file()
+    assert resolve_service_url() == "http://mac.example:9001"
+    # Re-resolution models a fresh app/client process after restart.
+    assert KnowledgeServiceClient().base_url == "http://mac.example:9001"
 
 
 def test_t02_legacy_service_url_is_compatible(monkeypatch):
@@ -61,6 +74,7 @@ def test_t04_capabilities_discovery_validates_contract(monkeypatch):
     client = KnowledgeServiceClient("http://mac.example:9001")
     payload = {
         "contract": "knowledge-consumer/v1",
+        "capabilities": {"health": True, "search": True, "ask": True, "sources": True, "citation": True},
         "endpoints": {
             "health": "/health", "search": "/search", "ask": "/ask",
             "sources": "/sources", "citation": "/citations/{citation_id}",
@@ -81,6 +95,31 @@ def test_t05_search_uses_discovered_endpoint(monkeypatch):
     monkeypatch.setattr(client, "_raw", lambda path, payload=None, **kw: seen.update(path=path, payload=payload) or {"hits": []})
     assert client.request("/search", {"query": "WAF", "top_k": 1}) == {"hits": []}
     assert seen["path"] == "/v2/find"
+
+
+def test_sources_revision_and_citation_resolve_through_the_same_origin(monkeypatch):
+    client = KnowledgeServiceClient("http://mac.example:9001")
+    client_module.reset_capabilities_cache()
+    monkeypatch.setattr(client, "capabilities", lambda **kw: client_module.ServiceCapabilities({
+        "endpoints": {
+            "source": "/sources/{source_id}",
+            "revision": "/sources/{source_id}/revisions/{revision_id}",
+            "citation": "/citations/{citation_id}",
+            "snapshot": "/sources/{source_id}/revisions/{revision_id}/snapshot",
+        }
+    }, "DISCOVERED"))
+    seen = []
+    monkeypatch.setattr(client, "_raw", lambda path, payload=None, **kw: seen.append((client.base_url, path)) or ((b"x", "application/pdf", "") if kw.get("binary") else {"ok": True}))
+    assert client.get_source("src:1")["ok"] is True
+    assert client.get_revision("src:1", "rev-2")["ok"] is True
+    assert client.resolve_citation("cite:3")["ok"] is True
+    assert client.get_snapshot("src:1", "rev-2")[0] == b"x"
+    assert seen == [
+        ("http://mac.example:9001", "/sources/src%3A1"),
+        ("http://mac.example:9001", "/sources/src%3A1/revisions/rev-2"),
+        ("http://mac.example:9001", "/citations/cite%3A3"),
+        ("http://mac.example:9001", "/sources/src%3A1/revisions/rev-2/snapshot"),
+    ]
 
 
 def test_t10_retrieval_timeout_and_retry_are_bounded(monkeypatch):
@@ -107,7 +146,12 @@ def test_capability_fallback_only_on_not_found(monkeypatch):
     client = KnowledgeServiceClient("http://legacy.example:9000")
     monkeypatch.setattr(client, "_raw", lambda *a, **k: (_ for _ in ()).throw(KnowledgeServiceError("KNOWLEDGE_SERVICE_UNREACHABLE", "HTTP 404: missing")))
     client_module.reset_capabilities_cache()
-    assert client.capabilities(refresh=True).mode == "LEGACY_CONTRACT"
+    legacy_caps = client.capabilities(refresh=True)
+    assert legacy_caps.mode == "LEGACY_CONTRACT"
+    assert legacy_caps.payload["read_only_consumer_api"] is True
+    local = KnowledgeServiceClient("http://127.0.0.1:9000")
+    local_caps = local.capabilities(refresh=True)
+    assert local_caps.payload["read_only_consumer_api"] is False
     monkeypatch.setattr(client, "_raw", lambda *a, **k: (_ for _ in ()).throw(KnowledgeServiceError("KNOWLEDGE_SERVICE_UNREACHABLE", "connection refused")))
     with pytest.raises(KnowledgeServiceError):
         client.capabilities(refresh=True)
@@ -126,6 +170,7 @@ def test_capabilities_cannot_redirect_consumer_operation_into_admin_path(monkeyp
     client = KnowledgeServiceClient("http://mac.example:9001")
     payload = {
         "contract": "knowledge-consumer/v1",
+        "capabilities": {"health": True, "search": True, "ask": True, "sources": True, "citation": True},
         "endpoints": {"health": "/health", "search": "/admin/config", "ask": "/ask", "sources": "/sources"},
     }
     monkeypatch.setattr(client, "_raw", lambda *a, **k: payload)

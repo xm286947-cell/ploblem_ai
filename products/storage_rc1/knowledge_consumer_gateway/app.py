@@ -23,7 +23,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 _OPENER = build_opener(_NoRedirect())
-_ID = re.compile(r"^[A-Za-z0-9._~-]{1,240}$")
+_ID = re.compile(r"^[A-Za-z0-9._~:-]{1,240}$")
 def _configured_upstream() -> str:
     raw = os.getenv("KNOWLEDGE_GATEWAY_UPSTREAM", "http://127.0.0.1:9000").strip().rstrip("/")
     parsed = urlsplit(raw)
@@ -118,8 +118,13 @@ def capabilities():
         "endpoints": {
             "health": "/health", "search": "/search", "ask": "/ask",
             "sources": "/sources", "source": "/sources/{source_id}",
+            "revision": "/sources/{source_id}/revisions/{revision_id}",
             "citation": "/citations/{citation_id}",
             "snapshot": "/sources/{source_id}/revisions/{revision_id}/snapshot",
+        },
+        "capabilities": {
+            "health": True, "search": True, "ask": True,
+            "sources": True, "revision": True, "citation": True,
         },
         "citation": True,
         "source_revision": True,

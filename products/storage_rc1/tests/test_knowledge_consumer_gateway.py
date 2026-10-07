@@ -13,6 +13,7 @@ def test_gateway_capabilities_are_consumer_only(monkeypatch):
     body = result.json()
     assert body["contract"] == "knowledge-consumer/v1"
     assert body["read_only_consumer_api"] is True
+    assert body["capabilities"] == {"health": True, "search": True, "ask": True, "sources": True, "revision": True, "citation": True}
     assert body["endpoints"]["search"] == "/search"
 
 
@@ -42,6 +43,13 @@ def test_t08_gateway_denies_admin_routes(monkeypatch):
 def test_t09_gateway_denies_delete_source(monkeypatch):
     monkeypatch.setattr(gateway_module, "_upstream", lambda *a, **k: (_ for _ in ()).throw(AssertionError("delete forwarded")))
     assert client.delete("/sources/source-1").status_code in {404, 405}
+
+
+def test_gateway_denies_remote_config_write_and_restart(monkeypatch):
+    monkeypatch.setattr(gateway_module, "_upstream", lambda *a, **k: (_ for _ in ()).throw(AssertionError("unsafe route forwarded")))
+    assert client.put("/admin/providers", json={"api_key": "not-a-real-secret"}).status_code == 404
+    assert client.post("/restart").status_code == 404
+    assert client.delete("/sources/source-1/revisions/rev-1").status_code in {404, 405}
 
 
 def test_gateway_rejects_path_injection_and_invalid_contract(monkeypatch):

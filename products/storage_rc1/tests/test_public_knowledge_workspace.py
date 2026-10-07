@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
-from storage_life import public_knowledge
+from storage_life import knowledge_service_client, public_knowledge
 from storage_life.app import app
 
 
@@ -106,19 +107,37 @@ def test_t03_t04_test_connection_discovers_health_capabilities_sources_and_searc
     assert calls == ["/health", "/capabilities", "/sources", "/search"]
 
 
-def test_settings_update_is_one_local_persisted_url_and_env_managed_is_read_only(monkeypatch):
-    original_save = public_knowledge.save_service_url
-    monkeypatch.delenv("KNOWLEDGE_SERVICE_URL", raising=False)
-    monkeypatch.delenv("PUBLIC_KNOWLEDGE_SERVICE_URL", raising=False)
-    monkeypatch.delenv("PUBLIC_KNOWLEDGE_API_URL", raising=False)
-    monkeypatch.setattr(public_knowledge, "save_service_url", lambda value: "http://mac.example:9001")
+def test_settings_update_persists_single_url_and_overrides_environment(monkeypatch, tmp_path):
+    config_path = tmp_path / "storage_local_config.json"
+    monkeypatch.setattr(knowledge_service_client, "config_file_path", lambda: config_path)
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://env.example:9001")
+    monkeypatch.setenv("PUBLIC_KNOWLEDGE_SERVICE_URL", "http://legacy.example:9001")
     response = client.put("/api/public-knowledge/settings", json={"url": "http://mac.example:9001"})
     assert response.status_code == 200
     assert response.json()["user_config_count"] == 1
-    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://pinned.example:9001")
-    monkeypatch.setattr(public_knowledge, "save_service_url", original_save)
-    response = client.put("/api/public-knowledge/settings", json={"url": "http://other.example"})
-    assert response.status_code == 409
+    assert response.json()["environment_managed"] is False
+    assert config_path.is_file()
+    after_reload = client.get("/api/public-knowledge/settings")
+    assert after_reload.status_code == 200
+    assert after_reload.json()["knowledge_service_url"] == "http://mac.example:9001"
+
+
+def test_settings_ui_exposes_exactly_one_editable_service_url():
+    html = (Path(__file__).parents[1] / "storage_life" / "index.html").read_text(encoding="utf-8")
+    assert html.count('id="knowledgeServiceUrl"') == 1
+    assert 'id="knowledgeServiceUrl" type="url"' in html
+    assert 'id="pkMode"' not in html
+    assert 'id="pkBaseUrl"' not in html
+    assert "localStorage.setItem('pk.url'" not in html
+
+
+def test_invalid_or_credential_bearing_url_is_rejected_before_persistence(monkeypatch, tmp_path):
+    config_path = tmp_path / "storage_local_config.json"
+    monkeypatch.setattr(knowledge_service_client, "config_file_path", lambda: config_path)
+    for value in ("ftp://mac.example", "http://user:pass@mac.example:9001", "http://mac.example/path"):
+        response = client.put("/api/public-knowledge/settings", json={"url": value})
+        assert response.status_code == 422
+    assert not config_path.exists()
 
 
 def test_remote_request_cannot_override_configured_host(monkeypatch):
@@ -132,6 +151,12 @@ def test_remote_consumer_cannot_import_public_source(monkeypatch):
     response = client.post("/api/public-knowledge/sources/import?mode=LIVE", json={
         "title": "public source", "content": "public text", "classification": "PUBLIC"
     })
+    assert response.status_code == 403
+
+
+def test_remote_consumer_cannot_delete_source(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "https://mac.example:9443")
+    response = client.delete("/api/public-knowledge/sources/source-1?mode=LIVE")
     assert response.status_code == 403
 
 

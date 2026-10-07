@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
@@ -26,7 +27,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 _OPENER = build_opener(_NoRedirect())
-_ID = re.compile(r"^[A-Za-z0-9._~-]{1,240}$")
+_ID = re.compile(r"^[A-Za-z0-9._~:-]{1,240}$")
 _DEFAULT_URL = "http://127.0.0.1:9000"
 _ENDPOINT_PATTERNS = {
     "health": re.compile(r"^/(?:api/)?health$"),
@@ -34,6 +35,7 @@ _ENDPOINT_PATTERNS = {
     "ask": re.compile(r"^/(?:v\d+/knowledge/)?ask$"),
     "sources": re.compile(r"^/(?:v\d+/knowledge/)?sources$"),
     "source": re.compile(r"^/(?:v\d+/knowledge/)?sources/\{source_id\}$"),
+    "revision": re.compile(r"^/(?:v\d+/knowledge/)?sources/\{source_id\}/revisions/\{revision_id\}$"),
     "citation": re.compile(r"^/(?:v\d+/)?citations/\{citation_id\}$"),
     "snapshot": re.compile(r"^/(?:v\d+/knowledge/)?sources/\{source_id\}/revisions/\{revision_id\}/snapshot$"),
 }
@@ -72,7 +74,7 @@ def canonicalize_service_url(value: str) -> str:
 
 
 def _config_file_value() -> str | None:
-    path = Path(__file__).resolve().parents[1] / "config" / "knowledge_service.local.json"
+    path = config_file_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -81,37 +83,43 @@ def _config_file_value() -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def config_file_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "config" / "knowledge_service.local.json"
+
+
 def resolve_service_url() -> str:
-    # Environment names preserve their documented legacy precedence. The local
-    # settings file is a persisted value for the one UI setting when no legacy
-    # deployment variable is present.
+    # The single persisted user setting is authoritative. Environment names
+    # remain compatibility fallbacks for fresh extracts and deployments.
     configured = (
-        os.getenv("KNOWLEDGE_SERVICE_URL")
+        _config_file_value()
+        or os.getenv("KNOWLEDGE_SERVICE_URL")
         or os.getenv("PUBLIC_KNOWLEDGE_SERVICE_URL")
         or os.getenv("PUBLIC_KNOWLEDGE_API_URL")
-        or _config_file_value()
         or _DEFAULT_URL
     )
     return canonicalize_service_url(configured)
 
 
 def save_service_url(value: str) -> str:
-    if any(os.getenv(key) for key in (
-        "KNOWLEDGE_SERVICE_URL", "PUBLIC_KNOWLEDGE_SERVICE_URL", "PUBLIC_KNOWLEDGE_API_URL"
-    )):
-        raise KnowledgeServiceError(
-            "KNOWLEDGE_SERVICE_URL_ENV_MANAGED",
-            "Knowledge 服务地址由部署环境管理，不能在页面覆盖。",
-        )
     normalized = canonicalize_service_url(value)
-    path = Path(__file__).resolve().parents[1] / "config" / "knowledge_service.local.json"
+    path = config_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps({"KNOWLEDGE_SERVICE_URL": normalized}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
+    temporary_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=path.name + ".", suffix=".tmp", delete=False,
+        ) as temporary:
+            temporary_name = temporary.name
+            temporary.write(json.dumps(
+                {"KNOWLEDGE_SERVICE_URL": normalized}, ensure_ascii=False, indent=2
+            ) + "\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if temporary_name and os.path.exists(temporary_name):
+            os.unlink(temporary_name)
     reset_capabilities_cache()
     return normalized
 
@@ -129,11 +137,17 @@ def _validate_capabilities(payload: Any) -> dict[str, Any]:
     endpoints = payload.get("endpoints")
     if not isinstance(endpoints, dict):
         raise KnowledgeServiceError("KNOWLEDGE_SERVICE_CONTRACT_INVALID", "capabilities endpoints 无效。")
+    capability_flags = payload.get("capabilities")
+    if not isinstance(capability_flags, dict) or any(
+        not isinstance(capability_flags.get(key), bool)
+        for key in ("health", "search", "ask", "sources", "citation")
+    ):
+        raise KnowledgeServiceError("KNOWLEDGE_SERVICE_CONTRACT_INVALID", "capabilities 状态字段无效。")
     for key in ("health", "search", "ask", "sources"):
         value = endpoints.get(key)
         if not isinstance(value, str) or not _ENDPOINT_PATTERNS[key].fullmatch(value):
             raise KnowledgeServiceError("KNOWLEDGE_SERVICE_CONTRACT_INVALID", f"capabilities 缺少 {key} endpoint。")
-    for key in ("source", "citation", "snapshot"):
+    for key in ("source", "revision", "citation", "snapshot"):
         value = endpoints.get(key)
         if value is not None and (not isinstance(value, str) or not _ENDPOINT_PATTERNS[key].fullmatch(value)):
             raise KnowledgeServiceError("KNOWLEDGE_SERVICE_CONTRACT_INVALID", f"capabilities {key} endpoint 不在 Consumer 路由边界内。")
@@ -227,13 +241,18 @@ class KnowledgeServiceClient:
                 "endpoints": {
                     "health": "/health", "search": "/search", "ask": "/ask",
                     "sources": "/sources", "source": "/sources/{source_id}",
+                    "revision": "/sources/{source_id}/revisions/{revision_id}",
                     "citation": "/citations/{citation_id}",
                     "snapshot": "/sources/{source_id}/revisions/{revision_id}/snapshot",
+                },
+                "capabilities": {
+                    "health": True, "search": True, "ask": True,
+                    "sources": True, "citation": True,
                 },
                 "citation": True,
                 "source_revision": True,
                 "generation": True,
-                "read_only_consumer_api": True,
+                "read_only_consumer_api": urlsplit(self.base_url).hostname not in {"localhost", "127.0.0.1", "::1"},
             }
             mode = "LEGACY_CONTRACT"
         else:
@@ -269,14 +288,19 @@ class KnowledgeServiceClient:
         if path.startswith("/sources/") and "/revisions/" in path and path.endswith("/snapshot"):
             parts = path.strip("/").split("/")
             if len(parts) == 5:
-                path = self.endpoint("snapshot", source_id=parts[1], revision_id=parts[3])
+                path = self.endpoint("snapshot", source_id=unquote(parts[1]), revision_id=unquote(parts[3]))
                 endpoint = "snapshot"
+        elif path.startswith("/sources/") and "/revisions/" in path:
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[2] == "revisions":
+                path = self.endpoint("revision", source_id=unquote(parts[1]), revision_id=unquote(parts[3]))
+                endpoint = "revision"
         elif path.startswith("/sources/"):
-            source_id = path[len("/sources/"):]
+            source_id = unquote(path[len("/sources/"):])
             path = self.endpoint("source", source_id=source_id)
             endpoint = "source"
         elif path.startswith("/citations/"):
-            citation_id = path[len("/citations/"):]
+            citation_id = unquote(path[len("/citations/"):])
             path = self.endpoint("citation", citation_id=citation_id)
             endpoint = "citation"
         if endpoint is None:
@@ -323,5 +347,11 @@ class KnowledgeServiceClient:
     def get_source(self, source_id: str) -> dict[str, Any]:
         return self.request("/sources/" + source_id)
 
+    def get_revision(self, source_id: str, revision_id: str) -> dict[str, Any]:
+        return self.request(f"/sources/{source_id}/revisions/{revision_id}")
+
     def get_citation(self, citation_id: str) -> dict[str, Any]:
         return self.request("/citations/" + citation_id)
+
+    def resolve_citation(self, citation_id: str) -> dict[str, Any]:
+        return self.get_citation(citation_id)

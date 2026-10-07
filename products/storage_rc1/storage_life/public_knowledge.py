@@ -410,14 +410,11 @@ def capabilities(mode: str = "LIVE"):
 
 @router.get("/settings")
 def knowledge_service_settings():
-    managed = any(os.getenv(key) for key in (
-        "KNOWLEDGE_SERVICE_URL", "PUBLIC_KNOWLEDGE_SERVICE_URL", "PUBLIC_KNOWLEDGE_API_URL"
-    ))
     try:
         value = resolve_service_url()
     except KnowledgeServiceError as exc:
         raise HTTPException(422, f"{exc.code}: {exc.detail}") from exc
-    return {"knowledge_service_url": value, "environment_managed": managed, "user_config_count": 1}
+    return {"knowledge_service_url": value, "environment_managed": False, "user_config_count": 1}
 
 
 @router.put("/settings")
@@ -428,8 +425,7 @@ def update_knowledge_service_settings(request: Request, body: KnowledgeServiceUr
     try:
         value = save_service_url(body.url)
     except KnowledgeServiceError as exc:
-        status_code = 409 if exc.code == "KNOWLEDGE_SERVICE_URL_ENV_MANAGED" else 422
-        raise HTTPException(status_code, f"{exc.code}: {exc.detail}") from exc
+        raise HTTPException(422, f"{exc.code}: {exc.detail}") from exc
     return {"knowledge_service_url": value, "environment_managed": False, "user_config_count": 1}
 
 
