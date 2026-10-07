@@ -30,23 +30,46 @@ def mapping_version(field_mapping: dict[str, Any]) -> str:
 
 def inspect_template(path: str | Path) -> dict[str, str]:
     """Inspect version metadata only; the existing ExcelParser still parses rows."""
-
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    try:
-        if TEMPLATE_META_SHEET not in workbook.sheetnames:
-            return {
-                "template_contract": TEMPLATE_CONTRACT,
-                "template_version": "LEGACY_UNVERSIONED",
-                "template_status": "LEGACY_COMPATIBLE",
+    source = Path(path)
+    if source.suffix.lower() == ".xls":
+        try:
+            import xlrd
+        except ImportError as exc:
+            raise ValueError("EXCEL_XLS_READER_NOT_INSTALLED") from exc
+        workbook = xlrd.open_workbook(filename=str(source), on_demand=False)
+        try:
+            try:
+                sheet = workbook.sheet_by_name(TEMPLATE_META_SHEET)
+            except xlrd.biffh.XLRDError:
+                return {
+                    "template_contract": TEMPLATE_CONTRACT,
+                    "template_version": "LEGACY_UNVERSIONED",
+                    "template_status": "LEGACY_COMPATIBLE",
+                }
+            values = {
+                str(sheet.cell_value(row, 0) or "").strip(): str(sheet.cell_value(row, 1) or "").strip()
+                for row in range(sheet.nrows)
+                if sheet.ncols and str(sheet.cell_value(row, 0) or "").strip()
             }
-        sheet = workbook[TEMPLATE_META_SHEET]
-        values: dict[str, str] = {}
-        for row in sheet.iter_rows(min_row=1, max_col=2, values_only=True):
-            key = str(row[0] or "").strip()
-            if key:
-                values[key] = str(row[1] or "").strip()
-    finally:
-        workbook.close()
+        finally:
+            workbook.release_resources()
+    else:
+        workbook = load_workbook(source, read_only=True, data_only=True)
+        try:
+            if TEMPLATE_META_SHEET not in workbook.sheetnames:
+                return {
+                    "template_contract": TEMPLATE_CONTRACT,
+                    "template_version": "LEGACY_UNVERSIONED",
+                    "template_status": "LEGACY_COMPATIBLE",
+                }
+            sheet = workbook[TEMPLATE_META_SHEET]
+            values: dict[str, str] = {}
+            for row in sheet.iter_rows(min_row=1, max_col=2, values_only=True):
+                key = str(row[0] or "").strip()
+                if key:
+                    values[key] = str(row[1] or "").strip()
+        finally:
+            workbook.close()
 
     if values.get("template_contract") != TEMPLATE_CONTRACT:
         raise ValueError("MAJOR_EXCEL_TEMPLATE_CONTRACT_UNSUPPORTED")

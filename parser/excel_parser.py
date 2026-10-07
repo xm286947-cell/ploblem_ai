@@ -12,6 +12,51 @@ import yaml
 from parser.common import normalize_scalar, write_json
 
 
+class _LegacyCell:
+    def __init__(self, value: Any):
+        self.value = value
+
+
+class _LegacySheet:
+    """Small read-only adapter exposing the openpyxl row interface for BIFF XLS."""
+
+    def __init__(self, sheet: Any, datemode: int):
+        self._sheet = sheet
+        self.title = sheet.name
+        self.max_row = sheet.nrows
+        self.max_column = sheet.ncols
+        self._datemode = datemode
+
+    def _value(self, row: int, col: int) -> Any:
+        import xlrd
+
+        cell = self._sheet.cell(row, col)
+        if cell.ctype == xlrd.XL_CELL_DATE:
+            return xlrd.xldate.xldate_as_datetime(cell.value, self._datemode)
+        return cell.value
+
+    def iter_rows(self, *, min_row: int, max_row: int | None = None, min_col: int, max_col: int):
+        end_row = self.max_row if max_row is None else min(max_row, self.max_row)
+        for row in range(min_row - 1, end_row):
+            yield tuple(
+                _LegacyCell(self._value(row, col - 1) if col <= self.max_column else "")
+                for col in range(min_col, max_col + 1)
+            )
+
+
+class _LegacyWorkbook:
+    def __init__(self, book: Any):
+        self._book = book
+        self.worksheets = [_LegacySheet(sheet, book.datemode) for sheet in book.sheets()]
+        self._by_name = {sheet.title: sheet for sheet in self.worksheets}
+
+    def __getitem__(self, name: str):
+        return self._by_name[name]
+
+    def close(self):
+        self._book.release_resources()
+
+
 def normalize_header(value: Any) -> str:
     """Normalize visually identical Excel headers for stable matching."""
     text = normalize_scalar(value)
@@ -204,7 +249,17 @@ class ExcelParser:
         if not source.exists():
             raise FileNotFoundError(f"Excel文件不存在: {source}")
 
-        workbook = openpyxl.load_workbook(source, data_only=True, read_only=False)
+        if source.suffix.lower() == ".xls":
+            try:
+                import xlrd
+
+                workbook = _LegacyWorkbook(xlrd.open_workbook(filename=str(source), on_demand=False))
+            except ImportError as exc:
+                raise ValueError("EXCEL_XLS_READER_NOT_INSTALLED") from exc
+            except Exception as exc:
+                raise ValueError("EXCEL_PARSE_FAILED") from exc
+        else:
+            workbook = openpyxl.load_workbook(source, data_only=True, read_only=False)
         try:
             worksheet, header_row, headers, diagnostics = self._detect_sheet_and_header(workbook)
             header_index = {

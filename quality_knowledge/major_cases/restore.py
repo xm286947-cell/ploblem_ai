@@ -211,6 +211,21 @@ class MajorCaseRestoreService:
             },
         }
 
+    @staticmethod
+    def _document_event_resolution(row: dict, match: dict) -> dict:
+        """Bind a matched document only when its event relation is unique."""
+        itrs = list(row.get("itrs") or [])
+        path = str(match.get("matched_report_path") or "")
+        if match.get("match_status") != "MATCHED" or not path:
+            return {"status": "REVIEW_REQUIRED", "standard_itr": "", "reason": "DOCUMENT_NOT_MATCHED"}
+        if len(itrs) <= 1:
+            return {"status": "MATCHED", "standard_itr": itrs[0] if itrs else "", "reason": "SINGLE_EVENT"}
+        haystack = re.sub(r"[^A-Z0-9]", "", Path(path).name.upper())
+        candidates = [itr for itr in itrs if re.sub(r"[^A-Z0-9]", "", itr.upper()) in haystack]
+        if len(candidates) == 1:
+            return {"status": "MATCHED", "standard_itr": candidates[0], "reason": "FILENAME_EVENT_KEY"}
+        return {"status": "REVIEW_REQUIRED", "standard_itr": "", "reason": "MULTI_EVENT_NOT_UNIQUE"}
+
     def preview_excel(
         self,
         excel_path: str | Path,
@@ -244,12 +259,20 @@ class MajorCaseRestoreService:
         for item in enriched:
             match = matches.get(item["case_id"]) or {
                 "match_type": "NO_REPORT_NAME" if not item["normalized_fields"].get("report_filename") else "NOT_FOUND",
+                "match_status": "REVIEW_REQUIRED" if not item["normalized_fields"].get("report_filename") else "NOT_FOUND",
                 "matched_report_path": "",
                 "candidate_paths": [],
                 "parse_status": "NO_REPORT" if not item["normalized_fields"].get("report_filename") else "REPORT_NOT_FOUND",
                 "parse_warnings": [],
             }
-            rows.append({**item, "report_match": match})
+            event_resolution = self._document_event_resolution(item, match)
+            match = dict(match)
+            match["event_binding_itr"] = event_resolution.get("standard_itr", "")
+            match["event_binding_status"] = (
+                "BOUND" if event_resolution.get("status") == "MATCHED" and event_resolution.get("standard_itr")
+                else "REVIEW_REQUIRED"
+            )
+            rows.append({**item, "report_match": match, "event_resolution": event_resolution})
 
         return {
             "group_code": group_code,
@@ -266,7 +289,7 @@ class MajorCaseRestoreService:
             "total": len(rows),
             "importable": sum(1 for row in rows if row["completeness"]["importable"]),
             "retrieval_ready": sum(1 for row in rows if row["completeness"]["retrieval_ready"]),
-            "ambiguous": sum(1 for row in rows if row["report_match"]["match_type"] == "AMBIGUOUS"),
+            "ambiguous": sum(1 for row in rows if row["report_match"].get("match_status") == "AMBIGUOUS"),
         }
 
     def stage_upload(
@@ -286,14 +309,13 @@ class MajorCaseRestoreService:
         excel_path = root / Path(excel_name or "major_cases.xlsx").name
         excel_path.write_bytes(excel_content)
 
-        used_names: set[str] = set()
+        staged_material_count = 0
         for index, (name, content) in enumerate(materials, 1):
             safe = Path(name or f"material-{index}").name
-            candidate = safe
-            if candidate in used_names:
-                candidate = f"{Path(safe).stem}-{index}{Path(safe).suffix}"
-            used_names.add(candidate)
-            (reports_dir / candidate).write_bytes(content)
+            slot = reports_dir / f"upload-{index:04d}"
+            slot.mkdir(parents=True, exist_ok=True)
+            (slot / safe).write_bytes(content)
+            staged_material_count += 1
 
         preview = self.preview_excel(
             excel_path,
@@ -302,7 +324,7 @@ class MajorCaseRestoreService:
             domain=domain,
         )
         preview["batch_id"] = batch_id
-        preview["staged_material_count"] = len(used_names)
+        preview["staged_material_count"] = staged_material_count
         actor = str(actor or "").strip() or "web-user"
         preview["governance"] = {
             "contract_version": IMPORT_GOVERNANCE_CONTRACT,
@@ -481,8 +503,14 @@ class MajorCaseRestoreService:
                 errors.append({"row": row_no, "error": "ROW_NOT_IMPORTABLE"})
                 continue
             match = row.get("report_match") or {}
-            if match.get("match_type") == "AMBIGUOUS":
+            if match.get("match_status") == "AMBIGUOUS" or match.get("match_type") == "AMBIGUOUS":
                 errors.append({"row": row_no, "error": "AMBIGUOUS_REPORT_MATCH"})
+            if (
+                match.get("match_status") == "MATCHED"
+                and len(row.get("itrs") or []) > 1
+                and (row.get("event_resolution") or {}).get("status") != "MATCHED"
+            ):
+                errors.append({"row": row_no, "error": "MULTI_EVENT_DOCUMENT_REVIEW_REQUIRED"})
             matched_path = str(match.get("matched_report_path") or "").strip()
             if matched_path and not Path(matched_path).is_file():
                 errors.append({"row": row_no, "error": "MATCHED_REPORT_NOT_FOUND"})
@@ -770,7 +798,13 @@ class MajorCaseRestoreService:
                             document["version_id"],
                             parsed,
                         )
-                    primary_event = events[0]
+                    resolved_itr = str((row.get("event_resolution") or {}).get("standard_itr") or "")
+                    primary_event = next(
+                        (event for event in events if event.get("standard_itr") == resolved_itr),
+                        events[0] if len(events) == 1 else None,
+                    )
+                    if primary_event is None:
+                        raise ValueError("MULTI_EVENT_DOCUMENT_REVIEW_REQUIRED")
                     self.repository.add_source_link(
                         case_id,
                         primary_event["event_id"],

@@ -91,7 +91,7 @@ def create_major_production_router(
         if restore_service is None:
             raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
         suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in {".xlsx", ".xlsm"}:
+        if suffix not in {".xls", ".xlsx", ".xlsm"}:
             raise HTTPException(400, "MAJOR_EXCEL_TYPE_UNSUPPORTED")
         excel_content = await file.read()
         if not excel_content:
