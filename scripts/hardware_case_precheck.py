@@ -161,6 +161,21 @@ def check_real_ai() -> list[str]:
 
     active = str(raw.get("active_model") or "").strip()
     models = raw.get("models")
+    if isinstance(models, dict):
+        literal_secret_profiles = sorted(
+            str(name)
+            for name, candidate in models.items()
+            if isinstance(candidate, dict)
+            and str(candidate.get("api_key") or "").strip()
+        )
+        if literal_secret_profiles:
+            errors.append("PLAINTEXT_API_KEY_FORBIDDEN")
+            emit(
+                "model_profiles",
+                "FAIL",
+                "plaintext api_key found; use api_key_env and rotate exposed credentials",
+            )
+            return errors
     if not active or not isinstance(models, dict) or active not in models:
         errors.append("ACTIVE_MODEL_INVALID")
         emit("active_model", "FAIL", active or "<empty>")
@@ -196,11 +211,8 @@ def check_real_ai() -> list[str]:
         else:
             emit("api_key_env", "PASS", api_key_env)
     elif profile.get("api_key"):
-        emit(
-            "api_key",
-            "WARN",
-            "local literal key is supported by Runtime but env reference is recommended",
-        )
+        errors.append("PLAINTEXT_API_KEY_FORBIDDEN")
+        emit("api_key", "FAIL", "use api_key_env")
     else:
         emit("provider_auth", "PASS", "none")
 

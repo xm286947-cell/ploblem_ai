@@ -203,15 +203,44 @@ def readiness_status(
             "phase": startup_status.get("phase"),
             "error_code": startup_status.get("error_code"),
         }
-    ready = all(item.get("status") == "READY" for item in dependencies.values())
+    required_dependencies = {
+        key: value
+        for key, value in dependencies.items()
+        if key != "UNIFIED_KNOWLEDGE"
+    }
+    core_ready = all(
+        item.get("status") == "READY"
+        for item in required_dependencies.values()
+    )
+    knowledge_ready = (
+        dependencies["UNIFIED_KNOWLEDGE"].get("status") == "READY"
+    )
+    if core_ready and knowledge_ready:
+        overall_status = "READY"
+    elif core_ready:
+        overall_status = "READY_DEGRADED"
+    else:
+        overall_status = "UNREADY"
     payload = {
-        "status": "READY" if ready else "UNREADY",
+        "status": overall_status,
         "service": "HARDWARE_CASE",
         "dependencies": dependencies,
+        "degraded_dependencies": (
+            ["UNIFIED_KNOWLEDGE"]
+            if core_ready and not knowledge_ready
+            else []
+        ),
+        "capabilities": {
+            "local_case_search": "READY" if core_ready else "UNREADY",
+            "formal_knowledge": "READY" if knowledge_ready else "UNAVAILABLE",
+            "ai_retrieval": (
+                "FORMAL_READY" if knowledge_ready else "LOCAL_FALLBACK"
+            ),
+        },
         "startup": dict(startup_status) if startup_status is not None else None,
         "binding": release_binding(root_path),
     }
-    return (200 if ready else 503), payload
+    return (200 if core_ready else 503), payload
 
 
 __all__ = [

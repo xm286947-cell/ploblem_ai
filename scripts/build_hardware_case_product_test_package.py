@@ -78,6 +78,7 @@ INCLUDE_FILES = [
     "prompts/runtime/hardware_case/r1_reuse_derive_v1.md",
     "prompts/runtime/hardware_retrieval/tagger_v1.md",
     "tools/hardware_case_real_validation.py",
+    "tools/hardware_retrieval_demo_seed.py",
     "scripts/hardware_case_mvp_smoke.py",
     "scripts/hardware_case_product_test_smoke.py",
     "scripts/hardware_case_precheck.py",
@@ -95,6 +96,8 @@ INCLUDE_FILES = [
     "START_HARDWARE_CASE.sh",
     "START_HARDWARE_CASE.command",
     "RUN_REAL_AI_VALIDATION.sh",
+    "LOAD_HARDWARE_RETRIEVAL_DEMO.bat",
+    "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
     "run_hardware_case_product_test.bat",
     "run_hardware_case_product_test.sh",
     "run_hardware_case_mvp_smoke.bat",
@@ -407,6 +410,7 @@ def main() -> int:
         "run_hardware_case_product_test.sh",
         "run_hardware_case_mvp_smoke.sh",
         "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
+        "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
     ):
         path = STAGE / relative
         path.chmod(path.stat().st_mode | 0o111)
@@ -483,6 +487,8 @@ def main() -> int:
             "start_product_shell": "START_HARDWARE_CASE.sh",
             "start_product_macos": "START_HARDWARE_CASE.command",
             "real_ai_validation_shell": "RUN_REAL_AI_VALIDATION.sh",
+            "retrieval_demo_windows": "LOAD_HARDWARE_RETRIEVAL_DEMO.bat",
+            "retrieval_demo_macos": "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
             "r1_6doc_validation_windows": "RUN_HARDWARE_R1_6DOC_VALIDATION.bat",
             "r1_6doc_validation_shell": "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
         },
@@ -497,6 +503,9 @@ def main() -> int:
             "secret_in_package": False,
             "missing_required_config": "FAIL_CLOSED",
             "windows_macos_semantics": "SAME",
+            "local_model_config_packaged": False,
+            "existing_model_config_preserved": True,
+            "plaintext_api_key_forbidden": True,
         },
         "data_reliability": {
             "schema_version": "HARDWARE_SCHEMA_V2",

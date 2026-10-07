@@ -201,10 +201,15 @@ def main() -> int:
             os.environ["HARDWARE_CASE_MODEL_CONFIG"] = str(model_config)
             os.environ["HARDWARE_KNOWLEDGE_READINESS_URL"] = "http://127.0.0.1:1/health"
             dependency = client.get("/ready")
-            if dependency.status_code != 503:
-                raise SystemExit("DEPENDENCY_UNREADY_DID_NOT_FAIL_CLOSED")
-            if dependency.json()["dependencies"]["UNIFIED_KNOWLEDGE"]["status"] != "UNREADY":
+            if dependency.status_code != 200:
+                raise SystemExit("DEPENDENCY_UNREADY_SHOULD_DEGRADE_PRODUCT")
+            dependency_payload = dependency.json()
+            if dependency_payload.get("status") != "READY_DEGRADED":
+                raise SystemExit("DEPENDENCY_UNREADY_DEGRADED_STATUS_MISSING")
+            if dependency_payload["dependencies"]["UNIFIED_KNOWLEDGE"]["status"] != "UNREADY":
                 raise SystemExit("DEPENDENCY_UNREADY_NOT_EXPLICIT")
+            if dependency_payload.get("capabilities", {}).get("local_case_search") != "READY":
+                raise SystemExit("LOCAL_FALLBACK_NOT_READY")
         finally:
             if client is not None:
                 client.close()

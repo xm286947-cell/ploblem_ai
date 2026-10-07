@@ -51,6 +51,11 @@ class FakeCaseService:
         }
 
 
+class EmptyCaseService(FakeCaseService):
+    def __init__(self) -> None:
+        self.items = []
+
+
 class FakeQuery:
     def search(self, text: str = "", *, filters=None, limit: int = 20):
         assert text == "mcu"
@@ -95,14 +100,32 @@ class FakeConsumption:
 
     store = Store()
 
-    def search(self, text: str = "", *, limit: int = 100, **_kwargs):
+    def get(self, knowledge_id: str):
+        if knowledge_id != "KO-A-MCU-001":
+            return None
+        return {
+            "knowledge_id": "KO-A-MCU-001",
+            "business_case_id": "A-MCU-001",
+            "title": "MCU intermittent reset",
+            "symptom": "MCU 偶发复位，重新上电恢复",
+            "root_cause": "RESET_N 受到瞬态干扰",
+            "actions": "检查复位信号完整性",
+            "evidence_refs": ["EV-FORMAL-01"],
+            "formal_revision": 1,
+            "formal_object_hash": "a" * 64,
+            "projected_at": "2026-10-07T00:00:00+00:00",
+        }
+
+    def search(self, text: str = "", *, limit: int = 100, **kwargs):
+        if kwargs.get("business_case_id") == "A-MCU-001":
+            return {"results": [self.get("KO-A-MCU-001")]}
         if text != "mcu":
             return {"results": []}
+        row = self.get("KO-A-MCU-001")
         return {
             "results": [
                 {
-                    "knowledge_id": "KO-A-MCU-001",
-                    "business_case_id": "A-MCU-001",
+                    **row,
                     "match_score": 100,
                     "match_reasons": [
                         {
@@ -181,3 +204,39 @@ def test_catalog_rebuild_tags_projection_then_builds_generation() -> None:
     assert result["formal_knowledge_write"] is False
     assert result["tagged_count"] == 1
     assert calls == [("tag", "KO-A-MCU-001"), ("index", "demo-001", 1)]
+
+
+def test_formal_hit_is_visible_even_when_local_case_table_is_empty() -> None:
+    service = HardwareCaseAIRetrievalService(
+        EmptyCaseService(),
+        retrieval_query_service=FakeQuery(),
+        consumption_service=FakeConsumption(),
+    )
+    result = service.search_cases("有哪些mcu的问题")
+    assert [item["case_id"] for item in result["results"]] == ["A-MCU-001"]
+    item = result["results"][0]
+    assert item["source_kind"] == "FORMAL_KNOWLEDGE"
+    assert item["case_status"] == "PUBLISHED"
+    assert item["facts"]["symptom"] == "MCU 偶发复位，重新上电恢复"
+    assert item["retrieval"]["mode"] == "OPENSEARCH"
+
+
+def test_formal_projection_fallback_is_visible_without_local_case_or_opensearch() -> None:
+    service = HardwareCaseAIRetrievalService(
+        EmptyCaseService(),
+        consumption_service=FakeConsumption(),
+    )
+    result = service.search_cases("有哪些mcu的问题")
+    assert [item["case_id"] for item in result["results"]] == ["A-MCU-001"]
+    assert result["retrieval"]["mode"] == "SQLITE_FORMAL"
+    assert result["results"][0]["source_kind"] == "FORMAL_KNOWLEDGE"
+
+
+def test_formal_only_result_can_open_case_detail() -> None:
+    service = HardwareCaseAIRetrievalService(
+        EmptyCaseService(),
+        consumption_service=FakeConsumption(),
+    )
+    item = service.get_case("A-MCU-001")
+    assert item["source_kind"] == "FORMAL_KNOWLEDGE"
+    assert item["title"] == "MCU intermittent reset"
