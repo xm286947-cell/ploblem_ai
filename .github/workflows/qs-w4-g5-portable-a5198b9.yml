@@ -1,0 +1,144 @@
+{
+  "name": "QS W4 G5 Portable Entry a5198b9",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/qs-w4-g5-portable-a5198b9"
+      ],
+      "paths": [
+        ".github/workflows/qs-w4-g5-portable-a5198b9.yml"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "env": {
+    "PRODUCT_SOURCE_SHA": "a5198b9ad05077f61127e8bb5c844e989baadb3e",
+    "PACKAGE_BASENAME": "QUALITY_PLATFORM_W4_FUNCTIONAL_GOLDEN_a5198b9ad050"
+  },
+  "jobs": {
+    "focused": {
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "a5198b9ad05077f61127e8bb5c844e989baadb3e",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Exact source",
+          "shell": "bash",
+          "run": "set -euo pipefail\n[ \"$(git rev-parse HEAD)\" = \"$PRODUCT_SOURCE_SHA\" ]\ngit diff --check \"$PRODUCT_SOURCE_SHA^..$PRODUCT_SOURCE_SHA\""
+        },
+        {
+          "name": "Focused regression",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython -m pytest -q tests/test_quality_scenario_w4_functional_fixture.py tests/test_quality_scenario_w4_functional_provider_e2e.py tests/test_qsv1_portrait_consumption.py tests/test_software_assessment_qsv1_browser_flow.py tests/test_r2_w2_qsv1_production_chain.py tests/test_p04_portrait_archive.py tests/test_qs_p04_p03_published_binding_fix.py"
+        }
+      ]
+    },
+    "mac_portability": {
+      "runs-on": "macos-latest",
+      "timeout-minutes": 25,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "a5198b9ad05077f61127e8bb5c844e989baadb3e"
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install dependencies",
+          "run": "python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt"
+        },
+        {
+          "name": "Prepare package-like venv",
+          "shell": "bash",
+          "run": "python -m venv --system-site-packages .venv"
+        },
+        {
+          "name": "Build fixture and poison manifest with CI path",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db\npython - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('validation/quality_scenario_w4_fixture.db.fixture.json')\nm=json.loads(p.read_text(encoding='utf-8'))\nm['database']='/Users/runner/work/CI_ONLY_DOES_NOT_EXIST/validation/quality_scenario_w4_fixture.db'\nm.pop('database_path_semantics',None)\np.write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')\nprint('STALE_CI_MANIFEST_INJECTED=YES')\nPY"
+        },
+        {
+          "name": "Official G5 entry must survive fresh-extract relocation",
+          "shell": "bash",
+          "run": "set -euo pipefail\n./advance_w4_g5_source_revision.command | tee validation/g5_advance.txt\ngrep -q 'W4_G5_SOURCE_REVISION=ADVANCED' validation/g5_advance.txt\ngrep -q 'G5_RESOLUTION_REVISION=2' validation/g5_advance.txt\npython - <<'PY'\nimport json,sqlite3\nfrom pathlib import Path\np=Path('validation/quality_scenario_w4_fixture.db.fixture.json')\nm=json.loads(p.read_text(encoding='utf-8'))\nassert m['database']=='quality_scenario_w4_fixture.db',m\nassert m['database_path_semantics']=='MANIFEST_RELATIVE',m\nassert m['g5_resolution_revision']==2,m\nwith sqlite3.connect('validation/quality_scenario_w4_fixture.db') as c:\n    n=c.execute(\"select count(*) from source_material where business_key='ITR20261051005CS' and material_type='ITR_CS'\").fetchone()[0]\nassert n==2,n\nprint('MAC_G5_OFFICIAL_ENTRY_PORTABLE=PASS')\nPY"
+        }
+      ]
+    },
+    "package": {
+      "needs": [
+        "focused",
+        "mac_portability"
+      ],
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 20,
+      "steps": [
+        {
+          "uses": "actions/checkout@v4",
+          "with": {
+            "ref": "a5198b9ad05077f61127e8bb5c844e989baadb3e",
+            "fetch-depth": 0
+          }
+        },
+        {
+          "uses": "actions/setup-python@v5",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Install product dependencies",
+          "run": "python -m pip install -r requirements.txt"
+        },
+        {
+          "name": "Build fixture",
+          "shell": "bash",
+          "run": "set -euo pipefail\nmkdir -p validation\npython tools/build_quality_scenario_test_fixture.py --db validation/quality_scenario_w4_fixture.db | tee validation/fixture_build.txt\npython tools/quality_scenario_w4_functional_preflight.py --db validation/quality_scenario_w4_fixture.db --require | tee validation/fixture_preflight.txt"
+        },
+        {
+          "name": "Build exact package",
+          "shell": "bash",
+          "run": "set -euo pipefail\nSTAGE=\"$RUNNER_TEMP/w4-g5-portable\"\nrm -rf \"$STAGE\"; mkdir -p \"$STAGE\" dist\ngit archive \"$PRODUCT_SOURCE_SHA\" | tar -x -C \"$STAGE\"\nmkdir -p \"$STAGE/validation\"\ncp validation/quality_scenario_w4_fixture.db \"$STAGE/validation/\"\ncp validation/quality_scenario_w4_fixture.db.fixture.json \"$STAGE/validation/\"\ncp validation/fixture_build.txt \"$STAGE/validation/\"\ncp validation/fixture_preflight.txt \"$STAGE/validation/\"\nprintf '%s\\n' \"$PRODUCT_SOURCE_SHA\" > \"$STAGE/PRODUCT_SOURCE_SHA\"\npython - <<'PY'\nimport json,os\nfrom pathlib import Path\nstage=Path(os.environ['RUNNER_TEMP'])/'w4-g5-portable'\nm={'package_type':'W4_FUNCTIONAL_GOLDEN_CANDIDATE','package_scope':'FULL_CURRENT_QUALITY_PLATFORM','source_sha':os.environ['PRODUCT_SOURCE_SHA'],'canonical_macos_entry':'start_w4_mac_functional_golden.command','g5_revision_entry':'advance_w4_g5_source_revision.command','g5_manifest_path_semantics':'MANIFEST_RELATIVE','g5_runtime_db_source':'COMMAND_LINE_DB','functional_provider':'CONTROLLED_OPENAI_MOCK','direct_qsv1_candidate_write':False,'direct_qsv1_publish_write':False,'real_provider_golden':False,'native_browser_golden':False}\n(stage/'FULL_PLATFORM_MANIFEST.json').write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')\n(stage/'00_READ_ME_FIRST.txt').write_text('W4 FUNCTIONAL GOLDEN\\n\\nSOURCE_SHA='+os.environ['PRODUCT_SOURCE_SHA']+'\\n\\nSTART: ./start_w4_mac_functional_golden.command --port 18080\\nG5 REVISION: ./advance_w4_g5_source_revision.command\\n\\nG5 manifest stores only a relative DB locator; runtime DB truth comes from --db.\\n',encoding='utf-8')\nPY\ntest -x \"$STAGE/advance_w4_g5_source_revision.command\"\n(cd \"$STAGE\" && zip -q -r \"$GITHUB_WORKSPACE/dist/${PACKAGE_BASENAME}.zip\" .)\nsha256sum \"dist/${PACKAGE_BASENAME}.zip\" | tee \"dist/${PACKAGE_BASENAME}.zip.sha256\""
+        },
+        {
+          "name": "Verify package identity",
+          "shell": "bash",
+          "run": "set -euo pipefail\npython - <<'PY'\nimport json,os,pathlib,zipfile\np=pathlib.Path('dist')/(os.environ['PACKAGE_BASENAME']+'.zip')\nz=zipfile.ZipFile(p)\nm=json.loads(z.read('FULL_PLATFORM_MANIFEST.json'))\nfm=json.loads(z.read('validation/quality_scenario_w4_fixture.db.fixture.json'))\nassert z.read('PRODUCT_SOURCE_SHA').decode().strip()==os.environ['PRODUCT_SOURCE_SHA']\nassert m['g5_manifest_path_semantics']=='MANIFEST_RELATIVE'\nassert m['g5_runtime_db_source']=='COMMAND_LINE_DB'\nassert fm['database']=='quality_scenario_w4_fixture.db',fm\nassert fm['database_path_semantics']=='MANIFEST_RELATIVE',fm\nprint('W4_G5_PORTABLE_PACKAGE_IDENTITY=PASS')\nPY"
+        },
+        {
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "QUALITY_PLATFORM_W4_FUNCTIONAL_GOLDEN_a5198b9ad050",
+            "path": "dist/QUALITY_PLATFORM_W4_FUNCTIONAL_GOLDEN_a5198b9ad050.zip\ndist/QUALITY_PLATFORM_W4_FUNCTIONAL_GOLDEN_a5198b9ad050.zip.sha256",
+            "if-no-files-found": "error",
+            "retention-days": 30,
+            "compression-level": 0
+          }
+        }
+      ]
+    }
+  }
+}
