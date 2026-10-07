@@ -425,6 +425,13 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    # Repositories intentionally do not own long-lived connections, but some
+    # SQLite cursors/connections can stay in cyclic garbage after schema-heavy
+    # fixture setup.  Release those transient objects before returning so a
+    # Fresh Extract relocation can remove the source DB on Windows.
+    del issues
+    del materials
+    gc.collect()
     return manifest
 
 
@@ -459,6 +466,8 @@ def advance_g5(db_path: Path) -> dict[str, Any]:
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    del materials
+    gc.collect()
     return manifest
 
 
