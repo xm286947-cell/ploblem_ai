@@ -523,6 +523,7 @@ jobs:
           export PYTHONPATH="$FRESH_ROOT:$FRESH_ROOT/vendor/unified_agent_runtime"
           export STORAGE_KNOWLEDGE_REPOSITORY_DIR="$FRESH_ROOT/.smoke-knowledge"
           mkdir -p "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+          python -m pip install -q -r "$FRESH_ROOT/requirements.txt"
 
           python - <<'PY'
           import os
