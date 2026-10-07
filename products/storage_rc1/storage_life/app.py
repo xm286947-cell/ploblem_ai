@@ -360,6 +360,16 @@ def product_execute_device_skill(device_id: str, skill_id: str, payload: dict):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/product/devices/{device_id}/engineering-decision/nand", tags=["Storage Product MVP"])
+def product_nand_engineering_decision(device_id: str, body: dict | None = None):
+    try:
+        return product_api.nand_engineering_decision(device_id, body or {})
+    except KeyError:
+        raise HTTPException(404, "器件不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/product/runtime-observations/parse", tags=["Storage Product MVP"])
 def product_parse_runtime_observations(body: dict):
     try:

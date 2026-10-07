@@ -471,6 +471,7 @@ def _require_lifetime_metric_applicable(detail: dict[str, Any], requested_metric
         "EMMC_DEVICE_LIFE_TIME_B_V1": {"eMMC"},
         "EMMC_PRE_EOL_V1": {"eMMC"},
         "NAND_PE_MARGIN_V1": {"NAND Flash"},
+        "NAND_REQUIRED_PE_BUDGET_V1": {"NAND Flash"},
         "NAND_ERASE_COUNT_MARGIN_V1": {"NAND Flash"},
         "NAND_WEAR_DISTRIBUTION_V1": {"NAND Flash"},
         "GENERIC_ENDURANCE_MARGIN_V1": {"NOR Flash"},
@@ -3139,3 +3140,264 @@ def maintenance() -> dict[str, Any]:
             "rule": "Storage only consumes formally published Knowledge Release; AI/source review cannot auto-publish formal knowledge.",
         },
     }
+
+
+def nand_engineering_decision(
+    device_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compose one NAND engineering-decision Golden from existing Storage capabilities.
+
+    This is intentionally a thin orchestration/view layer:
+    - Device Facts stay owned by the existing reviewed-fact model.
+    - Formal knowledge stays owned by Knowledge Release / Storage Skills.
+    - Lifetime arithmetic stays owned by LifetimeEngine.
+    - Runtime provenance stays owned by execute_device_skill().
+    - Procurement/test/change outputs are decision support only.
+    """
+    from .engineering_decision import (
+        compose_role_views,
+        derive_required_storage_profile,
+        match_candidate,
+    )
+
+    request = dict(payload or {})
+    detail = device_slots(device_id)
+    dtype = templates.normalize_device_type(detail["device"]["device_type"])
+    if dtype != "NAND Flash":
+        raise ValueError(f"NAND_ENGINEERING_DECISION_REQUIRES_NAND:{dtype}")
+
+    mission_profile = dict(request.get("mission_profile") or {})
+    workload_profile = dict(request.get("workload_profile") or {})
+    required_profile = derive_required_storage_profile(mission_profile, workload_profile)
+
+    # Formal NAND knowledge is queried by the same release consumer already used
+    # by Device Detail / Skills.  Public Knowledge/RAG is deliberately excluded.
+    knowledge_domains = [
+        ("PE_ENDURANCE", "pe_cycles", "P/E Cycle", "NAND endurance P/E erase wear lifetime"),
+        ("ECC_BIT_FLIP", "ecc_capability", "ECC Capability", "NAND ECC bit flip corrected uncorrectable margin"),
+        ("BAD_BLOCK", "runtime_bad_block", "Bad Block", "NAND factory runtime bad block management growth"),
+        ("RETENTION", "data_retention", "Data Retention", "NAND data retention temperature wear relationship"),
+    ]
+    formal_results: list[dict[str, Any]] = []
+    formal_evidence_refs: list[str] = []
+    formal_domains: list[dict[str, Any]] = []
+    for domain, canonical_name, parameter_name, context in knowledge_domains:
+        item = _formal_knowledge(
+            canonical_name,
+            parameter_name,
+            dtype,
+            context=context,
+            top_k=5,
+        )
+        formal_domains.append({
+            "domain": domain,
+            "status": item.get("status"),
+            "code": item.get("code"),
+            "knowledge_release_version": item.get("knowledge_release_version"),
+            "result_count": len(item.get("results") or []),
+            "evidence_refs": list(item.get("evidence_refs") or []),
+        })
+        formal_results.extend(item.get("results") or [])
+        formal_evidence_refs.extend(item.get("evidence_refs") or [])
+    formal_bundle = {
+        "domains": formal_domains,
+        "results": formal_results,
+        "evidence_refs": sorted(set(formal_evidence_refs)),
+    }
+
+    declared_workload_facts = list(request.get("workload_software_facts") or [])
+    if not declared_workload_facts and workload_profile:
+        declared_workload_facts = [
+            {
+                "behavior": key,
+                "value": value,
+                "source": "DECLARED_WORKLOAD_PROFILE",
+                "formal_device_fact": False,
+            }
+            for key, value in workload_profile.items()
+            if value not in (None, "")
+        ]
+
+    write_result = execute_device_skill(
+        device_id,
+        "storage-write-governance",
+        {
+            "user_context": {
+                "question": str(
+                    request.get("software_question")
+                    or "NAND software write behavior, persistence, lifetime and monitoring design constraints"
+                ),
+                "mission_profile": mission_profile,
+                "workload_profile": workload_profile,
+            },
+            "workload_software_facts": declared_workload_facts,
+        },
+    )["skill_result"]
+
+    runtime_observations = list(request.get("runtime_observations") or [])
+    diagnostic_result = execute_device_skill(
+        device_id,
+        "storage-diagnostic-validation",
+        {
+            "target_question": str(
+                request.get("diagnostic_question")
+                or "NAND P/E ECC bit flip bad block retention wear degradation validation"
+            ),
+            "runtime_observations": runtime_observations,
+        },
+    )["skill_result"]
+
+    lifetime_results: list[dict[str, Any]] = []
+    runtime_metric_names = {
+        str(item.get("metric_name") or "").strip()
+        for item in runtime_observations
+        if isinstance(item, dict)
+    }
+    for runtime_metric, formula_id in (
+        ("pe_cycle", "NAND_PE_MARGIN_V1"),
+        ("erase_count", "NAND_ERASE_COUNT_MARGIN_V1"),
+        ("wear_distribution", "NAND_WEAR_DISTRIBUTION_V1"),
+    ):
+        if runtime_metric not in runtime_metric_names:
+            continue
+        lifetime_results.append(
+            execute_device_skill(
+                device_id,
+                "storage-lifetime-budget",
+                {
+                    "requested_metric": formula_id,
+                    "runtime_observations": runtime_observations,
+                    "assessment_request": {},
+                    "target_service_life": {},
+                },
+            )
+        )
+
+    # Keep the requirement conversion in the canonical LifetimeEngine and expose
+    # its replay trace as part of the system-engineering view.
+    if required_profile.get("required_pe_cycles") is not None:
+        lifetime_results.insert(0, {
+            "adapter": "EXISTING_LIFETIME_ENGINE_REQUIRED_PROFILE",
+            "skill_result": {
+                "status": "ANSWERED",
+                "structured_result": {
+                    "applicable_formula": {
+                        "formula_id": (
+                            (required_profile.get("derivation_trace") or [{}])[0].get("formula_id")
+                            or "NAND_REQUIRED_PE_BUDGET_V1"
+                        ),
+                    },
+                    "measured_vs_budget": {
+                        "value": required_profile.get("required_pe_cycles"),
+                        "unit": "cycles",
+                    },
+                    "formula_replay_refs": [
+                        (required_profile.get("derivation_trace") or [{}])[0].get("replay_trace")
+                    ],
+                },
+            },
+        })
+
+    candidate_ids = [
+        str(x).strip()
+        for x in (request.get("candidate_device_ids") or [])
+        if str(x or "").strip()
+    ]
+    if device_id not in candidate_ids:
+        candidate_ids.insert(0, device_id)
+    if len(candidate_ids) > 8:
+        raise ValueError("NAND_PROCUREMENT_CANDIDATE_LIMIT_EXCEEDED:8")
+
+    procurement_results: list[dict[str, Any]] = []
+    for candidate_id in candidate_ids:
+        candidate = device_slots(candidate_id)
+        candidate_type = templates.normalize_device_type(candidate["device"]["device_type"])
+        if candidate_type != "NAND Flash":
+            procurement_results.append({
+                "candidate_id": candidate_id,
+                "status": "UNKNOWN",
+                "checks": [],
+                "unknowns": [f"DEVICE_TYPE_NOT_COMPARABLE:{candidate_type}"],
+                "formal_fact_only": True,
+                "automatic_purchase_approval": False,
+                "decision_boundary": "ENGINEERING_DECISION_SUPPORT_ONLY",
+            })
+            continue
+        matched = match_candidate(
+            required_profile,
+            candidate.get("device_facts") or [],
+            candidate_id=candidate_id,
+        )
+        matched["device"] = candidate["device"]
+        procurement_results.append(matched)
+
+    change_result: dict[str, Any] | None = None
+    change_target = str(request.get("change_target_device_id") or "").strip()
+    if change_target:
+        comparison = compare_devices([device_id, change_target])
+        parameter_delta = []
+        for row in comparison.get("rows") or []:
+            if not row.get("is_difference"):
+                continue
+            cells = row.get("cells") or {}
+            old = cells.get(device_id) or {}
+            new = cells.get(change_target) or {}
+            parameter_delta.append({
+                "canonical_name": row.get("canonical_name"),
+                "parameter_name": row.get("parameter_name"),
+                "old": old.get("value"),
+                "old_unit": old.get("unit"),
+                "new": new.get("value"),
+                "new_unit": new.get("unit"),
+                "old_status": old.get("review_status"),
+                "new_status": new.get("review_status"),
+            })
+        change_result = execute_device_skill(
+            device_id,
+            "storage-change-impact",
+            {
+                "parameter_delta": parameter_delta,
+                "question": str(
+                    request.get("change_question")
+                    or "NAND component change lifetime software monitoring validation risk"
+                ),
+            },
+        )["skill_result"]
+
+    result = compose_role_views(
+        device=detail["device"],
+        required_profile=required_profile,
+        hardware_facts=detail.get("device_facts") or [],
+        formal_nand_knowledge=formal_bundle,
+        write_governance_result=write_result,
+        diagnostic_result=diagnostic_result,
+        lifetime_results=lifetime_results,
+        procurement_results=procurement_results,
+        change_impact_result=change_result,
+    )
+    missing_domains = [
+        item["domain"]
+        for item in formal_domains
+        if item.get("status") != "MATCHED"
+    ]
+    if missing_domains:
+        result["blockers"] = sorted(set(
+            list(result.get("blockers") or [])
+            + [f"FORMAL_NAND_KNOWLEDGE_DOMAIN_MISSING:{name}" for name in missing_domains]
+        ))
+        result["overall_status"] = "PARTIAL_FAIL_CLOSED"
+    result["formal_knowledge"]["domains"] = formal_domains
+    result["reuse"] = {
+        "device_fact": "DIRECT_REUSE",
+        "knowledge_release": "DIRECT_REUSE",
+        "lifetime_engine": "DIRECT_REUSE_EXTENDED_ONE_FORMULA",
+        "storage_domain_skills": "DIRECT_REUSE",
+        "runtime_observation": "DIRECT_REUSE",
+        "evidence": "DIRECT_REUSE",
+        "public_knowledge": "CONTEXT_ONLY_NOT_FORMAL_EVIDENCE",
+        "mission_workload_profile": "MINIMAL_ADAPTER",
+        "procurement_view": "MINIMAL_ADAPTER",
+        "role_views": "MINIMAL_ADAPTER",
+    }
+    return result

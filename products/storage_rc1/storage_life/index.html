@@ -1002,6 +1002,7 @@ renderDetail=function(){
   let d=CURRENT.device||{},host=$('#deviceDetail');
   if(!host)return;
   renderScenarioLauncher(d);
+  renderNandEngineeringDecisionPanel(d);
   host.insertAdjacentHTML('afterbegin',
     '<div class="card"><div class="row" style="justify-content:space-between"><div><b>公开工程知识</b><br>'+
     '<small>在当前器件页直接检索 Public Knowledge；不会把 Runtime / 客户 / 内部问题数据发送出去。</small></div>'+
@@ -1034,6 +1035,110 @@ renderDetail=function(){
     pkContextButton({focus:'OPTIMIZATION',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'wear leveling write amplification cache logging monitoring lifetime optimization'},'查优化公共知识')+
     '</div></div></div>';
 };
+
+
+function renderNandEngineeringDecisionPanel(d){
+  if(!d||d.device_type!=='NAND Flash')return;
+  let host=$('#deviceDetail');
+  if(!host)return;
+  let nandDevices=DEV.filter(x=>x.device_type==='NAND Flash'&&x.id!==d.id);
+  let opts=nandDevices.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.vendor)+' '+esc(x.model)+'</option>').join('');
+  host.insertAdjacentHTML('beforeend',
+    '<div id="nandEngineeringDecisionPanel" class="card">'+
+      '<div class="pagehead"><div><div class="kicker">NAND ENGINEERING DECISION GOLDEN</div>'+
+      '<h3>从业务寿命到器件 / 软件 / 采购 / 测试 / 变更</h3>'+
+      '<div class="muted">复用现有 Device Fact、Formal Knowledge、LifetimeEngine、Storage Skills、Runtime 和 Evidence；不是第二套分析系统。缺知识或缺事实时保持 UNKNOWN / Fail-Closed。</div></div>'+
+      pkContextButton({focus:'DEVICE',device_type:d.device_type,vendor:d.vendor,model:d.model,parameter_name:'NAND P/E ECC bit flip bad block retention endurance'},'查公共知识背景')+
+      '</div>'+
+      '<div class="grid3">'+
+        '<label>目标服役寿命（年）<br><input id="nandMissionYears" type="number" min="0" step="0.1" placeholder="例如 10"></label>'+
+        '<label>每年运行天数<br><input id="nandDaysPerYear" type="number" min="1" max="366" value="365"><small>365 为日历默认，结果中会标记为 Assumption。</small></label>'+
+        '<label>设计裕量（%）<br><input id="nandMarginPercent" type="number" min="0" step="1" placeholder="例如 20"></label>'+
+        '<label>工作负载 P/E（cycles/day）<br><input id="nandPePerDay" type="number" min="0" step="0.001" placeholder="必须来自工作负载/测量，不从逻辑写入量猜"></label>'+
+        '<label>要求 Retention（年，可选）<br><input id="nandRetentionYears" type="number" min="0" step="0.1" placeholder="例如 10"></label>'+
+        '<label>最高工作温度（°C，可选）<br><input id="nandMaxTemp" type="number" step="1" placeholder="例如 70"></label>'+
+      '</div>'+
+      '<div class="row" style="margin-top:10px">'+
+        '<label>采购候选器件（可选）<br><select id="nandCandidate"><option value="">仅评估当前器件</option>'+opts+'</select></label>'+
+        '<label>变更目标器件（可选）<br><select id="nandChangeTarget"><option value="">不做器件变更分析</option>'+opts+'</select></label>'+
+        '<button class="primary" onclick="runNandEngineeringDecision()">生成 NAND 工程决策</button>'+
+      '</div>'+
+      '<div class="warning card" style="margin-top:10px"><b>边界</b><p>采购结果只做工程匹配支持，不自动批准采购；变更结果不自动批准替代；Public Knowledge 仅提供背景和 Citation，不作为 Formal Evidence。</p></div>'+
+      '<div id="nandEngineeringDecisionResult"><div class="empty">输入明确的 Mission / Workload 后生成六角色工程决策；运行态 P/E、ECC、Bit Flip、Bad Block 请继续使用下方 S3 / S4 的正式 Runtime 输入。</div></div>'+
+    '</div>'
+  );
+}
+
+function nandDecisionList(title,items,emptyText){
+  items=Array.isArray(items)?items.filter(Boolean):[];
+  return '<div class="card"><b>'+esc(title)+'</b>'+(items.length?'<ul>'+items.map(x=>'<li>'+esc(typeof x==='string'?x:JSON.stringify(x))+'</li>').join('')+'</ul>':'<p class="muted">'+esc(emptyText||'当前没有可证据化内容')+'</p>')+'</div>';
+}
+
+function nandDecisionStatusClass(status){
+  status=String(status||'UNKNOWN').toUpperCase();
+  return ['READY_FOR_DEMO','ANSWERED','FIT','PASS','READY'].includes(status)?'fact':status==='NOT_FIT'?'danger':'warning';
+}
+
+async function runNandEngineeringDecision(){
+  let d=CURRENT?.device,box=$('#nandEngineeringDecisionResult');
+  if(!d||d.device_type!=='NAND Flash'||!box)return;
+  let years=$('#nandMissionYears')?.value.trim()||'',
+      days=$('#nandDaysPerYear')?.value.trim()||'',
+      margin=$('#nandMarginPercent')?.value.trim()||'',
+      peDay=$('#nandPePerDay')?.value.trim()||'',
+      retention=$('#nandRetentionYears')?.value.trim()||'',
+      temp=$('#nandMaxTemp')?.value.trim()||'',
+      candidate=$('#nandCandidate')?.value||'',
+      change=$('#nandChangeTarget')?.value||'';
+  if(!years)return msg('请先填写目标服役寿命',true);
+  if(!peDay)return msg('请填写明确的 P/E cycles/day；系统不会从逻辑写入量猜测 NAND 物理磨损。',true);
+  let mission={
+    target_service_life_years:Number(years),
+    operating_days_per_year:days?Number(days):365
+  };
+  if(margin)mission.design_margin_ratio=Number(margin)/100;
+  if(retention)mission.required_retention_years=Number(retention);
+  if(temp)mission.max_operating_temperature_c=Number(temp);
+  let body={
+    mission_profile:mission,
+    workload_profile:{pe_cycles_per_day:Number(peDay)},
+    candidate_device_ids:candidate?[candidate]:[],
+    change_target_device_id:change||''
+  };
+  box.innerHTML='<div class="card">正在复用 Existing LifetimeEngine / Storage Skills / Formal Knowledge 生成工程决策…</div>';
+  try{
+    let r=await api('/api/product/devices/'+encodeURIComponent(d.id)+'/engineering-decision/nand',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
+    });
+    let sys=r.system_engineering||{},prof=sys.required_storage_profile||{},
+        hw=r.hardware_engineering||{},sw=r.software_engineering||{},
+        proc=r.procurement||{},test=r.test_validation||{},
+        changeRisk=r.change_risk||{},runtime=r.runtime_lifetime||{},
+        fk=r.formal_knowledge||{},blocks=r.blockers||[];
+    let pe=prof.required_pe_cycles;
+    let domains=fk.domains||[];
+    let html='<div class="'+nandDecisionStatusClass(r.overall_status)+' card"><div class="pagehead"><div><b>'+esc(r.overall_status||'UNKNOWN')+'</b><p>同一套工程事实 / Formal Knowledge / Runtime 支撑六角色视图。</p></div><span class="badge '+(r.overall_status==='READY_FOR_DEMO'?'CONFIRMED':'NEEDS_ATTENTION')+'">'+esc(r.overall_status||'UNKNOWN')+'</span></div>'+
+      (blocks.length?'<p><b>当前阻断：</b>'+esc(blocks.join('；'))+'</p>':'<p><b>阻断：</b>无</p>')+'</div>';
+    html+='<div class="grid3">'+
+      '<div class="card"><div class="kicker">SYSTEM</div><b>规格转化</b><p>目标寿命：'+esc(prof.target_service_life_years??'—')+' 年</p><p>要求 P/E：<b>'+(pe==null?'UNKNOWN':esc(Number(pe).toFixed(1))+' cycles')+'</b></p><small>'+esc(prof.decision_boundary||'')+'</small></div>'+
+      '<div class="card"><div class="kicker">HARDWARE</div><b>器件消费</b><p>Confirmed Facts：'+esc(hw.fact_count??0)+'</p><p>Formal NAND Knowledge：'+esc(hw.formal_knowledge_ready?'READY':'NOT READY')+'</p></div>'+
+      '<div class="card"><div class="kicker">SOFTWARE</div><b>设计约束</b><p>'+esc(sw.direct_answer||sw.status||'NOT RUN')+'</p><small>Existing Skill: storage-write-governance</small></div>'+
+      '</div>';
+    let candidates=proc.candidate_results||[];
+    html+='<div class="card"><div class="kicker">PROCUREMENT</div><h4>器件匹配</h4>'+(candidates.length?'<div class="tablewrap"><table><tr><th>候选</th><th>结论</th><th>Hard Checks</th><th>Unknown</th></tr>'+candidates.map(x=>'<tr><td>'+esc(x.device?.vendor||'')+' '+esc(x.device?.model||x.candidate_id||'')+'</td><td>'+badge(x.status||'UNKNOWN')+'</td><td>'+esc((x.checks||[]).map(y=>y.requirement+':'+y.status).join('；')||'—')+'</td><td>'+esc((x.unknowns||[]).join('；')||'无')+'</td></tr>').join('')+'</table></div>':'<p class="muted">没有候选结果</p>')+'<small>automatic_purchase_approval=false</small></div>';
+    let diag=test.diagnostic||{},validation=test.validation_from_write_governance||[];
+    html+='<div class="grid3">'+
+      '<div class="card"><div class="kicker">TEST</div><b>寿命风险拦截</b><p>Diagnostic Skill：'+esc(diag.status||'NOT RUN')+'</p>'+(validation.length?'<ul>'+validation.map(x=>'<li>'+esc(typeof x==='string'?x:JSON.stringify(x))+'</li>').join('')+'</ul>':'<p class="muted">等待 Formal Knowledge / 运行数据形成验证项。</p>')+'<small>automatic_release_approval=false</small></div>'+
+      '<div class="card"><div class="kicker">CHANGE</div><b>变更风险</b><p>'+esc(changeRisk.direct_answer||changeRisk.status||'未提供变更目标')+'</p><small>UNKNOWN ≠ SAFE</small></div>'+
+      '<div class="card"><div class="kicker">RUNTIME</div><b>当前寿命 / 退化</b><p>已有确定性寿命结果：'+esc(runtime.answered_count??0)+'</p><div class="row"><button class="secondary" onclick="scrollDeviceSection(\'lifetimePanel\')">去 S3 寿命</button><button class="secondary" onclick="openDiagnosisForCurrentDevice()">去 S4 诊断</button></div></div>'+
+      '</div>';
+    html+='<div class="card"><div class="kicker">FORMAL KNOWLEDGE</div><h4>NAND 知识消费状态</h4>'+(domains.length?'<table><tr><th>知识域</th><th>状态</th><th>对象数</th><th>Evidence</th></tr>'+domains.map(x=>'<tr><td>'+esc(x.domain)+'</td><td>'+badge(x.status||'UNKNOWN')+'</td><td>'+esc(x.result_count??0)+'</td><td>'+esc((x.evidence_refs||[]).join('；')||'—')+'</td></tr>').join('')+'</table>':'<p class="muted">没有 Formal NAND Knowledge 命中。</p>')+'</div>';
+    html+=nandDecisionList('规格转化 Replay / Trace',prof.derivation_trace||[],'没有可执行的确定性规格转化');
+    box.innerHTML=html;
+  }catch(e){
+    box.innerHTML='<div class="danger card"><b>NAND 工程决策未完成</b><p>'+esc(e.message)+'</p><small>系统保持 Fail-Closed，不用本地猜测替代 Formal Knowledge / Device Fact。</small></div>';
+  }
+}
 
 const LIFETIME_METRICS={
   'SSD_TBW_CONSUMPTION_V1':{label:'SSD · TBW 消耗',runtime:'host_written_bytes',unit:'TB'},
