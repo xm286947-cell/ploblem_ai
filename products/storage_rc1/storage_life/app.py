@@ -26,6 +26,7 @@ from .knowledge_release import KnowledgeReleaseConsumer, KnowledgeReleaseError
 from .engineering_insight import StorageEngineeringInsightService, create_engineering_insight_router
 from .skill_api import create_storage_skill_router
 from .public_knowledge import router as public_knowledge_router
+from .nand_lifetime_case import router as nand_lifetime_case_router
 from . import public_knowledge as public_knowledge_api
 
 app = FastAPI(title="存储器件寿命知识库 MVP", version="0.8.0-rc3-runtime-rc2.1")
@@ -33,6 +34,7 @@ engineering_insight_service = StorageEngineeringInsightService()
 app.state.engineering_insight_service = engineering_insight_service
 app.include_router(create_engineering_insight_router(engineering_insight_service))
 app.include_router(create_storage_skill_router())
+app.include_router(nand_lifetime_case_router)
 app.include_router(public_knowledge_router)
 
 IMPORT_JOBS = {}

@@ -298,6 +298,40 @@ def _request(mode: str, path: str, payload: dict | None = None, base_url: str | 
         raise HTTPException(503, f"Public Knowledge API 不可用：{exc}") from exc
 
 
+def source_revision_snapshot_bytes(
+    source_id: str,
+    revision_id: str,
+    *,
+    mode: str = "LIVE",
+    base_url: str | None = None,
+) -> tuple[bytes, dict[str, str]]:
+    """Read an immutable Public Knowledge revision snapshot without changing search."""
+    if mode != "LIVE":
+        raise HTTPException(409, "Source Revision Snapshot 仅允许 LIVE 真实来源。")
+    path = (
+        "/sources/" + quote(str(source_id), safe="")
+        + "/revisions/" + quote(str(revision_id), safe="")
+        + "/snapshot"
+    )
+    request = Request(_url(base_url) + path, method="GET")
+    try:
+        with _NO_REDIRECT_OPENER.open(request, timeout=15) as response:
+            content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            payload = response.read(20 * 1024 * 1024 + 1)
+            if len(payload) > 20 * 1024 * 1024:
+                raise HTTPException(413, "Public Knowledge Source Snapshot 超过读取限制。")
+            if content_type != "application/pdf" or not payload.startswith(b"%PDF-"):
+                raise HTTPException(415, "GD5 NAND Engineering Case 仅接受可验证的 PDF Source Snapshot。")
+            return payload, {"content_type": content_type, "content_length": str(len(payload))}
+    except HTTPException:
+        raise
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:1000]
+        raise HTTPException(exc.code, detail or f"Public Knowledge Snapshot 返回 HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, f"Public Knowledge Snapshot 不可用：{exc}") from exc
+
+
 def _delete_request(mode: str, path: str, base_url: str | None = None):
     if mode == "FIXTURE_REPLAY":
         raise HTTPException(409, "演示回放为只读模式；切换到 LIVE 才能删除公开资料。")
