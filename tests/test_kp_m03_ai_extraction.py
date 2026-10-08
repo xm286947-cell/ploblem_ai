@@ -468,6 +468,7 @@ def test_kp_m03_failed_task_rerun_is_explicit_audited_and_idempotent(
     assert new_task is not None
     assert new_task.task_id != old_task.task_id
     assert new_task.input_hash == old_task.input_hash
+    assert new_task.metadata["extraction_rerun"]["input_hash"] == old_task.input_hash
     assert new_task.status == RuntimeStatus.COMPLETED
     assert runtime.get_task(old_task.task_id).status == RuntimeStatus.FAILED
 
@@ -653,3 +654,67 @@ def test_kp_m03_concurrent_same_rerun_generation_invokes_once(
     assert runtime.store.get_task_by_request_id(
         old_request + ":rerun:1"
     ).status == RuntimeStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("source_text", "MUTATED TEXT under unchanged frozen Source identity"),
+        ("section", "MUTATED SECTION under unchanged frozen Source identity"),
+        ("source_anchor", "page:1:mutated-without-source-revision"),
+    ],
+)
+def test_kp_m03_rerun_rejects_changed_structured_input_before_dispatch(
+    tmp_path: Path,
+    changed_field: str,
+    changed_value: str,
+) -> None:
+    """Same source/revision/content/topics cannot mask changed structured input."""
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    runtime, calls = _failed_extraction_runtime(tmp_path)
+    service = KnowledgeExtractionService(repository, runtime)
+
+    with pytest.raises(KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"):
+        service.extract(source, structured)
+    original_request_id = (
+        f"knowledge-extract:{source.source_id}:{source.source_version}:"
+        f"{source.content_hash[:12]}:"
+        f"{hashlib.sha256(b'[]').hexdigest()[:12]}"
+    )
+    failed = runtime.store.get_task_by_request_id(original_request_id)
+    assert failed is not None
+    assert failed.status == RuntimeStatus.FAILED
+    assert calls["count"] == 1
+
+    tampered = structured.model_copy(deep=True)
+    setattr(tampered.blocks[0], changed_field, changed_value)
+    assert source.content_hash == _seedless_source_hash(source)
+    assert source.source_version == "R1"
+    assert source.source_id == "EMMC-HEALTH"
+    assert tampered.source_id == structured.source_id
+    assert tampered.source_version == structured.source_version
+
+    with pytest.raises(KnowledgeExtractionError, match="EXTRACTION_RERUN_INPUT_MISMATCH"):
+        service.extract(
+            source,
+            tampered,
+            requested_topics=[],
+            rerun_approval=_approve_rerun(previous_task_id=failed.task_id),
+        )
+
+    # Approval cannot admit altered input, even though the logical request ID
+    # is unchanged. The old failure is durable and no new Task or evidence exists.
+    assert calls["count"] == 1
+    assert runtime.store.get_task_by_request_id(
+        original_request_id + ":rerun:1"
+    ) is None
+    assert runtime.store.get_task(failed.task_id).input_hash == failed.input_hash
+    assert runtime.store.get_task(failed.task_id).status == RuntimeStatus.FAILED
+    assert repository.list("knowledge/production/candidates") == []
+    assert repository.list("knowledge/production/evidence") == []
+    assert repository.list("knowledge/production/published") == []
+
+
+def _seedless_source_hash(source: SourceDocument) -> str:
+    return hashlib.sha256(b"official-emmc-health-pdf").hexdigest()
