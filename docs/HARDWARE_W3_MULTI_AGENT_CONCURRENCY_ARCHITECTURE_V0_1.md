@@ -41,3 +41,23 @@ W3-00 => code audit/design; W3-01 => mock-only overlap, per-Batch cap, cross-Bat
 
 **Freeze:** no Formal Knowledge schema mutation, auto write/publish, Stage A/B semantic or prompt modification, new Runtime/Provider, or overwrite of original data/installation. Real Provider must never run in CI.
 
+
+## W3-02 incremental implementation and safety decision (2026-10-08)
+
+Developed on the existing W3 branch (not merged, not released):
+
+- `services/hardware_w3_capacity_gate.py`: durable 4-slot semaphore in the **same Workbench SQLite database**, transactional `BEGIN IMMEDIATE` acquisition, per-item uniqueness, and same `business_case_id + source_id` mutual exclusion across shared-DB processes. The W3-01 process-local executor remains a supplemental cap; it is not a deployment-wide resource manager.
+- All existing Case execution entrypoints (batch sequential/parallel, retry failed, individual retry, force-full-run) are wrapped by the same capacity gate before entering the frozen pipeline. Connections are per operation and not shared between threads.
+- Leases include heartbeat observation; **no automatic expiry/reap** after crash. A stale Provider call has an unknown outcome and must not be replayed because a timeout elapsed.
+- Batch cancellation is cooperative: atomically set `cancel_requested` and change only **unstarted QUEUED** items to `CANCELLED`. Already RUNNING cases finish their current Stage pipeline; results are preserved. Explicit `resume-cancelled` requeues only cancelled items and does not auto-retry failed/in-flight work.
+- `reconcile-interrupted?confirmed_stopped=true` requires independent operator confirmation that old workers stopped; only leases with stale heartbeat (>=120 seconds) are released and corresponding RUNNING items become `RUNTIME_BLOCKED` with a clear evidence/reconciliation requirement. This endpoint does **not** resume a Runtime task or call Provider.
+- Local SQLite additions (`hardware_r1_batch.cancel_requested`, `hardware_w3_case_lease`) are Workbench-only; **Formal Knowledge schema remains unchanged**.
+- Mock tests in `tests/test_hardware_w3_reliability.py`: separate process sharing the same SQLite file, same source serialization, unstarted cancellation, explicit resume, stale lease fail-closed handling, Maintainer-only endpoints.
+- CI workflow `.github/workflows/hardware-w3-multi-case-concurrency.yml` runs this suite on Ubuntu, macOS, Windows, and retains existing W2 Workbench and Pipeline regression boundaries.
+
+### Not yet closed
+- SQLite capacity guarantees are scoped to nodes/processes pointing to **the identical shared DB file**, not different hosts with separate DBs. Production multi-host settings must explicitly fail deployment readiness or supply a reviewed shared coordinator.
+- No safe forced interruption of an individual in-flight Provider call; cancelled Batch does not kill active Stage execution.
+- Recovery still requires independent operator confirmation and Candidate/Runtime reconciliation before any new Provider invocation. `RUNTIME_BLOCKED` is deliberately not auto-retried.
+- Bounded Provider budgets, parallel duplicate source import reuse, timeout tuning, crash during Candidate Asset commit, kill/restart stress, Windows native user preview, and Formal Candidate Gate remain pending.
+- CI success, if achieved, only permits `W3_02_MOCK_CANDIDATE`, not `W3_RELEASED`.
