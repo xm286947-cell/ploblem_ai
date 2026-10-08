@@ -28,6 +28,33 @@ The launcher will:
 
 No real Provider credential is required for this Windows compatibility gate.
 
+## Using the original DB
+
+Yes. Windows acceptance supports the existing mature DB.
+
+Preferred entry:
+
+`start_quality_scenario_windows_original_db.bat`
+
+You can either:
+
+- double-click it and enter the full path of the original DB; or
+- drag the original DB file onto this BAT file.
+
+The runner first copies the original DB to:
+
+`validation/windows_acceptance/original_quality_db_copy.db`
+
+The application runs against the COPY. The original DB file is not modified.
+
+In original-DB mode, the copied DB is used for both mature source data and existing QSV1 lifecycle/history so that existing scenarios remain visible. Any Review/Confirm/Publish or other test writes are written only to the copy.
+
+The controlled-fixture mode is still available by double-clicking:
+
+`start_quality_scenario_windows_acceptance.bat`
+
+without a DB argument.
+
 ## Acceptance checklist
 
 ### W1 - Startup and mature navigation
