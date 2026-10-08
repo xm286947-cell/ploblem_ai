@@ -128,7 +128,7 @@ def test_cancel_and_explicit_resume_preserves_other_states(tmp_path):
     first = store.add_item(batch, source_file="first.docx")
     other = store.add_item(batch, source_file="other.docx")
     store.update_item(
-        other, orchestration_status="CANDIDATE_READY",
+        other, orchestration_status="PARSE_FAILED",
         failed_stage=None, error_code=None, result=None,
     )
     service = HardwareR1WorkbenchService(
@@ -137,7 +137,7 @@ def test_cancel_and_explicit_resume_preserves_other_states(tmp_path):
     cancelled = service.cancel_batch(batch)
     assert cancelled["cancel_requested"] is True
     assert store.get_item(first)["orchestration_status"] == "CANCELLED"
-    assert store.get_item(other)["orchestration_status"] == "CANDIDATE_READY"
+    assert store.get_item(other)["orchestration_status"] == "PARSE_FAILED"
     assert service.run_batch(batch)["cancel_requested"] is True
     resumed = service.resume_cancelled_batch(batch)
     assert resumed["cancel_requested"] is False
