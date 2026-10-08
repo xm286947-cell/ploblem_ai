@@ -54,15 +54,14 @@ def terminate(proc: subprocess.Popen | None) -> None:
 
 
 def _redact_log_line(value: str) -> str:
-    """Avoid displaying credentials in diagnostic output."""
-    value = re.sub(r"(?i)(bearer\\s+)[^\\s,;]+", r"\\1[REDACTED]", value)
+    """Redact likely credentials from console diagnostics."""
+    value = re.sub(r'(?i)(bearer\s+)\S+', r'\1[REDACTED]', value)
     value = re.sub(
-        r"(?i)((?:api[_-]?key|authorization|password|secret|token)\\s*['\\\"]?\\s*[:=]\\s*['\\\"]?)[^\\s,'\\\"}]+",
-        r"\\1[REDACTED]",
+        r'(?i)((?:api[_-]?key|authorization|password|secret|token)\s*[:=]\s*)\S+',
+        r'\1[REDACTED]',
         value,
     )
-    return re.sub(r"(?i)\\bsk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)
-
+    return re.sub(r'(?i)\bsk-[A-Za-z0-9_-]{8,}', '[REDACTED]', value)
 
 def report_app_failure(error: BaseException, process: subprocess.Popen | None, db_path: Path) -> None:
     print("WINDOWS_ACCEPTANCE_START=FAIL")
