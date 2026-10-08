@@ -13,6 +13,7 @@ from typing import Any
 from runtime import EvidenceLocator, EvidenceReference, LightweightExecutionEngine, SourceRef, SqliteTaskStore
 from runtime.adapters import MajorIssueD01RuntimeAdapter, MajorIssueObjectSpec
 from quality_knowledge.major_cases.document_parser import parse_document
+from quality_knowledge.major_cases.identity import MajorCaseIdentityConflict, MajorCaseIdentityResolver
 from quality_knowledge.problem_refs import InvalidSourceProblemItrRef, SourceProblemItrRefV1
 from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
 from repositories import JsonArtifactRepository
@@ -42,6 +43,7 @@ class MajorCaseProductionService:
         provider: Any | None = None,
     ) -> None:
         self.repository = repository
+        self.identity_resolver = MajorCaseIdentityResolver(repository)
         self.artifact_repository = artifact_repository
         self.publisher = MajorCasePublisher(repository, artifact_repository)
         self.provider = provider
@@ -71,39 +73,25 @@ class MajorCaseProductionService:
         if suffix not in {".pdf", ".docx", ".doc"}:
             raise MajorProductionError("MAJOR_SOURCE_TYPE_UNSUPPORTED")
 
-        case = self.repository.create_case(title, group_code, domain=domain)
+        try:
+            resolution = self.identity_resolver.resolve_or_create_case(
+                group_code=group_code,
+                title=title,
+                domain=domain,
+                source_key=f"ITR:{standard_itr}",
+                standard_itrs=[standard_itr],
+            )
+            case = resolution["case"]
+            event = resolution["events"][0]
+        except MajorCaseIdentityConflict as error:
+            raise MajorProductionError(error.code) from error
         self.repository.update_case_status(case["case_id"], "ACTIVE")
-        event = self.repository.upsert_event(
-            case["case_id"],
-            standard_itr=standard_itr,
-            internal_event_key=standard_itr,
-            title=title,
-        )
         with TemporaryDirectory(prefix="major-source-") as directory:
             source_path = Path(directory) / Path(source_name).name
             source_path.write_bytes(source_bytes)
             document = self.repository.ingest_file(case["case_id"], source_path)
             parsed = parse_document(self.repository.attachment_path(document["version_id"]))
             fragments = self.repository.save_parse_result(document["version_id"], parsed)
-
-        source_fact = self.repository.add_source_fact_revision(
-            case["case_id"],
-            source_type="DOCUMENT",
-            source_ref=f"{source_name}@{document['version_no']}",
-            raw={
-                "title": title,
-                "group_code": group_code,
-                "domain": domain,
-                "standard_itr": standard_itr,
-                "source_name": source_name,
-            },
-            normalized={
-                "itr_id": standard_itr,
-                "original_description": title,
-                "report_filename": source_name,
-            },
-            actor="SOURCE_INTAKE",
-        )
 
         source_link = self.repository.add_source_link(
             case["case_id"],
@@ -128,7 +116,6 @@ class MajorCaseProductionService:
             "event": event,
             "document": document,
             "source_link": source_link,
-            "source_fact": source_fact,
             "parse": {"fragment_count": len(fragments), "warnings": parsed.warnings},
         }
 
