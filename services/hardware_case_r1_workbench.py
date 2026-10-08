@@ -29,6 +29,7 @@ from services.hardware_w3_capacity_gate import (
     W3CapacityTimeout,
 )
 from services.hardware_case_r1_runtime import (
+    R1_PIPELINE_VERSION,
     R1_STAGE_A_VALIDATOR_VERSION,
     R1_STAGE_B_VALIDATOR_VERSION,
 )
@@ -36,7 +37,11 @@ from services.hardware_case_r1_runtime import (
 
 WORKBENCH_CONTRACT_VERSION = "hardware-r1-knowledge-production-workbench/v1"
 
-FINAL_RESULTS = {"CANDIDATE_READY", "REVIEW", "FAILED"}
+FINAL_RESULTS = {"CANDIDATE_READY", "REVIEW", "FAILED", "CANCELLED"}
+# The existing frozen R1 stage Agent configs cap each step at two Provider
+# calls. W3 verifies the aggregate reported result before Candidate commit;
+# the authoritative *preventive* cap remains in the frozen Runtime.
+W3_MAX_OBSERVED_PROVIDER_CALLS_PER_CASE = 4
 FAILED_RESULTS = {"PARSE_FAILED", "STAGE_A_FAILED", "STAGE_B_FAILED", "GATE_FAILED"}
 
 
@@ -64,6 +69,13 @@ def bind_case_status(
     error_code: str | None = None,
 ) -> dict[str, Any]:
     """Bind frozen Runtime/Pipeline truth to the UED state contract."""
+    if orchestration_status == "CANCELLED":
+        return {
+            "parse": "PASS" if snapshot else "WAITING",
+            "stage_a": "WAITING", "stage_b": "WAITING",
+            "gate": "WAITING", "result": "CANCELLED",
+            "failed_stage": None, "error_code": error_code, "retryable": False,
+        }
     if error_code == "CANDIDATE_ASSET_COMMIT_FAILED":
         trace = (result or {}).get("latency_trace") or {}
         return {
@@ -487,6 +499,43 @@ class HardwareR1WorkbenchStore:
                 (code, now, item["item_id"],
                  item["orchestration_status"], item["updated_at"]),
             )
+
+    def find_reusable_completed_item(
+        self, item: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Find only durable Candidate-complete work with identical input.
+
+        The caller must hold the W3 case/source lease while reading. A
+        persisted Candidate reference is subsequently validated by the
+        Candidate repository; the Workbench record is not the Candidate truth.
+        """
+        case_id = str(item.get("business_case_id") or "")
+        source_id = str(item.get("source_id") or "")
+        snapshot = item.get("snapshot")
+        if not case_id or not source_id or not isinstance(snapshot, dict):
+            return None
+        canonical = json.dumps(snapshot, sort_keys=True, ensure_ascii=False)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM hardware_r1_batch_item
+                WHERE business_case_id=? AND source_id=? AND item_id<>?
+                  AND orchestration_status IN ('CANDIDATE_READY','REVIEW')
+                  AND candidate_id IS NOT NULL AND result_json IS NOT NULL
+                ORDER BY updated_at DESC LIMIT 30
+                """,
+                (case_id, source_id, item["item_id"]),
+            ).fetchall()
+        for row in rows:
+            candidate = self._item(row)
+            previous = candidate.get("snapshot")
+            if (
+                isinstance(previous, dict)
+                and json.dumps(previous, sort_keys=True, ensure_ascii=False)
+                == canonical
+            ):
+                return candidate
+        return None
 
     def claim_item_for_run(self, item: dict[str, Any]) -> bool:
         """Atomically claim exactly one case before any Agent/Provider work.
@@ -1181,12 +1230,9 @@ class HardwareR1WorkbenchService:
         def handle_unexpected(item: dict[str, Any], error: Exception) -> None:
             # Failure of the normal _run_item exception handler is not a batch
             # success. Persist a blocked case and allow other cases to proceed.
-            self.store.update_item(
-                item["item_id"],
-                orchestration_status="RUNTIME_BLOCKED",
-                failed_stage=item.get("failed_stage"),
-                error_code=str(getattr(error, "code", None) or "W3_ORCHESTRATION_FAILED"),
-                result=item.get("pipeline_result"),
+            self.store.mark_unclaimed_blocked(
+                item,
+                str(getattr(error, "code", None) or "W3_ORCHESTRATION_FAILED"),
             )
 
         execute_case_batch(
@@ -1381,6 +1427,10 @@ class HardwareR1WorkbenchService:
             )
             return
         try:
+            if retry_stage is None and not force_full_run and item.get(
+                "orchestration_status"
+            ) == "QUEUED" and self._reuse_completed_source_candidate(item, snapshot):
+                return
             structurer = self.structurer_factory()
             result = run_r1_agent_extraction(
                 snapshot,
@@ -1390,6 +1440,16 @@ class HardwareR1WorkbenchService:
                     retry_stage if retry_stage in {"STAGE_A", "STAGE_B"} else None
                 ),
             )
+            observed_calls = int(result.get("provider_call_count") or 0)
+            if not 0 <= observed_calls <= W3_MAX_OBSERVED_PROVIDER_CALLS_PER_CASE:
+                self.store.update_item(
+                    item["item_id"],
+                    orchestration_status="RUNTIME_BLOCKED",
+                    failed_stage=result.get("failed_stage"),
+                    error_code="W3_PROVIDER_BUDGET_EXCEEDED",
+                    result=result,
+                )
+                return
             bound = bind_case_status(snapshot=snapshot, result=result)
             candidate_id = None
             if bound["result"] in {"REVIEW", "CANDIDATE_READY"}:
@@ -1443,6 +1503,56 @@ class HardwareR1WorkbenchService:
                 ),
                 result=item.get("pipeline_result"),
             )
+
+    def _reuse_completed_source_candidate(
+        self, item: dict[str, Any], snapshot: dict[str, Any]
+    ) -> bool:
+        """Reuse only the *same case + source + exact snapshot* and verified asset.
+
+        Never bypass a prior review decision, write Formal Knowledge or make a
+        Provider call. The asset is shared only for the same business case.
+        """
+        previous = self.store.find_reusable_completed_item(item)
+        if previous is None:
+            return False
+        resolved = self._resolve_candidate(previous)
+        if resolved.get("result") not in {"REVIEW", "CANDIDATE_READY"}:
+            return False
+        asset = resolved.get("candidate_asset")
+        old = previous.get("pipeline_result")
+        if (
+            not isinstance(asset, dict)
+            or str(asset.get("asset_status") or "").upper() != "ACTIVE"
+            or not isinstance(old, dict)
+            or old.get("pipeline_status") != "GOLDEN_PREVIEW_READY"
+            or old.get("pipeline_version") != R1_PIPELINE_VERSION
+            or not isinstance(old.get("knowledge_object"), dict)
+            or not isinstance(old.get("evidence_validation"), dict)
+            or old["evidence_validation"].get("status") != "PASS"
+            or asset.get("knowledge_object") is None
+        ):
+            return False
+        reused_result = deepcopy(old)
+        reused_result["provider_call_count"] = 0
+        reused_result["execution_mode"] = "W3_VERIFIED_CANDIDATE_REUSE"
+        reused_result["w3_reused_from_item_id"] = previous["item_id"]
+        reused_result["w3_reused_from_run_id"] = old.get("run_id")
+        reused_result["w3_reuse_verified"] = True
+        reused_result["latency_trace"] = {
+            **(reused_result.get("latency_trace") or {}),
+            "W3_VERIFIED_CANDIDATE_REUSE": True,
+            "STAGE_A_PROVIDER_ATTEMPTS": [],
+            "STAGE_B_PROVIDER_ATTEMPTS": [],
+        }
+        self.store.update_item(
+            item["item_id"],
+            orchestration_status=resolved["result"],
+            failed_stage=None,
+            error_code=None,
+            result=reused_result,
+            candidate_id=previous["candidate_id"],
+        )
+        return True
 
     def _commit_candidate_asset(
         self,
