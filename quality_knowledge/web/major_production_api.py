@@ -17,7 +17,7 @@ from services.major_case_production import MajorCaseProductionService, MajorProd
 
 
 def _error(error: MajorProductionError) -> HTTPException:
-    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND", "MAJOR_EVENT_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
+    status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND", "MAJOR_EVENT_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE", "CASE_IDENTITY_CONFLICT"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
     return HTTPException(status, error.code)
 
 
