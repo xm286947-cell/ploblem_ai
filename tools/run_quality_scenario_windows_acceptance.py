@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -52,7 +53,40 @@ def terminate(proc: subprocess.Popen | None) -> None:
             pass
 
 
+def _redact_log_line(value: str) -> str:
+    """Avoid displaying credentials in diagnostic output."""
+    value = re.sub(r"(?i)(bearer\\s+)[^\\s,;]+", r"\\1[REDACTED]", value)
+    value = re.sub(
+        r"(?i)((?:api[_-]?key|authorization|password|secret|token)\\s*['\\\"]?\\s*[:=]\\s*['\\\"]?)[^\\s,'\\\"}]+",
+        r"\\1[REDACTED]",
+        value,
+    )
+    return re.sub(r"(?i)\\bsk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)
+
+
+def report_app_failure(error: BaseException, process: subprocess.Popen | None, db_path: Path) -> None:
+    print("WINDOWS_ACCEPTANCE_START=FAIL")
+    print(f"STARTUP_ERROR_TYPE={type(error).__name__}")
+    print(f"STARTUP_ERROR={_redact_log_line(str(error))}")
+    print(f"APP_PROCESS_EXIT={process.poll() if process else 'NOT_STARTED'}")
+    print(f"SOURCE_DB_EXISTS={db_path.is_file()}")
+    print(f"SOURCE_DB_SIZE_BYTES={db_path.stat().st_size if db_path.is_file() else 0}")
+    print(f"APP_LOG_PATH={APP_LOG}")
+    print("APP_LOG_TAIL_BEGIN")
+    try:
+        lines = APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines[-160:]:
+            print(_redact_log_line(line))
+        if not lines:
+            print("APP_LOG_EMPTY")
+    except Exception as log_exc:
+        print(f"APP_LOG_READ_FAIL={type(log_exc).__name__}")
+    print("APP_LOG_TAIL_END")
+    sys.stdout.flush()
+
+
 def main() -> int:
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--no-browser", action="store_true")
@@ -138,6 +172,7 @@ def main() -> int:
         app = subprocess.Popen(
             [
                 sys.executable,
+                "-u",
                 str(ROOT / "main.py"),
                 "knowledge-web",
                 "--db",
@@ -156,45 +191,51 @@ def main() -> int:
         base = f"http://127.0.0.1:{args.port}"
         startup_timeout = 300 if source_mode == "ORIGINAL_DB_COPY" else 45
         print(f"STARTUP_WAIT_LIMIT_SECONDS={startup_timeout}")
-        deadline = time.time() + startup_timeout
+        print(f"STARTUP_SOURCE_MODE={source_mode}")
+        print(f"STARTUP_SOURCE_DB={source_db}")
+        print(f"STARTUP_LOG_PATH={APP_LOG}")
+        print(f"STARTUP_HEALTH_URL={base}/issues")
+        deadline = time.monotonic() + startup_timeout
+        next_progress = time.monotonic() + 10
         startup_error = None
-        while time.time() < deadline:
+        ready = False
+        while time.monotonic() < deadline:
             if app.poll() is not None:
                 startup_error = RuntimeError(f"APP_EXITED_EARLY:{app.returncode}")
                 break
             try:
                 with urlopen(base + "/issues", timeout=1.0) as response:
                     if response.status == 200:
-                        startup_error = None
+                        ready = True
                         break
             except (URLError, TimeoutError, OSError) as exc:
                 startup_error = exc
+            now = time.monotonic()
+            if now >= next_progress:
+                elapsed = int(startup_timeout - max(0, deadline - now))
+                log_bytes = APP_LOG.stat().st_size if APP_LOG.exists() else 0
+                print(f"STARTUP_WAITING elapsed={elapsed}s app_alive={app.poll() is None} app_log_bytes={log_bytes}")
+                next_progress = now + 10
             time.sleep(1.0)
-        else:
-            startup_error = RuntimeError(f"HTTP_NOT_READY_AFTER_{startup_timeout}s")
 
-        if startup_error is not None:
-            print("WINDOWS_ACCEPTANCE_START=FAIL")
-            print(f"STARTUP_ERROR={type(startup_error).__name__}:{startup_error}")
-            print(f"APP_PROCESS_EXIT={app.poll()}")
-            print(f"APP_LOG={APP_LOG}")
-            try:
-                if APP_LOG.is_file():
-                    lines = APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
-                    print("----- APP LOG TAIL -----")
-                    for line in lines[-160:]:
-                        print(line)
-                    print("----- END APP LOG TAIL -----")
-            except Exception as log_exc:
-                print(f"APP_LOG_READ_FAIL={type(log_exc).__name__}")
-            raise startup_error
-        for route in (
-            "/issues",
-            "/software-assessment",
-            "/quality-scenarios/workbench",
-            "/quality-scenarios/library",
-        ):
-            wait_http(base + route, timeout=10)
+        if not ready:
+            error = startup_error if app.poll() is not None else RuntimeError(
+                f"HTTP_NOT_READY_AFTER_{startup_timeout}s:{startup_error}"
+            )
+            report_app_failure(error, app, source_db)
+            raise error
+
+        try:
+            for route in (
+                "/issues",
+                "/software-assessment",
+                "/quality-scenarios/workbench",
+                "/quality-scenarios/library",
+            ):
+                wait_http(base + route, timeout=10)
+        except Exception as error:
+            report_app_failure(error, app, source_db)
+            raise
 
         print("TASK=QUALITY_SCENARIO_WINDOWS_ACCEPTANCE_001")
         print("PLATFORM=Windows")
