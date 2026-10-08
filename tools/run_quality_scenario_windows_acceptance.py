@@ -66,7 +66,7 @@ def main() -> int:
 
     VALIDATION_DIR.mkdir(parents=True, exist_ok=True)
 
-    from tools.build_quality_scenario_test_fixture import build_fixture
+    from tools.build_quality_scenario_test_fixture import augment_fixture, build_fixture
     from tools.quality_scenario_functional_provider import configure
 
     source_mode = "CONTROLLED_FIXTURE"
@@ -80,7 +80,11 @@ def main() -> int:
         for suffix in ("", "-wal", "-shm"):
             Path(str(ORIGINAL_DB_COPY) + suffix).unlink(missing_ok=True)
         shutil.copy2(original, ORIGINAL_DB_COPY)
-        source_mode = "ORIGINAL_DB_COPY"
+        # Add the controlled G1-G5 source cases to the COPY only. This keeps
+        # original mature data/history visible while making the Windows
+        # acceptance checklist deterministic and keeps G5 revision available.
+        augment_fixture(ORIGINAL_DB_COPY)
+        source_mode = "ORIGINAL_DB_COPY_PLUS_CONTROLLED_CASES"
         source_db = ORIGINAL_DB_COPY
         # Preserve the original database's existing QSV1 lifecycle/history in
         # the test copy. Any Windows acceptance writes stay in the copy only.
@@ -167,14 +171,24 @@ def main() -> int:
         print("REAL_PROVIDER_SEMANTIC_GATE=OUT_OF_SCOPE")
         print(f"SOURCE_DB={source_db}")
         print(f"QSV1_DB={qsv1_db}")
-        print(f"ORIGINAL_DB_MUTATED={'NO' if source_mode == 'ORIGINAL_DB_COPY' else 'N/A'}")
+        print(
+            f"ORIGINAL_DB_MUTATED={'NO' if source_mode.startswith('ORIGINAL_DB_COPY') else 'N/A'}"
+        )
         print(
             "SOURCE_AND_QSV1_DB_SEPARATED="
-            + ("NO_PRESERVE_ORIGINAL_HISTORY" if source_mode == "ORIGINAL_DB_COPY" else "YES")
+            + (
+                "NO_PRESERVE_ORIGINAL_HISTORY"
+                if source_mode.startswith("ORIGINAL_DB_COPY")
+                else "YES"
+            )
         )
         print(
             "G1_G5_SOURCE_DATA="
-            + ("USER_ORIGINAL_DB" if source_mode == "ORIGINAL_DB_COPY" else "READY")
+            + (
+                "USER_ORIGINAL_DB_PLUS_CONTROLLED_CASES"
+                if source_mode.startswith("ORIGINAL_DB_COPY")
+                else "READY"
+            )
         )
         print(f"APP_URL={base}/software-assessment#quality-scenario-production")
         print("WINDOWS_ACCEPTANCE_START=PASS")
