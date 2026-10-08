@@ -22,6 +22,7 @@ from services.hardware_case_markdown_agent import (
     run_r1_agent_extraction,
 )
 from services.hardware_case_word import parse_docx
+from services.hardware_r1_batch_concurrency import execute_case_batch
 from services.hardware_case_r1_runtime import (
     R1_STAGE_A_VALIDATOR_VERSION,
     R1_STAGE_B_VALIDATOR_VERSION,
@@ -404,6 +405,36 @@ class HardwareR1WorkbenchStore:
                 (now, batch_id),
             )
         return item_id
+
+    def claim_item_for_run(self, item: dict[str, Any]) -> bool:
+        """Atomically claim exactly one case before any Agent/Provider work.
+
+        Optimistic item status+revision protects against concurrent Run/Retry
+        requests, including requests entering from different Python processes.
+        No connection is ever passed to another worker thread.
+        """
+        now = _utc_now()
+        with self._connect() as connection:
+            updated = connection.execute(
+                """
+                UPDATE hardware_r1_batch_item
+                SET orchestration_status='RUNNING',error_code=NULL,updated_at=?
+                WHERE item_id=? AND orchestration_status=? AND updated_at=?
+                """,
+                (
+                    now,
+                    item["item_id"],
+                    item["orchestration_status"],
+                    item["updated_at"],
+                ),
+            )
+            if updated.rowcount != 1:
+                return False
+            connection.execute(
+                "UPDATE hardware_r1_batch SET updated_at=? WHERE batch_id=?",
+                (now, item["batch_id"]),
+            )
+        return True
 
     def update_item(
         self,
@@ -1031,15 +1062,49 @@ class HardwareR1WorkbenchService:
         self.store.freeze_dataset_identity(batch_id, dataset_entries)
         return self.get_batch(batch_id)
 
-    def run_batch(self, batch_id: str) -> dict[str, Any]:
+    def run_batch(
+        self,
+        batch_id: str,
+        *,
+        execution_mode: str = "SEQUENTIAL",
+        concurrency: int = 2,
+    ) -> dict[str, Any]:
+        """W2 sequential by default; W3 optionally parallelizes whole cases."""
+        if execution_mode not in {"SEQUENTIAL", "PARALLEL"}:
+            raise HardwareR1WorkbenchError("HARDWARE_W3_EXECUTION_MODE_INVALID")
+        if (
+            isinstance(concurrency, bool)
+            or not isinstance(concurrency, int)
+            or not 1 <= concurrency <= 4
+        ):
+            raise HardwareR1WorkbenchError("HARDWARE_W3_CONCURRENCY_INVALID")
         items = [
             self._resolve_candidate(item)
             for item in self.store.list_items(batch_id)
         ]
-        for item in items:
-            if item["result"] != "QUEUED":
-                continue
+        selected = [item for item in items if item["result"] == "QUEUED"]
+
+        def run_one(item: dict[str, Any]) -> None:
             self._run_item(item, retry_stage=None, force_full_run=False)
+
+        def handle_unexpected(item: dict[str, Any], error: Exception) -> None:
+            # Failure of the normal _run_item exception handler is not a batch
+            # success. Persist a blocked case and allow other cases to proceed.
+            self.store.update_item(
+                item["item_id"],
+                orchestration_status="RUNTIME_BLOCKED",
+                failed_stage=item.get("failed_stage"),
+                error_code=str(getattr(error, "code", None) or "W3_ORCHESTRATION_FAILED"),
+                result=item.get("pipeline_result"),
+            )
+
+        execute_case_batch(
+            selected,
+            worker=run_one,
+            execution_mode=execution_mode,
+            concurrency=concurrency,
+            on_error=handle_unexpected,
+        )
         return self.get_batch(batch_id)
 
     def retry_failed_only(self, batch_id: str) -> dict[str, Any]:
@@ -1174,13 +1239,10 @@ class HardwareR1WorkbenchService:
                 result=item.get("pipeline_result"),
             )
             return
-        self.store.update_item(
-            item["item_id"],
-            orchestration_status="RUNNING",
-            failed_stage=item.get("failed_stage"),
-            error_code=None,
-            result=item.get("pipeline_result"),
-        )
+        if not self.store.claim_item_for_run(item):
+            # Another Run/Retry already claimed this row or changed it after
+            # this request read it. Never issue a second Provider call.
+            return
         try:
             structurer = self.structurer_factory()
             result = run_r1_agent_extraction(
