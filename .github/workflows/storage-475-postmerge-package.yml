@@ -1,0 +1,230 @@
+name: Storage 475 Postmerge Code Candidate
+on:
+  push:
+    branches: [packaging/storage-475-postmerge-786c6abd]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frozen merged source
+        uses: actions/checkout@v4
+        with:
+          ref: 786c6abd659f1246512791f428f57a58680d9461
+          path: source
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencies
+        run: |
+          python -m pip install -r source/requirements.txt -r source/products/storage_rc1/requirements.txt
+      - name: KP focused Regression (no real provider)
+        run: |
+          cd source
+          python -m pytest -q tests/test_kp_m03_ai_extraction.py
+      - name: Build pinned full-code ZIP with manifest / SHA
+        run: |
+          python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import hashlib, json, os, subprocess, zipfile
+          
+          SOURCE_SHA = "786c6abd659f1246512791f428f57a58680d9461"
+          NAME = "STORAGE_475_POSTMERGE_CODE_TEST_786c6abd_20261009"
+          src=Path("source").resolve()
+          out=Path("dist").resolve()
+          out.mkdir(exist_ok=True)
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          head=subprocess.check_output(["git","-C",str(src),"rev-parse","HEAD"],text=True).strip()
+          assert head==SOURCE_SHA,head
+          
+          exclude_top={".git",".github","data","outputs","output","input","logs"}
+          exclude_filename={"model.local.yaml","model.windows.real.yaml","product_test.env",".env",".env.local","credentials.json","secrets.yaml"}
+          exclude_suffix={".db",".sqlite",".sqlite3",".key",".pem",".p12",".pfx"}
+          excluded_part={"__pycache__",".pytest_cache",".venv","venv"}
+          include_top={"products","runtime","knowledge_production","repositories","parser","quality_knowledge","services","tools","prompts","config","schema","contracts","compatibility","knowledge","retriever","models","parsing","common","scripts","skills","delivery","test_assets","tests","builder","storage_e2e","packaging"}
+          include_root={"README.md","requirements.txt","pytest.ini","main.py"}
+          
+          def safe(p):
+              parts=PurePosixPath(p).parts
+              if not parts or parts[0] in exclude_top or any(x in excluded_part for x in parts):
+                  return False
+              if len(parts)==1 and p not in include_root:
+                  return False
+              if len(parts)>1 and parts[0] not in include_top:
+                  return False
+              name=parts[-1].lower()
+              if name in exclude_filename or Path(name).suffix.lower() in exclude_suffix:
+                  return False
+              if name.startswith(".env") or name.endswith(".env") or "credential" in name or "private_key" in name:
+                  return False
+              if name.startswith("model.") and name.endswith(".yaml") and not name.endswith(".example.yaml"):
+                  return False
+              if "secret" in name and not name.endswith(".py"):
+                  return False
+              return True
+          
+          files=subprocess.check_output(["git","-C",str(src),"ls-files","-z"]).split(b"\0")
+          included={}
+          for raw in files:
+              if not raw: continue
+              rel=raw.decode("utf-8")
+              path=src/rel
+              if safe(rel) and path.is_file():
+                  included[rel]=path.read_bytes()
+          required=[
+           "knowledge_production/extraction.py","knowledge_production/__init__.py",
+           "runtime/engine/runtime.py","products/storage_rc1/storage_life/app.py",
+           "products/storage_rc1/storage_life/knowledge_product.py",
+           "requirements.txt","config/runtime/agents/knowledge.production.extract.yaml"
+          ]
+          assert not (set(required)-set(included)),set(required)-set(included)
+          assert len(included)>450,len(included)
+          
+          mac='''#!/bin/bash
+          set -e
+          cd "$(dirname "$0")"
+          command -v python3.11 >/dev/null || { echo "Install Python 3.11 first"; exit 2; }
+          export PYTHONPATH="$PWD"
+          if [ -z "$STORAGE_KNOWLEDGE_REPOSITORY_DIR" ]; then
+           export STORAGE_KNOWLEDGE_REPOSITORY_DIR="$PWD/runtime_data/knowledge_repository"
+          fi
+          if [ -z "$STORAGE_WEB_PORT" ]; then export STORAGE_WEB_PORT=18773; fi
+          mkdir -p "$STORAGE_KNOWLEDGE_REPOSITORY_DIR"
+          echo "Storage isolated on http://127.0.0.1:$STORAGE_WEB_PORT/api/health"
+          exec python3.11 -m uvicorn products.storage_rc1.storage_life.app:app --host 127.0.0.1 --port "$STORAGE_WEB_PORT"
+          '''
+          win='''@echo off
+          setlocal
+          cd /d "%~dp0"
+          py -3.11 -c "import sys;assert sys.version_info[:2]==(3,11)" >nul 2>nul
+          if errorlevel 1 ( echo Python 3.11 required & exit /b 2 )
+          set "PYTHONPATH=%CD%"
+          if not defined STORAGE_KNOWLEDGE_REPOSITORY_DIR set "STORAGE_KNOWLEDGE_REPOSITORY_DIR=%CD%\\runtime_data\\knowledge_repository"
+          if not defined STORAGE_WEB_PORT set "STORAGE_WEB_PORT=18773"
+          if not exist "%STORAGE_KNOWLEDGE_REPOSITORY_DIR%" mkdir "%STORAGE_KNOWLEDGE_REPOSITORY_DIR%"
+          echo Storage isolated on http://127.0.0.1:%STORAGE_WEB_PORT%/api/health
+          py -3.11 -m uvicorn products.storage_rc1.storage_life.app:app --host 127.0.0.1 --port %STORAGE_WEB_PORT%
+          '''
+          notes='''# Storage NAND #475 — postmerge CODE TEST ZIP
+          Source main SHA: 786c6abd659f1246512791f428f57a58680d9461.
+          Includes full applicable source, KP/Runtime, app, prompts, tests and schema.
+          
+          ## Mac
+          Install Python 3.11; run:
+           python3.11 -m pip install -r requirements.txt -r products/storage_rc1/requirements.txt
+           ./start_storage_macos.command
+           http://127.0.0.1:18773/api/health
+          
+          ## Windows
+          Install Python 3.11; run:
+           py -3.11 -m pip install -r requirements.txt -r products/storage_rc1/requirements.txt
+           start_storage_windows.bat
+           http://127.0.0.1:18773/api/health
+          
+          ## Important missing SITE-HOSTED test data
+          This is a complete *source/runtime code* ZIP, but DOES NOT include frozen
+          GD5F1GQ5 SourceDocument/PDF, historical FAILED Runtime DB, external working
+          Agent/Provider configuration, credentials, or user data. They must be provided
+          from the site as isolated COPIES and checked before a real rerun. NEVER reset
+          or fabricate failed tasks. Same Source/Revision/Topics and input hash required.
+          Package does not claim Formal Release readiness.
+          
+          External config variable: STORAGE_MODEL_CONFIG.
+          External isolated data: STORAGE_KNOWLEDGE_REPOSITORY_DIR.
+          The new rerun facility is INTERNAL ONLY; the public HTTP extraction endpoint
+          does not expose it. See docs/KP_FAILED_EXTRACTION_EXPLICIT_RERUN.md.
+          
+          The extracted package does not call Provider until deliberately invoked. Do
+          NOT modify existing :18770 / :18772 services or frozen ZIP. No auto Publish.
+          
+          CI verified Python 3.11 Linux. Native Windows and macOS start tests are
+          PENDING native-machine execution, not presumed PASS.
+          '''
+          selfcheck='''from pathlib import Path
+          import hashlib, json
+          root=Path(__file__).resolve().parent
+          m=json.loads((root/"PACKAGE_MANIFEST.json").read_text())
+          assert m["source_commit"]=="786c6abd659f1246512791f428f57a58680d9461"
+          for item in m["files"]:
+           p=root/item["path"]
+           assert p.is_file(),p
+           assert hashlib.sha256(p.read_bytes()).hexdigest()==item["sha256"],p
+          for rel in ("config/model.local.yaml","products/storage_rc1/config/model.local.yaml",
+                      "products/storage_rc1/config/product_test.env"):
+           assert not (root/rel).exists(),rel
+          from knowledge_production import ExtractionRerunApproval
+          from runtime import SqliteTaskStore
+          from products.storage_rc1.storage_life import knowledge_product
+          print("OFFLINE_SELF_CHECK=PASS")
+          print("FILES_CHECKED=",len(m["files"]))
+          print("PROVIDER_CALLS=0")
+          print("FROZEN_SOURCE_AND_FAILED_TASK_DB=REQUIRES_EXTERNAL_COPY")
+          '''
+          included.update({
+           "start_storage_macos.command":mac.encode(),
+           "start_storage_windows.bat":win.encode(),
+           "README_475_TEST.txt":notes.encode(),
+           "offline_selfcheck.py":selfcheck.encode(),
+           "runtime_data/README.txt":b"ONLY isolated site copies of frozen Source and historical FAILED Runtime DB.\n"
+          })
+          filelist=[{"path":key,"bytes":len(value),"sha256":sha(value)} for key,value in sorted(included.items())]
+          manifest={"package_id":NAME,"source_commit":SOURCE_SHA,"source_branch":"main","merged_pr":562,
+          "package_scope":"COMPLETE_SOURCE_CODE_NOT_SITE_DB","included_file_count":len(filelist),
+          "data_source_frozen":"SITE_COPY_REQUIRED","failed_runtime_db":"SITE_COPY_REQUIRED",
+          "provider_config":"EXTERNAL_ONLY","real_provider_calls":0,
+          "windows_native_launch":"PENDING","macos_native_launch":"PENDING","files":filelist}
+          included["PACKAGE_MANIFEST.json"]=(json.dumps(manifest,ensure_ascii=False,sort_keys=True,indent=2)+"\n").encode()
+          dest=out/(NAME+".zip")
+          with zipfile.ZipFile(dest,"w",compression=zipfile.ZIP_DEFLATED,compresslevel=8) as archive:
+           for name,blob in sorted(included.items()):
+            zi=zipfile.ZipInfo(name,date_time=(2026,10,9,0,0,0))
+            zi.create_system=3
+            zi.external_attr=(0o755 if name.endswith((".sh",".command")) else 0o644)<<16
+            zi.compress_type=zipfile.ZIP_DEFLATED
+            archive.writestr(zi,blob)
+          with zipfile.ZipFile(dest) as z:
+           assert z.testzip() is None
+           for row in filelist:
+            assert sha(z.read(row["path"]))==row["sha256"],row["path"]
+           assert len(z.namelist())==len(filelist)+1
+          digest=sha(dest.read_bytes())
+          (out/(NAME+".sha256")).write_text(digest+"  "+dest.name+"\n")
+          (out/(NAME+".DELIVERY_MANIFEST.json")).write_text(json.dumps({
+          "package_id":NAME,"package_sha256":digest,"source_main_sha":SOURCE_SHA,
+          "file_count":len(filelist),"frozen_source_included":False,
+          "failed_task_db_included":False,"provider_config_included":False,
+          "real_provider_calls":0,"ready_for_real_extraction":False,
+          "fresh_extract_gate":"CI_REQUIRES_VERIFY","native_os_gate":"PENDING"
+          },sort_keys=True,indent=2)+"\n")
+          print("PACKAGE_ZIP_VERIFY=PASS")
+          print("FILE_SHA_CHECKED="+str(len(filelist)))
+          print("PACKAGE_SHA256="+digest)
+          print("PACKAGE_ZIP_NAME="+dest.name)
+          print("SOURCE_SHA="+SOURCE_SHA)
+          
+          PY
+      - name: Fresh extract and offline selfcheck
+        run: |
+          mkdir verify
+          python -m zipfile -e dist/STORAGE_475_POSTMERGE_CODE_TEST_786c6abd_20261009.zip verify
+          cd verify
+          python offline_selfcheck.py
+      - name: Linux native boot / health smoke (no provider)
+        run: |
+          cd verify
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from products.storage_rc1.storage_life.app import app
+          r=TestClient(app).get("/api/health")
+          print("STORAGE_APP_HEALTH=",r.status_code)
+          assert r.status_code==200
+          PY
+      - name: Upload complete package and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: STORAGE-475-POSTMERGE-CODE-TEST-786c6abd
+          path: dist/*
+          retention-days: 30
