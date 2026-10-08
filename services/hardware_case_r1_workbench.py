@@ -23,6 +23,11 @@ from services.hardware_case_markdown_agent import (
 )
 from services.hardware_case_word import parse_docx
 from services.hardware_r1_batch_concurrency import execute_case_batch
+from services.hardware_w3_capacity_gate import (
+    HardwareW3CapacityGate,
+    W3BatchCancelled,
+    W3CapacityTimeout,
+)
 from services.hardware_case_r1_runtime import (
     R1_STAGE_A_VALIDATOR_VERSION,
     R1_STAGE_B_VALIDATOR_VERSION,
@@ -194,10 +199,15 @@ def aggregate_batch_status(items: list[dict[str, Any]]) -> str:
     states = [str(item.get("result") or item.get("orchestration_status") or "QUEUED") for item in items]
     if all(state == "QUEUED" for state in states):
         return "QUEUED"
+    if all(state == "CANCELLED" for state in states):
+        return "CANCELLED"
     if any(state in {"RUNNING", "UPLOADING", "PARSING"} for state in states):
         return "RUNNING"
     failed = sum(state == "FAILED" for state in states)
+    cancelled = sum(state == "CANCELLED" for state in states)
     ready = sum(state in {"CANDIDATE_READY", "REVIEW"} for state in states)
+    if cancelled and cancelled + failed + ready == len(states):
+        return "PARTIAL_CANCELLED"
     if failed == len(states):
         return "FAILED"
     if failed and ready:
@@ -262,6 +272,11 @@ class HardwareR1WorkbenchStore:
             if "dataset_frozen_at" not in batch_columns:
                 connection.execute(
                     "ALTER TABLE hardware_r1_batch ADD COLUMN dataset_frozen_at TEXT"
+                )
+            if "cancel_requested" not in batch_columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch "
+                    "ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
                 )
             columns = {
                 str(row["name"])
@@ -406,6 +421,73 @@ class HardwareR1WorkbenchStore:
             )
         return item_id
 
+    def batch_cancel_requested(self, batch_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT cancel_requested FROM hardware_r1_batch WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+        if row is None:
+            raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+        return bool(row["cancel_requested"])
+
+    def cancel_batch(self, batch_id: str) -> int:
+        """Atomically stop queued items; in-flight cases finish their current work."""
+        now = _utc_now()
+        with self._connect() as connection:
+            updated = connection.execute(
+                "UPDATE hardware_r1_batch SET cancel_requested=1, updated_at=? "
+                "WHERE batch_id=?",
+                (now, batch_id),
+            )
+            if not updated.rowcount:
+                raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+            changed = connection.execute(
+                """
+                UPDATE hardware_r1_batch_item
+                SET orchestration_status='CANCELLED',
+                    error_code='W3_BATCH_CANCELLED',updated_at=?
+                WHERE batch_id=? AND orchestration_status='QUEUED'
+                """,
+                (now, batch_id),
+            )
+        return int(changed.rowcount)
+
+    def resume_cancelled_batch(self, batch_id: str) -> int:
+        """Explicit user resume; never auto-replays previously RUNNING work."""
+        now = _utc_now()
+        with self._connect() as connection:
+            updated = connection.execute(
+                "UPDATE hardware_r1_batch SET cancel_requested=0,updated_at=? "
+                "WHERE batch_id=? AND cancel_requested=1",
+                (now, batch_id),
+            )
+            if not updated.rowcount:
+                raise HardwareR1WorkbenchError("BATCH_NOT_CANCELLED")
+            changed = connection.execute(
+                """
+                UPDATE hardware_r1_batch_item
+                SET orchestration_status='QUEUED',error_code=NULL,updated_at=?
+                WHERE batch_id=? AND orchestration_status='CANCELLED'
+                """,
+                (now, batch_id),
+            )
+        return int(changed.rowcount)
+
+    def mark_unclaimed_blocked(self, item: dict[str, Any], code: str) -> None:
+        """Never overwrite a claimed, completed, or cancelled item."""
+        now = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE hardware_r1_batch_item SET
+                  orchestration_status='RUNTIME_BLOCKED',error_code=?,updated_at=?
+                WHERE item_id=? AND orchestration_status=? AND updated_at=?
+                """,
+                (code, now, item["item_id"],
+                 item["orchestration_status"], item["updated_at"]),
+            )
+
     def claim_item_for_run(self, item: dict[str, Any]) -> bool:
         """Atomically claim exactly one case before any Agent/Provider work.
 
@@ -420,6 +502,11 @@ class HardwareR1WorkbenchStore:
                 UPDATE hardware_r1_batch_item
                 SET orchestration_status='RUNNING',error_code=NULL,updated_at=?
                 WHERE item_id=? AND orchestration_status=? AND updated_at=?
+                  AND NOT EXISTS(
+                    SELECT 1 FROM hardware_r1_batch b
+                    WHERE b.batch_id=hardware_r1_batch_item.batch_id
+                      AND b.cancel_requested=1
+                  )
                 """,
                 (
                     now,
@@ -595,6 +682,7 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
         "CANDIDATE_READY": 0,
         "REVIEW": 0,
         "FAILED": 0,
+        "CANCELLED": 0,
     }
     for item in items:
         state = str(item.get("result") or "")
@@ -943,6 +1031,7 @@ class HardwareR1WorkbenchService:
         self.structurer_factory = structurer_factory
         self.preview_store = preview_store
         self.candidate_repository = candidate_repository
+        self.capacity_gate = HardwareW3CapacityGate(self.store.db_path)
 
     def upload_batch(self, files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
         batch_id = self.store.create_batch()
@@ -1083,6 +1172,8 @@ class HardwareR1WorkbenchService:
             for item in self.store.list_items(batch_id)
         ]
         selected = [item for item in items if item["result"] == "QUEUED"]
+        if self.store.batch_cancel_requested(batch_id):
+            return self.get_batch(batch_id)
 
         def run_one(item: dict[str, Any]) -> None:
             self._run_item(item, retry_stage=None, force_full_run=False)
@@ -1106,6 +1197,28 @@ class HardwareR1WorkbenchService:
             on_error=handle_unexpected,
         )
         return self.get_batch(batch_id)
+
+    def cancel_batch(self, batch_id: str) -> dict[str, Any]:
+        self.store.cancel_batch(batch_id)
+        return self.get_batch(batch_id)
+
+    def resume_cancelled_batch(self, batch_id: str) -> dict[str, Any]:
+        self.store.resume_cancelled_batch(batch_id)
+        return self.get_batch(batch_id)
+
+    def reconcile_interrupted_batch(
+        self, batch_id: str, *, confirmed_stopped: bool
+    ) -> dict[str, Any]:
+        # No Provider retry, no auto publish; a live worker must never be
+        # silently fenced/replaced merely because it is slow.
+        self.store.batch_cancel_requested(batch_id)  # also validates existence
+        try:
+            recovered = self.capacity_gate.reconcile_confirmed_stopped(
+                batch_id, confirmed_stopped=confirmed_stopped
+            )
+        except ValueError as error:
+            raise HardwareR1WorkbenchError(str(error)) from error
+        return {**self.get_batch(batch_id), "reconciled_item_ids": recovered}
 
     def retry_failed_only(self, batch_id: str) -> dict[str, Any]:
         items = [
@@ -1218,6 +1331,34 @@ class HardwareR1WorkbenchService:
         retry_stage: str | None,
         force_full_run: bool,
     ) -> None:
+        batch_id = str(item["batch_id"])
+        try:
+            with self.capacity_gate.lease(
+                item,
+                cancelled=lambda: self.store.batch_cancel_requested(batch_id),
+            ):
+                if self.store.batch_cancel_requested(batch_id):
+                    return
+                self._run_item_under_lease(
+                    item, retry_stage=retry_stage, force_full_run=force_full_run
+                )
+        except W3BatchCancelled:
+            # The Batch transaction already marks unstarted queued work cancelled.
+            return
+        except W3CapacityTimeout:
+            self.store.mark_unclaimed_blocked(item, "W3_CAPACITY_WAIT_TIMEOUT")
+
+    def _run_item_under_lease(
+        self,
+        item: dict[str, Any],
+        *,
+        retry_stage: str | None,
+        force_full_run: bool,
+    ) -> None:
+        # Claim first so stale concurrent requests cannot overwrite a case
+        # already RUNNING, even on early validation/identity errors.
+        if not self.store.claim_item_for_run(item):
+            return
         snapshot = item.get("snapshot")
         if not isinstance(snapshot, dict):
             self.store.update_item(
@@ -1238,10 +1379,6 @@ class HardwareR1WorkbenchService:
                 error_code=error.code,
                 result=item.get("pipeline_result"),
             )
-            return
-        if not self.store.claim_item_for_run(item):
-            # Another Run/Retry already claimed this row or changed it after
-            # this request read it. Never issue a second Provider call.
             return
         try:
             structurer = self.structurer_factory()
@@ -1683,6 +1820,7 @@ class HardwareR1WorkbenchService:
             "batch_id": batch_id,
             "status": aggregate_batch_status(items),
             "summary": _summary(items),
+            "cancel_requested": self.store.batch_cancel_requested(batch_id),
             "dataset_identity": self.store.get_dataset_identity(batch_id),
             "items": items,
         }
