@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,21 @@ class KnowledgeExtractionError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ExtractionRerunApproval:
+    """Explicit operator-supplied authorization for a new failed-task generation.
+
+    The caller is responsible for authenticating the operator and approval_ref.
+    This object never auto-approves an extraction or changes source identity.
+    """
+
+    generation: int
+    previous_task_id: str
+    approved_by: str
+    approval_ref: str
+    reason: str
 
 
 def _candidate_id(
@@ -118,6 +134,7 @@ class KnowledgeExtractionService:
         structured_document: StructuredDocument,
         *,
         requested_topics: list[str] | None = None,
+        rerun_approval: ExtractionRerunApproval | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -157,12 +174,15 @@ class KnowledgeExtractionService:
             ).encode("utf-8")
         ).hexdigest()[:12]
 
+        logical_request_id = (
+            f"knowledge-extract:{source_document.source_id}:"
+            f"{source_document.source_version}:"
+            f"{source_document.content_hash[:12]}:{focus_hash}"
+        )
+        # Construct the exact business input first. A rerun must not change
+        # even one structured block while retaining the same Source identity.
         request = AgentRequest(
-            request_id=(
-                f"knowledge-extract:{source_document.source_id}:"
-                f"{source_document.source_version}:"
-                f"{source_document.content_hash[:12]}:{focus_hash}"
-            ),
+            request_id=logical_request_id,
             agent_id=self.agent_id,
             input={
                 "source_document": {
@@ -194,6 +214,16 @@ class KnowledgeExtractionService:
                 "source_version": source_document.source_version,
             },
         )
+        request_id, rerun_metadata = self._resolve_execution_identity(
+            logical_request_id, rerun_approval, request.input
+        )
+        if rerun_metadata:
+            request = request.model_copy(
+                update={
+                    "request_id": request_id,
+                    "metadata": {**request.metadata, **rerun_metadata},
+                }
+            )
 
         try:
             result = self.runtime.invoke(request)
@@ -297,6 +327,84 @@ class KnowledgeExtractionService:
                     "KNOWLEDGE_EXTRACTION_FAILED"
                 ) from exc
         return produced
+
+    def _resolve_execution_identity(
+        self,
+        logical_request_id: str,
+        approval: ExtractionRerunApproval | None,
+        business_input: Any,
+    ) -> tuple[str, dict[str, Any]]:
+        if approval is None:
+            return logical_request_id, {}
+        if not isinstance(approval, ExtractionRerunApproval):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_APPROVAL_INVALID")
+
+        generation = approval.generation
+        if (
+            type(generation) is not int
+            or generation < 1
+            or not all(
+                isinstance(value, str) and value.strip()
+                for value in (
+                    approval.previous_task_id,
+                    approval.approved_by,
+                    approval.approval_ref,
+                    approval.reason,
+                )
+            )
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_APPROVAL_INVALID")
+
+        predecessor_request_id = (
+            logical_request_id
+            if generation == 1
+            else f"{logical_request_id}:rerun:{generation - 1}"
+        )
+        # Use the durable TaskRecord, not TaskSnapshot (which lacks input_hash).
+        # This is read-only and does not alter the Runtime state machine.
+        store = getattr(self.runtime, "store", None)
+        get_task_record = getattr(store, "get_task", None)
+        if not callable(get_task_record):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_RUNTIME_UNAVAILABLE")
+        predecessor = get_task_record(approval.previous_task_id)
+        if predecessor is None:
+            raise KnowledgeExtractionError(
+                "EXTRACTION_RERUN_PREDECESSOR_NOT_FOUND"
+            )
+        if (
+            predecessor.request_id != predecessor_request_id
+            or predecessor.status != RuntimeStatus.FAILED
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_PREDECESSOR_INVALID")
+
+        # Match runtime.engine.runtime._hash_payload(request.input) byte-for-byte.
+        # Request identity alone does NOT cover structured page/block content.
+        input_hash = hashlib.sha256(
+            json.dumps(
+                business_input,
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if predecessor.input_hash != input_hash:
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_INPUT_MISMATCH")
+
+        execution_request_id = f"{logical_request_id}:rerun:{generation}"
+        return execution_request_id, {
+            "extraction_rerun": {
+                "logical_request_id": logical_request_id,
+                "generation": generation,
+                "previous_request_id": predecessor_request_id,
+                "previous_task_id": predecessor.task_id,
+                "previous_status": RuntimeStatus.FAILED.value,
+                "input_hash": input_hash,
+                "approved_by": approval.approved_by.strip(),
+                "approval_ref": approval.approval_ref.strip(),
+                "reason": approval.reason.strip(),
+            }
+        }
 
     @staticmethod
     def _validate_source_pair(
