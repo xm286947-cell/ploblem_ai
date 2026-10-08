@@ -389,3 +389,282 @@ def test_kp_m03_non_completed_runtime_result_fails_closed(
         KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"
     ):
         service.extract(source, structured)
+
+# #475 regression: an explicit rerun is a NEW Runtime task only after a
+# verified FAILED predecessor. No real Provider or Formal Release is used.
+from knowledge_production import ExtractionRerunAuthorization
+from runtime import LightweightExecutionEngine, RuntimeStepError
+
+
+def _logical_request_id(source: SourceDocument) -> str:
+    empty_topics_hash = hashlib.sha256(b"[]").hexdigest()[:12]
+    return (
+        f"knowledge-extract:{source.source_id}:"
+        f"{source.source_version}:"
+        f"{source.content_hash[:12]}:{empty_topics_hash}"
+    )
+
+
+def _test_engine(tmp_path: Path, handler):
+    store = SqliteTaskStore(tmp_path / "rerun-runtime.sqlite3")
+    runtime = LightweightExecutionEngine(store)
+    runtime.register_agent("knowledge.production.extract", handler)
+    return runtime, store
+
+
+def test_kp_m03_failed_extraction_requires_explicit_rerun(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    calls = []
+
+    def handler(payload, context):
+        calls.append("attempt")
+        raise RuntimeStepError(
+            "controlled rejected request",
+            code="PROVIDER_HTTP_ERROR",
+            retryable=False,
+        )
+
+    runtime, store = _test_engine(tmp_path, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+    request_id = _logical_request_id(source)
+
+    with pytest.raises(KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"):
+        service.extract(source, structured)
+    previous = store.get_task_by_request_id(request_id)
+    assert previous is not None
+    assert previous.status == RuntimeStatus.FAILED
+    assert calls == ["attempt"]
+
+    # A normal retry must return the old FAILED Task, without a new call.
+    with pytest.raises(KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"):
+        service.extract(source, structured)
+    assert store.get_task_by_request_id(request_id).task_id == previous.task_id
+    assert calls == ["attempt"]
+    assert repository.list("knowledge/production/candidates") == []
+
+
+def test_kp_m03_explicit_rerun_creates_new_task_and_audit_lineage(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    attempts = []
+
+    def handler(payload, context):
+        attempts.append("attempt")
+        if len(attempts) == 1:
+            raise RuntimeStepError(
+                "old provider authorization failure",
+                code="PROVIDER_HTTP_ERROR",
+                retryable=False,
+            )
+        return _runtime_payload()
+
+    runtime, store = _test_engine(tmp_path, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+    base_id = _logical_request_id(source)
+
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured)
+    previous = store.get_task_by_request_id(base_id)
+    assert previous is not None and previous.status == RuntimeStatus.FAILED
+
+    authorization = ExtractionRerunAuthorization(
+        generation=1,
+        failed_task_id=previous.task_id,
+        approved_by="kp-test-operator",
+        reason="approved provider configuration recovery",
+        approval_ref="KP-475-RERUN-APPROVAL-001",
+    )
+    candidates = service.extract(
+        source, structured, rerun_authorization=authorization
+    )
+    assert len(candidates) == 4
+    rerun_id = f"{base_id}:rerun:1"
+    new_task = store.get_task_by_request_id(rerun_id)
+    assert new_task is not None
+    assert new_task.status == RuntimeStatus.COMPLETED
+    assert new_task.task_id != previous.task_id
+    assert new_task.input_hash == previous.input_hash
+    assert store.get_task_by_request_id(base_id).task_id == previous.task_id
+    lineage = new_task.metadata["extraction_rerun"]
+    assert lineage["rerun_of_task_id"] == previous.task_id
+    assert lineage["rerun_of_request_id"] == base_id
+    assert lineage["approval_ref"] == "KP-475-RERUN-APPROVAL-001"
+    assert lineage["business_input_hash"] == previous.input_hash
+
+    # Repeating the SAME approved generation replays committed Runtime result,
+    # and saves no additional Knowledge Candidates or Evidence.
+    again = service.extract(
+        source, structured, rerun_authorization=authorization
+    )
+    assert [x.candidate_id for x in again] == [x.candidate_id for x in candidates]
+    assert attempts == ["attempt", "attempt"]
+    assert len(repository.list("knowledge/production/candidates")) == 4
+    assert len(repository.list("knowledge/production/evidence")) > 0
+    assert repository.list("knowledge/production/published") == []
+    assert repository.list("knowledge/production/releases") == []
+
+
+def test_kp_m03_rerun_rejects_unverified_failed_task(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    attempts = []
+
+    def handler(payload, context):
+        attempts.append("attempt")
+        raise RuntimeStepError("forced failure", retryable=False)
+
+    runtime, store = _test_engine(tmp_path, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured)
+    old = store.get_task_by_request_id(_logical_request_id(source))
+    assert old is not None
+    good = dict(
+        generation=1,
+        failed_task_id=old.task_id,
+        approved_by="kp-test-operator",
+        reason="controlled retry",
+        approval_ref="APPROVAL-001",
+    )
+    for change in (
+        {"generation": 0},
+        {"generation": 2},
+        {"failed_task_id": "task-does-not-exist"},
+        {"approved_by": ""},
+        {"reason": ""},
+        {"approval_ref": ""},
+    ):
+        with pytest.raises(
+            KnowledgeExtractionError,
+            match="EXTRACTION_RERUN_NOT_AUTHORIZED",
+        ):
+            service.extract(
+                source,
+                structured,
+                rerun_authorization=ExtractionRerunAuthorization(
+                    **{**good, **change}
+                ),
+            )
+    assert attempts == ["attempt"]
+    assert store.get_task_by_request_id(
+        _logical_request_id(source) + ":rerun:1"
+    ) is None
+
+
+def test_kp_m03_rerun_rejects_changed_business_input_and_success_parent(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    attempts = []
+
+    def handler(payload, context):
+        attempts.append("attempt")
+        raise RuntimeStepError("first fails", retryable=False)
+
+    runtime, store = _test_engine(tmp_path, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured)
+    old = store.get_task_by_request_id(_logical_request_id(source))
+    assert old is not None
+
+    auth = ExtractionRerunAuthorization(
+        generation=1,
+        failed_task_id=old.task_id,
+        approved_by="kp-test-operator",
+        reason="provider recovered",
+        approval_ref="APPROVAL-002",
+    )
+    altered = structured.model_copy(deep=True)
+    altered.blocks[0].source_text += " silently edited"
+    with pytest.raises(
+        KnowledgeExtractionError, match="EXTRACTION_RERUN_NOT_AUTHORIZED"
+    ):
+        service.extract(source, altered, rerun_authorization=auth)
+    assert attempts == ["attempt"]
+
+    # A completed extraction must never be used as a FAILED predecessor.
+    other_repo = JsonArtifactRepository(tmp_path / "successful-repo")
+    other_source, other_structured = _seed_source(other_repo)
+    complete_calls = []
+    complete_runtime, complete_store = _test_engine(
+        tmp_path / "successful-runtime",
+        lambda payload, context: (
+            complete_calls.append("attempt") or _runtime_payload()
+        ),
+    )
+    complete_service = KnowledgeExtractionService(other_repo, complete_runtime)
+    complete_service.extract(other_source, other_structured)
+    completed = complete_store.get_task_by_request_id(
+        _logical_request_id(other_source)
+    )
+    assert completed is not None and completed.status == RuntimeStatus.COMPLETED
+    with pytest.raises(
+        KnowledgeExtractionError, match="EXTRACTION_RERUN_NOT_AUTHORIZED"
+    ):
+        complete_service.extract(
+            other_source,
+            other_structured,
+            rerun_authorization=ExtractionRerunAuthorization(
+                generation=1,
+                failed_task_id=completed.task_id,
+                approved_by="kp-test-operator",
+                reason="attempt to rerun success",
+                approval_ref="APPROVAL-003",
+            ),
+        )
+    assert complete_calls == ["attempt"]
+
+
+def test_kp_m03_rerun_generation_two_requires_failed_generation_one(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    calls = []
+
+    def handler(payload, context):
+        calls.append("attempt")
+        if len(calls) <= 2:
+            raise RuntimeStepError("controlled failure", retryable=False)
+        return _runtime_payload()
+
+    runtime, store = _test_engine(tmp_path, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+    base = _logical_request_id(source)
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured)
+    original = store.get_task_by_request_id(base)
+    first = ExtractionRerunAuthorization(
+        generation=1,
+        failed_task_id=original.task_id,
+        approved_by="kp-test-operator",
+        reason="first recovery",
+        approval_ref="APPROVAL-01",
+    )
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured, rerun_authorization=first)
+    rerun_one = store.get_task_by_request_id(base + ":rerun:1")
+    assert rerun_one.status == RuntimeStatus.FAILED
+    second = ExtractionRerunAuthorization(
+        generation=2,
+        failed_task_id=rerun_one.task_id,
+        approved_by="kp-test-operator",
+        reason="second explicitly approved recovery",
+        approval_ref="APPROVAL-02",
+    )
+    assert len(service.extract(
+        source, structured, rerun_authorization=second
+    )) == 4
+    assert len(calls) == 3
+    assert store.get_task_by_request_id(base + ":rerun:2").status == RuntimeStatus.COMPLETED
+    assert store.get_task_by_request_id(base).status == RuntimeStatus.FAILED
+    assert store.get_task_by_request_id(base + ":rerun:1").status == RuntimeStatus.FAILED

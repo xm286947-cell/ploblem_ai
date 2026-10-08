@@ -9,6 +9,7 @@ from .evaluation import (
     KnowledgeEvaluationService,
 )
 from .extraction import (
+    ExtractionRerunAuthorization,
     KnowledgeExtractionError,
     KnowledgeExtractionService,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "KnowledgeEvaluationService",
     "KnowledgeExtractionCandidateDraft",
     "KnowledgeExtractionOutput",
+    "ExtractionRerunAuthorization",
     "KnowledgeExtractionError",
     "KnowledgeExtractionService",
     "KnowledgeObject",

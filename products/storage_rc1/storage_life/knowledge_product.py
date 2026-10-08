@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from knowledge_production import (
+    ExtractionRerunAuthorization,
     KnowledgeExtractionService,
     KnowledgeReleaseService,
     SourceDocument,
@@ -106,6 +107,7 @@ def extract_source(
     source_version: str,
     *,
     requested_topics: list[str] | None = None,
+    rerun_authorization: ExtractionRerunAuthorization | None = None,
 ) -> dict:
     root = project_root()
     model_config = Path(
@@ -128,6 +130,7 @@ def extract_source(
         source,
         structured,
         requested_topics=requested_topics or [],
+        rerun_authorization=rerun_authorization,
     )
     return {
         "source_id": source_id,

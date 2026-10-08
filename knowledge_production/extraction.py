@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,22 @@ def _candidate_id(
     return "KPC-" + digest[:24]
 
 
+@dataclass(frozen=True)
+class ExtractionRerunAuthorization:
+    """Operator-authorized next execution of an identical failed extraction.
+
+    Generation 1 follows the original request; generation N follows N-1.
+    An authorization is an explicit application-layer audit instruction, not
+    authentication by itself. Callers must authorize the operator externally.
+    """
+
+    generation: int
+    failed_task_id: str
+    approved_by: str
+    reason: str
+    approval_ref: str
+
+
 class KnowledgeExtractionService:
     AGENT_ID = "knowledge.production.extract"
     EXTRACTION_VERSION = "kp-m03-v1"
@@ -118,6 +135,7 @@ class KnowledgeExtractionService:
         structured_document: StructuredDocument,
         *,
         requested_topics: list[str] | None = None,
+        rerun_authorization: ExtractionRerunAuthorization | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -157,14 +175,12 @@ class KnowledgeExtractionService:
             ).encode("utf-8")
         ).hexdigest()[:12]
 
-        request = AgentRequest(
-            request_id=(
-                f"knowledge-extract:{source_document.source_id}:"
-                f"{source_document.source_version}:"
-                f"{source_document.content_hash[:12]}:{focus_hash}"
-            ),
-            agent_id=self.agent_id,
-            input={
+        logical_request_id = (
+            f"knowledge-extract:{source_document.source_id}:"
+            f"{source_document.source_version}:"
+            f"{source_document.content_hash[:12]}:{focus_hash}"
+        )
+        input_payload = {
                 "source_document": {
                     "source_id": source_document.source_id,
                     "source_version": source_document.source_version,
@@ -187,14 +203,26 @@ class KnowledgeExtractionService:
                         for block in selected_blocks
                     ],
                 },
-            },
-            metadata={
-                "business_domain": "KNOWLEDGE_PRODUCTION",
-                "source_id": source_document.source_id,
-                "source_version": source_document.source_version,
-            },
-        )
+        }
 
+        request_id = logical_request_id
+        metadata: dict[str, Any] = {
+            "business_domain": "KNOWLEDGE_PRODUCTION",
+            "source_id": source_document.source_id,
+            "source_version": source_document.source_version,
+        }
+        if rerun_authorization is not None:
+            request_id, lineage = self._authorized_rerun_request(
+                logical_request_id, input_payload, rerun_authorization
+            )
+            metadata["extraction_rerun"] = lineage
+
+        request = AgentRequest(
+            request_id=request_id,
+            agent_id=self.agent_id,
+            input=input_payload,
+            metadata=metadata,
+        )
         try:
             result = self.runtime.invoke(request)
         except Exception as exc:
@@ -297,6 +325,79 @@ class KnowledgeExtractionService:
                     "KNOWLEDGE_EXTRACTION_FAILED"
                 ) from exc
         return produced
+
+    def _authorized_rerun_request(
+        self,
+        logical_request_id: str,
+        input_payload: dict[str, Any],
+        authorization: ExtractionRerunAuthorization,
+    ) -> tuple[str, dict[str, Any]]:
+        # Fail closed: neither a bare generation nor an unverified task_id is
+        # sufficient to create a fresh Runtime task.
+        if not isinstance(authorization, ExtractionRerunAuthorization):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_NOT_AUTHORIZED")
+        generation = authorization.generation
+        if (
+            type(generation) is not int
+            or generation < 1
+            or generation > 100
+            or not all(
+                isinstance(value, str) and value.strip()
+                for value in (
+                    authorization.failed_task_id,
+                    authorization.approved_by,
+                    authorization.reason,
+                    authorization.approval_ref,
+                )
+            )
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_NOT_AUTHORIZED")
+
+        previous_request_id = (
+            logical_request_id
+            if generation == 1
+            else f"{logical_request_id}:rerun:{generation - 1}"
+        )
+        # Use the existing Runtime TaskStore read interface. Do not delete,
+        # update, resume or otherwise mutate any historical failed task.
+        store = getattr(self.runtime, "store", None)
+        if store is None or not callable(getattr(store, "get_task", None)):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_NOT_AUTHORIZED")
+        try:
+            previous = store.get_task(authorization.failed_task_id)
+        except (KeyError, ValueError):
+            previous = None
+
+        material = json.dumps(
+            input_payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+        input_hash = hashlib.sha256(material.encode("utf-8")).hexdigest()
+        if (
+            previous is None
+            or previous.request_id != previous_request_id
+            or previous.status != RuntimeStatus.FAILED
+            or previous.input_hash != input_hash
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_NOT_AUTHORIZED")
+
+        return (
+            f"{logical_request_id}:rerun:{generation}",
+            {
+                "generation": generation,
+                "logical_request_id": logical_request_id,
+                "rerun_of_request_id": previous_request_id,
+                "rerun_of_task_id": previous.task_id,
+                "previous_status": RuntimeStatus.FAILED.value,
+                "approved_by": authorization.approved_by.strip(),
+                "reason": authorization.reason.strip(),
+                "approval_ref": authorization.approval_ref.strip(),
+                "business_input_hash": input_hash,
+            },
+        )
 
     @staticmethod
     def _validate_source_pair(
