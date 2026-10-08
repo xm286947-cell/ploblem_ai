@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/major-v11-canonical-convergence-overall-ci
+      - ci/overall-current-platform-mac-9751fc3
   pull_request:
     branches:
       - ci/overall-current-platform-mac-9751fc3
