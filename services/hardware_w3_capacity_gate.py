@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
+from datetime import datetime, timezone
 from contextlib import closing, contextmanager
 from pathlib import Path
 from threading import Event, Thread
@@ -43,6 +44,17 @@ class HardwareW3CapacityGate:
                     source_key TEXT UNIQUE,
                     acquired_at REAL NOT NULL,
                     heartbeat_at REAL NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hardware_w3_recovery_audit (
+                    recovery_id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    reconciled_at TEXT NOT NULL
                 )
                 """
             )
@@ -163,6 +175,16 @@ class HardwareW3CapacityGate:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def recovery_audit(self, batch_id: str) -> list[dict[str, str]]:
+        """Durable operator-visible reconciliation history, no secret payloads."""
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT item_id,reason,reconciled_at FROM hardware_w3_recovery_audit "
+                "WHERE batch_id=? ORDER BY reconciled_at,recovery_id",
+                (batch_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def reconcile_confirmed_stopped(
         self,
         batch_id: str,
@@ -170,32 +192,46 @@ class HardwareW3CapacityGate:
         confirmed_stopped: bool,
         stale_seconds: float = 120,
     ) -> list[str]:
-        """Operator-only crash recovery: no Provider replay, no auto retry.
+        """Fail-closed, operator-confirmed recovery; never replay Provider.
 
-        Caller must independently confirm old workers stopped. A recent
-        heartbeat blocks reclamation even if this flag is true. The affected
-        cases become RUNTIME_BLOCKED requiring explicit reconciliation.
+        Reconcile both stale lease holders and stranded RUNNING rows that have
+        *no lease* because the executor crashed after releasing capacity.
         """
         if not confirmed_stopped:
             raise ValueError("W3_WORKER_STOP_CONFIRMATION_REQUIRED")
         if stale_seconds < 1:
             raise ValueError("W3_STALE_GRACE_INVALID")
         cutoff = time.time() - stale_seconds
+        stamp = datetime.now(timezone.utc).isoformat()
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
                 """
-                SELECT i.item_id,l.token
+                SELECT i.item_id,i.updated_at,l.token,l.heartbeat_at
                 FROM hardware_r1_batch_item i
-                JOIN hardware_w3_case_lease l ON l.item_id=i.item_id
+                LEFT JOIN hardware_w3_case_lease l ON l.item_id=i.item_id
                 WHERE i.batch_id=? AND i.orchestration_status='RUNNING'
-                  AND l.heartbeat_at < ?
                 """,
-                (batch_id, cutoff),
+                (batch_id,),
             ).fetchall()
             recovered: list[str] = []
             for row in rows:
-                connection.execute(
+                reason = None
+                if row["token"] is not None:
+                    if float(row["heartbeat_at"]) >= cutoff:
+                        continue  # Possibly still active; do not evict.
+                    reason = "W3_STALE_LEASE_AFTER_WORKER_STOP"
+                else:
+                    try:
+                        updated = datetime.fromisoformat(str(row["updated_at"]))
+                        if updated.tzinfo is None:
+                            updated = updated.replace(tzinfo=timezone.utc)
+                        if updated.timestamp() >= cutoff:
+                            continue
+                    except (TypeError, ValueError):
+                        continue  # Unknown timing must never be auto-recovered.
+                    reason = "W3_ORPHAN_RUNNING_WITHOUT_LEASE"
+                changed = connection.execute(
                     """
                     UPDATE hardware_r1_batch_item
                     SET orchestration_status='RUNTIME_BLOCKED',
@@ -203,11 +239,20 @@ class HardwareW3CapacityGate:
                         updated_at=?
                     WHERE item_id=? AND orchestration_status='RUNNING'
                     """,
-                    (str(time.time()), row["item_id"]),
+                    (stamp, row["item_id"]),
                 )
+                if changed.rowcount != 1:
+                    continue
+                if row["token"] is not None:
+                    connection.execute(
+                        "DELETE FROM hardware_w3_case_lease WHERE token=?",
+                        (row["token"],),
+                    )
                 connection.execute(
-                    "DELETE FROM hardware_w3_case_lease WHERE token=?",
-                    (row["token"],),
+                    "INSERT INTO hardware_w3_recovery_audit("
+                    "recovery_id,batch_id,item_id,reason,reconciled_at"
+                    ") VALUES(?,?,?,?,?)",
+                    (uuid4().hex, batch_id, row["item_id"], reason, stamp),
                 )
                 recovered.append(str(row["item_id"]))
             connection.commit()
