@@ -438,6 +438,147 @@ def build_fixture(db_path: Path, *, reset: bool = False) -> dict[str, Any]:
     return manifest
 
 
+
+def augment_fixture(db_path: Path) -> dict[str, Any]:
+    """Add the controlled G1-G5 source fixtures to an existing mature DB copy.
+
+    This is intentionally for copied test databases only. It never resets or
+    deletes existing product data and it never writes QSV1 Candidate/Publish
+    outcomes directly.
+    """
+    db_path = db_path.expanduser().resolve()
+    if not db_path.is_file():
+        raise RuntimeError("AUGMENT_TARGET_DB_NOT_FOUND")
+
+    manifest_path = _manifest_path(db_path)
+    bootstrap_router = create_legacy_quality_issue_router(
+        db_path,
+        initialize_schema=True,
+        qsv1_db_path=None,
+    )
+    del bootstrap_router
+    gc.collect()
+
+    issues = IssueKnowledgeRepository(db_path)
+    materials = MaterialRepository(db_path)
+    ScenarioRepository(db_path)
+    _add_conflicting_resolution_group(materials)
+
+    manifest: dict[str, Any] = {
+        "contract": FIXTURE_VERSION,
+        "synthetic_business_data": True,
+        "augmented_existing_db_copy": True,
+        "direct_qsv1_candidate_write": False,
+        "direct_qsv1_publish_write": False,
+        "database": db_path.name,
+        "database_path_semantics": "MANIFEST_RELATIVE",
+        "cases": [],
+        "g5_resolution_revision": 1,
+    }
+
+    for index, case in enumerate(CASES, start=1):
+        knowledge_id, version_id = _create_issue(issues, case)
+        assessment_id, _ = materials.add_material(
+            materials.group("SW-OPS"),
+            case["business_key"],
+            _assessment_raw(case),
+            "W4_FUNCTIONAL_FIXTURE.xlsx",
+            "软件考核",
+            index + 1,
+        )
+        itr_id, _ = materials.add_material(
+            materials.group("ITR"),
+            case["business_key"],
+            _itr_raw(case),
+            "W4_FUNCTIONAL_FIXTURE.xlsx",
+            "ITR",
+            index + 1,
+        )
+        resolution_id, _ = materials.add_material(
+            materials.group("ITR-CS"),
+            case["business_key"] + "CS",
+            _resolution_raw(case),
+            "W4_FUNCTIONAL_FIXTURE.xlsx",
+            "彻底解决单",
+            index + 1,
+        )
+        missed_test_id = ""
+        if case.get("with_missed_test"):
+            missed_test_id, _ = materials.add_material(
+                materials.group("ESCAPE"),
+                case["business_key"],
+                _missed_test_raw(case),
+                "W4_FUNCTIONAL_FIXTURE.xlsx",
+                "漏测分析",
+                index + 1,
+            )
+            _save_analysis(
+                issues,
+                knowledge_id=knowledge_id,
+                version_id=version_id,
+                analysis_type="escape",
+                result={
+                    "escape_cause_summary": "测试设计未覆盖连续异常、状态残留和长稳组合条件",
+                    "verification_gap": "缺少异常边界 + 长稳 + 重复恢复的组合场景",
+                    "expected_detection_stage": "系统测试",
+                },
+            )
+        _save_analysis(
+            issues,
+            knowledge_id=knowledge_id,
+            version_id=version_id,
+            analysis_type="occurrence",
+            result={"root_cause_summary": case["resolution_root"]},
+        )
+
+        conflict_material_id = ""
+        if case.get("conflicting_resolution"):
+            conflict_group = materials.group("ITR-CS-CONFLICT")
+            conflict_material_id, _ = materials.add_material(
+                conflict_group,
+                case["business_key"] + "CS",
+                {
+                    **_resolution_raw(case),
+                    "问题信息_问题原因定位": "另一路彻底解决记录给出不同根因：第三方插件兼容矩阵错误",
+                    "技术根因分析与纠正_TRC根因": "第三方插件兼容矩阵错误",
+                    "问题处理结果_问题解决方案": "采用另一套兼容性修复策略",
+                },
+                "W4_FUNCTIONAL_FIXTURE_CONFLICT.xlsx",
+                "彻底解决单冲突",
+                index + 1,
+            )
+
+        manifest["cases"].append(
+            {
+                "case_id": case["case_id"],
+                "business_key": case["business_key"],
+                "knowledge_id": knowledge_id,
+                "issue_version_id": version_id,
+                "software_assessment_material_id": assessment_id,
+                "itr_material_id": itr_id,
+                "resolution_material_id": resolution_id,
+                "missed_test_material_id": missed_test_id,
+                "conflict_resolution_material_id": conflict_material_id,
+                "expected_source_status": {
+                    "SOFTWARE_ASSESSMENT": "PRESENT",
+                    "RESOLUTION": "CONFLICT" if case.get("conflicting_resolution") else "PRESENT",
+                    "ITR": "PRESENT",
+                    "MISSED_TEST": "PRESENT" if case.get("with_missed_test") else "MISSING",
+                },
+            }
+        )
+
+    materials.refresh_links()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    del issues
+    del materials
+    gc.collect()
+    return manifest
+
+
 def advance_g5(db_path: Path) -> dict[str, Any]:
     db_path = db_path.expanduser().resolve()
     manifest_path = _manifest_path(db_path)
@@ -503,12 +644,16 @@ def main() -> int:
     )
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--advance-g5", action="store_true")
+    parser.add_argument("--augment-existing", action="store_true")
     args = parser.parse_args()
 
     db_path = Path(args.db).expanduser().resolve()
     if args.advance_g5:
         manifest = advance_g5(db_path)
         print("W4_FIXTURE_ACTION=ADVANCE_G5_SOURCE_REVISION")
+    elif args.augment_existing:
+        manifest = augment_fixture(db_path)
+        print("W4_FIXTURE_ACTION=AUGMENT_EXISTING_DB_COPY")
     else:
         manifest = build_fixture(db_path, reset=args.reset)
         print("W4_FIXTURE_ACTION=BUILD")
