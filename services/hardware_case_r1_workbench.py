@@ -1381,6 +1381,12 @@ class HardwareR1WorkbenchService:
         retry_stage: str | None,
         force_full_run: bool,
     ) -> None:
+        # A crash-interrupted Provider may already have produced side effects.
+        # Operator recovery only marks the uncertainty; it never grants replay.
+        # Fresh UI Run/Resume or Force Full Run is also blocked until a future
+        # reviewed reconciliation of Candidate/Runtime truth explicitly clears it.
+        if item.get("error_code") == "W3_INTERRUPTED_REQUIRES_RECONCILIATION":
+            raise HardwareR1WorkbenchError("W3_RECONCILIATION_REQUIRED")
         batch_id = str(item["batch_id"])
         try:
             with self.capacity_gate.lease(
