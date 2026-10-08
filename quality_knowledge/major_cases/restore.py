@@ -24,6 +24,7 @@ from quality_knowledge.materials import normalize_itr
 from .document_parser import parse_document
 
 from .repository import MajorKnowledgeRepository
+from .identity import MajorCaseIdentityConflict, MajorCaseIdentityResolver
 from .import_governance import (
     IMPORT_GOVERNANCE_CONTRACT,
     MAPPING_CONTRACT,
@@ -129,6 +130,7 @@ class MajorCaseRestoreService:
         project_root: str | Path,
     ) -> None:
         self.repository = repository
+        self.identity_resolver = MajorCaseIdentityResolver(repository)
         self.project_root = Path(project_root).resolve()
         self.excel_parser = ExcelParser(self.project_root / "config/field_mapping.yaml")
         self.report_matcher = ReportMatcher(self.project_root / "config/report_matching.yaml")
@@ -272,7 +274,22 @@ class MajorCaseRestoreService:
                 "BOUND" if event_resolution.get("status") == "MATCHED" and event_resolution.get("standard_itr")
                 else "REVIEW_REQUIRED"
             )
-            rows.append({**item, "report_match": match, "event_resolution": event_resolution})
+            blockers = []
+            try:
+                self.identity_resolver.inspect(
+                    group_code=group_code,
+                    igr=str(item.get("igr") or ""),
+                    source_key=str(item.get("source_key") or ""),
+                    standard_itrs=item.get("itrs") or [],
+                )
+            except MajorCaseIdentityConflict:
+                blockers.append("CASE_IDENTITY_CONFLICT")
+            rows.append({
+                **item,
+                "report_match": match,
+                "event_resolution": event_resolution,
+                "blocking_reasons": blockers,
+            })
 
         return {
             "group_code": group_code,
@@ -401,15 +418,7 @@ class MajorCaseRestoreService:
         return result
 
     def _identity_case(self, group_code: str, identity_type: str, value: str) -> str | None:
-        if not value:
-            return None
-        with self.repository.connect() as connection:
-            row = connection.execute(
-                """SELECT case_id FROM kb_case_identity
-                   WHERE group_code=? AND identity_type=? AND identity_value=?""",
-                (group_code, identity_type, value),
-            ).fetchone()
-        return str(row["case_id"]) if row else None
+        return self.identity_resolver.identity_owner(group_code, identity_type, value)
 
     def _set_identity(
         self,
@@ -420,31 +429,9 @@ class MajorCaseRestoreService:
         *,
         primary: bool = False,
     ) -> None:
-        value = str(value or "").strip()
-        if not value:
-            return
-        with self.repository.connect() as connection:
-            if identity_type == "IGR":
-                existing = connection.execute(
-                    """SELECT identity_value FROM kb_case_identity
-                       WHERE case_id=? AND identity_type='IGR'""",
-                    (case_id,),
-                ).fetchone()
-                if existing and existing["identity_value"] != value:
-                    raise ValueError("CASE_IGR_CONFLICT")
-            owner = connection.execute(
-                """SELECT case_id FROM kb_case_identity
-                   WHERE group_code=? AND identity_type=? AND identity_value=?""",
-                (group_code, identity_type, value),
-            ).fetchone()
-            if owner and owner["case_id"] != case_id:
-                raise ValueError("CASE_IDENTITY_OWNED_BY_OTHER_CASE")
-            connection.execute(
-                """INSERT OR IGNORE INTO kb_case_identity(
-                     identity_id,case_id,group_code,identity_type,identity_value,is_primary)
-                   VALUES(?,?,?,?,?,?)""",
-                (_id("KID"), case_id, group_code, identity_type, value, 1 if primary else 0),
-            )
+        self.identity_resolver.bind_identity(
+            case_id, group_code, identity_type, value, primary=primary,
+        )
 
     def identities(self, case_id: str) -> list[dict]:
         with self.repository.connect() as connection:
@@ -518,9 +505,14 @@ class MajorCaseRestoreService:
             group_code = str(preview.get("group_code") or "")
             igr = str(row.get("igr") or "")
             source_key = str(row.get("source_key") or "")
-            igr_case = self._identity_case(group_code, "IGR", igr)
-            source_case = self._identity_case(group_code, "SOURCE_KEY", source_key)
-            if igr_case and source_case and igr_case != source_case:
+            try:
+                self.identity_resolver.inspect(
+                    group_code=group_code,
+                    igr=igr,
+                    source_key=source_key,
+                    standard_itrs=row.get("itrs") or [],
+                )
+            except MajorCaseIdentityConflict:
                 errors.append({"row": row_no, "error": "CASE_IDENTITY_CONFLICT"})
         return errors
 
@@ -698,37 +690,21 @@ class MajorCaseRestoreService:
                 group_code = preview["group_code"]
                 igr = str(row.get("igr") or "")
                 source_key = str(row["source_key"])
-                igr_case = self._identity_case(group_code, "IGR", igr)
-                source_case = self._identity_case(group_code, "SOURCE_KEY", source_key)
-                if igr_case and source_case and igr_case != source_case:
-                    raise ValueError("CASE_IDENTITY_CONFLICT")
-                case_id = igr_case or source_case
-                if case_id:
+                resolution = self.identity_resolver.resolve_or_create_case(
+                    group_code=group_code,
+                    title=str(row["title"]),
+                    domain=str(preview.get("domain") or ""),
+                    igr=igr,
+                    source_key=source_key,
+                    standard_itrs=row.get("itrs") or [],
+                    legacy_case_id=source_key,
+                )
+                case_id = resolution["case"]["case_id"]
+                if resolution["reused"]:
                     stats["reused_cases"] += 1
                 else:
-                    case = self.repository.create_case(
-                        row["title"],
-                        group_code,
-                        preview.get("domain") or "",
-                        legacy_case_id=source_key,
-                    )
-                    case_id = case["case_id"]
                     stats["created_cases"] += 1
                 stats["case_ids"].append(case_id)
-                self._set_identity(
-                    case_id,
-                    group_code,
-                    "SOURCE_KEY",
-                    source_key,
-                    primary=not bool(igr),
-                )
-                self._set_identity(
-                    case_id,
-                    group_code,
-                    "IGR",
-                    igr,
-                    primary=bool(igr),
-                )
 
                 source_ref = (
                     f"{preview['source_file']}#"
@@ -743,18 +719,10 @@ class MajorCaseRestoreService:
                 )
                 stats["source_fact_revisions"] += 1
 
-                events = []
-                for itr in row.get("itrs") or []:
-                    event = self.repository.upsert_event(
-                        case_id,
-                        standard_itr=itr,
-                        internal_event_key=itr,
-                        title=itr,
-                    )
-                    events.append(event)
+                events = list(resolution["events"])
                 if not events:
                     events.append(
-                        self.repository.upsert_event(
+                        self.identity_resolver.resolve_or_create_event(
                             case_id,
                             internal_event_key=f"{case_id}:UNLINKED",
                             title=row["title"],
