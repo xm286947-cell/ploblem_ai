@@ -211,10 +211,16 @@ def create_hardware_r1_workbench_router(
             default=None,
             alias="X-Hardware-Case-Role",
         ),
+        execution_mode: str = Query(default="SEQUENTIAL", pattern="^(SEQUENTIAL|PARALLEL)$"),
+        concurrency: int = Query(default=2, ge=1, le=4),
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
         try:
-            return service.run_batch(batch_id)
+            return service.run_batch(
+                batch_id,
+                execution_mode=execution_mode,
+                concurrency=concurrency,
+            )
         except HardwareR1WorkbenchError as error:
             raise _workbench_error(error) from error
 
