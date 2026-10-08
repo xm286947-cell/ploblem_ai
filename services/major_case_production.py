@@ -93,25 +93,6 @@ class MajorCaseProductionService:
             parsed = parse_document(self.repository.attachment_path(document["version_id"]))
             fragments = self.repository.save_parse_result(document["version_id"], parsed)
 
-        source_fact = self.repository.add_source_fact_revision(
-            case["case_id"],
-            source_type="DOCUMENT",
-            source_ref=f"{source_name}@{document['version_no']}",
-            raw={
-                "title": title,
-                "group_code": group_code,
-                "domain": domain,
-                "standard_itr": standard_itr,
-                "source_name": source_name,
-            },
-            normalized={
-                "itr_id": standard_itr,
-                "original_description": title,
-                "report_filename": source_name,
-            },
-            actor="SOURCE_INTAKE",
-        )
-
         source_link = self.repository.add_source_link(
             case["case_id"],
             event["event_id"],
@@ -135,7 +116,6 @@ class MajorCaseProductionService:
             "event": event,
             "document": document,
             "source_link": source_link,
-            "source_fact": source_fact,
             "parse": {"fragment_count": len(fragments), "warnings": parsed.warnings},
         }
 
