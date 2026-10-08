@@ -13,6 +13,8 @@ on:
       - "quality_knowledge/web/p0_app.py"
       - "quality_knowledge/web/templates/hardware_case_search.html"
       - "quality_knowledge/web/static/hardware_case.js"
+      - "quality_knowledge/web/static/hardware_case.css"
+      - "quality_knowledge/web/templates/hardware_case_detail.html"
       - "config/runtime/agents/hardware_retrieval.tag.yaml"
       - "prompts/runtime/hardware_retrieval/tagger_v1.md"
       - "tests/test_hardware_retrieval_metadata.py"
@@ -23,6 +25,7 @@ on:
       - "tests/test_hardware_retrieval_query.py"
       - "tests/test_hardware_case_ai_retrieval.py"
       - "tests/test_hardware_case_ai_retrieval_w2.py"
+      - "tests/test_hardware_case_w2_ui_smoke_contract.py"
       - "docs/product/HARDWARE_AI_RETRIEVAL_W1_METADATA_TAGGER.md"
       - ".github/workflows/hardware-ai-retrieval-w1.yml"
   workflow_dispatch:
@@ -50,3 +53,4 @@ jobs:
           tests/test_hardware_retrieval_query.py
           tests/test_hardware_case_ai_retrieval.py
           tests/test_hardware_case_ai_retrieval_w2.py
+          tests/test_hardware_case_w2_ui_smoke_contract.py

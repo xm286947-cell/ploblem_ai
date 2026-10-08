@@ -63,6 +63,10 @@
     const reasons=why&&Array.isArray(why.reasons)?why.reasons:[];
     const firstReason=reasons[0]||null;
     const reasonText=firstReason?(firstReason.matched_value||firstReason.matched_text||firstReason.source_term||firstReason.query_term||''):'';
+    const expansion=why&&why.query_expansion&&typeof why.query_expansion==='object'?why.query_expansion:null;
+    const expansionTier=expansion?String(expansion.tier||expansion.policy||''):'';
+    const expansionCost=expansion&&Number.isFinite(Number(expansion.expansion_cost))?Number(expansion.expansion_cost):null;
+    const expansionText=expansion&&expansionTier?('召回：'+expansionTier+(expansionCost!==null?' · cost='+expansionCost:'')):'';
     return '<article class="hc-case-item">'+
       '<div><h3><a href="'+caseHref(item.case_id,maintainer)+'">'+esc(item.title||item.case_id)+'</a></h3>'+
       '<div class="hc-case-meta"><code>'+esc(item.case_id)+'</code><span>'+esc(productName(item.product_context))+'</span>'+
@@ -71,7 +75,7 @@
       '<div class="hc-case-copy"><div><b>问题现象</b><p>'+esc(factValue(facts,'symptom'))+'</p></div><div><b>根因</b><p>'+esc(factValue(facts,'root_cause'))+'</p></div></div>'+
       '<div class="hc-path-row">'+circuit.slice(0,2).map(p=>'<span class="hc-path">电路 · '+esc(p)+'</span>').join('')+
       material.slice(0,2).map(p=>'<span class="hc-path material">器件 · '+esc(p)+'</span>').join('')+'</div>'+
-      (retrieval?'<div class="hc-case-meta"><span class="hc-status ok">'+esc(retrieval.mode||'AI_RETRIEVAL')+'</span>'+(reasonText?'<span>命中：'+esc(reasonText)+'</span>':'')+'</div>':'')+'</div>'+
+      (retrieval?'<div class="hc-case-meta"><span class="hc-status ok">'+esc(retrieval.mode||'AI_RETRIEVAL')+'</span>'+(reasonText?'<span>命中：'+esc(reasonText)+'</span>':'')+(expansionText?'<span>'+esc(expansionText)+'</span>':'')+'</div>':'')+'</div>'+
       '<div class="hc-case-meta"><span>'+esc(fmtTime(item.published_at||item.updated_at))+'</span></div>'+
     '</article>';
   }
