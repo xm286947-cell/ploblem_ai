@@ -361,3 +361,74 @@ def test_cancelled_case_is_not_reported_as_queued(tmp_path):
     assert result["summary"]["CANCELLED"] == 1
     assert result["items"][0]["result"] == "CANCELLED"
     assert store.get_item(item_id)["retryable"] is False
+
+
+def test_orphan_running_record_requires_stale_age_and_confirmed_stop(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = HardwareR1WorkbenchStore(tmp_path / "orphan.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx",
+        business_case_id="ORPHAN", source_id="ORPHAN-SOURCE",
+        snapshot={"identity": {"business_case_id": "ORPHAN"}},
+    )
+    item = store.get_item(item_id)
+    assert store.claim_item_for_run(item)
+    gate = HardwareW3CapacityGate(store.db_path)
+    assert gate.leases() == []
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == []
+    assert store.get_item(item_id)["orchestration_status"] == "RUNNING"
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at=? WHERE item_id=?",
+            ((datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat(), item_id),
+        )
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == [item_id]
+    assert store.get_item(item_id)["orchestration_status"] == "RUNTIME_BLOCKED"
+    assert gate.recovery_audit(batch) == [{
+        **{k: gate.recovery_audit(batch)[0][k] for k in ("reconciled_at",)},
+        "item_id": item_id,
+        "reason": "W3_ORPHAN_RUNNING_WITHOUT_LEASE",
+    }]
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == []
+
+
+def test_reconciled_item_cannot_run_from_stale_snapshot(tmp_path, monkeypatch):
+    import services.hardware_case_r1_workbench as module
+
+    store = HardwareR1WorkbenchStore(tmp_path / "recovered.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx", source_id="HASH",
+        business_case_id="CASE",
+        snapshot={"identity":{"business_case_id":"CASE"}},
+    )
+    item = store.get_item(item_id)
+    assert store.claim_item_for_run(item)
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at='2020-01-01T00:00:00+00:00' "
+            "WHERE item_id=?", (item_id,),
+        )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object(),
+    )
+    result = service.reconcile_interrupted_batch(
+        batch, confirmed_stopped=True
+    )
+    assert result["reconciled_item_ids"] == [item_id]
+    assert len(result["recovery_audit"]) == 1
+    monkeypatch.setattr(
+        module, "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: pytest.fail("Provider replay forbidden"),
+    )
+    # Stale pre-claim snapshot cannot regain ownership after recovery.
+    service._run_item(item, retry_stage=None, force_full_run=False)
+    assert store.get_item(item_id)["orchestration_status"] == "RUNTIME_BLOCKED"
