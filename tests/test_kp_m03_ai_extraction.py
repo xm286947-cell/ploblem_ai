@@ -584,3 +584,72 @@ def test_kp_m03_rerun_same_generation_conflicting_authority_fails_closed(
             approval_ref="DIFFERENT-APPROVAL",
         ))
     assert calls["count"] == 2
+
+
+def test_kp_m03_concurrent_same_rerun_generation_invokes_once(
+    tmp_path: Path,
+) -> None:
+    repository = JsonArtifactRepository(tmp_path / "repo")
+    source, structured = _seed_source(repository)
+    runtime = LightweightExecutionEngine(SqliteTaskStore(tmp_path / "runtime.db"))
+    rerun_entered = threading.Event()
+    allow_completion = threading.Event()
+    calls = {"count": 0}
+
+    def handler(_payload, _context):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeStepError(
+                "simulated upstream failure",
+                code="PROVIDER_HTTP_ERROR",
+                retryable=False,
+            )
+        rerun_entered.set()
+        assert allow_completion.wait(10), "test unblock timeout"
+        return _runtime_payload()
+
+    runtime.register_agent(KnowledgeExtractionService.AGENT_ID, handler)
+    service = KnowledgeExtractionService(repository, runtime)
+
+    with pytest.raises(KnowledgeExtractionError):
+        service.extract(source, structured)
+    old_request = (
+        f"knowledge-extract:{source.source_id}:{source.source_version}:"
+        f"{source.content_hash[:12]}:"
+        f"{hashlib.sha256(b'[]').hexdigest()[:12]}"
+    )
+    failed = runtime.store.get_task_by_request_id(old_request)
+    assert failed is not None
+    approval = _approve_rerun(previous_task_id=failed.task_id)
+    results: list[list] = []
+    errors: list[Exception] = []
+
+    def first_rerun():
+        try:
+            results.append(service.extract(
+                source, structured, rerun_approval=approval
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=first_rerun, daemon=True)
+    worker.start()
+    try:
+        assert rerun_entered.wait(10), "first rerun did not enter the handler"
+        # The second request may observe the in-flight Task and fail closed;
+        # it must not dispatch an additional provider call.
+        with pytest.raises(KnowledgeExtractionError, match="KNOWLEDGE_EXTRACTION_FAILED"):
+            service.extract(source, structured, rerun_approval=approval)
+        assert calls["count"] == 2
+    finally:
+        allow_completion.set()
+        worker.join(timeout=10)
+
+    assert not worker.is_alive()
+    assert errors == []
+    assert len(results) == 1
+    assert len(results[0]) == 4
+    assert calls["count"] == 2
+    assert runtime.store.get_task_by_request_id(
+        old_request + ":rerun:1"
+    ).status == RuntimeStatus.COMPLETED
