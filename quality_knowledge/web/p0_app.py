@@ -25,6 +25,7 @@ from quality_knowledge.p04.portrait import (
 )
 from quality_knowledge.p04.portrait_api import create_portrait_router
 from quality_knowledge.p04.service import P04InsightService
+from runtime.config.errors import AgentConfigError
 from repositories.hardware_case_repository import HardwareCaseRepository
 from repositories.hardware_tree_import_repository import HardwareTreeImportRepository
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -360,6 +361,7 @@ def create_p0_app(
     if "QUALITY_ISSUE" in domains:
         from quality_knowledge.major_cases.repository import MajorKnowledgeRepository
         from quality_knowledge.major_cases.restore import MajorCaseRestoreService
+        from quality_knowledge.major_cases.runtime_provider import build_major_d01_provider
         from quality_knowledge.web.major_production_api import create_major_production_router
         from repositories import JsonArtifactRepository
         from services.historical_case_contract import HistoricalCaseConsumerService
@@ -386,11 +388,34 @@ def create_p0_app(
         artifact_root = Path(major_artifact_root) if major_artifact_root is not None else root
         artifacts = JsonArtifactRepository(artifact_root)
         major_repository = MajorKnowledgeRepository(major_db, attachment_root)
+        resolved_major_provider = major_provider
+        if resolved_major_provider is None:
+            try:
+                resolved_major_provider = build_major_d01_provider(
+                    root,
+                    runtime_model_config,
+                )
+                app.state.major_provider_status = {
+                    "configured": True,
+                    "source": "UNIFIED_RUNTIME_AGENT_CONFIG",
+                }
+            except (AgentConfigError, OSError, ValueError) as error:
+                resolved_major_provider = None
+                app.state.major_provider_status = {
+                    "configured": False,
+                    "source": "UNIFIED_RUNTIME_AGENT_CONFIG",
+                    "diagnostic": getattr(error, "code", type(error).__name__),
+                }
+        else:
+            app.state.major_provider_status = {
+                "configured": True,
+                "source": "INJECTED_PROVIDER",
+            }
         major_case_service = MajorCaseProductionService(
             major_repository,
             artifacts,
             major_runtime_db,
-            provider=major_provider,
+            provider=resolved_major_provider,
         )
         major_restore_service = MajorCaseRestoreService(major_repository, root)
         ensure_major_runtime_schema = getattr(
