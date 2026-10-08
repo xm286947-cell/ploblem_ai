@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from runtime.config import AgentConfigLoader
+from runtime.config.errors import AgentConfigError, ConfigValidationError
 from runtime.content import (
     AdaptiveLongContentRecoveryExecutor,
     AdaptiveLongContentRecoveryPolicy,
@@ -36,6 +38,10 @@ from runtime.reliability import RuntimeStepError
 from runtime.store import SqliteTaskStore
 
 from .runtime_integration import MajorCaseRuntimeDomainAdapter
+from quality_knowledge.runtime_model_config import resolve_major_runtime_model_config
+
+
+MAJOR_D01_AGENT_CONFIG = "config/runtime/agents/major_issue.d01.extract.yaml"
 
 
 class MajorD01ProviderObject(BaseModel):
@@ -189,6 +195,69 @@ class MajorD01ProviderBridge:
                 }
             )
         return results
+
+
+def build_major_d01_provider(
+    project_root: str | Path,
+    model_config_path: str | Path | None = None,
+):
+    """Build the existing Major D01 provider from the Unified Runtime config.
+
+    Configuration and credentials are resolved by AgentConfigLoader. The
+    returned callable only adds the resolved in-memory provider context to the
+    existing Major D01 bridge; it does not persist credentials or alter the
+    Major analysis/retry contract.
+    """
+    root = Path(project_root).resolve()
+    resolved_model_config = resolve_major_runtime_model_config(
+        root,
+        model_config_path,
+    )
+    loader = AgentConfigLoader(
+        root=root,
+        model_profiles=resolved_model_config,
+        schemas={"MajorD01ProviderObject": MajorD01ProviderObject},
+    )
+    resolved = loader.load(MAJOR_D01_AGENT_CONFIG)
+    if resolved.provider.type != "openai_compatible":
+        raise ConfigValidationError(
+            "Major D01 requires the configured OpenAI-compatible provider",
+            details={"provider_type": resolved.provider.type},
+        )
+
+    provider_adapter = OpenAICompatibleProviderAdapter(
+        system_prompt=loader.read_prompt_text(resolved),
+        output_schema=loader.get_output_schema(resolved),
+        timeout_seconds=resolved.execution_policy.timeout_seconds,
+        response_shape=resolved.definition.metadata.get(
+            "provider_response_shape"
+        ),
+    )
+    bridge = MajorD01ProviderBridge(provider_adapter)
+    model_policy = dict(resolved.execution_policy.model_policy or {})
+    provider_config = {
+        "type": resolved.provider.type,
+        "auth": resolved.provider.auth,
+        "model": resolved.provider.model,
+        "base_url": resolved.provider.base_url,
+        "api_key": loader.get_runtime_api_key(
+            resolved.config_hash,
+            api_key_env=resolved.provider.api_key_env,
+        ),
+        "max_tokens": model_policy.get("max_tokens"),
+        "temperature": model_policy.get("temperature"),
+    }
+    if resolved.provider.auth == "api_key" and not provider_config["api_key"]:
+        raise AgentConfigError("Major D01 provider API key is not configured")
+
+    def configured_provider(provider_input, pending_specs, context):
+        configured_context = dict(context)
+        runtime_context = dict(configured_context.get("runtime") or {})
+        runtime_context["provider_config"] = provider_config
+        configured_context["runtime"] = runtime_context
+        return bridge(provider_input, pending_specs, configured_context)
+
+    return configured_provider
 
 
 class MajorD01ResultMerger:
