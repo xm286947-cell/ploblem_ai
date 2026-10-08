@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,21 @@ class KnowledgeExtractionError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ExtractionRerunApproval:
+    """Explicit operator-supplied authorization for a new failed-task generation.
+
+    The caller is responsible for authenticating the operator and approval_ref.
+    This object never auto-approves an extraction or changes source identity.
+    """
+
+    generation: int
+    previous_task_id: str
+    approved_by: str
+    approval_ref: str
+    reason: str
 
 
 def _candidate_id(
@@ -118,6 +134,7 @@ class KnowledgeExtractionService:
         structured_document: StructuredDocument,
         *,
         requested_topics: list[str] | None = None,
+        rerun_approval: ExtractionRerunApproval | None = None,
     ) -> list[KnowledgeCandidate]:
         self._validate_source_pair(source_document, structured_document)
         if structured_document.parse_status != "PARSED":
@@ -157,12 +174,17 @@ class KnowledgeExtractionService:
             ).encode("utf-8")
         ).hexdigest()[:12]
 
+        logical_request_id = (
+            f"knowledge-extract:{source_document.source_id}:"
+            f"{source_document.source_version}:"
+            f"{source_document.content_hash[:12]}:{focus_hash}"
+        )
+        request_id, rerun_metadata = self._resolve_execution_identity(
+            logical_request_id, rerun_approval
+        )
+
         request = AgentRequest(
-            request_id=(
-                f"knowledge-extract:{source_document.source_id}:"
-                f"{source_document.source_version}:"
-                f"{source_document.content_hash[:12]}:{focus_hash}"
-            ),
+            request_id=request_id,
             agent_id=self.agent_id,
             input={
                 "source_document": {
@@ -192,6 +214,7 @@ class KnowledgeExtractionService:
                 "business_domain": "KNOWLEDGE_PRODUCTION",
                 "source_id": source_document.source_id,
                 "source_version": source_document.source_version,
+                **rerun_metadata,
             },
         )
 
@@ -297,6 +320,67 @@ class KnowledgeExtractionService:
                     "KNOWLEDGE_EXTRACTION_FAILED"
                 ) from exc
         return produced
+
+    def _resolve_execution_identity(
+        self,
+        logical_request_id: str,
+        approval: ExtractionRerunApproval | None,
+    ) -> tuple[str, dict[str, Any]]:
+        if approval is None:
+            return logical_request_id, {}
+        if not isinstance(approval, ExtractionRerunApproval):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_APPROVAL_INVALID")
+
+        generation = approval.generation
+        if (
+            type(generation) is not int
+            or generation < 1
+            or not all(
+                isinstance(value, str) and value.strip()
+                for value in (
+                    approval.previous_task_id,
+                    approval.approved_by,
+                    approval.approval_ref,
+                    approval.reason,
+                )
+            )
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_APPROVAL_INVALID")
+
+        predecessor_request_id = (
+            logical_request_id
+            if generation == 1
+            else f"{logical_request_id}:rerun:{generation - 1}"
+        )
+        get_task = getattr(self.runtime, "get_task", None)
+        if not callable(get_task):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_RUNTIME_UNAVAILABLE")
+        try:
+            predecessor = get_task(approval.previous_task_id)
+        except KeyError as exc:
+            raise KnowledgeExtractionError(
+                "EXTRACTION_RERUN_PREDECESSOR_NOT_FOUND"
+            ) from exc
+
+        if (
+            predecessor.request_id != predecessor_request_id
+            or predecessor.status != RuntimeStatus.FAILED
+        ):
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_PREDECESSOR_INVALID")
+
+        execution_request_id = f"{logical_request_id}:rerun:{generation}"
+        return execution_request_id, {
+            "extraction_rerun": {
+                "logical_request_id": logical_request_id,
+                "generation": generation,
+                "previous_request_id": predecessor_request_id,
+                "previous_task_id": predecessor.task_id,
+                "previous_status": RuntimeStatus.FAILED.value,
+                "approved_by": approval.approved_by.strip(),
+                "approval_ref": approval.approval_ref.strip(),
+                "reason": approval.reason.strip(),
+            }
+        }
 
     @staticmethod
     def _validate_source_pair(
