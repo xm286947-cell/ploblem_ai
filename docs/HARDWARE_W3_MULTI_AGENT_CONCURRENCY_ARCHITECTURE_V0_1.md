@@ -61,3 +61,25 @@ Developed on the existing W3 branch (not merged, not released):
 - Recovery still requires independent operator confirmation and Candidate/Runtime reconciliation before any new Provider invocation. `RUNTIME_BLOCKED` is deliberately not auto-retried.
 - Bounded Provider budgets, parallel duplicate source import reuse, timeout tuning, crash during Candidate Asset commit, kill/restart stress, Windows native user preview, and Formal Candidate Gate remain pending.
 - CI success, if achieved, only permits `W3_02_MOCK_CANDIDATE`, not `W3_RELEASED`.
+
+## W3-02 follow-on closure: verified reuse, budget assertion, and orphan recovery (2026-10-08)
+
+- A queued duplicate with **exact** business_case_id/source_id/input snapshot and a **verified ACTIVE** Candidate from a successfully completed same-source Workbench item reuses the existing Candidate, not a new Agent/Provider call. Reuse is serialized by the global SQLite source lease; stage output is retained as source run evidence and the consuming item records `w3_reused_from_item_id`, `w3_reused_from_run_id`, `execution_mode=W3_VERIFIED_CANDIDATE_REUSE`, `provider_call_count=0`.
+- Reuse excludes Stage retry and Force Full Run, unverified/missing Candidate assets, altered snapshots, different Pipeline version, failed Evidence gate, and non-QUEUED items. Every formal upload must pass the existing frozen source manifest identity check.
+- Existing frozen Stage A/B Agent configuration already limits Provider calls to 2 per stage; W3 adds a **post-result defensive assertion** that reported aggregate Provider calls may not exceed 4 before Candidate commit. This does not replace Runtime's preventive budget enforcement.
+- `CANCELLED` is now a real bound result with non-retryable state and accurate summary, not a misleading `QUEUED` case.
+- Interrupted RUNNING rows are reconciled only after operator confirmation and stale-age check, including orphan rows without any lease (e.g. process died after lease exit but before item update). Recovery is durable in `hardware_w3_recovery_audit` without stored credentials or auto Provider replay. This remains an operator-assisted recovery gate.
+- W3-02 focused Mock suite (including new tests): Ubuntu/macOS/Windows PASS on commit `f236cc5c906dc1428375a20108ed13bf2d95204e`, run https://github.com/xm286947-cell/ploblem_ai/actions/runs/37764228727 .
+- Remaining formal limits: kill/restart full environment stress, unexpected Candidate commit side-effect reconciliation with live Knowledge store, shared DB proof in target Windows native deployment, distributed multi-host coordinator, real Provider only in authorized isolated Codex environment. A completed Mock run is not Formal Candidate acceptance.
+
+## W3-03 initial additive Workbench UI (2026-10-08)
+
+Existing Knowledge Production Workbench (same route/template, no rewrite):
+- Explicit `SEQUENTIAL`/ `PARALLEL` selector, initial `SEQUENTIAL` W2-compatible.
+- Case concurrency selector 1–4, initial 2, enabled only in `PARALLEL`.
+- `run-resume` requests carry opt-in `execution_mode` and `concurrency`.
+- Buttons for cancel unstarted cases and explicit resume of cancelled ones, with safety wording that already-running Provider stages are not forcibly interrupted and resume does not automatically run AI.
+- Polling stays on existing Batch GET, with status/summary/progress including `CANCELLED`.
+- Existing Stage A → Gate → Stage B / Human Review / Formal Publish controls stay intact.
+- W3 UI static/contract test `tests/test_hardware_w3_workbench_ui.py`, `node --check` and W2 Workbench Mock tests were added to W3 three-OS CI.
+- W3-03 is **code submitted; real browser Golden and Windows user native preview not yet validated**. Do not mark W3-03 accepted or W3-04 released.
