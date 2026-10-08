@@ -3,7 +3,16 @@ setlocal EnableExtensions
 chcp 65001 >nul 2>&1
 for %%I in ("%~dp0.") do set "PACKAGE_ROOT=%%~fI"
 set "PY=%PACKAGE_ROOT%\.venv\Scripts\python.exe"
-set "DB=%PACKAGE_ROOT%\validation\windows_acceptance\quality_scenario_source_fixture.db"
+set "ORIGINAL_COPY=%PACKAGE_ROOT%\validation\windows_acceptance\original_quality_db_copy.db"
+set "FIXTURE_DB=%PACKAGE_ROOT%\validation\windows_acceptance\quality_scenario_source_fixture.db"
+
+if exist "%ORIGINAL_COPY%.fixture.json" (
+  set "DB=%ORIGINAL_COPY%"
+  echo G5_MODE=ORIGINAL_DB_COPY
+) else (
+  set "DB=%FIXTURE_DB%"
+  echo G5_MODE=CONTROLLED_FIXTURE
+)
 
 if not exist "%PY%" (
   echo WINDOWS_ACCEPTANCE_VENV_NOT_FOUND
