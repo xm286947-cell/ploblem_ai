@@ -204,3 +204,160 @@ def test_http_maintainer_only_cancel_and_safe_resume(tmp_path):
     ).status_code == 409
     assert client.post(base + "/resume-cancelled", headers=headers).status_code == 200
     assert service.get_batch(batch)["cancel_requested"] is False
+
+
+def _stage_ready_result(*, calls=2):
+    from services.hardware_case_r1_runtime import R1_PIPELINE_VERSION
+    return {
+        "pipeline_status": "GOLDEN_PREVIEW_READY",
+        "pipeline_version": R1_PIPELINE_VERSION,
+        "provider_call_count": calls,
+        "run_id": "R-ORIGINAL",
+        "evidence_validation": {"status": "PASS"},
+        "knowledge_object": {"contract_version": "v1", "finding": "TEST"},
+        "latency_trace": {},
+    }
+
+
+class _CandidateRepositoryStub:
+    def __init__(self, *, active=True):
+        self.active = active
+
+    def get_candidate(self, candidate_id):
+        if candidate_id != "C-EXISTING":
+            return None
+        return {
+            "candidate_id": candidate_id,
+            "business_case_id": "CASE-A",
+            "source_id": "HASH-A",
+            "asset_status": "ACTIVE" if self.active else "RETIRED",
+            "production_review_status": "REQUIRED",
+            "knowledge_object": {"contract_version": "v1", "review": "REQUIRED"},
+        }
+
+
+def _reused_source_fixture(tmp_path, *, altered=False, asset_active=True):
+    store = HardwareR1WorkbenchStore(tmp_path / "cases.sqlite")
+    previous_batch, next_batch = store.create_batch(), store.create_batch()
+    snapshot = {
+        "identity": {"business_case_id": "CASE-A"},
+        "source": {"source_id": "HASH-A"},
+        "contents": [{"text": "frozen"}],
+    }
+    previous_id = store.add_item(
+        previous_batch, source_file="source.docx",
+        business_case_id="CASE-A", source_id="HASH-A", snapshot=snapshot,
+    )
+    store.update_item(
+        previous_id, orchestration_status="CANDIDATE_READY",
+        failed_stage=None, error_code=None, result=_stage_ready_result(),
+        candidate_id="C-EXISTING",
+    )
+    next_snapshot = {**snapshot}
+    if altered:
+        next_snapshot["contents"] = [{"text": "altered"}]
+    next_id = store.add_item(
+        next_batch, source_file="source.docx",
+        business_case_id="CASE-A", source_id="HASH-A", snapshot=next_snapshot,
+    )
+    repo = _CandidateRepositoryStub(active=asset_active)
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object(),
+        candidate_repository=repo,
+    )
+    return service, next_batch, next_id, previous_id
+
+
+def test_verified_completed_candidate_reuse_does_not_call_provider(tmp_path, monkeypatch):
+    import services.hardware_case_r1_workbench as module
+
+    service, batch, next_id, original_id = _reused_source_fixture(tmp_path)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("W3 replayed Provider despite verified Candidate")
+
+    monkeypatch.setattr(module, "run_r1_agent_extraction", forbidden)
+    result = service.run_batch(batch)
+    current = service.get_item(next_id)
+    assert result["summary"]["REVIEW"] == 1
+    assert current["candidate_id"] == "C-EXISTING"
+    assert current["provider_calls"] == 0
+    assert current["pipeline_result"]["w3_reuse_verified"] is True
+    assert current["pipeline_result"]["w3_reused_from_item_id"] == original_id
+    assert current["pipeline_result"]["run_id"] == "R-ORIGINAL"
+    assert service.capacity_gate.leases() == []
+
+
+@pytest.mark.parametrize("altered,active", [
+    (True, True), (False, False),
+])
+def test_nonmatching_input_or_inactive_candidate_never_reused(
+    tmp_path, monkeypatch, altered, active,
+):
+    import services.hardware_case_r1_workbench as module
+
+    service, batch, next_id, _ = _reused_source_fixture(
+        tmp_path, altered=altered, asset_active=active
+    )
+    calls = []
+
+    def invoked(*_args, **_kwargs):
+        calls.append(True)
+        return {
+            "pipeline_status": "CASE_EXTRACTION_FAILED",
+            "failed_stage": "STAGE_A",
+            "error_code": "MOCK_STAGE_A",
+            "latency_trace": {},
+        }
+
+    monkeypatch.setattr(module, "run_r1_agent_extraction", invoked)
+    result = service.run_batch(batch)
+    assert calls == [True]
+    assert service.get_item(next_id)["candidate_id"] is None
+    assert result["summary"]["FAILED"] == 1
+
+
+def test_reported_provider_calls_over_frozen_ceiling_block_candidate(
+    tmp_path, monkeypatch,
+):
+    import services.hardware_case_r1_workbench as module
+
+    store = HardwareR1WorkbenchStore(tmp_path / "cases.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx",
+        business_case_id="CASE-X", source_id="HASH-X",
+        snapshot={"identity": {"business_case_id": "CASE-X"}},
+    )
+    monkeypatch.setattr(
+        module, "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: _stage_ready_result(calls=5),
+    )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    result = service.run_batch(batch)
+    assert result["summary"]["CANDIDATE_READY"] == 0
+    item = store.get_item(item_id)
+    assert item["orchestration_status"] == "RUNTIME_BLOCKED"
+    assert item["error_code"] == "W3_PROVIDER_BUDGET_EXCEEDED"
+    assert item["candidate_id"] is None
+    assert item["provider_calls"] == 5
+
+
+def test_cancelled_case_is_not_reported_as_queued(tmp_path):
+    store = HardwareR1WorkbenchStore(tmp_path / "db.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="case.docx",
+        snapshot={"identity": {"business_case_id": "CASE-A"}},
+    )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    result = service.cancel_batch(batch)
+    assert result["status"] == "CANCELLED"
+    assert result["summary"]["QUEUED"] == 0
+    assert result["summary"]["CANCELLED"] == 1
+    assert result["items"][0]["result"] == "CANCELLED"
+    assert store.get_item(item_id)["retryable"] is False
