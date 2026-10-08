@@ -54,6 +54,29 @@ def _preview(client: TestClient, materials: list[tuple[str, bytes]]):
     )
 
 
+def test_golden_80_character_boundary_keeps_complete_sentence() -> None:
+    from quality_knowledge.major_cases.restore import derive_description_title
+
+    # The frozen XLS contains this real first sentence followed by 512 MiB.
+    description = (
+        "持续诊断日志写入场景下，Orion Edge Gateway OG-420 固件 2.8.1 "
+        "将迁移后的 retention_count=0 解释为无限保留。"
+        "512 MiB /var 分区达到至少 95% 使用率，随后配置写入失败。"
+    )
+    assert description[79:82] == "512"
+    title = derive_description_title(description)
+    assert title == description[:79]
+    assert title.endswith("解释为无限保留。")
+    assert not title.endswith("。5")
+    assert "512 MiB" in description
+
+    assert derive_description_title("短标题") == "短标题"
+    # Without a sentence break, numeric tokens cannot be cut mid-number.
+    numeric = "A" * 78 + " 512 MiB"
+    assert derive_description_title(numeric).endswith("…")
+    assert not derive_description_title(numeric).endswith(" 5…")
+
+
 def test_true_binary_xls_exact_pdf_match_converges_into_one_case_event(tmp_path: Path):
     assert XLS_FIXTURE.read_bytes()[:8] == bytes.fromhex("D0CF11E0A1B11AE1")
     client = _client(tmp_path)
@@ -90,6 +113,43 @@ def test_true_binary_xls_exact_pdf_match_converges_into_one_case_event(tmp_path:
     source_types = {item["source_type"] for item in body["source_links"]}
     assert "MAJOR_EXCEL_SOURCE_FACT" in source_types
     assert "MAJOR_SOURCE_DOCUMENT" in source_types
+
+
+def test_excel_source_fact_provenance_is_persisted_and_separate_from_pdf(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    response = _preview(client, [("ITR20269951-review.pdf", PDF_BYTES)])
+    assert response.status_code == 200, response.text
+    batch_id = response.json()["batch_id"]
+    imported = client.post("/api/v2/major-production/excel/confirm", data={"batch_id": batch_id})
+    assert imported.status_code == 200, imported.text
+    case_id = imported.json()["result"]["case_ids"][0]
+
+    response = client.get(f"/api/v2/major-production/cases/{case_id}/provenance")
+    assert response.status_code == 200, response.text
+    provenance = response.json()
+    facts = provenance["structured_source_facts"]
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact["source_type"] == "EXCEL"
+    assert fact["source_fact_revision_id"].startswith("KSF-")
+    assert fact["revision_no"] == 1
+    assert fact["source_ref"].startswith("cases.xls#")
+    assert len(fact["source_hash"]) == 64
+    assert fact["source_link_ids"] and fact["linked"] is True
+    assert fact["original_description"]
+
+    docs = provenance["document_evidence"]
+    assert len(docs) == 1
+    assert docs[0]["filename"] == "ITR20269951-review.pdf"
+    assert docs[0]["version_id"]
+    detail = client.get(f"/api/v2/major-production/cases/{case_id}").json()
+    types = [link["source_type"] for link in detail["source_links"]]
+    assert "MAJOR_EXCEL_SOURCE_FACT" in types
+    assert "MAJOR_SOURCE_DOCUMENT" in types
+    assert "DOCUMENT" not in {
+        row["source_type"]
+        for row in client.app.state.major_case_restore_service.source_fact_history(case_id)
+    }
 
 
 def test_normalized_collision_is_ambiguous_and_upload_names_are_isolated(tmp_path: Path):
