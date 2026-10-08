@@ -179,12 +179,10 @@ class KnowledgeExtractionService:
             f"{source_document.source_version}:"
             f"{source_document.content_hash[:12]}:{focus_hash}"
         )
-        request_id, rerun_metadata = self._resolve_execution_identity(
-            logical_request_id, rerun_approval
-        )
-
+        # Construct the exact business input first. A rerun must not change
+        # even one structured block while retaining the same Source identity.
         request = AgentRequest(
-            request_id=request_id,
+            request_id=logical_request_id,
             agent_id=self.agent_id,
             input={
                 "source_document": {
@@ -214,9 +212,18 @@ class KnowledgeExtractionService:
                 "business_domain": "KNOWLEDGE_PRODUCTION",
                 "source_id": source_document.source_id,
                 "source_version": source_document.source_version,
-                **rerun_metadata,
             },
         )
+        request_id, rerun_metadata = self._resolve_execution_identity(
+            logical_request_id, rerun_approval, request.input
+        )
+        if rerun_metadata:
+            request = request.model_copy(
+                update={
+                    "request_id": request_id,
+                    "metadata": {**request.metadata, **rerun_metadata},
+                }
+            )
 
         try:
             result = self.runtime.invoke(request)
@@ -325,6 +332,7 @@ class KnowledgeExtractionService:
         self,
         logical_request_id: str,
         approval: ExtractionRerunApproval | None,
+        business_input: Any,
     ) -> tuple[str, dict[str, Any]]:
         if approval is None:
             return logical_request_id, {}
@@ -352,21 +360,36 @@ class KnowledgeExtractionService:
             if generation == 1
             else f"{logical_request_id}:rerun:{generation - 1}"
         )
-        get_task = getattr(self.runtime, "get_task", None)
-        if not callable(get_task):
+        # Use the durable TaskRecord, not TaskSnapshot (which lacks input_hash).
+        # This is read-only and does not alter the Runtime state machine.
+        store = getattr(self.runtime, "store", None)
+        get_task_record = getattr(store, "get_task", None)
+        if not callable(get_task_record):
             raise KnowledgeExtractionError("EXTRACTION_RERUN_RUNTIME_UNAVAILABLE")
-        try:
-            predecessor = get_task(approval.previous_task_id)
-        except KeyError as exc:
+        predecessor = get_task_record(approval.previous_task_id)
+        if predecessor is None:
             raise KnowledgeExtractionError(
                 "EXTRACTION_RERUN_PREDECESSOR_NOT_FOUND"
-            ) from exc
-
+            )
         if (
             predecessor.request_id != predecessor_request_id
             or predecessor.status != RuntimeStatus.FAILED
         ):
             raise KnowledgeExtractionError("EXTRACTION_RERUN_PREDECESSOR_INVALID")
+
+        # Match runtime.engine.runtime._hash_payload(request.input) byte-for-byte.
+        # Request identity alone does NOT cover structured page/block content.
+        input_hash = hashlib.sha256(
+            json.dumps(
+                business_input,
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if predecessor.input_hash != input_hash:
+            raise KnowledgeExtractionError("EXTRACTION_RERUN_INPUT_MISMATCH")
 
         execution_request_id = f"{logical_request_id}:rerun:{generation}"
         return execution_request_id, {
@@ -376,6 +399,7 @@ class KnowledgeExtractionService:
                 "previous_request_id": predecessor_request_id,
                 "previous_task_id": predecessor.task_id,
                 "previous_status": RuntimeStatus.FAILED.value,
+                "input_hash": input_hash,
                 "approved_by": approval.approved_by.strip(),
                 "approval_ref": approval.approval_ref.strip(),
                 "reason": approval.reason.strip(),
