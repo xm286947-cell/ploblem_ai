@@ -1,0 +1,55 @@
+name: Major V1.1 552 Data Fidelity and Provenance Gate
+
+on:
+  push:
+    branches:
+      - fix/major-v11-552-title-source-provenance
+  pull_request:
+    branches:
+      - ci/overall-current-platform-mac-9751fc3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  major-552-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile and validate UI syntax
+        run: |
+          python -m compileall -q quality_knowledge/major_cases/restore.py quality_knowledge/web/major_production_api.py
+          node --check quality_knowledge/web/static/major_production.js
+      - name: Title, persisted provenance, canonical identity, XLS and provider regression
+        run: |
+          python -m pytest -q \
+            tests/test_major_v5_overall_legacy_xls.py \
+            tests/test_major_canonical_intake_convergence.py \
+            tests/test_major_provider_wiring.py
+
+  major-552-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile and validate UI syntax
+        run: |
+          python -m compileall -q quality_knowledge/major_cases/restore.py quality_knowledge/web/major_production_api.py
+          node --check quality_knowledge/web/static/major_production.js
+      - name: Golden title and Excel provenance on macOS
+        run: |
+          python -m pytest -q \
+            tests/test_major_v5_overall_legacy_xls.py \
+            tests/test_major_canonical_intake_convergence.py

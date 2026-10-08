@@ -18,6 +18,45 @@
     return data;
   }
 
+  async function showExcelProvenance(caseId) {
+    const box = root.querySelector('[data-major-provenance]');
+    if (!box) return false;
+    box.hidden = false;
+    box.innerHTML = '<article class="major-candidate"><h3>来源事实核验中…</h3></article>';
+    try {
+      const data = await read(await fetch(api + '/cases/' +
+        encodeURIComponent(caseId) + '/provenance'));
+      const facts = Array.isArray(data.structured_source_facts) ? data.structured_source_facts : [];
+      const docs = Array.isArray(data.document_evidence) ? data.document_evidence : [];
+      const verified = facts.length > 0 && facts.every(item =>
+        item.source_type === 'EXCEL' && item.linked === true &&
+        item.source_fact_revision_id && item.source_hash && item.source_ref);
+      const factHtml = facts.map(item => '<li><strong>Excel Structured Source Fact</strong> · ' +
+        esc(item.source_ref) + ' · Revision ' + esc(item.revision_no) +
+        ' · Source Fact ID ' + esc(item.source_fact_revision_id) +
+        ' · SHA256 ' + esc(item.source_hash) +
+        ' · Event Links ' + esc((item.source_link_ids || []).length) +
+        '<details><summary>查看保留的完整问题描述</summary><p>' +
+        esc(item.original_description) + '</p></details></li>').join('');
+      const docHtml = docs.map(item => '<li><strong>Document Evidence</strong> · ' +
+        esc(item.filename) + ' · Source Version ' + esc(item.version_id) +
+        ' · Parse ' + esc(item.parse_status) + '</li>').join('');
+      box.innerHTML = '<article class="major-candidate" data-source-fact-proof>' +
+        '<h3>来源事实与证据 · ' + (verified ? 'SOURCE_FACT_PERSISTED' : 'SOURCE_FACT_NOT_VERIFIED') +
+        '</h3><p>本区只读展示已保存的 Major 来源记录；Excel 是 Structured Source Fact，' +
+        'PDF/DOCX 是独立的 Document Evidence，不互相替代。</p>' +
+        '<ul>' + (factHtml || '<li>未发现已持久化并关联的 Excel Source Fact</li>') +
+        '</ul><h3>复盘文档 Evidence</h3><ul>' +
+        (docHtml || '<li>无文档 Evidence</li>') + '</ul></article>';
+      return Boolean(verified);
+    } catch (error) {
+      box.innerHTML = '<article class="major-candidate" data-source-fact-proof>' +
+        '<h3>SOURCE_FACT_NOT_VERIFIED</h3><p>只读来源核验失败：' +
+        esc(error.message) + '</p></article>';
+      return false;
+    }
+  }
+
   const excelForm = root.querySelector('[data-major-excel]');
   const excelPreview = root.querySelector('[data-major-excel-preview]');
   if (excelForm) {
@@ -73,7 +112,8 @@
             root.querySelector('[data-major-identity]').textContent = 'Excel Batch ' + data.batch_id +
               ' · Case ' + state.caseId + (events.length ? ' · ' + events.length + ' Event(s)' : '');
             root.querySelector('[data-major-state]').textContent = 'IMPORTED';
-            say('Excel 导入完成，已进入现有 AI Analysis → Human Review → Publish 链路。');
+            const sourceFactVerified = await showExcelProvenance(state.caseId);
+            say(sourceFactVerified ? 'Excel 已导入，Structured Source Fact 已持久化并关联；可继续 AI Analysis → Human Review → Publish。' : 'Excel 已导入，但 Structured Source Fact 尚未完成核验，请查看来源证据面板。', !sourceFactVerified);
           } catch (error) { say(error.message, true); }
         });
         say(hasUnsafeRows ? '预检发现歧义或 Event 未唯一绑定；已阻止确认导入。' : '预检完成。请核对 Mapping、复盘报告匹配与行级结果后确认导入。', hasUnsafeRows);

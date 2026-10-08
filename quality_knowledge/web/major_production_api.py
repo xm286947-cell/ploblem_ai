@@ -179,6 +179,55 @@ def create_major_production_router(
         except MajorProductionError as error:
             raise _error(error) from error
 
+    @router.get("/cases/{case_id}/provenance")
+    def case_provenance(case_id: str) -> dict[str, Any]:
+        """Read-only proof of persisted Excel Source Fact and separate documents.
+
+        Uses existing Major persistence and links; historical-case/v1 is unchanged.
+        """
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
+        try:
+            detail = service.detail(case_id)
+        except MajorProductionError as error:
+            raise _error(error) from error
+
+        links = detail.get("source_links") or []
+        structured = []
+        for fact in restore_service.source_fact_history(case_id):
+            if fact.get("source_type") != "EXCEL":
+                continue
+            link_ids = [
+                link["source_link_id"]
+                for link in links
+                if link.get("source_type") == "MAJOR_EXCEL_SOURCE_FACT"
+                and link.get("record_id") == fact.get("source_fact_revision_id")
+            ]
+            structured.append({
+                "source_type": "EXCEL",
+                "source_fact_revision_id": fact["source_fact_revision_id"],
+                "revision_no": fact["revision_no"],
+                "source_ref": fact["source_ref"],
+                "source_hash": fact["source_hash"],
+                "original_description": str((fact.get("normalized") or {}).get("original_description") or ""),
+                "source_link_ids": link_ids,
+                "linked": bool(link_ids),
+            })
+
+        documents = [
+            {
+                "version_id": doc["version_id"],
+                "filename": doc["original_filename"],
+                "parse_status": doc.get("parse_status") or "",
+            }
+            for doc in detail.get("documents") or []
+        ]
+        return {
+            "case_id": case_id,
+            "structured_source_facts": structured,
+            "document_evidence": documents,
+        }
+
     @router.post("/cases/{case_id}/analysis")
     def analyze(case_id: str, event_id: str = "") -> dict[str, Any]:
         try:
