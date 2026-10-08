@@ -1,0 +1,103 @@
+name: Major V1.1 Integrated macOS Release Candidate
+
+on:
+  push:
+    branches:
+      - release/major-v1.1-integrated-rc-20261008
+    paths:
+      - .github/workflows/major-v11-package-rc.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PINNED_SOURCE_SHA: d6e4668d51d38211cfe084e620b2b2599ee43287
+  PACKAGE_BASENAME: MAJOR_V11_OVERALL_INTEGRATED_RC_d6e4668d
+
+jobs:
+  build-and-fresh-extract:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact merged Overall CI source
+        uses: actions/checkout@v4
+        with:
+          ref: d6e4668d51d38211cfe084e620b2b2599ee43287
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install complete app and test dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Verify pinned identity and impacted Major contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_SOURCE_SHA"
+          python -m pytest -q \
+            tests/test_major_canonical_intake_convergence.py \
+            tests/test_major_v5_overall_legacy_xls.py \
+            tests/test_major_provider_wiring.py
+      - name: Build immutable candidate from pinned Git source
+        shell: bash
+        run: |
+          set -euo pipefail
+          export STAGE="$RUNNER_TEMP/major-v11-rc"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE" dist
+          git archive "$PINNED_SOURCE_SHA" | tar -x -C "$STAGE"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          stage = Path(os.environ["STAGE"])
+          src = os.environ["PINNED_SOURCE_SHA"]
+          manifest = {
+              "package_type": "MAJOR_V1_1_OVERALL_INTEGRATED_MACOS_CANDIDATE",
+              "package_scope": "INTEGRATED_OVERALL_MAJOR_V1_1",
+              "source_sha": src,
+              "source_branch": "ci/overall-current-platform-mac-9751fc3",
+              "integration_prs": [546, 551],
+              "post_integration_ci_run": 37754151032,
+              "golden_case_001_input_sha256": "fd8db33e945de7fea59cfd292aecdfd9d5b30988a32b5117e46086234304be43",
+              "golden_e2e_on_this_exact_package": "RETEST_REQUIRED",
+              "formal_release_status": "CANDIDATE_NOT_FROZEN",
+              "macos_launcher": "START_OVERALL_CURRENT_PLATFORM_MAC.command",
+              "expected_modified": False,
+              "input_modified": False,
+          }
+          (stage/"PRODUCT_SOURCE_SHA").write_text(src+"\n", encoding="utf-8")
+          (stage/"MAJOR_V11_CANDIDATE_MANIFEST.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2)+"\n", encoding="utf-8"
+          )
+          PY
+          (cd "$STAGE" && zip -q -r "$GITHUB_WORKSPACE/dist/$PACKAGE_BASENAME.zip" .)
+          shasum -a 256 "dist/$PACKAGE_BASENAME.zip" | tee "dist/$PACKAGE_BASENAME.zip.sha256"
+          unzip -tq "dist/$PACKAGE_BASENAME.zip"
+      - name: Test clean extraction without repository fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="$RUNNER_TEMP/major-v11-fresh-extract"
+          rm -rf "$TARGET"
+          mkdir -p "$TARGET"
+          unzip -q "dist/$PACKAGE_BASENAME.zip" -d "$TARGET"
+          cd "$TARGET"
+          test -x START_OVERALL_CURRENT_PLATFORM_MAC.command
+          test "$(cat PRODUCT_SOURCE_SHA)" = "$PINNED_SOURCE_SHA"
+          python -m pytest -q \
+            tests/test_major_canonical_intake_convergence.py \
+            tests/test_major_v5_overall_legacy_xls.py \
+            tests/test_major_provider_wiring.py
+          echo "FRESH_EXTRACT_MAJOR_REGRESSION=PASS"
+      - name: Publish immutable release candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MAJOR_V11_OVERALL_INTEGRATED_RC_d6e4668d
+          path: |
+            dist/MAJOR_V11_OVERALL_INTEGRATED_RC_d6e4668d.zip
+            dist/MAJOR_V11_OVERALL_INTEGRATED_RC_d6e4668d.zip.sha256
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
