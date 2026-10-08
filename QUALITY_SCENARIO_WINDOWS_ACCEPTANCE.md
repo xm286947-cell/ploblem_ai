@@ -28,32 +28,34 @@ The launcher will:
 
 No real Provider credential is required for this Windows compatibility gate.
 
-## Using the original DB
+## Using your existing mature DB on Windows
 
-Yes. Windows acceptance supports the existing mature DB.
+No script editing is needed:
 
-Preferred entry:
+1. Copy the original DB to the extracted package root.
+2. Name the copied file `quality_issue_v1.db`.
+3. Double-click `start_quality_scenario_windows_original_db.bat`.
 
-`start_quality_scenario_windows_original_db.bat`
+Alternatively, drag the original DB onto that BAT file.
 
-You can either:
+The runner makes its own further internal copy under `validation/windows_acceptance/original_quality_db_copy.db`.
+The input DB is not changed. Source/material/assessment facts come from the copied DB.
+QSV1 lifecycle writes use a dedicated Windows test DB; existing QSV1 published history from the input DB is **not** imported into that test DB.
 
-- double-click it and enter the full path of the original DB; or
-- drag the original DB file onto this BAT file.
+Original-DB mode does **not** inject any synthetic G1-G5 records. It tests startup, mature navigation, and the source records actually present in your DB.
 
-The runner first copies the original DB to:
+To run the deterministic G1-G5 controlled test cases, instead double-click `start_quality_scenario_windows_acceptance.bat` with no arguments. The G5 revision helper applies to that controlled-fixture mode only.
 
-`validation/windows_acceptance/original_quality_db_copy.db`
+## Startup troubleshooting
 
-The application runs against the COPY. The original DB file is not modified.
+Startup progress prints every 10 seconds; original-DB mode waits up to 300 seconds.
+A Python service crash is detected without waiting for the full timeout.
 
-In original-DB mode, the copied DB is used for both mature source data and existing QSV1 lifecycle/history so that existing scenarios remain visible. Any Review/Confirm/Publish or other test writes are written only to the copy.
+On failure, the window prints `STARTUP_ERROR`, `APP_PROCESS_EXIT`, and the last 160 lines between
+`APP_LOG_TAIL_BEGIN` / `APP_LOG_TAIL_END`.
 
-The controlled-fixture mode is still available by double-clicking:
-
-`start_quality_scenario_windows_acceptance.bat`
-
-without a DB argument.
+Full service output stays at `validation/windows_acceptance/mature_app.log`. This is the diagnostic file to inspect if your specific original DB still fails.
+No real-provider credential is required for this package.
 
 ## Acceptance checklist
 
