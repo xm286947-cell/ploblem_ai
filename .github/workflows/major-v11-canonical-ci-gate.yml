@@ -1,0 +1,52 @@
+name: Major V1.1 Canonical Integration Gate
+
+on:
+  push:
+    branches:
+      - fix/major-v11-canonical-convergence-overall-ci
+  pull_request:
+    branches:
+      - ci/overall-current-platform-mac-9751fc3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  major-contract-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install app and test dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Compile impacted modules
+        run: |
+          python -m compileall -q quality_knowledge/major_cases parser services/major_case_production.py quality_knowledge/web/major_production_api.py
+      - name: Canonical Intake + V5 + Provider regression
+        run: |
+          python -m pytest -q \
+            tests/test_major_canonical_intake_convergence.py \
+            tests/test_major_v5_overall_legacy_xls.py \
+            tests/test_major_provider_wiring.py
+
+  major-contract-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install app and test dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
+      - name: Canonical / binary XLS / C09 / C12 macOS regression
+        run: |
+          python -m pytest -q \
+            tests/test_major_canonical_intake_convergence.py \
+            tests/test_major_v5_overall_legacy_xls.py
