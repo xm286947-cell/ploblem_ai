@@ -1,0 +1,92 @@
+name: Quality Scenario Windows Test Package
+
+on:
+  push:
+    branches:
+      - test/quality-scenario-windows-acceptance-001
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-acceptance-package:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r requirements.txt -r requirements-runtime-p0-test.txt
+
+      - name: Windows controlled acceptance smoke
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe tools\run_quality_scenario_windows_acceptance.py --smoke-only --no-browser
+
+      - name: Build fresh-extract Windows test package
+        id: package
+        shell: pwsh
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0,12)
+          $name = "QUALITY_SCENARIO_WINDOWS_TEST_PACKAGE_$short"
+          $root = Join-Path $env:RUNNER_TEMP $name
+          $archive = Join-Path $env:RUNNER_TEMP "source.zip"
+          $out = Join-Path $env:GITHUB_WORKSPACE "$name.zip"
+          if (Test-Path $root) { Remove-Item -Recurse -Force $root }
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          git archive --format=zip --output="$archive" HEAD
+          Expand-Archive -Path $archive -DestinationPath $root -Force
+
+          $manifest = [ordered]@{
+            task = "QUALITY_SCENARIO_WINDOWS_ACCEPTANCE_PACKAGE_001"
+            result = "WINDOWS_TEST_CANDIDATE"
+            source_sha = $env:GITHUB_SHA
+            base_product_sha = "5d9538f189fb3ca6f056ea57ad0d666f6e6b9002"
+            platform_focus = "Windows"
+            launch_entry = "start_quality_scenario_windows_acceptance.bat"
+            guide = "QUALITY_SCENARIO_WINDOWS_ACCEPTANCE.md"
+            agent_timeout_seconds = 300
+            provider_mode = "CONTROLLED_OPENAI_COMPATIBLE_MOCK"
+            real_provider_semantic_gate = "OUT_OF_SCOPE"
+            synthetic_business_data = "TEST_ONLY"
+            direct_candidate_write = $false
+            direct_publish_write = $false
+            g1_real_provider_status = "CONDITIONAL_PASS_KEEP_FROM_MAC_GATE"
+            g2_real_provider_status = "NOT_RESULTED"
+            g3_g5_real_provider_status = "NOT_RUN"
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $root "TEST_RELEASE_MANIFEST.json")
+
+          if (Test-Path $out) { Remove-Item -Force $out }
+          Compress-Archive -Path (Join-Path $root "*") -DestinationPath $out -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
+          "$hash  $name.zip" | Set-Content -Encoding ascii "$out.sha256"
+
+          "PACKAGE_NAME=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "PACKAGE_PATH=$out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "PACKAGE_SHA256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          Write-Host "WINDOWS_PACKAGE_BUILD=PASS"
+          Write-Host "SOURCE_SHA=$env:GITHUB_SHA"
+          Write-Host "PACKAGE_NAME=$name.zip"
+          Write-Host "PACKAGE_SHA256=$hash"
+
+      - name: Upload Windows test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: QUALITY_SCENARIO_WINDOWS_TEST_PACKAGE
+          path: |
+            ${{ steps.package.outputs.PACKAGE_PATH }}
+            ${{ steps.package.outputs.PACKAGE_PATH }}.sha256
+          if-no-files-found: error
+          retention-days: 30
