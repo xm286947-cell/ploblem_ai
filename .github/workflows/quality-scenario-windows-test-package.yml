@@ -38,6 +38,11 @@ jobs:
         run: |
           .\.venv\Scripts\python.exe tools\run_quality_scenario_windows_acceptance.py --smoke-only --no-browser --source-db validation\windows_acceptance\quality_scenario_source_fixture.db
 
+      - name: Windows original DB G5 revision smoke
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe tools\build_quality_scenario_test_fixture.py --db validation\windows_acceptance\original_quality_db_copy.db --advance-g5
+
       - name: Build fresh-extract Windows test package
         id: package
         shell: pwsh
