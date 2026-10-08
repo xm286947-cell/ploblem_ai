@@ -522,6 +522,7 @@ def augment_fixture(db_path: Path) -> dict[str, Any]:
                     "verification_gap": "缺少异常边界 + 长稳 + 重复恢复的组合场景",
                     "expected_detection_stage": "系统测试",
                 },
+                run_suffix="AUG",
             )
         _save_analysis(
             issues,
@@ -529,6 +530,7 @@ def augment_fixture(db_path: Path) -> dict[str, Any]:
             version_id=version_id,
             analysis_type="occurrence",
             result={"root_cause_summary": case["resolution_root"]},
+            run_suffix="AUG",
         )
 
         conflict_material_id = ""
