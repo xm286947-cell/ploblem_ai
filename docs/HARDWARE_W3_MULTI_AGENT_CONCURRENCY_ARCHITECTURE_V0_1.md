@@ -83,3 +83,6 @@ Existing Knowledge Production Workbench (same route/template, no rewrite):
 - Existing Stage A → Gate → Stage B / Human Review / Formal Publish controls stay intact.
 - W3 UI static/contract test `tests/test_hardware_w3_workbench_ui.py`, `node --check` and W2 Workbench Mock tests were added to W3 three-OS CI.
 - W3-03 is **code submitted; real browser Golden and Windows user native preview not yet validated**. Do not mark W3-03 accepted or W3-04 released.
+
+### Crash replay hard stop (after review)
+Post-crash `W3_INTERRUPTED_REQUIRES_RECONCILIATION` is a **hard stop** for subsequent explicit user Run/Resume and Force Full Run. The operator-confirmed stale-lease cleanup does not itself authorize replay. The item remains `RUNTIME_BLOCKED` until a later reviewed Candidate/Runtime reconciliation protocol is implemented and proven. A fresh stale snapshot cannot regain ownership due to SQLite status+revision CAS.
