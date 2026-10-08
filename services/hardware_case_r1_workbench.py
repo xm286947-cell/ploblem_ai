@@ -1264,7 +1264,11 @@ class HardwareR1WorkbenchService:
             )
         except ValueError as error:
             raise HardwareR1WorkbenchError(str(error)) from error
-        return {**self.get_batch(batch_id), "reconciled_item_ids": recovered}
+        return {
+            **self.get_batch(batch_id),
+            "reconciled_item_ids": recovered,
+            "recovery_audit": self.capacity_gate.recovery_audit(batch_id),
+        }
 
     def retry_failed_only(self, batch_id: str) -> dict[str, Any]:
         items = [
