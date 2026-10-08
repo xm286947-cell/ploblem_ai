@@ -66,7 +66,7 @@ def main() -> int:
 
     VALIDATION_DIR.mkdir(parents=True, exist_ok=True)
 
-    from tools.build_quality_scenario_test_fixture import augment_fixture, build_fixture
+    from tools.build_quality_scenario_test_fixture import build_fixture
     from tools.quality_scenario_functional_provider import configure
 
     source_mode = "CONTROLLED_FIXTURE"
@@ -80,15 +80,11 @@ def main() -> int:
         for suffix in ("", "-wal", "-shm"):
             Path(str(ORIGINAL_DB_COPY) + suffix).unlink(missing_ok=True)
         shutil.copy2(original, ORIGINAL_DB_COPY)
-        # Add the controlled G1-G5 source cases to the COPY only. This keeps
-        # original mature data/history visible while making the Windows
-        # acceptance checklist deterministic and keeps G5 revision available.
-        augment_fixture(ORIGINAL_DB_COPY)
-        source_mode = "ORIGINAL_DB_COPY_PLUS_CONTROLLED_CASES"
+        source_mode = "ORIGINAL_DB_COPY"
         source_db = ORIGINAL_DB_COPY
-        # Keep QSV1 lifecycle writes in a dedicated Windows acceptance DB.
-        # The supplied mature DB is source/business data only and remains
-        # untouched; its copy is also not used as the QSV1 write store.
+        # Original-DB mode is intentionally simple: do not inject controlled
+        # fixtures into the user's mature data. QSV1 lifecycle writes go to a
+        # separate Windows acceptance DB.
         qsv1_db = FIXTURE_QSV1_DB
         for path in (
             qsv1_db,
@@ -158,21 +154,40 @@ def main() -> int:
         )
 
         base = f"http://127.0.0.1:{args.port}"
-        try:
-            wait_http(base + "/issues", timeout=45)
-        except Exception:
+        startup_timeout = 300 if source_mode == "ORIGINAL_DB_COPY" else 45
+        print(f"STARTUP_WAIT_LIMIT_SECONDS={startup_timeout}")
+        deadline = time.time() + startup_timeout
+        startup_error = None
+        while time.time() < deadline:
+            if app.poll() is not None:
+                startup_error = RuntimeError(f"APP_EXITED_EARLY:{app.returncode}")
+                break
+            try:
+                with urlopen(base + "/issues", timeout=1.0) as response:
+                    if response.status == 200:
+                        startup_error = None
+                        break
+            except (URLError, TimeoutError, OSError) as exc:
+                startup_error = exc
+            time.sleep(1.0)
+        else:
+            startup_error = RuntimeError(f"HTTP_NOT_READY_AFTER_{startup_timeout}s")
+
+        if startup_error is not None:
             print("WINDOWS_ACCEPTANCE_START=FAIL")
+            print(f"STARTUP_ERROR={type(startup_error).__name__}:{startup_error}")
+            print(f"APP_PROCESS_EXIT={app.poll()}")
             print(f"APP_LOG={APP_LOG}")
             try:
                 if APP_LOG.is_file():
                     lines = APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
                     print("----- APP LOG TAIL -----")
-                    for line in lines[-120:]:
+                    for line in lines[-160:]:
                         print(line)
                     print("----- END APP LOG TAIL -----")
             except Exception as log_exc:
                 print(f"APP_LOG_READ_FAIL={type(log_exc).__name__}")
-            raise
+            raise startup_error
         for route in (
             "/issues",
             "/software-assessment",
@@ -206,7 +221,7 @@ def main() -> int:
         print(
             "G1_G5_SOURCE_DATA="
             + (
-                "USER_ORIGINAL_DB_PLUS_CONTROLLED_CASES"
+                "USER_ORIGINAL_DB_AS_IS"
                 if source_mode.startswith("ORIGINAL_DB_COPY")
                 else "READY"
             )
