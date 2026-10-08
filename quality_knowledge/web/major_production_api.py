@@ -99,7 +99,7 @@ def create_major_production_router(
         material_payload: list[tuple[str, bytes]] = []
         for material in materials:
             material_suffix = Path(material.filename or "").suffix.lower()
-            if material_suffix not in {".pdf", ".docx", ".doc"}:
+            if material_suffix not in {".pdf", ".docx"}:
                 raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
             material_payload.append((material.filename or "material.bin", await material.read()))
         try:
