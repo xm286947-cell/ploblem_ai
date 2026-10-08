@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -17,8 +18,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 VALIDATION_DIR = ROOT / "validation" / "windows_acceptance"
-SOURCE_DB = VALIDATION_DIR / "quality_scenario_source_fixture.db"
-QSV1_DB = VALIDATION_DIR / "quality_scenario_v1_windows.db"
+FIXTURE_SOURCE_DB = VALIDATION_DIR / "quality_scenario_source_fixture.db"
+FIXTURE_QSV1_DB = VALIDATION_DIR / "quality_scenario_v1_windows.db"
+ORIGINAL_DB_COPY = VALIDATION_DIR / "original_quality_db_copy.db"
 APP_LOG = VALIDATION_DIR / "mature_app.log"
 MOCK_LOG = VALIDATION_DIR / "provider_mock.log"
 
@@ -55,6 +57,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--smoke-only", action="store_true")
+    parser.add_argument(
+        "--source-db",
+        default="",
+        help="Optional existing mature Quality DB. The runner copies it first and never writes the original file.",
+    )
     args = parser.parse_args()
 
     VALIDATION_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,17 +69,37 @@ def main() -> int:
     from tools.build_quality_scenario_test_fixture import build_fixture
     from tools.quality_scenario_functional_provider import configure
 
-    manifest_path = SOURCE_DB.with_suffix(SOURCE_DB.suffix + ".fixture.json")
-    if SOURCE_DB.exists():
-        if manifest_path.exists():
-            SOURCE_DB.unlink()
-            manifest_path.unlink(missing_ok=True)
-        else:
-            raise SystemExit("REFUSE_RESET_NON_FIXTURE_DB")
-    build_fixture(SOURCE_DB)
+    source_mode = "CONTROLLED_FIXTURE"
+    source_db = FIXTURE_SOURCE_DB
+    qsv1_db = FIXTURE_QSV1_DB
 
-    for path in (QSV1_DB, Path(str(QSV1_DB) + "-wal"), Path(str(QSV1_DB) + "-shm")):
-        path.unlink(missing_ok=True)
+    if args.source_db:
+        original = Path(args.source_db).expanduser().resolve()
+        if not original.is_file():
+            raise SystemExit(f"ORIGINAL_DB_NOT_FOUND:{original}")
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(ORIGINAL_DB_COPY) + suffix).unlink(missing_ok=True)
+        shutil.copy2(original, ORIGINAL_DB_COPY)
+        source_mode = "ORIGINAL_DB_COPY"
+        source_db = ORIGINAL_DB_COPY
+        # Preserve the original database's existing QSV1 lifecycle/history in
+        # the test copy. Any Windows acceptance writes stay in the copy only.
+        qsv1_db = ORIGINAL_DB_COPY
+    else:
+        manifest_path = FIXTURE_SOURCE_DB.with_suffix(FIXTURE_SOURCE_DB.suffix + ".fixture.json")
+        if FIXTURE_SOURCE_DB.exists():
+            if manifest_path.exists():
+                FIXTURE_SOURCE_DB.unlink()
+                manifest_path.unlink(missing_ok=True)
+            else:
+                raise SystemExit("REFUSE_RESET_NON_FIXTURE_DB")
+        build_fixture(FIXTURE_SOURCE_DB)
+        for path in (
+            FIXTURE_QSV1_DB,
+            Path(str(FIXTURE_QSV1_DB) + "-wal"),
+            Path(str(FIXTURE_QSV1_DB) + "-shm"),
+        ):
+            path.unlink(missing_ok=True)
 
     mock = None
     app = None
@@ -95,8 +122,8 @@ def main() -> int:
         configure("127.0.0.1", 18090)
 
         env = os.environ.copy()
-        env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(SOURCE_DB)
-        env["QUALITY_SCENARIO_V1_DB_PATH"] = str(QSV1_DB)
+        env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(source_db)
+        env["QUALITY_SCENARIO_V1_DB_PATH"] = str(qsv1_db)
         env["REVERSE_QUALITY_MODEL_CONFIG"] = str(ROOT / "config" / "runtime" / "model.w4-functional.yaml")
         env["W4_FUNCTIONAL_MOCK_API_KEY"] = "test-only-controlled-provider"
         env["W4_FUNCTIONAL_FIXTURE"] = "1"
@@ -107,7 +134,7 @@ def main() -> int:
                 str(ROOT / "main.py"),
                 "knowledge-web",
                 "--db",
-                str(SOURCE_DB),
+                str(source_db),
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -131,17 +158,24 @@ def main() -> int:
 
         print("TASK=QUALITY_SCENARIO_WINDOWS_ACCEPTANCE_001")
         print("PLATFORM=Windows")
-        print("MODE=TEST_ONLY_CONTROLLED_DATA")
+        print(f"MODE={source_mode}")
         print("MATURE_RUNTIME_ROOT=quality_knowledge.web.app.create_app")
         print("PRODUCT_ENTRY=/software-assessment#quality-scenario-production")
         print("DIRECT_QSV1_CANDIDATE_WRITE=NO")
         print("DIRECT_QSV1_PUBLISH_WRITE=NO")
         print("PROVIDER=CONTROLLED_OPENAI_COMPATIBLE_MOCK")
         print("REAL_PROVIDER_SEMANTIC_GATE=OUT_OF_SCOPE")
-        print(f"SOURCE_FIXTURE_DB={SOURCE_DB}")
-        print(f"QSV1_RESULT_DB={QSV1_DB}")
-        print("SOURCE_AND_QSV1_DB_SEPARATED=YES")
-        print("G1_G5_SOURCE_DATA=READY")
+        print(f"SOURCE_DB={source_db}")
+        print(f"QSV1_DB={qsv1_db}")
+        print(f"ORIGINAL_DB_MUTATED={'NO' if source_mode == 'ORIGINAL_DB_COPY' else 'N/A'}")
+        print(
+            "SOURCE_AND_QSV1_DB_SEPARATED="
+            + ("NO_PRESERVE_ORIGINAL_HISTORY" if source_mode == "ORIGINAL_DB_COPY" else "YES")
+        )
+        print(
+            "G1_G5_SOURCE_DATA="
+            + ("USER_ORIGINAL_DB" if source_mode == "ORIGINAL_DB_COPY" else "READY")
+        )
         print(f"APP_URL={base}/software-assessment#quality-scenario-production")
         print("WINDOWS_ACCEPTANCE_START=PASS")
 
