@@ -170,7 +170,11 @@ jobs:
           ]
           assert manifest["domain_boundary"]["composition_profile"] == ["HARDWARE_CASE"]
           assert manifest["domain_boundary"]["package_policy"] == "EXPLICIT_HARDWARE_ALLOWLIST"
-          assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is False
+          assert manifest["domain_boundary"]["cross_domain_business_code_bundled"] is True
+          assert manifest["domain_boundary"]["cross_domain_scope"] == [
+              "Unified Knowledge public facade and immutable release reader",
+              "LOCAL_NON_PROD Hardware E2E binding; no second store or Runtime",
+          ]
           assert manifest["entrypoints"]["start_product_windows"] == "START_HARDWARE_CASE.bat"
           assert manifest["entrypoints"]["start_product_macos"] == "START_HARDWARE_CASE.command"
           assert manifest["entrypoints"]["web_launcher"] == "scripts/hardware_case_web_start.py"
@@ -185,6 +189,12 @@ jobs:
           assert not any("P01-P06" in item for item in manifest["known_gaps"])
 
           paths = [item["path"] for item in manifest["files"]]
+          assert {
+              "services/hardware_r1_e2e_nonprod_knowledge.py",
+              "repositories/json_repository.py",
+              "knowledge_production/public_service.py",
+              "knowledge_production/release.py",
+          }.issubset(set(paths))
           forbidden_suffixes = {".db", ".sqlite", ".sqlite3", ".log"}
           assert not any(Path(path).suffix.lower() in forbidden_suffixes for path in paths)
           assert not any(Path(path).name.lower() in {".env", ".env.local"} for path in paths)
@@ -317,4 +327,3 @@ jobs:
           python -m pytest -q --noconftest
           tests/test_hardware_data_reliability.py
           tests/test_hardware_data_reliability_http.py
-

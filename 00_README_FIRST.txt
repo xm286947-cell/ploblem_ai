@@ -80,6 +80,22 @@ Provider、Endpoint、Retry、Secret 均由 Unified Runtime 负责。
 Hardware Case 不自建第二套模型调用链。
 
 
+【复用现有 Knowledge 数据根（本机 NON_PROD 验证）】
+
+如果升级到新解压目录但继续使用现有本机知识数据，启动前设置：
+
+  HARDWARE_BOOTSTRAP_PATH=<现有安装的 bootstrap.json>
+  HARDWARE_DATA_ROOT=<现有 bootstrap 绑定的数据目录，可省略>
+  HARDWARE_R1_E2E_PROFILE=1
+  HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD
+  HARDWARE_R1_E2E_KNOWLEDGE_MODE=LOCAL_NON_PROD
+  HARDWARE_KNOWLEDGE_RELEASE_VERSION=<现有 release 前缀>
+
+启动器会读取既有 bootstrap 并校验 data-root 一致性，不会覆盖系统默认
+bootstrap，也不会复制数据库或凭证。候选包包含 LOCAL_NON_PROD Knowledge
+公共 facade 绑定所需的源码闭包；正式数据仍位于本机既有 data root。
+
+
 【安全】
 
 真实 Word / Excel / API Key 只留在公司本机。
