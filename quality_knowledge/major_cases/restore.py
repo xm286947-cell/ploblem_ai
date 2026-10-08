@@ -121,6 +121,31 @@ ENTRY_FEATURE_MAP = {
 }
 
 
+def derive_description_title(description: str, *, limit: int = 80) -> str:
+    """Build a readable fallback title without cutting a numbered/numeric token.
+
+    The source description is never altered. An explicit business title wins.
+    """
+    text = str(description or "").strip()
+    if len(text) <= limit:
+        return text
+
+    excerpt = text[:limit]
+    sentence_end = max(
+        (index for index, char in enumerate(excerpt) if char in "。！？!?\\n"),
+        default=-1,
+    )
+    if sentence_end >= max(16, limit // 3):
+        return excerpt[:sentence_end + 1].strip()
+
+    # A character cap must not clip a numeric measurement into a stray digit.
+    if excerpt[-1].isascii() and excerpt[-1].isalnum() and text[limit].isascii() and text[limit].isalnum():
+        match = re.search(r"[A-Za-z0-9._/-]+$", excerpt)
+        if match and match.start() >= limit // 3:
+            excerpt = excerpt[:match.start()].rstrip(" ,，;；")
+    return excerpt.rstrip() + "…"
+
+
 class MajorCaseRestoreService:
     """MAJOR_CASE adapter over the existing Excel/report and knowledge layers."""
 
@@ -157,7 +182,7 @@ class MajorCaseRestoreService:
         mapped["itrs"] = itr_values
         title = _pick_raw(raw, EXTRA_ALIASES["title"])
         description = str(mapped.get("original_description") or "").strip()
-        title = title or description[:80] or igr or (itr_values[0] if itr_values else f"重大问题-{record['excel_row']}")
+        title = title or derive_description_title(description) or igr or (itr_values[0] if itr_values else f"重大问题-{record['excel_row']}")
 
         if igr:
             source_key = f"IGR:{igr}"
