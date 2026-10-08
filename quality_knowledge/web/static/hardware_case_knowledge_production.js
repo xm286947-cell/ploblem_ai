@@ -22,6 +22,11 @@
   const tbody = q('[data-batch-items]');
   const runBatchButton = q('[data-run-batch]');
   const retryBatchButton = q('[data-retry-failed]');
+  const w3Mode = q('[data-w3-execution-mode]');
+  const w3Concurrency = q('[data-w3-concurrency]');
+  const w3Cancel = q('[data-w3-cancel-batch]');
+  const w3Resume = q('[data-w3-resume-batch]');
+  const w3Progress = q('[data-w3-batch-progress]');
   const detail = q('[data-case-detail]');
   const debugPanel = q('[data-advanced-debug]');
 
@@ -91,7 +96,7 @@
   function statusClass(value) {
     const status = String(value || '');
     if (['PASS', 'CACHE_HIT', 'CANDIDATE_READY'].includes(status)) return 'ok';
-    if (['REVIEW', 'QUEUED', 'RUNNING', 'WAITING', 'RUNTIME_BLOCKED', 'DEPENDENCY_BLOCKED'].includes(status)) return 'warn';
+    if (['REVIEW', 'QUEUED', 'RUNNING', 'WAITING', 'CANCELLED', 'RUNTIME_BLOCKED', 'DEPENDENCY_BLOCKED'].includes(status)) return 'warn';
     if (['FAILED', 'PARSE_FAILED', 'STAGE_A_FAILED', 'STAGE_B_FAILED', 'GATE_FAILED'].includes(status)) return 'bad';
     return '';
   }
@@ -103,6 +108,8 @@
     REVIEW: '待人工确认',
     QUEUED: '待处理',
     RUNNING: '处理中',
+    CANCELLED: '已取消',
+    PARTIAL_CANCELLED: '部分取消',
     WAITING: '待执行',
     FAILED: '处理失败',
     PARSE_FAILED: '文档解析失败',
@@ -155,6 +162,7 @@
       summary.CANDIDATE_READY || 0,
       summary.REVIEW || 0,
       summary.FAILED || 0,
+      summary.CANCELLED || 0,
     ];
     q('[data-batch-summary]').querySelectorAll('strong')
       .forEach((node, index) => { node.textContent = values[index]; });
@@ -208,6 +216,7 @@
       CANDIDATE_READY: 0,
       REVIEW: 0,
       FAILED: 0,
+      CANCELLED: 0,
     };
     items.forEach((item) => {
       const value = displayResult(item);
@@ -222,10 +231,13 @@
     const states = items.map((item) => displayResult(item));
     if (!states.length) return 'EMPTY';
     if (states.every((value) => value === 'QUEUED')) return 'QUEUED';
+    if (states.every((value) => value === 'CANCELLED')) return 'CANCELLED';
     if (states.some((value) => value === 'RUNNING')) return 'RUNNING';
     const failed = states.filter((value) => value === 'FAILED').length;
+    const cancelled = states.filter((value) => value === 'CANCELLED').length;
     const ready = states.filter((value) =>
       ['CANDIDATE_READY', 'REVIEW'].includes(value)).length;
+    if (cancelled && cancelled + failed + ready === states.length) return 'PARTIAL_CANCELLED';
     if (failed === states.length) return 'FAILED';
     if (failed && ready) return 'PARTIAL_FAILURE';
     if (ready === states.length) return 'READY_FOR_REVIEW';
@@ -379,8 +391,24 @@
     q('[data-batch-ref]').textContent =
       batch ? batch.batch_id + ' · ' + statusLabel(batch.status) : '尚未选择导入任务。';
     renderSummary(batch?.summary || {});
-    runBatchButton.disabled = !batch;
-    retryBatchButton.disabled = !batch || !(batch.summary?.FAILED > 0);
+    const requested = Boolean(batch?.cancel_requested);
+    const summary = batch?.summary || {};
+    runBatchButton.disabled = !batch || requested;
+    retryBatchButton.disabled = !batch || requested || !(summary.FAILED > 0);
+    w3Cancel.disabled = !batch || requested ||
+      !(Number(summary.QUEUED || 0) + Number(summary.RUNNING || 0) > 0);
+    w3Resume.disabled = !batch || !requested;
+    w3Mode.disabled = !batch || requested;
+    w3Concurrency.disabled = !batch || requested || w3Mode.value !== 'PARALLEL';
+    const total = Number(summary.TOTAL || 0);
+    const finished = Math.max(0, total - Number(summary.QUEUED || 0) -
+      Number(summary.RUNNING || 0));
+    w3Progress.textContent = !batch
+      ? '选择导入任务后显示执行进度。'
+      : '进度 ' + finished + '/' + total +
+        ' · 运行中 ' + Number(summary.RUNNING || 0) +
+        ' · 已取消 ' + Number(summary.CANCELLED || 0) +
+        (requested ? ' · 已请求停止未开始的案例' : '') + '。';
 
     if (!batch) {
       tbody.innerHTML = '<tr><td colspan="11" class="hc-empty">暂无导入任务。</td></tr>';
@@ -507,15 +535,22 @@
           return;
         }
       }
+      const mode = w3Mode.value === 'PARALLEL' ? 'PARALLEL' : 'SEQUENTIAL';
+      const workers = Number(w3Concurrency.value);
+      const query = action === 'run-resume'
+        ? '?execution_mode=' + encodeURIComponent(mode) + '&concurrency=' + workers
+        : '';
       setMessage(action === 'retry-failed-only'
         ? '正在仅重试失败项…'
-        : '正在开始 / 继续处理本次导入任务…');
+        : (mode === 'PARALLEL'
+          ? '正在并发处理不同案例（最多 ' + workers + ' 个）…'
+          : '正在串行处理本次导入任务…'));
       const batchId = state.batch.batch_id;
       const stopPolling = startBatchPolling(batchId);
       let payload;
       try {
         payload = await request(
-          '/batches/' + encodeURIComponent(batchId) + '/' + action,
+          '/batches/' + encodeURIComponent(batchId) + '/' + action + query,
           {method: 'POST'}
         );
       } finally {
@@ -523,9 +558,11 @@
       }
       renderBatch(payload);
       const selected = payload.retry_selected_count;
-      setMessage(selected === undefined
-        ? '本次导入任务处理完成。'
-        : '失败项重试完成，共选择 ' + selected + ' 个失败案例。');
+      setMessage(payload.cancel_requested
+        ? '已请求取消；运行中的案例按既有 Stage 顺序收口。'
+        : (selected === undefined
+          ? '本次导入任务处理完成。'
+          : '失败项重试完成，共选择 ' + selected + ' 个失败案例。'));
     } catch (error) {
       setMessage('导入任务操作失败：' + error.message, true);
     }
@@ -1262,6 +1299,32 @@
     uploadFiles(event.target.files);
     event.target.value = '';
   });
+  w3Mode.addEventListener('change', () => {
+    w3Concurrency.disabled = w3Mode.value !== 'PARALLEL' ||
+      !state.batch || Boolean(state.batch.cancel_requested);
+  });
+  async function w3BatchControl(action) {
+    if (!state.batch) return;
+    const batchId = state.batch.batch_id;
+    if (action === 'resume-cancelled' && !window.confirm(
+      '只会恢复已取消的案例到待处理，不自动调用 AI。确定继续？'
+    )) return;
+    try {
+      const payload = await request(
+        '/batches/' + encodeURIComponent(batchId) + '/' + action,
+        {method: 'POST'}
+      );
+      if (state.batch?.batch_id !== batchId) return;
+      renderBatch(payload);
+      setMessage(action === 'cancel'
+        ? '取消请求已提交：只取消未开始的案例；运行中的任务不会强制终止。'
+        : '已恢复取消项；点击“开始 / 继续处理”才会重新执行。');
+    } catch (error) {
+      setMessage('批次控制失败：' + error.message, true);
+    }
+  }
+  w3Cancel.addEventListener('click', () => w3BatchControl('cancel'));
+  w3Resume.addEventListener('click', () => w3BatchControl('resume-cancelled'));
   runBatchButton.addEventListener('click', () => batchAction('run-resume'));
   retryBatchButton.addEventListener('click', () => batchAction('retry-failed-only'));
   historySelect.addEventListener('change', () => {
