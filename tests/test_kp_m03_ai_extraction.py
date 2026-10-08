@@ -689,7 +689,7 @@ def test_kp_m03_rerun_rejects_changed_structured_input_before_dispatch(
 
     tampered = structured.model_copy(deep=True)
     setattr(tampered.blocks[0], changed_field, changed_value)
-    assert source.content_hash == _seedless_source_hash(source)
+    assert source.content_hash == hashlib.sha256(b"official-emmc-health-pdf").hexdigest()
     assert source.source_version == "R1"
     assert source.source_id == "EMMC-HEALTH"
     assert tampered.source_id == structured.source_id
@@ -715,6 +715,3 @@ def test_kp_m03_rerun_rejects_changed_structured_input_before_dispatch(
     assert repository.list("knowledge/production/evidence") == []
     assert repository.list("knowledge/production/published") == []
 
-
-def _seedless_source_hash(source: SourceDocument) -> str:
-    return hashlib.sha256(b"official-emmc-health-pdf").hexdigest()
