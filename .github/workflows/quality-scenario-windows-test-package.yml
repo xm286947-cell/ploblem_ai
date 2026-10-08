@@ -38,6 +38,30 @@ jobs:
         run: |
           .\.venv\Scripts\python.exe tools\run_quality_scenario_windows_acceptance.py --smoke-only --no-browser --source-db validation\windows_acceptance\quality_scenario_source_fixture.db
 
+      - name: Windows startup failure diagnostics negative gate
+        shell: pwsh
+        run: |
+          $broken = Join-Path $env:RUNNER_TEMP "broken_original_quality.db"
+          [System.IO.File]::WriteAllText($broken, "THIS_IS_NOT_A_SQLITE_DB")
+          $out = Join-Path $env:RUNNER_TEMP "start_stdout.txt"
+          $err = Join-Path $env:RUNNER_TEMP "start_stderr.txt"
+          $proc = Start-Process -FilePath ".\.venv\Scripts\python.exe" -ArgumentList @(
+            "tools\run_quality_scenario_windows_acceptance.py",
+            "--smoke-only",
+            "--no-browser",
+            "--source-db",
+            $broken
+          ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          $text = (Get-Content -Raw $out) + (Get-Content -Raw $err)
+          if ($proc.ExitCode -eq 0) { throw "DIAGNOSTIC_GATE_UNEXPECTED_SUCCESS" }
+          if ($text -notmatch "WINDOWS_ACCEPTANCE_START=FAIL") { throw "DIAGNOSTIC_GATE_MISSING_FAILURE" }
+          if ($text -notmatch "APP_LOG_TAIL_BEGIN") { throw "DIAGNOSTIC_GATE_MISSING_APP_LOG" }
+          if ($text -notmatch "APP_PROCESS_EXIT=") { throw "DIAGNOSTIC_GATE_MISSING_PROCESS_EXIT" }
+          if ($text -notmatch "(?i)(not a database|databaseerror|sqlite3)") { throw "DIAGNOSTIC_GATE_MISSING_ROOT_CAUSE" }
+          Write-Host "WINDOWS_STARTUP_FAILURE_DIAGNOSTICS=PASS"
+          Write-Host "ROOT_CAUSE_VISIBLE=YES"
+          Write-Host "APP_LOG_TAIL_VISIBLE=YES"
+
       - name: Build fresh-extract Windows test package
         id: package
         shell: pwsh
