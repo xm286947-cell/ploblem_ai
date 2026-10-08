@@ -9,7 +9,12 @@ echo ============================================================
 echo Quality Scenario Windows Compatibility Acceptance
 echo ============================================================
 echo PACKAGE_ROOT=%PACKAGE_ROOT%
-echo MODE=TEST_ONLY_CONTROLLED_DATA
+if "%~1"=="" (
+  echo MODE=TEST_ONLY_CONTROLLED_DATA
+) else (
+  echo MODE=ORIGINAL_DB_COPY
+  echo ORIGINAL_DB=%~f1
+)
 echo REAL_PROVIDER_SEMANTIC_GATE=OUT_OF_SCOPE
 echo.
 
@@ -58,7 +63,11 @@ if errorlevel 1 (
 
 echo DEPENDENCY_PREFLIGHT=PASS
 echo.
-"%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py"
+if "%~1"=="" (
+  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py"
+) else (
+  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py" --source-db "%~f1"
+)
 set "EXIT_CODE=%errorlevel%"
 
 echo.
