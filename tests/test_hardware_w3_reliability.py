@@ -432,3 +432,9 @@ def test_reconciled_item_cannot_run_from_stale_snapshot(tmp_path, monkeypatch):
     # Stale pre-claim snapshot cannot regain ownership after recovery.
     service._run_item(item, retry_stage=None, force_full_run=False)
     assert store.get_item(item_id)["orchestration_status"] == "RUNTIME_BLOCKED"
+    # Even an explicit fresh user action must not replay an unknown Provider
+    # outcome without evidence reconciliation.
+    with pytest.raises(module.HardwareR1WorkbenchError, match="W3_RECONCILIATION_REQUIRED"):
+        service.run_resume_item(item_id)
+    with pytest.raises(module.HardwareR1WorkbenchError, match="W3_RECONCILIATION_REQUIRED"):
+        service.force_full_run_item(item_id)
