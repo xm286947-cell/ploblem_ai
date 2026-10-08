@@ -130,6 +130,13 @@ def test_cross_extension_and_itr_fallback_are_not_used(tmp_path: Path):
     assert row["report_match"]["candidate_paths"] == []
 
 
+def test_legacy_doc_is_rejected_before_staging(tmp_path: Path):
+    client = _client(tmp_path)
+    response = _preview(client, [("ITR20269951-review.doc", b"legacy binary Word")])
+    assert response.status_code == 400
+    assert response.json()["detail"] == "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED"
+
+
 def test_safe_normalized_filename_match_and_generic_itr_fallback_forbidden(tmp_path: Path):
     client = _client(tmp_path)
     normalized = _preview(client, [("itr20269951-REVIEW.PDF", PDF_BYTES)])
