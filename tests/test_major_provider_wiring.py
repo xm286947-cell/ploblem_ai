@@ -1,12 +1,19 @@
 """Canonical Major provider composition and fail-closed wiring gate."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+import json
 from pathlib import Path
+import sqlite3
+import threading
+from typing import Iterator
+from urllib.request import Request, urlopen
 
 from fastapi.testclient import TestClient
 
 from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
+from tools.openai_mock.server import create_server
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +25,44 @@ FORMAL_MOCK_FIXTURE = {
     "ACTION": "优化制动/回馈策略及相关控制参数，并补充边界工况验证",
     "VERIFICATION": "重复边界负载切换后未再复现母线过压保护",
 }
+WIRING_TEST_SECRET = "MAJOR_WIRING_TEST_SECRET_MUST_NOT_PERSIST"
+
+
+@contextmanager
+def running_provider() -> Iterator[tuple[str, int]]:
+    server = create_server("127.0.0.1", 0)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.01},
+        daemon=True,
+    )
+    thread.start()
+    try:
+        yield server.server_address
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def configure_provider(host: str, port: int, payload: list[dict]) -> None:
+    raw = json.dumps(
+        {"scenario_key": "default", "payload": payload},
+        ensure_ascii=False,
+    ).encode()
+    request = Request(
+        f"http://{host}:{port}/__mock__/scenario",
+        data=raw,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urlopen(request, timeout=2) as response:
+        assert response.status == 200
+
+
+def provider_counters(host: str, port: int) -> dict[str, int]:
+    with urlopen(f"http://{host}:{port}/__mock__/counters", timeout=2) as response:
+        return json.loads(response.read().decode())["data"]
 
 
 def formal_mock_provider(_provider_input, pending_specs, _context):
@@ -62,7 +107,10 @@ def _intake(client: TestClient) -> dict:
     return response.json()
 
 
-def test_core_provider_none_keeps_fail_closed_503(tmp_path: Path) -> None:
+def test_core_provider_none_keeps_fail_closed_503(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("MAJOR_MODEL_CONFIG", raising=False)
+    monkeypatch.delenv("DASHSCOPE_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     p0_db = tmp_path / "fail-closed.sqlite3"
     _initialize_p0(p0_db)
     client = TestClient(create_p0_app(
@@ -80,6 +128,72 @@ def test_core_provider_none_keeps_fail_closed_503(tmp_path: Path) -> None:
     assert response.status_code == 503
     assert response.json()["detail"] == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED"
     assert client.get("/api/v2/historical-cases").json()["total"] == 0
+
+
+def test_standard_composition_loads_configured_major_provider(tmp_path: Path) -> None:
+    with running_provider() as (host, port):
+        model_config = tmp_path / "model.local.yaml"
+        model_config.write_text(
+            f"""
+active_model: qwen_prod
+models:
+  qwen_prod:
+    provider: openai_compatible
+    base_url: http://{host}:{port}/v1
+    api_key: {WIRING_TEST_SECRET}
+    model: qwen3.8-max
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+            encoding="utf-8",
+        )
+        p0_db = tmp_path / "configured.sqlite3"
+        _initialize_p0(p0_db)
+        app = create_p0_app(
+            p0_db,
+            project_root=ROOT,
+            runtime_model_config=model_config,
+            major_case_db_path=tmp_path / "major.sqlite3",
+            major_attachment_root=tmp_path / "attachments",
+            major_artifact_root=tmp_path / "artifacts",
+        )
+        assert app.state.major_provider_status == {
+            "configured": True,
+            "source": "UNIFIED_RUNTIME_AGENT_CONFIG",
+        }
+        client = TestClient(app)
+        created = _intake(client)
+        case_id = created["case"]["case_id"]
+        event_id = created["event"]["event_id"]
+        version_id = created["document"]["version_id"]
+        fragments = app.state.major_case_repository.fragments(version_id)
+        assert fragments
+        fragment_id = str(fragments[0]["fragment_id"])
+        payload = [
+            {
+                "object_id": f"{event_id}:{entry_type}",
+                "content": FORMAL_MOCK_FIXTURE[entry_type],
+                "fragment_ids": [fragment_id],
+                "confidence": 0.9,
+                "explanation": "The cited source fragment supports this candidate.",
+                "mechanism": "",
+            }
+            for entry_type in FORMAL_MOCK_FIXTURE
+        ]
+        configure_provider(host, port, payload)
+
+        response = client.post(
+            f"/api/v2/major-production/cases/{case_id}/analysis"
+        )
+        assert response.status_code == 200, response.text
+        assert len(response.json()["candidates"]) == 4
+        assert provider_counters(host, port)["default"] == 1
+        assert app.state.major_case_production_service.provider is not None
+
+        runtime_db = tmp_path / "major.sqlite3.runtime.db"
+        with sqlite3.connect(runtime_db) as connection:
+            persisted = "\n".join(connection.iterdump())
+        assert WIRING_TEST_SECRET not in persisted
 
 
 def test_formal_provider_wiring_returns_four_pending_candidates(tmp_path: Path) -> None:

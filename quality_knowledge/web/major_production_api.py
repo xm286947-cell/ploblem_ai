@@ -91,7 +91,7 @@ def create_major_production_router(
         if restore_service is None:
             raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
         suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in {".xlsx", ".xlsm"}:
+        if suffix not in {".xls", ".xlsx", ".xlsm"}:
             raise HTTPException(400, "MAJOR_EXCEL_TYPE_UNSUPPORTED")
         excel_content = await file.read()
         if not excel_content:
@@ -99,7 +99,7 @@ def create_major_production_router(
         material_payload: list[tuple[str, bytes]] = []
         for material in materials:
             material_suffix = Path(material.filename or "").suffix.lower()
-            if material_suffix not in {".pdf", ".docx", ".doc"}:
+            if material_suffix not in {".pdf", ".docx"}:
                 raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
             material_payload.append((material.filename or "material.bin", await material.read()))
         try:

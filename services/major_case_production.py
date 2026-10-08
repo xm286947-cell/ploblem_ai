@@ -174,6 +174,15 @@ class MajorCaseProductionService:
             )
             fragments = self.repository.fragments(record_id)
             source_text = "\n".join(str(item.get("text_content") or "") for item in fragments[:20])
+            provider_fragments = [
+                {
+                    "fragment_id": str(item["fragment_id"]),
+                    "section_path": str(item.get("section_path") or ""),
+                    "location_ref": str(item.get("location_ref") or ""),
+                    "text_content": str(item.get("text_content") or ""),
+                }
+                for item in fragments[:20]
+            ]
             source_revision_id = record_id
         else:
             with self.repository.connect() as connection:
@@ -196,6 +205,14 @@ class MajorCaseProductionService:
             normalized = str(fact.get("normalized_json") or "{}")
             raw = str(fact.get("raw_json") or "{}")
             source_text = normalized + "\n" + raw
+            provider_fragments = [
+                {
+                    "fragment_id": record_id,
+                    "section_path": "STRUCTURED SOURCE FACT",
+                    "location_ref": record_id,
+                    "text_content": source_text,
+                }
+            ]
             source_revision_id = record_id
         specs = [
             MajorIssueObjectSpec(
@@ -219,6 +236,8 @@ class MajorCaseProductionService:
                 "standard_itr": event.get("standard_itr"),
                 "title": detail.get("title"),
                 "source_text": source_text,
+                "source": source.model_dump(mode="json"),
+                "fragments": provider_fragments,
             },
         )
         if not outcome.business_consumable:

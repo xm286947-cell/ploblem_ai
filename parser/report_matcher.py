@@ -13,10 +13,7 @@ class ReportMatcher:
     def __init__(self, config_path: str | Path) -> None:
         config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
         matching = config["matching"]
-        self.extensions = {ext.lower() for ext in matching.get("extensions", [".pdf"])}
-        self.allow_extension_completion = bool(matching.get("allow_extension_completion", True))
-        self.allow_stem_match = bool(matching.get("allow_stem_match", True))
-        self.allow_itr_fallback = bool(matching.get("allow_itr_fallback", True))
+        self.extensions = {ext.lower() for ext in matching.get("extensions", [".pdf", ".docx"])}
         self.recursive = bool(matching.get("recursive", True))
 
     def _scan(self, reports_dir: Path) -> List[Path]:
@@ -28,22 +25,21 @@ class ReportMatcher:
         )
 
     def _build_indexes(self, files: List[Path]) -> tuple[Dict[str, List[Path]], Dict[str, List[Path]]]:
-        by_name: Dict[str, List[Path]] = {}
-        by_stem: Dict[str, List[Path]] = {}
+        by_exact_name: Dict[str, List[Path]] = {}
+        by_normalized_name: Dict[str, List[Path]] = {}
         for path in files:
-            by_name.setdefault(normalize_filename(path.name), []).append(path)
-            by_stem.setdefault(normalize_filename(path.stem), []).append(path)
-        return by_name, by_stem
+            by_exact_name.setdefault(path.name, []).append(path)
+            by_normalized_name.setdefault(normalize_filename(path.name), []).append(path)
+        return by_exact_name, by_normalized_name
 
     def match_one(self, record: dict, reports_dir: str | Path) -> dict:
         reports_path = Path(reports_dir)
         files = self._scan(reports_path)
-        by_name, by_stem = self._build_indexes(files)
+        by_exact_name, by_normalized_name = self._build_indexes(files)
 
         case_id = record["case_id"]
         fields = record.get("mapped_fields", {})
         report_filename = str(fields.get("report_filename", "") or "").strip()
-        itr_id = str(fields.get("itr_id", "") or "").strip()
         warnings: List[str] = []
         candidates: List[Path] = []
         match_type = "NOT_FOUND"
@@ -51,25 +47,21 @@ class ReportMatcher:
         if not report_filename:
             match_type = "NO_REPORT_NAME"
         else:
-            normalized_name = normalize_filename(Path(report_filename).name)
-            candidates = by_name.get(normalized_name, [])
-            if candidates:
+            basename = Path(report_filename).name
+            normalized_name = normalize_filename(basename)
+            normalized_candidates = by_normalized_name.get(normalized_name, [])
+            exact_candidates = by_exact_name.get(basename, [])
+            # Normalized collisions are ambiguity, even when one spelling is an
+            # exact match. Never guess between case/width/whitespace variants.
+            if len(normalized_candidates) > 1:
+                candidates = normalized_candidates
+                match_type = "AMBIGUOUS"
+            elif exact_candidates:
+                candidates = exact_candidates
                 match_type = "EXACT_FILENAME"
-            elif self.allow_extension_completion and not Path(report_filename).suffix:
-                for extension in self.extensions:
-                    candidates.extend(by_name.get(normalize_filename(report_filename + extension), []))
-                if candidates:
-                    match_type = "NORMALIZED_FILENAME"
-            if not candidates and self.allow_stem_match:
-                candidates = by_stem.get(normalize_filename(Path(report_filename).stem), [])
-                if candidates:
-                    match_type = "STEM_MATCH"
-
-        if not candidates and self.allow_itr_fallback and itr_id:
-            itr_norm = normalize_filename(itr_id)
-            candidates = [path for path in files if itr_norm in normalize_filename(path.stem)]
-            if candidates:
-                match_type = "ITR_FALLBACK"
+            elif normalized_candidates:
+                candidates = normalized_candidates
+                match_type = "NORMALIZED_FILENAME"
 
         # Deduplicate
         candidates = sorted(set(candidates))
@@ -96,12 +88,20 @@ class ReportMatcher:
             file_hash = file_sha256(selected)
             file_size = selected.stat().st_size
 
+        status = {
+            "EXACT_FILENAME": "MATCHED",
+            "NORMALIZED_FILENAME": "MATCHED",
+            "NOT_FOUND": "NOT_FOUND",
+            "AMBIGUOUS": "AMBIGUOUS",
+            "NO_REPORT_NAME": "REVIEW_REQUIRED",
+        }.get(match_type, "REVIEW_REQUIRED")
         return {
             "case_id": case_id,
             "report_filename": report_filename,
             "matched_report_path": matched,
             "candidate_paths": [str(path) for path in candidates],
             "match_type": match_type,
+            "match_status": status,
             "file_hash": file_hash,
             "file_size": file_size,
             "parse_status": parse_status,
@@ -131,9 +131,15 @@ class ReportMatcher:
             "match_type_counts": counts,
             "matched_count": sum(
                 count for name, count in counts.items()
-                if name in {"EXACT_FILENAME","NORMALIZED_FILENAME","STEM_MATCH","ITR_FALLBACK"}
+                if name in {"EXACT_FILENAME", "NORMALIZED_FILENAME"}
             ),
             "unmatched_count": counts.get("NO_REPORT_NAME", 0) + counts.get("NOT_FOUND", 0),
             "ambiguous_count": counts.get("AMBIGUOUS", 0),
+            "status_counts": {
+                "MATCHED": sum(counts.get(name, 0) for name in {"EXACT_FILENAME", "NORMALIZED_FILENAME"}),
+                "NOT_FOUND": counts.get("NOT_FOUND", 0),
+                "AMBIGUOUS": counts.get("AMBIGUOUS", 0),
+                "REVIEW_REQUIRED": counts.get("NO_REPORT_NAME", 0),
+            },
         }
         return results, summary
