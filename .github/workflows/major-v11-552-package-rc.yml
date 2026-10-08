@@ -5,7 +5,7 @@ on:
     branches:
       - release/major-v1.1-552-rc-20261008
     paths:
-      - .github/workflows/major-v11-package-rc.yml
+      - .github/workflows/major-v11-552-package-rc.yml
   workflow_dispatch:
 
 permissions:
