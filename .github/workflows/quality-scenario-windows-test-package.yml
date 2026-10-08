@@ -33,6 +33,11 @@ jobs:
         run: |
           .\.venv\Scripts\python.exe tools\run_quality_scenario_windows_acceptance.py --smoke-only --no-browser
 
+      - name: Windows original DB copy smoke
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe tools\run_quality_scenario_windows_acceptance.py --smoke-only --no-browser --source-db validation\windows_acceptance\quality_scenario_source_fixture.db
+
       - name: Build fresh-extract Windows test package
         id: package
         shell: pwsh
@@ -54,6 +59,9 @@ jobs:
             base_product_sha = "5d9538f189fb3ca6f056ea57ad0d666f6e6b9002"
             platform_focus = "Windows"
             launch_entry = "start_quality_scenario_windows_acceptance.bat"
+            original_db_launch_entry = "start_quality_scenario_windows_original_db.bat"
+            original_db_supported = $true
+            original_db_write_policy = "COPY_FIRST_ORIGINAL_UNTOUCHED"
             guide = "QUALITY_SCENARIO_WINDOWS_ACCEPTANCE.md"
             agent_timeout_seconds = 300
             provider_mode = "CONTROLLED_OPENAI_COMPATIBLE_MOCK"
