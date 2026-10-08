@@ -86,9 +86,16 @@ def main() -> int:
         augment_fixture(ORIGINAL_DB_COPY)
         source_mode = "ORIGINAL_DB_COPY_PLUS_CONTROLLED_CASES"
         source_db = ORIGINAL_DB_COPY
-        # Preserve the original database's existing QSV1 lifecycle/history in
-        # the test copy. Any Windows acceptance writes stay in the copy only.
-        qsv1_db = ORIGINAL_DB_COPY
+        # Keep QSV1 lifecycle writes in a dedicated Windows acceptance DB.
+        # The supplied mature DB is source/business data only and remains
+        # untouched; its copy is also not used as the QSV1 write store.
+        qsv1_db = FIXTURE_QSV1_DB
+        for path in (
+            qsv1_db,
+            Path(str(qsv1_db) + "-wal"),
+            Path(str(qsv1_db) + "-shm"),
+        ):
+            path.unlink(missing_ok=True)
     else:
         manifest_path = FIXTURE_SOURCE_DB.with_suffix(FIXTURE_SOURCE_DB.suffix + ".fixture.json")
         if FIXTURE_SOURCE_DB.exists():
@@ -151,7 +158,21 @@ def main() -> int:
         )
 
         base = f"http://127.0.0.1:{args.port}"
-        wait_http(base + "/issues", timeout=45)
+        try:
+            wait_http(base + "/issues", timeout=45)
+        except Exception:
+            print("WINDOWS_ACCEPTANCE_START=FAIL")
+            print(f"APP_LOG={APP_LOG}")
+            try:
+                if APP_LOG.is_file():
+                    lines = APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+                    print("----- APP LOG TAIL -----")
+                    for line in lines[-120:]:
+                        print(line)
+                    print("----- END APP LOG TAIL -----")
+            except Exception as log_exc:
+                print(f"APP_LOG_READ_FAIL={type(log_exc).__name__}")
+            raise
         for route in (
             "/issues",
             "/software-assessment",
@@ -177,7 +198,7 @@ def main() -> int:
         print(
             "SOURCE_AND_QSV1_DB_SEPARATED="
             + (
-                "NO_PRESERVE_ORIGINAL_HISTORY"
+                "YES_SOURCE_COPY_PLUS_SEPARATE_QSV1"
                 if source_mode.startswith("ORIGINAL_DB_COPY")
                 else "YES"
             )
