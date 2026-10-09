@@ -58,3 +58,33 @@ def test_analysis_blocks_unknown_knowledge_and_unconfigured_agent():
         HardwareEngineeringAnalysisService(Formal(), None).analyze(
             "KO-0207", "DESIGN_REUSE")
     assert error.value.code == "ENGINEERING_AGENT_NOT_CONFIGURED"
+
+
+def test_analysis_http_endpoint_is_disabled_without_agent_and_reads_only_formal():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from quality_knowledge.web.hardware_case_api import create_hardware_case_router
+
+    class EmptyCases:
+        def search_cases(self, query="", **kwargs):
+            return {"results": []}
+
+    app = FastAPI()
+    app.include_router(create_hardware_case_router(EmptyCases()))
+    with TestClient(app) as client:
+        blocked = client.post("/api/v2/hardware-cases/r2/engineering-analysis",
+                              json={"knowledge_id": "KO-0207", "scenario": "DESIGN_REUSE"})
+        assert blocked.status_code == 503
+
+    app = FastAPI()
+    service = HardwareEngineeringAnalysisService(Formal(), lambda _: response())
+    app.include_router(create_hardware_case_router(
+        EmptyCases(), engineering_analysis_service=service))
+    with TestClient(app) as client:
+        result = client.post("/api/v2/hardware-cases/r2/engineering-analysis",
+                             json={"knowledge_id": "KO-0207", "scenario": "DESIGN_REUSE"})
+        assert result.status_code == 200
+        output = result.json()
+        assert output["kind"] == "AI_GENERATED_REFERENCE_NOT_FORMAL"
+        assert output["checks"][0]["source_field"] == "engineering_rule"
+        assert output["checks"][0]["evidence_scope"] == "CASE_LEVEL_REFERENCE"
