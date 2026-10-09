@@ -12,7 +12,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 dist=ROOT/"dist"
 target=dist/(NAME+".zip")
 assert target.is_file(), "CANDIDATE_NOT_BUILT"
-expected_hash=(dist/(NAME+"_SHA256.txt")).read_text().split("ZIP_SHA256=")[1].splitlines()[0]
+expected_hash=(dist/(NAME+"_SHA256.txt")).read_text(encoding="utf-8").split("ZIP_SHA256=")[1].splitlines()[0]
 real_hash=hashlib.sha256(target.read_bytes()).hexdigest()
 assert real_hash==expected_hash,"CANDIDATE_SHA_MISMATCH"
 
@@ -27,14 +27,14 @@ with tempfile.TemporaryDirectory(prefix="w3_candidate_native_") as folder:
         assert z.testzip() is None,"CANDIDATE_CRC_FAILURE"
         z.extractall(extracted)
     product=extracted/NAME
-    manifest=json.loads((product/"W3_TEST_CANDIDATE_MANIFEST.json").read_text())
+    manifest=json.loads((product/"W3_TEST_CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["source_commit"]==SOURCE_SHA
     assert manifest["release_status"]=="INTERNAL_TEST_ONLY_NOT_FORMAL"
     assert manifest["win_mac_fresh_extract"]=="NOT_RUN"
     assert manifest["real_provider"]=="NOT_RUN"
     assert manifest["web_port"]==18782
-    assert "127.0.0.1:18783" in (product/"config/runtime/hardware_w3_mock_only.example.yaml").read_text()
-    assert "data-w3-resume-batch" in (product/"quality_knowledge/web/templates/hardware_case_knowledge_production.html").read_text()
+    assert "127.0.0.1:18783" in (product/"config/runtime/hardware_w3_mock_only.example.yaml").read_text(encoding="utf-8")
+    assert "data-w3-resume-batch" in (product/"quality_knowledge/web/templates/hardware_case_knowledge_production.html").read_text(encoding="utf-8")
     if sys.platform=="darwin":
         cmd=["/bin/sh",str(product/"START_HARDWARE_W3_MOCK_TEST.command")]
     elif os.name=="nt":
