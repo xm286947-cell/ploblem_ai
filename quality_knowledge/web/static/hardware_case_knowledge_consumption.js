@@ -3,6 +3,7 @@
   if (!root) return;
 
   const api = (root.dataset.api || '/api/public/hardware-knowledge/v1').replace(/\/$/, '');
+  const smartApi = '/api/v2/hardware-r2';
   const q = (selector, parent = root) => parent.querySelector(selector);
   const qa = (selector, parent = root) => Array.from(parent.querySelectorAll(selector));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -29,6 +30,7 @@
     ['可复用知识', ['engineering_rule', 'design_constraint', 'diagnostic_clue', 'verification_method', 'applicability', 'conclusion']],
     ['器件与参数', ['device_refs', 'key_parameters']]
   ];
+  let agentStatus = 'SKIPPED_EMPTY_QUERY';
   let activeScenario = 'research';
   let results = [];
   let query = { text: '', interface: '', signal: '', device: '' };
@@ -68,7 +70,7 @@
 
   function renderResults() {
     const box = q('[data-knowledge-results]');
-    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'}`;
+    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'} · ${agentStatus === 'COMPLETED' ? '在线 Agent 已参与' : agentStatus === 'SKIPPED_FAST_PATH' || agentStatus === 'SKIPPED_EMPTY_QUERY' ? '快速检索' : '确定性检索（Agent 未就绪）'}`;
     if (!results.length) {
       box.innerHTML = '<div class="hc-knowledge-empty">未检索到已发布的正式硬件知识</div>';
       return;
@@ -84,6 +86,7 @@
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
         <div class="hc-knowledge-evidence">证据引用（${evidenceRefs.length}）：${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
+        <div class="hc-knowledge-analysis"><button type="button" data-analyze-knowledge="${esc(item.knowledge_id)}">按当前视角分析工程经验</button><div data-analysis-output></div></div>
       </article>`;
     }).join('');
   }
@@ -107,6 +110,21 @@
     return payload;
   }
 
+  async function fetchR2(path, options = {}) {
+    const response = await fetch(smartApi + path, {
+      ...options,
+      headers: {Accept:'application/json', ...(options.body ? {'Content-Type':'application/json'} : {})}
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) {}
+    if (!response.ok) {
+      const error = new Error(String(payload.detail || response.status));
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+
   function searchParams() {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => { if (value) params.set(key, value); });
@@ -118,7 +136,8 @@
     q('[data-knowledge-unavailable]').hidden = true;
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/search' + searchParams());
+      const payload = await fetchR2('/search' + searchParams());
+      agentStatus = String(payload.agent?.status || 'UNKNOWN');
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
     } catch (error) {
@@ -185,9 +204,33 @@
     query = { text: '', interface: '', signal: '', device: '' };
     runSearch();
   });
-  q('[data-knowledge-results]').addEventListener('click', event => {
+  q('[data-knowledge-results]').addEventListener('click', async event => {
     const button = event.target.closest('[data-open-knowledge]');
-    if (button) openDetail(button.dataset.openKnowledge);
+    if (button) { openDetail(button.dataset.openKnowledge); return; }
+    const analyze = event.target.closest('[data-analyze-knowledge]');
+    if (!analyze) return;
+    const output = analyze.parentElement.querySelector('[data-analysis-output]');
+    const intents = {research:'DESIGN_REUSE',risk:'COMPONENT_CIRCUIT_RISK',market:'FIELD_PROBLEM'};
+    analyze.disabled = true;
+    output.textContent = '正在分析正式知识…';
+    try {
+      const payload = await fetchR2('/analyze', {
+        method: 'POST',
+        body: JSON.stringify({knowledge_id:analyze.dataset.analyzeKnowledge,task:intents[activeScenario]})
+      });
+      if (payload.status !== 'COMPLETED') {
+        output.textContent = '在线分析不可用：' + String(payload.reason || payload.status) + '。可继续查看上方正式知识。';
+      } else {
+        const checks = payload.analysis?.checks || [];
+        output.innerHTML = '<strong>AI 工程建议（请结合实际设计复核）</strong>' +
+          (checks.length ? '<ul>' + checks.map(item =>
+            '<li>' + esc(item.advice) + ' <small>依据：' + esc(item.knowledge_id) +
+            ' · ' + esc(labels[item.field] || item.field) + ' · ' + esc(item.evidence_id) +
+            '</small></li>').join('') + '</ul>' : '<div>暂无有证据支持的具体建议。</div>');
+      }
+    } catch (error) {
+      output.textContent = '在线分析失败：' + String(error.message || '服务暂不可用');
+    } finally { analyze.disabled = false; }
   });
   q('[data-detail-close]').addEventListener('click', () => {
     const detail = q('[data-knowledge-detail]');
