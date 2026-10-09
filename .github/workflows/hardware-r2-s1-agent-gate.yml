@@ -10,6 +10,8 @@ on:
       - "config/runtime/agents/hardware_retrieval.query_understand.yaml"
       - "prompts/runtime/hardware_retrieval/query_understand_v1.md"
       - "tests/test_hardware_r2_*.py"
+      - "scripts/build_hardware_case_mvp_package.py"
+      - "tests/test_hardware_case_mvp_package_builder.py"
       - ".github/workflows/hardware-r2-s1-agent-gate.yml"
   workflow_dispatch:
 jobs:
@@ -23,6 +25,6 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - name: Existing retrieval and real-query red-gate
         run: |
-          python -m pytest -q tests/test_hardware_case_ai_retrieval.py tests/test_hardware_case_ai_retrieval_w2.py tests/test_hardware_r2_real_query_regressions.py tests/test_hardware_r2_query_agent_contract.py tests/test_hardware_r2_query_runtime_mock.py
+          python -m pytest -q tests/test_hardware_case_ai_retrieval.py tests/test_hardware_case_ai_retrieval_w2.py tests/test_hardware_r2_real_query_regressions.py tests/test_hardware_r2_query_agent_contract.py tests/test_hardware_r2_query_runtime_mock.py tests/test_hardware_case_mvp_package_builder.py
       - name: Browser entry JS syntax
         run: node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
