@@ -537,6 +537,24 @@ class SQLiteQualityScenarioV1Repository(QualityScenarioV1Repository):
                 )
             return {"versions": versions, "reviews": reviews}
 
+    def find_for_selected_issue(
+        self, selected_id: str, trigger_source: str, trigger_reason: str
+    ) -> list[QualityScenarioV1]:
+        """Read only scenarios linked to the selected issue, using the existing source-ref index."""
+        source_ref = "QSV1-SELECTED-ISSUE:" + str(selected_id)
+        with self.connect() as connection:
+            ids = [
+                row["scenario_id"]
+                for row in connection.execute(
+                    """SELECT q.scenario_id FROM quality_scenario_v1_source s
+                       JOIN quality_scenario_v1 q ON q.scenario_id=s.scenario_id
+                       WHERE s.source_ref=? AND q.trigger_source=? AND q.trigger_reason=?
+                       ORDER BY q.updated_at DESC,q.scenario_id""",
+                    (source_ref, trigger_source, trigger_reason),
+                )
+            ]
+            return [item for item in (self._load(connection, sid) for sid in ids) if item]
+
     def list(
         self,
         *,
