@@ -190,7 +190,8 @@ def test_query_agent_uses_real_unified_runtime_with_mock_provider(tmp_path):
         assert actual["trace"]["task_id"]
         assert actual["trace"]["run_id"]
         assert actual["trace"]["provider_calls"] == 1
-        assert actual["trace"]["model"] == "r2-mock-model"
+        assert actual["trace"]["configured_model"] == "r2-mock-model"
+        # Runtime actual-model metadata can be absent; never misreport it as observed.
         assert secret.encode() not in runtime_db.read_bytes()
     finally:
         server.shutdown()
