@@ -287,10 +287,74 @@ class HardwareCaseAIRetrievalService:
         *,
         retrieval_query_service: RetrievalQueryService | None = None,
         consumption_service: Any | None = None,
+        query_agent: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
+        self.query_agent = query_agent
         self.case_service = case_service
         self.retrieval_query_service = retrieval_query_service
         self.consumption_service = consumption_service
+
+    @staticmethod
+    def _needs_agent(query: str) -> bool:
+        """Only real task-like queries invoke Provider; short identifiers are fast."""
+        query = query.strip()
+        return len(query) >= 11 and any(
+            phrase in query for phrase in
+            ("怎么", "如何", "哪些", "有什么", "借鉴", "建议", "需要注意", "排查", "怎么办")
+        )
+
+    def _enrich_query_with_agent(
+        self, raw_query: str, understood: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._needs_agent(raw_query):
+            understood["online_agent"] = {"status": "FAST_PATH"}
+            return understood
+        if self.query_agent is None:
+            understood["online_agent"] = {"status": "BLOCKED", "code": "QUERY_AGENT_NOT_CONFIGURED"}
+            return understood
+        try:
+            plan = self.query_agent(raw_query)
+            if not isinstance(plan, Mapping):
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_OUTPUT_INVALID")
+            terms = plan.get("search_terms")
+            if not isinstance(terms, list) or not (1 <= len(terms) <= 5):
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_TERMS_INVALID")
+            trace = plan.get("trace")
+            if not isinstance(trace, Mapping) or not trace.get("task_id") or not trace.get("run_id") or int(trace.get("provider_calls") or 0) < 1:
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_TRACE_MISSING")
+            if plan.get("intent") not in {"DESIGN_REUSE", "RISK", "FIELD_PROBLEM", "TEST_VALIDATION", "GENERAL"}:
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_INTENT_INVALID")
+            known = {str(v["text"]) for v in understood["search_queries"]}
+            for term in terms:
+                if not isinstance(term, str) or len(term) < 2 or len(term) > 80:
+                    raise HardwareCaseAIRetrievalError("QUERY_AGENT_TERM_INVALID")
+                term = normalize_search_text(term)
+                if term in known:
+                    continue
+                known.add(term)
+                understood["search_queries"].append({
+                    "text": term,
+                    "kind": "AGENT_QUERY",
+                    "tier": "AGENT_RETRIEVAL_GUIDANCE",
+                    "priority_rank": 1,
+                    "expansion_cost": 1,
+                    "original_query": raw_query,
+                    "rules": [{
+                        "rule_id": "ONLINE_QUERY_UNDERSTANDING",
+                        "matched_phrase": raw_query,
+                        "expanded_term": term,
+                        "use": "RECALL_ONLY",
+                        "tier": "AGENT_RETRIEVAL_GUIDANCE",
+                        "cost": 1,
+                    }],
+                })
+            understood["online_agent"] = {"status": "COMPLETED", "intent": plan.get("intent"),
+                                           "trace": dict(trace)}
+        except Exception as error:
+            understood["online_agent"] = {
+                "status": "FAILED", "code": str(getattr(error, "code", None) or type(error).__name__),
+            }
+        return understood
 
     @staticmethod
     def _case_lookup(items: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -811,6 +875,7 @@ class HardwareCaseAIRetrievalService:
             }
             return result
 
+        understood = self._enrich_query_with_agent(raw_query, understood)
         visible = self._visible_payload(
             role=role,
             statuses=statuses,
