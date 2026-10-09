@@ -140,3 +140,59 @@ def test_consumer_analysis_is_on_demand_and_citation_checked(context):
     fail = bad_client.post("/api/v2/hardware-r2/analyze", json={
         "knowledge_id": "KO-A0207", "task": "DESIGN_REUSE"})
     assert fail.json()["status"] == "EVIDENCE_REJECTED"
+
+
+def test_query_agent_uses_real_unified_runtime_with_mock_provider(tmp_path):
+    """Provider mock verifies real ConfiguredAgentRuntime Task/Run, not real-model PASS."""
+    import json
+    import threading
+    from pathlib import Path
+    from urllib.request import Request, urlopen
+    from tools.openai_mock.server import create_server
+
+    server = create_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever,
+                              kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        payload = {
+            "scenario_key": "default",
+            "payload": {"intent": "DESIGN_REUSE", "queries": ["模拟量"]},
+            "behavior": {},
+        }
+        request = Request(
+            f"http://{host}:{port}/__mock__/scenario",
+            data=json.dumps(payload, ensure_ascii=False).encode(),
+            method="POST", headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=3) as response:
+            assert response.status == 200
+        secret = "LOCAL_MOCK_SECRET_MUST_NOT_PERSIST"
+        model = tmp_path / "model.local.yaml"
+        model.write_text(
+            f"active_model: r2_mock\nmodels:\n  r2_mock:\n"
+            f"    provider: openai_compatible\n"
+            f"    base_url: http://{host}:{port}/v1\n"
+            f"    api_key: {secret}\n"
+            f"    model: r2-mock-model\n    temperature: 0\n    max_tokens: 384\n",
+            encoding="utf-8")
+        runtime_db = tmp_path / "agent.db"
+        agent = HardwareR2Agent(
+            "query", root=Path(__file__).resolve().parents[1],
+            environ={
+                "HARDWARE_R2_REAL_PROVIDER_ENABLED": "1",
+                "HARDWARE_CASE_MODEL_CONFIG": str(model),
+                "HARDWARE_R2_RUNTIME_DB": str(runtime_db),
+            })
+        actual = agent.invoke({"question": "设计模拟量电路有什么经验？"})
+        assert actual["status"] == "COMPLETED", actual.get("reason")
+        assert actual["data"]["queries"] == ["模拟量"]
+        assert actual["trace"]["task_id"]
+        assert actual["trace"]["run_id"]
+        assert actual["trace"]["provider_calls"] == 1
+        assert actual["trace"]["model"] == "r2-mock-model"
+        assert secret.encode() not in runtime_db.read_bytes()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
