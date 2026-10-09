@@ -71,11 +71,11 @@ Expected:
 
 ### W2 - G1 complete source flow
 
-Select the G1 source case and generate.
+Select the G1 source case and click **生成质量场景** directly. There is no separate completeness-preview operation; the service checks sources automatically.
 
 Expected:
 
-- source preview is READY;
+- source binding and completeness checks happen automatically;
 - Candidate is created;
 - workbench can review / confirm;
 - publish completes;
@@ -100,9 +100,8 @@ Select the G3 source case.
 
 Expected:
 
-- preview state is INFORMATION_REQUIRED;
+- after clicking Generate, the result is INFORMATION_REQUIRED;
 - Resolution source shows CONFLICT;
-- Generate is disabled;
 - no Candidate is created.
 
 ### W5 - G4 idempotency
@@ -123,12 +122,12 @@ Then double-click:
 
 `advance_quality_scenario_windows_acceptance_g5.bat`
 
-Refresh Software Assessment and preview G5 again.
+Refresh Software Assessment and click Generate for G5 again.
 
 Expected:
 
-- state becomes SOURCE_CHANGED_REANALYSIS_AVAILABLE;
-- generate creates a new lineage item;
+- changed source revision is detected automatically;
+- generation creates a new lineage item;
 - previous published scenario/history remains available.
 
 ## Evidence to capture
