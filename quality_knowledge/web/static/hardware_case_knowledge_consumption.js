@@ -22,7 +22,8 @@
   const scenarios = {
     research: ['title', 'symptom', 'root_cause', 'failure_mechanism', 'actions', 'verification_result', 'engineering_rule', 'design_constraint', 'verification_method', 'applicability', 'interface', 'signal', 'device_refs', 'key_parameters'],
     risk: ['device_refs', 'interface', 'signal', 'key_parameters', 'failure_mode', 'failure_mechanism', 'design_constraint', 'diagnostic_clue', 'verification_method', 'applicability', 'conclusion'],
-    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability']
+    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability'],
+    test: ['title', 'symptom', 'failure_mode', 'failure_mechanism', 'verification_method', 'verification_result', 'design_constraint', 'key_parameters', 'applicability', 'evidence_refs']
   };
   const groups = [
     ['工程与观察', ['title', 'symptom', 'occurrence_condition', 'failure_mode', 'interface', 'signal']],
@@ -70,7 +71,7 @@
 
   function renderResults() {
     const box = q('[data-knowledge-results]');
-    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'} · ${agentStatus === 'COMPLETED' ? '在线 Agent 已参与' : agentStatus === 'SKIPPED_FAST_PATH' || agentStatus === 'SKIPPED_EMPTY_QUERY' ? '快速检索' : '确定性检索（Agent 未就绪）'}`;
+    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : activeScenario === 'test' ? '测试验证' : '市场与应用问题检索'} · ${agentStatus === 'COMPLETED' ? '在线 Agent 已参与' : agentStatus === 'SKIPPED_FAST_PATH' || agentStatus === 'SKIPPED_EMPTY_QUERY' ? '快速检索' : '确定性检索（Agent 未就绪）'}`;
     if (!results.length) {
       box.innerHTML = '<div class="hc-knowledge-empty">' + (agentStatus === 'DISABLED' || agentStatus === 'BLOCKED' ? '当前关键词检索未命中，在线 Agent 未就绪；不能据此断定知识库没有相关案例。' : '未检索到匹配的正式硬件知识') + '</div>';
       return;
@@ -210,7 +211,7 @@
     const analyze = event.target.closest('[data-analyze-knowledge]');
     if (!analyze) return;
     const output = analyze.parentElement.querySelector('[data-analysis-output]');
-    const intents = {research:'DESIGN_REUSE',risk:'COMPONENT_CIRCUIT_RISK',market:'FIELD_PROBLEM'};
+    const intents = {research:'DESIGN_REUSE',risk:'COMPONENT_CIRCUIT_RISK',market:'FIELD_PROBLEM',test:'TEST_VALIDATION'};
     analyze.disabled = true;
     output.textContent = '正在分析正式知识…';
     try {
