@@ -63,18 +63,27 @@ def await_url(url,proc,timeout=75):
 
 def start(command,env,cwd,logfile):
     log=open(logfile,"w",encoding="utf-8")
-    p=subprocess.Popen(command,env=env,cwd=cwd,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+    kwargs={"creationflags":subprocess.CREATE_NEW_PROCESS_GROUP} if os.name=="nt" else {"start_new_session":True}
+    p=subprocess.Popen(command,env=env,cwd=cwd,stdout=log,stderr=subprocess.STDOUT,**kwargs)
     return p,log
 
 def stop_group(proc,log):
     if proc.poll() is None:
-        try:os.killpg(proc.pid,signal.SIGTERM)
-        except ProcessLookupError:pass
-        try:proc.wait(timeout=8)
+        if os.name=="nt":
+            # Windows must kill Python descendants before deleting extracted ZIP.
+            subprocess.run(["taskkill","/PID",str(proc.pid),"/T","/F"],
+                           stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+                           text=True,timeout=15,check=False)
+        else:
+            try:os.killpg(proc.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+        try:proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid,signal.SIGKILL)
+            if os.name=="nt":proc.kill()
+            else:os.killpg(proc.pid,signal.SIGKILL)
             proc.wait(timeout=5)
     log.close()
+    if os.name=="nt":time.sleep(2)
 
 def evidence(batch,counters):
     records={
