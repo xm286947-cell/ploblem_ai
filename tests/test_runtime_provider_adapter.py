@@ -693,3 +693,154 @@ def test_provider_diagnostics_captures_http_400_error_body_and_request_id(
     assert "Set-Cookie" not in trace
     assert "MUST_NOT_LOG" not in trace
     assert SECRET not in trace
+
+
+def test_storage475_invalid_json_keeps_diagnostic_metadata_without_response_leak(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    """Existing Runtime DB and trace expose metadata, never provider text."""
+    import hashlib
+
+    marker = "CONFIDENTIAL_PROVIDER_OUTPUT_475"
+    content = (chr(96) * 3) + 'json\n{"ok":true,"marker":"' + marker + '"}\n' + (chr(96) * 3)
+    calls = []
+
+    class SafeResponse(_FakeResponse):
+        status = 200
+        headers = {"X-Request-Id": "req-475-mock", "Content-Type": "application/json"}
+
+    def fake_urlopen(_request, timeout):
+        calls.append(1)
+        return SafeResponse({
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 123, "completion_tokens": 33},
+        })
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    agent = _write_authless_agent(tmp_path)
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"SimpleResult": SimpleResult},
+        environ={},
+    )
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+    runtime.load_agent(agent)
+    result = runtime.invoke(AgentRequest(
+        request_id="storage475-diagnostics",
+        agent_id="authless.local",
+        input={"test": "mock-only"},
+    ))
+
+    assert len(calls) >= 1
+    assert result.status != RuntimeStatus.COMPLETED
+    assert result.error.code == "INVALID_JSON"
+    details = result.error.details
+    assert details["finish_reason"] == "stop"
+    assert details["http_status"] == 200
+    assert details["provider_request_id"] == "req-475-mock"
+    assert details["content_length_bytes"] == len(content.encode())
+    assert details["content_sha256"] == hashlib.sha256(content.encode()).hexdigest()
+    assert details["starts_with_markdown_fence"] is True
+    assert details["json_error_line"] == 1
+    assert details["json_error_column"] == 1
+    assert details["json_error_position"] == 0
+    assert details["prompt_tokens"] == 123
+    assert details["completion_tokens"] == 33
+    assert details["max_tokens"] == "NOT_RECORDED"
+
+    # The same Runtime failure metadata is durable, and the text stays absent.
+    db_dump = raw_database_dump(store)
+    trace_text = trace.read_text(encoding="utf-8")
+    console = capsys.readouterr().out
+    assert "content_sha256" in db_dump and "json_error_position" in db_dump
+    assert "invalid_json" in trace_text and "json_error_line" in trace_text
+    assert "invalid_json" in console
+    for private in (marker, content, "Authorization", "Bearer"):
+        assert private not in db_dump
+        assert private not in trace_text
+        assert private not in console
+
+
+def test_storage475_finish_reason_length_still_maps_to_output_truncated(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    class LimitedResponse(_FakeResponse):
+        status = 200
+        headers = {}
+
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: LimitedResponse({
+            "choices": [{"message": {"content": '{"ok":'}, "finish_reason": "length"}],
+            "usage": {"completion_tokens": 512},
+        }),
+    )
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, {"runtime": {"provider_call_seq": 1, "provider_config": {
+            "base_url": "http://127.0.0.1:9001/v1",
+            "model": "mock-only",
+            "max_tokens": 512,
+        }}})
+    assert err.value.code == "OUTPUT_TRUNCATED"
+    assert err.value.details["finish_reason"] == "length"
+    assert err.value.details["completion_tokens"] == 512
+    assert err.value.details["max_tokens"] == 512
+    assert "json_error_position" not in err.value.details
+    assert "output_truncated" in trace.read_text(encoding="utf-8")
+
+
+def test_storage475_valid_json_and_missing_metadata_remain_safe(tmp_path: Path, monkeypatch) -> None:
+    responses = iter(['{"ok":true}', "not-json"])
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": next(responses)}}],
+        }),
+    )
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    ctx = {"runtime": {"provider_call_seq": 1, "provider_config": {
+        "base_url": "http://127.0.0.1:9001/v1", "model": "mock-only",
+    }}}
+    assert adapter({"value": 1}, ctx) == {"ok": True}
+    assert not trace.exists()
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, ctx)
+    assert err.value.code == "INVALID_JSON"
+    for field in ("finish_reason", "http_status", "provider_request_id",
+                  "prompt_tokens", "completion_tokens", "max_tokens"):
+        assert err.value.details[field] == "NOT_RECORDED"
+    assert "not-json" not in trace.read_text(encoding="utf-8")
+
+
+def test_storage475_json_schema_fail_closed_not_relabelled(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": '{"ok":"not a boolean"}'}, "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, {"runtime": {"provider_config": {
+            "base_url": "http://127.0.0.1:9001/v1", "model": "mock-only",
+        }}})
+    assert err.value.code == "PROVIDER_SCHEMA_INVALID"
