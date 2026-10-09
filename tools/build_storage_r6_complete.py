@@ -154,6 +154,10 @@ def build() -> tuple[Path, Path, Path]:
     copy_tree(ROOT / "repositories", package_root / "repositories")
     copy_tree(ROOT / "parser", package_root / "parser")
     copy_tree(ROOT / "services", package_root / "services")
+    copy_tree(ROOT / "quality_knowledge", package_root / "quality_knowledge")
+    copy_tree(ROOT / "builder", package_root / "builder")
+    copy_tree(ROOT / "models", package_root / "models")
+    copy_tree(ROOT / "common", package_root / "common")
 
     # Preserve the existing launcher contract and provenance: the bundled Runtime
     # must be the exact pinned public Runtime snapshot, not the current assembly HEAD.
