@@ -21,6 +21,7 @@ class KnowledgeReviewError(RuntimeError):
 
 _EDITABLE_FIELDS = frozenset(
     {
+        "object_type",
         "title",
         "summary",
         "content",
