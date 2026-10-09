@@ -32,7 +32,7 @@ jobs:
           import hashlib, json, os, subprocess, zipfile
           
           SOURCE_SHA = "2e7ea4678dafb3bbd3441ef5acc4b83b0aac8693"
-          NAME = "STORAGE_475_PROVIDER_JSON_DIAG_TEST_2e7ea467_20261009"
+          NAME = "STORAGE_475_PROVIDER_JSON_DIAG_TEST_2e7ea467_R2_20261009"
           src=Path("source").resolve()
           out=Path("dist").resolve()
           out.mkdir(exist_ok=True)
@@ -109,7 +109,7 @@ jobs:
           py -3.11 -m uvicorn products.storage_rc1.storage_life.app:app --host 127.0.0.1 --port %STORAGE_WEB_PORT%
           '''
           notes='''# Storage NAND #475 — postmerge CODE TEST ZIP
-          Source main SHA: 2e7ea4678dafb3bbd3441ef5acc4b83b0aac8693.
+          Source PR #567 fix/storage-475-provider-invalid-json-diagnostics, SHA: 2e7ea4678dafb3bbd3441ef5acc4b83b0aac8693 (NOT YET MERGED).
           Includes full applicable source, KP/Runtime, app, prompts, tests and schema.
           
           ## Mac
@@ -171,7 +171,7 @@ jobs:
            "runtime_data/README.txt":b"ONLY isolated site copies of frozen Source and historical FAILED Runtime DB.\n"
           })
           filelist=[{"path":key,"bytes":len(value),"sha256":sha(value)} for key,value in sorted(included.items())]
-          manifest={"package_id":NAME,"source_commit":SOURCE_SHA,"source_branch":"main","merged_pr":562,
+          manifest={"package_id":NAME,"source_commit":SOURCE_SHA,"source_branch":"fix/storage-475-provider-invalid-json-diagnostics","merged_pr":562,"diagnostic_pr":567,
           "package_scope":"COMPLETE_SOURCE_CODE_NOT_SITE_DB","included_file_count":len(filelist),
           "data_source_frozen":"SITE_COPY_REQUIRED","failed_runtime_db":"SITE_COPY_REQUIRED",
           "provider_config":"EXTERNAL_ONLY","real_provider_calls":0,
@@ -193,7 +193,7 @@ jobs:
           digest=sha(dest.read_bytes())
           (out/(NAME+".sha256")).write_text(digest+"  "+dest.name+"\n")
           (out/(NAME+".DELIVERY_MANIFEST.json")).write_text(json.dumps({
-          "package_id":NAME,"package_sha256":digest,"source_main_sha":SOURCE_SHA,
+          "package_id":NAME,"package_sha256":digest,"source_commit_sha":SOURCE_SHA,"source_branch":"fix/storage-475-provider-invalid-json-diagnostics",
           "file_count":len(filelist),"frozen_source_included":False,
           "failed_task_db_included":False,"provider_config_included":False,
           "real_provider_calls":0,"ready_for_real_extraction":False,
@@ -209,7 +209,7 @@ jobs:
       - name: Fresh extract and offline selfcheck
         run: |
           mkdir verify
-          python -m zipfile -e dist/STORAGE_475_PROVIDER_JSON_DIAG_TEST_2e7ea467_20261009.zip verify
+          python -m zipfile -e dist/STORAGE_475_PROVIDER_JSON_DIAG_TEST_2e7ea467_R2_20261009.zip verify
           cd verify
           python offline_selfcheck.py
       - name: Linux native boot / health smoke (no provider)
@@ -225,6 +225,6 @@ jobs:
       - name: Upload complete package and evidence
         uses: actions/upload-artifact@v4
         with:
-          name: STORAGE-475-PROVIDER-JSON-DIAG-2e7ea467
+          name: STORAGE-475-PROVIDER-JSON-DIAG-2e7ea467-R2
           path: dist/*
           retention-days: 30
