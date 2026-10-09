@@ -21,31 +21,10 @@ echo.
 set "VENV_PYTHON=%PACKAGE_ROOT%\.venv\Scripts\python.exe"
 
 if not exist "%VENV_PYTHON%" (
-  echo Creating package-local Python environment...
-  set "BOOTSTRAP="
-  where py >nul 2>nul
-  if not errorlevel 1 (
-    py -3.12 -c "import sys" >nul 2>nul
-    if not errorlevel 1 set "BOOTSTRAP=py -3.12"
-    if not defined BOOTSTRAP (
-      py -3.11 -c "import sys" >nul 2>nul
-      if not errorlevel 1 set "BOOTSTRAP=py -3.11"
-    )
-  )
-  if not defined BOOTSTRAP (
-    where python >nul 2>nul
-    if not errorlevel 1 set "BOOTSTRAP=python"
-  )
-  if not defined BOOTSTRAP (
-    echo PYTHON_NOT_FOUND
-    echo Python 3.11 or 3.12 is required.
-    pause
-    exit /b 2
-  )
-  %BOOTSTRAP% -m venv "%PACKAGE_ROOT%\.venv"
+  call :create_venv
   if errorlevel 1 (
     echo VENV_CREATE=FAIL
-    pause
+    if not defined CI pause
     exit /b 2
   )
 )
@@ -56,7 +35,7 @@ if errorlevel 1 (
   "%VENV_PYTHON%" -m pip install --disable-pip-version-check -r "%PACKAGE_ROOT%\requirements.txt" -r "%PACKAGE_ROOT%\requirements-runtime-p0-test.txt"
   if errorlevel 1 (
     echo DEPENDENCY_INSTALL=FAIL
-    pause
+    if not defined CI pause
     exit /b 3
   )
 )
@@ -76,3 +55,24 @@ echo.
 echo WINDOWS_ACCEPTANCE_EXIT=%EXIT_CODE%
 if not defined CI pause
 endlocal & exit /b %EXIT_CODE%
+
+
+:create_venv
+echo Creating package-local Python environment...
+where py >nul 2>nul
+if not errorlevel 1 (
+  py -3.12 -m venv "%PACKAGE_ROOT%\.venv"
+  if not errorlevel 1 exit /b 0
+  py -3.11 -m venv "%PACKAGE_ROOT%\.venv"
+  if not errorlevel 1 exit /b 0
+)
+where python >nul 2>nul
+if not errorlevel 1 (
+  python -c "import sys; assert sys.version_info[:2] in [(3,11),(3,12)]" >nul 2>nul
+  if not errorlevel 1 (
+    python -m venv "%PACKAGE_ROOT%\.venv"
+    if not errorlevel 1 exit /b 0
+  )
+)
+echo PYTHON_311_312_NOT_FOUND
+exit /b 2
