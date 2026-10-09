@@ -69,6 +69,8 @@ class HardwareR2Agent:
         resolved = runtime.load_agent(agent_config)
         if resolved.definition.agent_id != self.agent_id:
             raise RuntimeError("AGENT_ID_MISMATCH")
+        self._configured_model = resolved.provider.model
+        self._configured_provider = resolved.provider.type
         self.runtime = runtime
 
     def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -85,6 +87,8 @@ class HardwareR2Agent:
             trace = {"task_id": result.task_id, "run_id": result.run_id,
                      "agent_id": self.agent_id, "trace_id": ex.trace_id,
                      "provider": ex.provider, "model": ex.model,
+                     "configured_provider": self._configured_provider,
+                     "configured_model": self._configured_model,
                      "provider_calls": ex.provider_calls, "token_usage": ex.token_usage,
                      "duration_ms": ex.duration_ms}
             if result.status != RuntimeStatus.COMPLETED or not isinstance(result.data, dict):
