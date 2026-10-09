@@ -702,7 +702,8 @@ def test_storage475_invalid_json_keeps_diagnostic_metadata_without_response_leak
     import hashlib
 
     marker = "CONFIDENTIAL_PROVIDER_OUTPUT_475"
-    content = (chr(96) * 3) + 'json\n{"ok":true,"marker":"' + marker + '"}\n' + (chr(96) * 3)
+    # An incomplete fence must still raise INVALID_JSON after bounded reuse.
+    content = (chr(96) * 3) + 'json\n{"ok":true,"marker":"' + marker + '"}\n'
     calls = []
 
     class SafeResponse(_FakeResponse):
@@ -918,7 +919,7 @@ def test_storage475_complete_fence_remains_schema_fail_closed(monkeypatch) -> No
     monkeypatch.setattr(
         "runtime.providers.openai_compatible.urlopen",
         lambda _request, timeout: _FakeResponse({
-            "choices": [{"message": {"content": fence + 'json\\n{"ok":"nonsense"}\\n' + fence},
+            "choices": [{"message": {"content": fence + "json" + chr(10) + '{"ok":"nonsense"}' + chr(10) + fence},
                          "finish_reason": "stop"}],
         }),
     )
