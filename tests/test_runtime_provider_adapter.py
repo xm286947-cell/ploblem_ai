@@ -844,3 +844,108 @@ def test_storage475_json_schema_fail_closed_not_relabelled(monkeypatch) -> None:
             "base_url": "http://127.0.0.1:9001/v1", "model": "mock-only",
         }}})
     assert err.value.code == "PROVIDER_SCHEMA_INVALID"
+
+
+@pytest.mark.parametrize("content", [
+    ' \\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3 + ' \\n',
+    chr(96) * 3 + 'JSON\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + '\\n{"ok":true}\\n' + chr(96) * 3,
+])
+def test_storage475_reuses_complete_json_fence_only_for_object_agents(
+    content: str, monkeypatch, tmp_path: Path,
+) -> None:
+    response_text = bytes(content, "utf-8").decode("unicode_escape")
+    class SafeResponse(_FakeResponse):
+        status = 200
+        headers = {}
+
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: SafeResponse({
+            "choices": [{"message": {"content": response_text}, "finish_reason": "stop"}],
+        }),
+    )
+    trace = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    result = adapter({"v": 1}, {"runtime": {
+        "provider_call_seq": 1,
+        "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+    }})
+    assert result == {"ok": True}
+    lines = trace.read_text(encoding="utf-8")
+    assert "json_fence_normalized" in lines
+    assert response_text not in lines
+    assert "Bearer" not in lines
+
+
+@pytest.mark.parametrize("content", [
+    chr(96) * 3 + 'json\\n{"ok":true}',
+    chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3 + '\\nextra',
+    'note\\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3
+        + '\\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + 'json\\n{"ok":\\n' + chr(96) * 3,
+    chr(96) * 3 + 'python\\n{"ok":true}\\n' + chr(96) * 3,
+    '{"ok":true} {"ok":false}',
+])
+def test_storage475_rejects_incomplete_or_ambiguous_json_fences(
+    content: str, monkeypatch,
+) -> None:
+    response_text = bytes(content, "utf-8").decode("unicode_escape")
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": response_text}, "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "INVALID_JSON"
+
+
+def test_storage475_complete_fence_remains_schema_fail_closed(monkeypatch) -> None:
+    fence = chr(96) * 3
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": fence + 'json\\n{"ok":"nonsense"}\\n' + fence},
+                         "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "PROVIDER_SCHEMA_INVALID"
+
+
+def test_storage475_fence_not_accepted_for_array_response_shape(monkeypatch) -> None:
+    fence = chr(96) * 3
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": fence + 'json\\n[1,2]\\n' + fence},
+                         "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=None, response_shape="json_array",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "INVALID_JSON"
