@@ -86,11 +86,25 @@ with tempfile.TemporaryDirectory(prefix="w3_candidate_native_") as folder:
             print("RESULT=NATIVE_FRESH_EXTRACT_READ_ONLY_PASS")
         finally:
             if worker.poll() is None:
-                worker.terminate()
+                if os.name == "nt":
+                    # A .bat launcher starts a child Python process; killing
+                    # only cmd.exe leaves its child holding the extracted
+                    # directory open. Terminate the complete test process tree.
+                    result = subprocess.run(
+                        ["taskkill", "/PID", str(worker.pid), "/T", "/F"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, timeout=15, check=False,
+                    )
+                    print("WINDOWS_TEST_PROCESS_TREE_CLEANUP=" + str(result.returncode))
+                else:
+                    worker.terminate()
                 try:
-                    worker.wait(timeout=8)
+                    worker.wait(timeout=12)
                 except subprocess.TimeoutExpired:
                     worker.kill()
                     worker.wait(timeout=5)
+            if os.name == "nt":
+                # NTFS file handles can close slightly after taskkill exits.
+                time.sleep(2)
     if worker.returncode not in (None,0,-15,1):
         print("NATIVE_TERMINATION_CODE="+str(worker.returncode))
