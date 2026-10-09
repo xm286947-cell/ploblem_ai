@@ -98,6 +98,12 @@ class HardwareR2RuntimeQueryAgent:
             "task_id": result.task_id,
             "run_id": result.run_id,
             "status": str(result.status),
+            "trace_id": result.execution.trace_id,
+            "provider": result.execution.provider,
+            "model": result.execution.model,
+            "provider_calls": result.execution.provider_calls,
+            "token_usage": dict(result.execution.token_usage or {}),
+            "duration_ms": result.execution.duration_ms,
         }
         if result.status != RuntimeStatus.COMPLETED or not isinstance(result.data, dict):
             raise RuntimeError("QUERY_RUNTIME_NOT_COMPLETED")
@@ -113,6 +119,8 @@ class HardwareR2QueryService:
 
     def search(self, text: str = "", *, limit: int = 100) -> dict[str, Any]:
         query = str(text or "").strip()
+        if len(query) > 512:
+            raise ValueError("QUERY_TOO_LONG")
         if not 1 <= limit <= 100:
             raise ValueError("SEARCH_LIMIT_INVALID")
         mode = "DETERMINISTIC"
