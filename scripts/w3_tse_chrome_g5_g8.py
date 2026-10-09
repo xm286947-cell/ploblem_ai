@@ -210,7 +210,7 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             page.reload(wait_until="domcontentloaded")
             page.locator("[data-batch-history]").select_option(batch_id)
             page.wait_for_function("""(id) => document.querySelector('[data-batch-ref]')?.textContent.includes(id)""",
-                                   batch_id,timeout=10000)
+                                   arg=batch_id,timeout=10000)
             _,refreshed=get(BASE+"/api/v2/hardware-cases/r1/workbench/batches/"+batch_id,True)
             assert {(i["business_case_id"],i["result"]) for i in refreshed["items"]} == \
                    {(i["business_case_id"],i["result"]) for i in latest["items"]}
