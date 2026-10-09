@@ -1,0 +1,127 @@
+{
+  "manifest_version": "hardware-w3-gate-evidence/pre-admission-v1",
+  "task": "HARDWARE-W3-TEST-FIX-FASTLOOP-001",
+  "as_of": "2026-10-09",
+  "formal_release_status": "PARTIAL_FORMAL_ACCEPTANCE_NOT_READY",
+  "frozen_product_source_sha": "c7935e00f1f0abe828b0090524bb14ba923f3635",
+  "immutable_product_pr": {
+    "number": 555,
+    "state": "DRAFT_OPEN",
+    "product_code_changed_during_test": false
+  },
+  "support_pr": 560,
+  "artifacts": {
+    "internal_candidate": {
+      "name": "HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0.zip",
+      "sha256": "42966120034b4e1e734c89066dfa60478c28685896a8b26fdc1181b43aaef138",
+      "drive_url": "https://drive.google.com/file/d/1h_J6yRKhIQ6CoQU_7f-HUztrIwSJR9DM/view",
+      "size_bytes": 3974557,
+      "release": false
+    },
+    "browser_mock_fixture": {
+      "name": "HARDWARE_W3_T2_BROWSER_MOCK_FIXTURES_c7935e0.zip",
+      "sha256": "a59ef48eacd4f1ed7e78a407e6b0cf09d1493e073205f61884f60bb8818a4a8b",
+      "drive_outer_artifact_url": "https://drive.google.com/file/d/1Ye6wxkoEmvtbzimlWqmdYE-1Lg4uWsMS/view",
+      "real_provider": false
+    }
+  },
+  "gates": {
+    "T1_independent_Python311": {
+      "status": "TSE_REPORTED_PASS",
+      "cases_passed": 20,
+      "cases_total": 20,
+      "pytest_executions": 25,
+      "evidence_location": "TSE Mac local, original report/log awaiting external SHA archive"
+    },
+    "T2_G1_G2_default_sequential": {
+      "status": "CI_PASS",
+      "run_id": 37891267132,
+      "github_url": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37891267132",
+      "platform": "ubuntu-latest / Chrome",
+      "drive_evidence_url": "https://drive.google.com/file/d/11PfoU_mpcGm8V1ZN0C1QWJg7KHMNZdlX/view",
+      "detail": "A9903/A9904 distinct SHA DOCX, A→B→A→B, each 2 calls, CANDIDATE_READY, JS errors=0"
+    },
+    "T2_G3_parallel": {
+      "status": "CI_PASS",
+      "github_url": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37889500403",
+      "platforms": [
+        "ubuntu-latest / Chrome",
+        "windows-latest / Chromium",
+        "macos-latest / Chromium"
+      ],
+      "cross_os_run_id": 37890580083,
+      "drive_linux_evidence_url": "https://drive.google.com/file/d/1D4jBU2qg5niT01fCF8LJlgzgdFZNWgkA/view"
+    },
+    "T2_G4_cancel_resume": {
+      "status": "TSE_REPORTED_PASS",
+      "summary": "Single approved UI POST, A9901/A9902 CANCELLED to QUEUED, Provider calls 0, no Run/Publish",
+      "original_evidence": "TSE Mac local report JSON and screenshot; not independently materialized in Drive"
+    },
+    "T2_G5_failure_isolation": {
+      "status": "CI_PASS",
+      "github_url": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37890328885",
+      "details": "A9915 STAGE_B_FAILED; A9916 REVIEW retained; StageB 503 2 calls max"
+    },
+    "T2_G6_publish_gate_negative": {
+      "status": "CI_PASS",
+      "details": "Unreviewed Publish disabled and failed-case promotion panel hidden; no formal Publish"
+    },
+    "T2_G7_refresh_idempotency": {
+      "status": "CI_PASS",
+      "details": "Refresh, reselect and repeat empty completed batch run: zero additional Provider calls"
+    },
+    "T2_G8_mock_audit_redaction": {
+      "status": "CI_PASS",
+      "details": "Mock Authorization redacted; no dummy token in stored audit"
+    },
+    "T2_G5_G8_browser_evidence": {
+      "status": "CI_PASS",
+      "drive_linux_evidence_url": "https://drive.google.com/file/d/1eNaDQ3T7dBJSvaQou4TWyeYZgPL5Bxvi/view"
+    },
+    "Windows_Mac_fresh_extract_readonly": {
+      "status": "CI_PASS",
+      "run_id": 37885979327,
+      "checks": [
+        "HEALTH_200",
+        "READY_200",
+        "WORKBENCH_200",
+        "WORKBENCH_API_200"
+      ],
+      "write_operations": 0
+    },
+    "Windows_Mac_native_browser_G3_G5_G8": {
+      "status": "CI_PASS",
+      "run_id": 37890580083,
+      "github_url": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37890580083",
+      "drive_windows_evidence_url": "https://drive.google.com/file/d/1BqPqs4cZjyVk2J3LA9GAUPX4X3DOTk2x/view",
+      "drive_macos_evidence_url": "https://drive.google.com/file/d/18aSFxUwwykDPBARboRNHlK1fuz2-0cSP/view"
+    },
+    "Real_Provider_isolated": {
+      "status": "NOT_RUN",
+      "reason": "Requires separate user authorization, safe secret injection, TSE evidence"
+    },
+    "Windows_end_user_native_acceptance": {
+      "status": "NOT_RUN",
+      "reason": "CI Windows runner is not independent user workstation signoff"
+    },
+    "W2_inherited_red_item_closure": {
+      "status": "OPEN_PENDING_GROUNDED_REBIND",
+      "reason": "Known prior red items require verification and explicit disposition; not silently waived"
+    }
+  },
+  "safety": {
+    "real_api_credentials_seen_or_recorded": false,
+    "real_provider_called": false,
+    "formal_publish_called": false,
+    "production_port_8080_touched": false,
+    "prior_isolated_port_18781_touched": false
+  },
+  "blockers_to_release": [
+    "Independent TSE review and immutable SHA archive of T1/G4 local evidence",
+    "End-user Windows native browser signoff if required for formal candidate",
+    "W2 inherited red items disposition",
+    "Explicitly authorized isolated Real Provider validation",
+    "Formal release manifest and approval"
+  ],
+  "determination": "MOCK_GOLDENS_GREEN_NOT_A_FORMAL_RELEASE"
+}
