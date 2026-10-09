@@ -83,6 +83,7 @@ class HardwareEngineeringAnalysisService:
                 "knowledge_id": knowledge_id,
                 "business_case_id": projection.get("business_case_id"),
                 "evidence_id": evidence,
+                "evidence_scope": "CASE_LEVEL_REFERENCE",
             })
         return {
             "contract_version": "hardware-r2-engineering-analysis/v1",
