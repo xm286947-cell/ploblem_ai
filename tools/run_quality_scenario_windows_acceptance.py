@@ -193,7 +193,10 @@ def main() -> int:
         print(f"STARTUP_SOURCE_MODE={source_mode}")
         print(f"STARTUP_SOURCE_DB={source_db}")
         print(f"STARTUP_LOG_PATH={APP_LOG}")
-        print(f"STARTUP_HEALTH_URL={base}/issues")
+        # /issues is a full history page, not a readiness check. Large real DBs
+        # can spend a long time querying issue history while the server is ready.
+        readiness_url = base + "/openapi.json"
+        print(f"STARTUP_HEALTH_URL={readiness_url}")
         deadline = time.monotonic() + startup_timeout
         next_progress = time.monotonic() + 10
         startup_error = None
@@ -203,7 +206,7 @@ def main() -> int:
                 startup_error = RuntimeError(f"APP_EXITED_EARLY:{app.returncode}")
                 break
             try:
-                with urlopen(base + "/issues", timeout=1.0) as response:
+                with urlopen(readiness_url, timeout=1.0) as response:
                     if response.status == 200:
                         ready = True
                         break
@@ -225,13 +228,20 @@ def main() -> int:
             raise error
 
         try:
+            # /issues performs history-wide work and must not gate startup
+            # in real-DB mode. The QSV1 workbench routes are the requested entry.
             for route in (
-                "/issues",
                 "/software-assessment",
                 "/quality-scenarios/workbench",
                 "/quality-scenarios/library",
             ):
+                print(f"PRODUCT_ROUTE_CHECK={route}")
                 wait_http(base + route, timeout=10)
+            if source_mode == "CONTROLLED_FIXTURE":
+                print("PRODUCT_ROUTE_CHECK=/issues")
+                wait_http(base + "/issues", timeout=10)
+            else:
+                print("ISSUES_FULL_HISTORY_PAGE_CHECK=NOT_A_STARTUP_GATE")
         except Exception as error:
             report_app_failure(error, app, source_db)
             raise
