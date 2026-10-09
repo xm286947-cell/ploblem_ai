@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-PRODUCT = Path(__file__).resolve().parents[2] / "product"
+PRODUCT = Path(__file__).resolve().parents[3] / "product"
 assert PRODUCT.is_dir(), "FROZEN_PRODUCT_CHECKOUT_MISSING"
 sys.path.insert(0, str(PRODUCT))
 
