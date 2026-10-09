@@ -167,6 +167,8 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             assert {x["business_case_id"] for x in before["items"]}=={"A9903","A9904"},before
             assert all(x["parse"]=="PASS" for x in before["items"]),before
             print("G1_G2_API_SOURCE_IDS="+json.dumps([{"case":x.get("business_case_id"),"source_id":x.get("source_id"),"file":x.get("source_file"),"result":x.get("result")} for x in before["items"]],ensure_ascii=False),flush=True)
+            print("G1_G2_DATASET_ENTRIES="+json.dumps(before.get("dataset_identity",{}).get("entries",[]),ensure_ascii=False),flush=True)
+            print("G1_G2_SOURCE_SNAPSHOTS="+json.dumps([{"case":x.get("business_case_id"),"snapshot_source":(x.get("snapshot") or {}).get("source")} for x in before["items"]],ensure_ascii=False),flush=True)
             assert len({x["source_id"] for x in before["items"]})==2, "G2_REQUIRES_DISTINCT_SOURCES"
             assert all(x["source_file"].endswith(".docx") for x in before["items"]),before
             print("G1_MULTI_WORD_UPLOAD_SOURCE_IDENTITY=PASS")
