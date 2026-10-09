@@ -24,13 +24,10 @@ if checks['FORMAL_RELEASE_AVAILABLE'] and release_objects_path.is_file():
    continue
   if not obj.get('evidence_refs'):
    continue
-  text=' '.join(str(obj.get(key) or '') for key in ('title','summary','content','semantic_class'))
-  text+=' '+' '.join(map(str,obj.get('tags') or []))
-  lowered=text.lower()
-  if 'p/e' in lowered or 'endurance' in lowered: formal_nand_domains.add('PE_ENDURANCE')
-  if 'retention' in lowered: formal_nand_domains.add('RETENTION')
-  if 'ecc' in lowered or 'bit flip' in lowered: formal_nand_domains.add('ECC_BIT_FLIP')
-  if 'bad block' in lowered or 'bad_block' in lowered: formal_nand_domains.add('BAD_BLOCK')
+  metadata=obj.get('metadata') if isinstance(obj.get('metadata'),dict) else {}
+  domain=str(obj.get('engineering_domain') or metadata.get('engineering_domain') or '').upper()
+  if domain in {'PE_ENDURANCE','RETENTION','ECC_BIT_FLIP','BAD_BLOCK'}:
+   formal_nand_domains.add(domain)
 checks['FORMAL_NAND_RELEASE_READY']=formal_nand_release and formal_nand_domains=={'PE_ENDURANCE','RETENTION','ECC_BIT_FLIP','BAD_BLOCK'}
 # Conservative secret scan over product config/source, ignoring examples/tests/baseline evidence.
 secret_patterns=[re.compile(r'(?i)authorization\s*[:=]\s*bearer\s+[A-Za-z0-9._-]{12,}'),re.compile(r'\bsk-[A-Za-z0-9_-]{16,}\b')]
