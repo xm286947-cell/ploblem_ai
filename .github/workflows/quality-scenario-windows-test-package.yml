@@ -62,6 +62,11 @@ jobs:
           Write-Host "ROOT_CAUSE_VISIBLE=YES"
           Write-Host "APP_LOG_TAIL_VISIBLE=YES"
 
+      - name: One-click source performance focused regression
+        shell: pwsh
+        run: |
+          .\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_software_assessment_qsv1_browser_flow.py
+
       - name: Windows real Chromium G1-G5 browser golden
         shell: pwsh
         run: |
