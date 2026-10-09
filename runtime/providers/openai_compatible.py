@@ -313,8 +313,8 @@ class OpenAICompatibleProviderAdapter:
             if self.response_shape not in {"json_object", "object", "dict"}:
                 raise
             complete_fence = re.fullmatch(
-                r"[ \\t\\r\\n]*```(?:json)?[ \\t]*\\r?\\n"
-                r"(?P<body>.*?)\\r?\\n```[ \\t\\r\\n]*",
+                r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n"
+                r"(?P<body>.*?)\r?\n```[ \t\r\n]*",
                 content,
                 flags=re.IGNORECASE | re.DOTALL,
             )
