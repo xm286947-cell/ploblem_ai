@@ -38,17 +38,22 @@ def source_commit() -> str:
     ).strip()
 
 
-def copy_tree(source: Path, target: Path) -> None:
+def copy_tree(source: Path, target: Path, *, exclude_local_state: bool = False) -> None:
     if not source.exists():
         raise SystemExit(f"missing package dependency: {source}")
     if target.exists():
         shutil.rmtree(target)
+    ignored = ["__pycache__", "*.pyc", ".pytest_cache", ".DS_Store"]
+    if exclude_local_state:
+        # Real test databases and machine-local credentials/configuration are
+        # external runtime state; never copy them into a distributable package.
+        ignored.extend(
+            ["*.sqlite", "*.sqlite3", "*.db", "*.env", "model.local.yaml", "knowledge_service.local.json"]
+        )
     shutil.copytree(
         source,
         target,
-        ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc", ".pytest_cache", ".DS_Store"
-        ),
+        ignore=shutil.ignore_patterns(*ignored),
     )
 
 
@@ -141,7 +146,7 @@ def build() -> tuple[Path, Path, Path]:
     if work.exists():
         shutil.rmtree(work)
     package_root = work / PACKAGE_ROOT_NAME
-    copy_tree(PRODUCT, package_root)
+    copy_tree(PRODUCT, package_root, exclude_local_state=True)
 
     # Unified Knowledge Production is packaged as the shared capability, not copied
     # into Storage domain code. Storage only adds the product bridge/consumer.

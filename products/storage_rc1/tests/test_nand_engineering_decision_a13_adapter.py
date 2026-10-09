@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from storage_life import product_api
+from storage_life.knowledge_release import KnowledgeReleaseConsumer
+from storage_life.lifetime_engine import FormulaRegistry
+from storage_life.nand_engineering_decision import _profile, build_nand_engineering_decision
+
+
+def test_required_budget_is_registered_and_reproducible_in_existing_engine():
+    spec = FormulaRegistry.describe("nand.required_pe_budget")
+    assert spec.formula_id == "NAND_REQUIRED_PE_BUDGET_V1"
+
+    profile = _profile("gd5", 
+        {"target_service_life_years": 5, "operating_days_per_year": 365, "design_margin_ratio": 0.25},
+        {"pe_cycles_per_day": 1},
+    )
+    assert profile["required_pe_cycles"] == 2281.25
+    trace = profile["derivation_trace"]
+    assert trace["formula_id"] == "NAND_REQUIRED_PE_BUDGET_V1"
+    assert trace["replay_trace"]["formula_id"] == "NAND_REQUIRED_PE_BUDGET_V1"
+    assert {row["name"] for row in profile["assumptions"]} == {
+        "pe_cycles_per_day", "target_service_life_years", "operating_days_per_year", "design_margin_ratio",
+    }
+
+
+def test_required_budget_fails_closed_without_explicit_pe_stress():
+    profile = _profile("gd5",
+        {"target_service_life_years": 5},
+        {"logical_write_bytes_per_day": 1024},
+    )
+    assert profile["required_pe_cycles"] is None
+    assert "PE_CYCLES_PER_DAY_REQUIRED_FOR_NAND_PE_BUDGET" in profile["missing_information"]
+
+
+def test_implicit_calendar_default_is_labeled_as_assumption():
+    profile = _profile("gd5", {"target_service_life_years": 5, "design_margin_ratio": 0.25}, {"pe_cycles_per_day": 1})
+    calendar = next(item for item in profile["assumptions"] if item["name"] == "operating_days_per_year")
+    assert calendar["rationale"] == "CALENDAR_DEFAULT_365_DAYS_PER_YEAR_NOT_DEVICE_FACT"
+
+
+def test_seven_roles_share_one_test_only_case_and_never_promote_unknown(monkeypatch):
+    facts = [{
+        "canonical_name": "pe_cycles",
+        "parameter_name": "P/E Cycle",
+        "value": "100000",
+        "unit": "cycles",
+        "condition": "With ECC",
+        "scope": "GD5 datasheet",
+        "evidence": [{"evidence_id": "EVD-PE"}],
+    }]
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash", "vendor": "GigaDevice", "model": "GD5F1GQ5"},
+        "device_facts": facts,
+    })
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "TEST_ONLY_GD5_G2_20261009"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+    monkeypatch.setattr(product_api, "_formal_knowledge", lambda *args, **kwargs: {
+        "status": "NO_MATCH", "code": "NO_MATCHING_PUBLISHED_KNOWLEDGE",
+        "knowledge_release_version": None, "results": [], "evidence_refs": [],
+    })
+
+    result = build_nand_engineering_decision("gd5", {
+        "case_id": "A13-SANDBOX-001",
+        "mission_profile": {"target_service_life_years": 5, "operating_days_per_year": 365, "design_margin_ratio": 0.25},
+        "workload_profile": {"pe_cycles_per_day": 1},
+    })
+
+    assert result["classification"] == "TEST_ONLY"
+    assert result["overall_status"] == "PARTIAL_FAIL_CLOSED"
+    assert result["shared_case"]["required_profile"]["required_pe_cycles"] == 2281.25
+    assert result["shared_case"]["source_fact_evidence_refs"] == ["EVD-PE"]
+    assert result["shared_case"]["device_decision"] == "INSUFFICIENT_EVIDENCE"
+    assert set(result["roles"]) == {
+        "system_engineering", "hardware_engineering", "software_engineering",
+        "procurement", "test_validation", "change_management", "runtime_lifetime",
+    }
+    assert all(view.get("status") for view in result["roles"].values())
+    assert result["roles"]["procurement"]["automatic_purchase_approval"] is False
+    assert result["roles"]["runtime_lifetime"]["status"] == "UNKNOWN"
+    assert result["rules"]["provider_call_performed"] is False
+    assert result["rules"]["formal_publish_performed"] is False
+
+
+def test_binding_failure_fails_closed_without_knowledge_query(monkeypatch):
+    class InvalidBinding:
+        def validate_storage_binding(self):
+            raise ValueError("RELEASE_VERSION_MISMATCH")
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: InvalidBinding()))
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash"}, "device_facts": [],
+    })
+    queries = []
+    monkeypatch.setattr(product_api, "_formal_knowledge", lambda *args, **kwargs: queries.append(args))
+
+    result = build_nand_engineering_decision("gd5", {})
+    assert result["shared_case"]["formal_knowledge"]["status"] == "UNKNOWN"
+    assert not queries
+    assert result["overall_status"] == "PARTIAL_FAIL_CLOSED"
+
+
+def test_release_version_mismatch_is_not_consumed(monkeypatch):
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "TEST_ONLY_PINNED"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash"}, "device_facts": [],
+    })
+    monkeypatch.setattr(product_api, "_formal_knowledge", lambda *args, **kwargs: {
+        "status": "MATCHED", "code": None, "knowledge_release_version": "OTHER_RELEASE",
+        "results": [{"object_id": "KO-TEST", "evidence_refs": ["EVD-TEST"]}],
+        "evidence_refs": ["EVD-TEST"],
+    })
+
+    result = build_nand_engineering_decision("gd5", {})
+    domain = result["shared_case"]["formal_knowledge"]["domains"][0]
+    assert domain["status"] == "UNKNOWN"
+    assert domain["code"] == "RELEASE_VERSION_BINDING_MISMATCH"
+    assert result["shared_case"]["formal_knowledge"]["knowledge_ids"] == []
+
+
+def test_device_decision_page_exposes_controlled_test_inputs_and_test_only_label():
+    from pathlib import Path
+
+    page = Path(__file__).parents[1] / "storage_life" / "index.html"
+    html = page.read_text(encoding="utf-8")
+    assert "NAND 七类工程决策 · TEST_ONLY" in html
+    assert "运行受控预验证" in html
+    assert "不是器件规格或寿命结论" in html
+
+
+def test_non_nand_device_is_rejected(monkeypatch):
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "ssd", "device_type": "SSD"}, "device_facts": [],
+    })
+    try:
+        build_nand_engineering_decision("ssd", {})
+    except ValueError as error:
+        assert "NAND_ENGINEERING_DECISION_REQUIRES_NAND" in str(error)
+    else:
+        raise AssertionError("non-NAND device must be rejected")
