@@ -198,3 +198,58 @@ def test_query_agent_uses_real_unified_runtime_with_mock_provider(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_consumption_agent_real_runtime_mock_and_citation(tmp_path):
+    """Execute the actual second Runtime agent with a disposable Mock Provider."""
+    import json
+    import threading
+    from pathlib import Path
+    from urllib.request import Request, urlopen
+    from tools.openai_mock.server import create_server
+
+    server = create_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever,
+                              kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        mock_output = {
+            "summary": "依据正式知识检查模拟量参考源",
+            "checks": [{"advice": "检查参考源精度和运放 offset",
+                        "knowledge_id": "KO-A0207",
+                        "field": "design_constraint",
+                        "evidence_id": "HCR1-EV-0207"}],
+        }
+        request = Request(
+            f"http://{host}:{port}/__mock__/scenario",
+            data=json.dumps({"scenario_key": "default", "payload": mock_output,
+                             "behavior": {}}, ensure_ascii=False).encode(),
+            method="POST", headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=3) as response:
+            assert response.status == 200
+        cfg = tmp_path / "model.local.yaml"
+        cfg.write_text(
+            f"active_model: consume_mock\nmodels:\n  consume_mock:\n"
+            f"    provider: openai_compatible\n"
+            f"    base_url: http://{host}:{port}/v1\n"
+            f"    api_key: DISPOSABLE_MOCK_ONLY\n"
+            f"    model: r2-consume-mock\n    temperature: 0\n    max_tokens: 1024\n",
+            encoding="utf-8")
+        agent = HardwareR2Agent("consume", root=Path(__file__).resolve().parents[1],
+                                environ={
+                                    "HARDWARE_R2_REAL_PROVIDER_ENABLED": "1",
+                                    "HARDWARE_R2_DEPLOYMENT_MODE": "NON_PROD",
+                                    "HARDWARE_CASE_MODEL_CONFIG": str(cfg),
+                                    "HARDWARE_R2_RUNTIME_DB": str(tmp_path / "consume.db"),
+                                })
+        actual = agent.invoke({"task": "DESIGN_REUSE", "knowledge": A0207})
+        assert actual["status"] == "COMPLETED", actual.get("reason")
+        assert actual["trace"]["task_id"] and actual["trace"]["run_id"]
+        assert actual["trace"]["provider_calls"] == 1
+        advice = validate_advice(actual["data"], A0207)
+        assert advice["checks"][0]["evidence_id"] == "HCR1-EV-0207"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
