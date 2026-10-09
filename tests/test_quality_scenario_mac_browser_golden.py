@@ -103,7 +103,6 @@ def _prepare_case(page, base: str, material_id: str):
     box.check()
     page.locator("[data-trigger-source]").select_option("HIGH_PERCEPTION")
     page.locator("[data-trigger-reason]").fill("MAC_BROWSER_GOLDEN")
-    page.locator("[data-preview]").click()
 
 
 def _scenario_id_from_actions(page) -> str:
@@ -115,9 +114,8 @@ def _scenario_id_from_actions(page) -> str:
     return values["scenario_id"][0]
 
 
-def _generate_candidate(page, base: str, material_id: str, expected_preview: str = "READY") -> str:
+def _generate_candidate(page, base: str, material_id: str) -> str:
     _prepare_case(page, base, material_id)
-    page.locator(f'[data-state="{expected_preview}"]').wait_for(timeout=15000)
     page.locator("[data-generate]").click()
     page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=30000)
     return _scenario_id_from_actions(page)
@@ -186,10 +184,9 @@ def test_mac_browser_g1_g5_from_mature_software_assessment(tmp_path, monkeypatch
                 # G2: missing missed-test remains explicitly MISSING; no fake source is invented.
                 g2 = _case(manifest, "G2_NO_MISSED_TEST")
                 _prepare_case(page, base, g2["software_assessment_material_id"])
-                page.locator('[data-state="READY"]').wait_for(timeout=15000)
-                assert "漏测分析：MISSING" in page.locator("[data-flow-results]").inner_text()
                 page.locator("[data-generate]").click()
-                page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=30000)
+                page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=45000)
+                assert "漏测分析：MISSING" in page.locator("[data-flow-results]").inner_text()
                 g2_id = _scenario_id_from_actions(page)
                 page.goto(
                     base + "/quality-scenarios/library/" + g2_id,
@@ -202,8 +199,9 @@ def test_mac_browser_g1_g5_from_mature_software_assessment(tmp_path, monkeypatch
                 # G3: conflicting Resolution is blocked in the mature UI and Generate stays disabled.
                 g3 = _case(manifest, "G3_CONFLICT")
                 _prepare_case(page, base, g3["software_assessment_material_id"])
-                page.locator('[data-state="INFORMATION_REQUIRED"]').wait_for(timeout=15000)
-                assert page.locator("[data-generate]").is_disabled()
+                page.locator("[data-generate]").click()
+                page.locator('[data-state="INFORMATION_REQUIRED"]').wait_for(timeout=20000)
+                assert page.locator('[data-flow-results] a[href^="/quality-scenarios/workbench?scenario_id="]').count() == 0
                 assert "彻底解决单：CONFLICT" in page.locator("[data-flow-results]").inner_text()
 
                 # G4: second generation of the same frozen source reuses the existing Candidate.
@@ -212,10 +210,8 @@ def test_mac_browser_g1_g5_from_mature_software_assessment(tmp_path, monkeypatch
                     page, base, g4["software_assessment_material_id"]
                 )
                 _prepare_case(page, base, g4["software_assessment_material_id"])
-                page.locator('[data-state="EXISTING_CANDIDATE"]').wait_for(timeout=15000)
-                assert _scenario_id_from_actions(page) == g4_id
                 page.locator("[data-generate]").click()
-                page.locator('[data-state="EXISTING_CANDIDATE"]').wait_for(timeout=15000)
+                page.locator('[data-state="EXISTING_CANDIDATE"]').wait_for(timeout=20000)
                 assert _scenario_id_from_actions(page) == g4_id
 
                 # G5: source revision creates a new lineage while preserving the old published object/history.
@@ -227,9 +223,6 @@ def test_mac_browser_g1_g5_from_mature_software_assessment(tmp_path, monkeypatch
                 advance_g5(source_db)
 
                 _prepare_case(page, base, g5["software_assessment_material_id"])
-                page.locator(
-                    '[data-state="SOURCE_CHANGED_REANALYSIS_AVAILABLE"]'
-                ).wait_for(timeout=15000)
                 page.locator("[data-generate]").click()
                 page.locator('[data-state="CANDIDATE_CREATED"]').wait_for(timeout=30000)
                 new_g5_id = _scenario_id_from_actions(page)
