@@ -1,0 +1,55 @@
+name: Hardware W3 T2 Chrome G5-G8 Mock Golden
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-chrome-g5-g8-mock.yml"
+      - "scripts/w3_tse_chrome_g5_g8.py"
+      - "scripts/w3_tse_g5_mock_server.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  chrome-g5-g8-mock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and isolated browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r support/requirements.txt -r support/requirements-runtime-p0-test.txt
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 37883734608
+          name: HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0
+          path: support/dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 37889176428
+          name: HARDWARE_W3_T2_BROWSER_MOCK_FIXTURES_c7935e0
+          path: support/dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Isolated Chrome G5-G8 negative/refresh/audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q support/scripts/w3_tse_g5_mock_server.py support/scripts/w3_tse_chrome_g5_g8.py
+          python support/scripts/w3_tse_chrome_g5_g8.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HARDWARE_W3_G5_G8_BROWSER_MOCK_EVIDENCE
+          path: support/dist/browser_g5_g8_evidence/
+          if-no-files-found: ignore
+          retention-days: 30
