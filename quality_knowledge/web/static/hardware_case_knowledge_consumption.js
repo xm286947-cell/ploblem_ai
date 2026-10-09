@@ -21,7 +21,8 @@
   const scenarios = {
     research: ['title', 'symptom', 'root_cause', 'failure_mechanism', 'actions', 'verification_result', 'engineering_rule', 'design_constraint', 'verification_method', 'applicability', 'interface', 'signal', 'device_refs', 'key_parameters'],
     risk: ['device_refs', 'interface', 'signal', 'key_parameters', 'failure_mode', 'failure_mechanism', 'design_constraint', 'diagnostic_clue', 'verification_method', 'applicability', 'conclusion'],
-    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability']
+    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability'],
+    testing: ['verification_method', 'verification_result', 'design_constraint', 'engineering_rule', 'failure_mechanism']
   };
   const groups = [
     ['工程与观察', ['title', 'symptom', 'occurrence_condition', 'failure_mode', 'interface', 'signal']],
@@ -85,6 +86,8 @@
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
         <div class="hc-knowledge-evidence">证据引用（${evidenceRefs.length}）：${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
+        <div class="hc-knowledge-actions"><button type="button" class="hc-button secondary" data-analyze-knowledge="${esc(item.knowledge_id)}">分析工程经验（试验）</button></div>
+        <section data-analysis-output="${esc(item.knowledge_id)}" aria-live="polite"></section>
       </article>`;
     }).join('');
   }
@@ -197,9 +200,34 @@
     query = { text: '', interface: '', signal: '', device: '' };
     runSearch();
   });
-  q('[data-knowledge-results]').addEventListener('click', event => {
+  q('[data-knowledge-results]').addEventListener('click', async event => {
     const button = event.target.closest('[data-open-knowledge]');
-    if (button) openDetail(button.dataset.openKnowledge);
+    if (button) { openDetail(button.dataset.openKnowledge); return; }
+    const analyze = event.target.closest('[data-analyze-knowledge]');
+    if (!analyze) return;
+    const panel = analyze.closest('.hc-knowledge-result').querySelector('[data-analysis-output]');
+    const scenario = {research: 'DESIGN_REUSE', risk: 'RISK', market: 'FIELD_PROBLEM', testing: 'TEST_VALIDATION'}[activeScenario];
+    panel.textContent = '正在分析正式知识，仅提供可追溯的参考建议…';
+    analyze.disabled = true;
+    try {
+      const response = await fetch('/api/v2/hardware-cases/r2/engineering-analysis', {
+        method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+        body: JSON.stringify({knowledge_id: analyze.dataset.analyzeKnowledge, scenario})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(String(data.detail || response.statusText));
+      const checks = Array.isArray(data.checks) ? data.checks : [];
+      panel.innerHTML = '<p><strong>AI 生成的工程参考（不是正式设计规范）</strong></p>'
+        + '<p>' + esc(data.summary || '') + '</p>'
+        + checks.map(item => '<div class="hc-knowledge-field"><strong>' + esc(item.recommendation)
+          + '</strong><span>依据：' + esc(item.source_field) + ' · ' + esc(item.source_excerpt)
+          + ' · 案例级证据 ' + esc(item.evidence_id) + '（字段与证据关联需人工复核）</span></div>').join('')
+        + '<p>待进一步确认：' + esc((data.unknowns || []).join('；') || '请结合实际产品条件复核') + '</p>';
+    } catch (error) {
+      panel.textContent = '智能工程分析不可用：' + error.message + '。可继续查看正式知识及原始证据。';
+    } finally {
+      analyze.disabled = false;
+    }
   });
   q('[data-detail-close]').addEventListener('click', () => {
     const detail = q('[data-knowledge-detail]');

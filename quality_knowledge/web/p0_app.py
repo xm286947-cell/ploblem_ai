@@ -599,6 +599,26 @@ def create_p0_app(
                     }
             app.state.hardware_query_agent_status = hardware_query_agent_status
 
+            # Explicit NON_PROD engineering advice: never auto-run on page load.
+            hardware_engineering_analysis_service = None
+            if (os.getenv("HARDWARE_R2_AGENT_NONPROD") == "1"
+                    and os.getenv("HARDWARE_ENGINEERING_AGENT_ENABLED") == "1"):
+                try:
+                    from services.hardware_engineering_analysis import HardwareEngineeringAnalysisService
+                    from services.hardware_engineering_runtime import HardwareEngineeringRuntimeInvoker
+                    hardware_engineering_analysis_service = HardwareEngineeringAnalysisService(
+                        hardware_knowledge_consumption_service,
+                        HardwareEngineeringRuntimeInvoker(),
+                    )
+                    app.state.hardware_engineering_agent_status = {"status": "READY"}
+                except Exception as error:
+                    app.state.hardware_engineering_agent_status = {
+                        "status": "BLOCKED",
+                        "code": str(getattr(error, "code", None) or type(error).__name__),
+                    }
+            else:
+                app.state.hardware_engineering_agent_status = {"status": "DISABLED_NONPROD_ONLY"}
+
             hardware_ai_search_service = HardwareCaseAIRetrievalService(
                 hardware_case_service,
                 retrieval_query_service=hardware_retrieval_query_service,
@@ -992,6 +1012,7 @@ def create_p0_app(
                     ),
                     ai_search_service=hardware_ai_search_service,
                     retrieval_catalog_service=hardware_retrieval_catalog_service,
+                    engineering_analysis_service=hardware_engineering_analysis_service,
                 )
             )
             app.include_router(
