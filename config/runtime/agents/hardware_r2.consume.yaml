@@ -1,0 +1,24 @@
+agent_id: hardware_knowledge.engineering_consume
+version: r2-v1
+label: Hardware Evidence-Constrained Consumption
+prompt:
+  ref: prompts/runtime/hardware_r2/consume_v1.md
+  version: HW-R2-CONSUME-V1
+output_schema:
+  ref: HardwareR2Advice
+  version: v1
+execution:
+  timeout_seconds: 45
+  retry:
+    transport_attempts: 1
+    validation_attempts: 1
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 1
+  model:
+    temperature: 0
+    max_tokens: 1024
+metadata:
+  business_domain: HARDWARE_CASE
+  provider_response_shape: json_object
+  formal_knowledge_write: false
