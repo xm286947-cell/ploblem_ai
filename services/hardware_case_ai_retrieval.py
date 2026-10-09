@@ -194,6 +194,32 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
             if len(variants) >= 32:
                 break
 
+    # The tokenized formal-search fallback requires each term to match.
+    # Split only exact, short interface+symptom compounds; this does not relax
+    # the ALL-terms constraint or invent a source fact.
+    compound = re.fullmatch(
+        r"(串口|uart|can|spi|i2c|adc)(乱码|丢包|失真|偏差|异常|故障)",
+        normalized,
+    )
+    if compound:
+        expanded = f"{compound.group(1)} {compound.group(2)}"
+        if expanded not in seen:
+            variants.append({
+                "text": expanded,
+                "kind": "RECALL_ONLY",
+                "tier": "ENGINEERING_ALIAS",
+                "priority_rank": _ALIAS_TIER_RANK["ENGINEERING_ALIAS"],
+                "expansion_cost": _ALIAS_TIER_COST["ENGINEERING_ALIAS"],
+                "rules": [{
+                    "rule_id": "INTERFACE_SYMPTOM_COMPOUND_SPLIT",
+                    "matched_phrase": retrieval_text,
+                    "expanded_term": expanded,
+                    "use": "RECALL_ONLY",
+                    "tier": "ENGINEERING_ALIAS",
+                    "cost": _ALIAS_TIER_COST["ENGINEERING_ALIAS"],
+                }],
+            })
+
     return sorted(
         variants,
         key=lambda item: (
@@ -728,6 +754,46 @@ class HardwareCaseAIRetrievalService:
     ) -> dict[str, Any]:
         raw_query = str(query or "")
         understood = understand_hardware_query(raw_query)
+
+        # Business case identity is not an arbitrary full-text term. Resolve
+        # against the read-only published view before searching.
+        direct_id = raw_query.strip().upper()
+        if re.fullmatch(r"[A-Z]\d{4,10}", direct_id):
+            visible = self._visible_payload(
+                role=role, statuses=statuses, historical=historical,
+            )
+            found = self._case_lookup(visible["results"]).get(direct_id)
+            if found is None and self.consumption_service is not None:
+                projection = self.consumption_service.search(
+                    "", business_case_id=direct_id, limit=2,
+                )
+                rows = projection.get("results", [])
+                if len(rows) == 1:
+                    found = self._projection_to_case(rows[0])
+            if found is not None and found.get("case_status") == "PUBLISHED":
+                case = self._attach_retrieval(
+                    found,
+                    mode="CASE_ID_EXACT",
+                    score=None,
+                    why_hit={
+                        "status": "EXACT_BUSINESS_CASE_ID",
+                        "claim_safe": True,
+                        "reasons": [{
+                            "matched_field": "business_case_id",
+                            "matched_text": direct_id,
+                        }],
+                    },
+                )
+                return {
+                    **visible,
+                    "results": [case],
+                    "retrieval": {
+                        "mode": "CASE_ID_EXACT",
+                        "query_understanding": understood,
+                        "degraded": False,
+                        "errors": [],
+                    },
+                }
 
         if not raw_query.strip():
             payload = self.case_service.search_cases(
