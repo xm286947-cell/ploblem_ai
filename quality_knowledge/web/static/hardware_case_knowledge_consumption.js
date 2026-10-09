@@ -220,7 +220,7 @@
         + '<p>' + esc(data.summary || '') + '</p>'
         + checks.map(item => '<div class="hc-knowledge-field"><strong>' + esc(item.recommendation)
           + '</strong><span>依据：' + esc(item.source_field) + ' · ' + esc(item.source_excerpt)
-          + ' · 证据 ' + esc(item.evidence_id) + '</span></div>').join('')
+          + ' · 案例级证据 ' + esc(item.evidence_id) + '（字段与证据关联需人工复核）</span></div>').join('')
         + '<p>待进一步确认：' + esc((data.unknowns || []).join('；') || '请结合实际产品条件复核') + '</p>';
     } catch (error) {
       panel.textContent = '智能工程分析不可用：' + error.message + '。可继续查看正式知识及原始证据。';
