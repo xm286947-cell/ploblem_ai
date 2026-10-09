@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-EXPECTED = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+EXPECTED = "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
 PRODUCT_ROOT = Path(__file__).resolve().parents[1]
 PREFLIGHT = PRODUCT_ROOT / "scripts" / "preflight.py"
 

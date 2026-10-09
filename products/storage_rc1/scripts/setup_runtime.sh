@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-EXPECTED="f9ca45f82960b3ce380273cf26868bc842a72b7f"
+EXPECTED="de8bbd6de1513b9bdceb9a0336b163d5595244cb"
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLED="$PROJECT/vendor/unified_agent_runtime"
 TARGET="${1:-$PROJECT/.external/ploblem_ai}"
