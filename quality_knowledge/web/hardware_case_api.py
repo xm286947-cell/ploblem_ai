@@ -20,7 +20,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from fastapi.responses import FileResponse
 
 from services.hardware_case_backend import HardwareCaseBackendService
-from services.hardware_case_ai_retrieval import HardwareCaseAIRetrievalError
+from services.hardware_case_ai_retrieval import HardwareCaseAIRetrievalError, HardwareCaseAIRetrievalService
 from services.hardware_case_contract import HardwareCaseContractError
 from services.hardware_case_source_store import HardwareCaseSourceError, HardwareCaseSourceStore
 from services.hardware_case_intake import HardwareCaseIntakeError, HardwareCaseIntakeService
@@ -76,6 +76,7 @@ def create_hardware_case_router(
     r1_stage_cache_invalidator: Callable[[str], int] | None = None,
     ai_search_service: Any | None = None,
     retrieval_catalog_service: Any | None = None,
+    assisted_query_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -410,6 +411,17 @@ def create_hardware_case_router(
             )
         except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
+
+    @router.get("/assisted-search")
+    def assisted_search(q: str = "", limit: int = Query(default=100, ge=1, le=100)) -> dict[str, Any]:
+        if assisted_query_service is None:
+            raise HTTPException(status_code=503, detail="ASSISTED_QUERY_UNAVAILABLE")
+        payload = assisted_query_service.search(q, limit=limit)
+        cases = [
+            HardwareCaseAIRetrievalService._projection_to_case(item)
+            for item in payload["results"]
+        ]
+        return {**payload, "results": cases}
 
     @router.get("/retrieval/status")
     def retrieval_status() -> dict[str, Any]:
