@@ -190,12 +190,14 @@
       return (!product||p.includes(product))&&(!circuit||c.includes(circuit))&&(!material||m.includes(material));
     });
     const mode=searchMeta.mode||'LEGACY';
-    const modeLabel={OPENSEARCH:'AI 检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索'}[mode]||mode;
+    const modeLabel={OPENSEARCH:'OpenSearch 检索',SQLITE_FORMAL:'正式知识关键词检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索',CASE_ID_EXACT:'案例编号直达'}[mode]||mode;
     const understood=searchMeta.query_understanding||{};
     const original=String(understood.original_query||'').trim();
     const retrievalText=String(understood.retrieval_text||'').trim();
     const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
+    const agentState=understood.online_agent?.status||'FAST_PATH';
+    const agentInfo=agentState==='COMPLETED'?'；在线 Agent 已参与':agentState==='BLOCKED'||agentState==='FAILED'?'；Agent 未就绪，确定性检索降级':'；快速规则检索';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+agentInfo+'；只展示 PUBLISHED。';
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
