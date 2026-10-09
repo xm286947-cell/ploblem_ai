@@ -76,11 +76,12 @@
     }
     box.innerHTML = results.map(item => {
       const evidenceRefs = Array.isArray(item.evidence_refs) ? item.evidence_refs : [];
+      const scoreLabel = !query.text ? '未评分' : item.case_retrieval?.mode === 'CASE_ID_EXACT' ? '编号直达' : (item.match_score ?? '—');
       return `<article class="hc-knowledge-result">
         <div class="hc-knowledge-result-head">
           <div><h3><button type="button" data-open-knowledge="${esc(item.knowledge_id)}">${esc(text(item.title))}</button></h3>
             <div class="hc-knowledge-meta"><code>knowledge_id: ${esc(item.knowledge_id)}</code><code>business_case_id: ${esc(item.business_case_id)}</code><span>${esc(item.source_domain)} / ${esc(item.source_object_type)}</span></div>
-          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>匹配度</small></div>
+          </div><div class="hc-knowledge-score"><b>${esc(scoreLabel)}</b><small>${!query.text ? '未检索' : '匹配信息'}</small></div>
         </div>
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
