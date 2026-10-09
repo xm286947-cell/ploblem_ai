@@ -23,7 +23,6 @@ from tools.openai_mock.server import create_server
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_CONFIG = "config/runtime/agents/storage.emmc.parameter_extract.yaml"
-MODEL_CONFIG = "config/runtime/model.yaml"
 SECRET = "ORCH_B01_SECRET_MUST_NOT_PERSIST"
 
 
@@ -76,7 +75,20 @@ def request_history(host: str, port: int) -> list[dict]:
 def storage_loader(base_url: str) -> AgentConfigLoader:
     return AgentConfigLoader(
         root=ROOT,
-        model_profiles=ROOT / MODEL_CONFIG,
+        # Offline tests must never depend on local user/Provider configs.
+        # Use the same runtime profile contract with an explicit in-memory mock.
+        model_profiles={
+            "active_model": "qwen_prod",
+            "models": {
+                "qwen_prod": {
+                    "provider": "openai_compatible",
+                    "base_url_env": "DASHSCOPE_BASE_URL",
+                    "api_key_env": "DASHSCOPE_API_KEY",
+                    "model": "qwen3.8-max",
+                    "temperature": 0,
+                },
+            },
+        },
         schemas={"StorageFieldResult": StorageFieldResult},
         content_strategies={
             "storage_linked_fields@1": {
