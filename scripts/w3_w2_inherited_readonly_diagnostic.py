@@ -12,7 +12,7 @@ mod=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 from services.hardware_case_word import parse_docx,HardwareWordParseError
 
-with tempfile.TemporaryDirectory(prefix="w2_inherited_readonly_") as td:
+with tempfile.TemporaryDirectory(prefix="w2_inherited_readonly_",ignore_cleanup_errors=True) as td:
     root=Path(td)
     source=root/"A12345-Flash启动异常.docx"
     payload=mod._docx(source)
