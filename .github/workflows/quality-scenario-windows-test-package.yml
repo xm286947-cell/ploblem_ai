@@ -62,6 +62,13 @@ jobs:
           Write-Host "ROOT_CAUSE_VISIBLE=YES"
           Write-Host "APP_LOG_TAIL_VISIBLE=YES"
 
+      - name: Windows real Chromium G1-G5 browser golden
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check playwright
+          .\.venv\Scripts\python.exe -m playwright install chromium
+          .\.venv\Scripts\python.exe -m pytest -q tests\test_quality_scenario_mac_browser_golden.py
+
       - name: Build fresh-extract Windows test package
         id: package
         shell: pwsh
@@ -114,6 +121,34 @@ jobs:
           Write-Host "SOURCE_SHA=$env:GITHUB_SHA"
           Write-Host "PACKAGE_NAME=$name.zip"
           Write-Host "PACKAGE_SHA256=$hash"
+
+      - name: Fresh Extract Windows BAT execution (fixture + original DB)
+        shell: pwsh
+        run: |
+          $package = "${{ steps.package.outputs.PACKAGE_PATH }}"
+          $fresh = Join-Path $env:RUNNER_TEMP "QS Windows Fresh Extract 中文"
+          if (Test-Path $fresh) { Remove-Item -Recurse -Force $fresh }
+          New-Item -ItemType Directory -Force -Path $fresh | Out-Null
+          Expand-Archive -Path $package -DestinationPath $fresh -Force
+          $env:QS_WINDOWS_ACCEPTANCE_SMOKE_ONLY = "1"
+          $env:CI = "true"
+          Push-Location $fresh
+          try {
+            $launcher = Join-Path $fresh "start_quality_scenario_windows_acceptance.bat"
+            & cmd.exe /d /c ('call "' + $launcher + '"')
+            if ($LASTEXITCODE -ne 0) { throw "FRESH_EXTRACT_FIXTURE_BAT_FAIL:$LASTEXITCODE" }
+            Write-Host "FRESH_EXTRACT_FIXTURE_BAT=PASS"
+
+            $fixture = Join-Path $fresh "validation\windows_acceptance\quality_scenario_source_fixture.db"
+            if (!(Test-Path $fixture)) { throw "FRESH_FIXTURE_MISSING" }
+            Copy-Item -Path $fixture -Destination (Join-Path $fresh "quality_issue_v1.db") -Force
+            $originalLauncher = Join-Path $fresh "start_quality_scenario_windows_original_db.bat"
+            & cmd.exe /d /c ('call "' + $originalLauncher + '"')
+            if ($LASTEXITCODE -ne 0) { throw "FRESH_EXTRACT_ORIGINAL_DB_BAT_FAIL:$LASTEXITCODE" }
+            Write-Host "FRESH_EXTRACT_ORIGINAL_DB_BAT=PASS"
+          } finally {
+            Pop-Location
+          }
 
       - name: Upload Windows test package
         uses: actions/upload-artifact@v4
