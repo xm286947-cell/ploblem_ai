@@ -30,6 +30,7 @@
       <label>器件<input type="text" data-knowledge-filter="device" placeholder="如 MCU"></label>
       <div class="hc-knowledge-actions"><button type="submit" class="hc-button primary">检索</button><button type="button" class="hc-button secondary" data-knowledge-clear>清空筛选</button></div>
     </form>
+    <p class="hc-help">查工程经验：输入“模拟量”或完整设计问题，检索正式知识；按任务视角查看工程规则、风险或验证要求。若出现“分析工程经验（试验）”，可按需调用 Agent；AI 建议需核对原始案例证据。</p>
   </section>
 
   <section class="hc-card" aria-live="polite">
@@ -51,4 +52,4 @@
   <div class="hc-toast" data-hc-toast hidden></div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=wave4-stage4-v2"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=hardware-r2-s2-v1"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}
