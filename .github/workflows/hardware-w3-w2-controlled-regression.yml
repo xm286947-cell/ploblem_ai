@@ -1,0 +1,51 @@
+name: Hardware W3 W2 Inherited Controlled Environment Regression
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-w2-controlled-regression.yml"
+      - "tests/support/w3_w2_asset_bootstrap_plugin.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  normalized-w2-neighbor:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - name: Keep frozen source bytes LF-normalized in checkout
+        shell: bash
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: product
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install frozen dependencies
+        run: python -m pip install -r product/requirements.txt -r product/requirements-runtime-p0-test.txt
+      - name: Run exact 58 legacy tests with real journal migration in only two fixtures
+        shell: bash
+        env:
+          PYTHONPATH: product
+          PYTHONUTF8: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p support/dist/w2_controlled
+          python -m pytest -q -ra             -p support.tests.support.w3_w2_asset_bootstrap_plugin             product/tests/test_hardware_r1_word_import_web.py             product/tests/test_hardware_r1_source_binding.py             product/tests/test_hardware_r1_single_package_e2e.py             product/tests/test_hardware_r1_wave4_validation_package.py             product/tests/test_hardware_case_product_package_closure.py             product/tests/test_hardware_case_w2_ui_smoke_contract.py             product/tests/test_hardware_r1_pipeline_v13.py             --junitxml=support/dist/w2_controlled/W2_CONTROLLED_58.xml             2>&1 | tee support/dist/w2_controlled/pytest.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-w3-w2-controlled-evidence-${{ matrix.os }}
+          path: support/dist/w2_controlled/
+          if-no-files-found: ignore
+          retention-days: 30
