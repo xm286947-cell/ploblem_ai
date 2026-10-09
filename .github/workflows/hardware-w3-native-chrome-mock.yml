@@ -1,0 +1,62 @@
+name: Hardware W3 Native Chrome G3 G5-G8 Same ZIP
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-native-chrome-mock.yml"
+      - "scripts/w3_tse_chrome_g3.py"
+      - "scripts/w3_tse_chrome_g5_g8.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  same-frozen-candidate-chrome:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 22
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install frozen exact test dependencies and native Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r support/requirements.txt -r support/requirements-runtime-p0-test.txt
+          python -m pip install playwright==1.58.0
+          python -m playwright install chromium
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 37883734608
+          name: HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0
+          path: support/dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 37889176428
+          name: HARDWARE_W3_T2_BROWSER_MOCK_FIXTURES_c7935e0
+          path: support/dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run native Chrome mock-only G3 and G5-G8 on same 2 immutable ZIPs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q support/scripts/w3_tse_chrome_g3.py support/scripts/w3_tse_chrome_g5_g8.py
+          python support/scripts/w3_tse_chrome_g3.py
+          python support/scripts/w3_tse_chrome_g5_g8.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HARDWARE_W3_NATIVE_CHROME_${{ matrix.os }}_EVIDENCE
+          path: |
+            support/dist/browser_g3_evidence/
+            support/dist/browser_g5_g8_evidence/
+          if-no-files-found: ignore
+          retention-days: 30
