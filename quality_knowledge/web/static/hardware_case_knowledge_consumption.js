@@ -15,7 +15,7 @@
     title: '标题', symptom: '问题现象', root_cause: '根因', failure_mechanism: '失效机理',
     actions: '解决措施', verification_result: '验证结果', engineering_rule: '工程规则',
     design_constraint: '设计约束', verification_method: '验证方法', applicability: '适用范围',
-    interface: '接口', signal: '信号', device_refs: '器件引用', key_parameters: '关键参数',
+    interface: '接口', signal: '信号', device_refs: '器件引用', key_parameters: '关键参数', evidence_refs: '证据引用',
     failure_mode: '失效模式', diagnostic_clue: '诊断线索', conclusion: '结论',
     occurrence_condition: '发生条件', analysis_process: '分析过程', occurrence: '发生条件'
   };
