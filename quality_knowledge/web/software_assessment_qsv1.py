@@ -164,7 +164,7 @@ class SoftwareAssessmentQSV1Flow:
     def _existing_for(self, bundle: dict[str, Any], trigger_source: str, trigger_reason: str):
         selected_id = str(bundle.get("primary_source_id") or "")
         previous_revision = False
-        for scenario in self.qsv1.list():
+        for scenario in self.qsv1.find_for_selected_issue(selected_id, trigger_source, trigger_reason):
             refs = {item.source_id for item in scenario.source_problem_refs if item.source_type == "SCENARIO_SOURCE_BUNDLE"}
             selected_refs = {item.source_id for item in scenario.source_problem_refs if item.source_type == "SELECTED_ISSUE"}
             if selected_id not in selected_refs or scenario.trigger_source is None:
