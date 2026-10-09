@@ -511,10 +511,12 @@ class OpenAICompatibleProviderAdapter:
 
         usage = envelope.get("usage") if isinstance(envelope, dict) else None
         usage = usage if isinstance(usage, dict) else {}
+        normalized_finish_reason = (
+            finish_reason.lower() if isinstance(finish_reason, str) else ""
+        )
         safe_reason = (
-            finish_reason
-            if isinstance(finish_reason, str)
-            and finish_reason in {"stop", "length", "tool_calls", "content_filter"}
+            normalized_finish_reason
+            if normalized_finish_reason in {"stop", "length", "tool_calls", "content_filter"}
             else "NOT_RECORDED"
         )
         output_bytes = content.encode("utf-8") if isinstance(content, str) else b""
@@ -530,7 +532,11 @@ class OpenAICompatibleProviderAdapter:
             "ends_with_json_object": stripped.endswith("}"),
             "starts_with_markdown_fence": stripped.startswith("```"),
             "provider_call_seq": runtime_context.get("provider_call_seq"),
-            "max_tokens": body.get("max_tokens", "NOT_RECORDED"),
+            "max_tokens": (
+                body["max_tokens"]
+                if type(body.get("max_tokens")) is int and body["max_tokens"] >= 0
+                else "NOT_RECORDED"
+            ),
         }
         for key in ("prompt_tokens", "completion_tokens"):
             value = usage.get(key)
