@@ -39,5 +39,5 @@ for file in ["config/runtime/agents/hardware_case.r1_case_extract.yaml","prompts
     p=product/file
     if p.exists():
         raw=p.read_bytes()
-        print("STAGE_A_FILE="+file+" BYTES="+str(len(raw))+" CRLF="+str(raw.count(b"\\r\\n"))+" LF="+str(raw.count(b"\\n"))+" SHA="+hashlib.sha256(raw).hexdigest())
+        print("STAGE_A_FILE="+file+" BYTES="+str(len(raw))+" CRLF="+str(raw.count(b"\r\n"))+" LF="+str(raw.count(b"\n"))+" SHA="+hashlib.sha256(raw).hexdigest())
 print("DIAGNOSTIC_DONE=YES")
