@@ -178,6 +178,8 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             payload["provider_calls_per_case"]={x["business_case_id"]:x.get("provider_calls") for x in latest["items"]}
             _,records=get(MOCK+"/__mock__/requests")
             order=[x.get("scenario_key") for x in records["data"]]
+            print("G1_G2_ITEM_STATES="+json.dumps([{"case":x.get("business_case_id"),"result":x.get("result"),"calls":x.get("provider_calls"),"source_id":x.get("source_id"),"candidate_id":x.get("candidate_id"),"error_code":x.get("error_code")} for x in latest["items"]],ensure_ascii=False),flush=True)
+            print("G1_G2_REQUEST_ORDER="+json.dumps(order),flush=True)
             assert order==["stage-a","stage-b","stage-a","stage-b"],order
             payload["call_order"]=order
             payload["default_execution_mode"]="SEQUENTIAL"
