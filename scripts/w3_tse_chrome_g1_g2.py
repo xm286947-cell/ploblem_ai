@@ -109,16 +109,6 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
     assert (product/"W3_TEST_CANDIDATE_MANIFEST.json").is_file()
     assert (fixtures/"A9903-MCU串口带载乱码.docx").is_file()
     assert (fixtures/"A9904-MCU串口输出配置异常.docx").is_file()
-    # Separate source identity is necessary for the sequential A/B/A/B check.
-    # The frozen kit ships two otherwise byte-identical synthetic DOCX.
-    # Only this extracted test fixture copy is changed: an inert ZIP member,
-    # leaving document.xml and all Evidence block IDs byte-for-byte identical.
-    with zipfile.ZipFile(fixtures/"A9904-MCU串口输出配置异常.docx","a") as z:
-        z.writestr("customXml/W3_G2_DISTINCT_TEST_SOURCE.txt",
-                   "Synthetic W3 G2 Source Identity Delta. No content changes.")
-    raw_hashes={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in [fixtures/"A9903-MCU串口带载乱码.docx",fixtures/"A9904-MCU串口输出配置异常.docx"]}
-    print("G1_G2_DISK_SOURCE_SHA256="+json.dumps(raw_hashes,ensure_ascii=False),flush=True)
-    assert len(set(raw_hashes.values()))==2,"G2_TEST_INPUT_MUST_HAVE_DISTINCT_BYTES"
     manifest=json.loads((product/"W3_TEST_CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["source_commit"]==SOURCE_SHA and manifest["real_provider"]=="NOT_RUN"
     model=product/"config/runtime/hardware_w3_mock_only.example.yaml"
@@ -139,6 +129,16 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
     web_p,web_log=None,None
     try:
         await_url(MOCK+"/__mock__/health",mock_p)
+        # Separate source identity is necessary for the sequential A/B/A/B check.
+        # The frozen kit ships two otherwise byte-identical synthetic DOCX.
+        # Only this extracted test fixture copy is changed: an inert ZIP member,
+        # leaving document.xml and all Evidence block IDs byte-for-byte identical.
+        with zipfile.ZipFile(fixtures/"A9904-MCU串口输出配置异常.docx","a") as z:
+            z.writestr("customXml/W3_G2_DISTINCT_TEST_SOURCE.txt",
+                       "Synthetic W3 G2 Source Identity Delta. No content changes.")
+        raw_hashes={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in [fixtures/"A9903-MCU串口带载乱码.docx",fixtures/"A9904-MCU串口输出配置异常.docx"]}
+        print("G1_G2_DISK_SOURCE_SHA256="+json.dumps(raw_hashes,ensure_ascii=False),flush=True)
+        assert len(set(raw_hashes.values()))==2,"G2_TEST_INPUT_MUST_HAVE_DISTINCT_BYTES"
         web_p,web_log=start([sys.executable,str(product/"scripts/hardware_r1_e2e_validation_start.py"),
                              "--data-root",str(isolated/"Data"),
                              "--bootstrap",str(isolated/"bootstrap.json"),
