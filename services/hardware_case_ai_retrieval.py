@@ -756,9 +756,55 @@ class HardwareCaseAIRetrievalService:
         )
         lookup = self._case_lookup(visible["results"])
         errors: list[str] = []
+        # Exact business identity is a locator, not a free-text substring.
+        case_id = raw_query.strip().upper()
+        if re.fullmatch(r"A[0-9]{4,}", case_id) and self.consumption_service is not None:
+            exact = self.consumption_service.search("", business_case_id=case_id, limit=2)
+            if exact.get("results"):
+                mapped = self._ranked_case_hits(
+                    exact["results"], lookup=lookup, mode="SQLITE_FORMAL",
+                    resolver=self._resolve_formal_case,
+                )
+                result = dict(visible)
+                result["results"] = mapped
+                result["retrieval"] = {
+                    "mode": "EXACT_BUSINESS_CASE_ID",
+                    "query_understanding": understood,
+                    "online_agent": {"status": "SKIPPED_EXACT_ID", "trace": None},
+                    "degraded": False, "errors": [],
+                }
+                return result
         search_queries = list(understood.get("search_queries") or []) or [
             {"text": str(understood["retrieval_text"]), "kind": "LITERAL", "rules": []}
         ]
+        agent_report: dict[str, Any] = {"status": "SKIPPED_FAST_PATH", "trace": None}
+        if self.query_agent is not None and (
+            len(raw_query.strip()) > 18
+            or any(x in raw_query for x in ("怎么", "如何", "什么经验", "为什么", "有什么建议"))
+        ):
+            reply = self.query_agent.invoke({"question": raw_query})
+            agent_report = {
+                "status": reply.get("status", "BLOCKED"),
+                "trace": reply.get("trace"),
+                "reason": reply.get("reason"),
+            }
+            if reply.get("status") == "COMPLETED":
+                words = reply.get("data", {}).get("queries") or []
+                seen = {str(v.get("text") or "").casefold() for v in search_queries}
+                for word in words[:5]:
+                    if not isinstance(word, str) or not (1 <= len(word.strip()) <= 80):
+                        continue
+                    word = word.strip()
+                    if word.casefold() in seen:
+                        continue
+                    seen.add(word.casefold())
+                    search_queries.append({
+                        "text": word, "kind": "AGENT_QUERY",
+                        "priority_rank": 1, "expansion_cost": 1,
+                        "tier": "ENGINEERING_ALIAS", "rules": [],
+                        "original_query": raw_query,
+                    })
+                understood["agent_intent"] = reply.get("data", {}).get("intent")
 
         if self.retrieval_query_service is not None:
             try:
@@ -788,6 +834,7 @@ class HardwareCaseAIRetrievalService:
                     result["retrieval"] = {
                         "mode": "OPENSEARCH",
                         "query_understanding": understood,
+                        "online_agent": agent_report,
                         "degraded": False,
                         "errors": errors,
                     }
@@ -823,6 +870,7 @@ class HardwareCaseAIRetrievalService:
                     result["retrieval"] = {
                         "mode": "SQLITE_FORMAL",
                         "query_understanding": understood,
+                        "online_agent": agent_report,
                         "degraded": self.retrieval_query_service is not None,
                         "errors": errors,
                     }
@@ -870,6 +918,7 @@ class HardwareCaseAIRetrievalService:
         result["retrieval"] = {
             "mode": "LEGACY_NORMALIZED",
             "query_understanding": understood,
+            "online_agent": agent_report,
             "degraded": bool(errors),
             "errors": errors,
         }
