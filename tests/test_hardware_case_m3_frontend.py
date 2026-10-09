@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -92,6 +93,32 @@ def test_m3_shared_assets_are_served(tmp_path: Path):
     assert "CORE_FACTS_NOT_REVIEWED" in js.text
     assert "NO_VALID_EVIDENCE" in js.text
     assert "NO_CONFIRMED_MAPPING" in js.text
+
+
+def test_evidence_drawer_layers_above_sticky_header():
+    hardware_css = (ROOT / "quality_knowledge/web/static/hardware_case.css").read_text(encoding="utf-8")
+    app_css = (ROOT / "quality_knowledge/web/static/app.css").read_text(encoding="utf-8")
+
+    def z_indexes(css: str, selector: str) -> list[int]:
+        rules = re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+        return [int(value.group(1)) for rule in rules if (value := re.search(r"z-index\s*:\s*(\d+)", rule))]
+
+    header_z = z_indexes(app_css, ".top-bar")
+    backdrop_z = z_indexes(hardware_css, ".hc-drawer-backdrop")
+    drawer_z = z_indexes(hardware_css, ".hc-evidence-drawer")
+
+    assert header_z and backdrop_z and drawer_z
+    assert min(backdrop_z) > max(header_z)
+    assert min(drawer_z) > min(backdrop_z)
+
+
+def test_evidence_labels_are_chinese_and_keep_full_source_identity_accessible():
+    js = (ROOT / "quality_knowledge/web/static/hardware_case.js").read_text(encoding="utf-8")
+    assert "WORD:'Word 原文'" in js
+    assert "AVAILABLE:'原文可用'" in js
+    assert "PARAGRAPH:'段落'" in js
+    assert "<details class=\"hc-source-identity\"><summary>技术来源标识</summary>" in js
+    assert "title=\"'+esc(ev.source_ref||'')+'\"" in js
 
 
 def test_m3_existing_platform_shell_has_hardware_case_primary_entry(tmp_path: Path):
