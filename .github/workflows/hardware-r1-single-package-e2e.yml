@@ -10,6 +10,7 @@ on:
       - "scripts/hardware_r1_e2e_validation_start.py"
       - "scripts/build_hardware_r1_e2e_validation_package.py"
       - "tests/test_hardware_r1_single_package_e2e.py"
+      - "tests/test_hardware_r1_e2e_start_check.py"
       - "tests/test_hardware_operability.py"
       - "tests/test_hardware_r1_workbench.py"
       - "tests/test_hardware_knowledge_consumption.py"
@@ -44,7 +45,7 @@ jobs:
       - name: Install runtime and test dependencies
         run: python -m pip install -r requirements.txt
       - name: Synthetic, consumption and fake-provider E2E regressions
-        run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_operability.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py tests/test_hardware_r1_promotion_architecture.py tests/test_hardware_r1_workbench_architecture.py
+        run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_r1_e2e_start_check.py tests/test_hardware_operability.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py tests/test_hardware_r1_promotion_architecture.py tests/test_hardware_r1_workbench_architecture.py
       - name: Hardware JavaScript syntax and retry UX gate
         run: |
           node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
@@ -80,6 +81,7 @@ jobs:
           (temp_root / "package.sha256").write_text(digest + "\n", encoding="utf-8")
           print("FRESH_EXTRACT=PASS")
           print("PACKAGE_SHA256=" + digest)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: hardware-r1-e2e-${{ matrix.label }}

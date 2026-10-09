@@ -17,6 +17,23 @@ from services.hardware_startup_coordinator import HardwareStartupCoordinator
 from scripts.hardware_case_web_start import build_app
 from fastapi.testclient import TestClient
 
+CONSUMPTION_CONTRACT_VERSION = "hardware-knowledge-consumption/v1"
+
+
+def _is_empty_consumption_search(response) -> bool:
+    """Validate the documented first-install response for public Knowledge search."""
+    if response.status_code != 200:
+        return False
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("contract_version") == CONSUMPTION_CONTRACT_VERSION
+        and payload.get("results") == []
+    )
+
 
 def _default_base() -> Path:
     if sys.platform.startswith("win"):
@@ -95,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             "WORKBENCH_PAGE": ("GET", "/p0/hardware-cases/knowledge-production", 200, {}),
             "KNOWLEDGE_PAGE": ("GET", "/p0/hardware-cases/knowledge?e2e=1", 200, {}),
             "WORKBENCH_API": ("GET", "/api/v2/hardware-cases/r1/workbench/batches", 200, {"X-Hardware-Case-Role": "MAINTAINER"}),
-            "CONSUMPTION_API": ("GET", "/api/public/hardware-knowledge/v1/search", 503, {}),
+            "CONSUMPTION_API": ("GET", "/api/public/hardware-knowledge/v1/search", 200, {}),
             "READINESS_API": ("GET", "/api/e2e/hardware-r1/readiness", 200, {}),
         }
         with TestClient(app) as client:
@@ -104,7 +121,18 @@ def main(argv: list[str] | None = None) -> int:
                 if response.status_code != expected:
                     print(f"RESULT=BLOCKED\nCHECK={name}\nEXPECTED={expected}\nACTUAL={response.status_code}\nBODY={response.text[:500]}", file=sys.stderr)
                     return 3
+                if name == "CONSUMPTION_API" and not _is_empty_consumption_search(response):
+                    print(
+                        "RESULT=BLOCKED\n"
+                        "CHECK=CONSUMPTION_API_CONTRACT\n"
+                        f"EXPECTED={CONSUMPTION_CONTRACT_VERSION} with empty results\n"
+                        f"BODY={response.text[:500]}",
+                        file=sys.stderr,
+                    )
+                    return 3
                 print(f"{name}=PASS")
+                if name == "CONSUMPTION_API":
+                    print("CONSUMPTION_EMPTY_FIRST_INSTALL=PASS")
             operability = client.get("/ready")
             payload = operability.json()
             knowledge = (
