@@ -85,7 +85,7 @@ def report_app_failure(error: BaseException, process: subprocess.Popen | None, d
 
 
 def main() -> int:
-    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace", line_buffering=True)
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--no-browser", action="store_true")
