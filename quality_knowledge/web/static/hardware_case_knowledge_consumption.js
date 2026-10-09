@@ -72,7 +72,7 @@
     const box = q('[data-knowledge-results]');
     q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'} · ${agentStatus === 'COMPLETED' ? '在线 Agent 已参与' : agentStatus === 'SKIPPED_FAST_PATH' || agentStatus === 'SKIPPED_EMPTY_QUERY' ? '快速检索' : '确定性检索（Agent 未就绪）'}`;
     if (!results.length) {
-      box.innerHTML = '<div class="hc-knowledge-empty">未检索到已发布的正式硬件知识</div>';
+      box.innerHTML = '<div class="hc-knowledge-empty">' + (agentStatus === 'DISABLED' || agentStatus === 'BLOCKED' ? '当前关键词检索未命中，在线 Agent 未就绪；不能据此断定知识库没有相关案例。' : '未检索到匹配的正式硬件知识') + '</div>';
       return;
     }
     box.innerHTML = results.map(item => {
