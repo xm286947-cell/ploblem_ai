@@ -44,7 +44,9 @@ class HardwareR2Agent:
         self.root = Path(root).resolve() if root else Path(__file__).resolve().parents[1]
         self.env = environ if environ is not None else os.environ
         self.agent_id = QUERY_AGENT if kind == "query" else CONSUME_AGENT
-        self.enabled = self.env.get("HARDWARE_R2_REAL_PROVIDER_ENABLED") == "1"
+        # Both switches are required; never enable a paid Provider in standard deployment.
+        self.enabled = (self.env.get("HARDWARE_R2_REAL_PROVIDER_ENABLED") == "1"
+                        and self.env.get("HARDWARE_R2_DEPLOYMENT_MODE") == "NON_PROD")
         self.runtime = None
 
     def _prepare(self):
@@ -75,7 +77,9 @@ class HardwareR2Agent:
 
     def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not self.enabled:
-            return {"status": "DISABLED", "data": None, "trace": None, "reason": "NOT_ENABLED"}
+            return {"status": "DISABLED", "data": None, "trace": None, "reason": "NONPROD_PROVIDER_NOT_ENABLED"}
+        if len(json.dumps(dict(payload), ensure_ascii=False, default=str)) > 16000:
+            return {"status": "BLOCKED", "data": None, "trace": None, "reason": "AGENT_INPUT_TOO_LARGE"}
         try:
             self._prepare()
             raw = json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, default=str)
