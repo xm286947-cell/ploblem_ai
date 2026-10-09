@@ -118,9 +118,20 @@
     q('[data-knowledge-unavailable]').hidden = true;
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/search' + searchParams());
+      const endpoint = query.text
+        ? '/api/v2/hardware-cases/r2/knowledge-query' + searchParams()
+        : api + '/search' + searchParams();
+      const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(String(payload.detail || response.statusText));
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
+      const agent = (payload.retrieval || {}).query_understanding?.online_agent;
+      if (query.text && agent && agent.status !== 'FAST_PATH') {
+        q('[data-knowledge-summary]').textContent += agent.status === 'COMPLETED'
+          ? ' · Agent 已理解查询（可审计）'
+          : ' · 确定性检索（Agent 未就绪/降级）';
+      }
     } catch (error) {
       results = [];
       if (error.status === 503) setUnavailable();
