@@ -64,6 +64,7 @@ class HardwareQueryRuntimeInvoker:
         self.store = SqliteTaskStore(db_path)
         self.runtime = ConfiguredAgentRuntime(self.store, config_loader=loader)
         resolved = self.runtime.load_agent(agent_path)
+        self.resolved = resolved
         if resolved.definition.agent_id != AGENT_ID:
             raise HardwareQueryRuntimeError("QUERY_AGENT_ID_MISMATCH")
 
@@ -91,8 +92,8 @@ class HardwareQueryRuntimeInvoker:
             "task_id": result.task_id,
             "run_id": result.run_id,
             "provider_calls": provider_calls,
-            "provider": result.execution.provider,
-            "model": result.execution.model,
+            "provider": result.execution.provider or self.resolved.provider.type,
+            "model": result.execution.model or self.resolved.provider.model,
             "duration_ms": result.execution.duration_ms,
             "token_usage": dict(result.execution.token_usage),
             "trace_id": result.execution.trace_id,
