@@ -39,3 +39,33 @@ def test_new_asset_migration_module_is_discovered_automatically(tmp_path: Path, 
     assert future in closure["asset_migration_modules"]
     assert future in closure["roots"]
     assert future in closure["files"]
+
+
+def test_candidate_packages_local_nonprod_knowledge_binding_without_old_install():
+    closure = package_builder.dependency_closure(package_builder.ROOT)
+
+    assert closure["status"] == "PASS"
+    binding = "services/hardware_r1_e2e_nonprod_knowledge.py"
+    assert binding in closure["roots"]
+    assert binding in closure["files"]
+    assert "knowledge_production/public_service.py" in closure["files"]
+    assert "knowledge_production/release.py" in closure["files"]
+    assert not closure["unresolved_local_imports"]
+
+    # The Candidate reuses the existing Knowledge facade and artifact store;
+    # this is the same repository implementation, not a second store.
+    assert "repositories/json_repository.py" in closure["files"]
+    assert package_builder.CLOSURE_ROOTS.count(binding) == 1
+
+
+def test_ai_retrieval_definition_is_packaged_but_provider_config_is_preserved():
+    assert (
+        "config/runtime/agents/hardware_retrieval.tag.yaml"
+        in package_builder.INCLUDE_FILES
+    )
+    assert (
+        "prompts/runtime/hardware_retrieval/tagger_v1.md"
+        in package_builder.INCLUDE_FILES
+    )
+    assert "config/hardware_search.example.yaml" in package_builder.INCLUDE_FILES
+    assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES

@@ -1,0 +1,226 @@
+name: Hardware AI Retrieval OpenSearch W0
+
+on:
+  pull_request:
+    paths:
+      - "services/hardware_search_adapter.py"
+      - "config/hardware_search.example.yaml"
+      - "scripts/opensearch/**"
+      - "tests/test_hardware_search_adapter.py"
+      - "docs/product/HARDWARE_AI_RETRIEVAL_W0_OPENSEARCH_SPIKE.md"
+      - ".github/workflows/hardware-ai-retrieval-opensearch-w0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Adapter unit tests
+        run: python -m pytest -q tests/test_hardware_search_adapter.py
+
+  macos-native:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download native tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="3.9.0"
+          case "$(uname -m)" in
+            arm64|aarch64) ARCH="arm64" ;;
+            x86_64|amd64) ARCH="x64" ;;
+            *) echo "unsupported architecture: $(uname -m)"; exit 2 ;;
+          esac
+          ARCHIVE="$RUNNER_TEMP/opensearch-$VERSION-linux-$ARCH.tar.gz"
+          SOURCE="https://artifacts.opensearch.org/releases/bundle/opensearch/$VERSION/opensearch-$VERSION-linux-$ARCH.tar.gz"
+          curl --fail --location --retry 3 "$SOURCE" --output "$ARCHIVE"
+          PACKAGE_SHA256="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+          echo "OPENSEARCH_PACKAGE_SOURCE=$SOURCE"
+          echo "OPENSEARCH_PACKAGE_SHA256=$PACKAGE_SHA256"
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP"
+          echo "OPENSEARCH_HOME=$RUNNER_TEMP/opensearch-$VERSION" >> "$GITHUB_ENV"
+          echo "HARDWARE_SEARCH_DATA_DIR=$RUNNER_TEMP/hardware-search-data" >> "$GITHUB_ENV"
+          echo "HARDWARE_SEARCH_BASE_URL=http://127.0.0.1:9200" >> "$GITHUB_ENV"
+
+      - name: Start native OpenSearch
+        shell: bash
+        run: |
+          chmod +x scripts/opensearch/start_macos.command
+          nohup bash scripts/opensearch/start_macos.command > "$RUNNER_TEMP/opensearch-stdout.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/opensearch-wrapper.pid"
+
+      - name: Bootstrap smoke
+        shell: bash
+        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 180
+
+      - name: Restart native OpenSearch
+        shell: bash
+        run: |
+          pkill -f 'org.opensearch.bootstrap.OpenSearch' || true
+          for i in {1..30}; do
+            if ! curl --silent --fail http://127.0.0.1:9200 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          nohup bash scripts/opensearch/start_macos.command > "$RUNNER_TEMP/opensearch-restart.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/opensearch-wrapper-restart.pid"
+
+      - name: Verify persistence after restart
+        shell: bash
+        run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
+
+      - name: Upload macOS logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-search-w0-macos
+          path: |
+            ${{ runner.temp }}/opensearch-stdout.log
+            ${{ runner.temp }}/opensearch-restart.log
+          if-no-files-found: warn
+
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download native Windows ZIP
+        shell: pwsh
+        run: |
+          $version = "3.9.0"
+          $archive = "C:\opensearch-$version-windows-x64.zip"
+          $url = "https://artifacts.opensearch.org/releases/bundle/opensearch/$version/opensearch-$version-windows-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "OPENSEARCH_PACKAGE_SOURCE=$url"
+          Write-Host "OPENSEARCH_PACKAGE_SHA256=$hash"
+          Expand-Archive -Path $archive -DestinationPath C:\ -Force
+          "OPENSEARCH_HOME=C:\opensearch-$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HARDWARE_SEARCH_DATA_DIR=C:\hardware-search-w0-data" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HARDWARE_SEARCH_BASE_URL=http://127.0.0.1:9200" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Start native OpenSearch through BAT launcher
+        id: windows_search_first
+        shell: cmd
+        run: call scripts\opensearch\start_windows.bat ^> "%RUNNER_TEMP%\opensearch-stdout.log" 2^> "%RUNNER_TEMP%\opensearch-stderr.log"
+        background: true
+
+      - name: Early Windows process diagnostics
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 8
+          Write-Host "=== OpenSearch/Java processes ==="
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match "java|cmd" -and $_.CommandLine -like "*opensearch*" } |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine |
+            Format-List
+          Write-Host "=== Port 9200 ==="
+          Get-NetTCPConnection -LocalPort 9200 -ErrorAction SilentlyContinue |
+            Format-Table -AutoSize
+          Write-Host "=== OPENSEARCH_HOME logs ==="
+          if (Test-Path "$env:OPENSEARCH_HOME\logs") {
+            Get-ChildItem "$env:OPENSEARCH_HOME\logs" -File -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                Write-Host "===== $($_.FullName) ====="
+                Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Bootstrap smoke
+        run: python scripts/opensearch/smoke_search.py --phase bootstrap --wait-seconds 60
+
+      - cancel: windows_search_first
+
+      - name: Wait for first native process to stop
+        shell: pwsh
+        run: |
+          for ($i = 0; $i -lt 30; $i++) {
+            $listener = Get-NetTCPConnection -LocalPort 9200 -State Listen -ErrorAction SilentlyContinue
+            if (-not $listener) { exit 0 }
+            Start-Sleep -Seconds 1
+          }
+          throw "WINDOWS_NATIVE_STOP_TIMEOUT"
+
+      - name: Restart native OpenSearch
+        id: windows_search_restart
+        shell: cmd
+        run: call scripts\opensearch\start_windows.bat ^> "%RUNNER_TEMP%\opensearch-restart.log" 2^> "%RUNNER_TEMP%\opensearch-restart-stderr.log"
+        background: true
+
+      - name: Verify persistence after restart
+        run: python scripts/opensearch/smoke_search.py --phase verify-existing --wait-seconds 180
+
+      - name: Collect Windows engine logs
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "=== Final Windows process state ==="
+          $java = Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match "^java(.exe)?$" -and $_.CommandLine -like "*org.opensearch.bootstrap.OpenSearch*" }
+          $java | Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-List
+          Write-Host "=== Final port 9200 state ==="
+          Get-NetTCPConnection -LocalPort 9200 -ErrorAction SilentlyContinue | Format-Table -AutoSize
+          if ($java) {
+            $pidValue = @($java)[0].ProcessId
+            $dump = "$env:RUNNER_TEMP\opensearch-thread-dump.txt"
+            & "$env:OPENSEARCH_HOME\jdk\bin\jcmd.exe" $pidValue Thread.print | Out-File $dump -Encoding utf8
+            Write-Host "THREAD_DUMP_PID=$pidValue"
+            Get-Content $dump -Tail 240
+          } else {
+            Write-Host "OPENSEARCH_JAVA_PROCESS=ABSENT"
+          }
+
+          $dest = "$env:RUNNER_TEMP\engine-logs"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $sources = @(
+            "C:\hardware-search-w0-data\logs",
+            "$env:OPENSEARCH_HOME\logs"
+          )
+          foreach ($source in $sources) {
+            if (Test-Path $source) {
+              $leaf = Split-Path $source -Leaf
+              $target = Join-Path $dest $leaf
+              New-Item -ItemType Directory -Force -Path $target | Out-Null
+              Copy-Item "$source\*" $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-ChildItem $dest -Recurse -File | ForEach-Object {
+            Write-Host "===== $($_.FullName) ====="
+            Get-Content $_.FullName -Tail 120 -ErrorAction SilentlyContinue
+          }
+
+      - cancel: windows_search_restart
+
+      - name: Upload Windows logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardware-search-w0-windows
+          path: |
+            ${{ runner.temp }}\opensearch-stdout.log
+            ${{ runner.temp }}\opensearch-stderr.log
+            ${{ runner.temp }}\opensearch-restart.log
+            ${{ runner.temp }}\opensearch-restart-stderr.log
+            ${{ runner.temp }}\opensearch-thread-dump.txt
+            ${{ runner.temp }}\engine-logs\**
+          if-no-files-found: warn

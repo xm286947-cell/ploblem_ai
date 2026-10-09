@@ -15,6 +15,7 @@ from quality_knowledge.web.hardware_public_api import create_hardware_public_rou
 from quality_knowledge.web.hardware_knowledge_consumption_api import (
     create_hardware_knowledge_consumption_router,
 )
+from quality_knowledge.web.hardware_r1_e2e_api import create_hardware_r1_e2e_router
 from quality_knowledge.web.hardware_operability_api import create_hardware_operability_router
 from quality_knowledge.web.hardware_r1_workbench_api import create_hardware_r1_workbench_router
 from quality_knowledge.web.hardware_tree_import_api import create_hardware_tree_import_router
@@ -39,6 +40,10 @@ from repositories.hardware_tree_import_repository import HardwareTreeImportRepos
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_case_backend import HardwareCaseBackendService
+from services.hardware_case_ai_retrieval import (
+    HardwareCaseAIRetrievalService,
+    HardwareRetrievalCatalogService,
+)
 from services.hardware_case_intake import HardwareCaseIntakeService
 from services.hardware_case_knowledge_adapter import (
     HardwareCaseKnowledgeAdapter,
@@ -47,6 +52,7 @@ from services.hardware_case_knowledge_adapter import (
 from services.hardware_case_source_store import HardwareCaseSourceStore
 from services.hardware_knowledge_consumption import (
     PROJECTION_FILENAME,
+    HardwareKnowledgeConsumptionError,
     HardwareKnowledgeConsumptionProjectionStore,
     HardwareKnowledgeConsumptionService,
 )
@@ -66,12 +72,24 @@ from services.hardware_data_reliability import (
     HardwareDataReliabilityError,
     HardwareDataReliabilityManager,
 )
+from services.hardware_data_root import HardwareDataRootResolver
 from services.hardware_durable_mutation_gate import (
     HardwareApplicationLock,
     HardwareDurableMutationError,
     HardwareDurableMutationGate,
 )
 from services.hardware_tree_import_files import HardwareTreeImportFileStore
+from services.hardware_search_adapter import HardwareSearchAdapter
+from services.hardware_retrieval_query import HardwareRetrievalQueryService
+from services.hardware_retrieval_indexer import (
+    METADATA_DB_FILENAME,
+    HardwareRetrievalGenerationIndexer,
+    HardwareRetrievalMetadataStore,
+)
+from services.hardware_retrieval_tagger import HardwareRetrievalTagger
+from services.hardware_retrieval_tagger_runtime import (
+    build_hardware_retrieval_tagger_runtime,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -407,6 +425,12 @@ def create_p0_app(
         repeat_web = None
         app.state.repeat_risk_service = None
 
+    # Operability /ready is mounted before the Hardware Knowledge binding is
+    # fully composed.  Keep a shared live status mapping so the route reports
+    # the actual in-process LOCAL_NON_PROD state instead of requiring external
+    # Knowledge URLs that are intentionally absent in the E2E profile.
+    hardware_operability_knowledge_status: dict[str, Any] = {}
+
     if "HARDWARE_CASE" in domains and hardware_startup_status is not None and not hardware_startup_status.get("ready"):
         hardware_db = (
             Path(hardware_case_db_path)
@@ -418,6 +442,7 @@ def create_p0_app(
                 project_root=root,
                 hardware_db_path=hardware_db,
                 startup_status=hardware_startup_status,
+                knowledge_status=hardware_operability_knowledge_status,
             )
         )
         app.state.hardware_data_reliability = None
@@ -472,6 +497,7 @@ def create_p0_app(
                 project_root=root,
                 hardware_db_path=hardware_db,
                 startup_status=hardware_startup_status,
+                knowledge_status=hardware_operability_knowledge_status,
             )
         )
 
@@ -493,6 +519,80 @@ def create_p0_app(
             hardware_case_service = HardwareCaseBackendService(hardware_case_repository)
             app.state.hardware_case_repository = hardware_case_repository
             app.state.hardware_case_service = hardware_case_service
+
+            hardware_retrieval_query_service = None
+            hardware_retrieval_catalog_service = None
+            hardware_retrieval_status: dict[str, Any] = {
+                "ready": False,
+                "mode": "SQLITE_FORMAL_FALLBACK",
+                "code": "OPENSEARCH_NOT_CONFIGURED",
+            }
+            hardware_search_base_url = str(
+                os.getenv("HARDWARE_SEARCH_BASE_URL") or ""
+            ).strip()
+            if hardware_search_base_url:
+                try:
+                    hardware_search_adapter = HardwareSearchAdapter(
+                        hardware_search_base_url,
+                        timeout_seconds=float(
+                            os.getenv("HARDWARE_SEARCH_TIMEOUT_SECONDS") or "5"
+                        ),
+                    )
+                    hardware_search_alias = str(
+                        os.getenv("HARDWARE_SEARCH_INDEX_ALIAS")
+                        or "hardware-knowledge-search-active"
+                    ).strip()
+                    hardware_retrieval_query_service = HardwareRetrievalQueryService(
+                        hardware_search_adapter,
+                        index_alias=hardware_search_alias,
+                    )
+                    hardware_retrieval_metadata_store = HardwareRetrievalMetadataStore(
+                        hardware_data_root / "rebuildable" / METADATA_DB_FILENAME
+                    )
+                    hardware_retrieval_indexer = HardwareRetrievalGenerationIndexer(
+                        hardware_search_adapter,
+                        hardware_retrieval_metadata_store,
+                        alias=hardware_search_alias,
+                    )
+
+                    def hardware_retrieval_tagger_factory() -> HardwareRetrievalTagger:
+                        return HardwareRetrievalTagger(
+                            build_hardware_retrieval_tagger_runtime()
+                        )
+
+                    hardware_retrieval_catalog_service = (
+                        HardwareRetrievalCatalogService(
+                            hardware_knowledge_consumption_service,
+                            tagger_factory=hardware_retrieval_tagger_factory,
+                            indexer=hardware_retrieval_indexer,
+                        )
+                    )
+                    hardware_retrieval_status = {
+                        "ready": True,
+                        "mode": "OPENSEARCH_WITH_FALLBACK",
+                        "code": "READY",
+                        "index_alias": hardware_search_alias,
+                    }
+                except Exception as error:
+                    hardware_retrieval_status = {
+                        "ready": False,
+                        "mode": "SQLITE_FORMAL_FALLBACK",
+                        "code": str(
+                            getattr(error, "code", None)
+                            or "OPENSEARCH_CONFIGURATION_INVALID"
+                        ),
+                    }
+
+            hardware_ai_search_service = HardwareCaseAIRetrievalService(
+                hardware_case_service,
+                retrieval_query_service=hardware_retrieval_query_service,
+                consumption_service=hardware_knowledge_consumption_service,
+            )
+            app.state.hardware_ai_search_service = hardware_ai_search_service
+            app.state.hardware_retrieval_catalog_service = (
+                hardware_retrieval_catalog_service
+            )
+            app.state.hardware_retrieval_status = hardware_retrieval_status
 
             hardware_source_root = (
                 Path(hardware_case_source_root)
@@ -574,12 +674,125 @@ def create_p0_app(
                 or os.getenv("HARDWARE_KNOWLEDGE_RELEASE_VERSION")
                 or ""
             ).strip()
+            e2e_profile = os.getenv("HARDWARE_R1_E2E_PROFILE") == "1"
+
+            class _HardwareR1ManagedNonProdNotLoaded(RuntimeError):
+                pass
+
+            managed_nonprod_error_type: type[Exception] = (
+                _HardwareR1ManagedNonProdNotLoaded
+            )
+            create_managed_nonprod_environment_fn = None
+            if e2e_profile:
+                # E2E-only local Unified Knowledge must not enter the normal
+                # Hardware product startup dependency closure. Import it only
+                # when the explicit E2E profile is enabled.
+                from services.hardware_r1_e2e_nonprod_knowledge import (
+                    HardwareR1ManagedNonProdError,
+                    create_managed_nonprod_environment,
+                )
+
+                managed_nonprod_error_type = HardwareR1ManagedNonProdError
+                create_managed_nonprod_environment_fn = (
+                    create_managed_nonprod_environment
+                )
+
+            e2e_knowledge_environment = os.getenv(
+                "HARDWARE_R1_E2E_KNOWLEDGE_ENV", ""
+            ).strip().upper()
+            e2e_knowledge_mode = os.getenv(
+                "HARDWARE_R1_E2E_KNOWLEDGE_MODE", "EXTERNAL"
+            ).strip().upper()
+            managed_nonprod_release_controller = None
+            managed_nonprod_status: dict[str, Any] | None = None
             hardware_r1_promotion_service = None
-            if effective_knowledge_adapter is None and knowledge_base_url and knowledge_release_version:
+
+            if (
+                effective_knowledge_adapter is None
+                and e2e_profile
+                and e2e_knowledge_environment == "NON_PROD"
+                and e2e_knowledge_mode == "LOCAL_NON_PROD"
+                and knowledge_release_version
+            ):
+                try:
+                    (
+                        effective_knowledge_adapter,
+                        managed_nonprod_release_controller,
+                        managed_nonprod_status,
+                    ) = create_managed_nonprod_environment_fn(
+                        hardware_data_root / "nonprod_unified_knowledge",
+                        release_prefix=knowledge_release_version,
+                    )
+                except managed_nonprod_error_type as error:
+                    effective_knowledge_adapter = None
+                    managed_nonprod_release_controller = None
+                    managed_nonprod_status = {
+                        "mode": "LOCAL_NON_PROD",
+                        "managed_release": True,
+                        "ready": False,
+                        "code": error.code,
+                    }
+            elif effective_knowledge_adapter is None and knowledge_base_url and knowledge_release_version:
                 effective_knowledge_adapter = HardwareCaseKnowledgeAdapter(
                     KnowledgeHttpTransport(knowledge_base_url),
                     knowledge_release_version=knowledge_release_version,
                 )
+
+            local_nonprod_ready = managed_nonprod_release_controller is not None
+            external_nonprod_ready = bool(
+                e2e_knowledge_environment == "NON_PROD"
+                and knowledge_base_url
+                and knowledge_release_version
+            )
+            if e2e_profile:
+                if local_nonprod_ready:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": True,
+                        "environment": "NON_PROD",
+                        **(managed_nonprod_status or {}),
+                    }
+                elif external_nonprod_ready:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": True,
+                        "environment": "NON_PROD",
+                        "mode": "EXTERNAL",
+                        "managed_release": False,
+                        "release_version": knowledge_release_version,
+                    }
+                else:
+                    hardware_r1_knowledge_environment_status = {
+                        "ready": False,
+                        "environment": (
+                            e2e_knowledge_environment or "UNCONFIGURED"
+                        ),
+                        "mode": e2e_knowledge_mode or "UNCONFIGURED",
+                        "managed_release": e2e_knowledge_mode == "LOCAL_NON_PROD",
+                        "release_version": None,
+                        "code": (
+                            (managed_nonprod_status or {}).get("code")
+                            or "BLOCKED_BY_ENVIRONMENT"
+                        ),
+                    }
+            else:
+                hardware_r1_knowledge_environment_status = {
+                    "ready": effective_knowledge_adapter is not None,
+                    "environment": "STANDARD",
+                    "mode": "EXTERNAL_OR_INJECTED",
+                    "managed_release": False,
+                    "release_version": knowledge_release_version or None,
+                    "code": (
+                        None
+                        if effective_knowledge_adapter is not None
+                        else "KNOWLEDGE_CONFIG_REQUIRED"
+                    ),
+                }
+            app.state.hardware_r1_knowledge_environment_status = (
+                hardware_r1_knowledge_environment_status
+            )
+            hardware_operability_knowledge_status.clear()
+            hardware_operability_knowledge_status.update(
+                hardware_r1_knowledge_environment_status
+            )
             if effective_knowledge_adapter is not None:
                 hardware_r1_promotion_store = HardwareR1KnowledgePromotionStore(
                     hardware_r1_workbench_db, read_only=True
@@ -593,6 +806,35 @@ def create_p0_app(
                     workbench_service=hardware_r1_workbench_service,
                     bridge=hardware_r1_promotion_bridge,
                     candidate_repository=hardware_candidate_asset_repository,
+                )
+                hardware_knowledge_consumption_service.assets = hardware_candidate_asset_repository
+                hardware_knowledge_consumption_service.adapter = effective_knowledge_adapter
+                try:
+                    projection_before = (
+                        hardware_knowledge_consumption_service.projection_status()
+                    )
+                    if int(projection_before.get("row_count") or 0) == 0:
+                        projection_bootstrap = (
+                            hardware_knowledge_consumption_service.rebuild_all_verified()
+                        )
+                    else:
+                        projection_bootstrap = {
+                            "projection_status": projection_before,
+                            "projected_count": int(
+                                projection_before.get("row_count") or 0
+                            ),
+                            "bootstrap_skipped": True,
+                        }
+                except HardwareKnowledgeConsumptionError as error:
+                    projection_bootstrap = {
+                        "projection_status": {
+                            "status": "DEGRADED",
+                            "error_code": error.code,
+                        },
+                        "projected_count": 0,
+                    }
+                app.state.hardware_knowledge_projection_bootstrap = (
+                    projection_bootstrap
                 )
                 app.state.hardware_r1_promotion_store = hardware_r1_promotion_store
                 try:
@@ -608,9 +850,14 @@ def create_p0_app(
                 else:
                     try:
                         remote_recovery = hardware_r1_promotion_service.reconcile_startup(
-                            max_remote_queries=2
+                            max_remote_queries=2,
+                            prepare_publication_query=(
+                                managed_nonprod_release_controller.ensure_queryable_release
+                                if managed_nonprod_release_controller is not None
+                                else None
+                            ),
                         )
-                    except HardwareR1PromotionError as error:
+                    except (HardwareR1PromotionError, managed_nonprod_error_type) as error:
                         remote_recovery = {
                             "pending_remote_reconciliation_count": 0,
                             "blocked_asset_count": 0,
@@ -726,24 +973,60 @@ def create_p0_app(
                             root=project_root,
                         )
                     ),
+                    ai_search_service=hardware_ai_search_service,
+                    retrieval_catalog_service=hardware_retrieval_catalog_service,
                 )
             )
             app.include_router(
                 create_hardware_r1_workbench_router(
                     hardware_r1_workbench_service,
                     promotion_service=hardware_r1_promotion_service,
+                    consumption_service=hardware_knowledge_consumption_service,
+                    publish_allowed=(
+                        not e2e_profile
+                        or (
+                            e2e_knowledge_environment == "NON_PROD"
+                            and (
+                                managed_nonprod_release_controller is not None
+                                or (
+                                    bool(knowledge_base_url)
+                                    and bool(knowledge_release_version)
+                                )
+                            )
+                        )
+                    ),
+                    release_controller=managed_nonprod_release_controller,
                 )
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
             app.include_router(
                 create_hardware_knowledge_consumption_router(
-                    hardware_knowledge_consumption_service
+                    hardware_knowledge_consumption_service,
+                    source_store=hardware_case_source_store,
+                    knowledge_adapter=effective_knowledge_adapter,
                 )
             )
+            if os.getenv("HARDWARE_R1_E2E_PROFILE") == "1":
+                app.include_router(
+                    create_hardware_r1_e2e_router(
+                        app_root=root,
+                        data_root=hardware_data_root,
+                        normal_data_root=HardwareDataRootResolver(root).default_data_root,
+                        promotion_status=app.state.hardware_r1_promotion_status,
+                        knowledge_status=hardware_r1_knowledge_environment_status,
+                    )
+                )
             testability_restore_hooks.append(hardware_data.ensure_ready)
         else:
             app.state.hardware_case_repository = None
             app.state.hardware_case_service = None
+            app.state.hardware_ai_search_service = None
+            app.state.hardware_retrieval_catalog_service = None
+            app.state.hardware_retrieval_status = {
+                "ready": False,
+                "mode": "UNAVAILABLE",
+                "code": "HARDWARE_DATA_NOT_READY",
+            }
             app.state.hardware_case_source_store = None
             app.state.hardware_case_intake_service = None
             app.state.hardware_r1_preview_store = None

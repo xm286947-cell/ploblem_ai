@@ -31,6 +31,10 @@ INCLUDE_GLOBS = [
     "services/hardware_tree*.py",
     "services/hardware_migrations/*.py",
     "services/hardware_asset_migrations/*.py",
+    # The local NON_PROD Knowledge binding is an explicitly selected
+    # Hardware E2E profile dependency.  Its transitive closure is rooted below
+    # so a fresh extraction never borrows these modules from an older install.
+    "services/hardware_r1_e2e_nonprod_knowledge.py",
     "repositories/hardware_case*.py",
     "repositories/hardware_tree*.py",
     "schema/hardware_case*.json",
@@ -69,12 +73,16 @@ INCLUDE_FILES = [
     "config/runtime/agents/hardware_case.r1_extract.yaml",
     "config/runtime/agents/hardware_case.r1_case_extract.yaml",
     "config/runtime/agents/hardware_case.r1_reuse_derive.yaml",
+    "config/runtime/agents/hardware_retrieval.tag.yaml",
     "config/hardware_case_real_validation.local.example.json",
+    "config/hardware_search.example.yaml",
     "prompts/runtime/hardware_case/structure_v1.md",
     "prompts/runtime/hardware_case/r1_extract_v2.md",
     "prompts/runtime/hardware_case/r1_case_extract_v1.md",
     "prompts/runtime/hardware_case/r1_reuse_derive_v1.md",
+    "prompts/runtime/hardware_retrieval/tagger_v1.md",
     "tools/hardware_case_real_validation.py",
+    "tools/hardware_retrieval_demo_seed.py",
     "scripts/hardware_case_mvp_smoke.py",
     "scripts/hardware_case_product_test_smoke.py",
     "scripts/hardware_case_precheck.py",
@@ -92,6 +100,8 @@ INCLUDE_FILES = [
     "START_HARDWARE_CASE.sh",
     "START_HARDWARE_CASE.command",
     "RUN_REAL_AI_VALIDATION.sh",
+    "LOAD_HARDWARE_RETRIEVAL_DEMO.bat",
+    "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
     "run_hardware_case_product_test.bat",
     "run_hardware_case_product_test.sh",
     "run_hardware_case_mvp_smoke.bat",
@@ -110,6 +120,10 @@ CLOSURE_ROOTS = [
     "scripts/hardware_case_product_test_smoke.py",
     "quality_knowledge/web/p0_app.py",
     "services/hardware_case_runtime_adapter.py",
+    "services/hardware_r1_e2e_nonprod_knowledge.py",
+    # JsonArtifactRepository is exported through repositories.__getattr__, so
+    # the AST scanner cannot discover this lazy import from the package root.
+    "repositories/json_repository.py",
 ]
 
 LOCAL_IMPORT_PREFIXES = {
@@ -361,7 +375,6 @@ def security_assertions(files: list[dict[str, object]]) -> None:
         "quality_knowledge/web/p1_pages.py",
         "services/historical_case_contract.py",
         "services/knowledge_service.py",
-        "repositories/json_repository.py",
         "main.py",
     }
     for entry in files:
@@ -404,6 +417,7 @@ def main() -> int:
         "run_hardware_case_product_test.sh",
         "run_hardware_case_mvp_smoke.sh",
         "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
+        "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
     ):
         path = STAGE / relative
         path.chmod(path.stat().st_mode | 0o111)
@@ -480,6 +494,8 @@ def main() -> int:
             "start_product_shell": "START_HARDWARE_CASE.sh",
             "start_product_macos": "START_HARDWARE_CASE.command",
             "real_ai_validation_shell": "RUN_REAL_AI_VALIDATION.sh",
+            "retrieval_demo_windows": "LOAD_HARDWARE_RETRIEVAL_DEMO.bat",
+            "retrieval_demo_macos": "LOAD_HARDWARE_RETRIEVAL_DEMO.command",
             "r1_6doc_validation_windows": "RUN_HARDWARE_R1_6DOC_VALIDATION.bat",
             "r1_6doc_validation_shell": "RUN_HARDWARE_R1_6DOC_VALIDATION.sh",
         },
@@ -494,6 +510,9 @@ def main() -> int:
             "secret_in_package": False,
             "missing_required_config": "FAIL_CLOSED",
             "windows_macos_semantics": "SAME",
+            "local_model_config_packaged": False,
+            "existing_model_config_preserved": True,
+            "plaintext_api_key_forbidden": True,
         },
         "data_reliability": {
             "schema_version": "HARDWARE_SCHEMA_V2",
@@ -511,6 +530,11 @@ def main() -> int:
             "runtime_adapter": "services.hardware_case_runtime_adapter:build_hardware_case_structurer",
             "provider_ownership": "UNIFIED_RUNTIME",
             "secret_policy": "ENV_REFERENCE_RECOMMENDED",
+            "retrieval_agent_id": "hardware_retrieval.tag",
+            "retrieval_agent_config": "config/runtime/agents/hardware_retrieval.tag.yaml",
+            "retrieval_prompt": "prompts/runtime/hardware_retrieval/tagger_v1.md",
+            "retrieval_model_config_source": "HARDWARE_CASE_MODEL_CONFIG",
+            "retrieval_provider_config_preserved": True,
             "r1_pipeline_version": "hardware-r1-agent-pipeline/v1.3.3",
             "r1_execution_trace_version": "hardware-r1-execution-trace/v1.5",
             "r1_stage_a_agent_id": "hardware_case.r1_case_extract",
@@ -647,7 +671,11 @@ def main() -> int:
             "composition_profile": ["HARDWARE_CASE"],
             "platform_shared": ["runtime"],
             "package_policy": "EXPLICIT_HARDWARE_ALLOWLIST",
-            "cross_domain_business_code_bundled": False,
+            "cross_domain_business_code_bundled": True,
+            "cross_domain_scope": [
+                "Unified Knowledge public facade and immutable release reader",
+                "LOCAL_NON_PROD Hardware E2E binding; no second store or Runtime",
+            ],
         },
         "asset_migration_package": {
             "module_dir": ASSET_MIGRATION_MODULE_DIR,
@@ -658,7 +686,7 @@ def main() -> int:
         "known_gaps": [
             "Real company Word/Excel data is not bundled",
             "Real Provider acceptance still requires company-environment validation with approved endpoint/model",
-            "Unified Knowledge Promotion requires HARDWARE_KNOWLEDGE_BASE_URL and HARDWARE_KNOWLEDGE_RELEASE_VERSION in the target environment",
+            "External Unified Knowledge Promotion requires HARDWARE_KNOWLEDGE_BASE_URL and HARDWARE_KNOWLEDGE_RELEASE_VERSION; LOCAL_NON_PROD uses the packaged binding against the existing data root",
             "The repository-wide main.py CLI is intentionally not packaged; Hardware Case uses the dedicated launcher to avoid unrelated legacy builder dependencies",
         ],
         "frontend_gate": "P01_P07_FRONTEND_GATE_PASS",

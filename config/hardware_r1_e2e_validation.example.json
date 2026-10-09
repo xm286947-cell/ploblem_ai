@@ -1,0 +1,27 @@
+{
+  "profile": "HARDWARE_R1_SINGLE_PACKAGE_E2E",
+  "knowledge_environment": "NON_PROD",
+  "default_knowledge_mode": "LOCAL_NON_PROD",
+  "notes": [
+    "The validation launcher defaults to an isolated LOCAL_NON_PROD Unified Knowledge repository under the E2E data root.",
+    "Publish remains an explicit human action; no automatic review or automatic publish is enabled.",
+    "The managed local mode creates immutable Knowledge Release snapshots automatically after an explicit publish so Query Back can run without manual release stitching.",
+    "To use an external NON_PROD Unified Knowledge service instead, set HARDWARE_R1_E2E_KNOWLEDGE_MODE=EXTERNAL plus HARDWARE_KNOWLEDGE_BASE_URL and HARDWARE_KNOWLEDGE_RELEASE_VERSION.",
+    "Provider credentials must be supplied only through environment variables; never store secrets in this file.",
+    "If an explicitly selected external NON_PROD environment is incomplete, Publish remains blocked."
+  ],
+  "local_nonprod_defaults": [
+    "HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD",
+    "HARDWARE_R1_E2E_KNOWLEDGE_MODE=LOCAL_NON_PROD",
+    "HARDWARE_KNOWLEDGE_RELEASE_VERSION=HARDWARE-R1-E2E"
+  ],
+  "external_nonprod_required_environment": [
+    "HARDWARE_R1_E2E_KNOWLEDGE_ENV=NON_PROD",
+    "HARDWARE_R1_E2E_KNOWLEDGE_MODE=EXTERNAL",
+    "HARDWARE_KNOWLEDGE_BASE_URL",
+    "HARDWARE_KNOWLEDGE_RELEASE_VERSION"
+  ],
+  "provider_environment_reference_only": true,
+  "automatic_review": false,
+  "automatic_publish": false
+}

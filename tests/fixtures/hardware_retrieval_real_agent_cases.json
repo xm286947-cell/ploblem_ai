@@ -1,0 +1,65 @@
+[
+  {
+    "case_label": "CASE-01-SYNTHETIC-MCU-RESET",
+    "projection_schema_version": 1,
+    "knowledge_id": "SYNTHETIC-KO-HW-CASE-01",
+    "public_ref": "SYNTHETIC-HW-CASE-01-R1",
+    "business_case_id": "SYNTHETIC-CASE-01",
+    "title": "MCU intermittent reset",
+    "symptom": "MCU 偶发复位，重新上电恢复",
+    "signal": "RESET_N",
+    "device_refs": [],
+    "evidence_refs": ["SYNTHETIC-EV-01"],
+    "source_domain": "HARDWARE_CASE",
+    "source_object_type": "HARDWARE_CASE",
+    "formal_revision": 1,
+    "formal_status": "ACTIVE",
+    "formal_object_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "projected_at": "2026-10-07T00:00:00+00:00"
+  },
+  {
+    "case_label": "CASE-02-SYNTHETIC-CAN-INTERRUPTION",
+    "projection_schema_version": 1,
+    "knowledge_id": "SYNTHETIC-KO-HW-CASE-02",
+    "public_ref": "SYNTHETIC-HW-CASE-02-R1",
+    "business_case_id": "SYNTHETIC-CASE-02",
+    "title": "CAN communication intermittent interruption",
+    "symptom": "CAN 通信偶发中断",
+    "interface": "CAN",
+    "device_refs": [],
+    "evidence_refs": ["SYNTHETIC-EV-02"],
+    "source_domain": "HARDWARE_CASE",
+    "source_object_type": "HARDWARE_CASE",
+    "formal_revision": 1,
+    "formal_status": "ACTIVE",
+    "formal_object_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "projected_at": "2026-10-07T00:00:00+00:00"
+  },
+  {
+    "case_label": "CASE-03-SYNTHETIC-LDO-OSCILLATION",
+    "projection_schema_version": 1,
+    "knowledge_id": "SYNTHETIC-KO-HW-CASE-03",
+    "public_ref": "SYNTHETIC-HW-CASE-03-R1",
+    "business_case_id": "SYNTHETIC-CASE-03",
+    "title": "LDO output oscillation",
+    "symptom": "LDO 输出振荡",
+    "device_refs": [
+      {
+        "category": "POWER",
+        "generic_name_or_series": "LDO",
+        "internal_material_no": null,
+        "manufacturer": null,
+        "manufacturer_part_no": null,
+        "evidence_refs": ["SYNTHETIC-EV-03"],
+        "status": "EXPLICIT"
+      }
+    ],
+    "evidence_refs": ["SYNTHETIC-EV-03"],
+    "source_domain": "HARDWARE_CASE",
+    "source_object_type": "HARDWARE_CASE",
+    "formal_revision": 1,
+    "formal_status": "ACTIVE",
+    "formal_object_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+    "projected_at": "2026-10-07T00:00:00+00:00"
+  }
+]

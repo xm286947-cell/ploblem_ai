@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from copy import deepcopy
 from pathlib import Path
@@ -7,8 +8,10 @@ from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from quality_knowledge.web.p0_app import create_p0_app
+from quality_knowledge.web.hardware_r1_workbench_api import PromotionReviewRequest
 from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_case_r1_preview_store import HardwareR1PreviewStore
 from services.hardware_case_r1_runtime import (
@@ -262,6 +265,62 @@ def test_gate_pass_review_required_maps_to_review_not_publish() -> None:
 
 
 
+def test_running_stage_b_retry_preserves_stage_a_last_good_status() -> None:
+    running = bind_case_status(
+        snapshot=_snapshot(),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            a_cache=True,
+        ),
+        orchestration_status="RUNNING",
+        error_code=None,
+    )
+    assert running == {
+        "parse": "PASS",
+        "stage_a": "CACHE_HIT",
+        "stage_b": "RUNNING",
+        "gate": "WAITING",
+        "result": "RUNNING",
+        "failed_stage": "STAGE_B",
+        "error_code": None,
+        "retryable": False,
+    }
+
+
+def test_running_item_reports_live_elapsed_duration(tmp_path: Path) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0152.docx",
+        business_case_id="A0152",
+        source_id="a" * 64,
+        snapshot=_snapshot(),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            a_cache=True,
+        ),
+        orchestration_status="RUNNING",
+    )
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at=? WHERE item_id=?",
+            ("2026-10-05T00:00:00+00:00", item_id),
+        )
+
+    running = store.get_item(item_id)
+    assert running["result"] == "RUNNING"
+    assert running["stage_a"] == "CACHE_HIT"
+    assert running["stage_b"] == "RUNNING"
+    assert running["duration_ms"] > 123
+
+
 def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy-workbench.db"
     with sqlite3.connect(db_path) as connection:
@@ -293,7 +352,14 @@ def test_existing_workbench_database_gains_candidate_id_column(tmp_path: Path) -
                 "PRAGMA table_info(hardware_r1_batch_item)"
             )
         }
+        batch_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(hardware_r1_batch)"
+            )
+        }
     assert "candidate_id" in columns
+    assert {"dataset_manifest_json", "dataset_frozen_at"}.issubset(batch_columns)
 
 
 @pytest.mark.parametrize("status", ["REVIEW", "CANDIDATE_READY"])
@@ -1101,6 +1167,64 @@ def test_retry_failed_only_selects_failed_cases_and_preserves_ready(tmp_path: Pa
     assert review_id not in {item[0] for item in calls}
 
 
+def test_retry_failed_stage_item_preserves_stage_a_last_good_on_stage_b_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id,
+        source_file="A4.docx",
+        business_case_id="A4",
+        source_id="d" * 64,
+        snapshot=_snapshot("A4", "d" * 64),
+        result=_result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            case_id="A4",
+            source_id="d" * 64,
+            a_cache=True,
+        ),
+        orchestration_status="FAILED",
+    )
+    calls: list[dict] = []
+
+    def fake_pipeline(snapshot, structurer, **kwargs):
+        calls.append(dict(kwargs))
+        return _result(
+            status="PARTIAL",
+            failed_stage="STAGE_B",
+            error_code="PROVIDER_TIMEOUT",
+            gate="NOT_RUN",
+            case_id="A4",
+            source_id="d" * 64,
+            a_cache=True,
+        )
+
+    monkeypatch.setattr(workbench_module, "run_r1_agent_extraction", fake_pipeline)
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+    )
+
+    item = service.retry_failed_stage_item(item_id)
+
+    assert calls == [
+        {
+            "force_retry": False,
+            "retry_failed_stage": "STAGE_B",
+        }
+    ]
+    assert item["result"] == "FAILED"
+    assert item["failed_stage"] == "STAGE_B"
+    assert item["stage_a"] == "CACHE_HIT"
+    assert item["stage_b"] == "FAILED"
+    assert item["error_code"] == "PROVIDER_TIMEOUT"
+
+
 def test_advanced_debug_reuses_frozen_trace_and_unknown_tokens(tmp_path: Path) -> None:
     store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
     batch_id = store.create_batch()
@@ -1159,6 +1283,125 @@ def test_batch_upload_is_file_isolated_and_source_binding_dependency_visible(
     assert results["bad.pdf"]["failed_stage"] == "PARSE"
 
 
+def test_web_upload_freezes_dataset_identity_with_sha_size_and_order(
+    tmp_path: Path,
+) -> None:
+    class SourceBindingStub:
+        def register_active_bytes(self, case_id, filename, content, *, mime_type=None):
+            digest = hashlib.sha256(content).hexdigest()
+            return {
+                "business_case_id": case_id,
+                "binding_status": "ACTIVE",
+                "source_id": digest,
+                "sha256": digest,
+                "size_bytes": len(content),
+            }
+
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=SourceBindingStub(),
+        structurer_factory=lambda: object(),
+    )
+    first = _docx(tmp_path / "A0152-demo.docx")
+    second = _docx(tmp_path / "A0153-demo.docx")
+    batch = service.upload_batch(
+        [
+            (
+                "A0152-demo.docx",
+                first,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "A0153-demo.docx",
+                second,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        ]
+    )
+
+    identity = batch["dataset_identity"]
+    assert identity["version"] == "hardware-r1-dataset-identity/v1"
+    assert identity["batch_id"] == batch["batch_id"]
+    assert [entry["order"] for entry in identity["entries"]] == [1, 2]
+    assert [entry["source_file"] for entry in identity["entries"]] == [
+        "A0152-demo.docx",
+        "A0153-demo.docx",
+    ]
+    assert [entry["size_bytes"] for entry in identity["entries"]] == [
+        len(first),
+        len(second),
+    ]
+    assert [entry["sha256"] for entry in identity["entries"]] == [
+        hashlib.sha256(first).hexdigest(),
+        hashlib.sha256(second).hexdigest(),
+    ]
+    assert all(entry["binding_status"] == "BOUND" for entry in identity["entries"])
+    assert all(entry["item_id"] for entry in identity["entries"])
+
+    with pytest.raises(HardwareR1WorkbenchError) as frozen:
+        store.freeze_dataset_identity(
+            batch["batch_id"],
+            [{**identity["entries"][0], "size_bytes": len(first) + 1}],
+        )
+    assert frozen.value.code == "DATASET_IDENTITY_ALREADY_FROZEN"
+
+
+def test_source_substitution_is_blocked_before_provider_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class MutableSourceBindingStub:
+        def __init__(self):
+            self.active = {}
+
+        def register_active_bytes(self, case_id, filename, content, *, mime_type=None):
+            digest = hashlib.sha256(content).hexdigest()
+            self.active[case_id] = {
+                "business_case_id": case_id,
+                "binding_status": "ACTIVE",
+                "source_id": digest,
+                "sha256": digest,
+                "size_bytes": len(content),
+            }
+            return dict(self.active[case_id])
+
+        def get_active_source(self, case_id):
+            return dict(self.active[case_id])
+
+    source_store = MutableSourceBindingStub()
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=source_store,
+        structurer_factory=lambda: object(),
+    )
+    raw = _docx(tmp_path / "A0152-demo.docx")
+    batch = service.upload_batch(
+        [
+            (
+                "A0152-demo.docx",
+                raw,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        ]
+    )
+    calls = {"provider": 0}
+
+    def fake_pipeline(*_args, **_kwargs):
+        calls["provider"] += 1
+        return _result()
+
+    monkeypatch.setattr(workbench_module, "run_r1_agent_extraction", fake_pipeline)
+    source_store.active["A0152"]["sha256"] = "f" * 64
+
+    result = service.run_batch(batch["batch_id"])
+    item = result["items"][0]
+    assert calls["provider"] == 0
+    assert item["result"] == "DEPENDENCY_BLOCKED"
+    assert item["orchestration_status"] == "DEPENDENCY_BLOCKED"
+    assert item["error_code"] == "DATASET_SOURCE_IDENTITY_MISMATCH"
+
+
 def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     tmp_path: Path,
 ) -> None:
@@ -1177,10 +1420,10 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     page = client.get("/p0/hardware-cases/knowledge-production")
     assert page.status_code == 200
     assert "知识生产工作台" in page.text
-    assert "Retry Failed Only" in page.text
-    assert "Advanced Debug" in page.text
-    assert "Force Full Run" in page.text
-    assert "Error Code" in page.text
+    assert "仅重试失败项" in page.text
+    assert "诊断信息（高级）" in page.text
+    assert "强制完整重跑" in page.text
+    assert "错误代码" in page.text
     assert "data-detail-error-code" in page.text
     assert "data-review-required" in page.text
     assert "需要人工确认" in page.text
@@ -1213,3 +1456,482 @@ def test_workbench_page_and_api_are_bound_in_existing_hardware_host(
     )
     assert batches.status_code == 200
     assert batches.json()["items"] == []
+
+
+def test_human_review_can_correct_candidate_without_machine_conflict(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    repository = _candidate_repository(tmp_path / "hardware_asset.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0201", source_id="c" * 64)
+    for section, field, value in (
+        ("observed_problem", "symptom", "原始现象"),
+        ("engineering_analysis", "root_cause", "原始根因"),
+        ("engineering_resolution", "actions", "原始措施"),
+        ("reusable_knowledge", "engineering_rule", "原始规则"),
+    ):
+        result["knowledge_object"][section] = {
+            field: {
+                "value": value,
+                "extraction_status": "EXTRACTED",
+                "evidence_block_ids": ["B0001"],
+            }
+        }
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "baud_rate",
+            "value": 115200,
+            "unit": "bps",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "warnings": [],
+        }
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0201", source_id="c" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0201.docx",
+        business_case_id="A0201",
+        source_id="c" * 64,
+        snapshot=_snapshot("A0201"),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["primary_subject"]["value"] = (
+        "人工确认后的 MCU 串口知识"
+    )
+    confirmed["engineering_context"]["primary_subject"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
+    confirmed["engineering_context"]["primary_subject"]["extraction_status"] = (
+        "MISSING"
+    )
+    parameter = confirmed["engineering_context"]["key_parameters"][0]
+    parameter["name"] = "uart_baud_rate"
+    parameter["value"] = 921600
+    parameter["unit"] = "bit/s"
+    parameter["evidence_block_ids"] = ["FORGED-EVIDENCE"]
+    parameter["extraction_status"] = "MISSING"
+    confirmed["observed_problem"]["symptom"]["value"] = "人工确认现象"
+    confirmed["engineering_analysis"]["root_cause"]["value"] = "人工确认根因"
+    confirmed["engineering_resolution"]["actions"]["value"] = "人工确认措施"
+    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "人工确认规则"
+    confirmed["engineering_analysis"]["root_cause"]["evidence_block_ids"] = [
+        "FORGED-EVIDENCE"
+    ]
+    confirmed["schema_extension"] = {"value": "must not be persisted"}
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision="CONFIRM",
+        reviewer="reviewer-product",
+        reason="真实业务复核后修正 AI 主体描述",
+        confirmed_content=confirmed,
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "RESOLVED"
+    assert durable["candidate_hash"] != asset["candidate_hash"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "evidence_block_ids"
+    ] == ["B0001"]
+    assert durable["knowledge_object"]["engineering_context"]["primary_subject"][
+        "extraction_status"
+    ] == "EXTRACTED"
+    durable_parameter = durable["knowledge_object"]["engineering_context"][
+        "key_parameters"
+    ][0]
+    assert durable_parameter["name"] == "uart_baud_rate"
+    assert durable_parameter["value"] == 921600
+    assert durable_parameter["unit"] == "bit/s"
+    assert durable_parameter["evidence_block_ids"] == ["B0001"]
+    assert durable_parameter["extraction_status"] == "EXTRACTED"
+    assert "schema_extension" not in durable["knowledge_object"]
+    assert durable["knowledge_object"]["observed_problem"]["symptom"]["value"] == (
+        "人工确认现象"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"]["value"] == (
+        "人工确认根因"
+    )
+    assert durable["knowledge_object"]["engineering_resolution"]["actions"]["value"] == (
+        "人工确认措施"
+    )
+    assert durable["knowledge_object"]["reusable_knowledge"]["engineering_rule"]["value"] == (
+        "人工确认规则"
+    )
+    assert durable["knowledge_object"]["engineering_analysis"]["root_cause"][
+        "evidence_block_ids"
+    ] == ["B0001"]
+    assert durable["knowledge_object"]["source_fact"] == asset["knowledge_object"][
+        "source_fact"
+    ]
+    assert durable["knowledge_object"]["evidence"] == asset["knowledge_object"][
+        "evidence"
+    ]
+    assert reviewed["result"] == "CANDIDATE_READY"
+    assert reviewed["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工确认后的 MCU 串口知识"
+    assert reviewed["pipeline_result"]["knowledge_object"]["engineering_context"][
+        "primary_subject"
+    ]["value"] == "MCU串口输出配置"
+    assert reviewed["review_history"][-1]["reviewer"] == "reviewer-product"
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_disposition"),
+    [("DEFER", "DEFERRED"), ("REJECT", "REJECTED")],
+)
+def test_human_review_defer_or_reject_blocks_promotion_and_is_audited(
+    tmp_path: Path,
+    decision: str,
+    expected_disposition: str,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / f"workbench-{decision}.db")
+    repository = _candidate_repository(tmp_path / f"hardware-asset-{decision}.db")
+    batch_id = store.create_batch()
+    case_id = f"A02{decision[:1]}1"
+    result = _result(status="PASS", case_id=case_id, source_id="d" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id=case_id, source_id="d" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file=f"{decision}.docx",
+        business_case_id=case_id,
+        source_id="d" * 64,
+        snapshot=_snapshot(case_id),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+
+    reviewed = service.apply_human_review(
+        item_id,
+        decision=decision,
+        reviewer="reviewer-product",
+        reason=f"{decision} pending engineering confirmation",
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    assert durable["production_review_status"] == "REQUIRED"
+    assert durable["candidate_hash"] == asset["candidate_hash"]
+    assert reviewed["result"] == "REVIEW"
+    history = reviewed["review_history"]
+    assert history[-1]["review_record"]["disposition"] == expected_disposition
+    assert history[-1]["before_candidate_hash"] == asset["candidate_hash"]
+    assert history[-1]["after_candidate_hash"] == asset["candidate_hash"]
+
+
+def test_promotion_review_request_rejects_editable_content() -> None:
+    with pytest.raises(ValidationError):
+        PromotionReviewRequest(
+            reviewer="formal-reviewer",
+            review_comment="approval only",
+            confirmed_content={"should": "be rejected"},
+        )
+
+
+def test_human_review_can_add_and_remove_evidence_bound_key_parameters(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-params.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-params.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0210", source_id="1" * 64)
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "old_parameter",
+            "value": "1",
+            "unit": "V",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.8,
+            "warnings": [],
+        },
+        {
+            "name": "keep_parameter",
+            "value": "2",
+            "unit": "A",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.9,
+            "warnings": [],
+        },
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0210", source_id="1" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0210.docx",
+        business_case_id="A0210",
+        source_id="1" * 64,
+        snapshot=_snapshot("A0210", "1" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            **deepcopy(
+                result["knowledge_object"]["engineering_context"]["key_parameters"][1]
+            ),
+            "__review_original_index": 1,
+            "name": "kept_and_renamed",
+        },
+        {
+            "__review_new": True,
+            "name": "human_added_parameter",
+            "value": "3.3",
+            "unit": "V",
+            "evidence_block_ids": ["B0001"],
+        },
+    ]
+
+    service.apply_human_review(
+        item_id,
+        decision="CONFIRM",
+        reviewer="reviewer-params",
+        reason="remove one parameter and add an evidence-backed parameter",
+        confirmed_content=confirmed,
+    )
+
+    durable = repository.get_candidate(asset["candidate_id"])
+    parameters = durable["knowledge_object"]["engineering_context"][
+        "key_parameters"
+    ]
+    assert [item["name"] for item in parameters] == [
+        "kept_and_renamed",
+        "human_added_parameter",
+    ]
+    assert parameters[0]["evidence_block_ids"] == ["B0001"]
+    assert parameters[0]["confidence"] == 0.9
+    assert parameters[1]["value"] == "3.3"
+    assert parameters[1]["evidence_block_ids"] == ["B0001"]
+    assert parameters[1]["extraction_status"] == "EXTRACTED"
+    assert parameters[1]["warnings"] == ["HUMAN_REVIEW_ADDED"]
+
+
+def test_human_review_rejects_new_parameter_with_forged_evidence(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-forged-param.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-forged-param.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0211", source_id="2" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0211", source_id="2" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0211.docx",
+        business_case_id="A0211",
+        source_id="2" * 64,
+        snapshot=_snapshot("A0211", "2" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            "__review_new": True,
+            "name": "forged_parameter",
+            "value": "9.9",
+            "unit": "V",
+            "evidence_block_ids": ["FORGED-EVIDENCE"],
+        }
+    ]
+
+    with pytest.raises(
+        HardwareR1WorkbenchError,
+        match="REVIEW_KEY_PARAMETER_EVIDENCE_INVALID",
+    ):
+        service.apply_human_review(
+            item_id,
+            decision="CONFIRM",
+            reviewer="reviewer-params",
+            reason="must fail closed",
+            confirmed_content=confirmed,
+        )
+
+
+
+def test_human_review_rejects_duplicate_key_parameter_name(
+    tmp_path: Path,
+) -> None:
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench-duplicate-param.db")
+    repository = _candidate_repository(tmp_path / "hardware-asset-duplicate-param.db")
+    batch_id = store.create_batch()
+    result = _result(status="PASS", case_id="A0212", source_id="3" * 64)
+    result["knowledge_object"]["engineering_context"]["key_parameters"] = [
+        {
+            "name": "baud_rate",
+            "value": 115200,
+            "unit": "bps",
+            "extraction_status": "EXTRACTED",
+            "evidence_block_ids": ["B0001"],
+            "confidence": 0.8,
+            "warnings": [],
+        }
+    ]
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0212", source_id="3" * 64
+    )
+    item_id = store.add_item(
+        batch_id,
+        source_file="A0212.docx",
+        business_case_id="A0212",
+        source_id="3" * 64,
+        snapshot=_snapshot("A0212", "3" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    service = HardwareR1WorkbenchService(
+        store,
+        source_store=object(),
+        structurer_factory=lambda: object(),
+        candidate_repository=repository,
+    )
+    confirmed = deepcopy(result["knowledge_object"])
+    confirmed["engineering_context"]["key_parameters"] = [
+        {
+            **deepcopy(
+                result["knowledge_object"]["engineering_context"]["key_parameters"][0]
+            ),
+            "__review_original_index": 0,
+        },
+        {
+            "__review_new": True,
+            "name": "baud_rate",
+            "value": 921600,
+            "unit": "bps",
+            "evidence_block_ids": ["B0001"],
+        },
+    ]
+
+    with pytest.raises(
+        HardwareR1WorkbenchError,
+        match="REVIEW_KEY_PARAMETER_NAME_INVALID",
+    ):
+        service.apply_human_review(
+            item_id,
+            decision="CONFIRM",
+            reviewer="reviewer-params",
+            reason="duplicate parameter names must fail closed",
+            confirmed_content=confirmed,
+        )
+
+
+def test_human_review_api_corrects_candidate_and_blocks_rejected_candidate(
+    tmp_path: Path,
+) -> None:
+    app = create_p0_app(
+        tmp_path / "quality.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_tree_upload_dir=tmp_path / "trees",
+        hardware_case_source_root=tmp_path / "sources",
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    service = app.state.hardware_r1_workbench_service
+    repository = app.state.hardware_candidate_asset_repository
+    repository.initialize()
+    client = TestClient(app)
+
+    result = _result(status="PASS", case_id="A0202", source_id="e" * 64)
+    asset = _commit_fixture_asset(
+        repository, result, case_id="A0202", source_id="e" * 64
+    )
+    item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0202.docx",
+        business_case_id="A0202",
+        source_id="e" * 64,
+        snapshot=_snapshot("A0202", "e" * 64),
+        result=result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=asset["candidate_id"],
+    )
+    edited = deepcopy(result["knowledge_object"])
+    edited["engineering_context"]["primary_subject"]["value"] = "人工 API 修正"
+
+    response = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "CONFIRM",
+            "reviewer": "reviewer-api",
+            "reason": "manual correction",
+            "confirmed_content": edited,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["candidate"]["engineering_context"]["primary_subject"][
+        "value"
+    ] == "人工 API 修正"
+    assert response.json()["candidate_asset"]["production_review_status"] == "RESOLVED"
+
+    reject_result = _result(
+        status="PASS", case_id="A0203", source_id="f" * 64
+    )
+    reject_asset = _commit_fixture_asset(
+        repository, reject_result, case_id="A0203", source_id="f" * 64
+    )
+    reject_item_id = service.store.add_item(
+        service.store.create_batch(),
+        source_file="A0203.docx",
+        business_case_id="A0203",
+        source_id="f" * 64,
+        snapshot=_snapshot("A0203", "f" * 64),
+        result=reject_result,
+        orchestration_status="CANDIDATE_READY",
+        candidate_id=reject_asset["candidate_id"],
+    )
+    rejected = client.post(
+        f"/api/v2/hardware-cases/r1/workbench/items/{reject_item_id}/human-review",
+        headers=MAINTAINER,
+        json={
+            "decision": "REJECT",
+            "reviewer": "reviewer-api",
+            "reason": "insufficient engineering confidence",
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["result"] == "REVIEW"
+    assert rejected.json()["candidate_asset"]["production_review_status"] == "REQUIRED"
+    assert rejected.json()["review_history"][-1]["review_record"]["disposition"] == "REJECTED"

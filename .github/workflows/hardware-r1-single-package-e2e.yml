@@ -1,0 +1,111 @@
+name: Hardware R1 Single-Package E2E
+
+on:
+  pull_request:
+    paths:
+      - "quality_knowledge/web/**"
+      - "services/hardware_knowledge_consumption.py"
+      - "services/hardware_r1_knowledge_promotion.py"
+      - "services/hardware_r1_e2e_nonprod_knowledge.py"
+      - "scripts/hardware_r1_e2e_validation_start.py"
+      - "scripts/build_hardware_r1_e2e_validation_package.py"
+      - "tests/test_hardware_r1_single_package_e2e.py"
+      - "tests/test_hardware_r1_e2e_start_check.py"
+      - "tests/test_hardware_operability.py"
+      - "tests/test_hardware_r1_workbench.py"
+      - "tests/test_hardware_knowledge_consumption.py"
+      - "tests/test_hardware_r1_promotion_architecture.py"
+      - "tests/test_hardware_r1_knowledge_promotion.py"
+      - "tests/test_hardware_r1_workbench_architecture.py"
+      - "tests/js/test_hardware_r1_retry_visible_state.mjs"
+      - "tests/js/test_hardware_r1_human_review.mjs"
+      - "docs/product/HARDWARE_R1_SINGLE_PACKAGE_E2E_VALIDATION.md"
+      - ".github/workflows/hardware-r1-single-package-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+          - os: macos-latest
+            label: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Synthetic, consumption and fake-provider E2E regressions
+        run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_r1_e2e_start_check.py tests/test_hardware_operability.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py tests/test_hardware_r1_promotion_architecture.py tests/test_hardware_r1_workbench_architecture.py
+      - name: Hardware JavaScript syntax and retry UX gate
+        run: |
+          node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
+          node --check quality_knowledge/web/static/hardware_case_e2e_evidence.js
+          node --check quality_knowledge/web/static/hardware_case_knowledge_evidence.js
+          node --check quality_knowledge/web/static/hardware_case_knowledge_production.js
+          node --test tests/js/test_hardware_r1_retry_visible_state.mjs tests/js/test_hardware_r1_human_review.mjs
+      - name: Build the single package
+        run: python scripts/build_hardware_r1_e2e_validation_package.py --output-dir "${{ runner.temp }}"
+      - name: Fresh extract, compile, launcher and package-security gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib, zipfile, tempfile, subprocess, sys
+          temp_root = pathlib.Path(__import__("os").environ["RUNNER_TEMP"])
+          archive = next(temp_root.glob("HARDWARE_R1_E2E_VALIDATION_*.zip"))
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          with tempfile.TemporaryDirectory(prefix="hardware-r1-e2e-extract-") as temp:
+              with zipfile.ZipFile(archive) as package:
+                  names = package.namelist()
+                  forbidden = [n for n in names if n.lower().endswith((".docx", ".doc", ".db", ".sqlite", ".sqlite3")) or "/model.yaml" in n.lower() or "/model.local.yaml" in n.lower() or "/.env" in n.lower()]
+                  assert not forbidden, forbidden
+                  package.extractall(temp)
+              root = next(pathlib.Path(temp).iterdir())
+              subprocess.run([sys.executable, "-m", "compileall", "-q", str(root / "scripts"), str(root / "quality_knowledge"), str(root / "services"), str(root / "knowledge_production")], check=True)
+              launcher = root / ("START_HARDWARE_R1_E2E_VALIDATION.bat" if sys.platform == "win32" else "START_HARDWARE_R1_E2E_VALIDATION.command")
+              assert launcher.is_file()
+              subprocess.run([sys.executable, str(root / "scripts/hardware_r1_e2e_validation_start.py"), "--help"], cwd=root, check=True)
+              isolated = pathlib.Path(temp) / "isolated-validation-root"
+              bootstrap = pathlib.Path(temp) / "isolated-bootstrap.json"
+              environment = dict(__import__("os").environ, HARDWARE_R1_E2E_PROFILE="1")
+              subprocess.run([sys.executable, str(root / "scripts/hardware_r1_e2e_validation_start.py"), "--check", "--data-root", str(isolated), "--bootstrap", str(bootstrap)], cwd=root, env=environment, check=True)
+          (temp_root / "package.sha256").write_text(digest + "\n", encoding="utf-8")
+          print("FRESH_EXTRACT=PASS")
+          print("PACKAGE_SHA256=" + digest)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardware-r1-e2e-${{ matrix.label }}
+          path: |
+            ${{ runner.temp }}/HARDWARE_R1_E2E_VALIDATION_*.zip
+            ${{ runner.temp }}/package.sha256
+          if-no-files-found: error
+
+  reproducible:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hardware-r1-e2e-*
+          path: packages
+          merge-multiple: false
+      - name: Verify Windows/macOS package identity
+        run: |
+          python - <<'PY'
+          import pathlib
+          reports = sorted(pathlib.Path("packages").glob("*/package.sha256"))
+          assert len(reports) == 2, reports
+          values = [path.read_text().strip() for path in reports]
+          assert values[0] == values[1], values
+          print("WINDOWS_MACOS_PACKAGE_SHA256_MATCH=PASS")
+          PY

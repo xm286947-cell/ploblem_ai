@@ -286,9 +286,12 @@ def test_production_launcher_blocks_before_store_construction(tmp_path, monkeypa
         "FIRST_INSTALL", tmp_path / "persistent-data", tmp_path / "bootstrap.json"
     )
 
+    resolver_arguments = {}
+
     class Resolver:
-        def __init__(self, application_root):
+        def __init__(self, application_root, *, bootstrap_path=None):
             self.application_root = application_root
+            resolver_arguments["bootstrap_path"] = bootstrap_path
 
         def resolve(self):
             return resolution
@@ -318,7 +321,10 @@ def test_production_launcher_blocks_before_store_construction(tmp_path, monkeypa
 
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(sys, "argv", [str(launcher_path)])
+    configured_bootstrap = tmp_path / "preserved-install" / "bootstrap.json"
+    monkeypatch.setenv("HARDWARE_BOOTSTRAP_PATH", str(configured_bootstrap))
 
     assert launcher.main() == 3
     assert len(created) == 1
     assert created[0]["startup_status"]["ready"] is False
+    assert resolver_arguments["bootstrap_path"] == str(configured_bootstrap)

@@ -6,6 +6,7 @@ publishes Formal Knowledge and never becomes a second Knowledge store.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 import sqlite3
@@ -90,6 +91,31 @@ def bind_case_status(
             "failed_stage": "PARSE" if orchestration_status == "PARSE_FAILED" else None,
             "error_code": error_code,
             "retryable": orchestration_status == "PARSE_FAILED",
+        }
+    if orchestration_status == "RUNNING":
+        trace = (result or {}).get("latency_trace") or {}
+        previous_failed_stage = str(
+            (result or {}).get("failed_stage") or ""
+        ).upper() or None
+        if previous_failed_stage == "STAGE_B":
+            stage_a = _stage_status(trace, "A", True)
+            stage_b = "RUNNING"
+        else:
+            stage_a = "RUNNING"
+            stage_b = "WAITING"
+        return {
+            "parse": "PASS",
+            "stage_a": stage_a,
+            "stage_b": stage_b,
+            "gate": "WAITING",
+            "result": "RUNNING",
+            "failed_stage": (
+                previous_failed_stage
+                if previous_failed_stage in {"STAGE_A", "STAGE_B"}
+                else None
+            ),
+            "error_code": error_code,
+            "retryable": False,
         }
     if result is None:
         return {
@@ -197,6 +223,8 @@ class HardwareR1WorkbenchStore:
                 """
                 CREATE TABLE IF NOT EXISTS hardware_r1_batch (
                     batch_id TEXT PRIMARY KEY,
+                    dataset_manifest_json TEXT,
+                    dataset_frozen_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -220,6 +248,20 @@ class HardwareR1WorkbenchStore:
                 ON hardware_r1_batch_item(batch_id, created_at);
                 """
             )
+            batch_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(hardware_r1_batch)"
+                ).fetchall()
+            }
+            if "dataset_manifest_json" not in batch_columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch ADD COLUMN dataset_manifest_json TEXT"
+                )
+            if "dataset_frozen_at" not in batch_columns:
+                connection.execute(
+                    "ALTER TABLE hardware_r1_batch ADD COLUMN dataset_frozen_at TEXT"
+                )
             columns = {
                 str(row["name"])
                 for row in connection.execute(
@@ -244,6 +286,77 @@ class HardwareR1WorkbenchStore:
                 (batch_id, now, now),
             )
         return batch_id
+
+    def freeze_dataset_identity(
+        self,
+        batch_id: str,
+        entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Persist the immutable upload identity before any Provider call."""
+        now = _utc_now()
+        manifest = {
+            "version": "hardware-r1-dataset-identity/v1",
+            "batch_id": str(batch_id),
+            "frozen_at": now,
+            "entries": [dict(entry) for entry in entries],
+        }
+        encoded = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT dataset_manifest_json FROM hardware_r1_batch WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            if row is None:
+                raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+            existing = row["dataset_manifest_json"]
+            if existing:
+                current = json.loads(existing)
+                # A frozen Batch identity is immutable. Repeating the freeze is
+                # allowed only when the exact entry list is unchanged.
+                if current.get("entries") != manifest["entries"]:
+                    raise HardwareR1WorkbenchError("DATASET_IDENTITY_ALREADY_FROZEN")
+                return current
+            connection.execute(
+                """
+                UPDATE hardware_r1_batch
+                SET dataset_manifest_json=?,dataset_frozen_at=?,updated_at=?
+                WHERE batch_id=?
+                """,
+                (encoded, now, now, batch_id),
+            )
+        return manifest
+
+    def get_dataset_identity(self, batch_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT dataset_manifest_json
+                FROM hardware_r1_batch
+                WHERE batch_id=?
+                """,
+                (batch_id,),
+            ).fetchone()
+        if row is None:
+            raise HardwareR1WorkbenchError("BATCH_NOT_FOUND")
+        if not row["dataset_manifest_json"]:
+            return None
+        try:
+            value = json.loads(row["dataset_manifest_json"])
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_CORRUPT") from error
+        if (
+            not isinstance(value, dict)
+            or value.get("version") != "hardware-r1-dataset-identity/v1"
+            or value.get("batch_id") != batch_id
+            or not isinstance(value.get("entries"), list)
+        ):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_CORRUPT")
+        return value
 
     def add_item(
         self,
@@ -355,6 +468,23 @@ class HardwareR1WorkbenchStore:
         else:
             orchestration_status = row["orchestration_status"]
         trace = (result or {}).get("latency_trace") or {}
+        duration_ms = int(trace.get("TOTAL_MS") or 0)
+        if orchestration_status == "RUNNING":
+            try:
+                started = datetime.fromisoformat(str(row["updated_at"]))
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                elapsed = int(
+                    max(
+                        0.0,
+                        (datetime.now(timezone.utc) - started.astimezone(timezone.utc))
+                        .total_seconds()
+                        * 1000,
+                    )
+                )
+                duration_ms = max(duration_ms, elapsed)
+            except (TypeError, ValueError):
+                pass
         return {
             "item_id": row["item_id"],
             "batch_id": row["batch_id"],
@@ -372,7 +502,7 @@ class HardwareR1WorkbenchStore:
             "result": bound["result"],
             "retryable": bound["retryable"],
             "provider_calls": int((result or {}).get("provider_call_count") or 0),
-            "duration_ms": int(trace.get("TOTAL_MS") or 0),
+            "duration_ms": duration_ms,
             "run_ref": (result or {}).get("run_id"),
             "updated_at": row["updated_at"],
             "snapshot": snapshot,
@@ -445,6 +575,329 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 class HardwareR1WorkbenchService:
+    def apply_human_review(
+        self,
+        item_id: str,
+        *,
+        decision: str,
+        reviewer: str,
+        reason: str,
+        confirmed_content: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Apply an explicit human decision to the Durable Candidate.
+
+        CONFIRM may correct editable knowledge fields. Source identity, provenance,
+        Evidence and Candidate contract identity remain server-owned and immutable.
+        DEFER/REJECT keep the Candidate blocked from Promotion without deleting it.
+        """
+        decision_name = str(decision or "").strip().upper()
+        reviewer_name = str(reviewer or "").strip()
+        reason_text = str(reason or "").strip()
+        if (
+            decision_name not in {"CONFIRM", "DEFER", "REJECT"}
+            or not reviewer_name
+            or not reason_text
+        ):
+            raise HardwareR1WorkbenchError("REVIEW_DECISION_INVALID")
+
+        item = self.store.get_item(item_id)
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        if not candidate_id:
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        getter = getattr(self.candidate_repository, "get_candidate", None)
+        if not callable(getter):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        try:
+            asset = getter(candidate_id)
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+        if not isinstance(asset, dict):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+        if str(asset.get("asset_status") or "").upper() != "ACTIVE":
+            raise HardwareR1WorkbenchError("CANDIDATE_ASSET_INVALIDATED")
+        if str(asset.get("promotion_status") or "").upper() != "NOT_STARTED":
+            raise HardwareR1WorkbenchError("CANDIDATE_LOCKED_BY_PROMOTION")
+        try:
+            expected_row_version = int(asset["row_version"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise HardwareR1WorkbenchError("CANDIDATE_REVIEW_TRANSITION_INVALID") from error
+
+        pipeline_result = item.get("pipeline_result") or {}
+        if decision_name in {"DEFER", "REJECT"}:
+            recorder = getattr(
+                self.candidate_repository,
+                "record_production_review_decision",
+                None,
+            )
+            if not callable(recorder):
+                raise HardwareR1WorkbenchError(
+                    "CANDIDATE_REVIEW_TRANSITION_INVALID"
+                )
+            try:
+                recorder(
+                    candidate_id,
+                    expected_row_version=expected_row_version,
+                    reviewer=reviewer_name,
+                    disposition=(
+                        "DEFERRED" if decision_name == "DEFER" else "REJECTED"
+                    ),
+                    reason=reason_text,
+                )
+            except CandidateAssetRepositoryError as error:
+                raise HardwareR1WorkbenchError(error.code) from error
+            self.store.update_item(
+                item_id,
+                orchestration_status="REVIEW",
+                failed_stage=None,
+                error_code=None,
+                result=pipeline_result,
+            )
+            return self.get_item(item_id)
+
+        if not isinstance(confirmed_content, dict):
+            raise HardwareR1WorkbenchError("REVIEW_CONFIRMED_CONTENT_REQUIRED")
+        original = deepcopy(asset.get("knowledge_object"))
+        if not isinstance(original, dict):
+            raise HardwareR1WorkbenchError("CANDIDATE_NOT_FOUND")
+
+        # The client may edit business knowledge sections only.  Identity,
+        # source/evidence/provenance, conflicts and review metadata are
+        # reconstructed from the authoritative Durable Candidate.
+        reviewed = deepcopy(original)
+
+        def merge_review_values(target: Any, incoming: Any) -> None:
+            if isinstance(target, dict):
+                if "value" in target:
+                    if isinstance(incoming, dict):
+                        if "value" in incoming:
+                            target["value"] = deepcopy(incoming["value"])
+                        # Key-parameter business semantics are editable, but
+                        # Evidence/status/confidence/warnings remain server-owned.
+                        if "name" in target and "name" in incoming:
+                            target["name"] = deepcopy(incoming["name"])
+                        if "unit" in target and "unit" in incoming:
+                            target["unit"] = deepcopy(incoming["unit"])
+                    return
+                if not isinstance(incoming, dict):
+                    return
+                for key, child in target.items():
+                    if key in incoming:
+                        merge_review_values(child, incoming[key])
+                return
+            if isinstance(target, list) and isinstance(incoming, list):
+                for index, child in enumerate(target):
+                    if index < len(incoming):
+                        merge_review_values(child, incoming[index])
+
+        def merge_key_parameters(
+            original_parameters: Any,
+            incoming_parameters: Any,
+        ) -> list[dict[str, Any]]:
+            original_list = (
+                list(original_parameters)
+                if isinstance(original_parameters, list)
+                else []
+            )
+            if not isinstance(incoming_parameters, list):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETERS_INVALID"
+                )
+            evidence_ids = {
+                str(item.get("block_id") or "")
+                for item in original.get("evidence") or []
+                if isinstance(item, dict) and item.get("block_id")
+            }
+            result: list[dict[str, Any]] = []
+            used_origins: set[int] = set()
+            legacy_mode = all(
+                not isinstance(item, dict)
+                or (
+                    "__review_original_index" not in item
+                    and not item.get("__review_new")
+                )
+                for item in incoming_parameters
+            )
+            if legacy_mode and len(incoming_parameters) != len(original_list):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETER_IDENTITY_REQUIRED"
+                )
+
+            for index, incoming in enumerate(incoming_parameters):
+                if not isinstance(incoming, dict):
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETERS_INVALID"
+                    )
+                origin = (
+                    index
+                    if legacy_mode
+                    else incoming.get("__review_original_index")
+                )
+                if isinstance(origin, bool):
+                    origin = None
+                if isinstance(origin, int):
+                    if (
+                        origin < 0
+                        or origin >= len(original_list)
+                        or origin in used_origins
+                        or not isinstance(original_list[origin], dict)
+                    ):
+                        raise HardwareR1WorkbenchError(
+                            "REVIEW_KEY_PARAMETER_IDENTITY_INVALID"
+                        )
+                    used_origins.add(origin)
+                    parameter = deepcopy(original_list[origin])
+                    for key in ("name", "value", "unit"):
+                        if key in incoming:
+                            parameter[key] = deepcopy(incoming[key])
+                    result.append(parameter)
+                    continue
+
+                if incoming.get("__review_new") is not True:
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETER_IDENTITY_REQUIRED"
+                    )
+                name = str(incoming.get("name") or "").strip()
+                value = incoming.get("value")
+                unit = incoming.get("unit")
+                refs = [
+                    str(item)
+                    for item in incoming.get("evidence_block_ids") or []
+                    if str(item).strip()
+                ]
+                if (
+                    not name
+                    or value in (None, "")
+                    or not refs
+                    or len(set(refs)) != len(refs)
+                    or any(ref not in evidence_ids for ref in refs)
+                ):
+                    raise HardwareR1WorkbenchError(
+                        "REVIEW_KEY_PARAMETER_EVIDENCE_INVALID"
+                    )
+                result.append(
+                    {
+                        "name": name,
+                        "value": deepcopy(value),
+                        "unit": deepcopy(unit),
+                        "extraction_status": "EXTRACTED",
+                        "evidence_block_ids": refs,
+                        "confidence": None,
+                        "warnings": ["HUMAN_REVIEW_ADDED"],
+                    }
+                )
+
+            names = [
+                str(item.get("name") or "").strip()
+                for item in result
+                if isinstance(item, dict)
+            ]
+            if any(not name for name in names) or len(set(names)) != len(names):
+                raise HardwareR1WorkbenchError(
+                    "REVIEW_KEY_PARAMETER_NAME_INVALID"
+                )
+            return result
+
+        # Only business field values are editable. Evidence bindings,
+        # extraction status/confidence, derived-from metadata and every
+        # Source/identity/provenance field remain server-owned.
+        for key in (
+            "engineering_context",
+            "observed_problem",
+            "engineering_analysis",
+            "engineering_resolution",
+            "reusable_knowledge",
+            "facts",  # compatibility with earlier Candidate fixtures
+        ):
+            if key in reviewed and key in confirmed_content:
+                merge_review_values(reviewed[key], confirmed_content[key])
+
+        reviewed_context = reviewed.get("engineering_context")
+        confirmed_context = confirmed_content.get("engineering_context")
+        if (
+            isinstance(reviewed_context, dict)
+            and isinstance(confirmed_context, dict)
+            and "key_parameters" in confirmed_context
+        ):
+            reviewed_context["key_parameters"] = merge_key_parameters(
+                (original.get("engineering_context") or {}).get(
+                    "key_parameters"
+                ),
+                confirmed_context["key_parameters"],
+            )
+
+        reviewed_at = _utc_now()
+        conflicts = reviewed.get("conflicts")
+        if not isinstance(conflicts, list):
+            conflicts = []
+            reviewed["conflicts"] = conflicts
+        review = reviewed.get("review")
+        if not isinstance(review, dict):
+            review = {}
+            reviewed["review"] = review
+        decisions = review.get("field_decisions")
+        if not isinstance(decisions, list):
+            decisions = []
+            review["field_decisions"] = decisions
+
+        for conflict in conflicts:
+            if not isinstance(conflict, dict):
+                continue
+            if (
+                str(conflict.get("status") or "").upper() != "OPEN"
+                and str(conflict.get("resolution_status") or "").upper()
+                != "NEEDS_REVIEW"
+            ):
+                continue
+            conflict_id = str(conflict.get("conflict_id") or "")
+            field = str(conflict.get("field") or "")
+            conflict["status"] = "RESOLVED"
+            conflict["resolution_status"] = "CONFIRMED"
+            conflict["reviewer_note"] = reason_text
+            conflict["resolution"] = {
+                "decision_source": "HUMAN_REVIEW",
+                "reviewer": reviewer_name,
+                "reviewed_at": reviewed_at,
+            }
+            decisions.append(
+                {
+                    "conflict_id": conflict_id,
+                    "field": field,
+                    "decision_source": "HUMAN_REVIEW",
+                    "reviewer": reviewer_name,
+                    "reviewed_at": reviewed_at,
+                }
+            )
+        review["object_status"] = "CANDIDATE"
+        review["reviewer"] = reviewer_name
+        review["reviewed_at"] = reviewed_at
+
+        apply_review = getattr(
+            self.candidate_repository, "apply_production_review", None
+        )
+        if not callable(apply_review):
+            raise HardwareR1WorkbenchError(
+                "CANDIDATE_REVIEW_TRANSITION_INVALID"
+            )
+        try:
+            apply_review(
+                candidate_id,
+                reviewed_knowledge_object=reviewed,
+                expected_row_version=expected_row_version,
+                reviewer=reviewer_name,
+                reason=reason_text,
+            )
+        except CandidateAssetRepositoryError as error:
+            raise HardwareR1WorkbenchError(error.code) from error
+
+        self.store.update_item(
+            item_id,
+            orchestration_status="CANDIDATE_READY",
+            failed_stage=None,
+            error_code=None,
+            result=pipeline_result,
+        )
+        return self.get_item(item_id)
+
     def __init__(
         self,
         store: HardwareR1WorkbenchStore,
@@ -462,10 +915,23 @@ class HardwareR1WorkbenchService:
 
     def upload_batch(self, files: list[tuple[str, bytes, str | None]]) -> dict[str, Any]:
         batch_id = self.store.create_batch()
-        for filename, payload, mime_type in files:
+        dataset_entries: list[dict[str, Any]] = []
+        for source_order, (filename, payload, mime_type) in enumerate(files, start=1):
             name = Path(str(filename or "").replace("\\", "/")).name
+            dataset_entry: dict[str, Any] = {
+                "order": source_order,
+                "item_id": None,
+                "source_file": name or "unknown",
+                "business_case_id": None,
+                "source_id": None,
+                "sha256": hashlib.sha256(payload).hexdigest() if payload else None,
+                "size_bytes": len(payload),
+                "binding_status": "UNBOUND",
+            }
+            dataset_entries.append(dataset_entry)
             if not name.lower().endswith(".docx") or not payload:
-                self.store.add_item(
+                dataset_entry["binding_status"] = "PARSE_FAILED"
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name or "unknown",
                     orchestration_status="PARSE_FAILED",
@@ -487,7 +953,11 @@ class HardwareR1WorkbenchService:
                     or ""
                 )
                 if not case_id:
-                    self.store.add_item(
+                    dataset_entry.update(
+                        source_id=source_id or None,
+                        binding_status="PARSE_FAILED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         source_id=source_id or None,
@@ -499,7 +969,12 @@ class HardwareR1WorkbenchService:
                     continue
                 register = getattr(self.source_store, "register_active_bytes", None)
                 if not callable(register):
-                    self.store.add_item(
+                    dataset_entry.update(
+                        business_case_id=case_id,
+                        source_id=source_id or None,
+                        binding_status="DEPENDENCY_BLOCKED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         business_case_id=case_id,
@@ -513,7 +988,12 @@ class HardwareR1WorkbenchService:
                     binding = register(case_id, name, payload, mime_type=mime_type)
                 except Exception as error:
                     code = str(getattr(error, "code", None) or "SOURCE_BINDING_FAILED")
-                    self.store.add_item(
+                    dataset_entry.update(
+                        business_case_id=case_id,
+                        source_id=source_id or None,
+                        binding_status="DEPENDENCY_BLOCKED",
+                    )
+                    dataset_entry["item_id"] = self.store.add_item(
                         batch_id,
                         source_file=name,
                         business_case_id=case_id,
@@ -523,22 +1003,32 @@ class HardwareR1WorkbenchService:
                         snapshot=snapshot,
                     )
                     continue
-                self.store.add_item(
+                bound_source_id = str(binding.get("source_id") or source_id)
+                dataset_entry.update(
+                    business_case_id=case_id,
+                    source_id=bound_source_id,
+                    sha256=str(binding.get("sha256") or dataset_entry["sha256"] or ""),
+                    size_bytes=int(binding.get("size_bytes") or len(payload)),
+                    binding_status="BOUND",
+                )
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name,
                     business_case_id=case_id,
-                    source_id=str(binding.get("source_id") or source_id),
+                    source_id=bound_source_id,
                     orchestration_status="QUEUED",
                     snapshot=snapshot,
                 )
             except Exception as error:
-                self.store.add_item(
+                dataset_entry["binding_status"] = "PARSE_FAILED"
+                dataset_entry["item_id"] = self.store.add_item(
                     batch_id,
                     source_file=name,
                     orchestration_status="PARSE_FAILED",
                     failed_stage="PARSE",
                     error_code=str(getattr(error, "code", None) or "PARSE_FAILED"),
                 )
+        self.store.freeze_dataset_identity(batch_id, dataset_entries)
         return self.get_batch(batch_id)
 
     def run_batch(self, batch_id: str) -> dict[str, Any]:
@@ -610,6 +1100,52 @@ class HardwareR1WorkbenchService:
         self._run_item(item, retry_stage=None, force_full_run=True)
         return self.get_item(item_id)
 
+    def _verify_frozen_source_identity(self, item: dict[str, Any]) -> None:
+        """Fail closed before Provider work if an uploaded source was substituted."""
+        manifest = self.store.get_dataset_identity(str(item["batch_id"]))
+        # Legacy/unit-created batches may predate the E2E manifest. The formal
+        # Web upload path always freezes one before returning from upload_batch.
+        if manifest is None:
+            return
+        entry = next(
+            (
+                value
+                for value in manifest["entries"]
+                if isinstance(value, dict)
+                and value.get("item_id") == item.get("item_id")
+            ),
+            None,
+        )
+        if not isinstance(entry, dict):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_MISMATCH")
+        expected = {
+            "source_file": str(item.get("source_file") or ""),
+            "business_case_id": item.get("business_case_id"),
+            "source_id": item.get("source_id"),
+        }
+        if any(entry.get(key) != value for key, value in expected.items()):
+            raise HardwareR1WorkbenchError("DATASET_IDENTITY_MISMATCH")
+        if entry.get("binding_status") != "BOUND":
+            return
+        get_active_source = getattr(self.source_store, "get_active_source", None)
+        if not callable(get_active_source):
+            raise HardwareR1WorkbenchError("SOURCE_BINDING_CLOSURE_REQUIRED")
+        try:
+            source = get_active_source(str(item.get("business_case_id") or ""))
+        except Exception as error:
+            code = str(
+                getattr(error, "code", None)
+                or "ACTIVE_SOURCE_BINDING_REQUIRED"
+            )
+            raise HardwareR1WorkbenchError(code) from error
+        if (
+            str(source.get("binding_status") or "").upper() != "ACTIVE"
+            or str(source.get("source_id") or "") != str(entry.get("source_id") or "")
+            or str(source.get("sha256") or "") != str(entry.get("sha256") or "")
+            or int(source.get("size_bytes") or -1) != int(entry.get("size_bytes") or -2)
+        ):
+            raise HardwareR1WorkbenchError("DATASET_SOURCE_IDENTITY_MISMATCH")
+
     def _run_item(
         self,
         item: dict[str, Any],
@@ -625,6 +1161,17 @@ class HardwareR1WorkbenchService:
                 failed_stage="PARSE",
                 error_code="SNAPSHOT_REQUIRED",
                 result=None,
+            )
+            return
+        try:
+            self._verify_frozen_source_identity(item)
+        except HardwareR1WorkbenchError as error:
+            self.store.update_item(
+                item["item_id"],
+                orchestration_status="DEPENDENCY_BLOCKED",
+                failed_stage=item.get("failed_stage"),
+                error_code=error.code,
+                result=item.get("pipeline_result"),
             )
             return
         self.store.update_item(
@@ -1040,12 +1587,23 @@ class HardwareR1WorkbenchService:
     def get_item(self, item_id: str) -> dict[str, Any]:
         item = self._resolve_candidate(self.store.get_item(item_id))
         result = item.get("pipeline_result") or {}
+        review_history: list[dict[str, Any]] = []
+        candidate_id = str(item.get("candidate_id") or "").strip()
+        history_reader = getattr(
+            self.candidate_repository, "list_production_reviews", None
+        )
+        if candidate_id and callable(history_reader):
+            try:
+                review_history = history_reader(candidate_id)
+            except CandidateAssetRepositoryError as error:
+                raise HardwareR1WorkbenchError(error.code) from error
         return {
             "contract_version": WORKBENCH_CONTRACT_VERSION,
             **item,
             "candidate": item.get("candidate"),
             "candidate_asset": item.get("candidate_asset"),
             "evidence_validation": result.get("evidence_validation"),
+            "review_history": review_history,
         }
 
     def get_batch(self, batch_id: str) -> dict[str, Any]:
@@ -1063,6 +1621,7 @@ class HardwareR1WorkbenchService:
             "batch_id": batch_id,
             "status": aggregate_batch_status(items),
             "summary": _summary(items),
+            "dataset_identity": self.store.get_dataset_identity(batch_id),
             "items": items,
         }
 

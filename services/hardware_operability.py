@@ -122,7 +122,28 @@ def _runtime_ready(root: Path, environ: Mapping[str, str]) -> dict[str, Any]:
         return {"status": "UNREADY", "error_code": "RUNTIME_CONFIG_INVALID:" + code}
 
 
-def _knowledge_ready(environ: Mapping[str, str]) -> dict[str, Any]:
+def _knowledge_ready(
+    environ: Mapping[str, str],
+    knowledge_status: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if (
+        knowledge_status
+        and str(knowledge_status.get("mode") or "").upper() == "LOCAL_NON_PROD"
+        and bool(knowledge_status.get("managed_release"))
+    ):
+        ready = bool(knowledge_status.get("ready"))
+        payload = {
+            "status": "READY" if ready else "UNREADY",
+            "mode": "LOCAL_NON_PROD",
+            "managed_release": True,
+            "release_version": knowledge_status.get("release_version"),
+        }
+        if not ready:
+            payload["error_code"] = str(
+                knowledge_status.get("code") or "KNOWLEDGE_UNAVAILABLE"
+            )
+        return payload
+
     base_url = str(environ.get("HARDWARE_KNOWLEDGE_BASE_URL") or "").strip()
     release_version = str(
         environ.get("HARDWARE_KNOWLEDGE_RELEASE_VERSION") or ""
@@ -150,6 +171,7 @@ def readiness_status(
     hardware_db_path: str | Path,
     environ: Mapping[str, str] | None = None,
     startup_status: Mapping[str, Any] | None = None,
+    knowledge_status: Mapping[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     root_path = Path(root).resolve()
     env = os.environ if environ is None else environ
@@ -173,7 +195,7 @@ def readiness_status(
         "HARDWARE_DB": _db_ready(Path(hardware_db_path)),
         "PUBLIC_CONTRACT": _contract_ready(root_path),
         "UNIFIED_RUNTIME_CONFIG": _runtime_ready(root_path, env),
-        "UNIFIED_KNOWLEDGE": _knowledge_ready(env),
+        "UNIFIED_KNOWLEDGE": _knowledge_ready(env, knowledge_status),
     }
     if startup_status is not None:
         dependencies["HARDWARE_STARTUP"] = {
@@ -181,15 +203,44 @@ def readiness_status(
             "phase": startup_status.get("phase"),
             "error_code": startup_status.get("error_code"),
         }
-    ready = all(item.get("status") == "READY" for item in dependencies.values())
+    required_dependencies = {
+        key: value
+        for key, value in dependencies.items()
+        if key != "UNIFIED_KNOWLEDGE"
+    }
+    core_ready = all(
+        item.get("status") == "READY"
+        for item in required_dependencies.values()
+    )
+    knowledge_ready = (
+        dependencies["UNIFIED_KNOWLEDGE"].get("status") == "READY"
+    )
+    if core_ready and knowledge_ready:
+        overall_status = "READY"
+    elif core_ready:
+        overall_status = "READY_DEGRADED"
+    else:
+        overall_status = "UNREADY"
     payload = {
-        "status": "READY" if ready else "UNREADY",
+        "status": overall_status,
         "service": "HARDWARE_CASE",
         "dependencies": dependencies,
+        "degraded_dependencies": (
+            ["UNIFIED_KNOWLEDGE"]
+            if core_ready and not knowledge_ready
+            else []
+        ),
+        "capabilities": {
+            "local_case_search": "READY" if core_ready else "UNREADY",
+            "formal_knowledge": "READY" if knowledge_ready else "UNAVAILABLE",
+            "ai_retrieval": (
+                "FORMAL_READY" if knowledge_ready else "LOCAL_FALLBACK"
+            ),
+        },
         "startup": dict(startup_status) if startup_status is not None else None,
         "binding": release_binding(root_path),
     }
-    return (200 if ready else 503), payload
+    return (200 if core_ready else 503), payload
 
 
 __all__ = [

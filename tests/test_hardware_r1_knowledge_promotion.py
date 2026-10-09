@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -34,10 +35,15 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1KnowledgePromotionStore,
     HardwareR1PromotionError,
+    _same_evidence_refs,
 )
+from services.hardware_r1_e2e_nonprod_knowledge import ManagedNonProdReleaseController
 from quality_knowledge.web.hardware_r1_workbench_api import (
     create_hardware_r1_workbench_router,
 )
+from quality_knowledge.web.p0_app import create_p0_app
+import services.hardware_case_r1_workbench as workbench_module
+from services.hardware_case_r1_workbench import HardwareR1WorkbenchStore
 
 
 NOW = datetime(2026, 10, 3, 6, 0, tzinfo=timezone.utc)
@@ -290,6 +296,27 @@ def setup_case(
     )
 
 
+def test_publication_evidence_multiset_allows_order_only_difference() -> None:
+    local = ["EV-A", "EV-B", "EV-C"]
+    remote = ["EV-C", "EV-A", "EV-B"]
+    assert _same_evidence_refs(remote, local) is True
+
+
+@pytest.mark.parametrize(
+    ("remote", "local"),
+    [
+        (["EV-A", "EV-B"], ["EV-A", "EV-B", "EV-C"]),
+        (["EV-A", "EV-B", "EV-C", "EV-D"], ["EV-A", "EV-B", "EV-C"]),
+        (["EV-A", "EV-A", "EV-B"], ["EV-A", "EV-B", "EV-B"]),
+    ],
+)
+def test_publication_evidence_multiset_rejects_missing_extra_or_duplicate(
+    remote: list[str],
+    local: list[str],
+) -> None:
+    assert _same_evidence_refs(remote, local) is False
+
+
 def test_precheck_and_candidate_intake_are_item_idempotent_and_do_not_publish(
     tmp_path: Path,
 ) -> None:
@@ -452,6 +479,50 @@ def test_legacy_promotion_row_migrates_idempotently_to_asset_ledger(tmp_path: Pa
         )
 
 
+def test_formal_review_uses_exact_durable_candidate_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        promotion,
+        _,
+        _,
+        _,
+        _,
+        transport,
+        _,
+    ) = setup_case(
+        tmp_path,
+        case_id="A0206",
+        item_id="HWI-A0206",
+        batch_id="HWB-DURABLE-ONLY",
+    )
+    promotion.intake_item("HWI-A0206")
+    durable = promotion.assets.get_candidate(
+        promotion.workbench.items["HWI-A0206"]["candidate_id"]
+    )
+    expected = copy.deepcopy(durable["knowledge_object"])
+    observed = {}
+    original = transport.request
+
+    def capture_review(method, path, *, json_body=None, query=None):
+        if method == "POST" and path == "/v1/knowledge/reviews":
+            observed["confirmed_value"] = copy.deepcopy(
+                (json_body or {}).get("confirmed_value")
+            )
+        return original(method, path, json_body=json_body, query=query)
+
+    monkeypatch.setattr(transport, "request", capture_review)
+    reviewed = promotion.review_item(
+        "HWI-A0206",
+        reviewer="durable-only-reviewer",
+        review_time=NOW,
+        review_comment="approval only",
+    )
+    assert reviewed["status"] == "REVIEW_CONFIRMED"
+    assert observed["confirmed_value"] == expected
+
+
 def test_human_review_publish_release_query_back_and_source_lock(
     tmp_path: Path,
 ) -> None:
@@ -471,14 +542,9 @@ def test_human_review_publish_release_query_back_and_source_lock(
     )
 
     intake = promotion.intake_item("HWI-A0207")
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = (
-        "模拟量精度设计必须校核参考源与器件误差预算"
-    )
     reviewed = promotion.review_item(
         "HWI-A0207",
         reviewer="hardware-reviewer",
-        confirmed_content=confirmed,
         review_time=NOW,
         review_comment="R1 formal promotion review",
     )
@@ -677,12 +743,9 @@ class SimulatedPowerLoss(BaseException):
 
 def _prepare_reviewed_promotion(promotion, candidate):
     intake = promotion.intake_item("HWI-RECOVERY")
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "human-confirmed recovery rule"
     promotion.review_item(
         "HWI-RECOVERY",
         reviewer="recovery-reviewer",
-        confirmed_content=confirmed,
         review_time=NOW,
         review_comment="recovery test",
     )
@@ -691,6 +754,73 @@ def _prepare_reviewed_promotion(promotion, candidate):
 
 def _count_calls(transport, method, path):
     return sum(call["method"] == method and call["path"] == path for call in transport.calls)
+
+
+def _seed_unrelated_queryable_release(
+    promotion,
+    source_store,
+    knowledge_root: Path,
+) -> tuple[ManagedNonProdReleaseController, str]:
+    """Create an immutable release that predates the A0152 publish."""
+    other_source = source_store.register_active_bytes(
+        "A0207", "A0207-release-seed.docx", b"unrelated release seed"
+    )
+    other_golden = golden("A0207", other_source["source_id"], "B0007")
+    adapter = promotion.bridge.adapter
+    other_evidence = other_golden["evidence"][0]
+    other_evidence_id = promotion.bridge.evidence_id(
+        "A0207", other_source["source_id"], other_evidence["block_id"]
+    )
+    adapter.intake_evidence(
+        case_id="A0207",
+        source_metadata=other_source,
+        evidence={
+            "evidence_id": other_evidence_id,
+            "source_ref": other_source["source_ref"],
+            "evidence_type": "PARAGRAPH",
+            "locator": {
+                **other_evidence["source_locator"],
+                "block_id": other_evidence["block_id"],
+            },
+            "excerpt_or_caption": other_evidence["text"],
+        },
+        revision=1,
+        source_revision=other_source["source_id"],
+    )
+    adapter.intake_candidate(
+        case_id="A0207",
+        source_document_id=other_source["source_id"],
+        source_ref=other_source["source_ref"],
+        structured_content=other_golden,
+        evidence_refs=[other_evidence_id],
+        revision=1,
+        source_version=other_source["source_id"],
+    )
+    adapter.review_candidate(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        state="CONFIRMED",
+        reviewer="release-seed-reviewer",
+        review_time=NOW,
+        confirmed_content=other_golden,
+        revision=1,
+    )
+    adapter.publish(
+        candidate_id="HC-KNOWLEDGE-A0207-R1",
+        hardware_publish_gate={"passed": True},
+        evidence_refs=[other_evidence_id],
+        publisher="release-seed-publisher",
+        published_at=NOW,
+        revision=1,
+    )
+    controller = ManagedNonProdReleaseController(
+        JsonArtifactRepository(knowledge_root),
+        adapter,
+        release_prefix=RELEASE,
+    )
+    release = controller.ensure_queryable_release()
+    version = str(release["release_version"])
+    assert version.startswith(RELEASE + "-R")
+    return controller, version
 
 
 def test_remote_write_is_journaled_before_send_and_remote_key_is_idempotent(tmp_path, monkeypatch):
@@ -726,11 +856,8 @@ def test_remote_write_is_journaled_before_send_and_remote_key_is_idempotent(tmp_
     result = promotion.intake_item("HWI-RECOVERY")
     assert result["status"] == "CANDIDATE_INTAKED"
 
-    candidate = promotion.workbench.items["HWI-RECOVERY"]["candidate"]
-    confirmed = copy.deepcopy(candidate)
-    confirmed["reusable_knowledge"]["engineering_rule"]["value"] = "confirmed journal rule"
     promotion.review_item(
-        "HWI-RECOVERY", reviewer="journal-reviewer", confirmed_content=confirmed,
+        "HWI-RECOVERY", reviewer="journal-reviewer",
         review_time=NOW,
     )
     promotion.publish_item(
@@ -930,10 +1057,12 @@ def test_promotion_recovery_diagnostics_route_is_maintainer_only(tmp_path):
     promotion, workbench, *_ = setup_case(
         tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
     )
+
     app = FastAPI()
     app.include_router(
         create_hardware_r1_workbench_router(
-            workbench, promotion_service=promotion
+            workbench,
+            promotion_service=promotion,
         )
     )
     client = TestClient(app)
@@ -1046,7 +1175,7 @@ def test_formal_review_unknown_is_asset_scoped_and_blocks_publish(tmp_path, monk
     monkeypatch.setattr(transport, "request", review_success_then_timeout)
     with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
         promotion.review_item(
-            "HWI-RECOVERY", reviewer="recovery-reviewer", confirmed_content=confirmed,
+            "HWI-RECOVERY", reviewer="recovery-reviewer",
             review_time=NOW, review_comment="unknown review outcome",
         )
     with pytest.raises(HardwareR1PromotionError, match="FORMAL_REVIEW_RECONCILIATION_REQUIRED"):
@@ -1069,31 +1198,28 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
     original_transition = promotion._transition
     original_add_reference = promotion.bridge.add_source_reference
     original_journal_transition = promotion._journal_transition
+    controller, stale_release_version = _seed_unrelated_queryable_release(
+        promotion, source_store, knowledge_root
+    )
+    publish_calls_before_target = _count_calls(
+        transport, "POST", "/v1/knowledge/publish"
+    )
     publish_operation_id = promotion._operation_id(
         intake["asset_candidate_id"], "PUBLISH", 1
     )
 
     def crash_on_asset_commit(*args, **kwargs):
         if crash_point == "remote-before-ledger" and args[3] == "PUBLISHED_PENDING_QUERY_BACK":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_transition(*args, **kwargs)
 
     def crash_before_source_ref(*args, **kwargs):
         if crash_point == "ledger-before-source-ref":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_add_reference(*args, **kwargs)
 
     def crash_before_journal_complete(operation_id, state, **kwargs):
         if crash_point == "source-ref-before-journal" and operation_id == publish_operation_id and state == "COMPLETED":
-            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
-                RELEASE, created_at=NOW
-            )
             raise SimulatedPowerLoss()
         return original_journal_transition(operation_id, state, **kwargs)
 
@@ -1111,16 +1237,196 @@ def test_publish_remote_success_local_crash_recovers_consistently(tmp_path, monk
         candidate_repository=promotion.assets,
         operation_journal=promotion.operation_journal,
     )
-    repaired = restarted.reconcile_item("HWI-RECOVERY")
+    pending = restarted.get_item("HWI-RECOVERY")
+    assert pending["reconciliation_required"] is True
+    assert pending["reconciliation_operation_type"] == "PUBLISH"
+    assert pending["reconciliation_error_code"] == "PUBLISH_RECONCILIATION_REQUIRED"
+
+    startup = restarted.reconcile_startup(
+        prepare_publication_query=controller.ensure_queryable_release
+    )
+    refreshed_release_version = str(controller.status()["release_version"])
+    assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
+    repaired = restarted.get_item("HWI-RECOVERY")
+    assert startup["startup_queries_used"] == 1
     assert repaired["status"] == "PUBLISHED_PENDING_QUERY_BACK"
     assert repaired["knowledge_id"]
+    settled = restarted.get_item("HWI-RECOVERY")
+    assert settled["reconciliation_required"] is False
+    assert settled["reconciliation_operation_type"] is None
+    assert settled["reconciliation_error_code"] is None
     journal = promotion.operation_journal.get(publish_operation_id)
     assert journal["operation_state"] == "COMPLETED"
     refs = source_store.formal_knowledge_references("A0152")
     assert any(item["knowledge_id"] == repaired["knowledge_id"] for item in refs)
-    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
     assert restarted.recovery_diagnostics()["pending_remote_reconciliation_count"] == 0
     assert source["source_id"] == promotion.assets.get_candidate(intake["asset_candidate_id"])["source_id"]
+
+
+def test_pending_publish_reconciliation_is_exposed_by_api_and_reconcile_does_not_republish(
+    tmp_path, monkeypatch
+):
+    promotion, workbench, source_store, _, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id="HWI-RECOVERY", batch_id="HWB-RECOVERY"
+    )
+    intake = _prepare_reviewed_promotion(promotion, candidate)
+    original_transition = promotion._transition
+    controller, stale_release_version = _seed_unrelated_queryable_release(
+        promotion, source_store, knowledge_root
+    )
+    publish_calls_before_target = _count_calls(
+        transport, "POST", "/v1/knowledge/publish"
+    )
+
+    def crash_after_remote_publish(item, asset, record, target, **kwargs):
+        if target == "PUBLISHED_PENDING_QUERY_BACK":
+            raise SimulatedPowerLoss()
+        return original_transition(item, asset, record, target, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_after_remote_publish)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.publish_item(
+            "HWI-RECOVERY", publisher="reconciliation-publisher", published_at=NOW
+        )
+    publish_operation = promotion.operation_journal.get(
+        promotion._operation_id(intake["asset_candidate_id"], "PUBLISH", 1)
+    )
+    assert publish_operation["operation_state"] in {
+        "REMOTE_SENT",
+        "OUTCOME_UNKNOWN",
+        "RECONCILING",
+    }
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
+
+    app = FastAPI()
+    app.include_router(
+        create_hardware_r1_workbench_router(
+            workbench,
+            promotion_service=promotion,
+            release_controller=controller,
+        )
+    )
+    client = TestClient(app)
+    headers = {"X-Hardware-Case-Role": "MAINTAINER"}
+    promotion_path = (
+        "/api/v2/hardware-cases/r1/workbench/items/HWI-RECOVERY/promotion"
+    )
+    response = client.get(promotion_path, headers=headers)
+    assert response.status_code == 200, response.text
+    assert {
+        key: response.json().get(key)
+        for key in (
+            "reconciliation_required",
+            "reconciliation_operation_type",
+            "reconciliation_error_code",
+        )
+    } == {
+        "reconciliation_required": True,
+        "reconciliation_operation_type": "PUBLISH",
+        "reconciliation_error_code": "PUBLISH_RECONCILIATION_REQUIRED",
+    }
+
+    monkeypatch.undo()
+    reconcile = client.post(promotion_path + "/reconcile", headers=headers)
+    assert reconcile.status_code == 200, reconcile.text
+    refreshed_release_version = str(controller.status()["release_version"])
+    assert refreshed_release_version.startswith(RELEASE + "-R")
+    assert refreshed_release_version != stale_release_version
+    assert reconcile.json()["status"] == "PUBLISHED_PENDING_QUERY_BACK"
+    assert reconcile.json()["reconciled"] is True
+    assert (
+        _count_calls(transport, "POST", "/v1/knowledge/publish")
+        - publish_calls_before_target
+    ) == 1
+
+
+def test_p0_app_starts_and_reconciles_pending_publish_without_republishing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        workbench_module, "uuid4", lambda: SimpleNamespace(hex="b" * 32)
+    )
+    workbench_store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = workbench_store.create_batch()
+    item_id = "HWI-" + "a" * 16
+    promotion, _, _, source, knowledge_root, transport, candidate = setup_case(
+        tmp_path, case_id="A0152", item_id=item_id, batch_id=batch_id
+    )
+    intake = promotion.intake_item(item_id)
+    promotion.review_item(
+        item_id,
+        reviewer="startup-recovery-reviewer",
+        review_time=NOW,
+        review_comment="startup recovery test",
+    )
+    monkeypatch.setattr(workbench_module, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    stored_item_id = workbench_store.add_item(
+        batch_id,
+        source_file="A0152-synthetic.docx",
+        business_case_id="A0152",
+        source_id=source["source_id"],
+        orchestration_status="CANDIDATE_READY",
+        snapshot={"source": {"source_id": source["source_id"]}},
+        result={
+            "pipeline_status": "GOLDEN_PREVIEW_READY",
+            "status": "PASS",
+            "evidence_validation": validation(),
+            "knowledge_object": candidate,
+            "provider_call_count": 0,
+        },
+        candidate_id=intake["asset_candidate_id"],
+    )
+    assert stored_item_id == item_id
+
+    original_transition = promotion._transition
+
+    def crash_after_remote_publish(item, asset, record, target, **kwargs):
+        if target == "PUBLISHED_PENDING_QUERY_BACK":
+            KnowledgeReleaseService(JsonArtifactRepository(knowledge_root)).build(
+                RELEASE, created_at=NOW
+            )
+            raise SimulatedPowerLoss()
+        return original_transition(item, asset, record, target, **kwargs)
+
+    monkeypatch.setattr(promotion, "_transition", crash_after_remote_publish)
+    with pytest.raises(SimulatedPowerLoss):
+        promotion.publish_item(
+            item_id, publisher="startup-recovery-publisher", published_at=NOW
+        )
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+    monkeypatch.undo()
+
+    app = create_p0_app(
+        tmp_path / "hardware.db",
+        hardware_case_db_path=tmp_path / "hardware.db",
+        hardware_case_source_root=tmp_path / "sources",
+        hardware_r1_workbench_db_path=tmp_path / "workbench.db",
+        hardware_knowledge_adapter=promotion.bridge.adapter,
+        hardware_knowledge_release_version=RELEASE,
+        hardware_startup_status={"status": "READY", "ready": True},
+        enabled_domains={"HARDWARE_CASE"},
+    )
+    assert app.state.hardware_r1_promotion_status["ready"] is True
+    recovery = app.state.hardware_r1_promotion_status["remote_recovery"]
+    assert recovery["pending_remote_reconciliation_count"] == 0
+    assert recovery["startup_queries_used"] == 1
+    assert promotion.operation_journal.get(
+        promotion._operation_id(intake["asset_candidate_id"], "PUBLISH", 1)
+    )["operation_state"] == "COMPLETED"
+    assert _count_calls(transport, "POST", "/v1/knowledge/publish") == 1
+
+    with TestClient(app) as client:
+        ready = client.get("/ready")
+        assert ready.status_code in {200, 503}, ready.text
+        assert ready.json()["service"] == "HARDWARE_CASE"
 
 
 def test_candidate_remote_success_crash_before_promotion_ledger_recovers_on_restart(tmp_path, monkeypatch):

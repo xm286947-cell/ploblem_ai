@@ -6,6 +6,7 @@ Knowledge store and never auto-publishes.
 """
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import sqlite3
@@ -48,6 +49,11 @@ class HardwareR1PromotionError(RuntimeError):
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _same_evidence_refs(left: list[str], right: list[str]) -> bool:
+    """Evidence identity is order-insensitive but multiplicity-sensitive."""
+    return Counter(left) == Counter(right)
 
 
 def _json_hash(value: Mapping[str, Any]) -> str:
@@ -637,6 +643,20 @@ class HardwareR1KnowledgePromotionService:
             raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
         return item, asset, evidence_ids
 
+    def _workbench_item(self, item_id: str) -> dict[str, Any]:
+        """Resolve a durable promotion's origin through the Workbench service API."""
+        item_key = str(item_id or "").strip()
+        if not item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        try:
+            item = self.workbench.get_item(item_key)
+        except Exception as error:
+            code = str(getattr(error, "code", None) or "BATCH_ITEM_NOT_FOUND")
+            raise HardwareR1PromotionError(code) from error
+        if not isinstance(item, dict) or str(item.get("item_id") or "") != item_key:
+            raise HardwareR1PromotionError("BATCH_ITEM_NOT_FOUND")
+        return item
+
     @staticmethod
     def _promotion_view(record: Mapping[str, Any], evidence_ids: list[str]) -> dict[str, Any]:
         return {
@@ -755,381 +775,8 @@ class HardwareR1KnowledgePromotionService:
         except CandidateAssetRepositoryError as error:
             raise HardwareR1PromotionError(error.code) from error
 
-    def precheck_item(self, item_id: str) -> dict[str, Any]:
-        item, asset, evidence_ids = self._context(item_id)
-        review_status = str(asset.get("production_review_status") or "")
-        if review_status == "REQUIRED":
-            raise HardwareR1PromotionError("CANDIDATE_LOCKED_BY_REVIEW")
-        if review_status not in {"NOT_REQUIRED", "RESOLVED"}:
-            raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
-        try:
-            check = self.bridge.precheck(asset["knowledge_object"], item["evidence_validation"])
-        except HardwareR1GoldenBridgeError as error:
-            raise HardwareR1PromotionError(error.code) from error
-        record = self._record(item, asset)
-        if record is None:
-            if asset.get("promotion_status") != "NOT_STARTED":
-                raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
-            try:
-                updated = self.assets.update_promotion_status(
-                    str(asset["candidate_id"]),
-                    expected_status="NOT_STARTED",
-                    new_status="PRECHECK_PASS",
-                    expected_row_version=int(asset["row_version"]),
-                    actor="HARDWARE_R1_PROMOTION",
-                    reason="Durable Candidate passed R1 Golden precheck",
-                    origin_batch_id=str(item.get("batch_id") or ""),
-                    origin_item_id=str(item.get("item_id") or ""),
-                )
-                record = dict(updated["promotion_record"])
-            except CandidateAssetRepositoryError as error:
-                raise HardwareR1PromotionError(error.code) from error
-        return {"contract_version": PROMOTION_CONTRACT_VERSION, "precheck": check,
-                "promotion": self._promotion_view(record, evidence_ids)}
-
-    def intake_item(
-        self, item_id: str, *, retry: bool = False, reconciliation: bool = False
-    ) -> dict[str, Any]:
-        prechecked = self.precheck_item(item_id)
-        item, asset, evidence_ids = self._context(item_id)
-        record = self._record(item, asset)
-        if record is None:
-            raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        view = self._promotion_view(record, evidence_ids)
-        if record["promotion_status"] in {"CANDIDATE_INTAKED", "REVIEW_CONFIRMED",
-                "PUBLISHED_PENDING_QUERY_BACK", "VERIFIED"}:
-            return {**view, "idempotent_reuse": True}
-        if record["promotion_status"] not in {"PRECHECK_PASS", "INTAKE_FAILED"}:
-            raise HardwareR1PromotionError("PROMOTION_STATE_INVALID")
-        try:
-            result = self.bridge.intake(
-                asset["knowledge_object"],
-                item["evidence_validation"],
-                asset_candidate_id=str(asset["candidate_id"]),
-                candidate_created_at=str(asset.get("created_at") or "") or None,
-                reconciliation=reconciliation,
-                operation_runner=lambda **operation: self._run_remote_operation(
-                    **operation, retry_failed=retry
-                ),
-            )
-            knowledge_candidate_id = str(result["candidate"]["candidate_id"])
-            returned_ids = [str(value) for value in result["candidate"].get("evidence_refs") or []]
-            if sorted(returned_ids) != sorted(evidence_ids):
-                raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
-        except HardwareR1GoldenBridgeError as error:
-            failed = self._transition(item, asset, record, "INTAKE_FAILED", action="INTAKE",
-                                      retry=retry, error_code=error.code)
-            return {**self._promotion_view(failed, evidence_ids), "idempotent_reuse": False}
-        committed = self._transition(item, asset, record, "CANDIDATE_INTAKED", action="INTAKE",
-                                     retry=retry, knowledge_candidate_id=knowledge_candidate_id)
-        return {**self._promotion_view(committed, evidence_ids), "idempotent_reuse": False,
-                "intake_status": result["status"]}
-
-    def _workbench_item(self, item_id: str) -> dict[str, Any]:
-        try:
-            item = self.workbench.get_item(item_id)
-        except Exception as error:
-            code = str(getattr(error, "code", None) or "BATCH_ITEM_NOT_FOUND")
-            raise HardwareR1PromotionError(code) from error
-        if item.get("result") not in {"CANDIDATE_READY", "REVIEW"}:
-            raise HardwareR1PromotionError("GOLDEN_CANDIDATE_NOT_READY")
-        candidate = item.get("candidate")
-        validation = item.get("evidence_validation")
-        if not isinstance(candidate, Mapping):
-            raise HardwareR1PromotionError("GOLDEN_CANDIDATE_REQUIRED")
-        if not isinstance(validation, Mapping):
-            raise HardwareR1PromotionError("EVIDENCE_GATE_RESULT_REQUIRED")
-        return item
-
-    def precheck_item(self, item_id: str) -> dict[str, Any]:
-        item = self._workbench_item(item_id)
-        candidate = item["candidate"]
-        validation = item["evidence_validation"]
-        try:
-            precheck = self.bridge.precheck(candidate, validation)
-        except HardwareR1GoldenBridgeError as error:
-            raise HardwareR1PromotionError(error.code) from error
-        golden_hash = _json_hash(candidate)
-        ledger = self.store.ensure(
-            item_id=item["item_id"],
-            batch_id=item["batch_id"],
-            business_case_id=str(item["business_case_id"]),
-            source_id=str(item["source_id"]),
-            golden_hash=golden_hash,
-        )
-        return {
-            "contract_version": PROMOTION_CONTRACT_VERSION,
-            "precheck": precheck,
-            "promotion": ledger,
-        }
-
-    def intake_item(self, item_id: str, *, retry: bool = False) -> dict[str, Any]:
-        prechecked = self.precheck_item(item_id)
-        current = prechecked["promotion"]
-        if current["status"] in {
-            "CANDIDATE_INTAKED",
-            "REVIEW_CONFIRMED",
-            "PUBLISHED_PENDING_QUERY_BACK",
-            "VERIFIED",
-        }:
-            return {**current, "idempotent_reuse": True}
-
-        item = self._workbench_item(item_id)
-        try:
-            intake = self.bridge.intake(
-                item["candidate"],
-                item["evidence_validation"],
-            )
-        except HardwareR1GoldenBridgeError as error:
-            failed = self.store.update(
-                item_id,
-                status="INTAKE_FAILED",
-                last_action="INTAKE",
-                error_code=error.code,
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        candidate = intake["candidate"]
-        updated = self.store.update(
-            item_id,
-            status="CANDIDATE_INTAKED",
-            last_action="INTAKE",
-            error_code=None,
-            candidate_id=str(candidate["candidate_id"]),
-            evidence_refs=[str(ref) for ref in candidate.get("evidence_refs") or []],
-            increment_retry=retry,
-        )
-        return {
-            **updated,
-            "idempotent_reuse": False,
-            "intake_status": intake["status"],
-        }
-
-    def review_item(
-        self,
-        item_id: str,
-        *,
-        reviewer: str,
-        confirmed_content: Mapping[str, Any],
-        review_time: datetime,
-        review_comment: str | None = None,
-    ) -> dict[str, Any]:
-        current = self.store.get(item_id)
-        if current is None or current["status"] == "PRECHECK_PASS":
-            current = self.intake_item(item_id)
-        if current["status"] == "REVIEW_CONFIRMED":
-            return {**current, "idempotent_reuse": True}
-        if current["status"] != "CANDIDATE_INTAKED":
-            raise HardwareR1PromotionError("CANDIDATE_INTAKE_REQUIRED")
-
-        item = self._workbench_item(item_id)
-        try:
-            response = self.bridge.review(
-                candidate_id=str(current["candidate_id"]),
-                original_golden=item["candidate"],
-                confirmed_content=confirmed_content,
-                reviewer=reviewer,
-                review_time=review_time,
-                review_comment=review_comment,
-                asset_candidate_id=str(asset["candidate_id"]),
-                business_case_id=str(asset["business_case_id"]),
-                source_id=str(asset["source_id"]),
-                reconciliation=False,
-                operation_runner=lambda **operation: self._run_remote_operation(
-                    **operation
-                ),
-            )
-        except HardwareR1GoldenBridgeError as error:
-            failed = self.store.update(
-                item_id,
-                status="REVIEW_FAILED",
-                last_action="REVIEW",
-                error_code=error.code,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        updated = self.store.update(
-            item_id,
-            status="REVIEW_CONFIRMED",
-            last_action="REVIEW",
-            error_code=None,
-            review_status=str(response.get("review_status") or "CONFIRMED"),
-        )
-        return {**updated, "idempotent_reuse": False}
-
-    def publish_item(
-        self,
-        item_id: str,
-        *,
-        publisher: str,
-        published_at: datetime,
-        retry: bool = False,
-    ) -> dict[str, Any]:
-        current = self.store.get(item_id)
-        if current is None:
-            raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        if current["status"] == "VERIFIED":
-            return {**current, "idempotent_reuse": True}
-        if current["status"] == "PUBLISHED_PENDING_QUERY_BACK":
-            return {**current, "idempotent_reuse": True}
-        if current["status"] not in {"REVIEW_CONFIRMED", "PUBLISH_FAILED"}:
-            raise HardwareR1PromotionError("HUMAN_REVIEW_REQUIRED")
-        if not current["candidate_id"] or not current["evidence_refs"]:
-            raise HardwareR1PromotionError("PROMOTION_STATE_INVALID")
-
-        try:
-            published = self.bridge.publish(
-                business_case_id=str(current["business_case_id"]),
-                candidate_id=str(current["candidate_id"]),
-                evidence_refs=list(current["evidence_refs"]),
-                publisher=publisher,
-                published_at=published_at,
-            )
-        except HardwareR1GoldenBridgeError as error:
-            failed = self.store.update(
-                item_id,
-                status="PUBLISH_FAILED",
-                last_action="PUBLISH",
-                error_code=error.code,
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        obj = published.get("object")
-        if not isinstance(obj, Mapping) or not obj.get("knowledge_id"):
-            failed = self.store.update(
-                item_id,
-                status="PUBLISH_FAILED",
-                last_action="PUBLISH",
-                error_code="KNOWLEDGE_OBJECT_ID_MISSING",
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        updated = self.store.update(
-            item_id,
-            status="PUBLISHED_PENDING_QUERY_BACK",
-            last_action="PUBLISH",
-            error_code=None,
-            knowledge_id=str(obj["knowledge_id"]),
-            public_ref=str(current["candidate_id"]),
-            increment_retry=retry,
-        )
-        return {**updated, "idempotent_reuse": False}
-
-    def verify_item(self, item_id: str, *, retry: bool = False) -> dict[str, Any]:
-        current = self.store.get(item_id)
-        if current is None:
-            raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        if current["status"] == "VERIFIED":
-            return {**current, "idempotent_reuse": True}
-        if current["status"] not in {
-            "PUBLISHED_PENDING_QUERY_BACK",
-            "VERIFY_FAILED",
-        }:
-            raise HardwareR1PromotionError("PUBLISH_REQUIRED_BEFORE_QUERY_BACK")
-
-        try:
-            verified = self.bridge.query_back(str(current["business_case_id"]))
-        except HardwareR1GoldenBridgeError as error:
-            failed = self.store.update(
-                item_id,
-                status="VERIFY_FAILED",
-                last_action="VERIFY",
-                error_code=error.code,
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        obj = verified.get("object")
-        if not isinstance(obj, Mapping):
-            raise HardwareR1PromotionError("KNOWLEDGE_RESPONSE_INVALID")
-        if str(obj.get("knowledge_id") or "") != str(current["knowledge_id"]):
-            failed = self.store.update(
-                item_id,
-                status="VERIFY_FAILED",
-                last_action="VERIFY",
-                error_code="QUERY_BACK_OBJECT_MISMATCH",
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-        if list(obj.get("evidence_refs") or []) != list(current["evidence_refs"]):
-            failed = self.store.update(
-                item_id,
-                status="VERIFY_FAILED",
-                last_action="VERIFY",
-                error_code="QUERY_BACK_EVIDENCE_MISMATCH",
-                increment_retry=retry,
-            )
-            return {**failed, "idempotent_reuse": False}
-
-        updated = self.store.update(
-            item_id,
-            status="VERIFIED",
-            last_action="VERIFY",
-            error_code=None,
-            public_ref=str(verified.get("public_ref") or current["public_ref"] or ""),
-            increment_retry=retry,
-        )
-        return {**updated, "idempotent_reuse": False}
-
-    def get_item(self, item_id: str) -> dict[str, Any]:
-        value = self.store.get(item_id)
-        if value is None:
-            raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        return value
-
-    def intake_batch(self, batch_id: str) -> dict[str, Any]:
-        try:
-            batch = self.workbench.get_batch(batch_id)
-        except Exception as error:
-            code = str(getattr(error, "code", None) or "BATCH_NOT_FOUND")
-            raise HardwareR1PromotionError(code) from error
-        results = []
-        for source_item in batch.get("items") or []:
-            item_id = str(source_item.get("item_id") or "")
-            if not item_id:
-                continue
-            if source_item.get("result") not in {"CANDIDATE_READY", "REVIEW"}:
-                results.append(
-                    {
-                        "item_id": item_id,
-                        "status": "SKIPPED",
-                        "error_code": "GOLDEN_CANDIDATE_NOT_READY",
-                    }
-                )
-                continue
-            results.append(self.intake_item(item_id))
-        return self._batch_result(batch_id, results)
-
-    def retry_failed_item(self, item_id: str) -> dict[str, Any]:
-        current = self.get_item(item_id)
-        if current["status"] == "INTAKE_FAILED":
-            return self.intake_item(item_id, retry=True)
-        if current["status"] == "PUBLISH_FAILED":
-            return self.publish_item(
-                item_id,
-                publisher="hardware-promotion-retry",
-                published_at=datetime.now(timezone.utc),
-                retry=True,
-            )
-        if current["status"] == "VERIFY_FAILED":
-            return self.verify_item(item_id, retry=True)
-        raise HardwareR1PromotionError("PROMOTION_RETRY_NOT_ALLOWED")
-
-    def retry_failed_batch(self, batch_id: str) -> dict[str, Any]:
-        records = self.store.list_batch(batch_id)
-        results = []
-        for record in records:
-            if record["status"] not in {"INTAKE_FAILED", "PUBLISH_FAILED", "VERIFY_FAILED"}:
-                continue
-            results.append(self.retry_failed_item(record["item_id"]))
-        return self._batch_result(batch_id, results, retry=True)
-
-    def get_batch(self, batch_id: str) -> dict[str, Any]:
-        records = self.store.list_batch(batch_id)
-        return self._batch_result(batch_id, records)
+    # Canonical Durable Asset-backed orchestration.
+    # Keep exactly one implementation of each public promotion operation.
 
     def precheck_item(self, item_id: str) -> dict[str, Any]:
         item, asset, evidence_ids = self._context(item_id)
@@ -1198,11 +845,8 @@ class HardwareR1KnowledgePromotionService:
         return {**self._promotion_view(committed, evidence_ids), "idempotent_reuse": False,
                 "intake_status": result["status"]}
 
-    # C1 Durable Asset-backed implementations intentionally shadow the legacy
-    # orchestration methods above; all local state reads/writes go through the
-    # Candidate Asset repository from this point forward.
     def review_item(
-        self, item_id: str, *, reviewer: str, confirmed_content: Mapping[str, Any],
+        self, item_id: str, *, reviewer: str,
         review_time: datetime, review_comment: str | None = None,
     ) -> dict[str, Any]:
         item, asset, evidence_ids = self._context(item_id)
@@ -1219,7 +863,10 @@ class HardwareR1KnowledgePromotionService:
             response = self.bridge.review(
                 candidate_id=str(record["knowledge_candidate_id"]),
                 original_golden=asset["knowledge_object"],
-                confirmed_content=confirmed_content,
+                # Formal Review is an approval step, not a second content editor.
+                # The already reviewed Durable Candidate is the only content
+                # allowed to cross into Unified Knowledge.
+                confirmed_content=asset["knowledge_object"],
                 reviewer=reviewer,
                 review_time=review_time,
                 review_comment=review_comment,
@@ -1457,7 +1104,9 @@ class HardwareR1KnowledgePromotionService:
         valid = (
             published.get("candidate_ref") == knowledge_candidate_id
             and int(published.get("revision") or 0) == PROMOTION_REVISION
-            and list(published.get("evidence_refs") or []) == evidence_ids
+            and _same_evidence_refs(
+                list(published.get("evidence_refs") or []), evidence_ids
+            )
             and published.get("domain") == "HARDWARE_CASE"
             and published.get("object_type") == "HARDWARE_CASE"
             and bool(knowledge_id)
@@ -1543,8 +1192,18 @@ class HardwareR1KnowledgePromotionService:
             return self._reconcile_publish(item, asset, evidence_ids, record, entry)
         raise HardwareR1PromotionError("CANDIDATE_DATA_INTEGRITY_ERROR")
 
-    def reconcile_startup(self, *, max_remote_queries: int = 2) -> dict[str, Any]:
-        """Use a bounded read-only reconciliation budget during app startup."""
+    def reconcile_startup(
+        self,
+        *,
+        max_remote_queries: int = 2,
+        prepare_publication_query: Any | None = None,
+    ) -> dict[str, Any]:
+        """Use a bounded read-only reconciliation budget during app startup.
+
+        LOCAL_NON_PROD callers may provide a release refresher.  It is invoked
+        only immediately before reconciling a pending PUBLISH operation so the
+        read-only publication lookup sees the latest immutable release.
+        """
         budget = max(0, min(int(max_remote_queries), 4))
         try:
             entries = self.operation_journal.list_nonterminal()
@@ -1578,6 +1237,8 @@ class HardwareR1KnowledgePromotionService:
                     continue
                 item_id = str(promotion_record.get("origin_item_id") or "")
                 item = self._workbench_item(item_id)
+                if prepare_publication_query is not None:
+                    prepare_publication_query()
                 evidence_ids = [
                     str(value.get("evidence_id") or "")
                     for value in asset.get("evidence_refs") or []
@@ -1629,7 +1290,22 @@ class HardwareR1KnowledgePromotionService:
         record = self._record(item, asset)
         if record is None:
             raise HardwareR1PromotionError("PROMOTION_NOT_FOUND")
-        return self._promotion_view(record, evidence_ids)
+        view = self._promotion_view(record, evidence_ids)
+        pending = self._pending_operations(str(asset["candidate_id"]))
+        if not pending:
+            return {
+                **view,
+                "reconciliation_required": False,
+                "reconciliation_operation_type": None,
+                "reconciliation_error_code": None,
+            }
+        operation_type = str(pending[0].get("operation_type") or "")
+        return {
+            **view,
+            "reconciliation_required": True,
+            "reconciliation_operation_type": operation_type,
+            "reconciliation_error_code": self._reconciliation_error(operation_type),
+        }
 
     def intake_batch(self, batch_id: str) -> dict[str, Any]:
         try:

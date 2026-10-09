@@ -20,6 +20,7 @@ def create_hardware_operability_router(
     project_root: str | Path,
     hardware_db_path: str | Path,
     startup_status: Mapping[str, Any] | None = None,
+    knowledge_status: Mapping[str, Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["hardware-operability"])
     root = Path(project_root)
@@ -35,6 +36,7 @@ def create_hardware_operability_router(
             root=root,
             hardware_db_path=hardware_db,
             startup_status=startup_status,
+            knowledge_status=knowledge_status,
         )
         return JSONResponse(payload, status_code=status)
 

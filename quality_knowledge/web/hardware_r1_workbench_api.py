@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from services.hardware_case_r1_workbench import (
     HardwareR1WorkbenchError,
@@ -20,6 +20,7 @@ from services.hardware_r1_knowledge_promotion import (
     HardwareR1KnowledgePromotionService,
     HardwareR1PromotionError,
 )
+from services.hardware_knowledge_consumption import HardwareKnowledgeConsumptionError, HardwareKnowledgeConsumptionService
 
 
 class ReviewConflictDecisionRequest(BaseModel):
@@ -27,9 +28,17 @@ class ReviewConflictDecisionRequest(BaseModel):
     reviewer: str = Field(default="MAINTAINER", min_length=1)
 
 
-class PromotionReviewRequest(BaseModel):
+class HumanReviewRequest(BaseModel):
+    decision: str = Field(min_length=1)
     reviewer: str = Field(min_length=1)
-    confirmed_content: dict[str, Any]
+    reason: str = Field(min_length=1)
+    confirmed_content: dict[str, Any] | None = None
+
+
+class PromotionReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer: str = Field(min_length=1)
     review_comment: str | None = None
 
 
@@ -105,14 +114,48 @@ def create_hardware_r1_workbench_router(
     service: HardwareR1WorkbenchService,
     *,
     promotion_service: HardwareR1KnowledgePromotionService | None = None,
+    consumption_service: HardwareKnowledgeConsumptionService | None = None,
+    publish_allowed: bool = True,
+    release_controller: Any | None = None,
     prefix: str = "/api/v2/hardware-cases/r1/workbench",
 ) -> APIRouter:
+    class _HardwareR1ManagedNonProdNotLoaded(RuntimeError):
+        pass
+
+    managed_nonprod_error_type: type[Exception] = (
+        _HardwareR1ManagedNonProdNotLoaded
+    )
+    if release_controller is not None:
+        # Managed Non-Prod is an E2E-only concern. Do not pull its
+        # knowledge_production/json_repository dependency chain into the
+        # standard Hardware product package.
+        from services.hardware_r1_e2e_nonprod_knowledge import (
+            HardwareR1ManagedNonProdError,
+        )
+
+        managed_nonprod_error_type = HardwareR1ManagedNonProdError
+
     router = APIRouter(prefix=prefix, tags=["hardware-r1-workbench"])
 
     def require_promotion_service() -> HardwareR1KnowledgePromotionService:
         if promotion_service is None:
             raise HTTPException(status_code=503, detail="KNOWLEDGE_PROMOTION_UNAVAILABLE")
         return promotion_service
+
+    @router.post("/consumption/project/{asset_candidate_id}")
+    def project_verified_candidate(
+        asset_candidate_id: str,
+        x_hardware_case_role: str | None = Header(default=None, alias="X-Hardware-Case-Role"),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        if consumption_service is None:
+            raise HTTPException(status_code=503, detail="CONSUMPTION_PROJECTION_UNAVAILABLE")
+        try:
+            return consumption_service.project_verified(asset_candidate_id)
+        except HardwareKnowledgeConsumptionError as error:
+            if error.code.startswith("CONSUMPTION_PROJECTION_"):
+                raise HTTPException(status_code=503, detail=error.code) from error
+            raise _workbench_error(error) from error
 
     @router.post("/batches", status_code=201)
     async def upload_batch(
@@ -226,6 +269,27 @@ def create_hardware_r1_workbench_router(
         except HardwareR1WorkbenchError as error:
             raise _workbench_error(error) from error
 
+    @router.post("/items/{item_id}/human-review")
+    def human_review_item(
+        item_id: str,
+        request: HumanReviewRequest,
+        x_hardware_case_role: str | None = Header(
+            default=None,
+            alias="X-Hardware-Case-Role",
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.apply_human_review(
+                item_id,
+                decision=request.decision,
+                reviewer=request.reviewer,
+                reason=request.reason,
+                confirmed_content=request.confirmed_content,
+            )
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
     @router.post("/items/{item_id}/run-resume")
     def run_resume_item(
         item_id: str,
@@ -327,7 +391,6 @@ def create_hardware_r1_workbench_router(
             return promotion.review_item(
                 item_id,
                 reviewer=request.reviewer,
-                confirmed_content=request.confirmed_content,
                 review_time=datetime.now(timezone.utc),
                 review_comment=request.review_comment,
             )
@@ -344,15 +407,24 @@ def create_hardware_r1_workbench_router(
         ),
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
+        if not publish_allowed:
+            raise HTTPException(status_code=503, detail="BLOCKED_BY_ENVIRONMENT")
         promotion = require_promotion_service()
         try:
-            return promotion.publish_item(
+            result = promotion.publish_item(
                 item_id,
                 publisher=request.publisher,
                 published_at=datetime.now(timezone.utc),
             )
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
+        if release_controller is None:
+            return result
+        try:
+            release = release_controller.ensure_queryable_release()
+        except managed_nonprod_error_type as error:
+            raise HTTPException(status_code=503, detail=error.code) from error
+        return {**result, "knowledge_release": release}
 
     @router.post("/items/{item_id}/promotion/verify")
     def promotion_verify(
@@ -364,6 +436,11 @@ def create_hardware_r1_workbench_router(
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
         promotion = require_promotion_service()
+        if release_controller is not None:
+            try:
+                release_controller.ensure_queryable_release()
+            except managed_nonprod_error_type as error:
+                raise HTTPException(status_code=503, detail=error.code) from error
         try:
             return promotion.verify_item(item_id)
         except HardwareR1PromotionError as error:
@@ -395,7 +472,16 @@ def create_hardware_r1_workbench_router(
         _require_maintainer(x_hardware_case_role)
         promotion = require_promotion_service()
         try:
+            current = promotion.get_item(item_id)
+            if (
+                release_controller is not None
+                and current.get("reconciliation_required") is True
+                and current.get("reconciliation_operation_type") == "PUBLISH"
+            ):
+                release_controller.ensure_queryable_release()
             return promotion.reconcile_item(item_id)
+        except managed_nonprod_error_type as error:
+            raise HTTPException(status_code=503, detail=error.code) from error
         except HardwareR1PromotionError as error:
             raise _promotion_error(error) from error
 

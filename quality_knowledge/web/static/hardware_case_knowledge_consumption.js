@@ -59,9 +59,11 @@
   function renderReasons(item) {
     const reasons = Array.isArray(item.match_reasons) ? item.match_reasons : [];
     if (!reasons.length) return '';
-    return `<div class="hc-knowledge-reasons" aria-label="可解释匹配原因">${reasons.map(reason =>
-      `<span class="hc-knowledge-reason">${esc(reason.matched_field)} · ${esc(reason.match_type)} · ${esc(reason.matched_text)} · 权重 ${esc(reason.weight)}</span>`
-    ).join('')}</div>`;
+    return `<div class="hc-knowledge-reasons" aria-label="可解释匹配原因">${reasons.map(reason => {
+      const field = reason.matched_field;
+      const actual = valueText(item[field]);
+      return `<span class="hc-knowledge-reason"><strong>${esc(labels[field] || field)}</strong> 命中 ${esc(reason.matched_text)} · ${esc(actual)} · 权重 ${esc(reason.weight)}</span>`;
+    }).join('')}</div>`;
   }
 
   function renderResults() {
@@ -77,20 +79,20 @@
         <div class="hc-knowledge-result-head">
           <div><h3><button type="button" data-open-knowledge="${esc(item.knowledge_id)}">${esc(text(item.title))}</button></h3>
             <div class="hc-knowledge-meta"><code>knowledge_id: ${esc(item.knowledge_id)}</code><code>business_case_id: ${esc(item.business_case_id)}</code><span>${esc(item.source_domain)} / ${esc(item.source_object_type)}</span></div>
-          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>match score</small></div>
+          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>匹配度</small></div>
         </div>
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
-        <div class="hc-knowledge-evidence">Evidence refs (${evidenceRefs.length}): ${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
+        <div class="hc-knowledge-evidence">证据引用（${evidenceRefs.length}）：${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
       </article>`;
     }).join('');
   }
 
-  function setUnavailable(message = '正式知识消费索引当前不可用，请先重建 Consumption Projection。') {
+  function setUnavailable(message = '请先到知识生产工作台，对已发布案例执行“生成检索数据”。') {
     q('[data-knowledge-unavailable]').hidden = false;
-    q('[data-knowledge-unavailable]').textContent = message;
+    q('[data-knowledge-unavailable-message]').textContent = message;
     q('[data-knowledge-results]').innerHTML = '';
-    q('[data-knowledge-summary]').textContent = '消费索引不可用';
+    q('[data-knowledge-summary]').textContent = '正式知识检索数据尚未生成';
   }
 
   async function fetchJson(path) {
@@ -122,11 +124,14 @@
     } catch (error) {
       results = [];
       if (error.status === 503) setUnavailable();
-      else setUnavailable(`正式知识消费索引请求失败：${error.message}`);
+      else setUnavailable(`正式知识检索请求失败：${error.message}`);
     }
   }
 
   function renderDetail(item) {
+    const detail = q('[data-knowledge-detail]');
+    detail.dataset.knowledgeId = item.knowledge_id || '';
+    detail.dataset.businessCaseId = item.business_case_id || '';
     const body = q('[data-detail-body]');
     const meta = [['knowledge_id', item.knowledge_id], ['public_ref', item.public_ref], ['business_case_id', item.business_case_id], ['source_domain', item.source_domain], ['source_object_type', item.source_object_type], ['formal_revision', item.formal_revision], ['formal_status', item.formal_status]];
     const metadata = `<section class="hc-knowledge-detail-section"><h3>正式知识身份</h3><div class="hc-knowledge-detail-grid">${meta.map(([key, value]) => `<div class="hc-knowledge-detail-item"><strong>${esc(key)}</strong><span>${esc(text(value))}</span></div>`).join('')}</div></section>`;
@@ -136,7 +141,7 @@
       return `<section class="hc-knowledge-detail-section"><h3>${esc(title)}</h3><div class="hc-knowledge-detail-grid">${present.map(field => `<div class="hc-knowledge-detail-item"><strong>${esc(labels[field] || field)}</strong><span>${esc(valueText(item[field]))}</span></div>`).join('')}</div></section>`;
     }).join('');
     const refs = Array.isArray(item.evidence_refs) ? item.evidence_refs : [];
-    body.innerHTML = metadata + content + `<section class="hc-knowledge-detail-section"><h3>Evidence refs</h3><div class="hc-knowledge-detail-item"><span>${refs.length ? refs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</span></div></section>`;
+    body.innerHTML = metadata + content + `<section class="hc-knowledge-detail-section"><h3>证据引用</h3><div class="hc-knowledge-detail-item"><span>${refs.length ? refs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</span></div></section>`;
     q('[data-detail-title]').textContent = text(item.title);
     q('[data-detail-subtitle]').textContent = `${item.knowledge_id || '—'} · ${item.business_case_id || '—'}`;
     q('[data-knowledge-detail]').hidden = false;
@@ -151,7 +156,7 @@
       renderDetail(await fetchJson('/objects/' + encodeURIComponent(knowledgeId)));
     } catch (error) {
       if (error.status === 503) setUnavailable();
-      q('[data-detail-body]').innerHTML = `<div class="hc-error">${esc(error.status === 503 ? '正式知识消费索引当前不可用，请先重建 Consumption Projection。' : `正式知识详情读取失败：${error.message}`)}</div>`;
+      q('[data-detail-body]').innerHTML = `<div class="hc-error">${esc(error.status === 503 ? '正式知识检索数据尚未生成，请返回知识生产工作台执行“生成检索数据”。' : `正式知识详情读取失败：${error.message}`)}</div>`;
     }
   }
 
@@ -184,6 +189,11 @@
     const button = event.target.closest('[data-open-knowledge]');
     if (button) openDetail(button.dataset.openKnowledge);
   });
-  q('[data-detail-close]').addEventListener('click', () => { q('[data-knowledge-detail]').hidden = true; });
+  q('[data-detail-close]').addEventListener('click', () => {
+    const detail = q('[data-knowledge-detail]');
+    detail.hidden = true;
+    delete detail.dataset.knowledgeId;
+    delete detail.dataset.businessCaseId;
+  });
   runSearch();
 })();
