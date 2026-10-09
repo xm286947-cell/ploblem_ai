@@ -190,13 +190,14 @@
       return (!product||p.includes(product))&&(!circuit||c.includes(circuit))&&(!material||m.includes(material));
     });
     const mode=searchMeta.mode||'LEGACY';
-    const modeLabel={OPENSEARCH:'AI 检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索'}[mode]||mode;
+    const modeLabel={OPENSEARCH:'AI 检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索',EXACT_BUSINESS_CASE_ID:'案例编号精准匹配'}[mode]||mode;
     const understood=searchMeta.query_understanding||{};
     const original=String(understood.original_query||'').trim();
     const retrievalText=String(understood.retrieval_text||'').trim();
     const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
-    qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
+    const online=searchMeta.online_agent||{};const agentText=online.status==='COMPLETED'?'；在线 Agent 已参与':online.status==='DISABLED'||online.status==='BLOCKED'?'；确定性检索（Agent 未就绪）':'';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+agentText+'；只展示 PUBLISHED。';
+    qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">'+(online.status==='DISABLED'||online.status==='BLOCKED'?'当前关键词未命中，在线 Agent 未就绪；这不代表知识库没有相关案例。':'未找到匹配案例。可清空筛选或切换双树导航。')+'</div>';
   }
   async function runSearch(q){
     const payload=await safe('?q='+encodeURIComponent(q||''),{},'CONSUMER');
