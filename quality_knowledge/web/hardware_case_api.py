@@ -76,6 +76,7 @@ def create_hardware_case_router(
     r1_stage_cache_invalidator: Callable[[str], int] | None = None,
     ai_search_service: Any | None = None,
     retrieval_catalog_service: Any | None = None,
+    engineering_analysis_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -410,6 +411,25 @@ def create_hardware_case_router(
             )
         except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
+
+    @router.post("/r2/engineering-analysis")
+    def r2_engineering_analysis(payload: dict[str, Any]) -> dict[str, Any]:
+        """Explicit non-production, read-only Agent advice. Never mutates Formal."""
+        if engineering_analysis_service is None:
+            raise HTTPException(status_code=503, detail="ENGINEERING_AGENT_NOT_READY")
+        knowledge_id = str(payload.get("knowledge_id") or "").strip()
+        scenario = str(payload.get("scenario") or "").strip()
+        if not knowledge_id or not scenario:
+            raise HTTPException(status_code=422, detail="KNOWLEDGE_AND_SCENARIO_REQUIRED")
+        try:
+            return engineering_analysis_service.analyze(knowledge_id, scenario)
+        except Exception as error:
+            from services.hardware_engineering_analysis import HardwareEngineeringAnalysisError
+            if not isinstance(error, HardwareEngineeringAnalysisError):
+                raise
+            status = (404 if error.code == "KNOWLEDGE_NOT_FOUND" else
+                      503 if error.code == "ENGINEERING_AGENT_NOT_CONFIGURED" else 422)
+            raise HTTPException(status_code=status, detail=error.code) from error
 
     @router.get("/r2/knowledge-query")
     def r2_knowledge_query(
