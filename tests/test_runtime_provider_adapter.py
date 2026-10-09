@@ -777,7 +777,7 @@ def test_storage475_finish_reason_length_still_maps_to_output_truncated(
     monkeypatch.setattr(
         "runtime.providers.openai_compatible.urlopen",
         lambda _request, timeout: LimitedResponse({
-            "choices": [{"message": {"content": '{"ok":'}, "finish_reason": "length"}],
+            "choices": [{"message": {"content": '{"ok":'}, "finish_reason": "LENGTH"}],
             "usage": {"completion_tokens": 512},
         }),
     )
