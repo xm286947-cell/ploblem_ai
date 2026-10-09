@@ -38,6 +38,18 @@ def source_commit() -> str:
     ).strip()
 
 
+def base_commit() -> str:
+    configured = os.environ.get("STORAGE_BASE_COMMIT", "").strip()
+    if configured:
+        return configured
+    try:
+        return subprocess.check_output(
+            ["git", "merge-base", "HEAD", "origin/main"], cwd=ROOT, text=True
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit("PACKAGE_BASE_COMMIT_UNRESOLVED: set STORAGE_BASE_COMMIT explicitly") from exc
+
+
 def copy_tree(source: Path, target: Path, *, exclude_local_state: bool = False) -> None:
     if not source.exists():
         raise SystemExit(f"missing package dependency: {source}")
@@ -229,15 +241,15 @@ def build() -> tuple[Path, Path, Path]:
         "package_id": package_id,
         "package_type": "PRODUCT_TEST_CANDIDATE",
         "product": "Storage RC1",
-        "assembly": "Golden A + Golden B + Golden C",
+        "assembly": "GD5 NAND A13 role knowledge-consumption validation",
         "source_commit": commit,
-        "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
+        "base_commit": base_commit(),
         "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_provenance_source": "RUNTIME_COMMIT",
         "runtime_vendor_closure": "PASS",
-        "supersedes": "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925",
-        "supersede_reason": "RUNTIME_VENDOR_CLOSURE_AND_PROVENANCE_DEFECT",
+        "supersedes": None,
+        "supersede_reason": None,
         "knowledge_release_version": release.get("knowledge_release_version"),
         "knowledge_snapshot_hash": release.get("snapshot_hash"),
         "knowledge_product_packaged": True,

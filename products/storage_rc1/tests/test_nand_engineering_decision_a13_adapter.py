@@ -125,6 +125,78 @@ def test_release_version_mismatch_is_not_consumed(monkeypatch):
     assert result["shared_case"]["formal_knowledge"]["knowledge_ids"] == []
 
 
+def test_evidence_bound_endurance_and_workload_change_role_screen_not_device_qualification(monkeypatch):
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash", "vendor": "GigaDevice", "model": "GD5F1GQ5"},
+        "device_facts": [],
+    })
+
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+
+    def knowledge(canonical, *_args, **_kwargs):
+        if canonical != "pe_cycles":
+            return {"status": "NO_MATCH", "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001", "results": [], "evidence_refs": []}
+        row = {
+            "object_id": "KO-TEST-PE",
+            "title": "P/E endurance with ECC",
+            "content": "P/E cycles with ECC: 100K",
+            "conditions": ["With internal ECC enabled"],
+            "evidence_refs": ["EVD-TEST-PE"],
+            "source_refs": ["SRC-TEST-GD5"],
+        }
+        return {"status": "MATCHED", "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001", "results": [row], "evidence_refs": ["EVD-TEST-PE"]}
+
+    monkeypatch.setattr(product_api, "_formal_knowledge", knowledge)
+    base = {
+        "mission_profile": {"target_service_life_years": 5, "operating_days_per_year": 365, "design_margin_ratio": 0.25},
+        "system_conditions": {"internal_ecc_enabled": True},
+    }
+    low = build_nand_engineering_decision("gd5", {**base, "workload_profile": {"pe_cycles_per_day": 0.5}})
+    high = build_nand_engineering_decision("gd5", {**base, "workload_profile": {"pe_cycles_per_day": 50}})
+
+    assert low["shared_case"]["engineering_screens"]["pe_endurance"]["status"] == "WITHIN_RATING_SCREEN"
+    assert high["shared_case"]["engineering_screens"]["pe_endurance"]["status"] == "EXCEEDS_RATING_SCREEN"
+    assert low["roles"]["procurement"]["endurance_screen"] == low["roles"]["hardware_engineering"]["pe_endurance_screen"]
+    assert low["roles"]["procurement"]["endurance_screen"]["evidence_refs"] == ["EVD-TEST-PE"]
+    assert low["shared_case"]["device_decision"] == high["shared_case"]["device_decision"] == "INSUFFICIENT_EVIDENCE"
+    assert low["roles"]["procurement"]["decision"] == high["roles"]["procurement"]["decision"] == "UNKNOWN"
+    assert low["shared_case"]["formal_knowledge"]["knowledge_ids"] == high["shared_case"]["formal_knowledge"]["knowledge_ids"]
+
+
+def test_ecc_condition_and_runtime_inputs_never_create_unsupported_lifetime_claim(monkeypatch):
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash"}, "device_facts": [],
+    })
+
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+    monkeypatch.setattr(product_api, "_formal_knowledge", lambda canonical, *_a, **_k: {
+        "status": "MATCHED" if canonical == "pe_cycles" else "NO_MATCH",
+        "knowledge_release_version": "KP-STORAGE-RC1-VALIDATION-001",
+        "results": ([{"object_id": "KO-TEST-PE", "title": "P/E with ECC", "content": "P/E cycles with ECC: 100K", "conditions": ["With ECC"], "evidence_refs": ["EVD-TEST-PE"]}] if canonical == "pe_cycles" else []),
+        "evidence_refs": (["EVD-TEST-PE"] if canonical == "pe_cycles" else []),
+    })
+    result = build_nand_engineering_decision("gd5", {
+        "mission_profile": {"target_service_life_years": 5, "operating_days_per_year": 365},
+        "workload_profile": {"pe_cycles_per_day": 1},
+        "runtime_telemetry": {"classification": "TEST_ONLY", "erase_count": 12},
+    })
+    screen = result["shared_case"]["engineering_screens"]["pe_endurance"]
+    assert screen["status"] == "UNKNOWN"
+    assert screen["reason"] == "SOURCE_RATING_REQUIRES_ECC_APPLICABILITY_INPUT"
+    runtime = result["roles"]["runtime_lifetime"]
+    assert runtime["status"] == "UNKNOWN"
+    assert runtime["telemetry_status"] == "TEST_INPUT_PROVIDED_NOT_DEVICE_OBSERVATION"
+    assert runtime["telemetry"] == [{"classification": "TEST_ONLY", "erase_count": 12}]
+
+
 def test_release_binding_resolves_inside_fresh_package(tmp_path, monkeypatch):
     package_root = tmp_path / "STORAGE_PRODUCT_MVP_RC1"
     module_file = package_root / "storage_life" / "knowledge_release.py"
