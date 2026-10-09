@@ -368,3 +368,125 @@ def test_kp_d05_web_layer_does_not_implement_repository_state_machine() -> None:
     assert "KnowledgeReviewService" not in source
     assert "KnowledgePublishService" not in source
     assert "KnowledgeProcessingService" in source
+
+
+def _seed_storage_semantic_candidate(repository: JsonArtifactRepository) -> str:
+    """Source-authorized model-driven Storage sample; never a Formal candidate."""
+    candidate_id = _seed_business_candidate(repository, candidate_id="STORAGE-UI-SEM-001")
+    path = f"knowledge/production/candidates/{candidate_id}.json"
+    original = repository.load(path, required=True)
+    original["metadata"] = {
+        "storage_lifetime": {
+            "schema_version": "storage-lifetime-knowledge/v1",
+            "model_driven_extraction": True,
+            "semantic_class_candidates": ["PARAMETER_DEFINITION", "DESIGN_RULE"],
+            "semantic_class_status": "NEEDS_REVIEW",
+            "formal_consumable": False,
+            "canonical_parameters": ["pe_cycles"],
+        }
+    }
+    original["tags"] = ["storage-lifetime", "storage-parameter:pe_cycles"]
+    repository.save(path, original)
+    return candidate_id
+
+
+def test_kp_d05_storage_review_semantic_selection_from_authorized_options(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    candidate_id = _seed_storage_semantic_candidate(repository)
+    original = repository.load(
+        f"knowledge/production/candidates/{candidate_id}.json", required=True
+    )
+    app = create_processing_app(repository.root)
+    client = TestClient(app)
+    service = app.state.knowledge_processing_service
+    evaluation = service.evaluate(candidate_id)
+
+    page = client.get(f"/knowledge-production/candidates/{candidate_id}")
+    assert page.status_code == 200
+    assert 'name="semantic_class"' in page.text
+    assert 'value="PARAMETER_DEFINITION"' in page.text
+    assert 'value="DESIGN_RULE"' in page.text
+    assert 'name="object_type"' in page.text
+    assert "NEEDS_REVIEW" in page.text
+
+    edited = client.post(
+        f"/knowledge-production/candidates/{candidate_id}/edit",
+        data={
+            "evaluation_id": evaluation.evaluation_id,
+            "reviewed_by": "TEST_ONLY-NOT-HUMAN-APPROVAL",
+            "title": "Merge small writes",
+            "content": "100,000 P/E cycles with internal ECC enabled.",
+            "semantic_class": "PARAMETER_DEFINITION",
+            "object_type": "FACT",
+            "review_note": "Isolated UI flow regression",
+        },
+        follow_redirects=False,
+    )
+    assert edited.status_code == 303
+    review = service.get_candidate_detail(candidate_id)["latest_review"]
+    effective = service.reviews.load_effective_candidate(review)
+    assert review.action == "EDIT"
+    assert effective.object_type.value == "FACT"
+    assert "storage-semantic:PARAMETER_DEFINITION" in effective.tags
+    assert "storage-parameter:pe_cycles" in effective.tags
+    assert repository.load(
+        f"knowledge/production/candidates/{candidate_id}.json", required=True
+    ) == original
+
+    published = client.post(
+        f"/knowledge-production/candidates/{candidate_id}/publish",
+        data={"published_by": "TEST_ONLY-PUBLISHER"},
+        follow_redirects=False,
+    )
+    assert published.status_code == 303
+    object_ = service.get_candidate_detail(candidate_id)["published"]
+    assert object_.metadata["storage_lifetime"]["semantic_class_status"] == "REVIEWED"
+    assert object_.metadata["storage_lifetime"]["formal_consumable"] is True
+
+
+def test_kp_d05_storage_review_rejects_invalid_or_mismatched_form_selection(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    candidate_id = _seed_storage_semantic_candidate(repository)
+    client = _client(repository)
+    service = KnowledgeProcessingService(repository)
+    evaluation = service.evaluate(candidate_id)
+    url = f"/knowledge-production/candidates/{candidate_id}/edit"
+    data = {
+        "evaluation_id": evaluation.evaluation_id,
+        "reviewed_by": "TEST_ONLY-NOT-HUMAN-APPROVAL",
+        "content": "Test-only semantic review.",
+    }
+    wrong_class = client.post(
+        url,
+        data={**data, "semantic_class": "TEST_RULE", "object_type": "SOLUTION"},
+    )
+    assert wrong_class.status_code == 409
+    assert "STORAGE_SEMANTIC_CLASS_INVALID" in wrong_class.text
+
+    incompatible = client.post(
+        url,
+        data={
+            **data,
+            "semantic_class": "PARAMETER_DEFINITION",
+            "object_type": "SOLUTION",
+        },
+    )
+    assert incompatible.status_code == 409
+    assert "STORAGE_SEMANTIC_OBJECT_TYPE_INVALID" in incompatible.text
+    assert service.get_candidate_detail(candidate_id)["latest_review"] is None
+
+
+def test_kp_d05_non_storage_candidate_has_no_semantic_form(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    candidate_id = _seed_business_candidate(repository)
+    client = _client(repository)
+    detail = client.get(f"/knowledge-production/candidates/{candidate_id}")
+    assert detail.status_code == 200
+    assert 'name="semantic_class"' not in detail.text
+    assert 'name="object_type"' not in detail.text
