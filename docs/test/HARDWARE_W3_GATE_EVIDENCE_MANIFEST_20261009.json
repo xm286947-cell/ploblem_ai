@@ -105,8 +105,37 @@
       "reason": "CI Windows runner is not independent user workstation signoff"
     },
     "W2_inherited_red_item_closure": {
-      "status": "OPEN_PENDING_GROUNDED_REBIND",
-      "reason": "Known prior red items require verification and explicit disposition; not silently waived"
+      "status": "CONTROLLED_TEST_ENV_PASS_58_OF_58_PER_OS_WITH_ORIGINAL_REDS_ARCHIVED",
+      "baseline_original_raw_ci": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37891825650",
+      "baseline_raw_results": {
+        "linux": "56 PASS/2 FAIL",
+        "macos": "56 PASS/2 FAIL",
+        "windows": "55 PASS/3 FAIL"
+      },
+      "raw_original_evidence": {
+        "windows": "https://drive.google.com/file/d/1zvOqNbKFmnS9IuaZGBahNNNQr69NTfEO/view",
+        "macos": "https://drive.google.com/file/d/1JlMCpKylbBC4J0caNEmoHfEfhFW6S5mr/view",
+        "linux": "https://drive.google.com/file/d/1SK0-sv1GnuGoZUV4F2KqW7XVc73ZrZPK/view"
+      },
+      "precondition_root_causes": [
+        "Two legacy Word API tests omitted existing CandidateAssetRepository.initialize(); identical frozen fixture returns HTTP 400 OPERATION_JOURNAL_UNAVAILABLE without startup migration, HTTP 200 ACTIVE after real migration.",
+        "Windows-only config_hash pinned-LF equality failed with Windows EOL checkout; setting git core.autocrlf=input before checkout recovers original hash, no code changes."
+      ],
+      "precondition_ci": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37892546659",
+      "controlled_regression_ci": "https://github.com/xm286947-cell/ploblem_ai/actions/runs/37892827755",
+      "controlled_results": {
+        "windows": "58/58 PASS",
+        "macos": "58/58 PASS",
+        "linux": "58/58 PASS"
+      },
+      "controlled_evidence": {
+        "windows": "https://drive.google.com/file/d/1uouzk3hOuPlTxsn1djwFxCiV1GzXPqfX/view",
+        "macos": "https://drive.google.com/file/d/1PJy6gS_WB1-IDPvxnfqW7-2eDrNBfkc5/view",
+        "linux": "https://drive.google.com/file/d/1vf0U-lcbkw4N6wfJUDwyXij6ISjgJkFh/view"
+      },
+      "code_modified": false,
+      "fixture_scope": "Only two allowlisted legacy Word pytest cases receive existing real Asset DB migration; all original product assertions retained.",
+      "formal_gate": "Test Center must accept and pin controlled preconditions before closing inherited red disposition."
     }
   },
   "safety": {
@@ -119,7 +148,7 @@
   "blockers_to_release": [
     "Independent TSE review and immutable SHA archive of T1/G4 local evidence",
     "End-user Windows native browser signoff if required for formal candidate",
-    "W2 inherited red items disposition",
+    "TSE formally accept and pin W2 controlled bootstrap+LF regression environment with original red evidence retained",
     "Explicitly authorized isolated Real Provider validation",
     "Formal release manifest and approval"
   ],
