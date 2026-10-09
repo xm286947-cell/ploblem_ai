@@ -240,12 +240,27 @@
       ).join(''):'<div class="hc-empty">未关联</div>')+'</div>';
     }).join('');
   }
+  const EVIDENCE_TYPE_LABELS={WORD:'Word 原文',TEXT:'文本证据',IMAGE:'图片证据',TABLE:'表格证据',EVIDENCE:'证据'};
+  const EVIDENCE_STATUS_LABELS={AVAILABLE:'原文可用',SOURCE_UNAVAILABLE:'原文暂不可用',MISSING:'来源缺失'};
+  const SOURCE_BLOCK_LABELS={PARAGRAPH:'段落',TABLE:'表格',HEADING:'标题',SECTION:'章节',IMAGE:'图片'};
+  function uiLabel(labels,value,fallback){return labels[String(value||'').toUpperCase()]||fallback}
+  function compactSourceRef(sourceRef){
+    const ref=String(sourceRef||'');
+    const identity=ref.match(/^r1:([^:]+):[a-f0-9]{32,}$/i);
+    if(identity)return identity[1];
+    if(ref.startsWith('word:'))return ref.slice(5).replaceAll('\\','/').split('/').pop()||'Word 原文';
+    return ref||'来源未标识';
+  }
+  function evidenceLocationLabel(evidence){
+    const locator=evidence&&evidence.locator||{};
+    return [locator.section,locator.block_id].filter(Boolean).join(' · ');
+  }
   function renderEvidenceList(container,evidence,{review=false}={}){
     if(!evidence.length){container.innerHTML='<div class="hc-empty">暂无 Evidence。</div>';return}
     container.innerHTML=evidence.map(ev=>
       '<div class="hc-evidence-item" data-'+(review?'review-':'')+'evidence-id="'+esc(ev.evidence_id)+'">'+
-      '<strong>'+esc(ev.evidence_type||'EVIDENCE')+' · '+esc(ev.evidence_status||'—')+'</strong>'+
-      '<p>'+esc(ev.excerpt_or_caption||'无摘录')+'</p><small>'+esc(ev.source_ref||'—')+' · '+esc((ev.locator&&ev.locator.section)||((ev.locator&&ev.locator.block_id)||''))+'</small></div>'
+      '<strong title="'+esc((ev.evidence_type||'EVIDENCE')+' · '+(ev.evidence_status||'—'))+'">'+esc(uiLabel(EVIDENCE_TYPE_LABELS,ev.evidence_type,'证据'))+' · '+esc(uiLabel(EVIDENCE_STATUS_LABELS,ev.evidence_status,'状态待确认'))+'</strong>'+
+      '<p>'+esc(ev.excerpt_or_caption||'暂无摘录')+'</p><small title="'+esc(ev.source_ref||'')+'">'+esc(compactSourceRef(ev.source_ref))+(evidenceLocationLabel(ev)?' · '+esc(evidenceLocationLabel(ev)):'')+'</small></div>'
     ).join('');
   }
   async function sourcePreview(caseId,evidenceId,authRole=role){
@@ -254,17 +269,21 @@
   function previewHtml(payload){
     if(!payload)return '<div class="hc-error">Evidence 来源不可用。</div>';
     if(payload.preview_status!=='AVAILABLE')return '<div class="hc-source-warning">'+esc(payload.preview_status||payload.source_status||'SOURCE_UNAVAILABLE')+'</div>';
-    return (payload.blocks||[]).map(block=>
-      '<div class="hc-evidence-preview-block '+(block.matched?'matched':'')+'"><div class="hc-evidence-locator">'+esc(block.block_type||'')+' · '+esc((block.section_path||[]).join(' > '))+' · '+esc((block.source_locator&&block.source_locator.block_id)||'')+'</div><pre>'+esc(block.text||block.image_ref||'—')+'</pre></div>'
-    ).join('');
+    return (payload.blocks||[]).map(block=>{
+      const locator=[(block.section_path||[]).join(' > '),(block.source_locator&&block.source_locator.block_id)].filter(Boolean).join(' · ');
+      const rawType=String(block.block_type||'');
+      const typeLabel=uiLabel(SOURCE_BLOCK_LABELS,rawType,'来源片段');
+      return '<div class="hc-evidence-preview-block '+(block.matched?'matched':'')+'"><div class="hc-evidence-locator" title="'+esc(rawType)+'">'+esc(typeLabel)+(locator?' · '+esc(locator):'')+'</div><pre>'+esc(block.text||block.image_ref||'—')+'</pre></div>';
+    }).join('');
   }
   async function openEvidenceDrawer(caseId,evidence,evidenceList){
     const drawer=qs('[data-evidence-drawer]'),back=qs('[data-evidence-backdrop]');if(!drawer)return;
-    drawer.hidden=false;back.hidden=false;qs('[data-evidence-title]').textContent=(evidence.evidence_type||'Evidence')+' · '+(evidence.evidence_status||'—');
+    drawer.hidden=false;back.hidden=false;qs('[data-evidence-title]').textContent=uiLabel(EVIDENCE_TYPE_LABELS,evidence.evidence_type,'证据')+' · '+uiLabel(EVIDENCE_STATUS_LABELS,evidence.evidence_status,'状态待确认');
     const body=qs('[data-evidence-body]');body.innerHTML='<div class="hc-empty">正在读取原始来源…</div>';
     try{
       const preview=await sourcePreview(caseId,evidence.evidence_id,role);
-      body.innerHTML='<div class="hc-case-meta"><span>'+esc(evidence.source_ref||'—')+'</span><span class="hc-status '+statusClass(evidence.evidence_status)+'">'+esc(evidence.evidence_status||'—')+'</span></div>'+
+      body.innerHTML='<div class="hc-case-meta"><span>'+esc(compactSourceRef(evidence.source_ref))+'</span><span class="hc-status '+statusClass(evidence.evidence_status)+'" title="'+esc(evidence.evidence_status||'')+'">'+esc(uiLabel(EVIDENCE_STATUS_LABELS,evidence.evidence_status,'状态待确认'))+'</span></div>'+
+        '<details class="hc-source-identity"><summary>技术来源标识</summary><code>'+esc(evidence.source_ref||'来源未标识')+'</code></details>'+
         '<p>'+esc(evidence.excerpt_or_caption||'')+'</p>'+previewHtml(preview)+
         '<button type="button" class="hc-button secondary" data-source-download="'+esc(evidence.evidence_id)+'">打开原始文件</button>';
     }catch(error){
