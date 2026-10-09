@@ -425,8 +425,11 @@ def create_hardware_case_router(
             return engineering_analysis_service.analyze(knowledge_id, scenario)
         except Exception as error:
             from services.hardware_engineering_analysis import HardwareEngineeringAnalysisError
+            from services.hardware_query_runtime import HardwareQueryRuntimeError
+            if isinstance(error, HardwareQueryRuntimeError):
+                raise HTTPException(status_code=503, detail=error.code) from error
             if not isinstance(error, HardwareEngineeringAnalysisError):
-                raise
+                raise HTTPException(status_code=503, detail="ENGINEERING_RUNTIME_UNAVAILABLE") from error
             status = (404 if error.code == "KNOWLEDGE_NOT_FOUND" else
                       503 if error.code == "ENGINEERING_AGENT_NOT_CONFIGURED" else 422)
             raise HTTPException(status_code=status, detail=error.code) from error
