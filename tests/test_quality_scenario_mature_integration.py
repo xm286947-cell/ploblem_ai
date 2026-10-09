@@ -31,3 +31,14 @@ def test_software_assessment_is_still_qsv1_production_entry(tmp_path):
     assert "quality-scenario-production" in page.text
 
 # Package candidate sync marker v2
+
+def test_windows_real_db_startup_uses_lightweight_health_not_full_history():
+    """The original DB can have large /issues history without failing startup readiness."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    runner = (root / "tools/run_quality_scenario_windows_acceptance.py").read_text(encoding="utf-8")
+    assert 'readiness_url = base + "/openapi.json"' in runner
+    assert "with urlopen(readiness_url" in runner
+    assert 'if source_mode == "CONTROLLED_FIXTURE":' in runner
+    assert 'ISSUES_FULL_HISTORY_PAGE_CHECK=NOT_A_STARTUP_GATE' in runner
