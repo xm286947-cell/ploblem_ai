@@ -1,5 +1,6 @@
 """Explain legacy W2 word-snapshot HTTP 400 using unmodified frozen fixtures."""
 from pathlib import Path
+import os
 from tempfile import TemporaryDirectory
 import json
 import runpy
@@ -8,7 +9,7 @@ import sys
 product=Path(sys.argv[1]).resolve()
 sys.path.insert(0,str(product))
 target=runpy.run_path(str(product/"tests/test_hardware_r1_word_import_web.py"))
-with TemporaryDirectory(prefix="w2_legacy_diag_") as td:
+with TemporaryDirectory(prefix="w2_legacy_diag_",ignore_cleanup_errors=(os.name=="nt")) as td:
     root=Path(td)
     source=root/"A12345-Flash启动异常.docx"
     data=target["_docx"](source)
@@ -29,7 +30,7 @@ with TemporaryDirectory(prefix="w2_legacy_diag_") as td:
         print("W2_STATUS=NEEDS_RECLASSIFICATION")
 
 
-with TemporaryDirectory(prefix="w2_bootstrapped_diag_") as td:
+with TemporaryDirectory(prefix="w2_bootstrapped_diag_",ignore_cleanup_errors=(os.name=="nt")) as td:
     root=Path(td)
     from services.hardware_asset_repository import CandidateAssetRepository
     init=CandidateAssetRepository(root/"hardware_asset.db").initialize()
