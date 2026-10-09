@@ -181,6 +181,7 @@ def test_query_agent_uses_real_unified_runtime_with_mock_provider(tmp_path):
             "query", root=Path(__file__).resolve().parents[1],
             environ={
                 "HARDWARE_R2_REAL_PROVIDER_ENABLED": "1",
+                "HARDWARE_R2_DEPLOYMENT_MODE": "NON_PROD",
                 "HARDWARE_CASE_MODEL_CONFIG": str(model),
                 "HARDWARE_R2_RUNTIME_DB": str(runtime_db),
             })
