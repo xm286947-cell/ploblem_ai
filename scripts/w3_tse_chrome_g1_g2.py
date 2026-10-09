@@ -109,6 +109,13 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
     assert (product/"W3_TEST_CANDIDATE_MANIFEST.json").is_file()
     assert (fixtures/"A9903-MCU串口带载乱码.docx").is_file()
     assert (fixtures/"A9904-MCU串口输出配置异常.docx").is_file()
+    # Separate source identity is necessary for the sequential A/B/A/B check.
+    # The frozen kit ships two otherwise byte-identical synthetic DOCX.
+    # Only this extracted test fixture copy is changed: an inert ZIP member,
+    # leaving document.xml and all Evidence block IDs byte-for-byte identical.
+    with zipfile.ZipFile(fixtures/"A9904-MCU串口输出配置异常.docx","a") as z:
+        z.writestr("customXml/W3_G2_DISTINCT_TEST_SOURCE.txt",
+                   "Synthetic W3 G2 Source Identity Delta. No content changes.")
     manifest=json.loads((product/"W3_TEST_CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["source_commit"]==SOURCE_SHA and manifest["real_provider"]=="NOT_RUN"
     model=product/"config/runtime/hardware_w3_mock_only.example.yaml"
@@ -156,6 +163,7 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             # G1 source identity and parser bound to both synthetic Word files.
             assert {x["business_case_id"] for x in before["items"]}=={"A9903","A9904"},before
             assert all(x["parse"]=="PASS" for x in before["items"]),before
+            assert len({x["source_id"] for x in before["items"]})==2, "G2_REQUIRES_DISTINCT_SOURCES"
             assert all(x["source_file"].endswith(".docx") for x in before["items"]),before
             print("G1_MULTI_WORD_UPLOAD_SOURCE_IDENTITY=PASS")
             # G2: W2 sequential mode MUST remain the default; no opt-in PARALLEL.
@@ -183,6 +191,7 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             assert order==["stage-a","stage-b","stage-a","stage-b"],order
             payload["call_order"]=order
             payload["default_execution_mode"]="SEQUENTIAL"
+            payload["source_identity_test_delta"]="A9904 synthetic inert customXml member added only in extracted CI fixture"
             (OUTPUT/"G1_G2_REPORT.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
             page.screenshot(path=str(OUTPUT/"G1_G2_WORKBENCH.png"),full_page=True)
             print("G1_G2_BATCH="+batch_id)
