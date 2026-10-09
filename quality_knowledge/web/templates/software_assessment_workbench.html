@@ -5,7 +5,7 @@
   <div>
     <span class="eyebrow">QUALITY SCENARIO PRODUCTION ROOT · SOFTWARE ASSESSMENT</span>
     <h1>软件考核工作台 · 质量场景生产入口</h1>
-    <p>从成熟软件考核来源选题，核对冻结来源后生成质量场景；软件考核仍是唯一生产入口，Review、确认与发布沿用现有 QSV1 工作台。</p>
+    <p>从现有软件考核选问题，直接生成候选质量场景；来源检查自动完成，审核与发布继续沿用质量场景工作台。</p>
   </div>
   <div class="page-actions">
     <a class="btn btn-secondary" href="/issues">返回问题工作台</a>
@@ -23,7 +23,7 @@
 <section id="quality-scenario-production" class="data-card sa-qsv1" data-sa-qsv1 data-api-prefix="/api/v2/software-assessment/quality-scenario">
   <div class="compact-card">
     <strong>从软件考核生成质量场景</strong>
-    <p>复用当前考核来源 → 冻结 Source Snapshot → QSV1 Candidate。不会建立第二套考核状态机。</p>
+    <p>选择问题后点击“生成质量场景”，系统自动关联彻底解决单与漏测分析；仅有冲突时提示处理。</p>
   </div>
   <div class="sa-qsv1-controls">
     <label>触发类型
@@ -37,7 +37,6 @@
       <input data-trigger-reason maxlength="1000" placeholder="说明为什么从软件考核记录生成质量场景">
     </label>
     <span data-selection-count>已选 0 条</span>
-    <button class="btn btn-secondary" type="button" data-preview disabled>预览来源完整性</button>
     <button class="btn btn-primary" type="button" data-generate disabled>生成质量场景</button>
   </div>
   <div class="sa-qsv1-status" data-flow-status role="status" aria-live="polite"></div>
