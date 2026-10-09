@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 >nul 2>&1
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
+set "PIP_PROGRESS_BAR=off"
 
 for %%I in ("%~dp0.") do set "PACKAGE_ROOT=%%~fI"
 cd /d "%PACKAGE_ROOT%"
