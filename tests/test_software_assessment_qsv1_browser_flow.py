@@ -139,6 +139,35 @@ def test_browser_flow_preserves_bundle_for_retry_and_renders_persisted_duplicate
     )
 
 
+
+def test_selected_preview_and_generation_do_not_scan_all_candidates(tmp_path):
+    flow, assessment_id = _setup_flow(tmp_path)
+
+    def forbid_full_list(*_args, **_kwargs):
+        raise AssertionError("SELECTED_SOURCE_MUST_NOT_LIST_ALL_QSV1_SCENARIOS")
+
+    flow.qsv1.list = forbid_full_list
+    result = flow.preview([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert result["items"][0]["state"] == "READY"
+    task = flow.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert task["items"][0]["state"] == "ANALYZING"
+
+
+def test_software_assessment_one_click_ui_without_preview_step(tmp_path, monkeypatch):
+    monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
+    client = TestClient(create_app(tmp_path / "one_click.db"))
+    page = client.get("/software-assessment")
+    assert page.status_code == 200
+    assert 'data-generate' in page.text
+    assert 'data-preview' not in page.text
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "quality_knowledge/web/static/software_assessment_qsv1.js"
+    ).read_text(encoding="utf-8")
+    assert "request('/generations'" in script
+    assert "request('/preview'" not in script
+
+
 def test_software_assessment_page_mounts_w4_controls_and_reuses_qsv1_routes(tmp_path, monkeypatch):
     monkeypatch.delenv("QUALITY_SCENARIO_V1_DB_PATH", raising=False)
     client = TestClient(create_app(tmp_path / "mature.db"))
