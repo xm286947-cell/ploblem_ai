@@ -1,0 +1,51 @@
+name: Hardware W3 Frozen Source W2 Inherited Regression Triage
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-w2-inherited-triage.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  w2-inherited-triage:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: product
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Confirm immutable source and install test requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "c7935e00f1f0abe828b0090524bb14ba923f3635"
+          python -m pip install -r product/requirements.txt -r product/requirements-runtime-p0-test.txt
+      - name: Run W2 adjacent Word and Source / Package / Pipeline regressions (no real Provider)
+        shell: bash
+        env:
+          PYTHONPATH: product
+          HARDWARE_R1_E2E_KNOWLEDGE_ENV: NON_PROD
+        run: |
+          set -euo pipefail
+          mkdir -p support/dist/w2_inherited
+          python -m pytest -q -ra             product/tests/test_hardware_r1_word_import_web.py             product/tests/test_hardware_r1_source_binding.py             product/tests/test_hardware_r1_single_package_e2e.py             product/tests/test_hardware_r1_wave4_validation_package.py             product/tests/test_hardware_case_product_package_closure.py             product/tests/test_hardware_case_w2_ui_smoke_contract.py             product/tests/test_hardware_r1_pipeline_v13.py             --junitxml=support/dist/w2_inherited/W2_111_REGRESSION.xml             2>&1 | tee support/dist/w2_inherited/pytest.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-w3-w2-inherited-evidence-${{ matrix.os }}
+          path: support/dist/w2_inherited/
+          if-no-files-found: ignore
+          retention-days: 30

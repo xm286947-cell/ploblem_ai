@@ -1,0 +1,48 @@
+name: Hardware W3 W2 Legacy Red Item Precondition Isolation
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-w2-legacy-red-preconditions.yml"
+      - "scripts/w3_w2_legacy_import_diagnose.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inherited-precondition-isolation:
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Normalize checkout line endings to original Git blob on all OS
+        shell: bash
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: product
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install frozen test-only requirements
+        run: python -m pip install -r product/requirements.txt -r product/requirements-runtime-p0-test.txt
+      - name: Diagnose legacy Word route with and without Asset DB startup migration
+        shell: bash
+        env:
+          PYTHONPATH: product
+        run: python support/scripts/w3_w2_legacy_import_diagnose.py product
+      - name: Retest frozen prompt/cache identity contract with LF checkout
+        shell: bash
+        env:
+          PYTHONPATH: product
+        run: |
+          python -m pytest -q -v product/tests/test_hardware_r1_pipeline_v13.py::test_v15_source_grounded_topology_contract_and_cache_identity

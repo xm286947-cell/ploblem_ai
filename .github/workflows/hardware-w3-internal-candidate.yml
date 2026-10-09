@@ -1,0 +1,50 @@
+name: Hardware W3 Internal Candidate Export for TSE
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-internal-candidate.yml"
+      - "scripts/w3_tse_make_candidate.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frozen-w3-internal-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test-only build script
+        uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - name: Checkout W3 exact frozen product source
+        uses: actions/checkout@v4
+        with:
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify immutable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "c7935e00f1f0abe828b0090524bb14ba923f3635"
+          python -m compileall -q support/scripts/w3_tse_make_candidate.py
+      - name: Assemble reviewed W2 closure plus W3-specific safe test launchers
+        shell: bash
+        env:
+          GITHUB_SHA: c7935e00f1f0abe828b0090524bb14ba923f3635
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python support/scripts/w3_tse_make_candidate.py product dist
+          sha256sum dist/HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0.zip
+      - name: Upload NOT-FORMAL test candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0
+          path: dist/
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error

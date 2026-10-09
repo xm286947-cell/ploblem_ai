@@ -1,0 +1,37 @@
+name: Hardware W3 W2 Word Failure Detail Diagnostic
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-w2-diagnostic.yml"
+      - "scripts/w3_w2_inherited_readonly_diagnostic.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readonly-diagnostic:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: product
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install frozen product requirements
+        run: python -m pip install -r product/requirements.txt -r product/requirements-runtime-p0-test.txt
+      - name: Report diagnostic error code and source configuration byte fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "c7935e00f1f0abe828b0090524bb14ba923f3635"
+          python support/scripts/w3_w2_inherited_readonly_diagnostic.py product

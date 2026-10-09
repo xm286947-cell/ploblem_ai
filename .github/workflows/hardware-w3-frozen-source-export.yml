@@ -1,0 +1,73 @@
+name: Hardware W3 Frozen Source Export for Independent TSE
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/hardware-w3-frozen-source-export.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exactly the W3 frozen DUT SHA (not PR merge HEAD)
+        uses: actions/checkout@v4
+        with:
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive and independently validate exact committed source
+        shell: bash
+        env:
+          FROZEN_SHA: c7935e00f1f0abe828b0090524bb14ba923f3635
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FROZEN_SHA"
+          mkdir -p dist
+          git archive --format=zip --prefix=hardware_w3_source_c7935e0/ \
+            --output=dist/HARDWARE_W3_FROZEN_SOURCE_c7935e0.zip HEAD
+          python - <<'PY'
+          import hashlib, pathlib, zipfile
+          output = pathlib.Path("dist/HARDWARE_W3_FROZEN_SOURCE_c7935e0.zip")
+          with zipfile.ZipFile(output) as archive:
+              assert archive.testzip() is None
+              files = set(archive.namelist())
+              prefix = "hardware_w3_source_c7935e0/"
+              essential = (
+                  "requirements.txt",
+                  "services/hardware_case_r1_workbench.py",
+                  "services/hardware_w3_capacity_gate.py",
+                  "quality_knowledge/web/static/hardware_case_knowledge_production.js",
+                  "tests/test_hardware_w3_reliability.py",
+                  "tests/test_hardware_w3_batch_concurrency.py",
+                  "tests/test_hardware_w3_workbench_ui.py",
+                  ".github/workflows/hardware-w3-multi-case-concurrency.yml",
+              )
+              assert all(prefix + path in files for path in essential), "FROZEN_SOURCE_INCOMPLETE"
+              count = len(files)
+          sha = hashlib.sha256(output.read_bytes()).hexdigest()
+          pathlib.Path("dist/SOURCE_IDENTITY.txt").write_text(
+              "TASK=HARDWARE-W3-TEST-FIX-FASTLOOP-001\n"
+              "SOURCE_SHA=c7935e00f1f0abe828b0090524bb14ba923f3635\n"
+              "ARCHIVE_NAME=HARDWARE_W3_FROZEN_SOURCE_c7935e0.zip\n"
+              f"ARCHIVE_SHA256={sha}\n"
+              f"ARCHIVE_ENTRIES={count}\n"
+              "ARCHIVE_SOURCE=git archive from exact SOURCE_SHA, no PR merge revision\n"
+              "PROVIDER_CALLED=NO\n"
+              "PRODUCT_DATA_MUTATED=NO\n"
+          )
+          print("SOURCE_SHA=c7935e00f1f0abe828b0090524bb14ba923f3635")
+          print(f"FROZEN_SOURCE_ZIP_SHA256={sha}")
+          print(f"ZIP_ENTRIES={count}")
+          PY
+      - name: Upload full test source without secrets
+        uses: actions/upload-artifact@v4
+        with:
+          name: HARDWARE_W3_FROZEN_SOURCE_c7935e0
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
