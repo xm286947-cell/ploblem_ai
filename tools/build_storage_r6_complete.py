@@ -162,7 +162,7 @@ def build() -> tuple[Path, Path, Path]:
         shutil.rmtree(runtime_source)
     subprocess.run(
         [
-            "git", "archive", "--format=tar",
+            "git", "-c", "http.proxy=", "-c", "https.proxy=", "archive", "--format=tar",
             f"--prefix={runtime_source.name}/",
             RUNTIME_EXPECTED_COMMIT,
             "runtime",
