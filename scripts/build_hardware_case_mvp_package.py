@@ -25,6 +25,8 @@ INCLUDE_DIRS = [
     "runtime",
     "services",
     "schema",
+    "config/runtime/agents",
+    "prompts/runtime/hardware_retrieval",
 ]
 
 INCLUDE_FILES = [
