@@ -63,14 +63,16 @@ if errorlevel 1 (
 
 echo DEPENDENCY_PREFLIGHT=PASS
 echo.
+set "SMOKE_FLAGS="
+if /I "%QS_WINDOWS_ACCEPTANCE_SMOKE_ONLY%"=="1" set "SMOKE_FLAGS=--smoke-only --no-browser"
 if "%~1"=="" (
-  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py"
+  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py" %SMOKE_FLAGS%
 ) else (
-  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py" --source-db "%~f1"
+  "%VENV_PYTHON%" "%PACKAGE_ROOT%\tools\run_quality_scenario_windows_acceptance.py" --source-db "%~f1" %SMOKE_FLAGS%
 )
 set "EXIT_CODE=%errorlevel%"
 
 echo.
 echo WINDOWS_ACCEPTANCE_EXIT=%EXIT_CODE%
-pause
+if not defined CI pause
 endlocal & exit /b %EXIT_CODE%
