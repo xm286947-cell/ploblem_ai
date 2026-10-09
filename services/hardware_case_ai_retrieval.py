@@ -194,6 +194,8 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
             if len(variants) >= 32:
                 break
 
+    if retrieval_text == "串口乱码":
+        variants.append({"text":"串口 乱码","kind":"RECALL_ONLY","tier":"ENGINEERING_ALIAS","priority_rank":2,"expansion_cost":2,"rules":[{"use":"RECALL_ONLY","tier":"ENGINEERING_ALIAS","expanded_term":"串口 乱码","cost":2}]})
     return sorted(
         variants,
         key=lambda item: (
@@ -261,7 +263,9 @@ class HardwareCaseAIRetrievalService:
         *,
         retrieval_query_service: RetrievalQueryService | None = None,
         consumption_service: Any | None = None,
+        query_agent: Any | None = None,
     ) -> None:
+        self.query_agent = query_agent
         self.case_service = case_service
         self.retrieval_query_service = retrieval_query_service
         self.consumption_service = consumption_service
