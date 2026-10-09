@@ -20,10 +20,29 @@
       </label>
       <button class="hc-button" type="button" data-run-batch disabled>开始 / 继续处理</button>
       <button class="hc-button" type="button" data-retry-failed disabled>仅重试失败项</button>
+      <button class="hc-button" type="button" data-w3-cancel-batch disabled>取消未开始项</button>
+      <button class="hc-button" type="button" data-w3-resume-batch disabled>恢复已取消项</button>
     </div>
   </section>
 
   <section class="hc-card">
+    <div class="hc-w3-controls" aria-label="W3 案例并发执行设置">
+      <label>执行方式
+        <select data-w3-execution-mode aria-label="案例执行方式">
+          <option value="SEQUENTIAL">串行（兼容原模式）</option>
+          <option value="PARALLEL">多案例并发</option>
+        </select>
+      </label>
+      <label>并发案例数
+        <select data-w3-concurrency aria-label="最大并发案例数" disabled>
+          <option value="1">1</option>
+          <option value="2" selected>2（推荐）</option>
+          <option value="3">3</option>
+          <option value="4">4（上限）</option>
+        </select>
+      </label>
+      <p>仅不同案例可以并发；同一案例始终按 Stage A → 校验 → Stage B 顺序执行。取消不会强停运行中的 Provider 请求。</p>
+    </div>
     <div class="hc-card-head">
       <div>
         <h2>本次导入任务</h2>
@@ -40,6 +59,7 @@
           <option value="CANDIDATE_READY">待发布</option>
           <option value="REVIEW">待人工确认</option>
           <option value="FAILED">处理失败</option>
+          <option value="CANCELLED">已取消</option>
           <option value="RUNTIME_BLOCKED">运行环境阻断</option>
           <option value="DEPENDENCY_BLOCKED">依赖阻断</option>
         </select>
@@ -52,7 +72,9 @@
       <span><b>待发布</b><strong>0</strong></span>
       <span><b>待人工确认</b><strong>0</strong></span>
       <span><b>失败</b><strong>0</strong></span>
+      <span><b>已取消</b><strong>0</strong></span>
     </div>
+    <p class="hc-w3-progress" data-w3-batch-progress role="status">选择导入任务后显示执行进度。</p>
     <p class="hc-workbench-message" role="status" data-workbench-message>正在载入历史导入记录…</p>
     <div class="hc-workbench-table-wrap">
       <table class="hc-workbench-table">
@@ -199,4 +221,4 @@
   </section>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-r1-workbench-v1.7"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_production.js?v=hc-w3-concurrency-v0.1"></script>{% endblock %}

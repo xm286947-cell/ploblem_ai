@@ -65,6 +65,8 @@ def _workbench_error(error: HardwareR1WorkbenchError) -> HTTPException:
         return HTTPException(status_code=404, detail=error.code)
     if error.code in {
         "RETRY_NOT_ALLOWED",
+        "BATCH_NOT_CANCELLED",
+        "W3_WORKER_STOP_CONFIRMATION_REQUIRED",
         "RETRY_FAILED_STAGE_NOT_AVAILABLE",
         "REVIEW_NOT_REQUIRED",
         "REVIEW_CONFLICT_ALREADY_RESOLVED",
@@ -211,10 +213,58 @@ def create_hardware_r1_workbench_router(
             default=None,
             alias="X-Hardware-Case-Role",
         ),
+        execution_mode: str = Query(default="SEQUENTIAL", pattern="^(SEQUENTIAL|PARALLEL)$"),
+        concurrency: int = Query(default=2, ge=1, le=4),
     ) -> dict[str, Any]:
         _require_maintainer(x_hardware_case_role)
         try:
-            return service.run_batch(batch_id)
+            return service.run_batch(
+                batch_id,
+                execution_mode=execution_mode,
+                concurrency=concurrency,
+            )
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
+    @router.post("/batches/{batch_id}/cancel")
+    def cancel_batch(
+        batch_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.cancel_batch(batch_id)
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
+    @router.post("/batches/{batch_id}/resume-cancelled")
+    def resume_cancelled_batch(
+        batch_id: str,
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.resume_cancelled_batch(batch_id)
+        except HardwareR1WorkbenchError as error:
+            raise _workbench_error(error) from error
+
+    @router.post("/batches/{batch_id}/reconcile-interrupted")
+    def reconcile_interrupted_batch(
+        batch_id: str,
+        confirmed_stopped: bool = Query(default=False),
+        x_hardware_case_role: str | None = Header(
+            default=None, alias="X-Hardware-Case-Role"
+        ),
+    ) -> dict[str, Any]:
+        _require_maintainer(x_hardware_case_role)
+        try:
+            return service.reconcile_interrupted_batch(
+                batch_id, confirmed_stopped=confirmed_stopped
+            )
         except HardwareR1WorkbenchError as error:
             raise _workbench_error(error) from error
 

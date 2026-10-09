@@ -124,3 +124,19 @@
   .hc-knowledge-flow{grid-template-columns:repeat(2,1fr)}
   .hc-promotion-steps{flex-direction:column;align-items:stretch}
 }
+
+
+/* W3: additive bounded multi-case scheduling controls; W2 remains the default. */
+.hc-w3-controls{display:flex;flex-wrap:wrap;align-items:end;gap:12px;
+  padding:14px 16px;border-bottom:1px solid var(--hc-line);background:#f8fafc}
+.hc-w3-controls label{display:flex;flex-direction:column;gap:5px;
+  color:#42526a;font-size:12px;font-weight:700}
+.hc-w3-controls select{min-height:36px;border:1px solid #cbd5e1;
+  border-radius:7px;background:#fff;padding:6px 10px;color:#172033;font:inherit}
+.hc-w3-controls select:disabled{opacity:.55;cursor:not-allowed}
+.hc-w3-controls p{flex-basis:100%;margin:0;color:#64748b;font-size:12px;
+  line-height:1.5}
+.hc-w3-progress{margin:10px 16px;padding:9px 12px;border-radius:6px;
+  background:#f1f5f9;color:#42526a;font-size:12px}
+@media(max-width:700px){.hc-w3-controls label{flex:1 1 150px}
+  .hc-w3-controls select{width:100%}}

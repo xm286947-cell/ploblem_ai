@@ -1,0 +1,440 @@
+"""W3-02 cross-process capacity, cooperative cancellation and recovery tests.
+
+Mock-only: no real Provider, no Formal Knowledge mutation/publish.
+"""
+from __future__ import annotations
+
+import multiprocessing
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from pathlib import Path
+from threading import Event, Lock
+from time import sleep
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from services.hardware_case_r1_workbench import (
+    HardwareR1WorkbenchService,
+    HardwareR1WorkbenchStore,
+)
+from services.hardware_w3_capacity_gate import (
+    HardwareW3CapacityGate,
+    W3CapacityTimeout,
+)
+from quality_knowledge.web.hardware_r1_workbench_api import (
+    create_hardware_r1_workbench_router,
+)
+
+
+def _item(number: int, *, case: str | None = None, source: str | None = None):
+    return {
+        "item_id": f"W3-{number}",
+        "batch_id": "BATCH-A",
+        "business_case_id": case or f"CASE-{number}",
+        "source_id": source or f"SOURCE-{number}",
+    }
+
+
+def _process_acquire(db_path: str, output) -> None:
+    gate = HardwareW3CapacityGate(db_path)
+    try:
+        with gate.lease(_item(99), max_wait_seconds=0.4):
+            output.put("ACQUIRED")
+    except W3CapacityTimeout:
+        output.put("TIMEOUT")
+
+
+def test_cross_process_capacity_is_fail_closed(tmp_path):
+    db = tmp_path / "shared.db"
+    # Run the Workbench migration first, exactly as production startup does.
+    HardwareR1WorkbenchStore(db)
+    gate = HardwareW3CapacityGate(db)
+    with ExitStack() as stack:
+        for number in range(4):
+            stack.enter_context(gate.lease(_item(number)))
+        assert len(gate.leases()) == 4
+        ctx = multiprocessing.get_context("spawn")
+        q = ctx.Queue()
+        worker = ctx.Process(target=_process_acquire, args=(str(db), q))
+        worker.start()
+        worker.join(timeout=12)
+        assert worker.exitcode == 0
+        assert q.get(timeout=2) == "TIMEOUT"
+        assert len(gate.leases()) == 4
+    assert gate.leases() == []
+    q2 = ctx.Queue()
+    next_worker = ctx.Process(target=_process_acquire, args=(str(db), q2))
+    next_worker.start()
+    next_worker.join(timeout=12)
+    assert next_worker.exitcode == 0
+    assert q2.get(timeout=2) == "ACQUIRED"
+    assert gate.leases() == []
+
+
+def test_same_source_is_serialized_even_with_spare_slots(tmp_path):
+    db = tmp_path / "shared.db"
+    HardwareR1WorkbenchStore(db)
+    first = HardwareW3CapacityGate(db)
+    second = HardwareW3CapacityGate(db)
+    with first.lease(_item(1, case="A", source="HASH"), max_wait_seconds=1):
+        with pytest.raises(W3CapacityTimeout):
+            with second.lease(
+                _item(2, case="A", source="HASH"),
+                max_wait_seconds=0.15, poll_seconds=0.01,
+            ):
+                pass
+        assert len(first.leases()) == 1
+    with second.lease(_item(2, case="A", source="HASH")):
+        assert len(first.leases()) == 1
+
+
+def test_explicit_reconcile_requires_stopped_worker_and_stale_heartbeat(tmp_path):
+    store = HardwareR1WorkbenchStore(tmp_path / "shared.db")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="case.docx", source_id="a",
+        business_case_id="A", snapshot={"identity": {"business_case_id": "A"}},
+    )
+    gate = HardwareW3CapacityGate(store.db_path)
+    item = store.get_item(item_id)
+    assert store.claim_item_for_run(item)
+    token = gate._try_acquire(item_id, gate.source_key(item))
+    assert token
+    with pytest.raises(ValueError, match="CONFIRMATION"):
+        gate.reconcile_confirmed_stopped(batch, confirmed_stopped=False)
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=1
+    ) == []
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "UPDATE hardware_w3_case_lease SET heartbeat_at=0 WHERE token=?",
+            (token,),
+        )
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=1
+    ) == [item_id]
+    after = store.get_item(item_id)
+    assert after["orchestration_status"] == "RUNTIME_BLOCKED"
+    assert after["error_code"] == "W3_INTERRUPTED_REQUIRES_RECONCILIATION"
+    assert gate.leases() == []
+
+
+def test_cancel_and_explicit_resume_preserves_other_states(tmp_path):
+    store = HardwareR1WorkbenchStore(tmp_path / "shared.db")
+    batch = store.create_batch()
+    first = store.add_item(batch, source_file="first.docx")
+    other = store.add_item(batch, source_file="other.docx")
+    store.update_item(
+        other, orchestration_status="PARSE_FAILED",
+        failed_stage=None, error_code=None, result=None,
+    )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    cancelled = service.cancel_batch(batch)
+    assert cancelled["cancel_requested"] is True
+    assert store.get_item(first)["orchestration_status"] == "CANCELLED"
+    assert store.get_item(other)["orchestration_status"] == "PARSE_FAILED"
+    assert service.run_batch(batch)["cancel_requested"] is True
+    resumed = service.resume_cancelled_batch(batch)
+    assert resumed["cancel_requested"] is False
+    assert store.get_item(first)["orchestration_status"] == "QUEUED"
+
+
+def test_cancellation_during_batch_only_stops_not_started_cases(tmp_path, monkeypatch):
+    import services.hardware_case_r1_workbench as module
+
+    store = HardwareR1WorkbenchStore(tmp_path / "shared.db")
+    batch = store.create_batch()
+    for n in range(3):
+        store.add_item(
+            batch,
+            source_file=f"C{n}.docx",
+            source_id=f"S{n}",business_case_id=f"C{n}",
+            snapshot={"identity":{"business_case_id":f"C{n}"},
+                      "source":{"source_id":f"S{n}"}},
+        )
+    started, release = Event(), Event()
+    calls = []
+
+    def synthetic_pipeline(snapshot, _runtime, **_kwargs):
+        calls.append(snapshot["identity"]["business_case_id"])
+        started.set()
+        assert release.wait(5)
+        return {"pipeline_status":"CASE_EXTRACTION_FAILED",
+                "failed_stage":"STAGE_A", "error_code":"SYNTHETIC", "latency_trace":{}}
+
+    monkeypatch.setattr(module, "run_r1_agent_extraction", synthetic_pipeline)
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running = pool.submit(
+            service.run_batch, batch, execution_mode="PARALLEL", concurrency=1
+        )
+        assert started.wait(5)
+        service.cancel_batch(batch)
+        release.set()
+        result = running.result(timeout=10)
+    assert calls == ["C0"]
+    assert result["summary"]["CANCELLED"] == 2
+    assert result["summary"]["FAILED"] == 1
+    assert not service.capacity_gate.leases()
+
+
+def test_http_maintainer_only_cancel_and_safe_resume(tmp_path):
+    store = HardwareR1WorkbenchStore(tmp_path / "db.sqlite")
+    batch = store.create_batch()
+    store.add_item(batch, source_file="case.docx")
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    app = FastAPI()
+    app.include_router(create_hardware_r1_workbench_router(service))
+    client = TestClient(app)
+    base = f"/api/v2/hardware-cases/r1/workbench/batches/{batch}"
+    assert client.post(base + "/cancel").status_code == 403
+    headers = {"X-Hardware-Case-Role": "MAINTAINER"}
+    assert client.post(base + "/cancel", headers=headers).status_code == 200
+    assert client.post(
+        base + "/reconcile-interrupted", headers=headers
+    ).status_code == 409
+    assert client.post(base + "/resume-cancelled", headers=headers).status_code == 200
+    assert service.get_batch(batch)["cancel_requested"] is False
+
+
+def _stage_ready_result(*, calls=2):
+    from services.hardware_case_r1_runtime import R1_PIPELINE_VERSION
+    return {
+        "pipeline_status": "GOLDEN_PREVIEW_READY",
+        "pipeline_version": R1_PIPELINE_VERSION,
+        "provider_call_count": calls,
+        "run_id": "R-ORIGINAL",
+        "evidence_validation": {"status": "PASS"},
+        "knowledge_object": {"contract_version": "v1", "finding": "TEST"},
+        "latency_trace": {},
+    }
+
+
+class _CandidateRepositoryStub:
+    def __init__(self, *, active=True):
+        self.active = active
+
+    def get_candidate(self, candidate_id):
+        if candidate_id != "C-EXISTING":
+            return None
+        return {
+            "candidate_id": candidate_id,
+            "business_case_id": "CASE-A",
+            "source_id": "HASH-A",
+            "asset_status": "ACTIVE" if self.active else "RETIRED",
+            "production_review_status": "REQUIRED",
+            "knowledge_object": {"contract_version": "v1", "review": "REQUIRED"},
+        }
+
+
+def _reused_source_fixture(tmp_path, *, altered=False, asset_active=True):
+    store = HardwareR1WorkbenchStore(tmp_path / "cases.sqlite")
+    previous_batch, next_batch = store.create_batch(), store.create_batch()
+    snapshot = {
+        "identity": {"business_case_id": "CASE-A"},
+        "source": {"source_id": "HASH-A"},
+        "contents": [{"text": "frozen"}],
+    }
+    previous_id = store.add_item(
+        previous_batch, source_file="source.docx",
+        business_case_id="CASE-A", source_id="HASH-A", snapshot=snapshot,
+    )
+    store.update_item(
+        previous_id, orchestration_status="CANDIDATE_READY",
+        failed_stage=None, error_code=None, result=_stage_ready_result(),
+        candidate_id="C-EXISTING",
+    )
+    next_snapshot = {**snapshot}
+    if altered:
+        next_snapshot["contents"] = [{"text": "altered"}]
+    next_id = store.add_item(
+        next_batch, source_file="source.docx",
+        business_case_id="CASE-A", source_id="HASH-A", snapshot=next_snapshot,
+    )
+    repo = _CandidateRepositoryStub(active=asset_active)
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object(),
+        candidate_repository=repo,
+    )
+    return service, next_batch, next_id, previous_id
+
+
+def test_verified_completed_candidate_reuse_does_not_call_provider(tmp_path, monkeypatch):
+    import services.hardware_case_r1_workbench as module
+
+    service, batch, next_id, original_id = _reused_source_fixture(tmp_path)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("W3 replayed Provider despite verified Candidate")
+
+    monkeypatch.setattr(module, "run_r1_agent_extraction", forbidden)
+    result = service.run_batch(batch)
+    current = service.get_item(next_id)
+    assert result["summary"]["REVIEW"] == 1
+    assert current["candidate_id"] == "C-EXISTING"
+    assert current["provider_calls"] == 0
+    assert current["pipeline_result"]["w3_reuse_verified"] is True
+    assert current["pipeline_result"]["w3_reused_from_item_id"] == original_id
+    assert current["pipeline_result"]["run_id"] == "R-ORIGINAL"
+    assert service.capacity_gate.leases() == []
+
+
+@pytest.mark.parametrize("altered,active", [
+    (True, True), (False, False),
+])
+def test_nonmatching_input_or_inactive_candidate_never_reused(
+    tmp_path, monkeypatch, altered, active,
+):
+    import services.hardware_case_r1_workbench as module
+
+    service, batch, next_id, _ = _reused_source_fixture(
+        tmp_path, altered=altered, asset_active=active
+    )
+    calls = []
+
+    def invoked(*_args, **_kwargs):
+        calls.append(True)
+        return {
+            "pipeline_status": "CASE_EXTRACTION_FAILED",
+            "failed_stage": "STAGE_A",
+            "error_code": "MOCK_STAGE_A",
+            "latency_trace": {},
+        }
+
+    monkeypatch.setattr(module, "run_r1_agent_extraction", invoked)
+    result = service.run_batch(batch)
+    assert calls == [True]
+    assert service.get_item(next_id)["candidate_id"] is None
+    assert result["summary"]["FAILED"] == 1
+
+
+def test_reported_provider_calls_over_frozen_ceiling_block_candidate(
+    tmp_path, monkeypatch,
+):
+    import services.hardware_case_r1_workbench as module
+
+    store = HardwareR1WorkbenchStore(tmp_path / "cases.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx",
+        business_case_id="CASE-X", source_id="HASH-X",
+        snapshot={"identity": {"business_case_id": "CASE-X"}},
+    )
+    monkeypatch.setattr(
+        module, "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: _stage_ready_result(calls=5),
+    )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    result = service.run_batch(batch)
+    assert result["summary"]["CANDIDATE_READY"] == 0
+    item = store.get_item(item_id)
+    assert item["orchestration_status"] == "RUNTIME_BLOCKED"
+    assert item["error_code"] == "W3_PROVIDER_BUDGET_EXCEEDED"
+    assert item["candidate_id"] is None
+    assert item["provider_calls"] == 5
+
+
+def test_cancelled_case_is_not_reported_as_queued(tmp_path):
+    store = HardwareR1WorkbenchStore(tmp_path / "db.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="case.docx",
+        snapshot={"identity": {"business_case_id": "CASE-A"}},
+    )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object()
+    )
+    result = service.cancel_batch(batch)
+    assert result["status"] == "CANCELLED"
+    assert result["summary"]["QUEUED"] == 0
+    assert result["summary"]["CANCELLED"] == 1
+    assert result["items"][0]["result"] == "CANCELLED"
+    assert store.get_item(item_id)["retryable"] is False
+
+
+def test_orphan_running_record_requires_stale_age_and_confirmed_stop(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = HardwareR1WorkbenchStore(tmp_path / "orphan.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx",
+        business_case_id="ORPHAN", source_id="ORPHAN-SOURCE",
+        snapshot={"identity": {"business_case_id": "ORPHAN"}},
+    )
+    item = store.get_item(item_id)
+    assert store.claim_item_for_run(item)
+    gate = HardwareW3CapacityGate(store.db_path)
+    assert gate.leases() == []
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == []
+    assert store.get_item(item_id)["orchestration_status"] == "RUNNING"
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at=? WHERE item_id=?",
+            ((datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat(), item_id),
+        )
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == [item_id]
+    assert store.get_item(item_id)["orchestration_status"] == "RUNTIME_BLOCKED"
+    assert gate.recovery_audit(batch) == [{
+        **{k: gate.recovery_audit(batch)[0][k] for k in ("reconciled_at",)},
+        "item_id": item_id,
+        "reason": "W3_ORPHAN_RUNNING_WITHOUT_LEASE",
+    }]
+    assert gate.reconcile_confirmed_stopped(
+        batch, confirmed_stopped=True, stale_seconds=120
+    ) == []
+
+
+def test_reconciled_item_cannot_run_from_stale_snapshot(tmp_path, monkeypatch):
+    import services.hardware_case_r1_workbench as module
+
+    store = HardwareR1WorkbenchStore(tmp_path / "recovered.sqlite")
+    batch = store.create_batch()
+    item_id = store.add_item(
+        batch, source_file="source.docx", source_id="HASH",
+        business_case_id="CASE",
+        snapshot={"identity":{"business_case_id":"CASE"}},
+    )
+    item = store.get_item(item_id)
+    assert store.claim_item_for_run(item)
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            "UPDATE hardware_r1_batch_item SET updated_at='2020-01-01T00:00:00+00:00' "
+            "WHERE item_id=?", (item_id,),
+        )
+    service = HardwareR1WorkbenchService(
+        store, source_store=object(), structurer_factory=lambda: object(),
+    )
+    result = service.reconcile_interrupted_batch(
+        batch, confirmed_stopped=True
+    )
+    assert result["reconciled_item_ids"] == [item_id]
+    assert len(result["recovery_audit"]) == 1
+    monkeypatch.setattr(
+        module, "run_r1_agent_extraction",
+        lambda *_args, **_kwargs: pytest.fail("Provider replay forbidden"),
+    )
+    # Stale pre-claim snapshot cannot regain ownership after recovery.
+    service._run_item(item, retry_stage=None, force_full_run=False)
+    assert store.get_item(item_id)["orchestration_status"] == "RUNTIME_BLOCKED"
+    # Even an explicit fresh user action must not replay an unknown Provider
+    # outcome without evidence reconciliation.
+    with pytest.raises(module.HardwareR1WorkbenchError, match="W3_RECONCILIATION_REQUIRED"):
+        service.run_resume_item(item_id)
+    with pytest.raises(module.HardwareR1WorkbenchError, match="W3_RECONCILIATION_REQUIRED"):
+        service.force_full_run_item(item_id)
