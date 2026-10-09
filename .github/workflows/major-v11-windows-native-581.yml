@@ -1,0 +1,110 @@
+name: Major V1.1 Windows Native Gate
+
+on:
+  push:
+    branches:
+      - ci/major-v11-windows-native-581
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin frozen package identity
+        shell: pwsh
+        run: |
+          Set-Content -Path PRODUCT_SOURCE_SHA -Value "55aaf9234ec102360043f4deef782126bc234b80" -NoNewline
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Launch through Windows batch entry
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "major-v11-server.out.log"
+          $err = Join-Path $env:RUNNER_TEMP "major-v11-server.err.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/d","/c","call START_MAJOR_V11_WINDOWS.bat" -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP "major-v11-cmd.pid") -Value $proc.Id
+          Write-Host "CMD_PID=$($proc.Id)"
+          $ok = $false
+          for ($i = 0; $i -lt 180; $i++) {
+            Start-Sleep -Seconds 2
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18080/p0/major-production" -TimeoutSec 5
+              if ($r.StatusCode -eq 200) {
+                $ok = $true
+                Write-Host "MAJOR_UI_HTTP_200=PASS"
+                break
+              }
+            } catch {}
+            if ($proc.HasExited) {
+              Write-Host "LAUNCHER_EXITED_EARLY=$($proc.ExitCode)"
+              break
+            }
+          }
+          if (-not $ok) {
+            Write-Host "===== STDOUT ====="
+            if (Test-Path $out) { Get-Content $out }
+            Write-Host "===== STDERR ====="
+            if (Test-Path $err) { Get-Content $err }
+            throw "Major UI did not become HTTP 200"
+          }
+
+      - name: Verify runtime process and page contract
+        shell: pwsh
+        run: |
+          $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18080/p0/major-production" -TimeoutSec 10
+          if ($r.StatusCode -ne 200) { throw "Unexpected status $($r.StatusCode)" }
+          if ($r.Content -notmatch "Excel 批量导入") { throw "Major production page contract missing" }
+          if ($r.Content -notmatch 'accept=".xls,.xlsx,.xlsm"') { throw "Legacy XLS picker missing" }
+          Write-Host "WINDOWS_STANDARD_START=PASS"
+          Write-Host "MAJOR_PRODUCTION_PAGE=PASS"
+
+      - name: Run focused Major regression using launcher venv
+        shell: pwsh
+        run: |
+          $py = Join-Path $env:LOCALAPPDATA "MajorV11\venv\Scripts\python.exe"
+          if (-not (Test-Path $py)) { throw "Launcher venv missing: $py" }
+          & $py -m pytest -q tests/test_major_v5_overall_legacy_xls.py tests/test_major_canonical_intake_convergence.py tests/test_major_provider_wiring.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Provider configuration gate is truthful
+        shell: pwsh
+        run: |
+          try {
+            $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18080/api/v2/major-production/provider/status" -TimeoutSec 10
+            Write-Host "PROVIDER_STATUS_HTTP=$($r.StatusCode)"
+            Write-Host $r.Content
+          } catch {
+            $status = $_.Exception.Response.StatusCode.value__
+            Write-Host "PROVIDER_STATUS_HTTP=$status"
+            Write-Host "REAL_PROVIDER=NOT_CONFIGURED_IN_GITHUB_ACTIONS"
+            Write-Host "REAL_PROVIDER_E2E=BLOCKED_AS_EXPECTED"
+          }
+
+      - name: Collect launcher logs
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "major-v11-server.out.log"
+          $err = Join-Path $env:RUNNER_TEMP "major-v11-server.err.log"
+          if (Test-Path $out) { Write-Host "===== STDOUT ====="; Get-Content $out }
+          if (Test-Path $err) { Write-Host "===== STDERR ====="; Get-Content $err }
+
+      - name: Stop Windows server
+        if: always()
+        shell: pwsh
+        run: |
+          $pidFile = Join-Path $env:RUNNER_TEMP "major-v11-cmd.pid"
+          if (Test-Path $pidFile) {
+            $serverPid = Get-Content $pidFile
+            cmd /c "taskkill /PID $serverPid /T /F" 2>$null
+          }
