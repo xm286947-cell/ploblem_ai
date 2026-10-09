@@ -11,7 +11,7 @@
     <div>
       <span class="hc-kicker">正式硬件知识 · 检索与复用</span>
       <h1>正式硬件知识消费</h1>
-      <p>面向研发复用、器件风险和市场应用问题的只读正式知识检索。</p>
+      <p>先查正式知识，再按研发设计、器件风险、市场问题或测试验证视角按需分析工程经验。</p>
     </div>
     <span class="hc-status ok">正式知识 · 只读</span>
   </header>
@@ -21,9 +21,10 @@
       <button type="button" class="active" role="tab" aria-selected="true" data-scenario="research">研发设计复用</button>
       <button type="button" role="tab" aria-selected="false" data-scenario="risk">器件与电路风险</button>
       <button type="button" role="tab" aria-selected="false" data-scenario="market">市场与应用问题检索</button>
+      <button type="button" role="tab" aria-selected="false" data-scenario="test">测试验证</button>
     </div>
     <form class="hc-knowledge-form" data-knowledge-form>
-      <label class="hc-knowledge-keyword">关键词<input type="search" data-knowledge-text placeholder="标题、现象、根因、措施、器件或接口"></label>
+      <label class="hc-knowledge-keyword">关键词<input type="search" data-knowledge-text placeholder="可输入工程问题，如：设计模拟量电路有什么经验"></label>
       <label>接口<input type="text" data-knowledge-filter="interface" placeholder="如 UART"></label>
       <label>信号<input type="text" data-knowledge-filter="signal" placeholder="如 3.3V TTL TX"></label>
       <label>器件<input type="text" data-knowledge-filter="device" placeholder="如 MCU"></label>
@@ -32,7 +33,7 @@
   </section>
 
   <section class="hc-card" aria-live="polite">
-    <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">hardware-knowledge-consumption/v1</span></div>
+    <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">R2 智能检索 · 正式知识只读</span></div>
     <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>
       <div>
         <strong>正式知识检索数据尚未生成</strong>
