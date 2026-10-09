@@ -52,7 +52,7 @@ if not exist "%VENV_PY%" (
     exit /b 21
   )
   echo CREATE_VENV=%VENV_DIR%
-  %BASE_PY% -m venv "%VENV_DIR%"
+  !BASE_PY! -m venv "%VENV_DIR%"
   if errorlevel 1 exit /b 22
 )
 
