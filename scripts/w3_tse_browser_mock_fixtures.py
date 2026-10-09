@@ -110,9 +110,11 @@ def prepare(product_root,out):
     a,b=stage_a_fixture(evidence_index),stage_b_fixture(evidence_index)
     jsonschema.validate(a,HARDWARE_R1_STAGE_A_SCHEMA)
     jsonschema.validate(b,HARDWARE_R1_STAGE_B_SCHEMA)
-    for x in (a,b):
-        for key in ("evidence_block_ids",):
-            assert str(evidence_index[0]) in str(x), "EVIDENCE_IDS_NOT_BOUND"
+    all_evidence=set(evidence_index)
+    assert all_evidence.issubset(set(str(a).split("'"))), "STAGE_A_EVIDENCE_IDS_NOT_BOUND"
+    for field in b["reusable_knowledge_candidate"].values():
+        assert set(field["evidence_block_ids"]).issubset(all_evidence), "STAGE_B_UNKNOWN_EVIDENCE_ID"
+    assert any(field["evidence_block_ids"] for field in b["reusable_knowledge_candidate"].values()), "STAGE_B_EVIDENCE_NOT_BOUND"
     (out/"stage_a_fixture.json").write_text(json.dumps(a,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     (out/"stage_b_fixture.json").write_text(json.dumps(b,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     ready={
