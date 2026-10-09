@@ -31,7 +31,7 @@ def test_selftest_is_explicit_separate_entry():
 
 
 def test_real_agent_and_mock_ports_are_separated():
-    model = (ROOT / "config" / "model.local.yaml").read_text(encoding="utf-8")
+    model = (ROOT / "config" / "model.windows.real.yaml").read_text(encoding="utf-8")
     e2e = (ROOT / "scripts" / "windows_e2e.py").read_text(encoding="utf-8")
     assert 'base_url: http://127.0.0.1:8000/v1' in model
     assert 'http://127.0.0.1:18000/__mock__/health' in e2e

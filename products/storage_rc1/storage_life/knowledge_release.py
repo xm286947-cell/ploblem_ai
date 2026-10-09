@@ -26,13 +26,13 @@ def _root() -> Path:
 
 
 def _binding_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[3]
-        / "contracts"
-        / "release_binding"
-        / "v1"
-        / "release_binding.json"
-    )
+    module_path = Path(__file__).resolve()
+    relative = Path("contracts") / "release_binding" / "v1" / "release_binding.json"
+    # Source checkout layout: repo/products/storage_rc1/storage_life/module.py.
+    # Fresh package layout: package_root/storage_life/module.py. Prefer the
+    # package-local contract, then retain the source-checkout location.
+    candidates = (module_path.parents[1] / relative, module_path.parents[3] / relative)
+    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
 
 
 def _json(path: Path) -> Any:

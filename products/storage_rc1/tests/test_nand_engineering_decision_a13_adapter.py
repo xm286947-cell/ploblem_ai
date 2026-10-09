@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from storage_life import product_api
+from storage_life import knowledge_release
 from storage_life.knowledge_release import KnowledgeReleaseConsumer
 from storage_life.lifetime_engine import FormulaRegistry
 from storage_life.nand_engineering_decision import _profile, build_nand_engineering_decision
@@ -122,6 +123,18 @@ def test_release_version_mismatch_is_not_consumed(monkeypatch):
     assert domain["status"] == "UNKNOWN"
     assert domain["code"] == "RELEASE_VERSION_BINDING_MISMATCH"
     assert result["shared_case"]["formal_knowledge"]["knowledge_ids"] == []
+
+
+def test_release_binding_resolves_inside_fresh_package(tmp_path, monkeypatch):
+    package_root = tmp_path / "STORAGE_PRODUCT_MVP_RC1"
+    module_file = package_root / "storage_life" / "knowledge_release.py"
+    module_file.parent.mkdir(parents=True)
+    binding = package_root / "contracts" / "release_binding" / "v1" / "release_binding.json"
+    binding.parent.mkdir(parents=True)
+    binding.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(knowledge_release, "__file__", str(module_file))
+
+    assert knowledge_release._binding_path() == binding
 
 
 def test_device_decision_page_exposes_controlled_test_inputs_and_test_only_label():
