@@ -1,0 +1,55 @@
+name: Hardware W3 Internal Candidate Native Fresh Extract
+on:
+  pull_request:
+    paths:
+      - "scripts/w3_tse_make_candidate.py"
+      - "scripts/w3_tse_native_fresh_extract_smoke.py"
+      - ".github/workflows/hardware-w3-native-fresh-extract.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-candidate:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: support
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: c7935e00f1f0abe828b0090524bb14ba923f3635
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the same source SHA and install frozen dependencies
+        shell: bash
+        env:
+          GITHUB_SHA: c7935e00f1f0abe828b0090524bb14ba923f3635
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "c7935e00f1f0abe828b0090524bb14ba923f3635"
+          python -m pip install -r product/requirements.txt -r product/requirements-runtime-p0-test.txt
+          mkdir -p support/dist
+          python support/scripts/w3_tse_make_candidate.py product support/dist
+      - name: Fresh extract and run native launcher (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python support/scripts/w3_tse_native_fresh_extract_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-w3-native-evidence-${{ matrix.os }}
+          path: support/dist/native_start_*.log
+          if-no-files-found: ignore
+          retention-days: 15
