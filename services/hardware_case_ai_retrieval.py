@@ -194,6 +194,32 @@ def _recall_only_query_variants(retrieval_text: str) -> list[dict[str, Any]]:
             if len(variants) >= 32:
                 break
 
+    # The tokenized formal-search fallback requires each term to match.
+    # Split only exact, short interface+symptom compounds; this does not relax
+    # the ALL-terms constraint or invent a source fact.
+    compound = re.fullmatch(
+        r"(串口|uart|can|spi|i2c|adc)(乱码|丢包|失真|偏差|异常|故障)",
+        normalized,
+    )
+    if compound:
+        expanded = f"{compound.group(1)} {compound.group(2)}"
+        if expanded not in seen:
+            variants.append({
+                "text": expanded,
+                "kind": "RECALL_ONLY",
+                "tier": "ENGINEERING_ALIAS",
+                "priority_rank": _ALIAS_TIER_RANK["ENGINEERING_ALIAS"],
+                "expansion_cost": _ALIAS_TIER_COST["ENGINEERING_ALIAS"],
+                "rules": [{
+                    "rule_id": "INTERFACE_SYMPTOM_COMPOUND_SPLIT",
+                    "matched_phrase": retrieval_text,
+                    "expanded_term": expanded,
+                    "use": "RECALL_ONLY",
+                    "tier": "ENGINEERING_ALIAS",
+                    "cost": _ALIAS_TIER_COST["ENGINEERING_ALIAS"],
+                }],
+            })
+
     return sorted(
         variants,
         key=lambda item: (
@@ -261,10 +287,74 @@ class HardwareCaseAIRetrievalService:
         *,
         retrieval_query_service: RetrievalQueryService | None = None,
         consumption_service: Any | None = None,
+        query_agent: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
+        self.query_agent = query_agent
         self.case_service = case_service
         self.retrieval_query_service = retrieval_query_service
         self.consumption_service = consumption_service
+
+    @staticmethod
+    def _needs_agent(query: str) -> bool:
+        """Only real task-like queries invoke Provider; short identifiers are fast."""
+        query = query.strip()
+        return len(query) >= 11 and any(
+            phrase in query for phrase in
+            ("怎么", "如何", "哪些", "有什么", "借鉴", "建议", "需要注意", "排查", "怎么办")
+        )
+
+    def _enrich_query_with_agent(
+        self, raw_query: str, understood: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._needs_agent(raw_query):
+            understood["online_agent"] = {"status": "FAST_PATH"}
+            return understood
+        if self.query_agent is None:
+            understood["online_agent"] = {"status": "BLOCKED", "code": "QUERY_AGENT_NOT_CONFIGURED"}
+            return understood
+        try:
+            plan = self.query_agent(raw_query)
+            if not isinstance(plan, Mapping):
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_OUTPUT_INVALID")
+            terms = plan.get("search_terms")
+            if not isinstance(terms, list) or not (1 <= len(terms) <= 5):
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_TERMS_INVALID")
+            trace = plan.get("trace")
+            if not isinstance(trace, Mapping) or not trace.get("task_id") or not trace.get("run_id") or int(trace.get("provider_calls") or 0) < 1:
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_TRACE_MISSING")
+            if plan.get("intent") not in {"DESIGN_REUSE", "RISK", "FIELD_PROBLEM", "TEST_VALIDATION", "GENERAL"}:
+                raise HardwareCaseAIRetrievalError("QUERY_AGENT_INTENT_INVALID")
+            known = {str(v["text"]) for v in understood["search_queries"]}
+            for term in terms:
+                if not isinstance(term, str) or len(term) < 2 or len(term) > 80:
+                    raise HardwareCaseAIRetrievalError("QUERY_AGENT_TERM_INVALID")
+                term = normalize_search_text(term)
+                if term in known:
+                    continue
+                known.add(term)
+                understood["search_queries"].append({
+                    "text": term,
+                    "kind": "AGENT_QUERY",
+                    "tier": "AGENT_RETRIEVAL_GUIDANCE",
+                    "priority_rank": 1,
+                    "expansion_cost": 1,
+                    "original_query": raw_query,
+                    "rules": [{
+                        "rule_id": "ONLINE_QUERY_UNDERSTANDING",
+                        "matched_phrase": raw_query,
+                        "expanded_term": term,
+                        "use": "RECALL_ONLY",
+                        "tier": "AGENT_RETRIEVAL_GUIDANCE",
+                        "cost": 1,
+                    }],
+                })
+            understood["online_agent"] = {"status": "COMPLETED", "intent": plan.get("intent"),
+                                           "trace": dict(trace)}
+        except Exception as error:
+            understood["online_agent"] = {
+                "status": "FAILED", "code": str(getattr(error, "code", None) or type(error).__name__),
+            }
+        return understood
 
     @staticmethod
     def _case_lookup(items: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -729,6 +819,46 @@ class HardwareCaseAIRetrievalService:
         raw_query = str(query or "")
         understood = understand_hardware_query(raw_query)
 
+        # Business case identity is not an arbitrary full-text term. Resolve
+        # against the read-only published view before searching.
+        direct_id = raw_query.strip().upper()
+        if re.fullmatch(r"[A-Z]\d{4,10}", direct_id):
+            visible = self._visible_payload(
+                role=role, statuses=statuses, historical=historical,
+            )
+            found = self._case_lookup(visible["results"]).get(direct_id)
+            if found is None and self.consumption_service is not None:
+                projection = self.consumption_service.search(
+                    "", business_case_id=direct_id, limit=2,
+                )
+                rows = projection.get("results", [])
+                if len(rows) == 1:
+                    found = self._projection_to_case(rows[0])
+            if found is not None and found.get("case_status") == "PUBLISHED":
+                case = self._attach_retrieval(
+                    found,
+                    mode="CASE_ID_EXACT",
+                    score=None,
+                    why_hit={
+                        "status": "EXACT_BUSINESS_CASE_ID",
+                        "claim_safe": True,
+                        "reasons": [{
+                            "matched_field": "business_case_id",
+                            "matched_text": direct_id,
+                        }],
+                    },
+                )
+                return {
+                    **visible,
+                    "results": [case],
+                    "retrieval": {
+                        "mode": "CASE_ID_EXACT",
+                        "query_understanding": understood,
+                        "degraded": False,
+                        "errors": [],
+                    },
+                }
+
         if not raw_query.strip():
             payload = self.case_service.search_cases(
                 raw_query,
@@ -745,6 +875,7 @@ class HardwareCaseAIRetrievalService:
             }
             return result
 
+        understood = self._enrich_query_with_agent(raw_query, understood)
         visible = self._visible_payload(
             role=role,
             statuses=statuses,

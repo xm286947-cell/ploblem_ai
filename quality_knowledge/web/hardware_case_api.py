@@ -411,6 +411,58 @@ def create_hardware_case_router(
         except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
             raise _http_error(error) from error
 
+    @router.get("/r2/knowledge-query")
+    def r2_knowledge_query(
+        text: str = "",
+        interface: str | None = None,
+        signal: str | None = None,
+        device: str | None = None,
+    ) -> dict[str, Any]:
+        """Shared read-only query path; public Consumption v1 stays unchanged.
+
+        Agent suggestions cannot create Formal objects; rehydrate only from
+        published projections, then re-apply structured filters.
+        """
+        search_service = ai_search_service or service
+        consumption = getattr(ai_search_service, "consumption_service", None)
+        if consumption is None:
+            return {"results": [], "retrieval": {"mode": "UNAVAILABLE"}}
+        if not text.strip():
+            return consumption.search("", interface=interface, signal=signal, device=device)
+        try:
+            searched = search_service.search_cases(text, role="CONSUMER")
+        except (HardwareCaseContractError, HardwareCaseAIRetrievalError) as error:
+            raise _http_error(error) from error
+        results: list[dict[str, Any]] = []
+        used: set[str] = set()
+        for case in searched.get("results", []):
+            business_id = str(case.get("business_case_id") or case.get("case_id") or "")
+            knowledge_id = str(case.get("knowledge_id") or (case.get("retrieval") or {}).get("knowledge_id") or "")
+            formal = consumption.get(knowledge_id) if knowledge_id else None
+            if formal is None and business_id:
+                options = consumption.search("", business_case_id=business_id, limit=2)
+                rows = options.get("results", [])
+                formal = rows[0] if len(rows) == 1 else None
+            if not formal or formal.get("knowledge_id") in used:
+                continue
+            allowed = consumption.search(
+                "", knowledge_id=formal["knowledge_id"], interface=interface,
+                signal=signal, device=device, limit=1,
+            ).get("results", [])
+            if not allowed:
+                continue
+            used.add(formal["knowledge_id"])
+            why = (case.get("retrieval") or {}).get("why_hit") or {}
+            results.append({
+                **formal,
+                "match_score": (case.get("retrieval") or {}).get("score") or 0,
+                "match_reasons": list(why.get("reasons") or []),
+                "case_retrieval": case.get("retrieval") or {},
+            })
+        return {"contract_version": "hardware-r2-knowledge-query/v1",
+                "results": results,
+                "retrieval": searched.get("retrieval") or {}}
+
     @router.get("/retrieval/status")
     def retrieval_status() -> dict[str, Any]:
         return {

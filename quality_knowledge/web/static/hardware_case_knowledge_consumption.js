@@ -75,11 +75,12 @@
     }
     box.innerHTML = results.map(item => {
       const evidenceRefs = Array.isArray(item.evidence_refs) ? item.evidence_refs : [];
+      const scoreLabel = !query.text ? '未评分' : item.case_retrieval?.mode === 'CASE_ID_EXACT' ? '编号直达' : (item.match_score ?? '—');
       return `<article class="hc-knowledge-result">
         <div class="hc-knowledge-result-head">
           <div><h3><button type="button" data-open-knowledge="${esc(item.knowledge_id)}">${esc(text(item.title))}</button></h3>
             <div class="hc-knowledge-meta"><code>knowledge_id: ${esc(item.knowledge_id)}</code><code>business_case_id: ${esc(item.business_case_id)}</code><span>${esc(item.source_domain)} / ${esc(item.source_object_type)}</span></div>
-          </div><div class="hc-knowledge-score"><b>${esc(item.match_score ?? 0)}</b><small>匹配度</small></div>
+          </div><div class="hc-knowledge-score"><b>${esc(scoreLabel)}</b><small>${!query.text ? '未检索' : '匹配信息'}</small></div>
         </div>
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
@@ -118,9 +119,20 @@
     q('[data-knowledge-unavailable]').hidden = true;
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/search' + searchParams());
+      const endpoint = query.text
+        ? '/api/v2/hardware-cases/r2/knowledge-query' + searchParams()
+        : api + '/search' + searchParams();
+      const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(String(payload.detail || response.statusText));
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
+      const agent = (payload.retrieval || {}).query_understanding?.online_agent;
+      if (query.text && agent && agent.status !== 'FAST_PATH') {
+        q('[data-knowledge-summary]').textContent += agent.status === 'COMPLETED'
+          ? ' · Agent 已理解查询（可审计）'
+          : ' · 确定性检索（Agent 未就绪/降级）';
+      }
     } catch (error) {
       results = [];
       if (error.status === 503) setUnavailable();

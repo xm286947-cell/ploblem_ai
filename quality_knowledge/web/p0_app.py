@@ -583,10 +583,27 @@ def create_p0_app(
                         ),
                     }
 
+            # Online query Agent is explicit opt-in, never boot-time Provider I/O.
+            # Missing authorized model config preserves deterministic search.
+            hardware_query_agent = None
+            hardware_query_agent_status = {"status": "DISABLED"}
+            if os.getenv("HARDWARE_QUERY_AGENT_ENABLED") == "1":
+                try:
+                    from services.hardware_query_runtime import HardwareQueryRuntimeInvoker
+                    hardware_query_agent = HardwareQueryRuntimeInvoker()
+                    hardware_query_agent_status = {"status": "READY"}
+                except Exception as error:
+                    hardware_query_agent_status = {
+                        "status": "BLOCKED",
+                        "code": str(getattr(error, "code", None) or type(error).__name__),
+                    }
+            app.state.hardware_query_agent_status = hardware_query_agent_status
+
             hardware_ai_search_service = HardwareCaseAIRetrievalService(
                 hardware_case_service,
                 retrieval_query_service=hardware_retrieval_query_service,
                 consumption_service=hardware_knowledge_consumption_service,
+                query_agent=hardware_query_agent,
             )
             app.state.hardware_ai_search_service = hardware_ai_search_service
             app.state.hardware_retrieval_catalog_service = (
