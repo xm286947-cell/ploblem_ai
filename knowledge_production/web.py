@@ -146,12 +146,20 @@ def create_processing_app(repository_root: str | Path) -> FastAPI:
         reviewed_by: str = Form(...),
         title: str = Form(""),
         content: str = Form(...),
+        semantic_class: str = Form(""),
+        object_type: str = Form(""),
         review_note: str = Form(""),
     ):
         edits = {"content": content}
         if title.strip():
             edits["title"] = title.strip()
         try:
+            if semantic_class or object_type:
+                edits.update(
+                    service.prepare_storage_semantic_edit(
+                        candidate_id, semantic_class, object_type
+                    )
+                )
             service.edit(
                 candidate_id,
                 evaluation_id,

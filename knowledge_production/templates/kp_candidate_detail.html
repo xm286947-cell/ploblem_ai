@@ -84,6 +84,29 @@
     <label>Reviewed By<input name="reviewed_by" required></label>
     <label>Title<input name="title" value="{{ detail.candidate.title }}"></label>
     <label>Content<textarea name="content" rows="5" required>{{ detail.candidate.content }}</textarea></label>
+    {% if detail.storage_semantic_review %}
+      <p class="muted">Storage 正式知识语义复核（{{ detail.storage_semantic_review.status }}）：必须选择被来源模型授权的类别及兼容对象类型。此操作只记录 Review，不代表实名认证或正式发布批准。</p>
+      {% if detail.storage_semantic_review.options %}
+        <label>Reviewed Semantic Class
+          <select name="semantic_class" required>
+            <option value="">请选择语义类别</option>
+            {% for option in detail.storage_semantic_review.options %}
+              <option value="{{ option.name }}">{{ option.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Reviewed Object Type
+          <select name="object_type" required>
+            <option value="">请选择兼容对象类型</option>
+            {% for object_type in detail.storage_semantic_review.object_types %}
+              <option value="{{ object_type }}" {% if object_type == detail.candidate.object_type.value %}selected{% endif %}>{{ object_type }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      {% else %}
+        <div class="error">STORAGE_SEMANTIC_REVIEW_OPTIONS_MISSING：来源未提供可审核类别；禁止手动输入任意类型。</div>
+      {% endif %}
+    {% endif %}
     <label>Note<textarea name="review_note"></textarea></label>
     <button class="secondary" type="submit">EDIT & CONFIRM</button>
   </form>

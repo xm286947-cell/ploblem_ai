@@ -16,7 +16,11 @@ from .models import (
     ReviewRecord,
     SourceDocument,
 )
-from .publish import KnowledgePublishError, KnowledgePublishService
+from .publish import (
+    KnowledgePublishError,
+    KnowledgePublishService,
+    _STORAGE_SEMANTIC_ALLOWED_OBJECT_TYPES,
+)
 from .review import KnowledgeReviewError, KnowledgeReviewService
 
 
@@ -97,7 +101,60 @@ class KnowledgeProcessingService:
             "latest_review": reviews[-1] if reviews else None,
             "evidences": evidence,
             "published": published[-1] if published else None,
+            "storage_semantic_review": self._storage_semantic_review(candidate),
         }
+
+    @staticmethod
+    def _storage_semantic_review(candidate: KnowledgeCandidate) -> dict[str, Any] | None:
+        """Use the exact Storage Publish contract's model-authorized options."""
+        metadata = candidate.metadata or {}
+        storage = metadata.get("storage_lifetime")
+        if not isinstance(storage, dict) or not storage.get("model_driven_extraction"):
+            return None
+        bridge = metadata.get("storage_source_bridge")
+        raw = (
+            storage.get("semantic_class_review_options")
+            or (bridge.get("semantic_class_candidates") if isinstance(bridge, dict) else None)
+            or storage.get("semantic_class_candidates")
+            or []
+        )
+        if not isinstance(raw, (list, tuple)):
+            raw = []
+        options = []
+        for value in raw:
+            name = str(value)
+            allowed_types = _STORAGE_SEMANTIC_ALLOWED_OBJECT_TYPES.get(name)
+            if allowed_types and name not in [item["name"] for item in options]:
+                options.append({"name": name, "object_types": sorted(allowed_types)})
+        return {
+            "options": options,
+            "object_types": sorted({
+                item for option in options for item in option["object_types"]
+            }),
+            "status": storage.get("semantic_class_status") or "NEEDS_REVIEW",
+        }
+
+    def prepare_storage_semantic_edit(
+        self, candidate_id: str, semantic_class: str, object_type: str
+    ) -> dict[str, Any]:
+        """Validate UI selection server-side; never accept arbitrary semantic tags."""
+        candidate = self._load_candidate(candidate_id)
+        review = self._storage_semantic_review(candidate)
+        if review is None:
+            raise KnowledgeProcessingError("STORAGE_SEMANTIC_REVIEW_NOT_APPLICABLE")
+        option = next(
+            (item for item in review["options"] if item["name"] == semantic_class),
+            None,
+        )
+        if option is None:
+            raise KnowledgeProcessingError("STORAGE_SEMANTIC_CLASS_INVALID")
+        if object_type not in option["object_types"]:
+            raise KnowledgeProcessingError("STORAGE_SEMANTIC_OBJECT_TYPE_INVALID")
+        tags = [
+            tag for tag in candidate.tags if not tag.startswith("storage-semantic:")
+        ]
+        tags.append(f"storage-semantic:{semantic_class}")
+        return {"tags": tags, "object_type": object_type}
 
     def evaluate(self, candidate_id: str):
         try:
