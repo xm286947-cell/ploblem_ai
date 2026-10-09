@@ -50,6 +50,6 @@ jobs:
         if: always()
         with:
           name: HARDWARE_W3_G5_BROWSER_MOCK_EVIDENCE
-          path: support/dist/browser_g3_evidence/
+          path: support/dist/browser_g5_evidence/
           if-no-files-found: ignore
           retention-days: 30
