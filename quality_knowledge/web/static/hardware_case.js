@@ -195,7 +195,8 @@
     const original=String(understood.original_query||'').trim();
     const retrievalText=String(understood.retrieval_text||'').trim();
     const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
+    const online=searchMeta.online_agent||{};const agentText=online.status==='COMPLETED'?'；在线 Agent 已参与':online.status==='DISABLED'||online.status==='BLOCKED'?'；确定性检索（Agent 未就绪）':'';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+agentText+'；只展示 PUBLISHED。';
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
