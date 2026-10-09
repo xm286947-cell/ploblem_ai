@@ -299,6 +299,29 @@ class OpenAICompatibleProviderAdapter:
                 details={"expected_shape": "json_object"},
             )
 
+    def _decode_output_json(self, content: str) -> tuple[Any, bool]:
+        """Reuse the proven Storage fenced-JSON convention, without loose extraction.
+
+        Only one *complete* Markdown JSON code fence is eligible, and only
+        for an explicitly configured JSON-object agent. Other text, incomplete
+        fences, multiple blocks, and malformed JSON remain INVALID_JSON.
+        Strict downstream shape/schema validation is unchanged.
+        """
+        try:
+            return json.loads(content), False
+        except json.JSONDecodeError:
+            if self.response_shape not in {"json_object", "object", "dict"}:
+                raise
+            complete_fence = re.fullmatch(
+                r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n"
+                r"(?P<body>.*?)\r?\n```[ \t\r\n]*",
+                content,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if complete_fence is None or "```" in complete_fence.group("body"):
+                raise
+            return json.loads(complete_fence.group("body")), True
+
     def _validate_output(self, parsed: Any) -> Any:
         self._validate_shape(parsed)
         schema = self.output_schema
@@ -565,7 +588,7 @@ class OpenAICompatibleProviderAdapter:
             )
 
         try:
-            parsed = json.loads(content)
+            parsed, unwrapped_json_fence = self._decode_output_json(content)
         except json.JSONDecodeError as exc:
             diagnostic_details.update({
                 "json_error_message": str(exc.msg)[:120],
@@ -588,7 +611,18 @@ class OpenAICompatibleProviderAdapter:
                 details=diagnostic_details,
             ) from exc
 
-        return self._validate_output(parsed)
+        # Keep the same schema and evidence validation as bare JSON; log only
+        # metadata so later audits can prove whether the bounded reuse occurred.
+        validated = self._validate_output(parsed)
+        if unwrapped_json_fence:
+            _write_provider_trace({
+                "phase": "json_fence_normalized",
+                "provider_call_seq": runtime_context.get("provider_call_seq"),
+                "content_length_bytes": diagnostic_details["content_length_bytes"],
+                "content_sha256": diagnostic_details["content_sha256"],
+                "finish_reason": safe_reason,
+            })
+        return validated
 
 
 __all__ = ["OpenAICompatibleProviderAdapter"]
