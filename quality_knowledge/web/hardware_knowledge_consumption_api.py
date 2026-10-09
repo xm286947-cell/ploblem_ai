@@ -33,6 +33,7 @@ def create_hardware_knowledge_consumption_router(
     *,
     source_store: Any | None = None,
     knowledge_adapter: Any | None = None,
+    assisted_query_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(
         prefix=PUBLIC_PREFIX,
@@ -65,6 +66,12 @@ def create_hardware_knowledge_consumption_router(
             )
         except HardwareKnowledgeConsumptionError as error:
             raise _http_error(error) from error
+
+    @router.get("/assisted-search")
+    def assisted_search(text: str = "", limit: int = Query(default=100, ge=1, le=100)) -> dict[str, Any]:
+        if assisted_query_service is None:
+            raise HTTPException(status_code=503, detail="ASSISTED_QUERY_UNAVAILABLE")
+        return assisted_query_service.search(text, limit=limit)
 
     @router.get("/objects/{knowledge_id}")
     def get_object(knowledge_id: str) -> dict[str, Any]:
