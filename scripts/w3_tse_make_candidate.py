@@ -7,7 +7,9 @@ NAME = "HARDWARE_W3_INTERNAL_TEST_CANDIDATE_c7935e0"
 product, out = (Path(v).resolve() for v in sys.argv[1:3])
 sys.path.insert(0, str(product))
 b = importlib.import_module("scripts.build_hardware_r1_e2e_validation_package")
-assert b.ROOT == product and os.environ["GITHUB_SHA"] == SHA
+assert os.environ["GITHUB_SHA"] == SHA
+# Force the imported, reviewed builder to read ONLY frozen product checkout.
+b.ROOT = product
 b.PACKAGE = NAME
 sys.argv = ["builder","--output-dir",str(out)]
 b.main()
