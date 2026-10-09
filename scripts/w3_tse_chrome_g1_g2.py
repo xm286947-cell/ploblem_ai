@@ -116,6 +116,9 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
     with zipfile.ZipFile(fixtures/"A9904-MCU串口输出配置异常.docx","a") as z:
         z.writestr("customXml/W3_G2_DISTINCT_TEST_SOURCE.txt",
                    "Synthetic W3 G2 Source Identity Delta. No content changes.")
+    raw_hashes={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in [fixtures/"A9903-MCU串口带载乱码.docx",fixtures/"A9904-MCU串口输出配置异常.docx"]}
+    print("G1_G2_DISK_SOURCE_SHA256="+json.dumps(raw_hashes,ensure_ascii=False),flush=True)
+    assert len(set(raw_hashes.values()))==2,"G2_TEST_INPUT_MUST_HAVE_DISTINCT_BYTES"
     manifest=json.loads((product/"W3_TEST_CANDIDATE_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["source_commit"]==SOURCE_SHA and manifest["real_provider"]=="NOT_RUN"
     model=product/"config/runtime/hardware_w3_mock_only.example.yaml"
@@ -163,6 +166,7 @@ with tempfile.TemporaryDirectory(prefix="w3_tse_browser_g3_") as folder:
             # G1 source identity and parser bound to both synthetic Word files.
             assert {x["business_case_id"] for x in before["items"]}=={"A9903","A9904"},before
             assert all(x["parse"]=="PASS" for x in before["items"]),before
+            print("G1_G2_API_SOURCE_IDS="+json.dumps([{"case":x.get("business_case_id"),"source_id":x.get("source_id"),"file":x.get("source_file"),"result":x.get("result")} for x in before["items"]],ensure_ascii=False),flush=True)
             assert len({x["source_id"] for x in before["items"]})==2, "G2_REQUIRES_DISTINCT_SOURCES"
             assert all(x["source_file"].endswith(".docx") for x in before["items"]),before
             print("G1_MULTI_WORD_UPLOAD_SOURCE_IDENTITY=PASS")
