@@ -92,12 +92,31 @@ def portrait_period(raw, business_key=''):
     month=re.fullmatch(r'\s*(\d{1,2})\s*月?\s*',value)
     return year_from_itr(business_key) or '未知',str(int(month[1])) if month and 1<=int(month[1])<=12 else '未知','问题信息_创建月份' if value else 'UNKNOWN'
 
-def _latest_materials(service, material_types):
+def _latest_materials(service, material_types, canonical_keys=None):
     marks=','.join('?' for _ in material_types)
+    predicate=""
+    params=list(material_types)
+    if canonical_keys is not None:
+        # Fetch only evidence for the selected software-assessment issues.
+        # Normalize CS suffix at SQL level to match normalize_itr semantics.
+        keys=sorted({normalize_itr(key) for key in canonical_keys})
+        if not keys:
+            return []
+        key_marks=','.join('?' for _ in keys)
+        predicate=f" AND UPPER(REPLACE(COALESCE(NULLIF(m.canonical_itr,''),m.business_key),' ','')) IN ({key_marks})"
+        predicate+=f" OR (m.material_type IN ({marks}) AND UPPER(REPLACE(COALESCE(NULLIF(m.canonical_itr,''),m.business_key),' ','')) IN ({key_marks}))"
+        params.extend(keys)
+        params.extend(material_types)
+        params.extend([key+'CS' for key in keys])
     with service.scenarios.connect() as c:
-        rows=[dict(r) for r in c.execute(f"SELECT m.*,g.group_code FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_type IN ({marks}) ORDER BY m.version_no DESC,m.created_at DESC,m.material_id",tuple(material_types))]
+        sql=f"SELECT m.*,g.group_code FROM source_material m JOIN data_group g ON g.group_id=m.group_id WHERE m.material_type IN ({marks}){predicate} ORDER BY m.version_no DESC,m.created_at DESC,m.material_id"
+        rows=[dict(r) for r in c.execute(sql,tuple(params))]
     latest={}
-    for row in rows:latest.setdefault((row['material_type'],row['group_id'],normalize_itr(row['canonical_itr'] or row['business_key'])),row)
+    for row in rows:
+        canonical=normalize_itr(row['canonical_itr'] or row['business_key'])
+        if canonical_keys is not None and canonical not in {normalize_itr(key) for key in canonical_keys}:
+            continue
+        latest.setdefault((row['material_type'],row['group_id'],canonical),row)
     return list(latest.values())
 
 def _issue_index(service):
@@ -266,21 +285,47 @@ def scene_source_records(service, source='operations', filters=None, selected_id
 def operation_records(service, filters=None, selected_ids=None, metadata_only=False):
     filters=filters or {}; selected=set(selected_ids or [])
     with service.scenarios.connect() as c:
-        # Selection is deliberately driven only by the software-operation workbench.
-        # CS/ITR and issue analyses enrich the selected rows later and must never
-        # reduce the number of selectable operation issues.
-        materials=[dict(r) for r in c.execute('''WITH ranked AS (
-                SELECT m.*,g.group_code,y.reporting_year,y.year_source,
-                       ROW_NUMBER() OVER (
-                         PARTITION BY m.group_id,COALESCE(NULLIF(m.canonical_itr,''),m.business_key)
-                         ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC
-                       ) AS rn
+        # Selected flow is bounded by IDs; the unfiltered workbench keeps its
+        # original latest-version projection and is not changed.
+        if selected:
+            marks=','.join('?' for _ in selected)
+            materials=[dict(r) for r in c.execute(f'''
+                SELECT m.*,g.group_code,y.reporting_year,y.year_source
                 FROM source_material m
                 JOIN data_group g ON g.group_id=m.group_id
                 LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id
-                WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'
-            ) SELECT * FROM ranked WHERE rn=1 ORDER BY business_key,material_id''')]
-        issues=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
+                WHERE m.material_id IN ({marks})
+                  AND m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'
+            ''',tuple(selected))]
+            # An older material version may not be selected just because it
+            # still has a valid ID.
+            materials=[row for row in materials if c.execute('''
+                SELECT material_id FROM source_material
+                WHERE group_id=? AND COALESCE(NULLIF(canonical_itr,''),business_key)=?
+                ORDER BY version_no DESC,created_at DESC,material_id DESC LIMIT 1
+            ''',(row['group_id'],row['canonical_itr'] or row['business_key'])).fetchone()[0]==row['material_id']]
+            keys={normalize_itr(row['business_key']) for row in materials}
+            if keys:
+                marks=','.join('?' for _ in keys)
+                issues=[dict(r) for r in c.execute(f'''
+                    SELECT knowledge_id,business_issue_id,business_type FROM quality_issue
+                    WHERE UPPER(REPLACE(business_issue_id,' ','')) IN ({marks})
+                ''',tuple(keys))]
+            else:
+                issues=[]
+        else:
+            materials=[dict(r) for r in c.execute('''WITH ranked AS (
+                    SELECT m.*,g.group_code,y.reporting_year,y.year_source,
+                           ROW_NUMBER() OVER (
+                             PARTITION BY m.group_id,COALESCE(NULLIF(m.canonical_itr,''),m.business_key)
+                             ORDER BY m.version_no DESC,m.created_at DESC,m.material_id DESC
+                           ) AS rn
+                    FROM source_material m
+                    JOIN data_group g ON g.group_id=m.group_id
+                    LEFT JOIN source_material_reporting_year y ON y.material_id=m.material_id
+                    WHERE m.material_type='SOFTWARE_OPERATION' AND g.group_code='SW-OPS'
+                ) SELECT * FROM ranked WHERE rn=1 ORDER BY business_key,material_id''')]
+            issues=[dict(r) for r in c.execute('SELECT knowledge_id,business_issue_id,business_type FROM quality_issue')]
     latest={}; cs=defaultdict(list); itr_sources=defaultdict(list); index=defaultdict(list)
     for row in materials:latest[(row['material_type'],row['group_id'],normalize_itr(row['business_key']))]=row
     for row in issues:index[normalize_itr(row['business_issue_id'])].append(row)
@@ -288,9 +333,10 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
     # load latest CS records separately so a missing/conflicting CS cannot hide
     # a software-operation record.
     if not metadata_only:
-        for row in _latest_materials(service,('ITR_CS',)):
+        source_keys={normalize_itr(row['business_key']) for row in materials} if selected else None
+        for row in _latest_materials(service,('ITR_CS',),source_keys):
             cs[normalize_itr(row['business_key'])].append(row)
-        for row in _latest_materials(service,('ITR_SOURCE',)):
+        for row in _latest_materials(service,('ITR_SOURCE',),source_keys):
             itr_sources[normalize_itr(row['canonical_itr'] or row['business_key'])].append(row)
     records=[]
     for material in latest.values():
