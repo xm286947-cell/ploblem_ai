@@ -260,7 +260,7 @@ def test_all_roles_consume_same_evidence_bound_domain_snapshot(monkeypatch):
         assert basis
         assert {item_id for item in basis.values() for item_id in item["knowledge_ids"]} <= expected_ids
         assert {ref for item in basis.values() for ref in item["evidence_refs"]} <= expected_evidence
-    assert result["roles"]["test_validation"]["test_basis_by_domain"]["BAD_BLOCK"].startswith("正式资料未声明")
+    assert "未声明运行累计坏块计数器" in result["roles"]["test_validation"]["test_basis_by_domain"]["BAD_BLOCK"]
     assert result["roles"]["runtime_lifetime"]["status"] == "UNKNOWN"
     assert result["roles"]["runtime_lifetime"]["telemetry_status"] == "NOT_PROVIDED"
     assert result["roles"]["procurement"]["decision"] == "UNKNOWN"

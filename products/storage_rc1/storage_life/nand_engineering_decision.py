@@ -83,6 +83,76 @@ def _pe_endurance_claim(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
+def _retention_claim(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    pattern = re.compile(r"(?:data\s+retention|retention)[^\d]{0,30}(\d+(?:\.\d+)?)\s*(years?|yrs?)\b", re.I)
+    for row in rows:
+        evidence = _evidence_ids(row)
+        if not evidence:
+            continue
+        text = " ".join(str(row.get(key) or "") for key in ("title", "summary", "content"))
+        match = pattern.search(text)
+        if match:
+            return {
+                "value": float(match.group(1)), "unit": "years",
+                "knowledge_id": row.get("object_id"), "evidence_refs": evidence,
+                "source_refs": sorted({str(item) for item in (row.get("source_refs") or []) if item}),
+                "conditions": row.get("conditions") or [],
+            }
+    return None
+
+
+def _evidence_screen(required: Any, claim: dict[str, Any] | None, *, unit: str) -> dict[str, Any]:
+    if claim is None:
+        return {"status": "UNKNOWN", "reason": f"EVIDENCE_BOUND_{unit.upper()}_RATING_MISSING"}
+    if required in (None, ""):
+        return {
+            "status": "UNKNOWN", "reason": f"REQUIRED_{unit.upper()}_INPUT_MISSING",
+            "knowledge_id": claim["knowledge_id"], "evidence_refs": claim["evidence_refs"],
+        }
+    try:
+        required_value = float(required)
+    except (TypeError, ValueError):
+        return {"status": "UNKNOWN", "reason": f"REQUIRED_{unit.upper()}_INPUT_INVALID"}
+    return {
+        "status": "WITHIN_RATING_SCREEN" if required_value <= claim["value"] else "EXCEEDS_RATING_SCREEN",
+        "required_value": required_value, "rated_value": claim["value"], "unit": claim["unit"],
+        "knowledge_id": claim["knowledge_id"], "evidence_refs": claim["evidence_refs"],
+        "source_refs": claim["source_refs"], "conditions": claim.get("conditions", []),
+        "qualification": "NOT_ESTABLISHED_SCREENING_ONLY",
+    }
+
+
+def _ecc_screen(rows: list[dict[str, Any]], payload: dict[str, Any]) -> dict[str, Any]:
+    evidenced = [row for row in rows if _evidence_ids(row)]
+    if not evidenced:
+        return {"status": "UNKNOWN", "reason": "EVIDENCE_BOUND_ECC_KNOWLEDGE_MISSING"}
+    refs = sorted({ref for row in evidenced for ref in _evidence_ids(row)})
+    ids = sorted({str(row.get("object_id")) for row in evidenced if row.get("object_id")})
+    mode = (payload.get("system_conditions") or {}).get("internal_ecc_enabled")
+    if mode is False:
+        return {"status": "CONDITION_MISMATCH", "reason": "INTERNAL_ECC_DISABLED", "knowledge_ids": ids, "evidence_refs": refs}
+    if mode is not True:
+        return {"status": "UNKNOWN", "reason": "INTERNAL_ECC_APPLICABILITY_NOT_PROVIDED", "knowledge_ids": ids, "evidence_refs": refs}
+    return {
+        "status": "CONDITION_APPLICABLE_LIMIT_NOT_ESTABLISHED",
+        "reason": "ECC_MODE_CONDITION_IS_EVIDENCED_BUT_CORRECTION_STRENGTH_IS_NOT_ASSERTED",
+        "knowledge_ids": ids, "evidence_refs": refs,
+    }
+
+
+def _bad_block_screen(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    evidence_rows = [row for row in rows if _evidence_ids(row)]
+    if not evidence_rows:
+        return {"status": "UNKNOWN", "reason": "EVIDENCE_BOUND_BAD_BLOCK_KNOWLEDGE_MISSING"}
+    text = " ".join(
+        str(row.get(key) or "") for row in evidence_rows for key in ("title", "summary", "content")
+    )
+    refs = sorted({ref for row in evidence_rows for ref in _evidence_ids(row)})
+    if re.search(r"(?:not\s+(?:declared|specified)|does\s+not\s+(?:declare|specify)|未声明|未定义|没有.*(?:计数器|counter))", text, re.I):
+        return {"status": "RUNTIME_COUNTER_NOT_DECLARED", "reason": "NO_RUNTIME_CUMULATIVE_BAD_BLOCK_COUNTER_DECLARED", "evidence_refs": refs}
+    return {"status": "BOUNDARY_KNOWN_RUNTIME_TELEMETRY_UNKNOWN", "reason": "STATIC_BAD_BLOCK_DATA_IS_NOT_RUNTIME_TELEMETRY", "evidence_refs": refs}
+
+
 def _endurance_screening(profile: dict[str, Any], claim: dict[str, Any] | None, payload: dict[str, Any]) -> dict[str, Any]:
     required = profile.get("required_pe_cycles")
     if claim is None or required is None:
@@ -219,8 +289,14 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
         )
         if not release_matches:
             returned_rows = []
+        # Releases that declare a domain are scoped here, preventing a broad
+        # keyword hit from making one fact appear to satisfy unrelated domains.
+        scoped_rows = [
+            row for row in returned_rows
+            if not row.get("storage_domain") or str(row.get("storage_domain")).upper() == domain
+        ]
         # A release result without row-level evidence is not a consumable fact.
-        rows = [row for row in returned_rows if _evidence_ids(row)]
+        rows = [row for row in scoped_rows if _evidence_ids(row)]
         domain_objects[domain] = rows
         refs = sorted({ref for row in rows for ref in _evidence_ids(row)})
         knowledge_ids = sorted({str(row.get("object_id")) for row in rows if row.get("object_id")})
@@ -234,8 +310,10 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             )
         })
         domain_code = result.get("code")
-        if returned_rows and not rows:
+        if returned_rows and scoped_rows and not rows:
             domain_code = "FORMAL_EVIDENCE_REQUIRED"
+        elif returned_rows and not scoped_rows:
+            domain_code = "KNOWLEDGE_DOMAIN_SCOPE_MISMATCH"
         elif result.get("results") and not release_matches:
             domain_code = "RELEASE_VERSION_BINDING_MISMATCH"
         knowledge_domains.append({
@@ -254,6 +332,12 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
     formal_ready = all(item["status"] == "MATCHED" for item in knowledge_domains)
     endurance_claim = _pe_endurance_claim(domain_objects.get("PE_ENDURANCE", []))
     endurance_screen = _endurance_screening(profile, endurance_claim, payload)
+    retention_claim = _retention_claim(domain_objects.get("RETENTION", []))
+    retention_screen = _evidence_screen(
+        mission.get("required_retention_years"), retention_claim, unit="retention_years"
+    )
+    ecc_screen = _ecc_screen(domain_objects.get("ECC_BIT_FLIP", []), payload)
+    bad_block_screen = _bad_block_screen(domain_objects.get("BAD_BLOCK", []))
     runtime_telemetry = payload.get("runtime_telemetry")
     telemetry_items = (
         [runtime_telemetry] if isinstance(runtime_telemetry, dict)
@@ -281,7 +365,9 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "release_identity": {
                 "version": bound_version or release_status.get("knowledge_release_version"),
                 "snapshot_hash": release_status.get("snapshot_hash"),
-                "classification": "CONTROLLED_VALIDATION_RELEASE_NOT_CUSTOMER_QUALIFICATION",
+                "binding_snapshot_hash": (binding or {}).get("knowledge_release_snapshot_hash"),
+                "classification": (binding or {}).get("release_class") or "CONTROLLED_VALIDATION_RELEASE",
+                "qualification_state": (binding or {}).get("qualification_state") or "NOT_CUSTOMER_QUALIFICATION",
             },
             "domains": knowledge_domains,
             "knowledge_ids": sorted({str(row.get("object_id")) for row in knowledge_objects if row.get("object_id")}),
@@ -289,7 +375,12 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
         },
         "controlled_inputs": {"mission_profile": mission, "workload_profile": workload},
         "required_profile": profile,
-        "engineering_screens": {"pe_endurance": endurance_screen},
+        "engineering_screens": {
+            "pe_endurance": endurance_screen,
+            "retention": retention_screen,
+            "ecc_bit_flip": ecc_screen,
+            "bad_block": bad_block_screen,
+        },
         "device_decision": "INSUFFICIENT_EVIDENCE",
     }
 
@@ -332,16 +423,6 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
         procurement_next_actions.append("向供应商索取有来源、条件和准确订货料号范围的 P/E/Endurance 资料后再做比较。")
     if procurement_unknowns:
         procurement_next_actions.append("补齐未关闭知识/需求项：" + ", ".join(sorted(set(procurement_unknowns))) + "。")
-    bad_block_claim_text = " ".join(
-        str(row.get(key) or "")
-        for row in domain_objects.get("BAD_BLOCK", [])
-        for key in ("title", "summary", "content")
-    )
-    bad_block_counter_undeclared = bool(re.search(
-        r"not\s+(?:declared|specified)|未声明|未定义|没有.*(?:计数器|counter)",
-        bad_block_claim_text,
-        re.I,
-    ))
     roles = {
         "system_engineering": {
             "status": "ACTIONABLE",
@@ -349,6 +430,9 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "open_knowledge_domains": [item["domain"] for item in knowledge_domains if item["status"] != "MATCHED"],
             "knowledge_basis": knowledge_basis,
             "pe_endurance_screen": endurance_screen,
+            "retention_screen": retention_screen,
+            "ecc_screen": ecc_screen,
+            "bad_block_screen": bad_block_screen,
             "next_actions": ["确认真实 P/E stress 与工作负载，再进行规格冻结。", "保留需求预算与器件资格结论的边界。"],
         },
         "hardware_engineering": {
@@ -357,6 +441,9 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "formal_knowledge_domains": knowledge_domains,
             "knowledge_basis": knowledge_basis,
             "pe_endurance_screen": endurance_screen,
+            "retention_screen": retention_screen,
+            "ecc_screen": ecc_screen,
+            "bad_block_screen": bad_block_screen,
             "evidence_refs": endurance_screen.get("evidence_refs", []),
             "next_actions": [
                 "补齐有来源和适用条件的 Endurance、Retention、ECC 与 Bad Block 正式知识。"
@@ -369,10 +456,17 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "required_pe_cycles": profile.get("required_pe_cycles"),
             "pe_endurance_screen": endurance_screen,
             "knowledge_basis": {key: knowledge_basis[key] for key in ("PE_ENDURANCE", "ECC_BIT_FLIP")},
+            "retention_screen": retention_screen,
+            "ecc_screen": ecc_screen,
+            "bad_block_screen": bad_block_screen,
             "design_constraints": [
                 "实测主机写入量、介质写入量和 WAF；不可由逻辑写入量直接推断 P/E stress。",
                 "将 ECC 配置和可纠正/不可纠正错误计数纳入软件/固件接口及日志。"
                 if "ECC_BIT_FLIP" in matched_domains else "明确 ECC 配置，并建立可纠正/不可纠正错误计数采集接口；阈值需由正式资料或批准要求提供。",
+                "将断电保持时长、存储温度和 P/E 状态纳入需求验证；本 Release 额定年限只用于条件筛查。"
+                if "RETENTION" in matched_domains else "Retention 证据未关联；不得将标称年限当作目标环境下的保证。",
+                "坏块累计计数器未由数据手册声明；需确认控制器/固件遥测来源，不能把静态坏块上限当运行态计数。"
+                if bad_block_screen.get("status") == "RUNTIME_COUNTER_NOT_DECLARED" else "建立运行态坏块观测接口，并将规格边界与运行遥测分开。",
             ],
             "next_actions": ["测量并约束主机写入量、介质写入量和 WAF；不得从逻辑写入推测 P/E stress。", "记录日志、WAL、Flush、GC 与磨损均衡相关负载。"],
         },
@@ -381,6 +475,9 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "decision": "UNKNOWN",
             "screening_result": procurement_screen,
             "endurance_screen": endurance_screen,
+            "retention_screen": retention_screen,
+            "ecc_screen": ecc_screen,
+            "bad_block_screen": bad_block_screen,
             "knowledge_basis": knowledge_basis,
             "unknowns": sorted(set(procurement_unknowns + ["ORDERABLE_PART_SCOPE"])),
             "next_actions": procurement_next_actions,
@@ -397,8 +494,8 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
                 "RETENTION": "按正式资料声明的温度、数据保持时间和寿命条件制定验证。" if "RETENTION" in matched_domains else "Retention 条件/判据缺失；测试阈值保持 UNKNOWN。",
                 "ECC_BIT_FLIP": "按正式 ECC 能力及错误语义制定采集和拦截项。" if "ECC_BIT_FLIP" in matched_domains else "ECC/Bit Flip 判据缺失；测试阈值保持 UNKNOWN。",
                 "BAD_BLOCK": (
-                    "正式资料未声明运行累计坏块计数器；不得构造运行阈值，需确认控制器/固件遥测能力并验证可观测性。"
-                    if bad_block_counter_undeclared else
+                    "受控证据记录：数据手册未声明运行累计坏块计数器；不得构造运行阈值，需确认控制器/固件遥测能力并验证可观测性。"
+                    if bad_block_screen.get("status") == "RUNTIME_COUNTER_NOT_DECLARED" else
                     "按正式证据中明确的坏块管理边界设计验证；静态最大坏块数不得当作运行计数阈值。"
                     if "BAD_BLOCK" in matched_domains else
                     "运行态坏块计数/处理规则缺失；不得从静态最大坏块数构造运行阈值。"

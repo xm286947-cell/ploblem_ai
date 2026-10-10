@@ -118,6 +118,20 @@ class KnowledgeReleaseConsumer:
             entry = entries.get(name)
             if entry and entry.get("sha256") and _sha256(self.root / name) != entry["sha256"]:
                 raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_HASH_MISMATCH")
+        objects = _json(self.root / "knowledge_objects.json").get("objects", [])
+        evidences = _json(self.root / "evidences.json").get("evidences", [])
+        sources = _json(self.root / "source_references.json").get("source_references", [])
+        snapshot_material = {
+            "knowledge_release_version": manifest["knowledge_release_version"],
+            "objects": objects,
+            "evidences": evidences,
+            "source_references": sources,
+        }
+        snapshot_bytes = json.dumps(
+            snapshot_material, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if hashlib.sha256(snapshot_bytes).hexdigest() != manifest.get("snapshot_hash"):
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_SNAPSHOT_HASH_MISMATCH")
         return manifest
 
     def _payload(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
