@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from .legacy_materials_rc1 import MaterialRepository, MaterialImportService
+from quality_knowledge.legacy_materials_rc1 import MaterialRepository, MaterialImportService
 from .missed_test_adapter import build_missed_test_rows
 ALLOWED={'.xlsx','.xlsm'}
 
