@@ -5,6 +5,9 @@ on:
     branches:
       - fix/major-v11-windows-excel-progress-599
       - fix/major-v11-windows-refresh-recovery-605
+  pull_request:
+    branches:
+      - fix/major-v11-windows-excel-progress-599
   workflow_dispatch:
 
 permissions:
