@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   old-scenario-regression:
@@ -83,21 +82,3 @@ jobs:
             LEGACY_QUALITY_SCENARIO_RESTORE_RC1.zip
             RESTORE_PACKAGE_SHA256.txt
           if-no-files-found: error
-
-  gate-report:
-    needs: [old-scenario-regression, restoration-zip]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Report actual CI gate into restoration PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          REGRESSION: ${{ needs.old-scenario-regression.result }}
-          PACKAGE: ${{ needs.restoration-zip.result }}
-          RUN_ID: ${{ github.run_id }}
-          COMMIT: ${{ github.sha }}
-        shell: bash
-        run: |
-          printf -v result 'LEGACY_RC1_RESTORE_CI\nHEAD=%s\nWORKFLOW_RUN=%s\nNATIVE_OS_REGRESSION=%s\nRESTORE_ZIP=%s\nREAL_CUSTOMER_DB=NOT_TESTED\nRELEASE=NOT_APPROVED' "$COMMIT" "$RUN_ID" "$REGRESSION" "$PACKAGE"
-          gh api "repos/$GH_REPO/issues/610/comments" -f body="$result"
