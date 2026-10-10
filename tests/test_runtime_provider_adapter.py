@@ -1124,3 +1124,113 @@ def test_hardware_stage_b_exhausted_length_fails_closed(
     assert result.error.details["max_tokens"] == 3072
     assert result.execution.provider_calls == 2
     assert count == [3072, 3072]
+
+
+def test_hardware_stage_a_300_seconds_only_stage_b_remains_120() -> None:
+    import yaml
+
+    stage_a = yaml.safe_load((ROOT / "config/runtime/agents/hardware_case.r1_case_extract.yaml").read_text(encoding="utf-8"))
+    stage_b = yaml.safe_load((ROOT / "config/runtime/agents/hardware_case.r1_reuse_derive.yaml").read_text(encoding="utf-8"))
+    assert stage_a["execution"]["timeout_seconds"] == 300
+    assert stage_a["execution"]["budget"]["max_provider_calls_per_step"] == 2
+    assert stage_b["execution"]["timeout_seconds"] == 120
+
+
+@pytest.mark.parametrize("response_headers_arrived", [False, True])
+def test_hardware_stage_a_timeout_diagnostics_do_not_leak_source_or_secret(
+    tmp_path: Path, monkeypatch, response_headers_arrived: bool,
+) -> None:
+    class SlowBody:
+        status = 200
+        headers = {"X-Request-Id": "safe-request-id"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            raise TimeoutError("PRIVATE_WORD_AND_TOKEN_MUST_NOT_APPEAR")
+
+    def fake_urlopen(_request, timeout):
+        assert timeout == 300
+        if response_headers_arrived:
+            return SlowBody()
+        raise TimeoutError("PRIVATE_WORD_AND_TOKEN_MUST_NOT_APPEAR")
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    path = tmp_path / "safe-provider-events.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(path))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="SECRET_SYSTEM_PROMPT_MUST_NOT_APPEAR",
+        output_schema=SimpleResult,
+        timeout_seconds=300,
+        response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as failure:
+        adapter(
+            {"private_word": "PRIVATE_WORD_AND_TOKEN_MUST_NOT_APPEAR"},
+            {"runtime": {
+                "provider_call_seq": 1,
+                "provider_config": {
+                    "base_url": "https://internal.example/v1",
+                    "model": "internal-model",
+                    "api_key": SECRET,
+                },
+            }},
+        )
+
+    assert failure.value.code == "PROVIDER_TRANSPORT"
+    d = failure.value.details
+    assert d["exception_type"] == "TimeoutError"
+    assert d["is_timeout"] is True
+    assert d["elapsed_ms"] >= 0
+    assert d["effective_timeout_seconds"] == 300
+    assert d["response_headers_observed"] is response_headers_arrived
+    assert d["request_phase"] == ("READ_RESPONSE_BODY" if response_headers_arrived else "BEFORE_RESPONSE_HEADERS")
+    assert d["http_status"] == (200 if response_headers_arrived else "NOT_RECORDED")
+    assert d["provider_request_id"] == ("safe-request-id" if response_headers_arrived else "NOT_RECORDED")
+    trace_text = path.read_text(encoding="utf-8")
+    assert '"phase": "transport_error"' in trace_text
+    for forbidden in (SECRET, "SECRET_SYSTEM_PROMPT_MUST_NOT_APPEAR", "PRIVATE_WORD_AND_TOKEN_MUST_NOT_APPEAR", "internal.example"):
+        assert forbidden not in str(d)
+        assert forbidden not in trace_text
+
+
+def test_hardware_timeout_safe_diagnostics_are_durable_in_existing_runtime_store(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    def fake_urlopen(_request, _timeout):
+        raise TimeoutError("PRIVATE_PROVIDER_EXCEPTION_CONTENT")
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"SimpleResult": SimpleResult},
+        environ={},
+    )
+    _write_authless_agent(tmp_path)
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+    runtime.load_agent("agent.yaml")
+    result = runtime.invoke(AgentRequest(
+        request_id="hardware-timeout-safe-diagnostics",
+        agent_id="authless.local",
+        input={"word": "PRIVATE_ORIGINAL_WORD_CONTENT"},
+    ))
+    assert result.status != RuntimeStatus.COMPLETED
+    assert result.error.code == "PROVIDER_TRANSPORT"
+    runs = store.list_runs(result.task_id)
+    attempts = store.list_attempts(store.list_step_runs(runs[0].run_id)[0].step_run_id)
+    assert attempts
+    assert all(attempt.error.details["is_timeout"] is True for attempt in attempts)
+    assert all(attempt.error.details["request_phase"] == "BEFORE_RESPONSE_HEADERS" for attempt in attempts)
+    db_dump = raw_database_dump(store)
+    assert "effective_timeout_seconds" in db_dump
+    assert "PRIVATE_PROVIDER_EXCEPTION_CONTENT" not in db_dump
