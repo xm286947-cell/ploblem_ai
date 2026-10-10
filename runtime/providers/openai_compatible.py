@@ -496,13 +496,41 @@ class OpenAICompatibleProviderAdapter:
                 retryable=True,
             ) from exc
 
+        # Carry only bounded, non-content diagnostics into the Runtime Attempt.
+        # A relay may omit finish_reason and usage; absence is not truncation.
+        safe_reason = (
+            finish_reason.strip().lower()
+            if isinstance(finish_reason, str)
+            else "unknown"
+        )
+        if safe_reason not in {
+            "stop", "length", "content_filter", "tool_calls", "function_call",
+        }:
+            safe_reason = "unknown"
+        provider_metrics: dict[str, Any] = {"finish_reason": safe_reason}
+        usage = envelope.get("usage") if isinstance(envelope, dict) else None
+        if isinstance(usage, dict):
+            for name in ("prompt_tokens", "completion_tokens"):
+                value = usage.get(name)
+                if type(value) is int and value >= 0:
+                    provider_metrics[name] = value
+        effective_max_tokens = provider.get("max_tokens")
+        if type(effective_max_tokens) is int and effective_max_tokens > 0:
+            provider_metrics["effective_max_tokens"] = effective_max_tokens
+        if isinstance(content, str):
+            provider_metrics["output_chars"] = len(content)
+            provider_metrics["output_bytes"] = len(content.encode("utf-8"))
+        metrics_sink = context.get("provider_metrics")
+        if isinstance(metrics_sink, dict):
+            metrics_sink.update(provider_metrics)
+
         if str(finish_reason or "").lower() == "length":
             raise RuntimeStepError(
                 "provider output was truncated",
                 code="OUTPUT_TRUNCATED",
                 category=ErrorCategory.VALIDATION,
                 retryable=True,
-                details={"finish_reason": "length"},
+                details=provider_metrics,
             )
 
         if not isinstance(content, str) or not content.strip():
@@ -511,6 +539,7 @@ class OpenAICompatibleProviderAdapter:
                 code="EMPTY_PROVIDER_CONTENT",
                 category=ErrorCategory.VALIDATION,
                 retryable=True,
+                details=provider_metrics,
             )
 
         try:
@@ -521,6 +550,7 @@ class OpenAICompatibleProviderAdapter:
                 code="INVALID_JSON",
                 category=ErrorCategory.VALIDATION,
                 retryable=True,
+                details={**provider_metrics, "json_error_pos": exc.pos},
             ) from exc
 
         return self._validate_output(parsed)
