@@ -20,7 +20,7 @@ from quality_knowledge.major_cases.import_governance import (
 from services.major_case_production import MajorCaseProductionService, MajorProductionError
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('uvicorn.error')
 
 
 def _error(error: MajorProductionError) -> HTTPException:
