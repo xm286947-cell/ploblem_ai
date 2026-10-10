@@ -1,0 +1,29 @@
+agent_id: major_issue.repeat_similarity
+version: v1
+label: Major Issue Repeat Similarity Analysis
+prompt:
+  ref: prompts/similarity_analyzer.md
+  version: M8.2-P1
+
+output_schema:
+  ref: RepeatSimilarityDTO
+  version: "1.0.0"
+
+execution:
+  timeout_seconds: 180
+  retry:
+    transport_attempts: 2
+    validation_attempts: 2
+    step_attempts: 1
+  budget:
+    max_provider_calls_per_step: 2
+  model:
+    temperature: 0
+    max_tokens: 4096
+
+metadata:
+  business_domain: MAJOR_CASE
+  analysis_stage: repeat_similarity
+  provider_response_shape: json_object
+  what_how_boundary: RUNTIME_EXECUTION_ONLY
+  model_selection: ACTIVE_MODEL
