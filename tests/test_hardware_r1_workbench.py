@@ -547,6 +547,54 @@ def test_candidate_commit_failure_never_enters_review_or_ready(
     assert item["error_code"] == "CANDIDATE_ASSET_COMMIT_FAILED"
     assert item["candidate_id"] is None
     assert item["candidate"] is None
+    assert item["candidate_asset"] is None
+    assert item["candidate_commit_failure_code"] == "CANDIDATE_STORAGE_IO_ERROR"
+    assert item["pipeline_result"]["candidate_commit_failure_code"] == "CANDIDATE_STORAGE_IO_ERROR"
+    assert "simulated durable storage failure" not in json.dumps(item, ensure_ascii=False)
+
+
+def test_candidate_commit_typed_error_is_visible_without_raw_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from services.hardware_asset_repository import CandidateAssetRepositoryError
+
+    case_id, source_id = "A0207", "a" * 64
+    result = _result(status="NEEDS_REVIEW", case_id=case_id, source_id=source_id)
+
+    class InvalidCandidateRepository:
+        def create_or_commit_candidate(self, **_kwargs):
+            raise CandidateAssetRepositoryError("CANDIDATE_INPUT_INVALID")
+
+    store = HardwareR1WorkbenchStore(tmp_path / "workbench.db")
+    batch_id = store.create_batch()
+    item_id = store.add_item(
+        batch_id, source_file="A0207.docx", business_case_id=case_id,
+        source_id=source_id, snapshot=_snapshot(case_id, source_id)
+    )
+    calls = []
+    def cached_pipeline(*_args, **_kwargs):
+        calls.append(1)
+        return deepcopy(result)
+    monkeypatch.setattr(workbench_module, "run_r1_agent_extraction", cached_pipeline)
+    service = HardwareR1WorkbenchService(
+        store, source_store=_ActiveSourceStub(case_id, source_id),
+        structurer_factory=lambda: object(),
+        candidate_repository=InvalidCandidateRepository(),
+    )
+    failed = service.run_batch(batch_id)["items"][0]
+    assert failed["error_code"] == "CANDIDATE_ASSET_COMMIT_FAILED"
+    assert failed["candidate_commit_failure_code"] == "CANDIDATE_INPUT_INVALID"
+    assert failed["candidate"] is None
+    assert failed["candidate_id"] is None
+    assert failed["result"] == "FAILED"
+    assert len(calls) == 1
+
+    # Retry the failed commit using existing pipeline output (fake here), not
+    # a new source or a forged published Candidate.
+    retried = service.run_resume_item(item_id)
+    assert retried["candidate_commit_failure_code"] == "CANDIDATE_INPUT_INVALID"
+    assert retried["result"] == "FAILED"
+    assert len(calls) == 2
 
 
 def test_workbench_candidate_display_reads_asset_not_result_json(tmp_path: Path) -> None:
