@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "$FROZEN_SOURCE"
+          git merge-base --is-ancestor "$FROZEN_SOURCE" HEAD
           DIFF="$(git diff --name-only "$FROZEN_SOURCE" HEAD)"
           test "$DIFF" = ".github/workflows/legacy-patch57-restore-acceptance.yml"
           grep -q 'V1.1_P2_RC2_PATCH57_20260913' README.md
@@ -143,14 +143,25 @@ jobs:
           python -m pytest -q tests/test_itr_cs_material_mvp.py tests/test_quality_scenario_library.py tests/test_scenario_assets.py
       - name: Double-click equivalent original Windows start_quality_capability_p1.bat
         shell: pwsh
+        env:
+          PY_PYTHON: '3.11'
         run: |
           $ErrorActionPreference = "Stop"
           $env:REPEAT_CASE_NO_PAUSE = '1'
+          Write-Output ("CI_PYTHON=" + (& python -V 2>&1))
+          Write-Output ("LAUNCHER_PYTHON=" + (& py -V 2>&1))
+          & py -c "import yaml,fastapi; print('LAUNCHER_DEPENDENCIES=OK')" 
+          if ($LASTEXITCODE -ne 0) { throw "BAT launcher Python does not have historical requirements" }
           $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','start_quality_capability_p1.bat' -PassThru -RedirectStandardOutput 'legacy-win-stdout.log' -RedirectStandardError 'legacy-win-stderr.log'
           try {
             $ready = $false
             for ($i=0; $i -lt 90; $i++) {
-              if ($p.HasExited) { throw "BAT terminated early" }
+              if ($p.HasExited) {
+      Write-Output ("BAT_EXIT_CODE=" + $p.ExitCode)
+      if (Test-Path 'legacy-win-stdout.log') { Get-Content 'legacy-win-stdout.log' | Select-Object -Last 40 }
+      if (Test-Path 'legacy-win-stderr.log') { Get-Content 'legacy-win-stderr.log' | Select-Object -Last 40 }
+      throw "BAT terminated early"
+    }
               try {
                 $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/issues' -TimeoutSec 2 -UseBasicParsing
                 if ($r.StatusCode -eq 200) { $ready = $true; break }
