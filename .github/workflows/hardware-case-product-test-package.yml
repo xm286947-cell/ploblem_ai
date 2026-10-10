@@ -302,6 +302,8 @@ jobs:
           tests/test_hardware_tree_import_m3a_api.py
           tests/test_hardware_tree_import_m3b_frontend.py
           tests/test_hardware_case_runtime_adapter.py
+          tests/test_runtime_provider_adapter.py
+          tests/test_runtime_provider_contract.py
           tests/test_hardware_case_evidence_source.py
           tests/test_hardware_r1_word_import_web.py
           tests/test_hardware_r1_markdown_agent.py
