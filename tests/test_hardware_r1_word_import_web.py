@@ -7,6 +7,7 @@ from zipfile import ZipFile
 from fastapi.testclient import TestClient
 
 from quality_knowledge.web.p0_app import create_p0_app
+from services.hardware_asset_repository import CandidateAssetRepository
 
 
 MAINTAINER = {"X-Hardware-Case-Role": "MAINTAINER"}
@@ -38,7 +39,15 @@ def _docx(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _bootstrap_asset_schema(tmp_path: Path) -> None:
+    # The normal HardwareStartupCoordinator FIRST_INSTALL performs this step.
+    # Standalone create_p0_app tests must explicitly initialize the same schema,
+    # including hardware_asset_operation_journal, before exercising Word APIs.
+    CandidateAssetRepository(tmp_path / "hardware_asset.db").initialize()
+
+
 def _client(tmp_path: Path) -> TestClient:
+    _bootstrap_asset_schema(tmp_path)
     return TestClient(
         create_p0_app(
             tmp_path / "quality.db",
@@ -172,6 +181,7 @@ def test_r1_agent_poc_uses_injected_unified_runtime_and_evidence_gate(tmp_path: 
             "material_links": [],
         }
 
+    _bootstrap_asset_schema(tmp_path)
     client = TestClient(
         create_p0_app(
             tmp_path / "quality.db",
