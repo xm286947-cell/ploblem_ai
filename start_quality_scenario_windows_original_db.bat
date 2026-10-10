@@ -5,7 +5,10 @@ for %%I in ("%~dp0.") do set "PACKAGE_ROOT=%%~fI"
 cd /d "%PACKAGE_ROOT%"
 
 echo ============================================================
-echo Quality Scenario Windows - Original DB Acceptance
+echo Quality Scenario Windows - CONTROLLED MOCK acceptance ONLY
+echo NOT REAL AI: This entry cannot prove actual quality scenario generation.
+echo For real model business evaluation use:
+echo   start_quality_scenario_windows_real_provider.bat
 echo ============================================================
 echo SIMPLE MODE
 echo 1. Put your existing DB in this package folder.
