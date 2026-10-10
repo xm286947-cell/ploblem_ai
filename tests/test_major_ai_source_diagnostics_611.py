@@ -5,6 +5,9 @@ No real Provider credential is used. Browser and live Provider have separate gat
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
+
+from pypdf import PdfWriter
 
 from fastapi.testclient import TestClient
 
@@ -13,10 +16,17 @@ from quality_knowledge.p0.initializer import P0Initializer
 from quality_knowledge.web.p0_app import create_p0_app
 from runtime.contracts import SourceRef
 
-from tests.test_major_refresh_recovery_605 import XLS_FIXTURE, _pdf
-
-
 ROOT = Path(__file__).resolve().parents[1]
+XLS_FIXTURE = ROOT / "tests/fixtures/major_v5/cases.xls"
+
+
+def _pdf() -> bytes:
+    output = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(output)
+    return output.getvalue()
+
 API = "/api/v2/major-production"
 
 
