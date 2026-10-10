@@ -1,7 +1,6 @@
 agent_id: major_issue.repeat_case
 version: v1
 label: Major Issue Repeat Case Decision
-model_ref: qwen_prod
 
 prompt:
   ref: prompts/repeat_decision.md
