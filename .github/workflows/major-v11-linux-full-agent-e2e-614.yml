@@ -235,8 +235,11 @@ jobs:
           print("MACOS_TRUE_BINARY_XLS_PREVIEW_IN_PACKAGED_RUNTIME=PASS")
           PY
           cd "$GITHUB_WORKSPACE"
-          # UI test tools are outside DUT .venv and may NOT install xlrd in it.
-          python -m pip install --disable-pip-version-check pytest==8.4.2 playwright==1.56.0 openpyxl pypdf
+          # Install browser test harness dependencies in the runner Python,
+          # NEVER in the product .venv. Native .command and real XLS already
+          # passed before this install; it cannot mask the runtime closure.
+          python -m pip install --disable-pip-version-check -r "$DUT/requirements-major-mvp-product.txt"
+          python -m pip install --disable-pip-version-check pytest==8.4.2 playwright==1.56.0
           python -m playwright install chromium
           python -m pytest -q tests/e2e/test_major_linux_full_click_614.py
           echo 'MACOS_REAL_CHROMIUM_CONFIRM_AND_69_ROW_PAGING=PASS'
