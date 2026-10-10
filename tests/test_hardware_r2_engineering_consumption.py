@@ -41,6 +41,9 @@ def test_analysis_is_read_only_and_cited_to_exact_field():
     assert output["case_evidence_refs"] == ["E-2"]
     assert output["evidence_binding"] == "CASE_LEVEL_ONLY"
     assert output["status"] == "AI_ADVISORY_REQUIRES_ENGINEERING_REVIEW"
+    # The model's own prose must not be treated as evidence-backed engineering fact.
+    assert output["items"][0]["suggestion"] == "参考源电路必须满足精度要求"
+    assert output["items"][0]["advice_scope"] == "VERBATIM_FORMAL_EXCERPT"
 
 
 def test_analysis_rejects_ungrounded_quote_and_unknown_case():
