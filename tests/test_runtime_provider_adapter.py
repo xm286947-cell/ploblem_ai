@@ -1203,7 +1203,8 @@ def test_hardware_stage_a_timeout_diagnostics_do_not_leak_source_or_secret(
 def test_hardware_timeout_safe_diagnostics_are_durable_in_existing_runtime_store(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    def fake_urlopen(_request, _timeout):
+    def fake_urlopen(_request, timeout):
+        assert timeout > 0
         raise TimeoutError("PRIVATE_PROVIDER_EXCEPTION_CONTENT")
 
     monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
