@@ -45,6 +45,7 @@ jobs:
                      'quality_knowledge/web/templates/quality_scenario',
                      'quality_knowledge/web/templates/scenario_', 'tests/test_legacy_scenario_restoration.py',
                      'tests/test_scenario_assets.py', 'start_quality_capability_p1.command',
+                     'tools/verify_legacy_quality_db.py',
                      '.github/workflows/legacy-scenario-restoration.yml')
           fixed = {'quality_knowledge/web/app.py', 'quality_knowledge/web/templates/base.html'}
           unexpected = [x for x in changed if x not in fixed and not x.startswith(allowed)]
