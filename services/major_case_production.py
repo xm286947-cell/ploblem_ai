@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import json
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -53,6 +54,20 @@ class MajorCaseProductionService:
         self.provider = provider
         self.store = SqliteTaskStore(runtime_db_path)
         self.runtime = LightweightExecutionEngine(self.store)
+        # Write only explicitly sanitized Major diagnostics to the per-user data directory.
+        self.diagnostic_log_path = Path(self.store.db_path).parent / "diagnostics" / "major_analysis.log"
+        self.diagnostic_log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_target = str(self.diagnostic_log_path.resolve())
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", "") == log_target
+            for handler in logger.handlers
+        ):
+            handler = logging.FileHandler(log_target, encoding="utf-8")
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
     def intake_source(
         self,
@@ -144,9 +159,12 @@ class MajorCaseProductionService:
 
         # Prefer a parsed review/source document when present. Excel Source Fact
         # is a first-class fallback and uses the same Runtime + review pipeline.
+        document_links = [link for link in links if link.get("source_type") == "MAJOR_SOURCE_DOCUMENT"]
+        # Some reports have zero parsed fragments. Prefer usable evidence
+        # rather than silently selecting the first (possibly empty) PDF.
         document_link = next(
-            (link for link in links if link.get("source_type") == "MAJOR_SOURCE_DOCUMENT"),
-            None,
+            (item for item in document_links if self.repository.fragments(str(item.get("record_id") or ""))),
+            document_links[0] if document_links else None,
         )
         link = document_link or next(
             (link for link in links if link.get("source_type") == "MAJOR_EXCEL_SOURCE_FACT"),
@@ -164,15 +182,17 @@ class MajorCaseProductionService:
                 uri=f"major-source://{record_id}",
             )
             fragments = self.repository.fragments(record_id)
-            source_text = "\n".join(str(item.get("text_content") or "") for item in fragments[:20])
+            # Never silently discard sections 21+ of a parsed review PDF/DOCX.
+            source_text = "\n".join(str(item.get("text_content") or "") for item in fragments)
             provider_fragments = [
                 {
                     "fragment_id": str(item["fragment_id"]),
                     "section_path": str(item.get("section_path") or ""),
                     "location_ref": str(item.get("location_ref") or ""),
                     "text_content": str(item.get("text_content") or ""),
+                    "source": source.model_dump(mode="json"),
                 }
-                for item in fragments[:20]
+                for item in fragments
             ]
             source_revision_id = record_id
         else:
@@ -202,9 +222,87 @@ class MajorCaseProductionService:
                     "section_path": "STRUCTURED SOURCE FACT",
                     "location_ref": record_id,
                     "text_content": source_text,
+                    "source": source.model_dump(mode="json"),
                 }
             ]
             source_revision_id = record_id
+
+        # A linked Excel Source Fact and a PDF review are *two distinct evidence
+        # sources*, not alternatives. Keep their SourceRef and locator separate.
+        # Only include facts linked to this exact Event; never borrow another
+        # Event's assertions from the same multi-event Case.
+        excel_fragments = []
+        seen_fact_ids: set[str] = set()
+        for fact_link in links:
+            if fact_link.get("source_type") != "MAJOR_EXCEL_SOURCE_FACT":
+                continue
+            fact_id = str(fact_link.get("record_id") or "")
+            if fact_id in seen_fact_ids or not fact_id:
+                continue
+            seen_fact_ids.add(fact_id)
+            if fact_id == source_revision_id:
+                continue  # Excel-only fallback was already built above.
+            with self.repository.connect() as connection:
+                fact_row = connection.execute(
+                    "SELECT source_fact_revision_id,revision_no,source_hash,normalized_json,raw_json "
+                    "FROM kb_source_fact_revision WHERE source_fact_revision_id=? AND case_id=?",
+                    (fact_id, case_id),
+                ).fetchone()
+            if fact_row is None:
+                raise MajorProductionError("MAJOR_EXCEL_SOURCE_FACT_NOT_FOUND")
+            fact_source = SourceRef(
+                source_id=fact_id,
+                source_type="MAJOR_EXCEL_SOURCE_FACT",
+                revision=str(fact_row["revision_no"] or "1"),
+                content_hash=str(fact_row["source_hash"]),
+                fingerprint=str(fact_row["source_hash"]),
+                uri=f"major-excel://{fact_id}",
+            )
+            fact_text = str(fact_row["normalized_json"] or "{}") + "\n" + str(fact_row["raw_json"] or "{}")
+            excel_fragments.append({
+                "fragment_id": fact_id,
+                "section_path": "STRUCTURED SOURCE FACT",
+                "location_ref": fact_id,
+                "text_content": fact_text,
+                "source": fact_source.model_dump(mode="json"),
+            })
+        additional_documents = []
+        for doc_link in document_links:
+            other_id = str(doc_link.get("record_id") or "")
+            if not other_id or other_id == source_revision_id:
+                continue
+            other_version = self.repository.version(other_id)
+            if not other_version:
+                raise MajorProductionError("MAJOR_SOURCE_VERSION_NOT_FOUND")
+            other_source = SourceRef(
+                source_id=other_id,
+                source_type="MAJOR_SOURCE_DOCUMENT",
+                revision=str(other_version.get("version_no") or "1"),
+                content_hash=str(other_version["content_hash"]),
+                fingerprint=str(other_version["content_hash"]),
+                uri=f"major-source://{other_id}",
+            )
+            for fragment in self.repository.fragments(other_id):
+                additional_documents.append({
+                    "fragment_id": str(fragment["fragment_id"]),
+                    "section_path": str(fragment.get("section_path") or ""),
+                    "location_ref": str(fragment.get("location_ref") or ""),
+                    "text_content": str(fragment.get("text_content") or ""),
+                    "source": other_source.model_dump(mode="json"),
+                })
+        provider_fragments = excel_fragments + provider_fragments + additional_documents
+        if not provider_fragments or not any(item["text_content"].strip() for item in provider_fragments):
+            raise MajorProductionError("MAJOR_ANALYSIS_SOURCE_TEXT_EMPTY")
+        # The real provider bridge consumes 'fragments', not source_text.
+        # Keep source_text consistent for injected providers and test harnesses.
+        source_text = "\n".join(item["text_content"] for item in provider_fragments)
+        logger.info(
+            "MAJOR_ANALYSIS_INPUT_READY case_id=%s event_id=%s fragments=%d "
+            "excel_facts=%d source_chars=%d",
+            case_id, event["event_id"], len(provider_fragments),
+            sum(f["source"]["source_type"] == "MAJOR_EXCEL_SOURCE_FACT" for f in provider_fragments),
+            len(source_text),
+        )
         specs = [
             MajorIssueObjectSpec(
                 object_id=f"{event['event_id']}:{entry_type}",
@@ -282,6 +380,71 @@ class MajorCaseProductionService:
                 analysis_metadata={"runtime_task_id": outcome.task_id, "provider_calls": outcome.provider_calls},
             ))
         return {"case_id": case_id, "event_id": event["event_id"], "runtime_task_id": outcome.task_id, "candidates": created}
+
+    def analysis_diagnostics(self, case_id: str) -> dict[str, Any]:
+        """Read-only sanitized statuses, never raw requests, prompts, outputs or keys."""
+        if not self.repository.case_detail(case_id):
+            raise MajorProductionError("MAJOR_CASE_NOT_FOUND")
+        recent: list[dict[str, Any]] = []
+        with self.store._connect() as connection:
+            rows = connection.execute(
+                "SELECT task_id,request_json FROM runtime_task ORDER BY rowid DESC LIMIT 200"
+            ).fetchall()
+        for row in rows:
+            if len(recent) >= 5:
+                break
+            try:
+                request_data = json.loads(row["request_json"] or "{}")
+            except (ValueError, TypeError):
+                continue
+            metadata = request_data.get("metadata") or {}
+            if metadata.get("business_domain") != "MAJOR_CASE" or metadata.get("business_id") != case_id:
+                continue
+            task_id = str(row["task_id"])
+            snapshot = self.store.get_task_snapshot(task_id)
+            expected = [
+                str(obj.get("object_id"))
+                for obj in (request_data.get("input") or {}).get("expected_objects") or []
+                if isinstance(obj, dict)
+            ]
+            committed = {
+                str(partial.metadata.get("object_id") or "")
+                for partial in self.store.list_partial_results(task_id)
+            }
+            failures: list[dict[str, str]] = []
+            for run in self.store.list_runs(task_id):
+                for step in self.store.list_step_runs(run.run_id):
+                    if step.error:
+                        failures.append({"layer": "step", "code": step.error.code})
+                    for attempt in self.store.list_attempts(step.step_run_id):
+                        if attempt.error:
+                            failures.append({"layer": "attempt", "code": attempt.error.code})
+                if run.error:
+                    failures.append({"layer": "run", "code": run.error.code})
+            if snapshot.error:
+                failures.append({"layer": "task", "code": snapshot.error.code})
+            failures = [
+                record for record in failures
+                if 0 < len(record["code"]) <= 100
+                and all(ch.isalnum() or ch in "_-." for ch in record["code"])
+            ]
+            recent.append({
+                "task_id": task_id,
+                "run_id": snapshot.current_run_id,
+                "status": snapshot.status.value,
+                "provider_calls": self.store.count_task_provider_calls(task_id),
+                "expected_objects": len(expected),
+                "committed_objects": len(committed),
+                "missing_types": [obj.rsplit(":", 1)[-1] for obj in expected if obj not in committed],
+                "failure_codes": failures[-15:],
+                "created_at": snapshot.created_at.isoformat(),
+            })
+        return {
+            "case_id": case_id,
+            "tasks": recent,
+            "diagnostic_log": str(self.diagnostic_log_path),
+            "note": "read-only Runtime status; no source text, prompt, model output or secrets",
+        }
 
     def confirm_entry(self, entry_id: str, *, reviewer: str, content: str = "", reason: str = "") -> dict[str, Any]:
         entry = self.repository.entry(entry_id)

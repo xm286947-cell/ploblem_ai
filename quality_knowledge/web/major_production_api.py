@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from starlette.concurrency import run_in_threadpool
@@ -91,8 +91,8 @@ def create_major_production_router(
 
     @router.post("/excel/preview")
     async def excel_preview(
+        request: Request,
         file: UploadFile = File(...),
-        materials: list[UploadFile] = File(default=[]),
         group_code: str = Form("MAJOR"),
         domain: str = Form("QUALITY"),
         actor: str = Form("web-user"),
@@ -108,11 +108,22 @@ def create_major_production_router(
         if not excel_content:
             raise HTTPException(400, "MAJOR_EXCEL_EMPTY")
         material_payload: list[tuple[str, bytes]] = []
-        for material in materials:
-            material_suffix = Path(material.filename or "").suffix.lower()
+        # The multipart parser represents an unselected optional file input
+        # as an empty *string*, not an UploadFile. FastAPI's typed
+        # list[UploadFile] rejects this before the handler with HTTP 422.
+        for material in (await request.form()).getlist("materials"):
+            if isinstance(material, str):
+                if not material.strip():
+                    continue
+                raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
+            content = await material.read()
+            name = (material.filename or "").strip()
+            if not name and not content:
+                continue
+            material_suffix = Path(name).suffix.lower()
             if material_suffix not in {".pdf", ".docx"}:
                 raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
-            material_payload.append((material.filename or "material.bin", await material.read()))
+            material_payload.append((name, content))
         logger.info(
             "MAJOR_EXCEL_PREVIEW_UPLOAD_COMPLETE request_id=%s excel_bytes=%d material_count=%d",
             request_id, len(excel_content), len(material_payload),
@@ -336,6 +347,14 @@ def create_major_production_router(
     def analyze(case_id: str, event_id: str = "") -> dict[str, Any]:
         try:
             return service.analyze(case_id, event_id=event_id)
+        except MajorProductionError as error:
+            raise _error(error) from error
+
+    @router.get("/cases/{case_id}/analysis/diagnostics")
+    def analysis_diagnostics(case_id: str) -> dict[str, Any]:
+        """Read-only, same case scope as case detail; never returns source/credentials."""
+        try:
+            return service.analysis_diagnostics(case_id)
         except MajorProductionError as error:
             raise _error(error) from error
 

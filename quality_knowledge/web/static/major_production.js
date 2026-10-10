@@ -46,7 +46,7 @@
       if (code === 'MAJOR_ANALYSIS_INCOMPLETE') {
         throw new Error('AI 分析未完成，已导入的数据保持不变。' +
           (taskId ? ' Runtime Task：' + taskId + '。' : '') +
-          '请按 Task ID 查看后台 MAJOR_ANALYSIS_INCOMPLETE 诊断日志；没有完整结果前不能人工确认。');
+          '下方将列出 Runtime 任务诊断；没有完整结果前不能人工确认。');
       }
       const desc = typeof code === 'string' ? code : JSON.stringify(code);
       if (response.status === 401 || response.status === 403)
@@ -360,6 +360,11 @@
         (e.status === 'CONFIRMED' || e.status === 'CORRECTED')));
     const pending = live.some(e => e.status === 'PENDING');
     publishButton.disabled = !fullyReviewed || pending;
+    const reanalyze = root.querySelector('[data-major-analyze]');
+    if (reanalyze) {
+      reanalyze.disabled = pending;
+      reanalyze.textContent = pending ? '已有待审核 AI 候选' : '运行 AI 分析';
+    }
     root.querySelector('[data-major-state]').textContent = pending ? 'REVIEW_REQUIRED' :
       (fullyReviewed ? 'READY_TO_PUBLISH' : 'INTAKED');
     if ((detail.source_links || []).some(link => link.source_type === 'MAJOR_EXCEL_SOURCE_FACT')) {
@@ -393,8 +398,11 @@
       '</article>';
     renderBatchTable(excelPreview.querySelector('[data-major-batch-table]'), rows, preflight.errors);
     const problems = preflight.errors || [];
+    const isCommitted = batch.status === 'COMPLETED' || batch.status === 'PARTIAL';
     const blockers = excelPreview.querySelector('[data-major-blocking-reasons]');
-    if (problems.length) {
+    if (isCommitted) {
+      blockers.textContent = '该批次已经保存，确认导入已完成，不需要重新提交。';
+    } else if (problems.length) {
       blockers.innerHTML = '<h3>确认导入被阻止：' + problems.length +
         ' 项问题（以下为全部行级原因）</h3><ul>' +
         problems.map(item => '<li>' +
@@ -407,7 +415,10 @@
         : '该批次已不处于可确认的 PREVIEW 状态。';
     }
     const confirmButton = excelPreview.querySelector('[data-major-recovered-confirm]');
-    if (!preflight.confirmable) {
+    if (isCommitted) {
+      confirmButton.textContent = '已完成导入';
+      confirmButton.disabled = true;
+    } else if (!preflight.confirmable) {
       confirmButton.textContent = '查看无法确认的原因';
       confirmButton.addEventListener('click', () => {
         setExcelStatus('当前批次不可确认：' + problems.length + ' 项阻断。请查看预检表的“阻断原因”和下方详细列表。', true);
@@ -580,6 +591,39 @@
   });
 
   const analyzeButton = root.querySelector('[data-major-analyze]');
+  const diagnosticsButton = document.createElement('button');
+  diagnosticsButton.type = 'button';
+  diagnosticsButton.className = 'case-button secondary';
+  diagnosticsButton.textContent = '查看 AI 诊断';
+  analyzeButton.parentNode.appendChild(diagnosticsButton);
+  const diagnosticsBox = document.createElement('div');
+  diagnosticsBox.setAttribute('data-major-analysis-diagnostics', '');
+  diagnosticsBox.setAttribute('role', 'status');
+  analyzeButton.closest('[data-major-workflow]').appendChild(diagnosticsBox);
+  async function loadAnalysisDiagnostics() {
+    if (!state.caseId) {
+      diagnosticsBox.textContent = '请先选定 Case。';
+      return;
+    }
+    diagnosticsBox.textContent = '正在读取该 Case 的 Runtime 任务记录…';
+    const data = await read(await fetch(api + '/cases/' +
+      encodeURIComponent(state.caseId) + '/analysis/diagnostics'));
+    const tasks = data.tasks || [];
+    diagnosticsBox.innerHTML = '<article class="major-candidate"><h3>AI Runtime 诊断（只读）</h3>' +
+      (tasks.length ? tasks.map(item =>
+        '<p>Task ' + esc(item.task_id) + ' · ' + esc(item.status) +
+        ' · Provider 调用 ' + esc(item.provider_calls) +
+        ' · 已提交 ' + esc(item.committed_objects) + '/' + esc(item.expected_objects) +
+        ' · 缺失：' + esc((item.missing_types || []).join('、') || '无') +
+        ' · 错误码：' + esc((item.failure_codes || []).map(e => e.code).join('、') || '无') +
+        '</p>').join('') : '<p>该 Case 尚无 Runtime 任务记录。</p>') +
+      '<p>Windows 日志：' + esc(data.diagnostic_log || '不可用') +
+      '；不展示 Prompt、原文或密钥。</p></article>';
+  }
+  diagnosticsButton.addEventListener('click', () =>
+    loadAnalysisDiagnostics().catch(error => {
+      diagnosticsBox.textContent = '读取 AI 诊断失败：' + error.message;
+    }));
   const analyzeStatus = document.createElement('p');
   analyzeStatus.className = 'major-message';
   analyzeStatus.setAttribute('role', 'status');
@@ -588,9 +632,10 @@
   const setAnalyzeStatus = (message, error) => {
     analyzeStatus.textContent = message;
     analyzeStatus.className = 'major-message' + (error ? ' error' : '');
-    say(message, error);
   };
+  let analysisBusy = false;
   analyzeButton.addEventListener('click', async () => {
+    if (analysisBusy) return;
     if (!state.caseId) {
       setAnalyzeStatus('请先从批次导入结果中选择一个具体 Case；不能把整个批次一次性当作一个 Case 运行 AI。', true);
       return;
@@ -599,7 +644,10 @@
       setAnalyzeStatus('请先在工作区选定 Event。多事件不能自动选择，也不能跨 Event 混合证据。', true);
       return;
     }
+    analysisBusy = true;
     analyzeButton.disabled = true;
+    analyzeButton.textContent = 'AI 正在分析…';
+    let analysisSucceeded = false;
     try {
       setAnalyzeStatus('正在分析 Case ' + state.caseId + ' / Event ' + state.eventId + '；请勿重复点击。');
       const suffix = '?event_id=' + encodeURIComponent(state.eventId);
@@ -610,15 +658,25 @@
         return;
       }
       root.querySelector('[data-major-state]').textContent = 'REVIEW_REQUIRED';
+      analysisSucceeded = true;
       setAnalyzeStatus('AI 已生成 ' + data.candidates.length + ' 条候选，已从服务端恢复审核列表。');
     } catch (error) {
       setAnalyzeStatus('AI 分析未完成：' + error.message + '。已保存的数据不变。', true);
+      await loadAnalysisDiagnostics().catch(diagnosticError => {
+        diagnosticsBox.textContent = '诊断读取失败：' + diagnosticError.message;
+      });
     } finally {
-      analyzeButton.disabled = false;
+      analysisBusy = false;
+      analyzeButton.disabled = analysisSucceeded;
+      analyzeButton.textContent = analysisSucceeded ? '已生成候选，请人工审核' : '运行 AI 分析';
     }
   });
 
   async function confirm(button) {
+    if (button.disabled) return;
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = '正在保存人工确认…';
     try {
       const content = button.closest('.major-candidate').querySelector('p').textContent;
       const data = await read(await fetch(api + '/entries/' + encodeURIComponent(button.dataset.entry) + '/confirm', {
@@ -628,21 +686,35 @@
       button.closest('.major-candidate').querySelector('h3').textContent = data.entry_type +
         ' · CONFIRMED · revision ' + data.revision_no;
       button.disabled = true;
+      button.textContent = '已确认';
       const all = [...root.querySelectorAll('[data-entry]')].every(item => item.disabled);
       if (all) {
         root.querySelector('[data-major-publish]').disabled = false;
         root.querySelector('[data-major-state]').textContent = 'READY_TO_PUBLISH';
       }
       say('已创建人工确认修订。');
-    } catch (error) { say(error.message, true); }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+      say('人工确认失败：' + error.message, true);
+    }
   }
 
-  root.querySelector('[data-major-publish]').addEventListener('click', async () => {
+  root.querySelector('[data-major-publish]').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = '正在正式发布…';
     try {
       const data = await read(await fetch(api + '/events/' + encodeURIComponent(state.eventId) + '/publish', { method: 'POST' }));
       root.querySelector('[data-major-state]').textContent = data.publication_status + ' · ' + data.status;
+      button.textContent = '已发布';
       say('已创建正式 Historical Case：' + data.case_id + '。可在案例库检索和复用。');
-    } catch (error) { say(error.message, true); }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = '正式发布';
+      say('发布失败：' + error.message, true);
+    }
   });
   resumeOnLoad();
 })();

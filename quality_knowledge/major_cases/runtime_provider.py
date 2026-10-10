@@ -103,6 +103,7 @@ class MajorD01ProviderBridge:
                     "section_path": item.get("section_path") or "",
                     "location_ref": item.get("location_ref") or "",
                     "text_content": item.get("text_content") or "",
+                    "source_type": (item.get("source") or {}).get("source_type") or source.source_type,
                 }
                 for item in fragments.values()
             ],
@@ -147,15 +148,18 @@ class MajorD01ProviderBridge:
                             "fragment_id": fragment_id,
                         },
                     )
+                # Excel and PDF carry their own evidence identity.  Do not
+                # cite a PDF fragment as if it came from a structured Excel fact.
+                fragment_source = SourceRef.model_validate(fragment.get("source") or source.model_dump(mode="json"))
                 evidence.append(
                     EvidenceReference(
                         evidence_id=_evidence_id(
-                            source_fingerprint=source.fingerprint,
+                            source_fingerprint=fragment_source.fingerprint,
                             partition_key=partition_key,
                             object_id=item.object_id,
                             fragment_id=fragment_id,
                         ),
-                        source=source,
+                        source=fragment_source,
                         locator=EvidenceLocator(
                             type="SECTION",
                             value={
