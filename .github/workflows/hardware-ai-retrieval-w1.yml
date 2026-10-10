@@ -11,6 +11,11 @@ on:
       - "services/hardware_case_ai_retrieval.py"
       - "services/hardware_query_agent.py"
       - "services/hardware_assisted_search.py"
+      - "services/hardware_engineering_consumption.py"
+      - "quality_knowledge/web/hardware_engineering_consumption_api.py"
+      - "config/runtime/agents/hardware_retrieval.engineering_consumption.yaml"
+      - "prompts/runtime/hardware_retrieval/engineering_consumption_v1.md"
+      - "tests/test_hardware_r2_engineering_consumption.py"
       - "quality_knowledge/web/hardware_assisted_query_api.py"
       - "quality_knowledge/web/static/hardware_case_knowledge_consumption.js"
       - "config/runtime/agents/hardware_retrieval.query_understand.yaml"
@@ -60,5 +65,6 @@ jobs:
           tests/test_hardware_retrieval_query.py
           tests/test_hardware_case_ai_retrieval.py
           tests/test_hardware_r2_query_assist.py
+          tests/test_hardware_r2_engineering_consumption.py
           tests/test_hardware_case_ai_retrieval_w2.py
           tests/test_hardware_case_w2_ui_smoke_contract.py
