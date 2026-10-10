@@ -193,7 +193,9 @@ jobs:
           assert actual==expected,(actual,expected)
           with zipfile.ZipFile(archive) as z:
               assert z.testzip() is None
-              z.extractall(folder/"extracted")
+          # macOS native ditto (unlike Python extractall) preserves executable
+          # Unix mode bits, required for Finder double-click .command files.
+          subprocess.run(["ditto","-x","-k",str(archive),str(folder/"extracted")],check=True)
           dut=next((folder/"extracted").iterdir())
           manifest=json.loads((dut/"PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
           sha=subprocess.check_output(["git","-C",os.environ["GITHUB_WORKSPACE"],"rev-parse","HEAD"],text=True).strip()
