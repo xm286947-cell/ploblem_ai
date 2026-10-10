@@ -53,3 +53,16 @@ def test_return_context_fail_closed(tmp_path):
     r = c.get("/issues/unknown?return_to=https://evil.example", follow_redirects=False)
     assert r.status_code == 400
     assert "INVALID_ISSUE_RETURN_CONTEXT" in r.text
+
+
+def test_restoration_does_not_leak_into_overall_composition(tmp_path):
+    from quality_knowledge.web.app import create_legacy_quality_issue_router
+    db = tmp_path / "isolated.db"
+    create_app(db)
+    router, state = create_legacy_quality_issue_router(db, initialize_schema=False)
+    paths = {route.path for route in router.routes}
+    for path in ("/itr/recovery-workbench", "/itr/resolution-workbench",
+                 "/software-assessment", "/missed-test-analysis",
+                 "/materials/software-operations", "/quality-scenarios"):
+        assert path not in paths, path
+    assert not hasattr(state, "material_repository")
