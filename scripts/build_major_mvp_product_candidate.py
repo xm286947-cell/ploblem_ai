@@ -224,6 +224,13 @@ def _copy_source(root: Path, stage: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
+    # macOS Finder double-click and POSIX launchers must survive ZIP extract
+    # with executable permissions even when the source checkout lacks +x.
+    for executable in ("START_MAJOR_MVP.sh", "START_MAJOR_MVP.command"):
+        launcher = stage / executable
+        if launcher.exists():
+            launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
     # Do not distribute development model profiles, local endpoints, or credentials.
     _write_text(stage / "config/model.yaml", SAFE_LEGACY_MODEL)
     _write_text(stage / "config/runtime/model.yaml", SAFE_RUNTIME_MODEL)
