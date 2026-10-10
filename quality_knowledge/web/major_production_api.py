@@ -339,6 +339,14 @@ def create_major_production_router(
         except MajorProductionError as error:
             raise _error(error) from error
 
+    @router.get("/cases/{case_id}/analysis/diagnostics")
+    def analysis_diagnostics(case_id: str) -> dict[str, Any]:
+        """Read-only, same case scope as case detail; never returns source/credentials."""
+        try:
+            return service.analysis_diagnostics(case_id)
+        except MajorProductionError as error:
+            raise _error(error) from error
+
     @router.post("/entries/{entry_id}/confirm")
     def confirm(entry_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
