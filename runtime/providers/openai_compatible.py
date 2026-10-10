@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -432,8 +433,13 @@ class OpenAICompatibleProviderAdapter:
 
         response_http_status: int | str = "NOT_RECORDED"
         response_request_id = "NOT_RECORDED"
+        request_started = time.monotonic()
+        # urlopen() may include DNS, TCP, TLS and waiting for HTTP headers.
+        # Do not pretend this phase identifies which of those substeps stalled.
+        request_phase = "BEFORE_RESPONSE_HEADERS"
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
+                request_phase = "READ_RESPONSE_BODY"
                 observed_status = getattr(response, "status", None)
                 if type(observed_status) is int and 100 <= observed_status <= 599:
                     response_http_status = observed_status
@@ -492,6 +498,9 @@ class OpenAICompatibleProviderAdapter:
                 retryable=exc.code in _RETRYABLE_HTTP,
                 details={
                     "http_status": int(exc.code),
+                    "elapsed_ms": max(0, int((time.monotonic() - request_started) * 1000)),
+                    "effective_timeout_seconds": self.timeout_seconds,
+                    "request_phase": "HTTP_ERROR_RESPONSE",
                     **(
                         {"provider_request_id": request_id}
                         if request_id
@@ -500,23 +509,33 @@ class OpenAICompatibleProviderAdapter:
                 },
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            if _provider_trace_enabled():
-                _write_provider_trace(
-                    {
-                        "ts": datetime.now().isoformat(timespec="milliseconds"),
-                        "phase": "transport_error",
-                        "provider_call_seq": runtime_context.get("provider_call_seq"),
-                        "error_type": type(exc).__name__,
-                        "error": str(exc).replace("\n", " ")[:500],
-                        "endpoint": endpoint,
-                    }
-                )
+            reason = exc.reason if isinstance(exc, URLError) else None
+            is_timeout = isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError)
+            # Persist only bounded, non-content metadata on EVERY transport failure,
+            # including when optional verbose provider tracing is disabled.
+            safe_details: dict[str, Any] = {
+                "exception_type": type(exc).__name__,
+                "nested_reason_type": type(reason).__name__ if reason is not None else None,
+                "is_timeout": is_timeout,
+                "request_phase": request_phase,
+                "response_headers_observed": request_phase == "READ_RESPONSE_BODY",
+                "elapsed_ms": max(0, int((time.monotonic() - request_started) * 1000)),
+                "effective_timeout_seconds": self.timeout_seconds,
+                "http_status": response_http_status,
+                "provider_request_id": response_request_id,
+            }
+            _write_provider_trace({
+                "ts": datetime.now().isoformat(timespec="milliseconds"),
+                "phase": "transport_error",
+                "provider_call_seq": runtime_context.get("provider_call_seq"),
+                **safe_details,
+            })
             raise RuntimeStepError(
                 f"provider transport failure: {type(exc).__name__}",
                 code="PROVIDER_TRANSPORT",
                 category=ErrorCategory.TRANSPORT,
                 retryable=True,
-                details={"exception_type": type(exc).__name__},
+                details=safe_details,
             ) from exc
 
         try:
