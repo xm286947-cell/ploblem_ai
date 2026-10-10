@@ -68,7 +68,11 @@ def _release_payload() -> tuple[list[dict], list[dict], list[dict]]:
             "excerpt": content,
             "locator": {
                 "type": "DOCUMENT_SCOPE" if domain == "BAD_BLOCK" else "PAGE",
-                "value": {"content_hash": PDF_SHA256, "page": page, "section": "TEST_ONLY source-audit locator", "source_anchor": f"page:{page}"},
+                "value": (
+                    {"content_hash": PDF_SHA256, "section": "whole-document negative-evidence audit", "source_anchor": "whole-document"}
+                    if domain == "BAD_BLOCK" else
+                    {"content_hash": PDF_SHA256, "page": page, "section": "TEST_ONLY source-audit locator", "source_anchor": f"page:{page}"}
+                ),
             },
             "metadata": evidence_metadata,
             "source": {
