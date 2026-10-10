@@ -130,6 +130,36 @@ def test_core_provider_none_keeps_fail_closed_503(tmp_path: Path, monkeypatch) -
     assert client.get("/api/v2/historical-cases").json()["total"] == 0
 
 
+def test_incomplete_analysis_reports_task_id_without_marking_intake_failed(tmp_path: Path) -> None:
+    p0_db = tmp_path / "incomplete.sqlite3"
+    _initialize_p0(p0_db)
+
+    def incomplete_provider(_provider_input, _pending_specs, _context):
+        # Real Runtime coverage gate must reject missing business objects.
+        return []
+
+    client = TestClient(create_p0_app(
+        p0_db,
+        project_root=ROOT,
+        major_case_db_path=tmp_path / "major.sqlite3",
+        major_attachment_root=tmp_path / "attachments",
+        major_artifact_root=tmp_path / "artifacts",
+        major_provider=incomplete_provider,
+    ))
+    created = _intake(client)
+    case_id = created["case"]["case_id"]
+    response = client.post(f"/api/v2/major-production/cases/{case_id}/analysis")
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "MAJOR_ANALYSIS_INCOMPLETE"
+    assert response.headers.get("X-Major-Runtime-Task-ID")
+    # The source remains imported; no fabricated human-review candidate or publication.
+    detail = client.get(f"/api/v2/major-production/cases/{case_id}")
+    assert detail.status_code == 200
+    assert detail.json()["documents"]
+    assert client.app.state.major_case_repository.entries(case_id) == []
+    assert client.get("/api/v2/historical-cases").json()["total"] == 0
+
+
 def test_standard_composition_loads_configured_major_provider(tmp_path: Path) -> None:
     with running_provider() as (host, port):
         model_config = tmp_path / "model.local.yaml"
