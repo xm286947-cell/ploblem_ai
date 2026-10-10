@@ -114,3 +114,12 @@ def test_missing_provider_trace_is_rejected():
     with pytest.raises(gate.ProbeError, match="REAL_AGENT_PROVIDER_TRACE_INCOMPLETE"):
         gate._trace_info({"trace": {"task_id": "MOCK", "run_id": "MOCK",
                                     "provider_calls": 0}}, analysis=True)
+
+
+def test_native_validation_package_includes_local_real_gate_tool():
+    """A ZIP without this probe cannot be used for the promised native gate."""
+    from scripts import build_hardware_r1_e2e_validation_package as package
+    for relative in ("tools/hardware_r2_real_gate_probe.py",
+                     "docs/product/HARDWARE_R2_INTERNAL_AGENT_SECURITY_AND_TRIAL.md"):
+        assert relative in package.INCLUDE_FILES
+        assert (package.ROOT / relative).is_file()
