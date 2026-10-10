@@ -1209,6 +1209,7 @@ def test_hardware_timeout_safe_diagnostics_are_durable_in_existing_runtime_store
     monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
     monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
     monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    _write_authless_agent(tmp_path)
     store = SqliteTaskStore(tmp_path / "runtime.db")
     loader = AgentConfigLoader(
         root=tmp_path,
@@ -1216,7 +1217,6 @@ def test_hardware_timeout_safe_diagnostics_are_durable_in_existing_runtime_store
         schemas={"SimpleResult": SimpleResult},
         environ={},
     )
-    _write_authless_agent(tmp_path)
     runtime = ConfiguredAgentRuntime(store, config_loader=loader)
     runtime.load_agent("agent.yaml")
     result = runtime.invoke(AgentRequest(
