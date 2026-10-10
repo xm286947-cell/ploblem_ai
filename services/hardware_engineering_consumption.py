@@ -100,6 +100,9 @@ class HardwareEngineeringConsumption:
             raise EngineeringAnalysisError("NO_GROUNDED_KNOWLEDGE_FIELDS")
         agent = self.agent
         if agent is None:
+            if (os.getenv("HARDWARE_R2_DEPLOYMENT_MODE") != "NON_PROD"
+                    or os.getenv("HARDWARE_CONSUMPTION_AGENT_NONPROD") != "1"):
+                raise EngineeringAnalysisError("CONSUMPTION_AGENT_NONPROD_GATE_REQUIRED")
             if os.getenv("HARDWARE_CONSUMPTION_AGENT_ENABLED") != "1":
                 raise EngineeringAnalysisError("CONSUMPTION_AGENT_DISABLED")
             agent = EngineeringConsumptionRuntime()
