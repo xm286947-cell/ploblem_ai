@@ -1,4 +1,4 @@
-name: Major V1.1 Linux Full Candidate and Agent Gate 614
+name: Major V1.1 macOS primary and Linux candidate Gate 614
 on:
   push:
     branches:
@@ -27,7 +27,8 @@ jobs:
       - name: Install candidate and test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r requirements-major-mvp-product.txt
-          python -m pip install --disable-pip-version-check pytest==8.4.2 xlrd==2.0.2
+          # No test-only xlrd; it MUST come from packaged requirements.
+          python -m pip install --disable-pip-version-check pytest==8.4.2
       - name: Prior Agent capability and Major regression
         run: |
           python -m pytest -q \
@@ -36,6 +37,7 @@ jobs:
             tests/test_repeat_search_contract.py \
             tests/test_repeat_result_contract.py \
             tests/test_major_linux_repeat_report_614.py \
+            tests/test_major_runtime_dependency_closure_614.py \
             tests/test_major_ai_source_diagnostics_611.py \
             tests/test_major_provider_wiring.py \
             tests/test_major_refresh_recovery_605.py \
@@ -96,8 +98,12 @@ jobs:
           PY
           DUT="$(cat "$RUNNER_TEMP/major614/DUT_PATH")"
           cd "$DUT"
-          env -u PYTHONPATH python scripts/major_mvp_product_start.py --check
+          python -m venv "$DUT/.venv"
+          "$DUT/.venv/bin/python" -m pip install --disable-pip-version-check -r "$DUT/requirements-major-mvp-product.txt"
+          "$DUT/.venv/bin/python" -c 'import xlrd; assert xlrd.__version__ == "2.0.2"'
+          env -u PYTHONPATH "$DUT/.venv/bin/python" scripts/major_mvp_product_start.py --check
           echo 'FRESH_EXTRACT_LINUX_START_CHECK=PASS'
+          echo 'LINUX_PACKAGED_XLRD=PASS'
       - name: Run Chromium real DOM click from extracted package
         shell: bash
         run: |
@@ -106,7 +112,7 @@ jobs:
           python -m playwright install --with-deps chromium
           DUT="$(cat "$RUNNER_TEMP/major614/DUT_PATH")"
           cd "$DUT"
-          python scripts/major_mvp_product_start.py --data-root "$RUNNER_TEMP/major614/data" --host 127.0.0.1 --port 18080 > "$RUNNER_TEMP/major614/server.log" 2>&1 &
+          "$DUT/.venv/bin/python" scripts/major_mvp_product_start.py --data-root "$RUNNER_TEMP/major614/data" --host 127.0.0.1 --port 18080 > "$RUNNER_TEMP/major614/server.log" 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 90); do
@@ -114,6 +120,13 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:18080/p0/major-production >/dev/null
+          curl -fsS -X POST -F "group_code=MAJOR" -F "domain=QUALITY" -F "file=@$GITHUB_WORKSPACE/tests/fixtures/major_v5/cases.xls;type=application/vnd.ms-excel" http://127.0.0.1:18080/api/v2/major-production/excel/preview -o "$RUNNER_TEMP/major614/xls-preview.json"
+          "$DUT/.venv/bin/python" - "$RUNNER_TEMP/major614/xls-preview.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1],encoding="utf-8"))
+          assert result.get("batch_id") and result.get("rows"), list(result)
+          print("LINUX_PACKAGED_RUNTIME_TRUE_XLS_PREVIEW=PASS")
+          PY
           cd "$GITHUB_WORKSPACE"
           python -m pytest -q tests/e2e/test_major_linux_full_click_614.py
           echo 'LINUX_CHROMIUM_REAL_DOM_GATE=PASS'
@@ -122,7 +135,7 @@ jobs:
         run: |
           echo 'REAL_PROVIDER_D01_CALLED=NO'
           echo 'REAL_PROVIDER_REPEAT_CALLED=NO'
-          echo 'LINUX_REAL_PROVIDER_E2E_GATE=BLOCKED_PROVIDER_CONFIG'
+          echo 'LINUX_REAL_PROVIDER_E2E_GATE=NOT_RUN_NO_AUTHORIZED_PROVIDER_IN_CI'
           echo 'WINDOWS_FIELD_GATE=NOT_RUN'
           echo 'READY_FOR_MANUAL_VALIDATION=NO'
       - name: Stage evidence for archive
