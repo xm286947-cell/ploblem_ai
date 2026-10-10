@@ -68,6 +68,11 @@ def test_refresh_preview_uses_existing_batch_and_preserves_snapshot(tmp_path: Pa
     assert loaded["current_mapping_version"] == preview["mapping_version"]
     assert loaded["governance"]["preview_sha256"] == before["governance"]["preview_sha256"]
     assert client.app.state.major_case_restore_service.batch(batch_id)["status"] == "PREVIEW"
+    recent = client.get("/api/v2/major-production/recent")
+    assert recent.status_code == 200, recent.text
+    assert recent.json()["batches"][0]["batch_id"] == batch_id
+    assert "preview_json" not in recent.json()["batches"][0]
+    assert "staging_path" not in recent.json()["batches"][0]
 
     result = client.post("/api/v2/major-production/excel/confirm", data={"batch_id": batch_id})
     assert result.status_code == 200, result.text
@@ -79,6 +84,8 @@ def test_refresh_preview_uses_existing_batch_and_preserves_snapshot(tmp_path: Pa
     assert detail.json()["source_links"]
     # Reload must not replay commit or create a duplicate case.
     assert len(client.app.state.major_case_repository.list_cases()["items"]) == 1
+    recent_after = client.get("/api/v2/major-production/recent").json()
+    assert recent_after["cases"][0]["case_id"] == again["result"]["case_ids"][0]
 
 
 def test_refresh_case_recovers_pending_and_human_confirmed_revisions(tmp_path: Path) -> None:
@@ -129,6 +136,8 @@ def test_windows_refresh_ui_wires_restoration_not_reexecution() -> None:
     assert "resumeOnLoad();" in js
     assert "api + '/excel/batches/'" in js
     assert "api + '/cases/'" in js
+    assert "api + '/recent'" in js
+    assert "data-major-recent" in js
     assert "data-major-recovered-confirm" in js
     assert "EVENT_SELECTION_REQUIRED" in js
     assert "window.addEventListener('beforeunload'" in js
