@@ -757,7 +757,10 @@ class HardwareCaseAIRetrievalService:
         # No field facts or source rows are modified.
         if self.consumption_service is not None and self._is_natural_query(query):
             store = getattr(self.consumption_service, "store", None)
-            rows = store.list_all() if store is not None else []
+            try:
+                rows = store.list_all() if store is not None else []
+            except Exception:
+                rows = []
             normalized_query = normalize_search_text(query)
             spans: set[str] = set()
             for row in rows:
@@ -780,7 +783,10 @@ class HardwareCaseAIRetrievalService:
         if self.consumption_service is None or not re.fullmatch(r"A\d{3,}", query.strip(), re.I):
             return None
         case_id = query.strip().upper()
-        payload = self.consumption_service.search("", business_case_id=case_id, limit=2)
+        try:
+            payload = self.consumption_service.search("", business_case_id=case_id, limit=2)
+        except Exception:
+            return None
         rows = payload.get("results") if isinstance(payload, Mapping) else []
         if not isinstance(rows, list) or len(rows) != 1:
             return None
