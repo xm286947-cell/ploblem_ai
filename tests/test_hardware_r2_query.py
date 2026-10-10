@@ -81,3 +81,36 @@ def test_public_v1_search_does_not_silently_change():
     direct = HardwareKnowledgeConsumptionService(SnapshotStore())
     assert direct.search("设计模拟量电路时，有什么经验可以借鉴？")["results"] == []
     assert len(direct.search("模拟量")["results"]) == 1
+
+
+def test_two_read_only_http_surfaces_share_formal_source():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from quality_knowledge.web.hardware_case_api import create_hardware_case_router
+    from quality_knowledge.web.hardware_knowledge_consumption_api import create_hardware_knowledge_consumption_router
+
+    service = svc()
+    app = FastAPI()
+    app.include_router(create_hardware_case_router(None, assisted_query_service=service))
+    app.include_router(create_hardware_knowledge_consumption_router(
+        service.consumption, assisted_query_service=service
+    ))
+    with TestClient(app) as client:
+        cases = client.get(
+            "/api/v2/hardware-cases/assisted-search", params={"q": "串口乱码"}
+        )
+        assert cases.status_code == 200
+        assert cases.json()["results"][0]["case_id"] == "A0152"
+        formal = client.get(
+            "/api/public/hardware-knowledge/v1/assisted-search",
+            params={"text": "设计模拟量电路时，有什么经验可以借鉴？"},
+        )
+        assert formal.status_code == 200
+        assert formal.json()["results"][0]["business_case_id"] == "A0207"
+        assert formal.json()["retrieval"]["agent_status"] == "NOT_CONFIGURED"
+        old = client.get(
+            "/api/public/hardware-knowledge/v1/search",
+            params={"text": "设计模拟量电路时，有什么经验可以借鉴？"},
+        )
+        assert old.status_code == 200
+        assert old.json()["results"] == []
