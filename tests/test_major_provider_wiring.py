@@ -273,3 +273,65 @@ def test_formal_provider_wiring_returns_four_pending_candidates(tmp_path: Path) 
     assert client.get("/api/v2/historical-cases").json()["total"] == 0
     assert client.post(f"/api/v2/major-production/events/{event_id}/publish").status_code == 409
     assert FORMAL_MOCK_FIXTURE_ID == "MAJOR_REPEAT_V11_F02"
+
+
+
+def test_active_runtime_model_is_used_for_major_d01(tmp_path: Path) -> None:
+    """A shared-runtime selection other than qwen_prod must run the Major route."""
+    with running_provider() as (host, port):
+        model_config = tmp_path / "runtime-active.yaml"
+        model_config.write_text(
+            f"""
+active_model: deepseek_prod
+models:
+  deepseek_prod:
+    provider: openai_compatible
+    base_url: http://{host}:{port}/v1
+    api_key: {WIRING_TEST_SECRET}
+    model: deepseek-chat
+    temperature: 0
+    max_tokens: 8192
+""".strip(),
+            encoding="utf-8",
+        )
+        p0_db = tmp_path / "deepseek-p0.db"
+        _initialize_p0(p0_db)
+        app = create_p0_app(
+            p0_db,
+            project_root=ROOT,
+            runtime_model_config=model_config,
+            major_case_db_path=tmp_path / "major.db",
+            major_attachment_root=tmp_path / "attachments",
+            major_artifact_root=tmp_path / "artifacts",
+        )
+        client = TestClient(app)
+        status = client.get("/api/v2/major-production/provider/status")
+        assert status.status_code == 200
+        assert status.json()["configured"] is True
+        assert status.json()["model_ref"] == "deepseek_prod"
+        assert status.json()["model"] == "deepseek-chat"
+        assert status.json()["real_provider_verified"] is False
+        assert WIRING_TEST_SECRET not in status.text
+
+        created = _intake(client)
+        case_id = created["case"]["case_id"]
+        event_id = created["event"]["event_id"]
+        fragments = app.state.major_case_repository.fragments(created["document"]["version_id"])
+        fragment_id = str(fragments[0]["fragment_id"])
+        payload = [
+            {
+                "object_id": f"{event_id}:{entry_type}",
+                "content": FORMAL_MOCK_FIXTURE[entry_type],
+                "fragment_ids": [fragment_id],
+                "confidence": 0.9,
+            }
+            for entry_type in FORMAL_MOCK_FIXTURE
+        ]
+        configure_provider(host, port, payload)
+        response = client.post(
+            f"/api/v2/major-production/cases/{case_id}/analysis",
+            params={"event_id": event_id},
+        )
+        assert response.status_code == 200, response.text
+        assert len(response.json()["candidates"]) == 4
+        assert provider_counters(host, port)["default"] == 1
