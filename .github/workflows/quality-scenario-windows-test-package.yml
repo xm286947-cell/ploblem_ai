@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - test/quality-scenario-windows-acceptance-001
+      - fix/quality-scenario-unclassified-candidate-601
   workflow_dispatch:
 
 permissions:
@@ -65,7 +66,7 @@ jobs:
       - name: One-click source performance focused regression
         shell: pwsh
         run: |
-          .\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_software_assessment_qsv1_browser_flow.py tests\test_quality_scenario_mature_integration.py
+          .\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_software_assessment_qsv1_browser_flow.py tests\test_quality_scenario_mature_integration.py tests\test_reverse_quality_field_evidence_recovery.py
 
       - name: Windows real Chromium G1-G5 browser golden
         shell: pwsh
