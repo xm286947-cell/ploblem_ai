@@ -18,7 +18,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BASE = "55aaf9234ec102360043f4deef782126bc234b80"
-PACKAGE_PREFIX = "MAJOR_V11_LINUX_FULL_REAL_E2E_CANDIDATE_"
+PACKAGE_PREFIX = "MAJOR_V11_CROSS_PLATFORM_FULL_CANDIDATE_"
 SOURCE_DIRS = {
     "analysis",
     "builder",
