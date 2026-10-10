@@ -29,7 +29,7 @@ def test_four_workbenches_and_legacy_scenarios_render(tmp_path):
         assert f'href="{path}"' in home
 
 
-def test_software_score_and_result_are_source_owned(tmp_path):
+def test_software_results_are_source_owned_without_score_column(tmp_path):
     db = tmp_path / "source.db"
     store = MaterialRepository(db)
     group = store.group("SW-OPS")
@@ -40,13 +40,16 @@ def test_software_score_and_result_are_source_owned(tmp_path):
         "source.xlsx", "sheet1", 3)
     store.add_material(
         group, "ITR20260716098CS",
-        {"问题信息_问题描述": "尚无考核分值"},
+        {"问题信息_问题描述": "未提供结果的原始记录"},
         "source.xlsx", "sheet1", 4)
     page = TestClient(create_app(db)).get("/software-assessment").text
-    for value in ("已完成整改", "87.5", "已考核", "尚无考核分值", "Source 未提供"):
+    for value in ("已完成整改", "已考核", "未提供结果的原始记录", "Source 未提供"):
         assert value in page
-    assert "87.5" in TestClient(create_app(db)).get("/software-assessment").text
-
+    # Raw imported source remains traceable; no score field is promoted into the workbench.
+    assert "考核信息_考核得分" in page
+    assert "87.5" in page
+    assert "<th>分值</th>" not in page
+    assert "assessment_score" not in page
 
 def test_return_context_fail_closed(tmp_path):
     c = TestClient(create_app(tmp_path / "return.db"))
