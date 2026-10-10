@@ -17,7 +17,10 @@ ALLOWED={'.xlsx', '.xlsm'}
 def create_legacy_scenario_router(db_path, issue_service, product_repository, templates):
     """Attach unchanged RC1 business flow to standalone legacy host only."""
     router=APIRouter()
-    # RC1's source-material tables are required by the mature portrait\n    # and source scopes, even when no source records exist yet.\n    MaterialRepository(db_path)\n    scenario_repo=ScenarioRepository(db_path)
+    # RC1's source-material tables are required by the mature portrait
+    # and source scopes, even when no source records exist yet.
+    MaterialRepository(db_path)
+    scenario_repo=ScenarioRepository(db_path)
     scenario_generation_svc=ScenarioGenerationService(issue_service, scenario_repo, Path(__file__).resolve().parents[2])
     product_repo=product_repository
     tpl=templates
