@@ -8,6 +8,7 @@ understanding and deterministic fallbacks.
 from __future__ import annotations
 
 import re
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
 
@@ -119,6 +120,7 @@ _ALIAS_TIER_COST = {
 _RECALL_ONLY_ALIAS_GROUPS: tuple[
     tuple[str, tuple[tuple[str, str], ...]], ...
 ] = (
+    ("串口乱码", (("串口 乱码", "ENGINEERING_ALIAS"),)),
     ("单片机", (("mcu", "DIRECT_SYNONYM"),)),
     ("微控制器", (("mcu", "DIRECT_SYNONYM"),)),
     ("复位", (("reset", "DIRECT_SYNONYM"), ("reset_n", "NARROW_SIGNAL_ALIAS"))),
@@ -261,7 +263,9 @@ class HardwareCaseAIRetrievalService:
         *,
         retrieval_query_service: RetrievalQueryService | None = None,
         consumption_service: Any | None = None,
+        query_agent: Any | None = None,
     ) -> None:
+        self.query_agent = query_agent
         self.case_service = case_service
         self.retrieval_query_service = retrieval_query_service
         self.consumption_service = consumption_service
@@ -718,6 +722,55 @@ class HardwareCaseAIRetrievalService:
             )
         return ranked
 
+    @staticmethod
+    def _is_natural_query(query: str) -> bool:
+        return len(query.strip()) >= 14 and any(
+            marker in query for marker in ("什么", "怎么", "如何", "哪些", "有什么", "经验", "建议", "？", "?")
+        )
+
+    def _query_plan(self, query: str, understood: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        variants = list(understood.get("search_queries") or [])
+        status: dict[str, Any] = {"status": "FAST_PATH", "trace": None}
+        if not self._is_natural_query(query):
+            return variants, status
+        status["status"] = "NOT_CONFIGURED"
+        if self.query_agent is None and os.getenv("HARDWARE_QUERY_AGENT_ENABLED") == "1":
+            try:
+                from services.hardware_query_agent import HardwareQueryAgent
+                self.query_agent = HardwareQueryAgent()
+            except Exception as error:
+                status = {"status": "BLOCKED", "error_code": str(getattr(error, "code", None) or type(error).__name__), "trace": None}
+        if self.query_agent is not None:
+            try:
+                plan = self.query_agent.understand(query)
+                proposed = plan.get("queries") or []
+                if not isinstance(proposed, list):
+                    raise ValueError("QUERY_PLAN_INVALID")
+                for item in proposed[:6]:
+                    phrase = normalize_search_text(item)
+                    if phrase and len(phrase) <= 90 and phrase not in {v.get("text") for v in variants}:
+                        variants.append({"text": phrase, "kind": "AGENT_QUERY", "rules": ["QUERY_AGENT"], "priority_rank": 1, "expansion_cost": 1})
+                status = {"status": "INVOKED", "trace": plan.get("trace"), "intent": plan.get("intent")}
+            except Exception as error:
+                status = {"status": "BLOCKED", "error_code": str(getattr(error, "code", None) or type(error).__name__), "trace": None}
+        return variants, status
+
+    def _case_id_hit(self, query: str) -> dict[str, Any] | None:
+        if self.consumption_service is None or not re.fullmatch(r"A\d{3,}", query.strip(), re.I):
+            return None
+        case_id = query.strip().upper()
+        payload = self.consumption_service.search("", business_case_id=case_id, limit=2)
+        rows = payload.get("results") if isinstance(payload, Mapping) else []
+        if not isinstance(rows, list) or len(rows) != 1:
+            return None
+        case = self._projection_to_case(rows[0], fallback_case_id=case_id)
+        case = self._attach_retrieval(case, mode="FORMAL_ID", score=None,
+                                      why_hit={"status": "EXACT_BUSINESS_CASE_ID", "claim_safe": True},
+                                      knowledge_id=rows[0].get("knowledge_id"))
+        return {"contract_version": "hardware-case/v1", "results": [case],
+                "retrieval": {"mode": "FORMAL_ID", "query_understanding": {"retrieval_text": case_id},
+                              "query_agent": {"status": "FAST_PATH", "trace": None}, "degraded": False, "errors": []}}
+
     def search_cases(
         self,
         query: str = "",
@@ -728,6 +781,10 @@ class HardwareCaseAIRetrievalService:
     ) -> dict[str, Any]:
         raw_query = str(query or "")
         understood = understand_hardware_query(raw_query)
+        exact = self._case_id_hit(raw_query)
+        if exact is not None:
+            return exact
+        variants, agent_status = self._query_plan(raw_query, understood)
 
         if not raw_query.strip():
             payload = self.case_service.search_cases(
@@ -740,6 +797,7 @@ class HardwareCaseAIRetrievalService:
             result["retrieval"] = {
                 "mode": "LEGACY",
                 "query_understanding": understood,
+                "query_agent": agent_status,
                 "degraded": False,
                 "errors": [],
             }
@@ -752,7 +810,7 @@ class HardwareCaseAIRetrievalService:
         )
         lookup = self._case_lookup(visible["results"])
         errors: list[str] = []
-        search_queries = list(understood.get("search_queries") or []) or [
+        search_queries = variants or [
             {"text": str(understood["retrieval_text"]), "kind": "LITERAL", "rules": []}
         ]
 
@@ -784,6 +842,7 @@ class HardwareCaseAIRetrievalService:
                     result["retrieval"] = {
                         "mode": "OPENSEARCH",
                         "query_understanding": understood,
+                        "query_agent": agent_status,
                         "degraded": False,
                         "errors": errors,
                     }
@@ -819,6 +878,7 @@ class HardwareCaseAIRetrievalService:
                     result["retrieval"] = {
                         "mode": "SQLITE_FORMAL",
                         "query_understanding": understood,
+                        "query_agent": agent_status,
                         "degraded": self.retrieval_query_service is not None,
                         "errors": errors,
                     }
@@ -866,6 +926,7 @@ class HardwareCaseAIRetrievalService:
         result["retrieval"] = {
             "mode": "LEGACY_NORMALIZED",
             "query_understanding": understood,
+            "query_agent": agent_status,
             "degraded": bool(errors),
             "errors": errors,
         }
