@@ -46,7 +46,6 @@
           <th>责任部门 / 人</th>
           <th>考核状态</th>
           <th>考核结果</th>
-          <th>分值</th>
           <th>Source</th>
           <th>操作</th>
         </tr>
@@ -62,7 +61,6 @@
           <td>{{ item.assessment_department or '-' }} / {{ item.assessment_owner or '-' }}</td>
           <td>{{ item.assessment_status or 'Source 未提供' }}<small>{{ item.action_binding_status }}</small></td>
           <td>{{ item.assessment_result or 'Source 未提供' }}</td>
-          <td>{{ item.assessment_score or '-' }}</td>
           <td>{{ item.source_file or '-' }}<small>{{ item.sheet_name or '' }} · Row {{ item.row_number or '-' }} · V{{ item.version_no }}</small></td>
           <td>
             {% if item.detail_url %}
@@ -74,7 +72,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="8"><div class="empty-state"><b>当前没有软件考核 Source Fact</b><span>入口已恢复；系统不会因为 Source 缺失而补造考核状态、责任人或分值。</span><a class="btn btn-primary" href="/materials/software-operations">导入软件运营数据</a></div></td></tr>
+        <tr><td colspan="7"><div class="empty-state"><b>当前没有软件考核 Source Fact</b><span>入口已恢复；系统不会因为 Source 缺失而补造考核状态或责任人。</span><a class="btn btn-primary" href="/materials/software-operations">导入软件运营数据</a></div></td></tr>
       {% endfor %}
       </tbody>
     </table>
