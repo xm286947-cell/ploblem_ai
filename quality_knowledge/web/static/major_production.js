@@ -137,6 +137,95 @@
   };
   let previewBusy = false;
 
+
+  const IMPORT_PAGE_SIZE = 20;
+  const PRECHECK_LABELS = {
+    ROW_NOT_IMPORTABLE: 'Excel 行缺少必填信息',
+    AMBIGUOUS_REPORT_MATCH: '复盘报告匹配到多个文件',
+    MULTI_EVENT_DOCUMENT_REVIEW_REQUIRED: '多事件报告未绑定唯一 Event',
+    MATCHED_REPORT_NOT_FOUND: '服务器找不到预检时匹配的报告',
+    CASE_IDENTITY_CONFLICT: '案例业务身份冲突',
+    MAJOR_EXCEL_BATCH_EMPTY: '预检结果为空',
+    MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW: '预检后字段映射发生变化，请重新预检',
+    MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW: '预检快照完整性校验失败，请重新预检',
+    MAJOR_EXCEL_GOVERNANCE_MISSING_REPREVIEW_REQUIRED: '缺少预检治理信息，请重新预检',
+    MAJOR_EXCEL_BATCH_NOT_CONFIRMABLE: '此批次已完成或失败，不允许重复确认'
+  };
+  function renderPagedRows(host, items, rowMarkup, title) {
+    const entries = Array.isArray(items) ? items : [];
+    let page = 0;
+    host.innerHTML = '<p data-paged-total></p><div class="table-wrap"><table>' +
+      '<thead>' + title + '</thead><tbody data-paged-body></tbody></table></div>' +
+      '<div class="major-actions"><button type="button" class="case-button secondary" data-paged-prev>上一页</button>' +
+      '<span data-paged-page></span><button type="button" class="case-button secondary" data-paged-next>下一页</button></div>';
+    const prev = host.querySelector('[data-paged-prev]');
+    const next = host.querySelector('[data-paged-next]');
+    const paint = () => {
+      const totalPages = Math.max(1, Math.ceil(entries.length / IMPORT_PAGE_SIZE));
+      page = Math.max(0, Math.min(page, totalPages - 1));
+      const start = page * IMPORT_PAGE_SIZE;
+      const current = entries.slice(start, start + IMPORT_PAGE_SIZE);
+      host.querySelector('[data-paged-body]').innerHTML = current.map(rowMarkup).join('');
+      host.querySelector('[data-paged-total]').textContent =
+        '实际预检/保存 ' + entries.length + ' 条；正在查看第 ' +
+        (entries.length ? start + 1 : 0) + '–' +
+        Math.min(start + IMPORT_PAGE_SIZE, entries.length) + ' 条。';
+      host.querySelector('[data-paged-page]').textContent = '第 ' + (page + 1) + ' / ' + totalPages + ' 页';
+      prev.disabled = page === 0;
+      next.disabled = page >= totalPages - 1;
+    };
+    prev.addEventListener('click', () => { page -= 1; paint(); });
+    next.addEventListener('click', () => { page += 1; paint(); });
+    paint();
+  }
+
+  function renderBatchTable(host, rows, errors) {
+    const errorMap = new Map();
+    (errors || []).forEach(error => {
+      if (error.row === null || error.row === undefined) return;
+      const k = String(error.row);
+      errorMap.set(k, [...(errorMap.get(k) || []), error.error]);
+    });
+    renderPagedRows(host, rows, row => {
+      const match = row.report_match || {};
+      const resolution = row.event_resolution || {};
+      const problems = (errorMap.get(String(row.excel_row)) || []).map(code =>
+        PRECHECK_LABELS[code] || code).join('；');
+      return '<tr><td>' + esc(row.excel_row) + '</td><td>' +
+        esc((row.itrs || []).join(' / ')) + '</td><td>' + esc(row.title) +
+        '</td><td>' + esc(row.completeness && row.completeness.importable ? 'IMPORTABLE' : 'BLOCKED') +
+        '</td><td>' + esc(match.report_filename || '') + '</td><td>' +
+        esc(match.match_status || match.match_type || 'NOT_FOUND') +
+        (resolution.standard_itr ? ' · Event ' + esc(resolution.standard_itr) : '') +
+        '</td><td>' + esc(problems || '—') + '</td></tr>';
+    }, '<tr><th>Excel 行</th><th>ITR</th><th>标题</th><th>导入条件</th>' +
+      '<th>复盘文件</th><th>匹配/Event</th><th>阻断原因</th></tr>');
+  }
+
+  function renderCommitResults(host, ids, importResult) {
+    const uniqueIds = [...new Set((ids || []).filter(safeId))];
+    const imported = Number(importResult && importResult.imported || 0);
+    host.innerHTML = '<article class="major-candidate"><h3>批次导入结果（已保存）</h3>' +
+      '<p>实际成功导入 ' + imported + ' 行；关联 ' + uniqueIds.length +
+      ' 个唯一 Case。相同 Case 可以关联多行/多个 Event，不应把行数当作 Case 数。</p>' +
+      '<div data-batch-case-list></div></article>';
+    const area = host.querySelector('[data-batch-case-list]');
+    renderPagedRows(area, uniqueIds, caseId =>
+      '<tr><td>' + esc(caseId) + '</td><td>' +
+      '<button type="button" class="case-button secondary" data-open-import-case="' +
+      esc(caseId) + '">选择此 Case 继续 AI 分析</button></td></tr>',
+    '<tr><th>Case ID</th><th>操作</th></tr>');
+    area.addEventListener('click', event => {
+      const button = event.target.closest('[data-open-import-case]');
+      if (!button || !area.contains(button)) return;
+      const id = button.dataset.openImportCase;
+      restoreCase(id, null).then(() => {
+        resumed('已打开 Case ' + id + '；如有多个 Event，请先选择 Event。');
+        root.querySelector('[data-major-workflow]').scrollIntoView({block: 'start'});
+      }).catch(error => resumed('打开案例失败：' + error.message, true));
+    });
+  }
+
   // A refresh used to discard the entire production state. Hydrate from
   // authoritative server snapshots instead of replaying a POST or an AI call.
   const resumeStatus = document.createElement('p');
@@ -271,69 +360,86 @@
 
   async function restoreBatch(batchId) {
     if (!safeId(batchId)) throw new Error('BATCH_ID_INVALID');
-    const batch = await read(await fetch(api + '/excel/batches/' + encodeURIComponent(batchId)));
+    const [batch, preflight] = await Promise.all([
+      read(await fetch(api + '/excel/batches/' + encodeURIComponent(batchId))),
+      read(await fetch(api + '/excel/batches/' + encodeURIComponent(batchId) + '/preflight'))
+    ]);
     const preview = batch.preview || {};
+    const rows = Array.isArray(preview.rows) ? preview.rows : [];
     state.batchId = batchId;
     saveContext();
-    const rows = Array.isArray(preview.rows) ? preview.rows : [];
-    const rowHtml = rows.slice(0, 100).map(row => {
-      const match = row.report_match || {};
-      return '<tr><td>' + esc(row.excel_row) + '</td><td>' +
-        esc((row.itrs || []).join(' / ')) + '</td><td>' + esc(row.title) +
-        '</td><td>' + esc(row.completeness && row.completeness.importable ? 'IMPORTABLE' : 'BLOCKED') +
-        '</td><td>' + esc(match.match_status || match.match_type || '') + '</td></tr>';
-    }).join('');
-    const unsafe = rows.some(row => {
-      const match = row.report_match || {};
-      const resolution = row.event_resolution || {};
-      return match.match_status === 'AMBIGUOUS' ||
-        (match.match_status === 'MATCHED' && (row.itrs || []).length > 1 &&
-          resolution.status !== 'MATCHED');
-    });
-    const confirmable = batch.status === 'PREVIEW' && rows.length > 0 && !unsafe &&
-      !!batch.governance && batch.current_mapping_version === preview.mapping_version;
     excelPreview.hidden = false;
     excelPreview.innerHTML = '<article class="major-candidate"><h3>已保存的 Excel 批次</h3>' +
       '<p>Batch ' + esc(batchId) + ' · 状态 ' + esc(batch.status) + ' · 来源 ' +
-      esc(preview.source_file || batch.source_file || '') + '</p><p>Mapping 版本：' +
-      esc(preview.mapping_version || '') + ' · ' + rows.length +
-      ' 行（展示前 100 行） · 可导入 ' + esc(preview.importable || 0) + '</p>' +
-      '<div class="table-wrap"><table><thead><tr><th>行</th><th>ITR</th>' +
-      '<th>问题</th><th>状态</th><th>报告匹配</th></tr></thead><tbody>' + rowHtml +
-      '</tbody></table></div>' +
-      (confirmable ? '<button class="case-button primary" data-major-recovered-confirm>确认导入已保存批次</button>' : '') +
+      esc(preview.source_file || batch.source_file || '') + '</p>' +
+      '<p>Excel 预检 ' + rows.length + ' 行；可导入标记 ' +
+      esc(preview.importable || 0) + ' 行。最终导入结果以服务端 Commit 为准。</p>' +
+      '<details><summary>本批次 Mapping 版本</summary><p>' +
+      esc(preview.mapping_version || 'UNKNOWN') + '</p></details>' +
+      '<div data-major-batch-table></div><div data-major-blocking-reasons></div>' +
+      '<div data-major-commit-results></div>' +
+      '<button type="button" class="case-button primary" data-major-recovered-confirm>确认导入当前批次</button>' +
       '</article>';
-    if (confirmable) {
-      excelPreview.querySelector('[data-major-recovered-confirm]').addEventListener('click', async event => {
-        const button = event.currentTarget;
-        button.disabled = true;
+    renderBatchTable(excelPreview.querySelector('[data-major-batch-table]'), rows, preflight.errors);
+    const problems = preflight.errors || [];
+    const blockers = excelPreview.querySelector('[data-major-blocking-reasons]');
+    if (problems.length) {
+      blockers.innerHTML = '<h3>确认导入被阻止：' + problems.length +
+        ' 项问题（以下为全部行级原因）</h3><ul>' +
+        problems.map(item => '<li>' +
+          (item.row === null || item.row === undefined ? '批次：' : 'Excel 第 ' + esc(item.row) + ' 行：') +
+          esc(PRECHECK_LABELS[item.error] || item.error) + '</li>').join('') +
+        '</ul><p>请核对并修正 Excel 或报告匹配后重新预检。不能跳过错误行或修改已冻结的预检快照。</p>';
+    } else {
+      blockers.textContent = batch.status === 'PREVIEW'
+        ? '全部 ' + rows.length + ' 行已通过服务端导入前检查，可继续确认。'
+        : '该批次已不处于可确认的 PREVIEW 状态。';
+    }
+    const confirmButton = excelPreview.querySelector('[data-major-recovered-confirm]');
+    if (!preflight.confirmable) {
+      confirmButton.textContent = '查看无法确认的原因';
+      confirmButton.addEventListener('click', () => {
+        setExcelStatus('当前批次不可确认：' + problems.length + ' 项阻断。请查看预检表的“阻断原因”和下方详细列表。', true);
+        blockers.scrollIntoView({block: 'center'});
+      });
+    } else {
+      confirmButton.addEventListener('click', async () => {
+        confirmButton.disabled = true;
+        const stopCommitClock = elapsedIndicator(seconds => setExcelStatus(
+          '后台正在导入批次… 已等待 ' + seconds + ' 秒；切勿重复提交。'));
         try {
-          setExcelStatus('正在确认已保存的预检批次，请勿重复提交…');
+          setExcelStatus('已发起确认导入，正在等待服务器返回…');
           const form = new FormData();
           form.append('batch_id', batchId);
-          const result = await read(await fetch(api + '/excel/confirm', { method: 'POST', body: form }));
-          setExcelStatus('批次已提交完成。');
-          const ids = (result.result && result.result.case_ids) || [];
+          await read(await fetch(api + '/excel/confirm', {method: 'POST', body: form}));
+          stopCommitClock();
           await restoreBatch(batchId);
-          if (ids.length) await restoreCase(ids[0], null);
+          setExcelStatus('批次已提交。请在导入结果列表中选择要继续分析的 Case。');
         } catch (error) {
-          button.disabled = false;
-          setExcelStatus('批次确认失败：' + error.message, true);
+          stopCommitClock();
+          // A network error after a successful commit is possible; never
+          // blindly replay a non-idempotent action from this button.
+          confirmButton.disabled = false;
+          setExcelStatus('确认导入未核实完成：' + error.message +
+            '。请通过恢复批次核对服务端状态，避免重复操作。', true);
         }
       });
-      setExcelStatus('已恢复服务端 PREVIEW 快照，可核对后继续确认；未再次上传文件。');
-    } else if (batch.status === 'COMPLETED' || batch.status === 'PARTIAL') {
-      const ids = (batch.result && batch.result.case_ids) || [];
-      setExcelStatus('批次已完成，已保存 ' + ids.length + ' 个 Case。');
-      if (ids.length && !state.caseId) await restoreCase(ids[0], null);
+    }
+    const result = batch.result || {};
+    const ids = Array.isArray(result.case_ids) ? result.case_ids : [];
+    if (batch.status === 'COMPLETED' || batch.status === 'PARTIAL') {
+      renderCommitResults(excelPreview.querySelector('[data-major-commit-results]'), ids, result);
+      setExcelStatus('已完成批次：导入 ' + (result.imported || 0) +
+        ' 行，关联 ' + [...new Set(ids)].length + ' 个 Case；可逐个选择并运行 AI 分析。');
+      if (ids.length === 1 && !state.caseId) await restoreCase(ids[0], null);
+    } else if (!preflight.confirmable) {
+      setExcelStatus('预检未通过，' + problems.length + ' 项阻断原因已列出；不允许静默导入。', true);
     } else {
-      setExcelStatus('已恢复批次 ' + esc(batchId) + '；当前状态为 ' + esc(batch.status) +
-        '，不可直接再次确认。若 Mapping 已改变或批次失败，请重新预检。', true);
+      setExcelStatus('预检完成，已展示全部 ' + rows.length + ' 行（每页 20 行）；可点击确认导入。');
     }
     resumed('已从服务端恢复 Batch ' + batchId + '（' + batch.status + '）。');
     return batch;
   }
-
 
   async function loadRecent() {
     const box = recoveryPanel.querySelector('[data-major-recent-list]');
@@ -426,66 +532,10 @@
         saveContext();
         clearSelectedFiles(excelForm);
         excelPreview.hidden = false;
-        const rows = (data.rows || []).slice(0, 20).map(row => {
-          const match = row.report_match || {};
-          const resolution = row.event_resolution || {};
-          return '<tr><td>' + esc(row.excel_row) + '</td><td>' + esc((row.itrs || []).join(' / ')) +
-            '</td><td>' + esc(row.title) + '</td><td>' +
-            esc(row.completeness && row.completeness.importable ? 'IMPORTABLE' : 'BLOCKED') +
-            '</td><td>' + esc(match.report_filename || '') + '</td><td>' +
-            esc(match.match_status || match.match_type || 'NOT_FOUND') +
-            (resolution.standard_itr ? ' · ' + esc(resolution.standard_itr) : '') + '</td></tr>';
-        }).join('');
-        const mapping = Object.entries((data.mapping || {}).fields || {}).map(([key, value]) =>
-          '<li>' + esc(key) + ' ← ' + esc(value) + '</li>'
-        ).join('');
-        const hasUnsafeRows = (data.rows || []).some(row => {
-          const match = row.report_match || {};
-          const resolution = row.event_resolution || {};
-          return match.match_status === 'AMBIGUOUS' ||
-            (match.match_status === 'MATCHED' && (row.itrs || []).length > 1 && resolution.status !== 'MATCHED');
-        });
-        excelPreview.innerHTML = '<article class="major-candidate"><h3>Preview / Mapping</h3><p>Batch ' +
-          esc(data.batch_id) + ' · ' + esc(data.total) + ' rows · ' + esc(data.importable) +
-          ' importable</p><details><summary>字段 Mapping</summary><ul>' + mapping +
-          '</ul></details><div class="table-wrap"><table><thead><tr><th>Row</th><th>ITR</th>' +
-          '<th>Title</th><th>Status</th><th>复盘报告文件名</th><th>匹配 / Event</th></tr></thead><tbody>' +
-          rows + '</tbody></table></div><button class="case-button primary" data-major-excel-confirm ' +
-          (hasUnsafeRows ? 'disabled title="存在歧义或未解决的 Event 绑定，需先处理"' : '') +
-          '>确认导入</button></article>';
-        const confirmButton = excelPreview.querySelector('[data-major-excel-confirm]');
-        if (!hasUnsafeRows) confirmButton.addEventListener('click', async () => {
-          confirmButton.disabled = true;
-          const stopCommitClock = elapsedIndicator(seconds => setExcelStatus(
-            '后台正在写入 Case/Event 和来源证据… 已等待 ' + seconds + ' 秒，请勿重复点击。'
-          ));
-          try {
-            setExcelStatus('正在确认并导入 Excel…');
-            const form = new FormData();
-            form.append('batch_id', data.batch_id);
-            const committed = await read(await fetch(api + '/excel/confirm', { method: 'POST', body: form }));
-            const ids = (committed.result && committed.result.case_ids) || [];
-            if (!ids.length) throw new Error('MAJOR_EXCEL_NO_IMPORTED_CASE');
-            state.caseId = ids[0];
-            saveContext();
-            const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
-            const events = detail.events || [];
-            state.eventId = events.length === 1 ? events[0].event_id : null;
-            saveContext();
-            unsavedText = false;
-            root.querySelector('[data-major-workflow]').hidden = false;
-            root.querySelector('[data-major-identity]').textContent = 'Excel Batch ' + data.batch_id +
-              ' · Case ' + state.caseId + (events.length ? ' · ' + events.length + ' Event(s)' : '');
-            root.querySelector('[data-major-state]').textContent = 'IMPORTED';
-            await restoreCase(state.caseId, state.eventId);
-            const sourceFactVerified = await showExcelProvenance(state.caseId);
-            setExcelStatus(sourceFactVerified ? 'Excel 已导入，Structured Source Fact 已持久化并关联；可继续 AI Analysis → Human Review → Publish。' : 'Excel 已导入，但 Structured Source Fact 尚未完成核验，请查看来源证据面板。', !sourceFactVerified);
-          } catch (error) {
-            confirmButton.disabled = false;
-            setExcelStatus('确认导入失败：' + error.message, true);
-          } finally { stopCommitClock(); }
-        });
-        setExcelStatus(hasUnsafeRows ? '预检发现歧义或 Event 未唯一绑定；已阻止确认导入。' : '预检完成。请核对 Mapping、复盘报告匹配与行级结果后确认导入。', hasUnsafeRows);
+        // Render the same server-authoritative 69-row preview as refresh.
+        // Do not create a second UI contract with an invisible 20-row slice.
+        await restoreBatch(data.batch_id);
+
       } catch (error) {
         setExcelStatus('批量预检失败：' + error.message, true);
       } finally {
