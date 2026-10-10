@@ -1,0 +1,121 @@
+schema_version: "0.8"
+updated_at: "2026-09-20"
+purpose: "给所有项目提供可直接复用的目标、计划、有效证据和结论索引。"
+
+principle:
+  archive_only_effective_data: true
+  raw_process_log_required: false
+  default_reuse: true
+  revalidate_only_when_invalidated: true
+  preflight_before_execution: true
+
+asset_types: [TARGET, PLAN, EVIDENCE, DECISION]
+
+assets:
+  - asset_id: ASSET-001
+    type: DECISION
+    subject: "P0/P1 architecture baseline"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    conclusion: "P0/P1 新架构作为后续开发基线。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [PRODUCT_REQUIREMENT_CHANGED, REAL_E2E_CONTRADICTS_CONCLUSION]
+
+  - asset_id: ASSET-002
+    type: DECISION
+    subject: "legacy database compatibility"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    conclusion: "不迁移、不读取、不兼容旧业务数据库。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [PRODUCT_REQUIREMENT_CHANGED, DATABASE_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-003
+    type: EVIDENCE
+    subject: "P1 import E2E"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    evidence_summary: "PLC全字段样例 Preview→Validate/Activate→Import 已完成；5/5成功。"
+    reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY, MAJOR_PROBLEM_AGENT]
+    invalidation: [RELATED_IMPORT_FILES_CHANGED, MAPPING_CONTRACT_CHANGED, REAL_E2E_CONTRADICTS_CONCLUSION]
+
+  - asset_id: ASSET-004
+    type: EVIDENCE
+    subject: "batch AI analysis E2E"
+    source: "docs/DEVELOPMENT_AUDIT_LEDGER.md"
+    status: ACTIVE
+    evidence_summary: "并发2完成四阶段批量分析；结果持久化和详情读取已验证。"
+    reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY, MAJOR_PROBLEM_AGENT]
+    invalidation: [AI_RUNTIME_CHANGED, EXECUTION_ENGINE_CHANGED, ANALYSIS_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-005
+    type: DECISION
+    subject: "shared component convergence"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/05_DESIGN/SHARED_COMPONENT_CONVERGENCE_V0.4.md"
+    status: ACTIVE
+    conclusion: "业务层保留领域策略；AI Runtime、Execution Engine、Packaging 收敛到共享层。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [ARCHITECTURE_DECISION_CHANGED, SHARED_COMPONENT_CONTRACT_CHANGED]
+
+  - asset_id: ASSET-006
+    type: PLAN
+    subject: "shared component migration order"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/MIGRATION_PLAN_V0.4.yaml"
+    status: ACTIVE
+    plan_summary: [EXECUTION_ENGINE, AI_RUNTIME, PACKAGING_POLICY, DEPRECATION]
+    reusable_by: [ALL_PROJECTS]
+    invalidation: [ARCHITECTURE_DECISION_CHANGED, BLOCKING_TECHNICAL_EVIDENCE]
+
+  - asset_id: ASSET-008
+    type: EVIDENCE
+    subject: "Execution Engine first adapter"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.6_EXECUTION_ENGINE_ADAPTER.yaml"
+    status: ACTIVE
+    evidence_summary: "共享 ExecutionEngine 已承接 ordered sequential/parallel map；旧 ordered_map 保持兼容。"
+    reusable_by: [ALL_PROJECTS]
+    invalidation:
+      - "builder/execution_engine.py MATERIAL_CHANGE"
+      - "builder/parallel_execution.py MATERIAL_CHANGE"
+      - "EXECUTION_ENGINE_CONTRACT_CHANGED"
+      - "RELATED_REGRESSION_FAILED"
+
+  - asset_id: ASSET-009
+    type: EVIDENCE
+    subject: "Quality scenario Execution Engine consumer migration"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/30_EXECUTION_ASSETS/RECORD_V0.7_SCENARIO_EXECUTION_CONSUMER.yaml"
+    status: IMPLEMENTED_VALIDATION_BLOCKED
+    reusable_by: [QUALITY_SCENARIO_AND_CASE_LIBRARY]
+    evidence_summary: "scenario_generation 的候选生成与历史场景标准化已从直接 ThreadPool/as_completed 迁移到共享 Execution Engine；业务状态与持久化逻辑保持在领域层。"
+    implementation:
+      branch: "feature/execution-engine-scenario-adapter-v0.7"
+      commit: "477da757c0059c5e78c036469d6cf281920c7f48"
+      pull_request: "https://github.com/xm286947-cell/ploblem_ai/pull/2"
+    validation:
+      static_readback: PASS
+      isolated_engine_semantics_smoke: PASS
+      repository_ci: NOT_AVAILABLE
+      quality_scenario_regression: BLOCKED_ENVIRONMENT
+      blocker: "pytest dependency unavailable in execution environment"
+    invalidation:
+      - "RELATED_REGRESSION_FAILED"
+      - "SCENARIO_GENERATION_SEMANTICS_CHANGED"
+      - "EXECUTION_ENGINE_CONTRACT_CHANGED"
+
+  - asset_id: ASSET-010
+    type: DECISION
+    subject: "Task Preflight Gate"
+    source: "AI_PROJECT_ENGINEERING_CONTROL/00_CONTROL/EXECUTION_ASSET_RULES.md"
+    status: ACTIVE
+    reusable_by: [ALL_PROJECTS]
+    conclusion: "代码任务在正式执行前必须确认 Runtime、依赖和测试框架可用；Preflight 未通过时环境熔断，不进入代码修改。"
+    evidence: "PR #2 首轮回归因 pytest 缺失触发 BASELINE_OR_ENVIRONMENT_FAILURE，未产生代码修改。"
+    invalidation: [GOVERNANCE_RULE_CHANGED]
+
+usage:
+  task_start:
+    - "先按 PROJECT_ID / module / subject 查询本索引。"
+    - "命中 ACTIVE 资产且未触发失效条件时直接复用。"
+    - "执行 Preflight；未 PASS 时停止并记录环境熔断。"
+  task_end:
+    - "只登记对后续项目有复用价值的新证据或结论。"
+    - "临时日志、调试过程、无结论中间产物默认不归档。"

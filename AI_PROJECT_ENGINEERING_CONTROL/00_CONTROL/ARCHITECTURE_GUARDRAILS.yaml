@@ -1,0 +1,27 @@
+schema_version: "0.3"
+updated_at: "2026-09-20"
+
+allowed_dependency_direction:
+  - "L0_ENTRY_DELIVERY -> L1_DOMAIN_APPLICATION"
+  - "L1_DOMAIN_APPLICATION -> L2_AI_RUNTIME"
+  - "L1_DOMAIN_APPLICATION -> L3_DATA_CONTRACT"
+  - "L1_DOMAIN_APPLICATION -> L4_PARSING_TRANSFORMATION"
+  - "L1_DOMAIN_APPLICATION -> L5_PRESENTATION"
+  - "L2_AI_RUNTIME -> L3_DATA_CONTRACT"
+  - "L4_PARSING_TRANSFORMATION -> L3_DATA_CONTRACT"
+
+guardrails:
+  - rule_id: G-001
+    rule: "OWNED 模块不得直接引用其他项目 OWNED 模块的内部实现；跨项目共享必须经 SHARED 组件或公开契约。"
+  - rule_id: G-002
+    rule: "禁止新增第三套 AI Client / Model Config / ThreadPool 调度实现；新增能力优先进入 AI_ORCHESTRATOR 目标架构。"
+  - rule_id: G-003
+    rule: "禁止新增未标版本的分析服务；V1/V2 共存必须声明生命周期。"
+  - rule_id: G-004
+    rule: "Schema/Contract 破坏性变更必须提升 MAJOR 版本并执行 consumer 影响分析。"
+  - rule_id: G-005
+    rule: "Web Shell 只负责装配与路由，不新增领域核心算法。"
+  - rule_id: G-006
+    rule: "共享打包规则统一维护；项目脚本只描述差异化 profile。"
+  - rule_id: G-007
+    rule: "自动发现结果必须保留 discovery_source、confidence、confirmation_status，不把推断伪装成已确认事实。"

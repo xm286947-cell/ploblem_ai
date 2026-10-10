@@ -1,0 +1,46 @@
+schema_version: "0.9"
+template_id: CMO_TRACE_ITEM
+
+trace_id: ""
+project_id: ""
+subject: ""
+
+requirement:
+  requirement_id: ""
+  status: "DRAFT | ACCEPTED | CHANGED | SUPERSEDED"
+  title: ""
+  source_refs: []
+
+solution:
+  solution_id: ""
+  status: "PLANNED | DEFINED | IMPLEMENTED | SUPERSEDED"
+  title: ""
+  source_refs: []
+
+change:
+  change_id: ""
+  status: "PLANNED | IMPLEMENTED | REVERTED"
+  repository: ""
+  branch: ""
+  commit: ""
+  pull_request: null
+  changed_files: []
+
+verification:
+  verification_id: ""
+  status: "NOT_RUN | BLOCKED_ENVIRONMENT | FAILED | VERIFIED"
+  required_tests: []
+  evidence_refs: []
+  blocker: ""
+  code_failure_confirmed: false
+
+baseline:
+  source_baseline_id: ""
+  source_commit: ""
+  target_baseline_id: ""
+  status: "NOT_BASELINED | BASELINED"
+  baseline_ref: ""
+
+trace_status: "PLANNED | SOLUTION_DEFINED | IMPLEMENTED | VALIDATION_BLOCKED | VERIFIED | BASELINED | SUPERSEDED"
+missing_links: []
+next_action: ""

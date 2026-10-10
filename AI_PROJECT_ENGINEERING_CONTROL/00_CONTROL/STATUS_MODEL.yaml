@@ -1,0 +1,22 @@
+schema_version: "0.1"
+
+allowed_project_status:
+  - PLANNING
+  - DEVELOPMENT
+  - TESTING
+  - ACCEPTED
+  - FROZEN
+  - FROZEN_FAILED_ACCEPTANCE
+  - RELEASED
+  - ARCHIVED
+
+allowed_registration_status:
+  - VERIFIED
+  - PENDING_REGISTRATION
+  - DEPRECATED
+
+baseline_rules:
+  - "正式基线必须包含 repository、branch、commit SHA。"
+  - "FAILED_ACCEPTANCE 只能作为冻结证据基线，不得标记 RELEASED。"
+  - "规划目标必须写入 target_state，不得覆盖 current_state。"
+  - "未知信息必须显式标记 UNKNOWN 或 PENDING_REGISTRATION。"

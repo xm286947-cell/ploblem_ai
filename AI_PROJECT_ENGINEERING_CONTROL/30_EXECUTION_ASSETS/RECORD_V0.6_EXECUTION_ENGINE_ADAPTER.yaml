@@ -1,0 +1,60 @@
+schema_version: "0.6"
+record_id: V0.6_EXECUTION_ENGINE_ADAPTER
+project_id: AI_PROJECT_ENGINEERING_CONTROL
+baseline:
+  branch: "feature/engineering-control-v0.1"
+  start_commit: "fb932d1f6535da93c80cf7d1d748a00410efe10c"
+
+target:
+  objective: "以最小改动建立共享 Execution Engine，并保持 builder.parallel_execution 现有调用接口兼容。"
+  acceptance:
+    - "ThreadPool 实现从 builder/parallel_execution.py 下沉到共享引擎"
+    - "ordered_map API 不变"
+    - "并行保持输入顺序"
+    - "串行模式语义不变"
+    - "worker 异常继续 fail-fast 透传"
+  out_of_scope:
+    - "不迁移 scenario_generation"
+    - "不迁移 v2_batch_job_service"
+    - "不实现 retry/checkpoint/progress"
+    - "不修改业务状态模型"
+
+plan:
+  steps:
+    - "新增 builder/execution_engine.py"
+    - "将 builder/parallel_execution.py 改为 compatibility adapter"
+    - "增加最小专项测试"
+    - "保留 M8.2/M8.3 现有调用方式"
+  shared_modules_touched:
+    - "PARALLEL_EXECUTION"
+
+effective_evidence:
+  - evidence_id: EVD-V06-001
+    type: TEST
+    result: "隔离语法编译通过；并行顺序、并发线程、串行单线程、异常透传 smoke 验证通过。"
+    source: "V0.6 implementation validation"
+    reusable: true
+  - evidence_id: EVD-V06-002
+    type: AUDIT
+    result: "tests/test_parallel_ai_execution.py 已覆盖 ordered_map 并行顺序、串行模式及 M8.2 调用行为；旧 API 保留。"
+    source: "tests/test_parallel_ai_execution.py"
+    reusable: true
+
+reusable_decisions:
+  - decision_id: DEC-V06-001
+    conclusion: "Execution Engine 第一阶段只收敛执行机制，不扩大到业务状态、Retry、Checkpoint。"
+    applies_to:
+      - "AI_ORCHESTRATOR"
+      - "QUALITY_SCENARIO_AND_CASE_LIBRARY"
+      - "MAJOR_PROBLEM_AGENT"
+    invalidation:
+      - "EXECUTION_ENGINE_CONTRACT_CHANGED"
+      - "CONSUMER_REQUIRES_STRUCTURED_PARTIAL_RESULT"
+
+result:
+  status: COMPLETED
+  changed_files:
+    - "builder/execution_engine.py"
+    - "builder/parallel_execution.py"
+    - "tests/test_execution_engine.py"
+  next_action: "先验证现有相关回归，再选择 scenario_generation 或 v2_batch_job_service 作为第二个 consumer。"

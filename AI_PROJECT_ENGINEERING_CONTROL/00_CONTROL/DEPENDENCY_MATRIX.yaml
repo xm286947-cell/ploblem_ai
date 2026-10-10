@@ -1,0 +1,77 @@
+schema_version: "0.2"
+updated_at: "2026-09-20"
+
+dependencies:
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    dependency_type: baseline_lineage
+    current_state:
+      base_commit: "c7aa3017e07f46d1b010c90300becdae9ccd7005"
+      child_commit: "18ac9ea4c8919be17ef82980766bcaba30e719cb"
+      commits_ahead: 1
+    target_state: EXPLICIT_SHARED_COMPONENT_DEPENDENCIES
+    status: ACTIVE
+    risk: "当前重大问题分支继承了质量场景完整基线；共享模块修改可能形成隐式耦合。"
+
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: NOT_UNIFIED
+    target_state: UNIFIED_SERVICE
+    status: PLANNED
+
+  - consumer: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: NOT_UNIFIED
+    target_state: UNIFIED_SERVICE
+    status: PLANNED
+
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: SHARED_MODEL_RUNTIME
+    dependency_type: runtime_config
+    current_state:
+      config_path: "config/model.yaml"
+      loader_path: "quality_knowledge/model_config.py"
+      ai_client_path: "builder/ai_client.py"
+      verified: true
+    target_state: CONTROLLED_REFERENCE
+    status: ACTIVE
+
+  - consumer: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    provider: SHARED_MODEL_RUNTIME
+    dependency_type: runtime_config
+    current_state:
+      config_path: "config/model.yaml"
+      loader_path: "quality_knowledge/model_config.py"
+      ai_client_path: "builder/ai_client.py"
+      verified: true
+    target_state: CONTROLLED_REFERENCE
+    status: ACTIVE
+
+  - consumer: MAJOR_PROBLEM_AGENT
+    provider: SHARED_WEB_SHELL
+    dependency_type: ui_integration
+    current_state:
+      paths:
+        - "quality_knowledge/web/app.py"
+        - "quality_knowledge/web/templates/base.html"
+    target_state: CONTROLLED_SHARED_BOUNDARY
+    status: ACTIVE
+
+  - consumer: QUALITY_SCENARIO_AND_CASE_LIBRARY
+    provider: SHARED_WEB_SHELL
+    dependency_type: ui_integration
+    current_state:
+      paths:
+        - "quality_knowledge/web/app.py"
+        - "quality_knowledge/web/templates/base.html"
+    target_state: CONTROLLED_SHARED_BOUNDARY
+    status: ACTIVE
+
+  - consumer: STORAGE_LIFE_SPECIALTY
+    provider: AI_ORCHESTRATOR
+    dependency_type: ai_runtime
+    current_state: UNKNOWN
+    target_state: TO_BE_ASSESSED
+    status: PENDING_REGISTRATION

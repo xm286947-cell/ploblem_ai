@@ -1,0 +1,19 @@
+project_id: "<PROJECT_ID>"
+name: "<PROJECT_NAME>"
+
+repository:
+  full_name: null
+  status: PENDING_REGISTRATION
+
+baseline:
+  branch: null
+  commit: null
+  status: PENDING_REGISTRATION
+
+runtime_config: {}
+
+dependencies: []
+
+governance:
+  owner: null
+  notes: null

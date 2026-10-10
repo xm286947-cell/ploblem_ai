@@ -1,0 +1,90 @@
+schema_version: "0.1"
+profile_id: STORAGE_UKCI_REFERENCE_V0.1
+status: REFERENCE_DRAFT
+reference_source:
+  asset: "UKCI_07_WINDOWS_DELIVERY.patch"
+  builder: "scripts/ukci07_delivery.py::build_package"
+  package_id: "STORAGE_UKCI_WINDOWS_RC_V0.1"
+
+package:
+  type: VALIDATION_RC
+  output_format: ZIP
+  source_commit: REQUIRED
+  staging: TEMPORARY_CLEAN_COPY
+
+selection:
+  strategy: COPY_ALL_EXCEPT_EXCLUSIONS
+  required_files:
+    - run_windows.bat
+    - selftest_windows.bat
+    - validate_windows_real.bat
+    - validate_ukci_windows.bat
+    - requirements.txt
+    - config/model.local.example.yaml
+    - config/model.windows.real.yaml
+    - config/parameter_knowledge.yaml
+    - storage_life/comparison.py
+    - storage_life/integrations/contracts.py
+    - storage_life/integrations/traceability.py
+    - storage_life/integrations/unified_knowledge.py
+    - storage_life/integrations/historical_case.py
+    - vendor/unified_agent_runtime/runtime/__init__.py
+  exclude_dirs:
+    - .git
+    - .venv
+    - .pytest_cache
+    - __pycache__
+    - data
+    - logs
+  exclude_suffixes:
+    - .pyc
+    - .pyo
+    - .zip
+    - .bundle
+    - .patch
+  exclude_files:
+    - RUN_LOG.txt
+    - release/storage_app.log
+  project_specific_excludes:
+    - HANDOFF_STORAGE_NEXT_001.md
+    - UKCI_00_CURRENT_STATE_AUDIT.md
+    - UKCI_03_CIRCUIT_BREAKER.md
+    - tests/test_ukci_07_windows_delivery.py
+    - release/ukci/UKCI_WINDOWS_GATE_RESULT.json
+
+gates:
+  required_files: true
+  secret_scan: true
+  developer_absolute_path_scan: true
+  manifest_build_commit_match: true
+  contract_preservation: true
+  portable: true
+
+integrity:
+  zip_sha256: REQUIRED
+
+validation:
+  offline_acceptance: validate_ukci_windows.bat
+  real_provider_gate: validate_windows_real.bat
+  real_provider_may_be_pending: true
+
+publicization:
+  common:
+    - clean_staging
+    - include_exclude_policy
+    - required_file_gate
+    - secret_scan
+    - absolute_path_scan
+    - source_commit_manifest
+    - package_validation_before_zip
+    - zip_sha256
+  storage_specific:
+    - required_files
+    - project_specific_excludes
+    - contracts
+    - golden_tests
+    - startup_and_acceptance_entries
+  unresolved:
+    - "统一 Secret scanner 规则需扩展并配置化"
+    - "统一 Package Type/Version 命名"
+    - "通用 Manifest 与 CMO Trace 字段映射"

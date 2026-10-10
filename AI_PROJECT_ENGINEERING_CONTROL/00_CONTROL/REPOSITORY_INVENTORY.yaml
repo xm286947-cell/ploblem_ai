@@ -1,0 +1,28 @@
+schema_version: "0.2"
+updated_at: "2026-09-20"
+
+repositories:
+  - repository: "xm286947-cell/ploblem_ai"
+    default_branch: main
+    connection_visibility: WRITABLE_MANAGED
+    permissions:
+      admin: true
+      maintain: true
+      push: true
+      pull: true
+    managed: true
+    role: "当前质量类逻辑子项目组合仓库"
+    observed_branches:
+      - main
+      - feature/reverse-quality-v01
+      - handoff/req022-rc1-failed-acceptance
+      - feature/engineering-control-v0.1
+      - test/chatgpt-write-20260920
+
+  - repository: "xm286947-cell/quality-ai"
+    default_branch: main
+    connection_visibility: READABLE_NOT_IN_WRITABLE_INVENTORY
+    managed: false
+    repository_description: "test only"
+    role: UNKNOWN
+    note: "可读取但未出现在当前连接的可写仓库清单；V0.2不作为正式工程仓纳管。"

@@ -1,0 +1,41 @@
+project_id: AI_ORCHESTRATOR
+name: "统一AI编排器"
+
+repository:
+  full_name: null
+  status: PENDING_REGISTRATION
+
+role: "为上层业务提供统一 AI Runtime 与 Execution Engine；业务项目只声明能力、输入和执行策略，不直接维护 Provider Client、ThreadPool 或模型密钥解析。"
+
+current_state:
+  status: PLANNING
+  implementations_distributed_in:
+    - "builder/ai_client.py"
+    - "builder/parallel_execution.py"
+    - "quality_knowledge/model_config.py"
+    - "quality_knowledge/scenario_generation.py"
+    - "quality_knowledge/services/v2_batch_job_service.py"
+
+target_state:
+  interface: UNIFIED_SERVICE
+  modules:
+    - AI_RUNTIME
+    - EXECUTION_ENGINE
+  agent_config: CENTRALIZED
+  model_config: CENTRALIZED
+  execution_mechanics: CENTRALIZED
+  business_awareness: LOW_COUPLING
+
+contracts:
+  ai_runtime: "20_SHARED_CONFIG/AI_RUNTIME_CONTRACT.yaml"
+  execution_engine: "20_SHARED_CONFIG/EXECUTION_ENGINE_CONTRACT.yaml"
+
+migration:
+  strategy: ADAPTER_FIRST
+  first_priority: EXECUTION_ENGINE
+  no_big_bang_rewrite: true
+
+governance:
+  business_projects_keep_domain_policy: true
+  business_projects_must_not_add_new_provider_clients_after_migration: true
+  business_projects_must_not_add_new_threadpool_engines_after_migration: true
