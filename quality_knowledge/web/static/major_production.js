@@ -48,7 +48,18 @@
           (taskId ? ' Runtime Task：' + taskId + '。' : '') +
           '请按 Task ID 查看后台 MAJOR_ANALYSIS_INCOMPLETE 诊断日志；没有完整结果前不能人工确认。');
       }
-      throw new Error(typeof code === 'string' ? code : JSON.stringify(code));
+      const desc = typeof code === 'string' ? code : JSON.stringify(code);
+      if (response.status === 401 || response.status === 403)
+        throw new Error('服务器拒绝执行（HTTP ' + response.status + '）：' + desc +
+          '。请核查登录状态、服务权限及反向代理认证，不会尝试绕过权限。');
+      if (response.status === 405)
+        throw new Error('当前服务器不允许该请求方法（HTTP 405）：' + desc +
+          '。请核对正在运行的版本和 API 路由。');
+      if (code === 'MAJOR_ANALYSIS_REQUIRES_EVENT_SELECTION')
+        throw new Error('该 Case 存在多个 Event，必须先在上方选择具体 Event 才能运行分析。');
+      if (code === 'MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED')
+        throw new Error('AI Provider 尚未配置（HTTP ' + response.status + '）；已导入的 Case 保持不变。');
+      throw new Error('HTTP ' + response.status + '：' + desc);
     }
     return data;
   }
@@ -568,20 +579,44 @@
     }
   });
 
-  root.querySelector('[data-major-analyze]').addEventListener('click', async () => {
-    if (!state.caseId) return;
+  const analyzeButton = root.querySelector('[data-major-analyze]');
+  const analyzeStatus = document.createElement('p');
+  analyzeStatus.className = 'major-message';
+  analyzeStatus.setAttribute('role', 'status');
+  analyzeStatus.setAttribute('aria-live', 'polite');
+  analyzeButton.closest('[data-major-workflow]').querySelector('[data-major-actions-placeholder]')?.appendChild(analyzeStatus);
+  if (!analyzeStatus.isConnected) analyzeButton.parentNode.after(analyzeStatus);
+  const setAnalyzeStatus = (message, error) => {
+    analyzeStatus.textContent = message;
+    analyzeStatus.className = 'major-message' + (error ? ' error' : '');
+    say(message, error);
+  };
+  analyzeButton.addEventListener('click', async () => {
+    if (!state.caseId) {
+      setAnalyzeStatus('请先从批次导入结果中选择一个具体 Case；不能把整个批次一次性当作一个 Case 运行 AI。', true);
+      return;
+    }
+    if (!state.eventId) {
+      setAnalyzeStatus('请先在工作区选定 Event。多事件不能自动选择，也不能跨 Event 混合证据。', true);
+      return;
+    }
+    analyzeButton.disabled = true;
     try {
-      say('正在调用已配置的 AI Provider…');
-      const suffix = state.eventId ? '?event_id=' + encodeURIComponent(state.eventId) : '';
+      setAnalyzeStatus('正在分析 Case ' + state.caseId + ' / Event ' + state.eventId + '；请勿重复点击。');
+      const suffix = '?event_id=' + encodeURIComponent(state.eventId);
       const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis' + suffix, { method: 'POST' }));
-      const box = root.querySelector('[data-major-candidates]');
-      box.innerHTML = data.candidates.map(item => '<article class="major-candidate"><h3>' + esc(item.entry_type) +
-        ' · PENDING</h3><p>' + esc(item.content) + '</p><button class="case-button secondary" data-entry="' +
-        esc(item.entry_id) + '">人工确认并创建修订</button></article>').join('');
-      box.querySelectorAll('[data-entry]').forEach(button => button.addEventListener('click', () => confirm(button)));
+      const detail = await restoreCase(state.caseId, state.eventId);
+      if (!(data.candidates || []).length) {
+        setAnalyzeStatus('Provider 没有返回可审核候选；任务不能标记为成功。', true);
+        return;
+      }
       root.querySelector('[data-major-state]').textContent = 'REVIEW_REQUIRED';
-      say('AI 候选已生成，必须逐条人工确认。');
-    } catch (error) { say(error.message, true); }
+      setAnalyzeStatus('AI 已生成 ' + data.candidates.length + ' 条候选，已从服务端恢复审核列表。');
+    } catch (error) {
+      setAnalyzeStatus('AI 分析未完成：' + error.message + '。已保存的数据不变。', true);
+    } finally {
+      analyzeButton.disabled = false;
+    }
   });
 
   async function confirm(button) {
