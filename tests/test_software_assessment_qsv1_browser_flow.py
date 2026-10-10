@@ -316,3 +316,18 @@ def test_real_reverse_bridge_keeps_candidate_when_one_ai_field_lacks_evidence(tm
     assert any(x["field_name"] == "customer_experience" and x["status"] == "PENDING"
                for x in result["scenario"]["missing_information"])
     assert not result["scenario"]["confirmation"]["quality_confirmed_by"]
+
+
+def test_candidate_mapping_failure_is_not_disguised_as_provider_failure(tmp_path):
+    flow, material_id = _setup_flow(tmp_path)
+    task = flow.start([material_id], "HIGH_PERCEPTION", "客户需求")
+    flow.generation.reverse_quality_from_bundle = lambda bundle, *, taxonomy=None: _reverse_result(bundle)
+    def broken_candidate(*args, **kwargs):
+        raise RuntimeError("injected-candidate-database-failure")
+    flow.candidates.create_from_reverse = broken_candidate
+    flow.run_task(task["task_id"])
+    item = flow.get_task(task["task_id"])["items"][0]
+    assert item["state"] == "GENERATION_FAILED"
+    assert item["error_stage"] == "CANDIDATE_MAPPING"
+    assert item["error"] == "QSV1_CANDIDATE_CREATION_FAILED"
+    assert flow.retry(task["task_id"])["items"][0]["state"] == "ANALYZING"
