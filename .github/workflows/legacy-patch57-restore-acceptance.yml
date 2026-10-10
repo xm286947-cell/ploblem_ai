@@ -137,6 +137,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install httpx
+      - name: Install original requirements into the interpreter selected by BAT's py launcher
+        shell: pwsh
+        env:
+          PY_PYTHON: '3.11'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command py -ErrorAction SilentlyContinue) {
+            py -c "import sys; print('BAT_LAUNCHER_EXECUTABLE='+sys.executable)"
+            py -m pip install -r requirements.txt
+            py -m pip install httpx
+            py -c "import yaml, fastapi, uvicorn, openpyxl; print('BAT_LAUNCHER_DEPS=PASS')"
+          }
       - name: Run original workbench regression
         shell: pwsh
         run: |
@@ -157,11 +169,11 @@ jobs:
             $ready = $false
             for ($i=0; $i -lt 90; $i++) {
               if ($p.HasExited) {
-      Write-Output ("BAT_EXIT_CODE=" + $p.ExitCode)
-      if (Test-Path 'legacy-win-stdout.log') { Get-Content 'legacy-win-stdout.log' | Select-Object -Last 40 }
-      if (Test-Path 'legacy-win-stderr.log') { Get-Content 'legacy-win-stderr.log' | Select-Object -Last 40 }
-      throw "BAT terminated early"
-    }
+                Write-Output ("BAT_EXIT_CODE=" + $p.ExitCode)
+                if (Test-Path 'legacy-win-stdout.log') { Get-Content 'legacy-win-stdout.log' | Select-Object -Last 40 }
+                if (Test-Path 'legacy-win-stderr.log') { Get-Content 'legacy-win-stderr.log' | Select-Object -Last 40 }
+                throw "BAT terminated early"
+              }
               try {
                 $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/issues' -TimeoutSec 2 -UseBasicParsing
                 if ($r.StatusCode -eq 200) { $ready = $true; break }
