@@ -41,6 +41,8 @@ def test_windows_real_browser_confirm_and_69_row_pages(tmp_path: Path) -> None:
             expect(preview).to_contain_text("批次导入结果", timeout=90000)
             # The current batch must now be persisted; never ask a second POST.
             expect(preview).to_contain_text("实际成功导入 1 行")
+            expect(preview.locator("[data-major-recovered-confirm]")).to_be_disabled()
+            expect(preview.locator("[data-major-recovered-confirm]")).to_contain_text("已完成导入")
             pick = preview.get_by_role("button", name="选择此 Case 继续 AI 分析").first
             pick.click()
             expect(page.locator("[data-major-workflow]")).to_be_visible()
