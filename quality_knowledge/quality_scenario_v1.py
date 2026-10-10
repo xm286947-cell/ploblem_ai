@@ -155,7 +155,9 @@ class ScenarioVersionMetadata(BaseModel):
 class QualityScenarioFieldsV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    product_code: str = Field(min_length=1, max_length=120)
+    # Empty only for pre-review candidates produced from verified, as-yet
+    # unclassified sources. Formal states still require a product identity.
+    product_code: str = Field(default="", max_length=120)
     product_name: str = Field(default="", max_length=200)
     lifecycle_stage_code: str = Field(default="", max_length=120)
     lifecycle_stage_name: str = Field(default="", max_length=200)
@@ -247,6 +249,7 @@ class QualityScenarioV1(QualityScenarioFieldsV1):
 
     def assert_formal_ready(self) -> None:
         required = {
+            "product_code": self.product_code,
             "lifecycle_stage_code": self.lifecycle_stage_code,
             "business_activity_code": self.business_activity_code,
             "scenario_name": self.scenario_name,
