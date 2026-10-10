@@ -436,6 +436,7 @@ def create_p0_app(
             create_major_production_router(
                 major_case_service,
                 restore_service=major_restore_service,
+                provider_status=app.state.major_provider_status,
             )
         )
 

@@ -1,7 +1,8 @@
 agent_id: major_issue.d01.extract
 version: v1
 label: Major Issue D01 Extract
-model_ref: qwen_prod
+# Use the active_model selected by the Unified Runtime control plane.
+# Pinning qwen_prod here bypassed operator selection of other providers.
 
 prompt:
   ref: prompts/runtime/major_issue/d01_extract.md
