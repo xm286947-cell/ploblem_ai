@@ -267,6 +267,21 @@ class CandidateV1Service:
             trigger_source=trigger_source,
             trigger_reason=trigger_reason,
         )
+        if taxonomy.get("unclassified_analysis"):
+            # Never silently classify by product model/keyword or borrow PLC's
+            # dictionary. Reviewers can see the existing evidence-grounded
+            # candidate but cannot Confirm/Publish while unresolved.
+            blockers = list(candidate.blockers)
+            if not candidate.product_code:
+                blockers.append("PRODUCT_TYPE_CONFIRMATION_REQUIRED")
+            blockers.append("TAXONOMY_MAPPING_REQUIRED")
+            candidate = candidate.model_copy(update={
+                "blockers": list(dict.fromkeys(blockers)),
+                "lifecycle_stage_code": "",
+                "lifecycle_stage_name": "",
+                "business_activity_code": "",
+                "business_activity_name": "",
+            })
         provenance = self._bundle_provenance(result)
         candidate = self._attach_bundle_provenance(candidate, provenance)
         idempotency_key = self._idempotency_key(candidate)
