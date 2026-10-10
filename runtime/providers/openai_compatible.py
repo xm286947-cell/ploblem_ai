@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -298,6 +299,29 @@ class OpenAICompatibleProviderAdapter:
                 details={"expected_shape": "json_object"},
             )
 
+    def _decode_output_json(self, content: str) -> tuple[Any, bool]:
+        """Reuse the proven Storage fenced-JSON convention, without loose extraction.
+
+        Only one *complete* Markdown JSON code fence is eligible, and only
+        for an explicitly configured JSON-object agent. Other text, incomplete
+        fences, multiple blocks, and malformed JSON remain INVALID_JSON.
+        Strict downstream shape/schema validation is unchanged.
+        """
+        try:
+            return json.loads(content), False
+        except json.JSONDecodeError:
+            if self.response_shape not in {"json_object", "object", "dict"}:
+                raise
+            complete_fence = re.fullmatch(
+                r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n"
+                r"(?P<body>.*?)\r?\n```[ \t\r\n]*",
+                content,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if complete_fence is None or "```" in complete_fence.group("body"):
+                raise
+            return json.loads(complete_fence.group("body")), True
+
     def _validate_output(self, parsed: Any) -> Any:
         self._validate_shape(parsed)
         schema = self.output_schema
@@ -406,8 +430,20 @@ class OpenAICompatibleProviderAdapter:
             headers=headers,
         )
 
+        response_http_status: int | str = "NOT_RECORDED"
+        response_request_id = "NOT_RECORDED"
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
+                observed_status = getattr(response, "status", None)
+                if type(observed_status) is int and 100 <= observed_status <= 599:
+                    response_http_status = observed_status
+                headers_observed = getattr(response, "headers", None)
+                observed_request_id = _provider_request_id(headers_observed)
+                # Never persist arbitrary header bytes or user/provider content.
+                if observed_request_id and re.fullmatch(
+                    r"[A-Za-z0-9._:/-]{1,128}", observed_request_id
+                ):
+                    response_request_id = observed_request_id
                 if _provider_trace_enabled():
                     _write_provider_trace(
                         {
@@ -496,13 +532,51 @@ class OpenAICompatibleProviderAdapter:
                 retryable=True,
             ) from exc
 
-        if str(finish_reason or "").lower() == "length":
+        usage = envelope.get("usage") if isinstance(envelope, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        normalized_finish_reason = (
+            finish_reason.lower() if isinstance(finish_reason, str) else ""
+        )
+        safe_reason = (
+            normalized_finish_reason
+            if normalized_finish_reason in {"stop", "length", "tool_calls", "content_filter"}
+            else "NOT_RECORDED"
+        )
+        output_bytes = content.encode("utf-8") if isinstance(content, str) else b""
+        stripped = content.strip() if isinstance(content, str) else ""
+        # Persist only non-sensitive error metadata, never model text or prompts.
+        diagnostic_details: dict[str, Any] = {
+            "finish_reason": safe_reason,
+            "http_status": response_http_status,
+            "provider_request_id": response_request_id,
+            "content_length_bytes": len(output_bytes),
+            "content_sha256": hashlib.sha256(output_bytes).hexdigest(),
+            "starts_with_json_object": stripped.startswith("{"),
+            "ends_with_json_object": stripped.endswith("}"),
+            "starts_with_markdown_fence": stripped.startswith("```"),
+            "provider_call_seq": runtime_context.get("provider_call_seq"),
+            "max_tokens": (
+                body["max_tokens"]
+                if type(body.get("max_tokens")) is int and body["max_tokens"] >= 0
+                else "NOT_RECORDED"
+            ),
+        }
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(key)
+            diagnostic_details[key] = (
+                value if type(value) is int and value >= 0 else "NOT_RECORDED"
+            )
+        if safe_reason == "length":
+            _write_provider_trace({
+                "phase": "output_truncated",
+                **diagnostic_details,
+            })
             raise RuntimeStepError(
                 "provider output was truncated",
                 code="OUTPUT_TRUNCATED",
                 category=ErrorCategory.VALIDATION,
                 retryable=True,
-                details={"finish_reason": "length"},
+                details=diagnostic_details,
             )
 
         if not isinstance(content, str) or not content.strip():
@@ -514,16 +588,41 @@ class OpenAICompatibleProviderAdapter:
             )
 
         try:
-            parsed = json.loads(content)
+            parsed, unwrapped_json_fence = self._decode_output_json(content)
         except json.JSONDecodeError as exc:
+            diagnostic_details.update({
+                "json_error_message": str(exc.msg)[:120],
+                "json_error_line": exc.lineno,
+                "json_error_column": exc.colno,
+                "json_error_position": exc.pos,
+            })
+            # Print and append *metadata only* to the existing optional trace
+            # file even when TRACE isn't enabled; failure evidence must not
+            # disappear again. Runtime persists the same data in Error.details.
+            _write_provider_trace({
+                "phase": "invalid_json",
+                **diagnostic_details,
+            })
             raise RuntimeStepError(
                 "provider content is not strict JSON",
                 code="INVALID_JSON",
                 category=ErrorCategory.VALIDATION,
                 retryable=True,
+                details=diagnostic_details,
             ) from exc
 
-        return self._validate_output(parsed)
+        # Keep the same schema and evidence validation as bare JSON; log only
+        # metadata so later audits can prove whether the bounded reuse occurred.
+        validated = self._validate_output(parsed)
+        if unwrapped_json_fence:
+            _write_provider_trace({
+                "phase": "json_fence_normalized",
+                "provider_call_seq": runtime_context.get("provider_call_seq"),
+                "content_length_bytes": diagnostic_details["content_length_bytes"],
+                "content_sha256": diagnostic_details["content_sha256"],
+                "finish_reason": safe_reason,
+            })
+        return validated
 
 
 __all__ = ["OpenAICompatibleProviderAdapter"]
