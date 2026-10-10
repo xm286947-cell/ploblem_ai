@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from quality_knowledge.scenarios import ScenarioRepository
+from quality_knowledge.materials import MaterialRepository
 from quality_knowledge.scenario_generation import ScenarioGenerationService
 
 ALLOWED={'.xlsx', '.xlsm'}
@@ -16,7 +17,7 @@ ALLOWED={'.xlsx', '.xlsm'}
 def create_legacy_scenario_router(db_path, issue_service, product_repository, templates):
     """Attach unchanged RC1 business flow to standalone legacy host only."""
     router=APIRouter()
-    scenario_repo=ScenarioRepository(db_path)
+    # RC1's source-material tables are required by the mature portrait\n    # and source scopes, even when no source records exist yet.\n    MaterialRepository(db_path)\n    scenario_repo=ScenarioRepository(db_path)
     scenario_generation_svc=ScenarioGenerationService(issue_service, scenario_repo, Path(__file__).resolve().parents[2])
     product_repo=product_repository
     tpl=templates
