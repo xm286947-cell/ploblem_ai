@@ -584,8 +584,7 @@
   analyzeStatus.className = 'major-message';
   analyzeStatus.setAttribute('role', 'status');
   analyzeStatus.setAttribute('aria-live', 'polite');
-  analyzeButton.closest('[data-major-workflow]').querySelector('[data-major-actions-placeholder]')?.appendChild(analyzeStatus);
-  if (!analyzeStatus.isConnected) analyzeButton.parentNode.after(analyzeStatus);
+  analyzeButton.parentNode.after(analyzeStatus);
   const setAnalyzeStatus = (message, error) => {
     analyzeStatus.textContent = message;
     analyzeStatus.className = 'major-message' + (error ? ' error' : '');
@@ -605,7 +604,7 @@
       setAnalyzeStatus('正在分析 Case ' + state.caseId + ' / Event ' + state.eventId + '；请勿重复点击。');
       const suffix = '?event_id=' + encodeURIComponent(state.eventId);
       const data = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId) + '/analysis' + suffix, { method: 'POST' }));
-      const detail = await restoreCase(state.caseId, state.eventId);
+      await restoreCase(state.caseId, state.eventId);
       if (!(data.candidates || []).length) {
         setAnalyzeStatus('Provider 没有返回可审核候选；任务不能标记为成功。', true);
         return;
