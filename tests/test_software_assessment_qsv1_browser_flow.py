@@ -275,3 +275,44 @@ def test_software_assessment_page_mounts_w4_controls_and_reuses_qsv1_routes(tmp_
     assert client.get("/quality-scenarios/library").status_code == 200
     assert client.get("/quality-scenarios/library/QSV1-NOT-FOUND").status_code == 200
     assert client.get("/p0/quality-scenarios/workbench").status_code == 200  # compatibility only
+
+def test_real_reverse_bridge_keeps_candidate_when_one_ai_field_lacks_evidence(tmp_path):
+    """Field report: missing customer-experience evidence must not discard the Candidate."""
+    from types import SimpleNamespace
+    from quality_knowledge.reverse_quality import ReverseQualityService
+
+    flow, assessment_id = _setup_flow(tmp_path)
+    preview = flow.preview([assessment_id], "HIGH_PERCEPTION", "11")
+    assert preview["items"][0]["state"] == "READY"
+
+    def fake_runtime(payload, **_kwargs):
+        evidence = payload["facts"]["evidence"]
+        description = next(key for key, row in evidence.items()
+                           if row.get("target_field") == "problem_description")
+        return SimpleNamespace(data={
+            "fields": {
+                "customer_experience": {"value": "客户停产三天", "evidence_ids": ["AI_NONEXISTENT_ID"]},
+                "failure_mode": {"value": "软件考核记录中的掉电恢复问题", "evidence_ids": [description]},
+            },
+            "lifecycle_code": "", "activity_code": "", "questions": [],
+        }, model="CONTROLLED_TEST_PROVIDER")
+
+    service = ReverseQualityService(flow.generation.materials, flow.scenarios,
+                                    flow.generation.issues, tmp_path,
+                                    runtime_executor=SimpleNamespace(execute=fake_runtime))
+
+    def run_existing_reverse(bundle, *, taxonomy=None, retry_failed=False):
+        return ScenarioGenerationService.reverse_quality_from_bundle(
+            flow.generation, bundle, taxonomy=taxonomy, reverse_quality_service=service)
+    flow.generation.reverse_quality_from_bundle = run_existing_reverse
+
+    task = flow.start([assessment_id], "HIGH_PERCEPTION", "11")
+    flow.run_task(task["task_id"])
+    result = flow.get_task(task["task_id"])["items"][0]
+    assert result["state"] == "CANDIDATE_CREATED", result
+    assert result["scenario"]["status"] == "CANDIDATE"
+    assert result["scenario"]["source_problem_refs"]
+    assert result["scenario"]["evidence_refs"]
+    assert any(x["field_name"] == "customer_experience" and x["status"] == "PENDING"
+               for x in result["scenario"]["missing_information"])
+    assert not result["scenario"]["confirmation"]["quality_confirmed_by"]
