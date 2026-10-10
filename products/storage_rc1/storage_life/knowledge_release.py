@@ -77,9 +77,26 @@ class KnowledgeReleaseConsumer:
             manifest = self._validated_manifest()
         except KnowledgeReleaseError as exc:
             return {"available": False, "status": "INVALID", "code": str(exc), "release_dir": str(self.root)}
+        binding_status = "NOT_PRESENT"
+        release_class = "UNCLASSIFIED"
+        qualification_state = "NOT_ASSERTED"
+        binding_path = _binding_path()
+        if binding_path.is_file():
+            try:
+                binding = _json(binding_path)
+                validate_release_binding(binding, release_manifest=manifest)
+            except (KnowledgeReleaseError, ReleaseBindingError, TypeError):
+                binding_status = "INVALID"
+            else:
+                binding_status = "PASS"
+                release_class = str(binding.get("release_class") or "UNCLASSIFIED")
+                qualification_state = str(binding.get("qualification_state") or "NOT_ASSERTED")
         return {
             "available": True,
             "status": "READY",
+            "binding_status": binding_status,
+            "release_class": release_class,
+            "qualification_state": qualification_state,
             "knowledge_release_version": manifest.get("knowledge_release_version", ""),
             "contract_version": manifest.get("contract_version", "knowledge-query/v1"),
             "object_count": manifest.get("object_count", 0),

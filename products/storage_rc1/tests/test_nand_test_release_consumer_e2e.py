@@ -205,6 +205,9 @@ def test_file_backed_test_release_binding_consumer_and_roles(monkeypatch, tmp_pa
 
     consumer = KnowledgeReleaseConsumer.current()
     assert consumer.status()["snapshot_hash"] == manifest["snapshot_hash"]
+    assert consumer.status()["binding_status"] == "PASS"
+    assert consumer.status()["release_class"] == "TEST_ONLY_FIXTURE"
+    assert consumer.status()["qualification_state"] == "TEST_ONLY_NOT_FORMAL_APPROVAL"
     assert consumer.validate_storage_binding()["release_class"] == "TEST_ONLY_FIXTURE"
     query = consumer.query("GD5F1GQ5 P/E cycles with ECC 100K", device_type="NAND Flash")
     assert query["total"] >= 1
