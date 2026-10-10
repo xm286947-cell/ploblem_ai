@@ -962,3 +962,95 @@ def test_storage475_fence_not_accepted_for_array_response_shape(monkeypatch) -> 
             "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
         }})
     assert error.value.code == "INVALID_JSON"
+
+
+def _hardware_stage_b_runtime_for_json_gate(tmp_path: Path):
+    """Bind the *real* Hardware Stage B agent/prompt/schema; use fake HTTP only."""
+    from services.hardware_case_r1_runtime import HARDWARE_R1_STAGE_B_SCHEMA
+
+    loader = AgentConfigLoader(
+        root=ROOT,
+        model_profiles={
+            "active_model": "offline_model",
+            "models": {
+                "offline_model": {
+                    "provider": "openai_compatible",
+                    "base_url": "http://127.0.0.1:9001/v1",
+                    "model": "offline-only",
+                    "max_tokens": 8192,
+                }
+            },
+        },
+        schemas={"HardwareCaseR1ReusableKnowledgeV13": HARDWARE_R1_STAGE_B_SCHEMA},
+        environ={},
+    )
+    engine = ConfiguredAgentRuntime(
+        SqliteTaskStore(tmp_path / "hardware-stage-b.db"),
+        config_loader=loader,
+    )
+    config = engine.load_agent(
+        ROOT / "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
+    )
+    return engine, config
+
+
+def test_hardware_stage_b_inherits_runtime_json_recovery(tmp_path: Path, monkeypatch) -> None:
+    """A complete fenced JSON block recovers under the unchanged Stage B schema."""
+    engine, resolved = _hardware_stage_b_runtime_for_json_gate(tmp_path)
+    assert resolved.execution_policy.model_policy["max_tokens"] == 3072
+    assert resolved.execution_policy.validation_retry.max_attempts == 2
+    seen: list[dict] = []
+    field = {"value": None, "status": "MISSING",
+             "derived_from_fields": [], "evidence_block_ids": []}
+    expected = {"reusable_knowledge_candidate": {
+        key: dict(field)
+        for key in ("engineering_rule", "design_constraint", "diagnostic_clue",
+                    "verification_method", "applicability", "conclusion")
+    }}
+    fenced = "&#96;&#96;&#96;json\n" + json.dumps(expected) + "\n&#96;&#96;&#96;"
+    fenced = fenced.replace("&#96;", chr(96))
+
+    def fake_urlopen(request, timeout):
+        seen.append(json.loads(request.data))
+        return _FakeResponse({"choices": [
+            {"message": {"content": fenced}, "finish_reason": "stop"}
+        ]})
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    result = engine.invoke(AgentRequest(
+        request_id="hardware-stage-b-fenced-json",
+        agent_id="hardware_case.r1_reuse_derive",
+        input={"synthetic": True},
+    ))
+    assert result.status == RuntimeStatus.COMPLETED
+    assert result.data == expected
+    assert result.execution.provider_calls == 1
+    assert seen[0]["max_tokens"] == 3072  # Stage config overrides model 8192.
+
+
+def test_hardware_stage_b_incomplete_json_remains_blocked(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """No repairing missing fields, no bypass of Runtime retry budget."""
+    engine, _ = _hardware_stage_b_runtime_for_json_gate(tmp_path)
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(json.loads(request.data)["max_tokens"])
+        return _FakeResponse({"choices": [
+            {"message": {"content": '{"reusable_knowledge_candidate":'},
+             "finish_reason": "stop"}
+        ]})
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    result = engine.invoke(AgentRequest(
+        request_id="hardware-stage-b-incomplete-json",
+        agent_id="hardware_case.r1_reuse_derive",
+        input={"synthetic": True},
+    ))
+    assert result.status != RuntimeStatus.COMPLETED
+    assert result.error is not None
+    assert result.error.code == "INVALID_JSON"
+    assert result.error.details["finish_reason"] == "stop"
+    assert result.execution.provider_calls == 2
+    assert calls == [3072, 3072]
