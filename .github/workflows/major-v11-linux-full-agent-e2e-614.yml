@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - feature/major-v11-linux-full-agent-e2e-614
+  pull_request:
+    branches:
+      - fix/major-v11-ai-source-runtime-diagnostics-609
   workflow_dispatch:
 permissions:
   contents: read
