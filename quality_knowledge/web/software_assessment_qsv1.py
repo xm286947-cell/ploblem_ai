@@ -309,6 +309,7 @@ class SoftwareAssessmentQSV1Flow:
                 self.task_store.save(task)
                 continue
             key = item.get("bundle_key")
+            stage = "SOURCE_BUNDLE"
             try:
                 bundle = self.bundle_store.get(key["bundle_id"], key["bundle_revision"]) if key else None
                 if bundle is None:
@@ -319,23 +320,31 @@ class SoftwareAssessmentQSV1Flow:
                     taxonomy = unclassified_analysis_taxonomy()
                 # Only semantic classification becomes provisional. Immutable
                 # source/evidence completeness and conflict gates still apply.
+                stage = "REVERSE_QUALITY"
                 reverse_result = self.generation.reverse_quality_from_bundle(bundle, taxonomy=taxonomy)
+                stage = "CANDIDATE_MAPPING"
                 produced = self.candidates.create_from_reverse(
                     reverse_result, taxonomy,
                     trigger_source=task["trigger_source"],
                     trigger_reason=task["trigger_reason"],
                     created_by="SOFTWARE_ASSESSMENT_WORKBENCH",
                 )
+                stage = "CANDIDATE_PERSISTENCE"
                 persisted = self.qsv1.get(produced.scenario.scenario_id)
                 if persisted is None:
                     raise ValueError("QSV1_PERSISTED_SCENARIO_NOT_FOUND")
                 item.update(
                     state="EXISTING_CANDIDATE" if not produced.created else "CANDIDATE_CREATED",
                     scenario=persisted.model_dump(mode="json"), created=produced.created,
+                    error="", error_stage="", error_code="",
                 )
             except ValueError as error:
                 code = str(error)
-                if any(token in code for token in ("SOURCE", "LOCATOR", "BUNDLE_SNAPSHOT")):
+                item["error_stage"] = stage
+                item["error_code"] = type(error).__name__
+                if stage in {"CANDIDATE_MAPPING", "CANDIDATE_PERSISTENCE"}:
+                    item.update(state="GENERATION_FAILED", error="QSV1_CANDIDATE_CREATION_FAILED")
+                elif any(token in code for token in ("SOURCE", "LOCATOR", "BUNDLE_SNAPSHOT")):
                     item.update(state="SOURCE_BINDING_FAILED", error=code)
                 elif "人工" in code or "CONFIRMED" in code or "REVIEWED" in code:
                     item.update(state="INFORMATION_REQUIRED", error=code)
@@ -343,15 +352,22 @@ class SoftwareAssessmentQSV1Flow:
                     item.update(state="INFORMATION_REQUIRED", error=code)
                 else:
                     item.update(state="PROVIDER_FAILED", error=code)
-            except Exception:  # Keep provider/runtime details out of the browser response.
-                item.update(state="PROVIDER_FAILED", error="REVERSE_QUALITY_PROVIDER_FAILED")
+            except Exception as error:  # Never disclose credentials or raw business facts in UI.
+                item["error_stage"] = stage
+                item["error_code"] = type(error).__name__
+                if stage == "REVERSE_QUALITY":
+                    item.update(state="PROVIDER_FAILED", error="REVERSE_QUALITY_EXECUTION_FAILED")
+                elif stage == "SOURCE_BUNDLE":
+                    item.update(state="SOURCE_BINDING_FAILED", error="SCENARIO_SOURCE_PROCESSING_FAILED")
+                else:
+                    item.update(state="GENERATION_FAILED", error="QSV1_CANDIDATE_CREATION_FAILED")
             completed += 1
             with self._lock:
                 task["progress"] = {"completed": completed, "total": len(task["items"])}
             self.task_store.save(task)
         with self._lock:
             states = {item.get("state") for item in task["items"]}
-            task["state"] = "COMPLETED" if not states.intersection({"ANALYZING", "PROVIDER_FAILED", "SOURCE_BINDING_FAILED", "INFORMATION_REQUIRED"}) else "PARTIAL"
+            task["state"] = "COMPLETED" if not states.intersection({"ANALYZING", "PROVIDER_FAILED", "GENERATION_FAILED", "SOURCE_BINDING_FAILED", "INFORMATION_REQUIRED"}) else "PARTIAL"
         self.task_store.save(task)
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
@@ -367,7 +383,7 @@ class SoftwareAssessmentQSV1Flow:
         source = self._load_task(task_id)
         if source is None:
             raise ValueError("SOFTWARE_ASSESSMENT_TASK_NOT_FOUND")
-        retry_items = [item for item in source["items"] if item.get("state") == "PROVIDER_FAILED"]
+        retry_items = [item for item in source["items"] if item.get("state") in {"PROVIDER_FAILED", "GENERATION_FAILED"}]
         if not retry_items:
             raise ValueError("SOFTWARE_ASSESSMENT_NO_RETRYABLE_ITEMS")
         new_task_id = "QSFAST-" + uuid.uuid4().hex[:16]
