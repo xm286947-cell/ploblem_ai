@@ -63,6 +63,12 @@ def check_zip_modes(archive: Path) -> None:
         for name in WINDOWS_ENTRYPOINTS:
             if prefix + name not in names:
                 raise SystemExit(f"WINDOWS_ENTRY_MISSING={name}")
+        # Validate the actual ZIP bytes rather than only the checkout.
+        # CMD can drop the first letter of commands in LF-only .bat files.
+        for name in sorted(path for path in names if path.startswith(prefix) and path.lower().endswith(".bat")):
+            content = bundle.read(name)
+            if not content or b"\n" not in content or content.count(b"\r\n") != content.count(b"\n"):
+                raise SystemExit(f"WINDOWS_ENTRY_NOT_CRLF={name}")
 
 
 def kill_process_group(process: subprocess.Popen[str]) -> None:
