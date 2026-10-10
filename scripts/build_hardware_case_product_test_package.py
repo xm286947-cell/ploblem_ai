@@ -373,6 +373,30 @@ def inventory() -> list[dict[str, object]]:
     return files
 
 
+
+def normalize_windows_batch_line_endings(package_root: Path) -> list[str]:
+    """Normalize staged batch launchers to CRLF for Windows CMD.
+
+    Git/ZIP can preserve LF-only .bat sources; on Windows CMD this can result
+    in commands losing their first character (setlocal -> etlocal, etc.).
+    Preserve all existing bytes except line endings, including local encoding.
+    """
+    normalized: list[str] = []
+    for path in sorted(package_root.rglob("*.bat")):
+        original = path.read_bytes()
+        fixed = (
+            original.replace(b"\r\n", b"\n")
+            .replace(b"\r", b"\n")
+            .replace(b"\n", b"\r\n")
+        )
+        if fixed != original:
+            path.write_bytes(fixed)
+            normalized.append(path.relative_to(package_root).as_posix())
+        if b"\n" in fixed and fixed.count(b"\r\n") != fixed.count(b"\n"):
+            raise SystemExit("WINDOWS_BATCH_CRLF_FAILED=" + str(path))
+    return normalized
+
+
 def security_assertions(files: list[dict[str, object]]) -> None:
     forbidden: list[str] = []
     cross_domain_forbidden = {
@@ -429,6 +453,10 @@ def main() -> int:
         path.chmod(path.stat().st_mode | 0o111)
 
     closure = copy_dependency_closure()
+
+    # Validate executable Windows syntax after ZIP extraction, regardless of
+    # checkout platform; never rewrite repository-local source or user data.
+    normalize_windows_batch_line_endings(STAGE)
 
     # Empty company-local working folders are intentionally created in the
     # package. Real data is supplied only after extraction inside the company.
