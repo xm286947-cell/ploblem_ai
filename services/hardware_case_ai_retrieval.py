@@ -753,6 +753,27 @@ class HardwareCaseAIRetrievalService:
                 status = {"status": "INVOKED", "trace": plan.get("trace"), "intent": plan.get("intent")}
             except Exception as error:
                 status = {"status": "BLOCKED", "error_code": str(getattr(error, "code", None) or type(error).__name__), "trace": None}
+        # Bound fallback to literal overlaps with existing Formal titles.
+        # No field facts or source rows are modified.
+        if self.consumption_service is not None and self._is_natural_query(query):
+            store = getattr(self.consumption_service, "store", None)
+            rows = store.list_all() if store is not None else []
+            normalized_query = normalize_search_text(query)
+            spans: set[str] = set()
+            for row in rows:
+                title = normalize_search_text(row.get("title") or "")
+                for phrase in re.findall(r"[\u4e00-\u9fff]{3,}", title):
+                    for length in (4, 3):
+                        for idx in range(len(phrase) - length + 1):
+                            piece = phrase[idx:idx + length]
+                            if any(term in piece for term in ("问题", "报告", "分析", "设计", "电路", "经验")):
+                                continue
+                            if piece in normalized_query:
+                                spans.add(piece)
+            for piece in sorted(spans, key=lambda item: (-len(item), item))[:6]:
+                if piece not in {v.get("text") for v in variants}:
+                    variants.append({"text": piece, "kind": "FORMAL_TITLE_OVERLAP", "rules": ["FORMAL_TITLE_LITERAL"],
+                                     "priority_rank": 2, "expansion_cost": 2})
         return variants, status
 
     def _case_id_hit(self, query: str) -> dict[str, Any] | None:
