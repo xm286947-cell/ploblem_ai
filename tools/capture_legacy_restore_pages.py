@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
+from urllib.parse import urljoin
 
 import uvicorn
 from playwright.sync_api import sync_playwright
@@ -76,7 +77,7 @@ def main():
                     for link in styles.all():
                         url = link.get_attribute("href")
                         if url and "app.css" in url:
-                            resource = page.request.get(address + url)
+                            resource = page.request.get(urljoin(address, url))
                             assert resource.status == 200, f"CSS_FETCH_FAILED {route} {resource.status}"
                     output = destination / (name + ".png")
                     page.screenshot(path=str(output), full_page=True, animations="disabled")
