@@ -50,7 +50,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           changed = Path('changed.txt').read_text().splitlines()
-          allowed = ('quality_knowledge/scenario', 'quality_knowledge/reverse_quality_scenario_adapter.py',
+          allowed = ('quality_knowledge/web/itr_', 'quality_knowledge/web/missed_test_adapter.py',
+                     'quality_knowledge/web/software_assessment_adapter.py',
+                     'quality_knowledge/web/templates/itr_', 'quality_knowledge/web/templates/missed_test_',
+                     'quality_knowledge/web/templates/software_assessment_',
+                     'quality_knowledge/web/templates/materials.html',
+                     'quality_knowledge/web/templates/association_settings.html',
+                     'tests/test_restored_quality_workbenches.py',
+                     'quality_knowledge/scenario', 'quality_knowledge/reverse_quality_scenario_adapter.py',
                      'quality_knowledge/quality_models.py', 'quality_knowledge/materials.py',
                      'quality_knowledge/web/scenario', 'quality_knowledge/web/legacy_scenario_rc1_routes.py',
                      'quality_knowledge/web/templates/quality_scenario',
