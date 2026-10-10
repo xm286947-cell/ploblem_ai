@@ -69,3 +69,20 @@ def test_ai_retrieval_definition_is_packaged_but_provider_config_is_preserved():
     )
     assert "config/hardware_search.example.yaml" in package_builder.INCLUDE_FILES
     assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES
+
+
+def test_r2_query_and_engineering_consumer_runtime_assets_ship_in_native_package():
+    """Do not claim R2 real-provider readiness with missing packaged agents."""
+    required = {
+        "config/runtime/agents/hardware_retrieval.query_understand.yaml",
+        "config/runtime/agents/hardware_retrieval.engineering_consumption.yaml",
+        "prompts/runtime/hardware_retrieval/query_understand_v1.md",
+        "prompts/runtime/hardware_retrieval/engineering_consumption_v1.md",
+        "tools/hardware_r2_real_gate_probe.py",
+        "docs/product/HARDWARE_R2_INTERNAL_AGENT_SECURITY_AND_TRIAL.md",
+    }
+    assert required.issubset(set(package_builder.INCLUDE_FILES))
+    for relative in required:
+        assert (package_builder.ROOT / relative).is_file(), relative
+    assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES
+    assert all(package_builder.allowed(Path(path)) for path in required)
