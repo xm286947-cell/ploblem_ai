@@ -96,7 +96,7 @@
   }
 
   async function fetchJson(path) {
-    const response = await fetch(api + path, { headers: { Accept: 'application/json' } });
+    const response = await fetch(path.startsWith('/api/') ? path : api + path, { headers: { Accept: 'application/json' } });
     let payload = null;
     try { payload = await response.json(); } catch (_) { payload = {}; }
     if (!response.ok) {
@@ -118,9 +118,11 @@
     q('[data-knowledge-unavailable]').hidden = true;
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/search' + searchParams());
+      const payload = await fetchJson('/api/hardware-query/v1/search' + searchParams());
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
+      const status = payload.retrieval && payload.retrieval.query_agent ? payload.retrieval.query_agent.status : 'FAST_PATH';
+      if (status === 'BLOCKED' || status === 'NOT_CONFIGURED') q('[data-knowledge-summary]').textContent += ' · 规则检索（Agent 未就绪）';
     } catch (error) {
       results = [];
       if (error.status === 503) setUnavailable();
