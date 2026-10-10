@@ -21,6 +21,7 @@ on:
       - "config/runtime/agents/hardware_retrieval.query_understand.yaml"
       - "prompts/runtime/hardware_retrieval/query_understand_v1.md"
       - "tests/test_hardware_r2_query_assist.py"
+      - "tests/test_hardware_r2_query_trusted_gate.py"
       - "quality_knowledge/web/hardware_case_api.py"
       - "quality_knowledge/web/p0_app.py"
       - "quality_knowledge/web/templates/hardware_case_search.html"
@@ -65,6 +66,7 @@ jobs:
           tests/test_hardware_retrieval_query.py
           tests/test_hardware_case_ai_retrieval.py
           tests/test_hardware_r2_query_assist.py
+          tests/test_hardware_r2_query_trusted_gate.py
           tests/test_hardware_r2_engineering_consumption.py
           tests/test_hardware_case_ai_retrieval_w2.py
           tests/test_hardware_case_w2_ui_smoke_contract.py
