@@ -91,7 +91,7 @@ jobs:
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt playwright
           python -m playwright install --with-deps chromium
       - name: Capture actual rendered restore pages
-        run: python tools/capture_legacy_restore_pages.py --output restore-page-screenshots
+        run: python -m tools.capture_legacy_restore_pages --output restore-page-screenshots
       - uses: actions/upload-artifact@v4
         with:
           name: LEGACY_QUALITY_RESTORE_REAL_CHROME_SCREENSHOTS
