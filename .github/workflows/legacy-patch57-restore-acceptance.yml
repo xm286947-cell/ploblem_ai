@@ -1,0 +1,233 @@
+name: Legacy Quality PATCH57 Restore Acceptance
+on:
+  push:
+    branches:
+      - test/legacy-quality-patch57-20260913
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  FROZEN_SOURCE: 6bd207e00b38e3688c817f27621bfedf052aeffb
+
+jobs:
+  identity:
+    name: Historical Source Identity
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Confirm old product source is byte-for-byte unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$FROZEN_SOURCE"
+          DIFF="$(git diff --name-only "$FROZEN_SOURCE" HEAD)"
+          test "$DIFF" = ".github/workflows/legacy-patch57-restore-acceptance.yml"
+          grep -q 'V1.1_P2_RC2_PATCH57_20260913' README.md
+          test -f start_quality_capability_p1.bat
+          test -f quality_knowledge/web/templates/quality_scenarios.html
+          test -f quality_knowledge/web/templates/materials.html
+          test -f quality_knowledge/web/templates/scenario_customer_portrait.html
+          test ! -e quality_knowledge/reverse_quality.py
+          test ! -e quality_knowledge/web/templates/reverse_quality_issue.html
+          echo "FROZEN_SOURCE_SHA=$FROZEN_SOURCE" >> "$GITHUB_STEP_SUMMARY"
+          echo "LEGACY_SOURCE_IDENTITY=PASS; NO_PRODUCT_CODE_MODIFIED=YES" >> "$GITHUB_STEP_SUMMARY"
+
+  linux-web:
+    name: Linux Original Web / Browser
+    needs: identity
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install historical requirements and browser test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install httpx playwright
+          python -m playwright install --with-deps chromium
+      - name: Historical regression (no external provider or customer data)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_itr_cs_material_mvp.py tests/test_quality_scenario_generation.py tests/test_quality_scenario_library.py tests/test_scenario_assets.py tests/test_scenario_interpretation.py | tee legacy-linux-pytest.log
+      - name: Real Chromium screenshots with isolated SQLite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib, subprocess, sys, tempfile, time, urllib.request, os
+          from playwright.sync_api import sync_playwright
+          root = pathlib.Path.cwd()
+          screenshots = root / 'legacy-screenshots'
+          screenshots.mkdir(exist_ok=True)
+          with tempfile.TemporaryDirectory(prefix='patch57-smoke-') as tmp:
+              db = pathlib.Path(tmp) / 'synthetic_empty.db'
+              log = open(root / 'legacy-browser-server.log','w',encoding='utf-8')
+              server = subprocess.Popen([sys.executable, 'main.py', 'knowledge-web', '--db', str(db)], stdout=log, stderr=subprocess.STDOUT)
+              try:
+                  for _ in range(90):
+                      if server.poll() is not None:
+                          raise RuntimeError('Web exited before listen; inspect legacy-browser-server.log')
+                      try:
+                          with urllib.request.urlopen('http://127.0.0.1:8080/issues',timeout=1) as resp:
+                              if resp.status == 200:
+                                  break
+                      except Exception:
+                          time.sleep(1)
+                  else:
+                      raise RuntimeError('Historical Web did not start within 90 seconds')
+                  pages = [
+                      ('issues','/issues','问题工作台'),
+                      ('software-operations','/materials/software-operations','软件'),
+                      ('quality-scenarios','/quality-scenarios','质量场景库'),
+                      ('scenario-assets','/quality-scenario-assets','场景'),
+                  ]
+                  with sync_playwright() as p:
+                      browser=p.chromium.launch(headless=True)
+                      page=browser.new_page(viewport={'width': 1440, 'height': 900}, device_scale_factor=1)
+                      for label,path,expected in pages:
+                          response=page.goto('http://127.0.0.1:8080'+path, wait_until='networkidle',timeout=40000)
+                          if not response or response.status != 200:
+                              raise AssertionError(f'{path}: HTTP {response.status if response else "NO_RESPONSE"}')
+                          if expected not in page.locator('body').inner_text():
+                              raise AssertionError(f'{path}: missing expected text {expected}')
+                          if label=='software-operations':
+                              if page.locator('th').filter(has_text='分值').count():
+                                  raise AssertionError('Unapproved score column appeared')
+                          page.screenshot(path=str(screenshots/(label+'.png')), full_page=True)
+                          print(f'BROWSER_PASS={path}')
+                      browser.close()
+              finally:
+                  server.terminate()
+                  try: server.wait(timeout=10)
+                  except subprocess.TimeoutExpired: server.kill()
+                  log.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PATCH57_LINUX_EVIDENCE
+          path: |
+            legacy-screenshots/
+            legacy-linux-pytest.log
+            legacy-browser-server.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  windows-bat:
+    name: Windows Original BAT
+    needs: identity
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install original requirements and test runner
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install httpx
+      - name: Run original workbench regression
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_itr_cs_material_mvp.py tests/test_quality_scenario_library.py tests/test_scenario_assets.py
+      - name: Double-click equivalent original Windows start_quality_capability_p1.bat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:REPEAT_CASE_NO_PAUSE = '1'
+          $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','start_quality_capability_p1.bat' -PassThru -RedirectStandardOutput 'legacy-win-stdout.log' -RedirectStandardError 'legacy-win-stderr.log'
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              if ($p.HasExited) { throw "BAT terminated early" }
+              try {
+                $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/issues' -TimeoutSec 2 -UseBasicParsing
+                if ($r.StatusCode -eq 200) { $ready = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw "Windows BAT did not serve /issues" }
+            foreach ($path in @('/issues','/materials/software-operations','/quality-scenarios','/quality-scenario-assets')) {
+              $r = Invoke-WebRequest -Uri ("http://127.0.0.1:8080" + $path) -TimeoutSec 20 -UseBasicParsing
+              if ($r.StatusCode -ne 200) { throw "$path HTTP $($r.StatusCode)" }
+              Write-Output "WINDOWS_BAT_PASS=$path"
+            }
+          } finally {
+            taskkill /F /T /PID $p.Id 2>$null
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PATCH57_WINDOWS_EVIDENCE
+          path: |
+            legacy-win-stdout.log
+            legacy-win-stderr.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  source-package:
+    name: Historical full-code archive candidate
+    needs: identity
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package frozen SHA without runtime data or secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime, hashlib, io, json, pathlib, subprocess, tarfile, tempfile, zipfile
+          source='6bd207e00b38e3688c817f27621bfedf052aeffb'
+          root='LEGACY_QUALITY_PATCH57_20260913'
+          out=pathlib.Path('LEGACY_QUALITY_PATCH57_20260913_SOURCE_CANDIDATE.zip')
+          blob=subprocess.check_output(['git','archive','--format=tar',source])
+          excluded_prefix=('input/','output/','outputs/','sources/')
+          excluded_suffix=('.db','.sqlite','.sqlite3','.log','.key','.pem','.env')
+          excluded=[]
+          count=0
+          with tarfile.open(fileobj=io.BytesIO(blob),mode='r:') as src, zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as dest:
+              for m in src.getmembers():
+                  if not m.isfile(): continue
+                  p=m.name
+                  if p.startswith(excluded_prefix) or p.endswith(excluded_suffix) or '/.env' in p or p.startswith('.git/'):
+                      excluded.append(p); continue
+                  f=src.extractfile(m)
+                  if f is None: continue
+                  dest.writestr(root+'/'+p,f.read()); count+=1
+              manifest={
+                  'artifact_role':'LEGACY_SOURCE_CANDIDATE_NOT_UAT_RELEASE',
+                  'source_git_sha':source,
+                  'historical_source_date_china':'2026-09-13 08:44:31',
+                  'historical_patch':'V1.1_P2_RC2_PATCH57_20260913',
+                  'entrypoint':'start_quality_capability_p1.bat',
+                  'web_command':'python main.py knowledge-web --db knowledge/quality_issue_v1.db',
+                  'web_url':'http://127.0.0.1:8080/issues',
+                  'database_included':False,
+                  'excluded_paths':excluded,
+                  'historical_code_files_included':count,
+                  'test_status':'See the separate GitHub Actions linux-web and windows-bat jobs; do not infer PASS from packaging'
+              }
+              dest.writestr(root+'/RESTORE_PACKAGE_MANIFEST.json',json.dumps(manifest,ensure_ascii=False,indent=2))
+          checksum=hashlib.sha256(out.read_bytes()).hexdigest()
+          pathlib.Path(out.name+'.sha256').write_text(checksum+'  '+out.name+'\n',encoding='utf-8')
+          print(f'PACKAGE_PATH={out} PACKAGE_SHA256={checksum} CODE_FILES={count} EXCLUDED={len(excluded)}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LEGACY_QUALITY_PATCH57_20260913_SOURCE_CANDIDATE
+          path: |
+            LEGACY_QUALITY_PATCH57_20260913_SOURCE_CANDIDATE.zip
+            LEGACY_QUALITY_PATCH57_20260913_SOURCE_CANDIDATE.zip.sha256
+          retention-days: 30
