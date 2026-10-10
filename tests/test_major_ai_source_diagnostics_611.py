@@ -157,7 +157,7 @@ def test_incomplete_runtime_returns_sanitized_task_diagnostics(tmp_path: Path) -
     assert body["tasks"][0]["committed_objects"] == 0
     assert set(body["tasks"][0]["missing_types"]) == {
         "ISSUE_FACT", "ROOT_CAUSE", "ACTION", "VERIFICATION"}
-    assert body["diagnostic_log"].endswith("diagnostics/major_analysis.log")
+    assert Path(body["diagnostic_log"]).parts[-2:] == ("diagnostics", "major_analysis.log")
     # No source bytes, prompts, provider output or credentials in diagnostics.
     for forbidden in ("provider_input", "source_text", "raw_json", "api_key"):
         assert forbidden not in diagnostics.text
