@@ -147,7 +147,23 @@ class RepeatHistoricalCaseSearchService:
             candidate = self._base_candidate(item)
             case_id = candidate["case_id"]
             try:
-                semantic_context = self.case_client.get_repeat_risk_context(case_id)
+                semantic_reader = getattr(self.case_client, "get_repeat_risk_context", None)
+                if callable(semantic_reader):
+                    semantic_context = semantic_reader(case_id)
+                else:
+                    # Legacy historical-case/v1 consumers without the additive
+                    # semantic endpoint remain valid. Never fabricate typed
+                    # semantics or evidence; explicitly mark generic-only.
+                    semantic_context = {
+                        "contract_version": REPEAT_RISK_CONTEXT_CONTRACT_VERSION,
+                        "case_id": case_id,
+                        "semantic_mode": "LEGACY_GENERIC_ONLY",
+                        "semantic_contract_version": None,
+                        "typed_causes": [],
+                        "typed_actions": [],
+                        "semantic_coverage": {},
+                        "semantic_evidence_status": "LEGACY_GENERIC_ONLY",
+                    }
                 semantic_projection = self._semantic_projection(semantic_context, case_id)
             except HistoricalCaseContractError as exc:
                 candidate["detail_status"] = SEARCH_INCOMPLETE
