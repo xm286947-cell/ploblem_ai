@@ -59,8 +59,8 @@ def test_windows_real_browser_confirm_and_69_row_pages(tmp_path: Path) -> None:
             row2 = [cell.value for cell in ws[2]]
             for index in range(2, 71):
                 values = dict(zip(headers, row2))
-                values["IGR编号"] = f"IGR-EDGE-611-{index:04d}"
-                values["ITR单号"] = f"ITREDGE611{index:04d}"
+                values["IGR编号"] = f"IGR-2026-{index:04d}"
+                values["ITR单号"] = f"ITR2027{index:04d}"
                 values["问题描述"] = f"Edge UI 行号 {index}: 用于 69 行完整预览"
                 for col, key in enumerate(headers, 1):
                     ws.cell(index, col).value = values.get(key)
