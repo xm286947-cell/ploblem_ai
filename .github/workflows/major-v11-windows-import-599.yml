@@ -6,6 +6,7 @@ on:
       - fix/major-v11-windows-excel-progress-599
       - fix/major-v11-windows-refresh-recovery-605
       - fix/major-v11-windows-full-batch-view-607
+      - fix/major-v11-windows-ai-provider-bind-610
   pull_request:
     branches:
       - fix/major-v11-windows-excel-progress-599
