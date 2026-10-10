@@ -63,6 +63,22 @@ def _excel_case(client: TestClient) -> tuple[str, str]:
     return case_id, detail["events"][0]["event_id"]
 
 
+def test_native_browser_blank_optional_material_does_not_block_excel_preview(tmp_path: Path) -> None:
+    client = _client(tmp_path, lambda *_args: [])
+    # HTML FormData can include an empty file part for an optional file control.
+    # It is not a document and must not fail the Excel upload with HTTP 400.
+    response = client.post(
+        API + "/excel/preview",
+        data={"group_code": "MAJOR", "domain": "QUALITY"},
+        files=[
+            ("file", ("cases.xls", XLS_FIXTURE.read_bytes(), "application/vnd.ms-excel")),
+            ("materials", ("", b"", "application/octet-stream")),
+        ],
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["staged_material_count"] == 0
+
+
 def test_bridge_does_not_relabel_excel_evidence_as_pdf() -> None:
     def ref(source_id: str, kind: str) -> SourceRef:
         return SourceRef(
