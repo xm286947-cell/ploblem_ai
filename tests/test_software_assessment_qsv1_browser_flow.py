@@ -46,12 +46,13 @@ def _reverse_result(bundle):
     }
 
 
-def _setup_flow(tmp_path):
+def _setup_flow(tmp_path, *, explicit_product_type=""):
     db = tmp_path / "mature.db"
     materials = MaterialRepository(db)
     assessment_id = materials.add_material(
         materials.group("SW-OPS"), "ITR20261041001",
-        {"问题信息_问题描述": "软件考核记录中的掉电恢复问题", "问题信息_产品型号": "PLC-X"},
+        {"问题信息_问题描述": "软件考核记录中的掉电恢复问题", "问题信息_产品型号": "PLC-X",
+         **({"问题信息_产品类型": explicit_product_type} if explicit_product_type else {})},
         "source.xlsx", "assessment", 3,
     )[0]
     materials.add_material(
@@ -166,6 +167,34 @@ def test_software_assessment_one_click_ui_without_preview_step(tmp_path, monkeyp
     ).read_text(encoding="utf-8")
     assert "request('/generations'" in script
     assert "request('/preview'" not in script
+
+
+def test_missing_issue_product_category_uses_explicit_software_assessment_type(tmp_path):
+    flow, assessment_id = _setup_flow(tmp_path, explicit_product_type="PLC")
+    with sqlite3.connect(flow.generation.materials.db_path) as connection:
+        connection.execute("UPDATE quality_issue SET business_type='' WHERE knowledge_id=?", ("QK-W4-41001",))
+    preview = flow.preview([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert preview["items"][0]["state"] == "READY"
+    assert preview["items"][0]["bundle"]["selected_issue"]["product_code"] == "PLC"
+
+    task = flow.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert task["items"][0]["state"] == "ANALYZING"
+    flow.run_task(task["task_id"])
+    # Controlled provider intentionally fails its first run; product-code validation must pass.
+    assert flow.get_task(task["task_id"])["items"][0]["state"] == "PROVIDER_FAILED"
+
+
+def test_missing_product_category_does_not_guess_from_product_model(tmp_path):
+    flow, assessment_id = _setup_flow(tmp_path)
+    with sqlite3.connect(flow.generation.materials.db_path) as connection:
+        connection.execute("UPDATE quality_issue SET business_type='' WHERE knowledge_id=?", ("QK-W4-41001",))
+    preview = flow.preview([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert preview["items"][0]["bundle"]["selected_issue"]["product_code"] == ""
+    task = flow.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    flow.run_task(task["task_id"])
+    item = flow.get_task(task["task_id"])["items"][0]
+    assert item["state"] == "INFORMATION_REQUIRED"
+    assert item["error"] == "BUNDLE_PRODUCT_CODE_REQUIRED"
 
 
 def test_software_assessment_page_mounts_w4_controls_and_reuses_qsv1_routes(tmp_path, monkeypatch):
