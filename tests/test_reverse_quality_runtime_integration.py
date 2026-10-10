@@ -106,6 +106,7 @@ def model_config(tmp_path,base_url):
     path=tmp_path/"model.local.yaml"
     path.write_text(
         f"""
+active_model: qwen_prod
 models:
   qwen_prod:
     provider: openai_compatible
@@ -305,6 +306,9 @@ def test_reverse_quality_service_uses_runtime_and_preserves_result_contract(tmp_
                   "lifecycle_code":"","activity_code":"","questions":[]},
             model="mock-gpt",
         ))
+        captured = {}
+        service.repository.complete_run = lambda run_id, **kwargs: captured.update(kwargs)
+        service.get = lambda _canonical: {"review": captured["fields"], "missing_information": captured["missing_information"]}
         downgraded = service._analyse_run(saved["input"],{"lifecycles":[],"activities":[]},"invalid-evidence","RQRUN-INVALID","PLC")
         assert downgraded["review"]["related_objects"]["value"] == ""
         assert any(x["field_name"] == "related_objects" and x["status"] == "PENDING"
