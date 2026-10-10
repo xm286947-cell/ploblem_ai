@@ -28,7 +28,7 @@ def _stub_request(*, invalid_quote=False):
     def request(base, method, path, *, payload=None, token=None, token_header=None, timeout=30):
         calls.append((method, path, token_header))
         if method == "GET" and "/objects/" in path:
-            return dict(A0207)
+            return dict(A0152 if path.endswith("/KO-A0152") else A0207)
         if method == "GET":
             query = parse_qs(urlsplit(path).query)["text"][0]
             if query == "复位问题":
@@ -41,7 +41,8 @@ def _stub_request(*, invalid_quote=False):
             assert token == FLAGS["HARDWARE_QUERY_AGENT_INTERNAL_TOKEN"]
             return {"results": [dict(A0207)], "retrieval": {
                 "query_agent": {"trace": {"agent_id": "hardware_retrieval.query_understand",
-                   "task_id": "T01", "run_id": "R01", "provider_calls": 1}}}}
+                   "task_id": "T01", "run_id": "R01", "provider_calls": 1,
+                   "provider": "openai_compatible", "model": "qwen3.8-max"}}}}
         if path.endswith("/analyze"):
             assert token_header == "X-Hardware-Analysis-Token"
             assert token == FLAGS["HARDWARE_ANALYSIS_INTERNAL_TOKEN"]
@@ -50,7 +51,8 @@ def _stub_request(*, invalid_quote=False):
                     "items": [{"source_field": "design_constraint", "source_quote": quote,
                                "suggestion": quote, "advice_scope": "VERBATIM_FORMAL_EXCERPT"}],
                     "trace": {"agent_id": "hardware_retrieval.engineering_consumption",
-                              "task_id": "T02", "run_id": "R02", "provider_calls": 1}}
+                              "task_id": "T02", "run_id": "R02", "provider_calls": 1,
+                              "provider": "openai_compatible", "model": "qwen3.8-max"}}
         raise AssertionError("Unexpected request")
     return request, calls
 
@@ -73,7 +75,49 @@ def test_read_only_probe_checks_known_cases_without_provider(monkeypatch):
     assert report["online_agent_gate"] == "NOT_RUN"
     assert report["engineering_agent_gate"] == "NOT_RUN"
     assert report["a0207_formal_identity"]["evidence_ref_count"] == 1
+    assert set(report["formal_identity"]) == {"A0152", "A0207"}
+    assert report["original_word_sha_gate"] == "NOT_RUN"
     assert all(method == "GET" for method, _, _ in calls)
+
+
+def test_search_hit_outside_top_five_fails_instead_of_claiming_pass(monkeypatch):
+    requester, _ = _stub_request()
+
+    def sixth_hit(*args, **kwargs):
+        payload = requester(*args, **kwargs)
+        if args[1] == "GET" and "text=%E6%A8%A1%E6%8B%9F%E9%87%8F" in args[2]:
+            payload["results"] = [
+                {"business_case_id": "A000" + str(i)} for i in range(5)
+            ] + [dict(A0207)]
+        return payload
+
+    monkeypatch.setattr(gate, "_request", sixth_hit)
+    report = gate.probe("http://127.0.0.1:18785", environ={})
+    assert report["deterministic_gate"] == "FAIL"
+    assert report["deterministic_query_results"][0]["hit_count"] == 6
+    assert "A0207" not in report["deterministic_query_results"][0]["actual_business_case_ids"]
+
+
+def test_missing_formal_evidence_blocks_real_data_gate(monkeypatch):
+    requester, _ = _stub_request()
+
+    def missing_evidence(*args, **kwargs):
+        result = requester(*args, **kwargs)
+        if args[1] == "GET" and args[2].endswith("/KO-A0152"):
+            result["evidence_refs"] = []
+        return result
+
+    monkeypatch.setattr(gate, "_request", missing_evidence)
+    with pytest.raises(gate.ProbeError, match="FORMAL_CASE_EVIDENCE_MISSING_A0152"):
+        gate.probe("http://127.0.0.1:18785", environ={})
+
+
+def test_mock_provider_identity_does_not_count_as_real_agent():
+    with pytest.raises(gate.ProbeError, match="REAL_AGENT_PROVIDER_IDENTITY_UNVERIFIED"):
+        gate._trace_info({"trace": {
+            "task_id": "FAKE_TASK", "run_id": "FAKE_RUN",
+            "provider_calls": 1, "provider": "mock_provider", "model": "unit-test",
+        }}, analysis=True)
 
 
 def test_real_agent_approval_precedes_network(monkeypatch):
