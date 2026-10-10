@@ -121,9 +121,13 @@ class HardwareEngineeringConsumption:
                 raise EngineeringAnalysisError("ANALYSIS_UNGROUNDED_QUOTE")
             if not isinstance(suggestion, str) or not suggestion.strip() or len(suggestion) > 600:
                 raise EngineeringAnalysisError("ANALYSIS_SUGGESTION_INVALID")
-            validated.append({"suggestion": suggestion, "knowledge_id": formal["knowledge_id"],
+            # A valid citation alone cannot prove a free-form model claim.
+            # For the first safe MVP surface only the verbatim Formal excerpt;
+            # task selection is agent-driven, but new engineering claims are not.
+            validated.append({"suggestion": quote, "knowledge_id": formal["knowledge_id"],
                               "business_case_id": formal.get("business_case_id"),
-                              "source_field": field, "source_quote": quote})
+                              "source_field": field, "source_quote": quote,
+                              "advice_scope": "VERBATIM_FORMAL_EXCERPT"})
         return {"status": "AI_ADVISORY_REQUIRES_ENGINEERING_REVIEW", "task_intent": task_intent,
                 "knowledge_id": formal["knowledge_id"], "business_case_id": formal.get("business_case_id"),
                 "items": validated, "case_evidence_refs": list(formal.get("evidence_refs") or []),
