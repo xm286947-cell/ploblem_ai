@@ -1,4 +1,4 @@
-name: Major V1.1 Windows Batch 607 Gate
+name: Major V1.1 Windows AI Provider Active Model Gate
 
 on:
   push:
@@ -105,19 +105,22 @@ jobs:
             Write-Host "SERVER_CLEANUP_DONE=YES"
           }
 
-      - name: Package cumulative Windows Delta E overlay
+      - name: Package cumulative Windows Delta F overlay
         if: success()
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $stage = Join-Path $env:RUNNER_TEMP "major-refresh-delta-e-root"
+          $stage = Join-Path $env:RUNNER_TEMP "major-ai-delta-f-root"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           $files = @(
             "START_MAJOR_V11_WINDOWS.bat",
             "quality_knowledge/web/major_production_api.py",
             "quality_knowledge/web/static/major_production.js",
             "quality_knowledge/web/templates/major_production.html",
-            "services/major_case_production.py"
+            "services/major_case_production.py",
+            "quality_knowledge/major_cases/runtime_provider.py",
+            "quality_knowledge/web/p0_app.py",
+            "config/runtime/agents/major_issue.d01.extract.yaml"
           )
           foreach ($src in $files) {
             if (-not (Test-Path -LiteralPath $src)) { throw "Patch source missing: $src" }
@@ -128,10 +131,14 @@ jobs:
           $manifest = @(
             "PRODUCT_FROZEN_SOURCE=55aaf9234ec102360043f4deef782126bc234b80",
             "BASE_PACKAGE=MAJOR_V11_OVERALL_552_RC_55aaf923.zip",
-            "DELIVERY=WINDOWS_DELTA_E_CUMULATIVE_OVERLAY",
+            "DELIVERY=WINDOWS_DELTA_F_CUMULATIVE_OVERLAY",
             "DELTA_C_INCLUDED=YES",
             "DELTA_D_INCLUDED=YES",
-            "SOURCE_BRANCH=fix/major-v11-windows-full-batch-view-607",
+            "DELTA_E_INCLUDED=YES",
+            "MAJOR_ACTIVE_RUNTIME_MODEL_BINDING=YES",
+            "MAJOR_PROVIDER_STATUS=READ_ONLY",
+            "PROVIDER_TRACE_FILE=LOCALAPPDATA/MajorV11/logs/major-provider-trace.jsonl",
+            "SOURCE_BRANCH=fix/major-v11-windows-ai-provider-bind-610",
             "BATCH_VISIBILITY_ISSUE=607",
             "USAGE=Fresh extract original frozen product; overlay this ZIP at main.py folder; launch START_MAJOR_V11_WINDOWS.bat",
             "USER_DATA=Keep LOCALAPPDATA/MajorV11/data unchanged",
@@ -139,20 +146,20 @@ jobs:
             "REAL_PROVIDER_E2E=NOT_RUN"
           )
           $manifest | Set-Content -Path (Join-Path $stage "PATCH_MANIFEST.txt") -Encoding UTF8
-          $out = Join-Path $env:RUNNER_TEMP "MAJOR_V11_WINDOWS_BATCH_DELTA_E_55AAF923_20261010.zip"
+          $out = Join-Path $env:RUNNER_TEMP "MAJOR_V11_WINDOWS_AI_DELTA_F_55AAF923_20261010.zip"
           Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $out -CompressionLevel Optimal
           $hash = (Get-FileHash -Path $out -Algorithm SHA256).Hash.ToLower()
-          "PATCH_SHA256=$hash" | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP "MAJOR_DELTA_E_SHA256.txt")
-          Write-Host "MAJOR_DELTA_E_ZIP=$out"
-          Write-Host "MAJOR_DELTA_E_SHA256=$hash"
+          "PATCH_SHA256=$hash" | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP "MAJOR_DELTA_F_SHA256.txt")
+          Write-Host "MAJOR_DELTA_F_ZIP=$out"
+          Write-Host "MAJOR_DELTA_F_SHA256=$hash"
 
       - name: Upload Delta E Windows patch candidate
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: major-v11-windows-batch-delta-e
+          name: major-v11-windows-ai-delta-f
           path: |
-            ${{ runner.temp }}/MAJOR_V11_WINDOWS_BATCH_DELTA_E_55AAF923_20261010.zip
-            ${{ runner.temp }}/MAJOR_DELTA_E_SHA256.txt
+            ${{ runner.temp }}/MAJOR_V11_WINDOWS_AI_DELTA_F_55AAF923_20261010.zip
+            ${{ runner.temp }}/MAJOR_DELTA_F_SHA256.txt
           if-no-files-found: error
           retention-days: 30
