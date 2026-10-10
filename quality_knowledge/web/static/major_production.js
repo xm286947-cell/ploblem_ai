@@ -150,7 +150,9 @@
     '<form data-major-resume class="major-form">' +
     '<label>Case ID <input name="case_id" placeholder="KCASE-..."></label>' +
     '<label>Batch ID <input name="batch_id" placeholder="MIMP-..."></label>' +
-    '<button type="submit" class="case-button secondary">恢复已有记录（不重新导入）</button></form>';
+    '<button type="submit" class="case-button secondary">恢复已有记录（不重新导入）</button></form>' +
+    '<button type="button" class="case-button secondary" data-major-recent>查看最近已保存操作</button>' +
+    '<div data-major-recent-list class="major-candidates"></div>';
   recoveryPanel.appendChild(resumeStatus);
   excelForm.closest('section').before(recoveryPanel);
   const resumeForm = recoveryPanel.querySelector('[data-major-resume]');
@@ -331,6 +333,39 @@
     return batch;
   }
 
+
+  async function loadRecent() {
+    const box = recoveryPanel.querySelector('[data-major-recent-list]');
+    box.textContent = '正在读取最近服务端记录…';
+    try {
+      const data = await read(await fetch(api + '/recent'));
+      const batches = (data.batches || []).map(item =>
+        '<li><button class="case-button secondary" type="button" data-resume-batch="' +
+        esc(item.batch_id) + '">批次 ' + esc(item.batch_id) + ' · ' +
+        esc(item.status) + ' · ' + esc(item.source_file) + ' · ' +
+        esc(item.created_at) + '</button></li>').join('');
+      const cases = (data.cases || []).map(item =>
+        '<li><button class="case-button secondary" type="button" data-resume-case="' +
+        esc(item.case_id) + '">案例 ' + esc(item.title) + ' · ' +
+        esc(item.status) + ' · ' + esc(item.case_id) + '</button></li>').join('');
+      box.innerHTML = '<article class="major-candidate"><h3>服务器最近保存的批次（最多 20 条）</h3>' +
+        '<ul>' + (batches || '<li>暂无批次</li>') + '</ul>' +
+        '<h3>最近保存的案例（最多 20 条）</h3><ul>' +
+        (cases || '<li>暂无案例</li>') + '</ul></article>';
+      box.querySelectorAll('[data-resume-batch]').forEach(button =>
+        button.addEventListener('click', () =>
+          restoreBatch(button.dataset.resumeBatch).catch(error =>
+            resumed('恢复批次失败：' + error.message, true))));
+      box.querySelectorAll('[data-resume-case]').forEach(button =>
+        button.addEventListener('click', () =>
+          restoreCase(button.dataset.resumeCase, null).catch(error =>
+            resumed('恢复案例失败：' + error.message, true))));
+    } catch (error) {
+      box.textContent = '查询最近记录失败：' + error.message;
+    }
+  }
+  recoveryPanel.querySelector('[data-major-recent]').addEventListener('click', loadRecent);
+
   resumeForm.addEventListener('submit', async event => {
     event.preventDefault();
     const c = resumeForm.elements.namedItem('case_id').value.trim();
@@ -348,7 +383,8 @@
     resumeForm.elements.namedItem('case_id').value = previous.caseId || '';
     resumeForm.elements.namedItem('batch_id').value = previous.batchId || '';
     if (!previous.caseId && !previous.batchId) {
-      resumed('尚无本浏览器保存的工作记录；可输入已知 Case ID 或 Batch ID 恢复。');
+      resumed('尚无本浏览器保存的工作编号，正在查找服务器最近记录。');
+      await loadRecent();
       return;
     }
     try {
