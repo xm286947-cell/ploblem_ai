@@ -13,9 +13,52 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
   async function read(response) {
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'REQUEST_FAILED');
+    let data;
+    try { data = await response.json(); }
+    catch (_) { throw new Error('服务返回非 JSON 数据（HTTP ' + response.status + '），请查看后台日志。'); }
+    if (!response.ok) {
+      const code = (data && data.detail) || 'REQUEST_FAILED';
+      const taskId = response.headers.get('X-Major-Runtime-Task-ID');
+      if (code === 'MAJOR_ANALYSIS_INCOMPLETE') {
+        throw new Error('AI 分析未完成，已导入的数据保持不变。' +
+          (taskId ? ' Runtime Task：' + taskId + '。' : '') +
+          '请按 Task ID 查看后台 MAJOR_ANALYSIS_INCOMPLETE 诊断日志；没有完整结果前不能人工确认。');
+      }
+      throw new Error(typeof code === 'string' ? code : JSON.stringify(code));
+    }
     return data;
+  }
+
+  // Upload progress is measured on the browser connection only. Server parsing
+  // has no trusted percentage; show elapsed time instead of inventing one.
+  function postPreviewWithProgress(formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', api + '/excel/preview');
+      xhr.upload.addEventListener('progress', event => {
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.min(100, Math.round(event.loaded * 100 / event.total)));
+        }
+      });
+      xhr.onload = () => {
+        let data;
+        try { data = JSON.parse(xhr.responseText || '{}'); }
+        catch (_) { reject(new Error('预检接口返回非 JSON：HTTP ' + xhr.status)); return; }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(typeof data.detail === 'string' ? data.detail : ('预检失败：HTTP ' + xhr.status)));
+          return;
+        }
+        resolve(data);
+      };
+      xhr.onerror = () => reject(new Error('网络错误：未收到预检响应，请检查 Windows 服务日志与浏览器网络连接。'));
+      xhr.onabort = () => reject(new Error('上传已取消；未执行确认导入。'));
+      xhr.send(formData);
+    });
+  }
+  function elapsedIndicator(onTick) {
+    const started = Date.now();
+    const timer = window.setInterval(() => onTick(Math.floor((Date.now() - started) / 1000)), 3000);
+    return () => window.clearInterval(timer);
   }
 
   async function showExcelProvenance(caseId) {
@@ -59,14 +102,41 @@
 
   const excelForm = root.querySelector('[data-major-excel]');
   const excelPreview = root.querySelector('[data-major-excel-preview]');
+  const excelStatus = root.querySelector('[data-major-excel-status]');
+  const sourceStatus = root.querySelector('[data-major-source-status]');
+  const setExcelStatus = (text, error) => {
+    if (excelStatus) {
+      excelStatus.textContent = text;
+      excelStatus.className = 'major-message' + (error ? ' error' : '');
+    }
+    say(text, error);
+  };
+  let previewBusy = false;
   if (excelForm) {
     excelForm.addEventListener('submit', async event => {
       event.preventDefault();
+      if (previewBusy) return;
+      previewBusy = true;
+      const previewButton = excelForm.querySelector('button[type="submit"]');
+      previewButton.disabled = true;
+      excelPreview.hidden = true;
+      const formData = new FormData(event.currentTarget);
+      let uploaded = false;
+      let uploadPercent = 0;
+      const stopClock = elapsedIndicator(seconds => {
+        setExcelStatus(uploaded
+          ? '文件已发送，后台正在解析 Excel、检查 Mapping 和复盘匹配… 已等待 ' + seconds + ' 秒，请勿重复点击。'
+          : '正在上传文件… ' + uploadPercent + '% · 已等待 ' + seconds + ' 秒');
+      });
       try {
-        say('正在预检 Excel 并加载 Mapping…');
-        const data = await read(await fetch(api + '/excel/preview', {
-          method: 'POST', body: new FormData(event.currentTarget)
-        }));
+        setExcelStatus('正在上传 Excel 和复盘材料…');
+        const data = await postPreviewWithProgress(formData, percent => {
+          uploadPercent = percent;
+          if (percent >= 100) uploaded = true;
+          setExcelStatus(percent >= 100
+            ? '上传已完成，后台正在进行预检，处理时长取决于文件大小…'
+            : '正在上传文件：' + percent + '%');
+        });
         excelPreview.hidden = false;
         const rows = (data.rows || []).slice(0, 20).map(row => {
           const match = row.report_match || {};
@@ -97,8 +167,12 @@
           '>确认导入</button></article>';
         const confirmButton = excelPreview.querySelector('[data-major-excel-confirm]');
         if (!hasUnsafeRows) confirmButton.addEventListener('click', async () => {
+          confirmButton.disabled = true;
+          const stopCommitClock = elapsedIndicator(seconds => setExcelStatus(
+            '后台正在写入 Case/Event 和来源证据… 已等待 ' + seconds + ' 秒，请勿重复点击。'
+          ));
           try {
-            say('正在确认并导入 Excel…');
+            setExcelStatus('正在确认并导入 Excel…');
             const form = new FormData();
             form.append('batch_id', data.batch_id);
             const committed = await read(await fetch(api + '/excel/confirm', { method: 'POST', body: form }));
@@ -113,26 +187,40 @@
               ' · Case ' + state.caseId + (events.length ? ' · ' + events.length + ' Event(s)' : '');
             root.querySelector('[data-major-state]').textContent = 'IMPORTED';
             const sourceFactVerified = await showExcelProvenance(state.caseId);
-            say(sourceFactVerified ? 'Excel 已导入，Structured Source Fact 已持久化并关联；可继续 AI Analysis → Human Review → Publish。' : 'Excel 已导入，但 Structured Source Fact 尚未完成核验，请查看来源证据面板。', !sourceFactVerified);
-          } catch (error) { say(error.message, true); }
+            setExcelStatus(sourceFactVerified ? 'Excel 已导入，Structured Source Fact 已持久化并关联；可继续 AI Analysis → Human Review → Publish。' : 'Excel 已导入，但 Structured Source Fact 尚未完成核验，请查看来源证据面板。', !sourceFactVerified);
+          } catch (error) {
+            confirmButton.disabled = false;
+            setExcelStatus('确认导入失败：' + error.message, true);
+          } finally { stopCommitClock(); }
         });
-        say(hasUnsafeRows ? '预检发现歧义或 Event 未唯一绑定；已阻止确认导入。' : '预检完成。请核对 Mapping、复盘报告匹配与行级结果后确认导入。', hasUnsafeRows);
-      } catch (error) { say(error.message, true); }
+        setExcelStatus(hasUnsafeRows ? '预检发现歧义或 Event 未唯一绑定；已阻止确认导入。' : '预检完成。请核对 Mapping、复盘报告匹配与行级结果后确认导入。', hasUnsafeRows);
+      } catch (error) {
+        setExcelStatus('批量预检失败：' + error.message, true);
+      } finally {
+        stopClock();
+        previewBusy = false;
+        previewButton.disabled = false;
+      }
     });
   }
 
   root.querySelector('[data-major-intake]').addEventListener('submit', async event => {
     event.preventDefault();
     try {
-      say('正在导入 Major Source…');
+      say('正在导入单份 Major Source，此操作不会自动运行 AI 分析…');
+      if (sourceStatus) sourceStatus.textContent = '正在导入、解析并建立来源证据…';
       const data = await read(await fetch(api + '/sources', { method: 'POST', body: new FormData(event.currentTarget) }));
       state.caseId = data.case.case_id;
       state.eventId = data.event.event_id;
       root.querySelector('[data-major-workflow]').hidden = false;
       root.querySelector('[data-major-identity]').textContent = 'ITR ' + data.event.standard_itr +
         ' · Source ' + data.document.original_filename + ' · Version ' + data.document.version_no;
+      if (sourceStatus) sourceStatus.textContent = '单份来源已导入成功，下一步请手动运行 AI 分析。';
       say('Major Source 已入库，已建立 Event 与证据版本。');
-    } catch (error) { say(error.message, true); }
+    } catch (error) {
+      if (sourceStatus) sourceStatus.textContent = '单份来源导入失败：' + error.message;
+      say(error.message, true);
+    }
   });
 
   root.querySelector('[data-major-analyze]').addEventListener('click', async () => {
