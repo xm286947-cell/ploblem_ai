@@ -25,6 +25,8 @@ on:
       - "tests/test_hardware_retrieval_query.py"
       - "tests/test_hardware_case_ai_retrieval.py"
       - "tests/test_hardware_case_ai_retrieval_w2.py"
+      - "tests/test_hardware_r2_real_gate_probe.py"
+      - "tools/hardware_r2_real_gate_probe.py"
       - "tests/test_hardware_case_w2_ui_smoke_contract.py"
       - "docs/product/HARDWARE_AI_RETRIEVAL_W1_METADATA_TAGGER.md"
       - ".github/workflows/hardware-ai-retrieval-w1.yml"
@@ -53,4 +55,5 @@ jobs:
           tests/test_hardware_retrieval_query.py
           tests/test_hardware_case_ai_retrieval.py
           tests/test_hardware_case_ai_retrieval_w2.py
+          tests/test_hardware_r2_real_gate_probe.py
           tests/test_hardware_case_w2_ui_smoke_contract.py

@@ -21,6 +21,7 @@
       <button type="button" class="active" role="tab" aria-selected="true" data-scenario="research">研发设计复用</button>
       <button type="button" role="tab" aria-selected="false" data-scenario="risk">器件与电路风险</button>
       <button type="button" role="tab" aria-selected="false" data-scenario="market">市场与应用问题检索</button>
+      <button type="button" role="tab" aria-selected="false" data-scenario="testing">测试验证</button>
     </div>
     <form class="hc-knowledge-form" data-knowledge-form>
       <label class="hc-knowledge-keyword">关键词<input type="search" data-knowledge-text placeholder="标题、现象、根因、措施、器件或接口"></label>
@@ -50,4 +51,4 @@
   <div class="hc-toast" data-hc-toast hidden></div>
 </main>
 {% endblock %}
-{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=wave4-stage4-v2"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}
+{% block page_scripts %}<script src="/p0/static/hardware_case_knowledge_consumption.js?v=hc-r2-consumption-v1"></script><script src="/p0/static/hardware_case_knowledge_evidence.js?v=mvp-closure-v1"></script>{% endblock %}

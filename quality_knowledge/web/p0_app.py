@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from quality_knowledge.web.hardware_case_api import create_hardware_case_router
 from services.hardware_r2_query import HardwareR2QueryService, HardwareR2RuntimeQueryAgent
+from services.hardware_r2_analysis import HardwareR2EngineeringConsumptionService, HardwareR2EngineeringAgent
 from quality_knowledge.web.hardware_public_api import create_hardware_public_router
 from quality_knowledge.web.hardware_knowledge_consumption_api import (
     create_hardware_knowledge_consumption_router,
@@ -518,6 +519,12 @@ def create_p0_app(
                        if os.getenv("HARDWARE_R2_QUERY_AGENT_ENABLED") == "1" else None),
             )
             app.state.hardware_r2_query_service = hardware_r2_query_service
+            hardware_r2_analysis_service = HardwareR2EngineeringConsumptionService(
+                hardware_knowledge_consumption_service,
+                agent=(HardwareR2EngineeringAgent()
+                       if os.getenv("HARDWARE_R2_CONSUMPTION_AGENT_ENABLED") == "1" else None),
+            )
+            app.state.hardware_r2_analysis_service = hardware_r2_analysis_service
 
             hardware_case_repository = HardwareCaseRepository(
                 hardware_db,
@@ -983,6 +990,7 @@ def create_p0_app(
                     ai_search_service=hardware_ai_search_service,
                     retrieval_catalog_service=hardware_retrieval_catalog_service,
                     assisted_query_service=hardware_r2_query_service,
+                    engineering_analysis_service=hardware_r2_analysis_service,
                 )
             )
             app.include_router(
