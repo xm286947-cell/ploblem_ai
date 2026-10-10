@@ -212,23 +212,42 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
                 "knowledge_release_version": None, "results": [], "evidence_refs": [],
             }
         )
-        rows = list(result.get("results") or [])
-        if rows and str(result.get("knowledge_release_version") or "") != bound_version:
-            rows = []
+        returned_rows = list(result.get("results") or [])
+        release_matches = (
+            not returned_rows
+            or str(result.get("knowledge_release_version") or "") == bound_version
+        )
+        if not release_matches:
+            returned_rows = []
+        # A release result without row-level evidence is not a consumable fact.
+        rows = [row for row in returned_rows if _evidence_ids(row)]
         domain_objects[domain] = rows
-        refs = sorted({str(ref) for row in rows for ref in (row.get("evidence_refs") or []) if ref})
+        refs = sorted({ref for row in rows for ref in _evidence_ids(row)})
+        knowledge_ids = sorted({str(row.get("object_id")) for row in rows if row.get("object_id")})
+        source_refs = sorted({str(ref) for row in rows for ref in (row.get("source_refs") or []) if ref})
+        conditions = sorted({
+            str(condition)
+            for row in rows
+            for condition in (
+                row.get("conditions") if isinstance(row.get("conditions"), list)
+                else [row.get("conditions")] if row.get("conditions") else []
+            )
+        })
         domain_code = result.get("code")
-        if result.get("results") and not rows:
-            domain_code = "RELEASE_VERSION_BINDING_MISMATCH"
-        elif rows and not refs:
+        if returned_rows and not rows:
             domain_code = "FORMAL_EVIDENCE_REQUIRED"
+        elif result.get("results") and not release_matches:
+            domain_code = "RELEASE_VERSION_BINDING_MISMATCH"
         knowledge_domains.append({
             "domain": domain,
             "status": "MATCHED" if rows and refs else "UNKNOWN",
             "code": domain_code,
             "knowledge_release_version": result.get("knowledge_release_version"),
             "result_count": len(rows),
+            "knowledge_ids": knowledge_ids,
             "evidence_refs": refs,
+            "source_refs": source_refs,
+            "conditions": conditions,
         })
         knowledge_objects.extend(rows)
     formal_evidence = sorted({ref for item in knowledge_domains for ref in item["evidence_refs"]})
@@ -277,11 +296,58 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
     blockers = list(profile["missing_information"])
     if not formal_ready:
         blockers.extend(f"FORMAL_KNOWLEDGE_DOMAIN_UNKNOWN:{item['domain']}" for item in knowledge_domains if item["status"] != "MATCHED")
+    matched_domains = {item["domain"] for item in knowledge_domains if item["status"] == "MATCHED"}
+    knowledge_basis = {
+        item["domain"]: {
+            "status": item["status"],
+            "knowledge_ids": item["knowledge_ids"],
+            "evidence_refs": item["evidence_refs"],
+            "source_refs": item["source_refs"],
+            "conditions": item["conditions"],
+            "release_version": item["knowledge_release_version"],
+        }
+        for item in knowledge_domains
+    }
+    pe_status = endurance_screen.get("status")
+    if pe_status == "WITHIN_RATING_SCREEN":
+        procurement_screen = "WITHIN_P_E_RATING_SCREEN_ONLY"
+    elif pe_status == "EXCEEDS_RATING_SCREEN":
+        procurement_screen = "EXCEEDS_P_E_RATING_SCREEN"
+    else:
+        procurement_screen = "UNKNOWN"
+    procurement_unknowns = [
+        domain for domain in ("RETENTION", "ECC_BIT_FLIP", "BAD_BLOCK")
+        if domain not in matched_domains
+    ]
+    if not profile.get("required_retention_years"):
+        procurement_unknowns.append("REQUIRED_RETENTION_CONDITION")
+    if profile.get("minimum_ecc_correctable_bits") is None:
+        procurement_unknowns.append("SYSTEM_ECC_REQUIREMENT")
+    procurement_next_actions = []
+    if procurement_screen == "EXCEEDS_P_E_RATING_SCREEN":
+        procurement_next_actions.append("在任何选型放行前，先核实该 P/E 预算、ECC 适用条件及工作负载；当前仅表示筛查超出额定值。")
+    elif procurement_screen == "WITHIN_P_E_RATING_SCREEN_ONLY":
+        procurement_next_actions.append("P/E 子项位于资料额定值筛查范围内；不得据此批准器件，继续关闭 Retention、ECC/Bit Flip、Bad Block 和料号适用范围。")
+    else:
+        procurement_next_actions.append("向供应商索取有来源、条件和准确订货料号范围的 P/E/Endurance 资料后再做比较。")
+    if procurement_unknowns:
+        procurement_next_actions.append("补齐未关闭知识/需求项：" + ", ".join(sorted(set(procurement_unknowns))) + "。")
+    bad_block_claim_text = " ".join(
+        str(row.get(key) or "")
+        for row in domain_objects.get("BAD_BLOCK", [])
+        for key in ("title", "summary", "content")
+    )
+    bad_block_counter_undeclared = bool(re.search(
+        r"not\s+(?:declared|specified)|未声明|未定义|没有.*(?:计数器|counter)",
+        bad_block_claim_text,
+        re.I,
+    ))
     roles = {
         "system_engineering": {
             "status": "ACTIONABLE",
             "required_profile": profile,
             "open_knowledge_domains": [item["domain"] for item in knowledge_domains if item["status"] != "MATCHED"],
+            "knowledge_basis": knowledge_basis,
             "pe_endurance_screen": endurance_screen,
             "next_actions": ["确认真实 P/E stress 与工作负载，再进行规格冻结。", "保留需求预算与器件资格结论的边界。"],
         },
@@ -289,22 +355,35 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "status": "ACTIONABLE" if facts or formal_ready else "UNKNOWN",
             "confirmed_facts": facts,
             "formal_knowledge_domains": knowledge_domains,
+            "knowledge_basis": knowledge_basis,
             "pe_endurance_screen": endurance_screen,
             "evidence_refs": endurance_screen.get("evidence_refs", []),
-            "next_actions": ["补齐有来源和适用条件的 Endurance、Retention、ECC 与 Bad Block 正式知识。"],
+            "next_actions": [
+                "补齐有来源和适用条件的 Endurance、Retention、ECC 与 Bad Block 正式知识。"
+                if not formal_ready else "核对各知识对象的料号范围、工作条件和证据定位，再决定规格约束。"
+            ],
         },
         "software_engineering": {
             "status": "ACTIONABLE",
             "controlled_workload_inputs": workload,
             "required_pe_cycles": profile.get("required_pe_cycles"),
             "pe_endurance_screen": endurance_screen,
+            "knowledge_basis": {key: knowledge_basis[key] for key in ("PE_ENDURANCE", "ECC_BIT_FLIP")},
+            "design_constraints": [
+                "实测主机写入量、介质写入量和 WAF；不可由逻辑写入量直接推断 P/E stress。",
+                "将 ECC 配置和可纠正/不可纠正错误计数纳入软件/固件接口及日志。"
+                if "ECC_BIT_FLIP" in matched_domains else "明确 ECC 配置，并建立可纠正/不可纠正错误计数采集接口；阈值需由正式资料或批准要求提供。",
+            ],
             "next_actions": ["测量并约束主机写入量、介质写入量和 WAF；不得从逻辑写入推测 P/E stress。", "记录日志、WAL、Flush、GC 与磨损均衡相关负载。"],
         },
         "procurement": {
-            "status": "ACTIONABLE" if endurance_screen.get("status") != "UNKNOWN" else "UNKNOWN",
+            "status": "ACTIONABLE" if procurement_screen != "UNKNOWN" or matched_domains else "UNKNOWN",
             "decision": "UNKNOWN",
+            "screening_result": procurement_screen,
             "endurance_screen": endurance_screen,
-            "unknowns": ["FORMAL_ENDURANCE_CONDITION", "ORDERABLE_PART_SCOPE", "RETENTION_CONDITION", "ECC_AND_BAD_BLOCK_BOUNDARY"],
+            "knowledge_basis": knowledge_basis,
+            "unknowns": sorted(set(procurement_unknowns + ["ORDERABLE_PART_SCOPE"])),
+            "next_actions": procurement_next_actions,
             "decision_boundary": "SCREENING_DOES_NOT_QUALIFY_OR_APPROVE_DEVICE",
             "automatic_purchase_approval": False,
         },
@@ -312,7 +391,19 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "status": "ACTIONABLE",
             "is_test_result": False,
             "proposed_checks": ["记录 host/media writes 与实际 WAF", "覆盖工作负载和温度条件", "采集 P/E 分布、ECC corrected/uncorrectable 与坏块遥测", "按批准阈值判定并回填同一 Case"],
-            "knowledge_basis": {"pe_endurance_screen": endurance_screen, "formal_evidence_refs": formal_evidence},
+            "knowledge_basis": knowledge_basis,
+            "test_basis_by_domain": {
+                "PE_ENDURANCE": "按正式资料的 P/E 额定值及 ECC 条件设计筛查，不将筛查当作寿命资格。" if "PE_ENDURANCE" in matched_domains else "P/E 判据来源缺失；先补正式资料，测试阈值保持 UNKNOWN。",
+                "RETENTION": "按正式资料声明的温度、数据保持时间和寿命条件制定验证。" if "RETENTION" in matched_domains else "Retention 条件/判据缺失；测试阈值保持 UNKNOWN。",
+                "ECC_BIT_FLIP": "按正式 ECC 能力及错误语义制定采集和拦截项。" if "ECC_BIT_FLIP" in matched_domains else "ECC/Bit Flip 判据缺失；测试阈值保持 UNKNOWN。",
+                "BAD_BLOCK": (
+                    "正式资料未声明运行累计坏块计数器；不得构造运行阈值，需确认控制器/固件遥测能力并验证可观测性。"
+                    if bad_block_counter_undeclared else
+                    "按正式证据中明确的坏块管理边界设计验证；静态最大坏块数不得当作运行计数阈值。"
+                    if "BAD_BLOCK" in matched_domains else
+                    "运行态坏块计数/处理规则缺失；不得从静态最大坏块数构造运行阈值。"
+                ),
+            },
         },
         "change_management": {
             "status": "ACTIONABLE",
@@ -322,11 +413,13 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
                 "knowledge_snapshot_hash": shared_case["formal_knowledge"]["release_identity"]["snapshot_hash"],
                 "knowledge_ids": shared_case["formal_knowledge"]["knowledge_ids"],
                 "evidence_refs": formal_evidence,
+                "domain_basis": knowledge_basis,
             },
             "safe_by_default": False,
         },
         "runtime_lifetime": {
             **runtime_view,
+            "knowledge_basis": {key: knowledge_basis[key] for key in ("ECC_BIT_FLIP", "BAD_BLOCK")},
         },
     }
     return {

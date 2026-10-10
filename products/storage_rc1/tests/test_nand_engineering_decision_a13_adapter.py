@@ -125,6 +125,32 @@ def test_release_version_mismatch_is_not_consumed(monkeypatch):
     assert result["shared_case"]["formal_knowledge"]["knowledge_ids"] == []
 
 
+def test_formal_knowledge_without_row_evidence_is_not_consumed(monkeypatch):
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "TEST_ONLY_PINNED"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash"}, "device_facts": [],
+    })
+    monkeypatch.setattr(product_api, "_formal_knowledge", lambda canonical, *_args, **_kwargs: {
+        "status": "MATCHED", "code": None, "knowledge_release_version": "TEST_ONLY_PINNED",
+        "results": ([{"object_id": "KO-UNSUPPORTED", "content": "P/E cycles 100K"}] if canonical == "pe_cycles" else []),
+        "evidence_refs": ["EVD-ONLY-TOP-LEVEL"],
+    })
+
+    result = build_nand_engineering_decision("gd5", {
+        "mission_profile": {"target_service_life_years": 5},
+        "workload_profile": {"pe_cycles_per_day": 1},
+    })
+    pe_domain = result["shared_case"]["formal_knowledge"]["domains"][0]
+    assert pe_domain["status"] == "UNKNOWN"
+    assert pe_domain["code"] == "FORMAL_EVIDENCE_REQUIRED"
+    assert result["shared_case"]["formal_knowledge"]["knowledge_ids"] == []
+    assert result["shared_case"]["engineering_screens"]["pe_endurance"]["status"] == "UNKNOWN"
+
+
 def test_evidence_bound_endurance_and_workload_change_role_screen_not_device_qualification(monkeypatch):
     monkeypatch.setattr(product_api, "device_slots", lambda _: {
         "device": {"id": "gd5", "device_type": "NAND Flash", "vendor": "GigaDevice", "model": "GD5F1GQ5"},
@@ -162,9 +188,83 @@ def test_evidence_bound_endurance_and_workload_change_role_screen_not_device_qua
     assert high["shared_case"]["engineering_screens"]["pe_endurance"]["status"] == "EXCEEDS_RATING_SCREEN"
     assert low["roles"]["procurement"]["endurance_screen"] == low["roles"]["hardware_engineering"]["pe_endurance_screen"]
     assert low["roles"]["procurement"]["endurance_screen"]["evidence_refs"] == ["EVD-TEST-PE"]
+    assert low["roles"]["procurement"]["screening_result"] == "WITHIN_P_E_RATING_SCREEN_ONLY"
+    assert high["roles"]["procurement"]["screening_result"] == "EXCEEDS_P_E_RATING_SCREEN"
+    assert low["roles"]["procurement"]["decision"] == "UNKNOWN"
     assert low["shared_case"]["device_decision"] == high["shared_case"]["device_decision"] == "INSUFFICIENT_EVIDENCE"
-    assert low["roles"]["procurement"]["decision"] == high["roles"]["procurement"]["decision"] == "UNKNOWN"
+    assert low["roles"]["procurement"]["decision"] == high["roles"]["procurement"]["decision"]
     assert low["shared_case"]["formal_knowledge"]["knowledge_ids"] == high["shared_case"]["formal_knowledge"]["knowledge_ids"]
+
+
+def test_all_roles_consume_same_evidence_bound_domain_snapshot(monkeypatch):
+    monkeypatch.setattr(product_api, "device_slots", lambda _: {
+        "device": {"id": "gd5", "device_type": "NAND Flash", "vendor": "GigaDevice", "model": "GD5F1GQ5"},
+        "device_facts": [],
+    })
+
+    class ValidTestBinding:
+        def validate_storage_binding(self):
+            return {"knowledge_release_version": "TEST_ONLY_GD5_RELEASE"}
+
+    monkeypatch.setattr(KnowledgeReleaseConsumer, "current", classmethod(lambda cls: ValidTestBinding()))
+    rows = {
+        "pe_cycles": {
+            "object_id": "KO-PE", "title": "P/E with ECC", "content": "P/E cycles with ECC: 100K",
+            "conditions": ["With internal ECC enabled"], "evidence_refs": ["EVD-PE"], "source_refs": ["SRC-GD5"],
+        },
+        "data_retention": {
+            "object_id": "KO-RET", "title": "Data retention", "content": "Data retention: 10 years",
+            "conditions": ["specified storage condition"], "evidence_refs": ["EVD-RET"], "source_refs": ["SRC-GD5"],
+        },
+        "ecc_capability": {
+            "object_id": "KO-ECC", "title": "ECC capability", "content": "ECC corrects up to 4 bits per 528 bytes",
+            "conditions": ["internal ECC enabled"], "evidence_refs": ["EVD-ECC"], "source_refs": ["SRC-GD5"],
+        },
+        "runtime_bad_block": {
+            "object_id": "KO-BB", "title": "Bad block handling", "content": "Runtime cumulative counter not declared",
+            "conditions": ["no runtime counter specified"], "evidence_refs": ["EVD-BB"], "source_refs": ["SRC-GD5"],
+        },
+    }
+
+    def knowledge(canonical, *_args, **_kwargs):
+        row = rows.get(canonical)
+        return {
+            "status": "MATCHED" if row else "NO_MATCH",
+            "code": None if row else "NO_MATCHING_PUBLISHED_KNOWLEDGE",
+            "knowledge_release_version": "TEST_ONLY_GD5_RELEASE",
+            "results": [row] if row else [],
+            "evidence_refs": row["evidence_refs"] if row else [],
+        }
+
+    monkeypatch.setattr(product_api, "_formal_knowledge", knowledge)
+    payload = {
+        "case_id": "A13-SAME-CASE-TEST-ONLY",
+        "mission_profile": {"target_service_life_years": 5, "required_retention_years": 10, "minimum_ecc_correctable_bits": 4},
+        "workload_profile": {"pe_cycles_per_day": 0.5},
+        "system_conditions": {"internal_ecc_enabled": True},
+    }
+    result = build_nand_engineering_decision("gd5", payload)
+
+    expected_ids = {"KO-PE", "KO-RET", "KO-ECC", "KO-BB"}
+    expected_evidence = {"EVD-PE", "EVD-RET", "EVD-ECC", "EVD-BB"}
+    shared = result["shared_case"]["formal_knowledge"]
+    assert shared["status"] == "READY"
+    assert set(shared["knowledge_ids"]) == expected_ids
+    assert set(shared["evidence_refs"]) == expected_evidence
+    assert result["shared_case"]["device_decision"] == "INSUFFICIENT_EVIDENCE"
+
+    # Every decision-facing role references the same release-bound knowledge snapshot.
+    for role_name in ("system_engineering", "hardware_engineering", "software_engineering", "procurement", "test_validation", "change_management"):
+        role = result["roles"][role_name]
+        basis = role.get("knowledge_basis") or role.get("reassessment_baseline", {}).get("domain_basis")
+        assert basis
+        assert {item_id for item in basis.values() for item_id in item["knowledge_ids"]} <= expected_ids
+        assert {ref for item in basis.values() for ref in item["evidence_refs"]} <= expected_evidence
+    assert result["roles"]["test_validation"]["test_basis_by_domain"]["BAD_BLOCK"].startswith("正式资料未声明")
+    assert result["roles"]["runtime_lifetime"]["status"] == "UNKNOWN"
+    assert result["roles"]["runtime_lifetime"]["telemetry_status"] == "NOT_PROVIDED"
+    assert result["roles"]["procurement"]["decision"] == "UNKNOWN"
+    assert result["roles"]["procurement"]["screening_result"] == "WITHIN_P_E_RATING_SCREEN_ONLY"
 
 
 def test_ecc_condition_and_runtime_inputs_never_create_unsupported_lifetime_claim(monkeypatch):
@@ -217,6 +317,9 @@ def test_device_decision_page_exposes_controlled_test_inputs_and_test_only_label
     assert "NAND 七类工程决策 · TEST_ONLY" in html
     assert "运行受控预验证" in html
     assert "不是器件规格或寿命结论" in html
+    assert 'id="nandInternalEcc"' in html
+    assert 'id="nandRetentionYears"' in html
+    assert "查看本角色完整结构化数据" in html
 
 
 def test_non_nand_device_is_rejected(monkeypatch):
