@@ -42,6 +42,7 @@ from services.hardware_asset_repository import CandidateAssetRepository
 from services.hardware_asset_operation_journal import HardwareAssetOperationJournal
 from services.hardware_case_backend import HardwareCaseBackendService
 from services.hardware_assisted_search import HardwareAssistedSearch
+from services.hardware_query_agent import HardwareQueryAgent
 from services.hardware_case_ai_retrieval import (
     HardwareCaseAIRetrievalService,
     HardwareRetrievalCatalogService,
@@ -1002,7 +1003,9 @@ def create_p0_app(
             )
             app.include_router(create_hardware_public_router(hardware_case_service))
             app.include_router(create_hardware_assisted_query_router(
-                HardwareAssistedSearch(hardware_ai_search_service, hardware_knowledge_consumption_service)
+                HardwareAssistedSearch(hardware_ai_search_service, hardware_knowledge_consumption_service),
+                trusted_agent_token=os.getenv("HARDWARE_QUERY_AGENT_INTERNAL_TOKEN"),
+                trusted_agent_factory=HardwareQueryAgent,
             ))
             app.include_router(
                 create_hardware_knowledge_consumption_router(
