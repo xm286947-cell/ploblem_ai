@@ -21,7 +21,8 @@
   const scenarios = {
     research: ['title', 'symptom', 'root_cause', 'failure_mechanism', 'actions', 'verification_result', 'engineering_rule', 'design_constraint', 'verification_method', 'applicability', 'interface', 'signal', 'device_refs', 'key_parameters'],
     risk: ['device_refs', 'interface', 'signal', 'key_parameters', 'failure_mode', 'failure_mechanism', 'design_constraint', 'diagnostic_clue', 'verification_method', 'applicability', 'conclusion'],
-    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability']
+    market: ['title', 'symptom', 'occurrence_condition', 'device_refs', 'interface', 'signal', 'root_cause', 'actions', 'verification_result', 'conclusion', 'applicability'],
+    testing: ['title', 'failure_mechanism', 'design_constraint', 'verification_method', 'verification_result', 'applicability']
   };
   const groups = [
     ['工程与观察', ['title', 'symptom', 'occurrence_condition', 'failure_mode', 'interface', 'signal']],
@@ -69,7 +70,7 @@
   function renderResults() {
     const box = q('[data-knowledge-results]');
     const agent = root.dataset.queryAgentStatus === 'COMPLETED' ? 'AI 查询理解已执行' : '确定性检索（未调用在线 Agent）';
-    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${agent} · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'}`;
+    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${agent} · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : activeScenario === 'testing' ? '测试验证' : '市场与应用问题检索'}`;
     if (!results.length) {
       box.innerHTML = '<div class="hc-knowledge-empty">未检索到已发布的正式硬件知识</div>';
       return;
@@ -85,6 +86,8 @@
         <div class="hc-knowledge-fields">${renderFields(item)}</div>
         ${renderReasons(item)}
         <div class="hc-knowledge-evidence">证据引用（${evidenceRefs.length}）：${evidenceRefs.length ? evidenceRefs.map(ref => `<code>${esc(ref)}</code>`).join('、') : '—'}</div>
+        <button type="button" class="hc-button secondary" data-analyze-knowledge="${esc(item.knowledge_id)}">按当前视角分析工程经验（Agent）</button>
+        <div data-analysis-output></div>
       </article>`;
     }).join('');
   }
@@ -187,7 +190,35 @@
     query = { text: '', interface: '', signal: '', device: '' };
     runSearch();
   });
+  async function analyzeEngineering(button) {
+    const article = button.closest('.hc-knowledge-result');
+    const display = article.querySelector('[data-analysis-output]');
+    const intent = {research:'DESIGN_REUSE',risk:'RISK',market:'FIELD_PROBLEM',testing:'TEST_VALIDATION'}[activeScenario];
+    button.disabled = true;
+    display.textContent = '正在执行有证据约束的工程经验分析…';
+    try {
+      const response = await fetch('/api/v2/hardware-cases/engineering-analysis', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({knowledge_id:button.dataset.analyzeKnowledge,intent})
+      });
+      const result = await response.json();
+      if (!response.ok || result.status !== 'COMPLETED') {
+        display.textContent = '智能分析当前不可用；可继续查看上方已发布的正式知识。';
+        return;
+      }
+      const recommendations = Array.isArray(result.recommendations) ? result.recommendations : [];
+      display.innerHTML = '<h4>有来源的工程参考（AI 筛选已有知识字段）</h4>' +
+        (recommendations.length ? recommendations.map(item =>
+          '<p><strong>' + esc(item.label) + '</strong>：' + esc(valueText(item.text)) +
+          ' <small>来源：' + esc(item.source?.business_case_id || '') + ' · ' + esc(item.source?.field || '') +
+          ' · 案例级证据（非逐字段确认）</small></p>').join('') : '<p>无足够依据形成建议。</p>');
+    } catch (_) {
+      display.textContent = '智能分析请求失败；正式知识内容不受影响。';
+    } finally { button.disabled = false; }
+  }
   q('[data-knowledge-results]').addEventListener('click', event => {
+    const analyzer = event.target.closest('[data-analyze-knowledge]');
+    if (analyzer) { analyzeEngineering(analyzer); return; }
     const button = event.target.closest('[data-open-knowledge]');
     if (button) openDetail(button.dataset.openKnowledge);
   });

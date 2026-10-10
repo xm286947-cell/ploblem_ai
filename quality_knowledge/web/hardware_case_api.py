@@ -16,7 +16,7 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import Any, Callable
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from services.hardware_case_backend import HardwareCaseBackendService
@@ -77,6 +77,7 @@ def create_hardware_case_router(
     ai_search_service: Any | None = None,
     retrieval_catalog_service: Any | None = None,
     assisted_query_service: Any | None = None,
+    engineering_analysis_service: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["hardware-case"])
 
@@ -422,6 +423,20 @@ def create_hardware_case_router(
             for item in payload["results"]
         ]
         return {**payload, "results": cases}
+
+    @router.post("/engineering-analysis")
+    def engineering_analysis(payload: dict[str, str] = Body(...)) -> dict[str, Any]:
+        if engineering_analysis_service is None:
+            raise HTTPException(status_code=503, detail="ENGINEERING_AGENT_UNAVAILABLE")
+        try:
+            return engineering_analysis_service.analyze(
+                knowledge_id=str(payload.get("knowledge_id") or ""),
+                intent=str(payload.get("intent") or ""),
+            )
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @router.get("/retrieval/status")
     def retrieval_status() -> dict[str, Any]:
