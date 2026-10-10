@@ -55,7 +55,7 @@ def test_analysis_rejects_ungrounded_quote_and_unknown_case():
         HardwareEngineeringConsumption(Formal(), agent=GoodAgent()).analyze("KO-A0207", "SOMETHING_ELSE")
 
 
-def test_internal_analysis_endpoint_is_closed_without_trusted_token():
+def test_internal_analysis_endpoint_is_closed_without_trusted_token(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from quality_knowledge.web.hardware_engineering_consumption_api import create_hardware_engineering_consumption_router
@@ -67,6 +67,15 @@ def test_internal_analysis_endpoint_is_closed_without_trusted_token():
     enabled_app = FastAPI()
     enabled_app.include_router(create_hardware_engineering_consumption_router(service, token="unit-test-token"))
     client = TestClient(enabled_app)
+    trusted = {"X-Hardware-Analysis-Token": "unit-test-token"}
+    # Even a correct token cannot enable Agent analysis in production or with
+    # a single switch; the Provider must remain unreachable by default.
+    blocked = client.post("/api/hardware-query/v1/analyze", json={"knowledge_id": "KO-A0207", "task_intent": "DESIGN_REUSE"}, headers=trusted)
+    assert blocked.status_code == 503
+    assert blocked.json()["detail"] == "CONSUMPTION_AGENT_NONPROD_GATE_REQUIRED"
+    monkeypatch.setenv("HARDWARE_R2_DEPLOYMENT_MODE", "NON_PROD")
+    monkeypatch.setenv("HARDWARE_CONSUMPTION_AGENT_NONPROD", "1")
+    monkeypatch.setenv("HARDWARE_CONSUMPTION_AGENT_ENABLED", "1")
     assert client.post("/api/hardware-query/v1/analyze", json={"knowledge_id": "KO-A0207", "task_intent": "DESIGN_REUSE"}).status_code == 403
     approved = client.post("/api/hardware-query/v1/analyze", json={"knowledge_id": "KO-A0207", "task_intent": "DESIGN_REUSE"}, headers={"X-Hardware-Analysis-Token": "unit-test-token"})
     assert approved.status_code == 200
