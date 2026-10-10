@@ -4,6 +4,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from services.historical_case_contract import (
+    REPEAT_SEMANTIC_TYPES,
+    SEMANTIC_PROJECTION_CONTRACT_VERSION,
+)
+
 from .repository import RepeatQueryTraceRepository
 from .search import (
     SEARCH_INCOMPLETE,
@@ -124,6 +129,16 @@ class RepeatResultService:
                 "message": "本次查询未召回历史候选；这不等价于 NOT_REPEAT。",
             })
 
+        agent_analysis = deepcopy(search_result.get("agent_analysis") or {})
+        for warning in agent_analysis.get("warnings") or []:
+            if isinstance(warning, dict):
+                warnings.append({
+                    "code": _text(warning.get("code"))
+                    or "REPEAT_AGENT_ANALYSIS_WARNING",
+                    "message": _text(warning.get("message"))
+                    or "Repeat Agent analysis is degraded.",
+                })
+
         result = {
             "contract_version": RESULT_CONTRACT_VERSION,
             "query_id": query_id,
@@ -140,6 +155,8 @@ class RepeatResultService:
             "search_error": search_result.get("error_code"),
             "candidate_count": len(candidates),
             "candidates": candidates,
+            "agent_analysis": agent_analysis,
+            "analysis_report": deepcopy(search_result.get("analysis_report") or {}),
             "warnings": warnings,
             "human_decision": {
                 "decision": "PENDING",
@@ -235,6 +252,85 @@ class RepeatResultService:
         evidence_refs = deepcopy(item.get("evidence_refs") or [])
         root_causes = _unique_text(item.get("root_causes"))
         measures = _unique_text(item.get("measures"))
+        semantic_mode = _text(item.get("semantic_mode")) or "LEGACY_GENERIC_ONLY"
+        typed_causes = item.get("typed_causes", [])
+        typed_actions = item.get("typed_actions", [])
+        semantic_coverage = item.get("semantic_coverage", {})
+        if (
+            semantic_mode not in {"TYPED", "LEGACY_GENERIC_ONLY", "INCOMPLETE"}
+            or not isinstance(typed_causes, list)
+            or not isinstance(typed_actions, list)
+            or not isinstance(semantic_coverage, dict)
+        ):
+            raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+        if semantic_mode != "TYPED" and (typed_causes or typed_actions):
+            raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+        if semantic_mode == "TYPED":
+            if (
+                item.get("semantic_contract_version") != SEMANTIC_PROJECTION_CONTRACT_VERSION
+                or set(semantic_coverage) != set(REPEAT_SEMANTIC_TYPES)
+                or any(
+                    not isinstance(value, str) or value not in {"PRESENT", "MISSING"}
+                    for value in semantic_coverage.values()
+                )
+                or any(not isinstance(semantic, dict) for semantic in typed_causes + typed_actions)
+            ):
+                raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+            cause_types = set(REPEAT_SEMANTIC_TYPES[:4])
+            action_types = set(REPEAT_SEMANTIC_TYPES[4:])
+            all_semantics = typed_causes + typed_actions
+            if any(
+                not isinstance(semantic.get("semantic_type"), str)
+                or semantic.get("semantic_type") not in REPEAT_SEMANTIC_TYPES
+                or not isinstance(semantic.get("value"), str)
+                or not semantic.get("value", "").strip()
+                or not isinstance(semantic.get("evidence"), list)
+                or not semantic.get("evidence")
+                or any(not isinstance(evidence_item, dict) for evidence_item in semantic["evidence"])
+                or (
+                    semantic.get("source_type") is not None
+                    and (
+                        not isinstance(semantic.get("source_type"), str)
+                        or semantic.get("source_type") not in {"EXCEL", "PDF", "FUSED"}
+                    )
+                )
+                for semantic in all_semantics
+            ):
+                raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+            if any(semantic["semantic_type"] not in cause_types for semantic in typed_causes) or any(
+                semantic["semantic_type"] not in action_types for semantic in typed_actions
+            ):
+                raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+            count_by_type: dict[str, int] = {}
+            for semantic in all_semantics:
+                semantic_type = semantic["semantic_type"]
+                count_by_type[semantic_type] = count_by_type.get(semantic_type, 0) + 1
+            if any(
+                (count_by_type.get(entry_type, 0) > 0) != (semantic_coverage[entry_type] == "PRESENT")
+                for entry_type in REPEAT_SEMANTIC_TYPES
+            ) or any(
+                count_by_type.get(entry_type, 0) != 1
+                for entry_type in cause_types
+                if semantic_coverage[entry_type] == "PRESENT"
+            ):
+                raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+        elif semantic_mode == "LEGACY_GENERIC_ONLY" and item.get("semantic_contract_version") is not None:
+            raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
+
+        semantic_evidence_status = item.get("semantic_evidence_status") or (
+            "LEGACY_GENERIC_ONLY" if semantic_mode == "LEGACY_GENERIC_ONLY"
+            else "INCOMPLETE" if semantic_mode == "INCOMPLETE"
+            else "COMPLETE" if typed_causes or typed_actions
+            else "NO_TYPED_SEMANTICS"
+        )
+        expected_evidence_status = (
+            "LEGACY_GENERIC_ONLY" if semantic_mode == "LEGACY_GENERIC_ONLY"
+            else "INCOMPLETE" if semantic_mode == "INCOMPLETE"
+            else "COMPLETE" if typed_causes or typed_actions
+            else "NO_TYPED_SEMANTICS"
+        )
+        if semantic_evidence_status != expected_evidence_status:
+            raise RepeatResultContractError("REPEAT_SEMANTIC_CONTEXT_INVALID")
 
         return {
             "case_id": case_id,
@@ -256,4 +352,14 @@ class RepeatResultService:
             "detail_status": item.get("detail_status") or SEARCH_INCOMPLETE,
             "detail_error": item.get("detail_error"),
             "case_status": item.get("case_status"),
+            "semantic_mode": semantic_mode,
+            "semantic_contract_version": item.get("semantic_contract_version"),
+            "typed_causes": deepcopy(typed_causes),
+            "typed_actions": deepcopy(typed_actions),
+            "semantic_coverage": deepcopy(semantic_coverage),
+            "semantic_evidence_status": semantic_evidence_status,
+            "agent_analysis_status": item.get("agent_analysis_status"),
+            "agent_similarity": deepcopy(item.get("agent_similarity") or {}),
+            "agent_solution": deepcopy(item.get("agent_solution") or {}),
+            "ai_recommendation": deepcopy(item.get("ai_recommendation") or {}),
         }
