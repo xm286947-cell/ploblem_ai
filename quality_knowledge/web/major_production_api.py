@@ -188,7 +188,29 @@ def create_major_production_router(
         batch = restore_service.batch(batch_id)
         if not batch:
             raise HTTPException(404, "MAJOR_EXCEL_BATCH_NOT_FOUND")
+        # Read-only recovery metadata: never mutate the frozen preview snapshot
+        # or its governance SHA. Only the original PREVIEW can be committed.
+        batch["current_mapping_version"] = restore_service.current_mapping_version()
         return batch
+
+    @router.get("/recent")
+    def recent_work() -> dict[str, Any]:
+        """Read-only recovery index for an interrupted browser session.
+
+        Return bounded identifiers/status only, not full source text, upload
+        bytes, prompts, credentials, or preview content.
+        """
+        with service.repository.connect() as connection:
+            batches = [dict(row) for row in connection.execute(
+                """SELECT batch_id,source_file,status,created_at,committed_at
+                   FROM kb_major_import_batch ORDER BY created_at DESC,batch_id DESC LIMIT 20"""
+            ).fetchall()]
+            cases = [dict(row) for row in connection.execute(
+                """SELECT case_id,title,status,created_at,updated_at
+                   FROM kb_case WHERE archived_at IS NULL
+                   ORDER BY created_at DESC,case_id DESC LIMIT 20"""
+            ).fetchall()]
+        return {"batches": batches, "cases": cases}
 
     @router.post("/sources", status_code=201)
     async def intake_source(
