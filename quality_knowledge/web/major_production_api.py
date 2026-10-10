@@ -188,6 +188,9 @@ def create_major_production_router(
         batch = restore_service.batch(batch_id)
         if not batch:
             raise HTTPException(404, "MAJOR_EXCEL_BATCH_NOT_FOUND")
+        # Read-only recovery metadata: never mutate the frozen preview snapshot
+        # or its governance SHA. Only the original PREVIEW can be committed.
+        batch["current_mapping_version"] = restore_service.current_mapping_version()
         return batch
 
     @router.post("/sources", status_code=201)
