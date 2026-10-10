@@ -40,7 +40,7 @@ jobs:
           Write-Host "WINDOWS_MISSING_DB_FAIL_CLOSED=PASS"
           $global:LASTEXITCODE = 0  # expected exit=3 is validated above; do not propagate it
       - name: Compile restored and untouched code
-        run: python -m compileall -q quality_knowledge/web/app.py quality_knowledge/web/legacy_scenario_rc1_routes.py quality_knowledge/scenarios.py
+        run: python -m compileall -q quality_knowledge/web/app.py quality_knowledge/web/legacy_scenario_rc1_routes.py quality_knowledge/scenarios.py quality_knowledge/web/legacy_material_workbenches_rc1.py quality_knowledge/legacy_materials_rc1.py
       - name: Confirm non-scenario tracked code unchanged from main
         shell: bash
         run: |
@@ -62,6 +62,11 @@ jobs:
                      'quality_knowledge/scenario', 'quality_knowledge/reverse_quality_scenario_adapter.py',
                      'quality_knowledge/quality_models.py', 'quality_knowledge/materials.py',
                      'quality_knowledge/web/scenario', 'quality_knowledge/web/legacy_scenario_rc1_routes.py',
+                     'quality_knowledge/web/legacy_material_workbenches_rc1.py',
+                     'quality_knowledge/legacy_materials_rc1.py',
+                     'quality_knowledge/web/templates/material_detail.html',
+                     'quality_knowledge/web/templates/material_data_cleanup.html',
+                     'quality_knowledge/web/templates/software_operation_distribution.html',
                      'quality_knowledge/web/templates/quality_scenario',
                      'quality_knowledge/web/templates/scenario_', 'tests/test_legacy_scenario_restoration.py',
                      'tests/test_scenario_assets.py', 'start_quality_capability_p1.command', 'start_quality_capability_p1.bat',

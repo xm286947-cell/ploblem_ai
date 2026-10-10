@@ -12,8 +12,8 @@ def test_four_workbenches_and_legacy_scenarios_render(tmp_path):
         "/itr/resolution-workbench": "ITR 彻底解决工作台",
         "/software-assessment": "软件考核工作台",
         "/missed-test-analysis": "软件问题漏测分析",
-        "/materials/software-operations": "软件运营数据导入",
-        "/materials/cs": "彻底解决单材料导入",
+        "/materials/software-operations": "软件问题考核工作台",
+        "/materials/cs": "ITR彻底解决工作台",
         "/settings/associations": "关联",
         "/quality-scenarios": "质量场景",
         "/quality-scenario-assets": "场景",
@@ -23,8 +23,8 @@ def test_four_workbenches_and_legacy_scenarios_render(tmp_path):
         assert response.status_code == 200, (path, response.status_code, response.text[:300])
         assert expected in response.text, path
     home = c.get("/issues").text
-    for path in ("/itr/recovery-workbench", "/itr/resolution-workbench",
-                 "/software-assessment", "/missed-test-analysis",
+    for path in ("/materials/itr", "/materials/cs",
+                 "/materials/software-operations", "/missed-test-analysis",
                  "/quality-scenarios", "/quality-scenario-assets"):
         assert f'href="{path}"' in home
 
@@ -66,3 +66,24 @@ def test_restoration_does_not_leak_into_overall_composition(tmp_path):
                  "/materials/software-operations", "/quality-scenarios"):
         assert path not in paths, path
     assert not hasattr(state, "material_repository")
+
+
+def test_historical_rc1_workbench_detail_and_saved_result(tmp_path):
+    db=tmp_path/"historical.db"
+    first=create_app(db)
+    legacy=first.state.legacy_material_repository
+    key="ITR20260424040CS"
+    mid,disposition=legacy.add_material(
+        legacy.group("SW-OPS"),key,
+        {"问题信息_彻底解决单号":key,"问题信息_问题描述":"历史软件考核原始字段",
+         "数据运营_KPI计入月份":"2026-04","考核信息_考核结果":"已审核"},
+        "source-history.xlsx","Sheet1",3)
+    assert disposition=="NEW"
+    client=TestClient(create_app(db))
+    page=client.get("/materials/software-operations")
+    assert page.status_code==200,page.text[:400]
+    assert key in page.text
+    detail=client.get("/materials/software-operations/"+mid)
+    assert detail.status_code==200,detail.text[:400]
+    assert "历史软件考核原始字段" in detail.text
+    assert "已审核" in detail.text

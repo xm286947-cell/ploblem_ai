@@ -26,6 +26,9 @@ ROUTES = {
     "05-missed-test-analysis": ("/missed-test-analysis", "软件问题漏测分析"),
     "06-legacy-scenario-library": ("/quality-scenarios", "质量场景"),
     "07-legacy-scenario-assets": ("/quality-scenario-assets", "场景"),
+    "08-original-itr": ("/materials/itr", "ITR问题工作台"),
+    "09-original-resolution": ("/materials/cs", "ITR彻底解决工作台"),
+    "10-original-software-assessment": ("/materials/software-operations", "软件问题考核工作台"),
 }
 
 

@@ -247,6 +247,14 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     tpl.env.globals['confidence'] = _confidence
     tpl.env.globals['zh_value'] = zh_value
 
+    if initialize_schema:
+        # Register historical material workbenches before reduced source-only placeholders.
+        # Other issue/analysis/scenario routes are kept unchanged.
+        from .legacy_material_workbenches_rc1 import create_legacy_material_router
+        original_workbenches, rc1_materials = create_legacy_material_router(db_path,tpl,svc)
+        app.include_router(original_workbenches)
+        state.legacy_material_repository = rc1_materials
+
     def filters(req):
         return {k: v for k in ['business_type', 'business_issue_id', 'product', 'platform', 'severity', 'issue_type', 'issue_domain', 'year', 'month'] if (v := req.query_params.get(k))}
 
