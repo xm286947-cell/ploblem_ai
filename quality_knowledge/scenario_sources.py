@@ -395,12 +395,24 @@ def operation_records(service, filters=None, selected_ids=None, metadata_only=Fa
         source_refs.extend(_material_ref('MISSED_TEST',row) for row in missed_materials)
         source_refs.extend(_effective_missed_test_refs(issue,analysis_provenance))
         if len(missed_materials)>1:warnings.append('关联到多个漏测源材料，均保留为证据，不据此选择分析结论')
+        # A linked issue can legitimately have an empty business_type.
+        # Reuse only explicitly recorded product *types* from bound source facts;
+        # never infer taxonomy from product model/part number or default to PLC.
+        itr_context = context_from(json.loads(itr_record['raw_json'])) if itr_record else {}
+        product_type = (
+            str(issue.get('business_type') or '').strip() if issue else ''
+        ) or str(
+            context.get('product_type')
+            or operation_context.get('product_type')
+            or itr_context.get('product_type')
+            or ''
+        ).strip()
         selected_issue={
             'knowledge_id':issue.get('knowledge_id') if issue else '',
             'business_issue_id':issue.get('business_issue_id') if issue else material.get('business_key') or '',
             'software_assessment_record_id':material['material_id'],
             'software_assessment_revision':material.get('source_hash') or '',
-            'product_code':issue.get('business_type') if issue else '',
+            'product_code':product_type,
             'product_model':values.get('product_model') or '', 'ipmt':values.get('ipmt') or '',
             'spdt':values.get('spdt') or '', 'industry':values.get('industry') or '',
             'customer':values.get('customer') or '', 'kpi_year':year, 'kpi_month':month,
