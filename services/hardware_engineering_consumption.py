@@ -76,7 +76,12 @@ class EngineeringConsumptionRuntime:
             raise EngineeringAnalysisError("ANALYSIS_OUTPUT_INVALID")
         return {**result.data, "_trace": {"agent_id": result.agent_id, "task_id": result.task_id,
                                          "run_id": result.run_id,
-                                         "provider_calls": int(getattr(result.execution, "provider_calls", 0) or 0)}}
+                                         "provider_calls": int(getattr(result.execution, "provider_calls", 0) or 0),
+                                         "provider": getattr(result.execution, "provider", None),
+                                         "model": getattr(result.execution, "model", None),
+                                         "duration_ms": getattr(result.execution, "duration_ms", None),
+                                         "token_usage": dict(getattr(result.execution, "token_usage", {}) or {}),
+                                         "trace_id": getattr(result.execution, "trace_id", None)}}
 
 
 class HardwareEngineeringConsumption:
