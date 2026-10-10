@@ -190,12 +190,26 @@
       return (!product||p.includes(product))&&(!circuit||c.includes(circuit))&&(!material||m.includes(material));
     });
     const mode=searchMeta.mode||'LEGACY';
-    const modeLabel={OPENSEARCH:'AI 检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索'}[mode]||mode;
+    // OpenSearch index recall is not proof that an online Runtime Agent ran.
+    const modeLabel={OPENSEARCH:'索引检索',SQLITE_FORMAL:'正式知识检索',LEGACY_NORMALIZED:'兼容检索',LEGACY:'普通检索'}[mode]||mode;
+    const agent=searchMeta.query_agent||{};
+    const agentStatus=String(agent.status||'FAST_PATH');
+    const trace=agent.trace||{};
+    let agentLabel='';
+    if(agentStatus==='INVOKED'){
+      agentLabel=trace.task_id&&trace.run_id&&Number(trace.provider_calls)>0
+        ?'；在线 Agent 已参与'
+        :'；Agent 路径已执行（Provider 调用待核验）';
+    }else if(agentStatus==='BLOCKED'||agentStatus==='NOT_CONFIGURED'){
+      agentLabel='；规则检索（Agent 未就绪）';
+    }else if(agentStatus==='FAST_PATH'){
+      agentLabel='；快速检索（未调用在线 Agent）';
+    }
     const understood=searchMeta.query_understanding||{};
     const original=String(understood.original_query||'').trim();
     const retrievalText=String(understood.retrieval_text||'').trim();
     const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+agentLabel+'；只展示 PUBLISHED。';
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
