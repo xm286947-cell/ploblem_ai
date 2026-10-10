@@ -66,7 +66,7 @@ jobs:
       - name: One-click source performance focused regression
         shell: pwsh
         run: |
-          .\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_software_assessment_qsv1_browser_flow.py tests\test_quality_scenario_mature_integration.py tests\test_reverse_quality_field_evidence_recovery.py
+          .\\.venv\\Scripts\\python.exe -m pytest -q tests\\test_software_assessment_qsv1_browser_flow.py tests\test_quality_scenario_mature_integration.py tests\test_reverse_quality_field_evidence_recovery.py tests\test_quality_scenario_real_provider_safe_launch.py
 
       - name: Windows real Chromium G1-G5 browser golden
         shell: pwsh
@@ -97,6 +97,9 @@ jobs:
             platform_focus = "Windows"
             launch_entry = "start_quality_scenario_windows_acceptance.bat"
             original_db_launch_entry = "start_quality_scenario_windows_original_db.bat"
+            real_provider_launch_entry = "start_quality_scenario_windows_real_provider.bat"
+            real_provider_requires_authorized_model_config = $true
+            real_provider_acceptance = "PENDING_ACTUAL_CUSTOMER_DB_AND_PROVIDER"
             original_db_supported = $true
             original_db_write_policy = "COPY_FIRST_ORIGINAL_UNTOUCHED"
             original_db_fixture_injection = "NO"
