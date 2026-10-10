@@ -735,11 +735,17 @@ class HardwareCaseAIRetrievalService:
             return variants, status
         status["status"] = "NOT_CONFIGURED"
         if self.query_agent is None and os.getenv("HARDWARE_QUERY_AGENT_ENABLED") == "1":
-            try:
-                from services.hardware_query_agent import HardwareQueryAgent
-                self.query_agent = HardwareQueryAgent()
-            except Exception as error:
-                status = {"status": "BLOCKED", "error_code": str(getattr(error, "code", None) or type(error).__name__), "trace": None}
+            # The search endpoint is publicly reachable in the current P0 app.
+            # Never allow a lone feature flag to spend real Provider calls.
+            if (os.getenv("HARDWARE_R2_DEPLOYMENT_MODE") != "NON_PROD"
+                    or os.getenv("HARDWARE_QUERY_AGENT_NONPROD") != "1"):
+                status = {"status": "BLOCKED", "error_code": "QUERY_AGENT_NONPROD_GATE_REQUIRED", "trace": None}
+            else:
+                try:
+                    from services.hardware_query_agent import HardwareQueryAgent
+                    self.query_agent = HardwareQueryAgent()
+                except Exception as error:
+                    status = {"status": "BLOCKED", "error_code": str(getattr(error, "code", None) or type(error).__name__), "trace": None}
         if self.query_agent is not None:
             try:
                 plan = self.query_agent.understand(query)
