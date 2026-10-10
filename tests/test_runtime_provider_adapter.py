@@ -23,7 +23,6 @@ from tools.openai_mock.server import create_server
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_CONFIG = "config/runtime/agents/storage.emmc.parameter_extract.yaml"
-MODEL_CONFIG = "config/runtime/model.yaml"
 SECRET = "ORCH_B01_SECRET_MUST_NOT_PERSIST"
 
 
@@ -76,7 +75,20 @@ def request_history(host: str, port: int) -> list[dict]:
 def storage_loader(base_url: str) -> AgentConfigLoader:
     return AgentConfigLoader(
         root=ROOT,
-        model_profiles=ROOT / MODEL_CONFIG,
+        # Offline tests must never depend on local user/Provider configs.
+        # Use the same runtime profile contract with an explicit in-memory mock.
+        model_profiles={
+            "active_model": "qwen_prod",
+            "models": {
+                "qwen_prod": {
+                    "provider": "openai_compatible",
+                    "base_url_env": "DASHSCOPE_BASE_URL",
+                    "api_key_env": "DASHSCOPE_API_KEY",
+                    "model": "qwen3.8-max",
+                    "temperature": 0,
+                },
+            },
+        },
         schemas={"StorageFieldResult": StorageFieldResult},
         content_strategies={
             "storage_linked_fields@1": {
@@ -693,3 +705,260 @@ def test_provider_diagnostics_captures_http_400_error_body_and_request_id(
     assert "Set-Cookie" not in trace
     assert "MUST_NOT_LOG" not in trace
     assert SECRET not in trace
+
+
+def test_storage475_invalid_json_keeps_diagnostic_metadata_without_response_leak(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    """Existing Runtime DB and trace expose metadata, never provider text."""
+    import hashlib
+
+    marker = "CONFIDENTIAL_PROVIDER_OUTPUT_475"
+    # An incomplete fence must still raise INVALID_JSON after bounded reuse.
+    content = (chr(96) * 3) + 'json\n{"ok":true,"marker":"' + marker + '"}\n'
+    calls = []
+
+    class SafeResponse(_FakeResponse):
+        status = 200
+        headers = {"X-Request-Id": "req-475-mock", "Content-Type": "application/json"}
+
+    def fake_urlopen(_request, timeout):
+        calls.append(1)
+        return SafeResponse({
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 123, "completion_tokens": 33},
+        })
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    agent = _write_authless_agent(tmp_path)
+    loader = AgentConfigLoader(
+        root=tmp_path,
+        model_profiles="model.yaml",
+        schemas={"SimpleResult": SimpleResult},
+        environ={},
+    )
+    store = SqliteTaskStore(tmp_path / "runtime.db")
+    runtime = ConfiguredAgentRuntime(store, config_loader=loader)
+    runtime.load_agent(agent)
+    result = runtime.invoke(AgentRequest(
+        request_id="storage475-diagnostics",
+        agent_id="authless.local",
+        input={"test": "mock-only"},
+    ))
+
+    assert len(calls) >= 1
+    assert result.status != RuntimeStatus.COMPLETED
+    assert result.error.code == "INVALID_JSON"
+    details = result.error.details
+    assert details["finish_reason"] == "stop"
+    assert details["http_status"] == 200
+    assert details["provider_request_id"] == "req-475-mock"
+    assert details["content_length_bytes"] == len(content.encode())
+    assert details["content_sha256"] == hashlib.sha256(content.encode()).hexdigest()
+    assert details["starts_with_markdown_fence"] is True
+    assert details["json_error_line"] == 1
+    assert details["json_error_column"] == 1
+    assert details["json_error_position"] == 0
+    assert details["prompt_tokens"] == 123
+    assert details["completion_tokens"] == 33
+    assert details["max_tokens"] == "NOT_RECORDED"
+
+    # The same Runtime failure metadata is durable, and the text stays absent.
+    db_dump = raw_database_dump(store)
+    trace_text = trace.read_text(encoding="utf-8")
+    console = capsys.readouterr().out
+    assert "content_sha256" in db_dump and "json_error_position" in db_dump
+    assert "invalid_json" in trace_text and "json_error_line" in trace_text
+    assert "invalid_json" in console
+    for private in (marker, content, "Authorization", "Bearer"):
+        assert private not in db_dump
+        assert private not in trace_text
+        assert private not in console
+
+
+def test_storage475_finish_reason_length_still_maps_to_output_truncated(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    class LimitedResponse(_FakeResponse):
+        status = 200
+        headers = {}
+
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: LimitedResponse({
+            "choices": [{"message": {"content": '{"ok":'}, "finish_reason": "LENGTH"}],
+            "usage": {"completion_tokens": 512},
+        }),
+    )
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, {"runtime": {"provider_call_seq": 1, "provider_config": {
+            "base_url": "http://127.0.0.1:9001/v1",
+            "model": "mock-only",
+            "max_tokens": 512,
+        }}})
+    assert err.value.code == "OUTPUT_TRUNCATED"
+    assert err.value.details["finish_reason"] == "length"
+    assert err.value.details["completion_tokens"] == 512
+    assert err.value.details["max_tokens"] == 512
+    assert "json_error_position" not in err.value.details
+    assert "output_truncated" in trace.read_text(encoding="utf-8")
+
+
+def test_storage475_valid_json_and_missing_metadata_remain_safe(tmp_path: Path, monkeypatch) -> None:
+    responses = iter(['{"ok":true}', "not-json"])
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": next(responses)}}],
+        }),
+    )
+    trace = tmp_path / "provider-trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    ctx = {"runtime": {"provider_call_seq": 1, "provider_config": {
+        "base_url": "http://127.0.0.1:9001/v1", "model": "mock-only",
+    }}}
+    assert adapter({"value": 1}, ctx) == {"ok": True}
+    assert not trace.exists()
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, ctx)
+    assert err.value.code == "INVALID_JSON"
+    for field in ("finish_reason", "http_status", "provider_request_id",
+                  "prompt_tokens", "completion_tokens", "max_tokens"):
+        assert err.value.details[field] == "NOT_RECORDED"
+    assert "not-json" not in trace.read_text(encoding="utf-8")
+
+
+def test_storage475_json_schema_fail_closed_not_relabelled(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": '{"ok":"not a boolean"}'}, "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Only JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as err:
+        adapter({"value": 1}, {"runtime": {"provider_config": {
+            "base_url": "http://127.0.0.1:9001/v1", "model": "mock-only",
+        }}})
+    assert err.value.code == "PROVIDER_SCHEMA_INVALID"
+
+
+@pytest.mark.parametrize("content", [
+    ' \\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3 + ' \\n',
+    chr(96) * 3 + 'JSON\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + '\\n{"ok":true}\\n' + chr(96) * 3,
+])
+def test_storage475_reuses_complete_json_fence_only_for_object_agents(
+    content: str, monkeypatch, tmp_path: Path,
+) -> None:
+    response_text = bytes(content, "utf-8").decode("unicode_escape")
+    class SafeResponse(_FakeResponse):
+        status = 200
+        headers = {}
+
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: SafeResponse({
+            "choices": [{"message": {"content": response_text}, "finish_reason": "stop"}],
+        }),
+    )
+    trace = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("RUNTIME_PROVIDER_TRACE_FILE", str(trace))
+    monkeypatch.delenv("RUNTIME_PROVIDER_TRACE", raising=False)
+    monkeypatch.delenv("RUNTIME_PROVIDER_DIAGNOSTICS", raising=False)
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    result = adapter({"v": 1}, {"runtime": {
+        "provider_call_seq": 1,
+        "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+    }})
+    assert result == {"ok": True}
+    lines = trace.read_text(encoding="utf-8")
+    assert "json_fence_normalized" in lines
+    assert response_text not in lines
+    assert "Bearer" not in lines
+
+
+@pytest.mark.parametrize("content", [
+    chr(96) * 3 + 'json\\n{"ok":true}',
+    chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3 + '\\nextra',
+    'note\\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3
+        + '\\n' + chr(96) * 3 + 'json\\n{"ok":true}\\n' + chr(96) * 3,
+    chr(96) * 3 + 'json\\n{"ok":\\n' + chr(96) * 3,
+    chr(96) * 3 + 'python\\n{"ok":true}\\n' + chr(96) * 3,
+    '{"ok":true} {"ok":false}',
+])
+def test_storage475_rejects_incomplete_or_ambiguous_json_fences(
+    content: str, monkeypatch,
+) -> None:
+    response_text = bytes(content, "utf-8").decode("unicode_escape")
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": response_text}, "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "INVALID_JSON"
+
+
+def test_storage475_complete_fence_remains_schema_fail_closed(monkeypatch) -> None:
+    fence = chr(96) * 3
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": fence + "json" + chr(10) + '{"ok":"nonsense"}' + chr(10) + fence},
+                         "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=SimpleResult, response_shape="json_object",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "PROVIDER_SCHEMA_INVALID"
+
+
+def test_storage475_fence_not_accepted_for_array_response_shape(monkeypatch) -> None:
+    fence = chr(96) * 3
+    monkeypatch.setattr(
+        "runtime.providers.openai_compatible.urlopen",
+        lambda _request, timeout: _FakeResponse({
+            "choices": [{"message": {"content": fence + 'json\\n[1,2]\\n' + fence},
+                         "finish_reason": "stop"}],
+        }),
+    )
+    adapter = OpenAICompatibleProviderAdapter(
+        system_prompt="Strict JSON", output_schema=None, response_shape="json_array",
+    )
+    with pytest.raises(RuntimeStepError) as error:
+        adapter({"v": 1}, {"runtime": {
+            "provider_config": {"base_url": "http://127.0.0.1:9001/v1", "model": "mock-only"},
+        }})
+    assert error.value.code == "INVALID_JSON"
