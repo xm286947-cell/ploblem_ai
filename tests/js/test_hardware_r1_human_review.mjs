@@ -275,3 +275,22 @@ test('pending PUBLISH API state reveals reconciliation and disables unsafe actio
     0
   );
 });
+
+
+test('preview-only knowledge never unlocks human review without durable candidate', () => {
+  const start = source.indexOf('function hasDurableCandidate');
+  const end = source.indexOf('function openReviewConflicts', start);
+  assert.ok(start >= 0 && end > start);
+  const candidateBlock = source.slice(start, end);
+  assert.match(candidateBlock, /candidate_asset\?\.candidate_id === item\.candidate_id/);
+  assert.match(candidateBlock, /asset_status === 'ACTIVE'/);
+  assert.match(candidateBlock, /return hasDurableCandidate\(item\) \? item\.candidate : null/);
+  assert.doesNotMatch(candidateBlock, /pipeline_result\?\.knowledge_object/);
+  const humanStart = source.indexOf('async function humanReviewAction');
+  const humanEnd = source.indexOf('function renderNextStep', humanStart);
+  assert.ok(humanStart >= 0 && humanEnd > humanStart);
+  const humanBlock = source.slice(humanStart, humanEnd);
+  assert.match(humanBlock, /if \(!hasDurableCandidate\(state\.item\)\)/);
+  assert.match(source, /candidate_commit_failure_code/);
+  assert.match(source, /不需要强制重跑 AI/);
+});
