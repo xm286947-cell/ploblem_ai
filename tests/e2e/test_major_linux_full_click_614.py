@@ -79,6 +79,6 @@ def test_linux_full_candidate_browser_confirm_and_69_row_pages(tmp_path: Path) -
                 preview.get_by_role("button", name="下一页").first.click()
             expect(preview.locator("[data-paged-page]").first).to_contain_text("4 / 4")
             assert preview.locator("[data-paged-body] tr").count() == 9
-            expect(preview).to_contain_text("Edge UI 行号 70")
+            expect(preview).to_contain_text("Linux UI 行号 70")
         finally:
             browser.close()
