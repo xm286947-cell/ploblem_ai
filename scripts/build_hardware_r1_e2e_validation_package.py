@@ -15,6 +15,7 @@ INCLUDE_FILES = (
     "requirements.txt", "scripts/hardware_case_web_start.py", "scripts/hardware_r1_e2e_validation_start.py",
     "START_HARDWARE_R1_E2E_VALIDATION.command", "START_HARDWARE_R1_E2E_VALIDATION.bat",
     "config/hardware_r1_e2e_validation.example.json", "docs/product/HARDWARE_R1_SINGLE_PACKAGE_E2E_VALIDATION.md",
+    "tools/hardware_r2_real_gate_probe.py", "docs/product/HARDWARE_R2_INTERNAL_AGENT_SECURITY_AND_TRIAL.md",
 )
 EXCLUDED_PARTS = {".git", "__pycache__", ".pytest_cache", "node_modules", "dist", "build", "releases", "tests", "test", "data", "sources", "output", "artifacts"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".docx", ".doc", ".zip", ".log"}
