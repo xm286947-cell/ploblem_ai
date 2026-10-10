@@ -111,6 +111,13 @@ def _trace_info(response: dict[str, Any], *, analysis: bool) -> dict[str, Any]:
                                          "model", "provider_calls", "duration_ms", "trace_id")}
     if not safe["task_id"] or not safe["run_id"] or int(safe["provider_calls"] or 0) < 1:
         raise ProbeError("REAL_AGENT_PROVIDER_TRACE_INCOMPLETE")
+    provider = str(safe["provider"] or "").strip()
+    model = str(safe["model"] or "").strip()
+    if not provider or not model or any(
+        marker in (provider + " " + model).lower()
+        for marker in ("mock", "fake", "dummy", "test-only")
+    ):
+        raise ProbeError("REAL_AGENT_PROVIDER_IDENTITY_UNVERIFIED")
     return safe
 
 
@@ -130,18 +137,19 @@ def probe(base_url: str, *, real_agent: bool = False, explicit: bool = False,
         ensure_real_agent_permission(env, explicit=explicit)
 
     rows: list[dict[str, Any]] = []
-    formal_a0207 = None
+    formal_by_case: dict[str, str] = {}
     for question, expected_id in QUERIES:
         response = _request(base, "GET", "/api/hardware-query/v1/search?" + urlencode({"text": question, "limit": 20}))
         actual = _case_ids(response)
-        ok = expected_id in actual if expected_id is not None else len(actual) == 0
-        if expected_id == "A0207" and formal_a0207 is None:
+        # Top-5 acceptance must not silently succeed on a sixth or later hit.
+        ok = expected_id in actual[:5] if expected_id is not None else len(actual) == 0
+        if expected_id in {"A0152", "A0207"} and expected_id not in formal_by_case:
             matches = [row for row in response.get("results", []) if isinstance(row, dict)
-                       and row.get("business_case_id") == "A0207"]
-            if matches:
-                formal_a0207 = matches[0].get("knowledge_id")
+                       and row.get("business_case_id") == expected_id]
+            if matches and matches[0].get("knowledge_id"):
+                formal_by_case[expected_id] = str(matches[0]["knowledge_id"])
         rows.append({"query": question, "expected": expected_id or "NO_HIT",
-                     "actual_business_case_ids": actual[:5], "pass": ok})
+                     "actual_business_case_ids": actual[:5], "hit_count": len(actual), "pass": ok})
     report: dict[str, Any] = {
         "scope": "LOCAL_NONPROD_READ_ONLY" if not real_agent else "LOCAL_NONPROD_AUTHORIZED_PROVIDER",
         "deterministic_query_results": rows,
@@ -149,14 +157,28 @@ def probe(base_url: str, *, real_agent: bool = False, explicit: bool = False,
         "online_agent_gate": "NOT_RUN",
         "engineering_agent_gate": "NOT_RUN",
         "native_chrome_gate": "NOT_RUN",
+        "original_word_sha_gate": "NOT_RUN",
         "independent_tse_gate": "NOT_RUN",
     }
-    if formal_a0207:
-        obj = _get_formal_object(base, str(formal_a0207))
-        report["a0207_formal_identity"] = {
-            "knowledge_id": obj.get("knowledge_id"), "business_case_id": obj.get("business_case_id"),
-            "evidence_ref_count": len(obj.get("evidence_refs") or []),
+    # A matching case ID alone is not acceptable: both sources must resolve to
+    # actual Formal objects with existing case-level Evidence references.
+    identities: dict[str, Any] = {}
+    for case_id in ("A0152", "A0207"):
+        knowledge_id = formal_by_case.get(case_id)
+        if not knowledge_id:
+            raise ProbeError("FORMAL_KNOWLEDGE_ID_MISSING_" + case_id)
+        obj = _get_formal_object(base, knowledge_id)
+        if obj.get("knowledge_id") != knowledge_id or obj.get("business_case_id") != case_id:
+            raise ProbeError("FORMAL_IDENTITY_MISMATCH_" + case_id)
+        evidence_refs = obj.get("evidence_refs")
+        if not isinstance(evidence_refs, list) or not evidence_refs:
+            raise ProbeError("FORMAL_CASE_EVIDENCE_MISSING_" + case_id)
+        identities[case_id] = {
+            "knowledge_id": knowledge_id, "business_case_id": case_id,
+            "evidence_ref_count": len(evidence_refs),
         }
+    report["formal_identity"] = identities
+    report["a0207_formal_identity"] = identities["A0207"]
 
     if not real_agent:
         return report
