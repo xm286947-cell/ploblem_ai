@@ -195,11 +195,12 @@
     const original=String(understood.original_query||'').trim();
     const retrievalText=String(understood.retrieval_text||'').trim();
     const rewrite=original&&retrievalText&&original.toLowerCase()!==retrievalText.toLowerCase()?'；理解为“'+retrievalText+'”':'';
-    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+modeLabel+rewrite+'；只展示 PUBLISHED。';
+    const agent=searchMeta.agent_status==='COMPLETED'?'AI 查询理解已执行':'确定性检索（未调用在线 Agent）';
+    qs('[data-search-summary]').textContent='共 '+filtered.length+' 条结果；'+agent+rewrite+'；只展示 PUBLISHED。';
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
-    const payload=await safe('?q='+encodeURIComponent(q||''),{},'CONSUMER');
+    const payload=await safe('/assisted-search?q='+encodeURIComponent(q||''),{},'CONSUMER');
     searchItems=(payload&&payload.results)||[];
     searchMeta=(payload&&payload.retrieval)||{};
     applySearchFilters();

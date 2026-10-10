@@ -68,7 +68,8 @@
 
   function renderResults() {
     const box = q('[data-knowledge-results]');
-    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'}`;
+    const agent = root.dataset.queryAgentStatus === 'COMPLETED' ? 'AI 查询理解已执行' : '确定性检索（未调用在线 Agent）';
+    q('[data-knowledge-summary]').textContent = `${results.length} 条正式知识 · ${agent} · ${activeScenario === 'research' ? '研发设计复用' : activeScenario === 'risk' ? '器件与电路风险' : '市场与应用问题检索'}`;
     if (!results.length) {
       box.innerHTML = '<div class="hc-knowledge-empty">未检索到已发布的正式硬件知识</div>';
       return;
@@ -118,7 +119,8 @@
     q('[data-knowledge-unavailable]').hidden = true;
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/search' + searchParams());
+      const payload = await fetchJson('/assisted-search' + searchParams());
+      root.dataset.queryAgentStatus = String(payload.retrieval?.agent_status || 'NOT_CONFIGURED');
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
     } catch (error) {
