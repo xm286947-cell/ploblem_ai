@@ -3,7 +3,31 @@
   const root = document.querySelector('[data-major-production]');
   if (!root) return;
   const api = (window.P0_MAJOR_API || root.dataset.apiPrefix || '/api/v2').replace(/\/$/, '') + '/major-production';
-  const state = { caseId: null, eventId: null };
+  const state = { caseId: null, eventId: null, batchId: null };
+  // Client storage is only a pointer. Case, Event, Preview and Review authority
+  // always comes from the server. Never store files, provider output or evidence.
+  const CONTEXT_KEY = 'major-v11-context:' + window.location.pathname;
+  const DRAFT_KEY = 'major-v11-draft:' + window.location.pathname;
+  const safeId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+  function saveContext() {
+    try {
+      window.localStorage.setItem(CONTEXT_KEY, JSON.stringify({
+        caseId: safeId(state.caseId) ? state.caseId : null,
+        eventId: safeId(state.eventId) ? state.eventId : null,
+        batchId: safeId(state.batchId) ? state.batchId : null
+      }));
+    } catch (_) { /* private browsing / unavailable storage: manual recovery remains available */ }
+  }
+  function loadContext() {
+    try {
+      const v = JSON.parse(window.localStorage.getItem(CONTEXT_KEY) || '{}');
+      return {
+        caseId: safeId(v.caseId) ? v.caseId : null,
+        eventId: safeId(v.eventId) ? v.eventId : null,
+        batchId: safeId(v.batchId) ? v.batchId : null
+      };
+    } catch (_) { return {}; }
+  }
   const message = root.querySelector('[data-major-message]');
   const say = (text, error) => {
     message.textContent = text;
@@ -112,6 +136,230 @@
     say(text, error);
   };
   let previewBusy = false;
+
+  // A refresh used to discard the entire production state. Hydrate from
+  // authoritative server snapshots instead of replaying a POST or an AI call.
+  const resumeStatus = document.createElement('p');
+  resumeStatus.className = 'major-message';
+  resumeStatus.setAttribute('role', 'status');
+  const recoveryPanel = document.createElement('section');
+  recoveryPanel.className = 'case-card';
+  recoveryPanel.innerHTML =
+    '<h2>继续上次工作</h2><p>刷新后从服务端恢复已保存的批次、案例和人工审核。' +
+    '文件选择不能由浏览器自动恢复；未上传的文件需重新选择。</p>' +
+    '<form data-major-resume class="major-form">' +
+    '<label>Case ID <input name="case_id" placeholder="KCASE-..."></label>' +
+    '<label>Batch ID <input name="batch_id" placeholder="MIMP-..."></label>' +
+    '<button type="submit" class="case-button secondary">恢复已有记录（不重新导入）</button></form>';
+  recoveryPanel.appendChild(resumeStatus);
+  excelForm.closest('section').before(recoveryPanel);
+  const resumeForm = recoveryPanel.querySelector('[data-major-resume]');
+  const resumed = (message, isError) => {
+    resumeStatus.textContent = message;
+    resumeStatus.className = 'major-message' + (isError ? ' error' : '');
+  };
+
+  const draftForms = [excelForm, root.querySelector('[data-major-intake]')];
+  function saveDraft() {
+    const draft = {};
+    draftForms.forEach((form, i) => {
+      if (!form) return;
+      draft['form' + i] = {};
+      form.querySelectorAll('input:not([type=file])').forEach(input => {
+        if (input.name) draft['form' + i][input.name] = input.value;
+      });
+    });
+    try { window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (_) {}
+  }
+  function restoreDraft() {
+    let draft = {};
+    try { draft = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) || '{}'); } catch (_) {}
+    draftForms.forEach((form, i) => {
+      if (!form) return;
+      const fields = draft['form' + i] || {};
+      form.querySelectorAll('input:not([type=file])').forEach(input => {
+        if (input.name && typeof fields[input.name] === 'string') input.value = fields[input.name];
+      });
+      form.addEventListener('input', saveDraft);
+      form.addEventListener('change', saveDraft);
+    });
+  }
+  const hasSelectedFiles = () => draftForms.some(form => form && [...form.querySelectorAll('input[type=file]')]
+    .some(input => input.files && input.files.length));
+  window.addEventListener('beforeunload', event => {
+    if (!hasSelectedFiles()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  function clearSelectedFiles(form) {
+    form.querySelectorAll('input[type=file]').forEach(input => { input.value = ''; });
+  }
+
+  async function restoreCase(caseId, requestedEventId) {
+    if (!safeId(caseId)) throw new Error('CASE_ID_INVALID');
+    const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(caseId)));
+    const events = Array.isArray(detail.events) ? detail.events : [];
+    const selected = events.some(e => e.event_id === requestedEventId) ? requestedEventId :
+      (events.length === 1 ? events[0].event_id : null);
+    state.caseId = caseId;
+    state.eventId = selected;
+    saveContext();
+    const workflow = root.querySelector('[data-major-workflow]');
+    workflow.hidden = false;
+    root.querySelector('[data-major-identity]').textContent = 'Case ' + caseId +
+      ' · ' + events.length + ' Event(s) · 数据来自已保存的服务端记录';
+    const box = root.querySelector('[data-major-candidates]');
+    box.innerHTML = '';
+    if (events.length > 1) {
+      const selector = document.createElement('label');
+      selector.textContent = '当前 Event（多事件必须明确选择）：';
+      const input = document.createElement('select');
+      input.innerHTML = '<option value="">请选择 Event</option>' +
+        events.map(e => '<option value="' + esc(e.event_id) + '">' +
+          esc(e.standard_itr || e.event_title || e.event_id) + '</option>').join('');
+      input.value = selected || '';
+      input.addEventListener('change', () => {
+        restoreCase(caseId, input.value || null).catch(error => resumed('恢复 Event 失败：' + error.message, true));
+      });
+      selector.appendChild(input);
+      box.appendChild(selector);
+    }
+    const publishButton = root.querySelector('[data-major-publish]');
+    publishButton.disabled = true;
+    if (events.length > 1 && !selected) {
+      root.querySelector('[data-major-state]').textContent = 'EVENT_SELECTION_REQUIRED';
+      resumed('已恢复案例；请选择需要继续审核的 Event，不会自动混用其他 Event 的结果。');
+      return detail;
+    }
+    const entries = (detail.entries || []).filter(e => e.event_id === selected ||
+      e.scope_kind === 'CASE_SHARED' || (events.length === 1 && !e.event_id));
+    const live = entries.filter(e => ['PENDING', 'CONFIRMED', 'CORRECTED'].includes(e.status) &&
+      (e.origin === 'AI' || e.origin === 'HUMAN'));
+    live.forEach(item => {
+      const article = document.createElement('article');
+      article.className = 'major-candidate';
+      const reviewable = item.status === 'PENDING' && item.origin === 'AI';
+      article.innerHTML = '<h3>' + esc(item.entry_type) + ' · ' + esc(item.status) +
+        '</h3><p>' + esc(item.content) + '</p>' +
+        (reviewable ? '<button class="case-button secondary" data-entry="' +
+        esc(item.entry_id) + '">人工确认并创建修订</button>' : '<p>已保存的审核状态</p>');
+      const button = article.querySelector('[data-entry]');
+      if (button) button.addEventListener('click', () => confirm(button));
+      box.appendChild(article);
+    });
+    if (!live.length) {
+      box.insertAdjacentHTML('beforeend', '<p>已恢复来源与案例；尚无可继续审核的 AI 候选。' +
+        '需要时可手动运行 AI 分析。</p>');
+    }
+    const required = ['ISSUE_FACT', 'ROOT_CAUSE', 'ACTION', 'VERIFICATION'];
+    const fullyReviewed = !!selected && required.every(type =>
+      entries.some(e => e.entry_type === type && e.event_id === selected &&
+        (e.status === 'CONFIRMED' || e.status === 'CORRECTED')));
+    const pending = live.some(e => e.status === 'PENDING');
+    publishButton.disabled = !fullyReviewed || pending;
+    root.querySelector('[data-major-state]').textContent = pending ? 'REVIEW_REQUIRED' :
+      (fullyReviewed ? 'READY_TO_PUBLISH' : 'INTAKED');
+    if ((detail.source_links || []).some(link => link.source_type === 'MAJOR_EXCEL_SOURCE_FACT')) {
+      await showExcelProvenance(caseId);
+    }
+    resumed('已从服务端恢复 Case ' + caseId + '。已确认内容不会因刷新而重新生成。');
+    return detail;
+  }
+
+  async function restoreBatch(batchId) {
+    if (!safeId(batchId)) throw new Error('BATCH_ID_INVALID');
+    const batch = await read(await fetch(api + '/excel/batches/' + encodeURIComponent(batchId)));
+    const preview = batch.preview || {};
+    state.batchId = batchId;
+    saveContext();
+    const rows = Array.isArray(preview.rows) ? preview.rows : [];
+    const rowHtml = rows.slice(0, 100).map(row => {
+      const match = row.report_match || {};
+      return '<tr><td>' + esc(row.excel_row) + '</td><td>' +
+        esc((row.itrs || []).join(' / ')) + '</td><td>' + esc(row.title) +
+        '</td><td>' + esc(row.completeness && row.completeness.importable ? 'IMPORTABLE' : 'BLOCKED') +
+        '</td><td>' + esc(match.match_status || match.match_type || '') + '</td></tr>';
+    }).join('');
+    const unsafe = rows.some(row => {
+      const match = row.report_match || {};
+      const resolution = row.event_resolution || {};
+      return match.match_status === 'AMBIGUOUS' ||
+        (match.match_status === 'MATCHED' && (row.itrs || []).length > 1 &&
+          resolution.status !== 'MATCHED');
+    });
+    const confirmable = batch.status === 'PREVIEW' && rows.length > 0 && !unsafe &&
+      !!batch.governance && batch.current_mapping_version === preview.mapping_version;
+    excelPreview.hidden = false;
+    excelPreview.innerHTML = '<article class="major-candidate"><h3>已保存的 Excel 批次</h3>' +
+      '<p>Batch ' + esc(batchId) + ' · 状态 ' + esc(batch.status) + ' · 来源 ' +
+      esc(preview.source_file || batch.source_file || '') + '</p><p>Mapping 版本：' +
+      esc(preview.mapping_version || '') + ' · ' + rows.length +
+      ' 行（展示前 100 行） · 可导入 ' + esc(preview.importable || 0) + '</p>' +
+      '<div class="table-wrap"><table><thead><tr><th>行</th><th>ITR</th>' +
+      '<th>问题</th><th>状态</th><th>报告匹配</th></tr></thead><tbody>' + rowHtml +
+      '</tbody></table></div>' +
+      (confirmable ? '<button class="case-button primary" data-major-recovered-confirm>确认导入已保存批次</button>' : '') +
+      '</article>';
+    if (confirmable) {
+      excelPreview.querySelector('[data-major-recovered-confirm]').addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          setExcelStatus('正在确认已保存的预检批次，请勿重复提交…');
+          const form = new FormData();
+          form.append('batch_id', batchId);
+          const result = await read(await fetch(api + '/excel/confirm', { method: 'POST', body: form }));
+          setExcelStatus('批次已提交完成。');
+          const ids = (result.result && result.result.case_ids) || [];
+          await restoreBatch(batchId);
+          if (ids.length) await restoreCase(ids[0], null);
+        } catch (error) {
+          button.disabled = false;
+          setExcelStatus('批次确认失败：' + error.message, true);
+        }
+      });
+      setExcelStatus('已恢复服务端 PREVIEW 快照，可核对后继续确认；未再次上传文件。');
+    } else if (batch.status === 'COMPLETED' || batch.status === 'PARTIAL') {
+      const ids = (batch.result && batch.result.case_ids) || [];
+      setExcelStatus('批次已完成，已保存 ' + ids.length + ' 个 Case。');
+      if (ids.length && !state.caseId) await restoreCase(ids[0], null);
+    } else {
+      setExcelStatus('已恢复批次 ' + esc(batchId) + '；当前状态为 ' + esc(batch.status) +
+        '，不可直接再次确认。若 Mapping 已改变或批次失败，请重新预检。', true);
+    }
+    resumed('已从服务端恢复 Batch ' + batchId + '（' + batch.status + '）。');
+    return batch;
+  }
+
+  resumeForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const c = resumeForm.elements.namedItem('case_id').value.trim();
+    const b = resumeForm.elements.namedItem('batch_id').value.trim();
+    if (!c && !b) { resumed('请输入 Case ID 或 Batch ID。', true); return; }
+    try {
+      if (c) await restoreCase(c, null);
+      if (b) await restoreBatch(b);
+    } catch (error) { resumed('恢复失败：' + error.message, true); }
+  });
+
+  async function resumeOnLoad() {
+    restoreDraft();
+    const previous = loadContext();
+    resumeForm.elements.namedItem('case_id').value = previous.caseId || '';
+    resumeForm.elements.namedItem('batch_id').value = previous.batchId || '';
+    if (!previous.caseId && !previous.batchId) {
+      resumed('尚无本浏览器保存的工作记录；可输入已知 Case ID 或 Batch ID 恢复。');
+      return;
+    }
+    try {
+      if (previous.caseId) await restoreCase(previous.caseId, previous.eventId);
+      if (previous.batchId) await restoreBatch(previous.batchId);
+    } catch (error) {
+      resumed('上次工作自动恢复失败：' + error.message +
+        '。可以检查服务端记录，或输入其他 Case/Batch ID 手动恢复。', true);
+    }
+  }
+
   if (excelForm) {
     excelForm.addEventListener('submit', async event => {
       event.preventDefault();
@@ -137,6 +385,9 @@
             ? '上传已完成，后台正在进行预检，处理时长取决于文件大小…'
             : '正在上传文件：' + percent + '%');
         });
+        state.batchId = data.batch_id;
+        saveContext();
+        clearSelectedFiles(excelForm);
         excelPreview.hidden = false;
         const rows = (data.rows || []).slice(0, 20).map(row => {
           const match = row.report_match || {};
@@ -179,6 +430,7 @@
             const ids = (committed.result && committed.result.case_ids) || [];
             if (!ids.length) throw new Error('MAJOR_EXCEL_NO_IMPORTED_CASE');
             state.caseId = ids[0];
+            saveContext();
             const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
             const events = detail.events || [];
             state.eventId = events.length === 1 ? events[0].event_id : null;
@@ -212,6 +464,8 @@
       const data = await read(await fetch(api + '/sources', { method: 'POST', body: new FormData(event.currentTarget) }));
       state.caseId = data.case.case_id;
       state.eventId = data.event.event_id;
+      saveContext();
+      clearSelectedFiles(event.currentTarget);
       root.querySelector('[data-major-workflow]').hidden = false;
       root.querySelector('[data-major-identity]').textContent = 'ITR ' + data.event.standard_itr +
         ' · Source ' + data.document.original_filename + ' · Version ' + data.document.version_no;
@@ -265,4 +519,5 @@
       say('已创建正式 Historical Case：' + data.case_id + '。可在案例库检索和复用。');
     } catch (error) { say(error.message, true); }
   });
+}  resumeOnLoad();
 })();
