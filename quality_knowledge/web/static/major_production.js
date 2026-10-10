@@ -398,8 +398,11 @@
       '</article>';
     renderBatchTable(excelPreview.querySelector('[data-major-batch-table]'), rows, preflight.errors);
     const problems = preflight.errors || [];
+    const isCommitted = batch.status === 'COMPLETED' || batch.status === 'PARTIAL';
     const blockers = excelPreview.querySelector('[data-major-blocking-reasons]');
-    if (problems.length) {
+    if (isCommitted) {
+      blockers.textContent = '该批次已经保存，确认导入已完成，不需要重新提交。';
+    } else if (problems.length) {
       blockers.innerHTML = '<h3>确认导入被阻止：' + problems.length +
         ' 项问题（以下为全部行级原因）</h3><ul>' +
         problems.map(item => '<li>' +
@@ -412,7 +415,10 @@
         : '该批次已不处于可确认的 PREVIEW 状态。';
     }
     const confirmButton = excelPreview.querySelector('[data-major-recovered-confirm]');
-    if (!preflight.confirmable) {
+    if (isCommitted) {
+      confirmButton.textContent = '已完成导入';
+      confirmButton.disabled = true;
+    } else if (!preflight.confirmable) {
       confirmButton.textContent = '查看无法确认的原因';
       confirmButton.addEventListener('click', () => {
         setExcelStatus('当前批次不可确认：' + problems.length + ' 项阻断。请查看预检表的“阻断原因”和下方详细列表。', true);
