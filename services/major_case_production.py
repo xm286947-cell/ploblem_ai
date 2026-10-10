@@ -159,9 +159,12 @@ class MajorCaseProductionService:
 
         # Prefer a parsed review/source document when present. Excel Source Fact
         # is a first-class fallback and uses the same Runtime + review pipeline.
+        document_links = [link for link in links if link.get("source_type") == "MAJOR_SOURCE_DOCUMENT"]
+        # Some reports have zero parsed fragments. Prefer usable evidence
+        # rather than silently selecting the first (possibly empty) PDF.
         document_link = next(
-            (link for link in links if link.get("source_type") == "MAJOR_SOURCE_DOCUMENT"),
-            None,
+            (item for item in document_links if self.repository.fragments(str(item.get("record_id") or ""))),
+            document_links[0] if document_links else None,
         )
         link = document_link or next(
             (link for link in links if link.get("source_type") == "MAJOR_EXCEL_SOURCE_FACT"),
@@ -263,7 +266,31 @@ class MajorCaseProductionService:
                 "text_content": fact_text,
                 "source": fact_source.model_dump(mode="json"),
             })
-        provider_fragments = excel_fragments + provider_fragments
+        additional_documents = []
+        for doc_link in document_links:
+            other_id = str(doc_link.get("record_id") or "")
+            if not other_id or other_id == source_revision_id:
+                continue
+            other_version = self.repository.version(other_id)
+            if not other_version:
+                raise MajorProductionError("MAJOR_SOURCE_VERSION_NOT_FOUND")
+            other_source = SourceRef(
+                source_id=other_id,
+                source_type="MAJOR_SOURCE_DOCUMENT",
+                revision=str(other_version.get("version_no") or "1"),
+                content_hash=str(other_version["content_hash"]),
+                fingerprint=str(other_version["content_hash"]),
+                uri=f"major-source://{other_id}",
+            )
+            for fragment in self.repository.fragments(other_id):
+                additional_documents.append({
+                    "fragment_id": str(fragment["fragment_id"]),
+                    "section_path": str(fragment.get("section_path") or ""),
+                    "location_ref": str(fragment.get("location_ref") or ""),
+                    "text_content": str(fragment.get("text_content") or ""),
+                    "source": other_source.model_dump(mode="json"),
+                })
+        provider_fragments = excel_fragments + provider_fragments + additional_documents
         if not provider_fragments or not any(item["text_content"].strip() for item in provider_fragments):
             raise MajorProductionError("MAJOR_ANALYSIS_SOURCE_TEXT_EMPTY")
         # The real provider bridge consumes 'fragments', not source_text.
