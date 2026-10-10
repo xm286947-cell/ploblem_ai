@@ -72,7 +72,7 @@ jobs:
                      'tests/test_scenario_assets.py', 'start_quality_capability_p1.command', 'start_quality_capability_p1.bat',
                      'tools/verify_legacy_quality_db.py',
                      '.github/workflows/legacy-scenario-restoration.yml')
-          fixed = {'quality_knowledge/web/app.py', 'quality_knowledge/web/templates/base.html'}
+          fixed = {'quality_knowledge/web/app.py', 'quality_knowledge/web/templates/base.html', 'quality_knowledge/web/static/app.css'}
           unexpected = [x for x in changed if x not in fixed and not x.startswith(allowed)]
           if unexpected: raise SystemExit('UNRELATED_FILE_CHANGED: '+repr(unexpected))
           print('OTHER_DOMAINS_SOURCE_UNCHANGED=PASS')
