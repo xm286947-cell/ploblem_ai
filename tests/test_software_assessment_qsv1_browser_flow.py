@@ -46,7 +46,7 @@ def _reverse_result(bundle):
     }
 
 
-def _setup_flow(tmp_path, *, explicit_product_type=""):
+def _setup_flow(tmp_path, *, explicit_product_type="", resolution_product_type=""):
     db = tmp_path / "mature.db"
     materials = MaterialRepository(db)
     assessment_id = materials.add_material(
@@ -57,7 +57,8 @@ def _setup_flow(tmp_path, *, explicit_product_type=""):
     )[0]
     materials.add_material(
         materials.group("ITR-CS"), "ITR20261041001CS",
-        {"问题信息_问题原因定位": "保存时序未保证", "问题处理结果_问题解决方案": "增加掉电保护与恢复校验"},
+        {"问题信息_问题原因定位": "保存时序未保证", "问题处理结果_问题解决方案": "增加掉电保护与恢复校验",
+         **({"问题信息_产品类型": resolution_product_type} if resolution_product_type else {})},
         "source.xlsx", "resolution", 4,
     )
     IssueKnowledgeRepository(db)
@@ -182,6 +183,15 @@ def test_missing_issue_product_category_uses_explicit_software_assessment_type(t
     flow.run_task(task["task_id"])
     # Controlled provider intentionally fails its first run; product-code validation must pass.
     assert flow.get_task(task["task_id"])["items"][0]["state"] == "PROVIDER_FAILED"
+
+
+def test_missing_issue_classification_falls_back_to_explicit_resolution_product_type(tmp_path):
+    flow, assessment_id = _setup_flow(tmp_path, resolution_product_type="PLC")
+    with sqlite3.connect(flow.generation.materials.db_path) as connection:
+        connection.execute("UPDATE quality_issue SET business_type='' WHERE knowledge_id=?", ("QK-W4-41001",))
+    result = flow.preview([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
+    assert result["items"][0]["bundle"]["selected_issue"]["product_code"] == "PLC"
+    assert result["items"][0]["bundle"]["source_status"]["RESOLUTION"] == "PRESENT"
 
 
 def test_missing_product_category_does_not_guess_from_product_model(tmp_path):
