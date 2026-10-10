@@ -118,6 +118,18 @@ class P0ITRSubjectSource:
         )
         effective_values = _mapping((effective or {}).get("values"))
 
+        def context_value(*keys: str) -> Any:
+            key_set = set(keys)
+            for source in (fact, product_context, normalized, raw):
+                direct = _first(source, *keys)
+                if direct not in (None, "", [], {}):
+                    return direct
+                nested = _find_recursive(source, key_set)
+                if nested not in (None, "", [], {}):
+                    return nested
+            return None
+
+
         existing_context = {
             "root_cause": _first(
                 fact,
@@ -197,6 +209,26 @@ class P0ITRSubjectSource:
                 "scene",
                 "scenario",
                 "lifecycle_scene",
+            ),
+            "ipmt": context_value("ipmt", "IPMT", "责任IPMT", "产品IPMT"),
+            "spdt": context_value("spdt", "SPDT", "责任SPDT", "产品SPDT"),
+            "responsible_department_level2": context_value(
+                "responsible_department_level2",
+                "责任部门二级",
+                "二级责任部门",
+                "责任部门",
+            ),
+            "cause_level1": context_value(
+                "cause_level1",
+                "cause_level_1",
+                "原因一级分类",
+                "一级原因分类",
+            ),
+            "cause_level2": context_value(
+                "cause_level2",
+                "cause_level_2",
+                "原因二级分类",
+                "二级原因分类",
             ),
             "existing_context": existing_context,
             "itr_version": issue.get("issue_version_id") or issue.get("version_no"),
