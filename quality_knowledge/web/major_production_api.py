@@ -193,6 +193,43 @@ def create_major_production_router(
         batch["current_mapping_version"] = restore_service.current_mapping_version()
         return batch
 
+    @router.get("/excel/batches/{batch_id}/preflight")
+    def excel_batch_preflight(batch_id: str) -> dict[str, Any]:
+        """Read-only explanation of the same row checks used by commit().
+
+        No automatic exclusion of rows, commit, Provider call or mutation.
+        """
+        if restore_service is None:
+            raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
+        batch = restore_service.batch(batch_id)
+        if not batch:
+            raise HTTPException(404, "MAJOR_EXCEL_BATCH_NOT_FOUND")
+        errors: list[dict[str, Any]] = []
+        status = str(batch.get("status") or "")
+        if status != "PREVIEW":
+            errors.append({"row": None, "error": "MAJOR_EXCEL_BATCH_NOT_CONFIRMABLE"})
+        else:
+            governance = batch.get("governance")
+            if not governance:
+                errors.append({"row": None, "error": "MAJOR_EXCEL_GOVERNANCE_MISSING_REPREVIEW_REQUIRED"})
+            else:
+                if restore_service.current_mapping_version() != governance.get("mapping_version"):
+                    errors.append({"row": None, "error": "MAJOR_EXCEL_MAPPING_CHANGED_AFTER_PREVIEW"})
+                # Use exactly the already existing preview snapshot hash rule;
+                # never edit preview_json or the import governance record.
+                from quality_knowledge.major_cases.restore import _hash
+                if _hash(batch["preview"]) != governance.get("preview_sha256"):
+                    errors.append({"row": None, "error": "MAJOR_EXCEL_PREVIEW_CHANGED_AFTER_PREVIEW"})
+            if not errors:
+                errors.extend(restore_service._preflight_commit(batch))
+        return {
+            "batch_id": batch_id,
+            "status": status,
+            "row_count": len((batch.get("preview") or {}).get("rows") or []),
+            "confirmable": status == "PREVIEW" and not errors,
+            "errors": errors,
+        }
+
     @router.get("/recent")
     def recent_work() -> dict[str, Any]:
         """Read-only recovery index for an interrupted browser session.
