@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from io import BytesIO
+import logging
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from starlette.concurrency import run_in_threadpool
 
 from quality_knowledge.major_cases.import_governance import (
     TEMPLATE_VERSION,
@@ -16,9 +20,14 @@ from quality_knowledge.major_cases.import_governance import (
 from services.major_case_production import MajorCaseProductionService, MajorProductionError
 
 
+logger = logging.getLogger(__name__)
+
+
 def _error(error: MajorProductionError) -> HTTPException:
     status = 404 if error.code in {"MAJOR_CASE_NOT_FOUND", "MAJOR_ENTRY_NOT_FOUND", "MAJOR_EVENT_NOT_FOUND"} else 409 if error.code in {"NO_PUBLISHABLE_CONFIRMED_FACT", "MAJOR_CONFIRMATION_REQUIRES_PENDING_AI_CANDIDATE", "CASE_IDENTITY_CONFLICT"} else 503 if error.code == "MAJOR_ANALYSIS_PROVIDER_NOT_CONFIGURED" else 400
-    return HTTPException(status, error.code)
+    task_id = getattr(error, 'task_id', None)
+    headers = {'X-Major-Runtime-Task-ID': task_id} if task_id else None
+    return HTTPException(status, error.code, headers=headers)
 
 
 def create_major_production_router(
@@ -93,6 +102,8 @@ def create_major_production_router(
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in {".xls", ".xlsx", ".xlsm"}:
             raise HTTPException(400, "MAJOR_EXCEL_TYPE_UNSUPPORTED")
+        request_id = uuid.uuid4().hex[:12]
+        started = time.monotonic()
         excel_content = await file.read()
         if not excel_content:
             raise HTTPException(400, "MAJOR_EXCEL_EMPTY")
@@ -102,8 +113,15 @@ def create_major_production_router(
             if material_suffix not in {".pdf", ".docx"}:
                 raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
             material_payload.append((material.filename or "material.bin", await material.read()))
+        logger.info(
+            "MAJOR_EXCEL_PREVIEW_UPLOAD_COMPLETE request_id=%s excel_bytes=%d material_count=%d",
+            request_id, len(excel_content), len(material_payload),
+        )
         try:
-            preview = restore_service.stage_upload(
+            logger.info("MAJOR_EXCEL_PREVIEW_STAGE_START request_id=%s", request_id)
+            # Parsing/staging perform disk and SQLite IO; keep the ASGI loop responsive.
+            preview = await run_in_threadpool(
+                restore_service.stage_upload,
                 file.filename or "major_cases.xlsx",
                 excel_content,
                 material_payload,
@@ -112,7 +130,22 @@ def create_major_production_router(
                 actor=actor.strip() or "web-user",
             )
         except ValueError as error:
+            logger.warning(
+                "MAJOR_EXCEL_PREVIEW_REJECTED request_id=%s elapsed_ms=%d error_code=%s",
+                request_id, int((time.monotonic() - started) * 1000), str(error),
+            )
             raise HTTPException(400, str(error)) from error
+        except Exception:
+            logger.exception(
+                "MAJOR_EXCEL_PREVIEW_FAILED request_id=%s elapsed_ms=%d",
+                request_id, int((time.monotonic() - started) * 1000),
+            )
+            raise
+        logger.info(
+            "MAJOR_EXCEL_PREVIEW_COMPLETE request_id=%s batch_id=%s rows=%d elapsed_ms=%d",
+            request_id, preview.get("batch_id"), len(preview.get("rows") or []),
+            int((time.monotonic() - started) * 1000),
+        )
         preview["mapping"] = {
             "contract": preview["mapping_contract"],
             "version": preview["mapping_version"],
@@ -130,6 +163,8 @@ def create_major_production_router(
     ) -> dict[str, Any]:
         if restore_service is None:
             raise HTTPException(503, "MAJOR_EXCEL_IMPORT_NOT_CONFIGURED")
+        started = time.monotonic()
+        logger.info("MAJOR_EXCEL_COMMIT_START batch_id=%s", batch_id)
         try:
             result = restore_service.commit(
                 batch_id,
@@ -139,6 +174,11 @@ def create_major_production_router(
             raise HTTPException(404, "MAJOR_EXCEL_BATCH_NOT_FOUND") from error
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
+        logger.info(
+            "MAJOR_EXCEL_COMMIT_COMPLETE batch_id=%s imported=%d elapsed_ms=%d",
+            batch_id, int(result.get("imported") or 0),
+            int((time.monotonic() - started) * 1000),
+        )
         return {"batch_id": batch_id, "result": result}
 
     @router.get("/excel/batches/{batch_id}")
@@ -158,15 +198,20 @@ def create_major_production_router(
         domain: str = Form(""),
         file: UploadFile = File(...),
     ) -> dict[str, Any]:
+        source_content = await file.read()
         try:
-            return service.intake_source(
+            logger.info("MAJOR_SINGLE_SOURCE_INTAKE_START source_type=%s source_bytes=%d", Path(file.filename or "").suffix.lower(), len(source_content))
+            result = await run_in_threadpool(
+                service.intake_source,
                 title=title,
                 group_code=group_code,
                 domain=domain,
                 standard_itr=standard_itr,
                 source_name=file.filename or "major-source.pdf",
-                source_bytes=await file.read(),
+                source_bytes=source_content,
             )
+            logger.info("MAJOR_SINGLE_SOURCE_INTAKE_COMPLETE case_id=%s event_id=%s", result["case"]["case_id"], result["event"]["event_id"])
+            return result
         except MajorProductionError as error:
             raise _error(error) from error
         except ValueError as error:
