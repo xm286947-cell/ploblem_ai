@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}软件问题漏测分析{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div>
+    <span class="eyebrow">MISSED TEST ANALYSIS</span>
+    <h1>软件问题漏测分析</h1>
+    <p>复用现有问题事实与 Escape Analysis，聚焦“为什么没有提前发现”和验证缺口；本视图不创建第二套漏测问题对象。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="/issues">返回问题工作台</a>
+  </div>
+</div>
+
+<div class="metric-grid task-metrics">
+  <div class="metric-card info-soft">
+    <span>当前漏测问题</span>
+    <strong>{{ total }}</strong>
+    <small>来自现有问题事实中的漏测标记</small>
+  </div>
+</div>
+
+<form class="filter-bar" method="get" action="/missed-test-analysis">
+  <div class="search-field">
+    <span>⌕</span>
+    <input name="q" value="{{ q or '' }}" placeholder="问题编号、摘要、产品、流出原因、验证缺口">
+  </div>
+  <select name="analysis_status">
+    <option value="">全部 Escape 分析状态</option>
+    {% for value in ['COMPLETED','PARTIAL_FAILED','FAILED','RUNNING','NOT_ANALYZED'] %}
+      <option value="{{ value }}" {% if analysis_status == value %}selected{% endif %}>{{ value }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-primary">筛选</button>
+  <a class="btn btn-ghost" href="/missed-test-analysis">清空</a>
+</form>
+
+<div class="data-card">
+  <div class="table-wrap">
+    <table class="data-table issue-table">
+      <thead>
+        <tr>
+          <th>问题</th>
+          <th>产品 / 平台</th>
+          <th>Escape 分析</th>
+          <th>流出原因</th>
+          <th>验证缺口</th>
+          <th>应发现 / 实际发现</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in items %}
+        <tr>
+          <td>
+            <strong>{{ item.business_issue_id }}</strong>
+            <div class="issue-summary">{{ item.title or item.description or '-' }}</div>
+          </td>
+          <td>
+            <b>{{ item.product or '-' }}</b>
+            <small>{{ item.platform or '-' }}</small>
+          </td>
+          <td><span class="badge status-{{ item.escape_analysis_status|lower }}">{{ item.escape_analysis_status }}</span></td>
+          <td>{{ item.escape_cause_summary or '待分析' }}</td>
+          <td>{{ item.verification_gap or '待分析' }}</td>
+          <td>{{ item.expected_detection_stage or '-' }} / {{ item.actual_detection_stage or '-' }}</td>
+          <td><a class="btn btn-secondary" href="{{ item.detail_url }}">打开原问题</a></td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="7">
+            <div class="empty-state">
+              <b>当前范围暂无漏测问题</b>
+              <span>本页只展示现有问题事实中已标记为漏测的问题，不推断、不补造漏测状态。</span>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="muted">数据所有权仍属于 Existing Problem Domain；本页只是 R2 Existing Capability Adapter。</p>
+{% endblock %}

@@ -1,0 +1,20 @@
+<section class="di-card" style="padding:16px;border-top:4px solid #b66a16">
+<h2>当前能得出的结论与下一步</h2>
+<p>当前范围关联 <b>{{decision.total}}</b> 个去重问题。下面按“同产品＋同业务活动＋共性关注点”提取待核查主题，<b>不自动合并场景，不作为已确认根因或风险等级</b>。</p>
+<p>数据与资产准备情况：{{decision.unknown_time}} 条时间未知 · {{decision.unknown_industry}} 条行业未知 · {{decision.unknown_scale}} 条规模未知 · {{decision.unknown_environment}} 条工况未知；{{decision.unpublished}} / {{decision.asset_count}} 个资产尚未发布，{{decision.no_metrics}} 个尚未关联指标建议。</p>
+{% if decision.unknown_time %}<p style="color:#995000">时间缺失部分不能用于趋势判断。先核对原问题统计年月或考核年月，不以场景创建日期代替。</p>{% endif %}
+<p>规则辅助归纳，非新增AI分析；可多标签计数，主题数量不可相加作为总数。{{decision.unmatched}} 条未命中共性标签，保留原文待人工归纳。按当前样本问题数排序，不代表发生率或业务损失优先级。</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:12px">
+{% for t in decision.themes %}
+<article style="border:1px solid #d7dfe9;border-left:4px solid #3568a4;padding:14px;margin:12px 0;border-radius:5px">
+<h3>{{loop.index}}. {{t.activity}}：{{t.theme}}</h3>
+<p><b>{{'共性候选，待核查' if t.count>1 else '单例线索，不作共性结论'}}</b> · {{t.business}} · {{t.count}} 个问题</p>
+<p>行业：{{t.industries|join('、')}}；客户：{{t.customers|join('、')}}。这里表示样本涉及范围，尚不足以证明行业或客户间存在显著差异。</p>
+<p>规模：{{t.scales|join('；')}}；工况：{{t.conditions|join('；')}}。先核对边界是否一致，不同条件保留为变体。</p>
+<dl><dt><b>研发建议（待评审）</b></dt><dd>{{t.design}}。</dd><dt><b>测试建议（待评审）</b></dt><dd>{{t.test}}。</dd><dt><b>指标候选</b></dt><dd>{{t.metric}}。目标值须结合业务要求确定，不自动生成达标结论。</dd></dl>
+<details><summary>查看 {{t.count}} 个问题的原始关注点与匹配依据</summary>
+{% for e in t.issues %}<div style="padding:8px 0;border-bottom:1px solid #eee"><a href="{{'/materials/'~e.source_workbench~'/' if e.issue_id.startswith('MAT-') and e.source_workbench else '/issues/'}}{{e.issue_id}}">来源问题 {{e.issue_key}}</a> · <a href="/quality-scenario-assets/{{e.asset_id}}">查看场景／关联指标</a><p>{{e.concern}}</p><small>规则命中：{{e.matched_text}}；{{e.industry}} / {{e.customer}} / {{e.product}}；{{e.scale}} / {{e.environment}}</small></div>{% endfor %}</details>
+<p><b>下一步：</b>核查上述证据 → 确认是否属于同一痛点及适用边界 → 在场景详情人工归集或保留差异 → 评审设计／测试建议并关联指标。</p>
+</article>{% else %}<p>当前没有可支持主题归纳的关注点。请先补充或确认原场景证据，不能仅凭质量属性计数生成结论。</p>{% endfor %}</div>
+<p>先选一个证据充分的主题做研发与测试评审，不必重跑全部AI。以下矩阵用于验证和展开上述线索。</p>
+</section>

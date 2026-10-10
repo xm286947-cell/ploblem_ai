@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}ITR 彻底解决工作台{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div>
+    <span class="eyebrow">ITR RESOLUTION WORKBENCH</span>
+    <h1>ITR 彻底解决工作台</h1>
+    <p>对齐展示 ITR-CS Source Fact 中的原因、措施、验证和业务状态。原保存 / 提交 / 流转动作仍由原业务系统拥有，当前不创建第二套状态机。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="/issues">返回 ITR / 问题工作台</a>
+    <a class="btn btn-secondary" href="/itr/recovery-workbench">ITR / 现场恢复</a>
+    <a class="btn btn-primary" href="/materials/cs">导入彻底解决单材料</a>
+  </div>
+</div>
+
+<div class="metric-grid task-metrics">
+  <div class="metric-card"><span>彻底解决单来源</span><strong>{{ total }}</strong><small>当前筛选后的 Source Fact</small></div>
+  <div class="metric-card info-soft"><span>已关联 ITR</span><strong>{{ linked }}</strong><small>仅唯一匹配的现有 ITR</small></div>
+  <div class="metric-card warning-soft"><span>待关联</span><strong>{{ unlinked }}</strong><small>未建立关联，不猜测匹配</small></div>
+  <div class="metric-card"><span>含源业务状态</span><strong>{{ source_state_count }}</strong><small>仅展示 Source 明确提供的状态</small></div>
+</div>
+
+<div class="data-card">
+  <div class="compact-card">
+    <strong>动作边界</strong>
+    <p>SOURCE_OWNED_READ_ONLY · SOURCE_ACTION_BINDING_PENDING · 保存 / 提交 / 流转不得由 Overall 自建状态机。</p>
+  </div>
+</div>
+
+<form class="filter-bar" method="get" action="/itr/resolution-workbench">
+  <div class="search-field">
+    <span>⌕</span>
+    <input name="q" value="{{ q or '' }}" placeholder="彻底解决单、ITR、问题、原因、措施、验证、状态">
+  </div>
+  <button class="btn btn-primary">筛选</button>
+  <a class="btn btn-ghost" href="/itr/resolution-workbench">清空</a>
+</form>
+
+<div class="data-card">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>彻底解决单 / ITR</th><th>问题</th><th>原因</th><th>措施</th><th>验证</th><th>业务状态</th><th>来源</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+        <tr>
+          <td>
+            <strong>{{ item.business_key }}</strong>
+            <small>{% if item.linked_issue_id %}ITR {{ item.linked_issue_id }}{% else %}未匹配 ITR{% endif %}</small>
+            <small>{{ item.link_status }}</small>
+          </td>
+          <td>{{ item.problem_description or 'Source 未提供' }}</td>
+          <td>{{ item.root_cause or 'Source 未提供' }}</td>
+          <td>{% if item.measures %}{{ item.measures|join('；') }}{% else %}Source 未提供{% endif %}</td>
+          <td>{{ item.verification_result or 'Source 未提供' }}</td>
+          <td>
+            {{ item.business_status or 'Source 未提供' }}
+            <small>{{ item.action_binding_status }}</small>
+            {% if item.source_owner %}<small>Owner：{{ item.source_owner }}</small>{% endif %}
+          </td>
+          <td>{{ item.source_file or '-' }}<small>{{ item.sheet_name or '' }} · 第 {{ item.row_number or '-' }} 行 · V{{ item.version_no }}</small></td>
+          <td>
+            {% if item.detail_url %}
+              <a class="btn btn-secondary" data-overall-preserve-context="return" href="{{ item.detail_url }}">打开关联问题</a>
+            {% else %}
+              <span>先核对 ITR 关联</span>
+            {% endif %}
+            <details><summary>查看全部 Source 字段</summary><dl class="source-fields">{% for key, value in item.raw.items() %}<dt>{{ key }}</dt><dd>{{ value if value is not none else '-' }}</dd>{% endfor %}</dl></details>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8"><div class="empty-state"><b>暂无匹配的彻底解决单 Source Fact</b><span>系统不会因缺少业务状态或动作绑定而推断完成态。</span><a class="btn btn-primary" href="/materials/cs">导入彻底解决单材料</a></div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="muted">此工作台只消费 ITR-CS 来源事实并关联 Existing Problem。原保存 / 提交 / 流转能力必须在找到权威 Source Contract 后再绑定。</p>
+{% endblock %}

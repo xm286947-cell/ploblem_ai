@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}ITR / 现场恢复{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div>
+    <span class="eyebrow">ITR / FIELD RECOVERY</span>
+    <h1>ITR / 现场恢复</h1>
+    <p>研发/测试对齐后的只读消费视图。原始 ITR 与现场恢复 Source Fact 仍由原业务事实源拥有，本页不静默覆盖、不创建第二套 ITR。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="/issues">返回问题工作台</a>
+    <a class="btn btn-secondary" href="/itr/resolution-workbench">彻底解决工作台</a>
+  </div>
+</div>
+
+<div class="metric-grid task-metrics">
+  <div class="metric-card info-soft"><span>当前 ITR / 问题</span><strong>{{ total }}</strong><small>来自权威 Existing Problem 消费视图</small></div>
+  <div class="metric-card"><span>含现场恢复事实</span><strong>{{ with_recovery }}</strong><small>只统计 Source Fact 中明确存在的现场记录/措施</small></div>
+</div>
+
+<div class="data-card">
+  <div class="compact-card">
+    <strong>数据边界</strong>
+    <p>READ_ONLY_SOURCE_OWNED · SOURCE_CHANGED → REFRESH / RECONCILE · CONFLICT → HUMAN_CONFIRM · NO_SILENT_OVERWRITE</p>
+  </div>
+</div>
+
+<form class="filter-bar" method="get" action="/itr/recovery-workbench">
+  <div class="search-field">
+    <span>⌕</span>
+    <input name="q" value="{{ q or '' }}" placeholder="ITR、问题摘要、产品、平台、现场记录、临时措施">
+  </div>
+  <button class="btn btn-primary">筛选</button>
+  <a class="btn btn-ghost" href="/itr/recovery-workbench">清空</a>
+</form>
+
+<div class="data-card">
+  <div class="table-wrap">
+    <table class="data-table issue-table">
+      <thead>
+        <tr>
+          <th>ITR / 问题</th>
+          <th>产品 / 平台</th>
+          <th>发生阶段</th>
+          <th>现场作业 / 恢复记录</th>
+          <th>临时措施 / 解决方案</th>
+          <th>Source</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in items %}
+        <tr>
+          <td>
+            <strong>{{ item.business_issue_id }}</strong>
+            <div class="issue-summary">{{ item.title or item.description or '-' }}</div>
+            <small>{{ item.source_fact_status }}</small>
+          </td>
+          <td><b>{{ item.product or '-' }}</b><small>{{ item.platform or '-' }}</small></td>
+          <td>{{ item.occurrence_stage or 'Source 未提供' }}</td>
+          <td>{{ item.field_work_record or 'Source 未提供现场作业记录' }}</td>
+          <td>{{ item.workaround or 'Source 未提供临时措施' }}</td>
+          <td>
+            <div>{{ item.source_file or '未知文件' }}</div>
+            <small>{{ item.source_sheet or '-' }}{% if item.source_row %} · Row {{ item.source_row }}{% endif %}</small>
+            {% if item.source_url %}<div><a href="{{ item.source_url }}" target="_blank" rel="noopener">打开原 Source</a></div>{% endif %}
+          </td>
+          <td><a class="btn btn-secondary" href="{{ item.detail_url }}">打开对齐问题详情</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7"><div class="empty-state"><b>当前范围没有匹配 ITR</b><span>本页不会因为缺少现场恢复字段而推断或补造 Source Fact。</span></div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="muted">Owner：原 ITR / 现场恢复业务事实源。Overall R2 只提供对齐消费视图与 Deep Link，不接管源系统状态机。</p>
+{% endblock %}
