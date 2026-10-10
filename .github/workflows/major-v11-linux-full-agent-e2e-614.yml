@@ -35,6 +35,7 @@ jobs:
             tests/test_repeat_web_mvp.py \
             tests/test_repeat_search_contract.py \
             tests/test_repeat_result_contract.py \
+            tests/test_major_linux_repeat_report_614.py \
             tests/test_major_ai_source_diagnostics_611.py \
             tests/test_major_provider_wiring.py \
             tests/test_major_refresh_recovery_605.py \
