@@ -71,6 +71,12 @@ set "PYTHONPATH=%CD%"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
+rem Persist safe Provider transport metadata only; not prompts, source text or credentials.
+if not exist "%APP_HOME%\logs" mkdir "%APP_HOME%\logs"
+if not defined RUNTIME_PROVIDER_TRACE set "RUNTIME_PROVIDER_TRACE=1"
+if not defined RUNTIME_PROVIDER_TRACE_FILE set "RUNTIME_PROVIDER_TRACE_FILE=%APP_HOME%\logs\major-provider-trace.jsonl"
+echo PROVIDER_TRACE_FILE=%RUNTIME_PROVIDER_TRACE_FILE%
+
 echo START_COMMAND=main.py knowledge-p1-start
 echo P0_DB=%P0_DB%
 echo OPEN_AFTER_READY=%WEB_ENTRY%
