@@ -7,6 +7,7 @@ callers a shortcut around human review.
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -21,14 +22,17 @@ from services.major_case_publisher import MajorCasePublisher, PublishCommitError
 from services.major_case_publish import PublishValidationError
 
 
+logger = logging.getLogger(__name__)
+
 ENTRY_TYPES = ("ISSUE_FACT", "ROOT_CAUSE", "ACTION", "VERIFICATION")
 
 
 class MajorProductionError(RuntimeError):
     """Stable error used by the Web entry point."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, task_id: str | None = None):
         self.code = code
+        self.task_id = task_id
         super().__init__(code)
 
 
@@ -228,7 +232,19 @@ class MajorCaseProductionService:
             },
         )
         if not outcome.business_consumable:
-            raise MajorProductionError("MAJOR_ANALYSIS_INCOMPLETE")
+            committed = {str(item.get("object_id") or "") for item in outcome.committed_objects}
+            missing = [
+                entry_type for entry_type in ENTRY_TYPES
+                if f"{event['event_id']}:{entry_type}" not in committed
+            ]
+            logger.warning(
+                "MAJOR_ANALYSIS_INCOMPLETE task_id=%s case_id=%s event_id=%s "
+                "runtime_status=%s provider_calls=%d committed=%d missing_types=%s gate_passed=%s",
+                outcome.task_id, case_id, event["event_id"], outcome.status,
+                outcome.provider_calls, len(committed), ",".join(missing),
+                bool(outcome.gate and outcome.gate.passed),
+            )
+            raise MajorProductionError("MAJOR_ANALYSIS_INCOMPLETE", task_id=outcome.task_id)
 
         # New analysis can replace only pending AI candidates; confirmed human
         # revisions remain immutable until another explicit review action.
@@ -238,7 +254,11 @@ class MajorCaseProductionService:
         for entry_type in ENTRY_TYPES:
             item = objects.get(f"{event['event_id']}:{entry_type}")
             if not item:
-                raise MajorProductionError("MAJOR_ANALYSIS_INCOMPLETE")
+                logger.warning(
+                    "MAJOR_ANALYSIS_MISSING_OBJECT task_id=%s case_id=%s event_id=%s entry_type=%s",
+                    outcome.task_id, case_id, event["event_id"], entry_type,
+                )
+                raise MajorProductionError("MAJOR_ANALYSIS_INCOMPLETE", task_id=outcome.task_id)
             data = item.get("data")
             content = data.get("content") if isinstance(data, dict) else data
             content = str(content or "").strip()
