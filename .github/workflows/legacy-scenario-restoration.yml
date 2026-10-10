@@ -39,6 +39,7 @@ jobs:
           if ($LASTEXITCODE -ne 3) { throw "Windows launcher must reject missing mature DB with exit=3; actual=$LASTEXITCODE" }
           if (Test-Path "never-exists-rc1-gate.db") { throw "Launcher created an unauthorized DB" }
           Write-Host "WINDOWS_MISSING_DB_FAIL_CLOSED=PASS"
+          $global:LASTEXITCODE = 0  # expected exit=3 is validated above; do not propagate it
       - name: Compile restored and untouched code
         run: python -m compileall -q quality_knowledge/web/app.py quality_knowledge/web/legacy_scenario_rc1_routes.py quality_knowledge/scenarios.py
       - name: Confirm non-scenario tracked code unchanged from main
