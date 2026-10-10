@@ -38,7 +38,7 @@ jobs:
           if ($html -notmatch "data-major-excel-status") { throw "Excel near-form status missing" }
           if ($html -notmatch "data-major-source-status") { throw "Single-source near-form status missing" }
           if ($html -notmatch "major-refresh605-v1") { throw "Refresh recovery JS cache bust not active" }
-          if ($html -notmatch "major-progress599-v1") { throw "Original C CSS cache bust missing" }
+          if ($html -notmatch "major-production-progress599-v1") { throw "Original C CSS cache bust missing" }
           Write-Host "MAJOR_UI_PROGRESS_STATIC_GATE=PASS"
 
       - name: Windows native launch, page contract, regression and provider gate
