@@ -164,15 +164,17 @@ class MajorCaseProductionService:
                 uri=f"major-source://{record_id}",
             )
             fragments = self.repository.fragments(record_id)
-            source_text = "\n".join(str(item.get("text_content") or "") for item in fragments[:20])
+            # Never silently discard sections 21+ of a parsed review PDF/DOCX.
+            source_text = "\n".join(str(item.get("text_content") or "") for item in fragments)
             provider_fragments = [
                 {
                     "fragment_id": str(item["fragment_id"]),
                     "section_path": str(item.get("section_path") or ""),
                     "location_ref": str(item.get("location_ref") or ""),
                     "text_content": str(item.get("text_content") or ""),
+                    "source": source.model_dump(mode="json"),
                 }
-                for item in fragments[:20]
+                for item in fragments
             ]
             source_revision_id = record_id
         else:
@@ -202,9 +204,63 @@ class MajorCaseProductionService:
                     "section_path": "STRUCTURED SOURCE FACT",
                     "location_ref": record_id,
                     "text_content": source_text,
+                    "source": source.model_dump(mode="json"),
                 }
             ]
             source_revision_id = record_id
+
+        # A linked Excel Source Fact and a PDF review are *two distinct evidence
+        # sources*, not alternatives. Keep their SourceRef and locator separate.
+        # Only include facts linked to this exact Event; never borrow another
+        # Event's assertions from the same multi-event Case.
+        excel_fragments = []
+        seen_fact_ids: set[str] = set()
+        for fact_link in links:
+            if fact_link.get("source_type") != "MAJOR_EXCEL_SOURCE_FACT":
+                continue
+            fact_id = str(fact_link.get("record_id") or "")
+            if fact_id in seen_fact_ids or not fact_id:
+                continue
+            seen_fact_ids.add(fact_id)
+            if fact_id == source_revision_id:
+                continue  # Excel-only fallback was already built above.
+            with self.repository.connect() as connection:
+                fact_row = connection.execute(
+                    "SELECT source_fact_revision_id,revision_no,source_hash,normalized_json,raw_json "
+                    "FROM kb_source_fact_revision WHERE source_fact_revision_id=? AND case_id=?",
+                    (fact_id, case_id),
+                ).fetchone()
+            if fact_row is None:
+                raise MajorProductionError("MAJOR_EXCEL_SOURCE_FACT_NOT_FOUND")
+            fact_source = SourceRef(
+                source_id=fact_id,
+                source_type="MAJOR_EXCEL_SOURCE_FACT",
+                revision=str(fact_row["revision_no"] or "1"),
+                content_hash=str(fact_row["source_hash"]),
+                fingerprint=str(fact_row["source_hash"]),
+                uri=f"major-excel://{fact_id}",
+            )
+            fact_text = str(fact_row["normalized_json"] or "{}") + "\n" + str(fact_row["raw_json"] or "{}")
+            excel_fragments.append({
+                "fragment_id": fact_id,
+                "section_path": "STRUCTURED SOURCE FACT",
+                "location_ref": fact_id,
+                "text_content": fact_text,
+                "source": fact_source.model_dump(mode="json"),
+            })
+        provider_fragments = excel_fragments + provider_fragments
+        if not provider_fragments or not any(item["text_content"].strip() for item in provider_fragments):
+            raise MajorProductionError("MAJOR_ANALYSIS_SOURCE_TEXT_EMPTY")
+        # The real provider bridge consumes 'fragments', not source_text.
+        # Keep source_text consistent for injected providers and test harnesses.
+        source_text = "\n".join(item["text_content"] for item in provider_fragments)
+        logger.info(
+            "MAJOR_ANALYSIS_INPUT_READY case_id=%s event_id=%s fragments=%d "
+            "excel_facts=%d source_chars=%d",
+            case_id, event["event_id"], len(provider_fragments),
+            sum(f["source"]["source_type"] == "MAJOR_EXCEL_SOURCE_FACT" for f in provider_fragments),
+            len(source_text),
+        )
         specs = [
             MajorIssueObjectSpec(
                 object_id=f"{event['event_id']}:{entry_type}",
