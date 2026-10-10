@@ -269,12 +269,25 @@ class ReverseQualityService:
             model=runtime_result.model
         if not isinstance(parsed,dict) or not isinstance(parsed.get('fields'),dict):raise ValueError('逆向分析响应不是字段结构')
         valid_evidence=facts['evidence'];fields={}
+        # Provider field-level evidence problems are not source-integrity
+        # failures. Suppress unsupported claims, retain valid analysis fields
+        # and request a human evidence check before formal confirmation.
+        evidence_questions=[]
+        def pending_evidence(name, reason):
+            evidence_questions.append({
+                'field_name': name, 'reason': reason,
+                'question': f'请核对{LABELS[name]}的真实来源证据，并确认是否可用于质量场景。',
+                'evidence_needed': [f'{LABELS[name]}的原始问题记录或审核确认'],
+                'status': 'PENDING', 'answer': '', 'reviewer': '',
+            })
         for name in FIELD_NAMES:
             raw=parsed['fields'].get(name) or {}
             if isinstance(raw,str):raw={'value':raw}
             value=str(raw.get('value') or '').strip()[:500]
             ids=list(dict.fromkeys(str(x) for x in raw.get('evidence_ids',[]) if str(x) in valid_evidence))[:8]
-            if value and not ids:raise ValueError(f'{LABELS[name]}缺少可核验的来源证据')
+            if value and not ids:
+                pending_evidence(name, 'AI 给出了字段内容，但未引用有效的来源证据 ID')
+                value=''
             if name=='related_objects':
                 legacy_ids=[x for x in ids if x.startswith('structured.') and x.split('.',1)[1] in {'product_type','product_model','product_series','product_line','product_code','equipment_code','equipment_name','terminal_name'}]
                 bundle_ids=[x for x in raw.get('evidence_ids', [])
@@ -284,7 +297,9 @@ class ReverseQualityService:
                             and valid_evidence[x].get('source_type') in {'RESOLUTION','SOFTWARE_ASSESSMENT','ITR'}
                             and valid_evidence[x].get('provenance')=='SOURCE_FACT']
                 ids=list(dict.fromkeys([*legacy_ids, *bundle_ids]))[:8]
-                if value and not ids:raise ValueError('参与系统/设备只能引用结构化产品或设备字段')
+                if value and not ids:
+                    pending_evidence(name, '参与系统或设备信息没有对应的结构化产品、型号或设备证据')
+                    value=''
             if name=='root_cause' and value:
                 ids=[x for x in ids if x in {'cs.root_cause','itr.root_cause','operation.root_cause'}]
                 bundle_ids=[x for x in raw.get('evidence_ids', [])
@@ -294,12 +309,18 @@ class ReverseQualityService:
                             and valid_evidence[x].get('provenance')=='SOURCE_FACT']
                 ids=list(dict.fromkeys([*ids, *bundle_ids]))
                 if not ids or not any(value in str(valid_evidence[x].get('value') or '') for x in ids):
-                    raise ValueError('已确认根因必须直接来自原问题根因字段；其他分析请写入失效机理并待确认')
+                    pending_evidence(name, 'AI 根因与彻底解决单的原始根因字段没有直接证据匹配')
+                    value=''
+                    ids=[]
             if name=='quality_characteristic' and value and value not in characteristics:
-                raise ValueError('产品质量特性必须使用当前质量模型词典的名称')
+                pending_evidence(name, 'AI 给出的质量特性不属于当前质量模型词典')
+                value=''
+                ids=[]
             try:confidence=max(0,min(1,float(raw.get('confidence') or 0)))
             except (TypeError,ValueError):confidence=0
-            direct=bool(ids) and any(value in valid_evidence[x]['value'] for x in ids)
+            if not value:
+                ids=[]
+            direct=bool(ids) and any(value in str(valid_evidence[x].get('value') or '') for x in ids)
             fields[name]={'value':value,'source_type':'FACT' if direct else 'INFERRED' if value else 'MISSING',
                           'evidence_ids':ids,'confidence':confidence,'review_status':'PENDING','reviewer_edit':''}
         life=str(parsed.get('lifecycle_code') or '')
@@ -341,7 +362,7 @@ class ReverseQualityService:
             },
             model=model,
             input_payload=facts,
-            missing_information=_missing_information_from_questions(parsed),
+            missing_information=[*_missing_information_from_questions(parsed), *evidence_questions],
         )
         return self.get(facts['canonical_itr'])
 
