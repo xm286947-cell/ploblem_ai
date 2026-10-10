@@ -20,9 +20,12 @@ from quality_knowledge.web.app import create_app
 
 ROUTES = {
     "01-issue-workbench": ("/issues", "问题工作台"),
-    "02-itr-workbench": ("/itr/recovery-workbench", "ITR / 现场恢复"),
-    "03-resolution-workbench": ("/itr/resolution-workbench", "ITR 彻底解决工作台"),
-    "04-software-assessment": ("/software-assessment", "软件考核工作台"),
+    "02-itr-original": ("/materials/itr", "ITR问题工作台"),
+    "03-resolution-original": ("/materials/cs", "ITR彻底解决工作台"),
+    "04-software-assessment-original": ("/materials/software-operations", "软件问题考核工作台"),
+    "08-itr-compatibility": ("/itr/recovery-workbench", "ITR / 现场恢复"),
+    "09-resolution-compatibility": ("/itr/resolution-workbench", "ITR 彻底解决工作台"),
+    "10-software-assessment-compatibility": ("/software-assessment", "软件考核工作台"),
     "05-missed-test-analysis": ("/missed-test-analysis", "软件问题漏测分析"),
     "06-legacy-scenario-library": ("/quality-scenarios", "质量场景"),
     "07-legacy-scenario-assets": ("/quality-scenario-assets", "场景"),
