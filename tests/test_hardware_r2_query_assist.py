@@ -59,6 +59,27 @@ def test_direct_ids_symptom_synonym_and_negative_query():
     assert ui.search("复位问题")["results"] == []
 
 
+def test_public_search_cannot_enable_provider_with_single_feature_flag(monkeypatch):
+    """An unauthenticated GET cannot trigger paid Provider from an accidental flag."""
+    monkeypatch.setenv("HARDWARE_QUERY_AGENT_ENABLED", "1")
+    monkeypatch.delenv("HARDWARE_QUERY_AGENT_NONPROD", raising=False)
+    monkeypatch.delenv("HARDWARE_R2_DEPLOYMENT_MODE", raising=False)
+
+    class WithStore(Consumption):
+        class Store:
+            @staticmethod
+            def list_all():
+                return ROWS
+        store = Store()
+
+    service = HardwareCaseAIRetrievalService(CaseStore(), consumption_service=WithStore())
+    response = service.search_cases("设计模拟量电路时，有什么经验可以借鉴？")
+    assert [row["case_id"] for row in response["results"]] == ["A0207"]
+    assert response["retrieval"]["query_agent"]["status"] == "BLOCKED"
+    assert response["retrieval"]["query_agent"]["error_code"] == "QUERY_AGENT_NONPROD_GATE_REQUIRED"
+    assert response["retrieval"]["query_agent"]["trace"] is None
+
+
 def test_long_design_question_has_grounded_fallback_when_provider_unavailable():
     class WithStore(Consumption):
         class Store:
