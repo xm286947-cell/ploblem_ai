@@ -10,6 +10,9 @@ on:
       - "scripts/hardware_r1_e2e_validation_start.py"
       - "scripts/build_hardware_r1_e2e_validation_package.py"
       - "tests/test_hardware_r1_single_package_e2e.py"
+      - "tests/test_runtime_provider_adapter.py"
+      - "runtime/providers/openai_compatible.py"
+      - "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
       - "tests/test_hardware_r1_e2e_start_check.py"
       - "tests/test_hardware_operability.py"
       - "tests/test_hardware_r1_workbench.py"
@@ -46,6 +49,11 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Synthetic, consumption and fake-provider E2E regressions
         run: python -m pytest -q tests/test_hardware_r1_single_package_e2e.py tests/test_hardware_r1_e2e_start_check.py tests/test_hardware_operability.py tests/test_hardware_r1_workbench.py tests/test_hardware_knowledge_consumption.py tests/test_hardware_r1_promotion_architecture.py tests/test_hardware_r1_workbench_architecture.py
+      - name: Real Hardware Stage B JSON recovery contract (offline Provider)
+        run: >-
+          python -m pytest -q
+          tests/test_runtime_provider_adapter.py::test_hardware_stage_b_inherits_runtime_json_recovery
+          tests/test_runtime_provider_adapter.py::test_hardware_stage_b_incomplete_json_remains_blocked
       - name: Hardware JavaScript syntax and retry UX gate
         run: |
           node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
