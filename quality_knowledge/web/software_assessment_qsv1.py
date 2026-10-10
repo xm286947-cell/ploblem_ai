@@ -18,6 +18,7 @@ from quality_knowledge.quality_scenario_candidate_v1_service import CandidateV1S
 from quality_knowledge.quality_scenario_v1 import ScenarioTriggerSource
 from quality_knowledge.quality_scenario_v1_store import SQLiteQualityScenarioV1Repository
 from quality_knowledge.reverse_quality_bundle_adapter import ReverseQualityInputAdapter
+from quality_knowledge.reverse_quality_bundle_bridge import unclassified_analysis_taxonomy
 from quality_knowledge.scenario_source_bundle_v1 import build_scenario_source_bundle_v1
 
 
@@ -313,15 +314,11 @@ class SoftwareAssessmentQSV1Flow:
                 if bundle is None:
                     raise ValueError("SCENARIO_SOURCE_BUNDLE_SNAPSHOT_NOT_FOUND")
                 product_code = str((bundle.get("selected_issue") or {}).get("product_code") or "").strip()
-                if not product_code:
-                    item.update(state="INFORMATION_REQUIRED", error="BUNDLE_PRODUCT_CODE_REQUIRED")
-                    completed += 1
-                    continue
-                taxonomy = self.scenarios.taxonomy_active(product_code)
-                if not taxonomy:
-                    item.update(state="INFORMATION_REQUIRED", error="REVERSE_QUALITY_TAXONOMY_NOT_FOUND")
-                    completed += 1
-                    continue
+                taxonomy = self.scenarios.taxonomy_active(product_code) if product_code else None
+                if taxonomy is None:
+                    taxonomy = unclassified_analysis_taxonomy()
+                # Only semantic classification becomes provisional. Immutable
+                # source/evidence completeness and conflict gates still apply.
                 reverse_result = self.generation.reverse_quality_from_bundle(bundle, taxonomy=taxonomy)
                 produced = self.candidates.create_from_reverse(
                     reverse_result, taxonomy,
