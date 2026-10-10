@@ -237,10 +237,11 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     intake_svc = IntakeSessionService()
     state.intake_session_service = intake_svc
     # Reuse source material storage; no second issue master.
-    material_repo = MaterialRepository(db_path)
-    material_svc = MaterialImportService(material_repo)
-    state.material_repository = material_repo
-    state.material_import_service = material_svc
+    material_repo = MaterialRepository(db_path) if initialize_schema else None
+    material_svc = MaterialImportService(material_repo) if material_repo is not None else None
+    if material_repo is not None:
+        state.material_repository = material_repo
+        state.material_import_service = material_svc
     tpl = Jinja2Templates(directory=BASE / 'templates')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
@@ -264,185 +265,186 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
 
-    material_workbenches = {
-        'itr': {
-            'group_code': 'ITR',
-            'title': 'ITR 材料导入',
-            'description': '导入与浏览 ITR 来源材料；本页不承担现场业务处理。',
-            'scope': '软件 / 硬件 / 机械 / 跨领域',
-        },
-        'cs': {
-            'group_code': 'ITR-CS',
-            'title': '彻底解决单材料导入',
-            'description': '导入与浏览彻底解决单来源材料。',
-            'scope': '软件 / 硬件 / 机械 / 跨领域',
-        },
-        'software-operations': {
-            'group_code': 'SW-OPS',
-            'title': '软件运营数据导入',
-            'description': '导入与浏览软件问题运营及考核数据。',
-            'scope': '仅软件',
-        },
-    }
+    if initialize_schema:
+        material_workbenches = {
+            'itr': {
+                'group_code': 'ITR',
+                'title': 'ITR 材料导入',
+                'description': '导入与浏览 ITR 来源材料；本页不承担现场业务处理。',
+                'scope': '软件 / 硬件 / 机械 / 跨领域',
+            },
+            'cs': {
+                'group_code': 'ITR-CS',
+                'title': '彻底解决单材料导入',
+                'description': '导入与浏览彻底解决单来源材料。',
+                'scope': '软件 / 硬件 / 机械 / 跨领域',
+            },
+            'software-operations': {
+                'group_code': 'SW-OPS',
+                'title': '软件运营数据导入',
+                'description': '导入与浏览软件问题运营及考核数据。',
+                'scope': '仅软件',
+            },
+        }
 
-    @app.get('/materials', include_in_schema=False)
-    def materials_root():
-        return RedirectResponse('/materials/itr', 303)
+        @app.get('/materials', include_in_schema=False)
+        def materials_root():
+            return RedirectResponse('/materials/itr', 303)
 
-    @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
-    def materials_page(request: Request, workbench: str):
-        workspace = material_workbenches.get(workbench)
-        if not workspace:
-            raise HTTPException(404, 'MATERIAL_WORKBENCH_NOT_FOUND')
-        return tpl.TemplateResponse(request, 'materials.html', {
-            'groups': material_repo.groups(False),
-            'items': material_repo.list_materials(workspace['group_code']),
-            'group_code': workspace['group_code'],
-            'result': None,
-            'workbench': workbench,
-            'workspace': workspace,
-        })
+        @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
+        def materials_page(request: Request, workbench: str):
+            workspace = material_workbenches.get(workbench)
+            if not workspace:
+                raise HTTPException(404, 'MATERIAL_WORKBENCH_NOT_FOUND')
+            return tpl.TemplateResponse(request, 'materials.html', {
+                'groups': material_repo.groups(False),
+                'items': material_repo.list_materials(workspace['group_code']),
+                'group_code': workspace['group_code'],
+                'result': None,
+                'workbench': workbench,
+                'workspace': workspace,
+            })
 
-    @app.get('/itr/resolution-workbench', response_class=HTMLResponse, include_in_schema=False)
-    def itr_resolution_workbench(request: Request):
-        q = (request.query_params.get('q') or '').strip()
-        rows = build_itr_resolution_rows(
-            material_repo,
-            q=q,
-            detail_prefix='/issues',
-            return_path='/itr/resolution-workbench',
-        )
-        linked_count = sum(1 for row in rows if row.get('knowledge_id'))
-        source_state_count = sum(1 for row in rows if row.get('business_status'))
-        return tpl.TemplateResponse(request, 'itr_resolution_workbench.html', {
-            'items': rows,
-            'total': len(rows),
-            'linked': linked_count,
-            'unlinked': len(rows) - linked_count,
-            'source_state_count': source_state_count,
-            'q': q,
-        })
+        @app.get('/itr/resolution-workbench', response_class=HTMLResponse, include_in_schema=False)
+        def itr_resolution_workbench(request: Request):
+            q = (request.query_params.get('q') or '').strip()
+            rows = build_itr_resolution_rows(
+                material_repo,
+                q=q,
+                detail_prefix='/issues',
+                return_path='/itr/resolution-workbench',
+            )
+            linked_count = sum(1 for row in rows if row.get('knowledge_id'))
+            source_state_count = sum(1 for row in rows if row.get('business_status'))
+            return tpl.TemplateResponse(request, 'itr_resolution_workbench.html', {
+                'items': rows,
+                'total': len(rows),
+                'linked': linked_count,
+                'unlinked': len(rows) - linked_count,
+                'source_state_count': source_state_count,
+                'q': q,
+            })
 
-    @app.get('/itr/recovery-workbench', response_class=HTMLResponse, include_in_schema=False)
-    def itr_recovery_workbench(request: Request):
-        q = (request.query_params.get('q') or '').strip()
-        rows = build_itr_recovery_rows(
-            svc,
-            q=q,
-            detail_prefix='/issues',
-            return_path='/itr/recovery-workbench',
-        )
-        with_recovery = sum(
-            1 for row in rows
-            if row.get('source_fact_status') == 'SOURCE_FACT_PRESENT'
-        )
-        return tpl.TemplateResponse(request, 'itr_recovery_workbench.html', {
-            'items': rows,
-            'total': len(rows),
-            'with_recovery': with_recovery,
-            'q': q,
-        })
+        @app.get('/itr/recovery-workbench', response_class=HTMLResponse, include_in_schema=False)
+        def itr_recovery_workbench(request: Request):
+            q = (request.query_params.get('q') or '').strip()
+            rows = build_itr_recovery_rows(
+                svc,
+                q=q,
+                detail_prefix='/issues',
+                return_path='/itr/recovery-workbench',
+            )
+            with_recovery = sum(
+                1 for row in rows
+                if row.get('source_fact_status') == 'SOURCE_FACT_PRESENT'
+            )
+            return tpl.TemplateResponse(request, 'itr_recovery_workbench.html', {
+                'items': rows,
+                'total': len(rows),
+                'with_recovery': with_recovery,
+                'q': q,
+            })
 
-    @app.get('/missed-test-analysis', response_class=HTMLResponse, include_in_schema=False)
-    def missed_test_analysis(request: Request):
-        q = (request.query_params.get('q') or '').strip()
-        analysis_status = (request.query_params.get('analysis_status') or '').strip().upper()
-        rows = build_missed_test_rows(
-            svc,
-            q=q,
-            analysis_status=analysis_status,
-            detail_prefix='/issues',
-            return_path='/missed-test-analysis',
-            detail_anchor='causes',
-        )
-        return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
-            'items': rows,
-            'total': len(rows),
-            'q': q,
-            'analysis_status': analysis_status,
-        })
+        @app.get('/missed-test-analysis', response_class=HTMLResponse, include_in_schema=False)
+        def missed_test_analysis(request: Request):
+            q = (request.query_params.get('q') or '').strip()
+            analysis_status = (request.query_params.get('analysis_status') or '').strip().upper()
+            rows = build_missed_test_rows(
+                svc,
+                q=q,
+                analysis_status=analysis_status,
+                detail_prefix='/issues',
+                return_path='/missed-test-analysis',
+                detail_anchor='causes',
+            )
+            return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
+                'items': rows,
+                'total': len(rows),
+                'q': q,
+                'analysis_status': analysis_status,
+            })
 
-    @app.get('/software-assessment', response_class=HTMLResponse, include_in_schema=False)
-    def software_assessment(request: Request):
-        q = (request.query_params.get('q') or '').strip()
-        rows = build_software_assessment_rows(
-            material_repo,
-            q=q,
-            detail_prefix='/issues',
-            return_path='/software-assessment',
-        )
-        linked = sum(1 for row in rows if row.get('knowledge_id'))
-        source_state = sum(
-            1 for row in rows
-            if row.get('assessment_status') or row.get('assessment_result')
-        )
-        return tpl.TemplateResponse(request, 'software_assessment_workbench.html', {
-            'items': rows,
-            'total': len(rows),
-            'linked': linked,
-            'unlinked': len(rows) - linked,
-            'source_state': source_state,
-            'q': q,
-        })
+        @app.get('/software-assessment', response_class=HTMLResponse, include_in_schema=False)
+        def software_assessment(request: Request):
+            q = (request.query_params.get('q') or '').strip()
+            rows = build_software_assessment_rows(
+                material_repo,
+                q=q,
+                detail_prefix='/issues',
+                return_path='/software-assessment',
+            )
+            linked = sum(1 for row in rows if row.get('knowledge_id'))
+            source_state = sum(
+                1 for row in rows
+                if row.get('assessment_status') or row.get('assessment_result')
+            )
+            return tpl.TemplateResponse(request, 'software_assessment_workbench.html', {
+                'items': rows,
+                'total': len(rows),
+                'linked': linked,
+                'unlinked': len(rows) - linked,
+                'source_state': source_state,
+                'q': q,
+            })
 
-    @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
-    def materials_import(
-        request: Request,
-        file: UploadFile = File(...),
-        group_code: str = Form(...),
-        header_rows: int = Form(2),
-        workbench: str = Form(...),
-    ):
-        workspace = material_workbenches.get(workbench)
-        if not workspace or workspace['group_code'] != group_code:
-            raise HTTPException(400, 'WORKBENCH_GROUP_MISMATCH')
-        if Path(file.filename or '').suffix.lower() not in {'.xlsx', '.xlsm'}:
-            raise HTTPException(400, '仅支持 .xlsx / .xlsm')
-        with tempfile.TemporaryDirectory() as td:
-            source = Path(td) / Path(file.filename or 'materials.xlsx').name
-            source.write_bytes(file.file.read())
+        @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
+        def materials_import(
+            request: Request,
+            file: UploadFile = File(...),
+            group_code: str = Form(...),
+            header_rows: int = Form(2),
+            workbench: str = Form(...),
+        ):
+            workspace = material_workbenches.get(workbench)
+            if not workspace or workspace['group_code'] != group_code:
+                raise HTTPException(400, 'WORKBENCH_GROUP_MISMATCH')
+            if Path(file.filename or '').suffix.lower() not in {'.xlsx', '.xlsm'}:
+                raise HTTPException(400, '仅支持 .xlsx / .xlsm')
+            with tempfile.TemporaryDirectory() as td:
+                source = Path(td) / Path(file.filename or 'materials.xlsx').name
+                source.write_bytes(file.file.read())
+                try:
+                    result = material_svc.import_file(source, group_code, header_rows)
+                except ValueError as error:
+                    raise HTTPException(400, str(error)) from error
+            return tpl.TemplateResponse(request, 'materials.html', {
+                'groups': material_repo.groups(False),
+                'items': material_repo.list_materials(group_code),
+                'group_code': group_code,
+                'result': result,
+                'workbench': workbench,
+                'workspace': workspace,
+            })
+
+        @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)
+        def association_settings(request: Request):
+            return tpl.TemplateResponse(request, 'association_settings.html', {
+                'rules': material_repo.rules(),
+                'preview': material_repo.link_preview(),
+            })
+
+        @app.post('/settings/associations/{rule_id}', include_in_schema=False)
+        def association_rule_save(
+            rule_id: str,
+            source_field: str = Form(...),
+            target_field: str = Form(...),
+            transform: str = Form(...),
+            status: str = Form(...),
+        ):
             try:
-                result = material_svc.import_file(source, group_code, header_rows)
+                material_repo.update_rule(
+                    rule_id,
+                    source_field=source_field,
+                    target_field=target_field,
+                    transform=transform,
+                    status=status,
+                )
+            except KeyError as error:
+                raise HTTPException(404, 'RULE_NOT_FOUND') from error
             except ValueError as error:
                 raise HTTPException(400, str(error)) from error
-        return tpl.TemplateResponse(request, 'materials.html', {
-            'groups': material_repo.groups(False),
-            'items': material_repo.list_materials(group_code),
-            'group_code': group_code,
-            'result': result,
-            'workbench': workbench,
-            'workspace': workspace,
-        })
-
-    @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)
-    def association_settings(request: Request):
-        return tpl.TemplateResponse(request, 'association_settings.html', {
-            'rules': material_repo.rules(),
-            'preview': material_repo.link_preview(),
-        })
-
-    @app.post('/settings/associations/{rule_id}', include_in_schema=False)
-    def association_rule_save(
-        rule_id: str,
-        source_field: str = Form(...),
-        target_field: str = Form(...),
-        transform: str = Form(...),
-        status: str = Form(...),
-    ):
-        try:
-            material_repo.update_rule(
-                rule_id,
-                source_field=source_field,
-                target_field=target_field,
-                transform=transform,
-                status=status,
-            )
-        except KeyError as error:
-            raise HTTPException(404, 'RULE_NOT_FOUND') from error
-        except ValueError as error:
-            raise HTTPException(400, str(error)) from error
-        material_repo.refresh_links()
-        return RedirectResponse('/settings/associations', 303)
+            material_repo.refresh_links()
+            return RedirectResponse('/settings/associations', 303)
 
     def _mapping_contract_error(error: RuntimeError, business_type: str = '') -> HTTPException | None:
         message = str(error)
