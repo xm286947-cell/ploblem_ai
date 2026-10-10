@@ -1054,3 +1054,73 @@ def test_hardware_stage_b_incomplete_json_remains_blocked(
     assert result.error.details["finish_reason"] == "stop"
     assert result.execution.provider_calls == 2
     assert calls == [3072, 3072]
+
+
+def test_hardware_stage_b_recovers_after_length_then_valid_json(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Runtime, not Stage B business code, owns the bounded length retry."""
+    engine, _ = _hardware_stage_b_runtime_for_json_gate(tmp_path)
+    field = {"value": None, "status": "MISSING",
+             "derived_from_fields": [], "evidence_block_ids": []}
+    valid = {"reusable_knowledge_candidate": {
+        name: dict(field)
+        for name in ("engineering_rule", "design_constraint", "diagnostic_clue",
+                     "verification_method", "applicability", "conclusion")
+    }}
+    calls: list[int] = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(json.loads(request.data)["max_tokens"])
+        if len(calls) == 1:
+            return _FakeResponse({
+                "choices": [{"message": {"content": '{"reusable_knowledge_candidate":'},
+                             "finish_reason": "length"}],
+                "usage": {"completion_tokens": 3072},
+            })
+        return _FakeResponse({"choices": [
+            {"message": {"content": json.dumps(valid)}, "finish_reason": "stop"}
+        ]})
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    result = engine.invoke(AgentRequest(
+        request_id="hardware-stage-b-length-then-success",
+        agent_id="hardware_case.r1_reuse_derive",
+        input={"synthetic": True},
+    ))
+    assert result.status == RuntimeStatus.COMPLETED
+    assert result.data == valid
+    assert result.execution.provider_calls == 2
+    assert calls == [3072, 3072]
+
+
+def test_hardware_stage_b_exhausted_length_fails_closed(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Two truncated attempts must not become a published/reused knowledge value."""
+    engine, _ = _hardware_stage_b_runtime_for_json_gate(tmp_path)
+    count = []
+
+    def fake_urlopen(request, timeout):
+        count.append(json.loads(request.data)["max_tokens"])
+        return _FakeResponse({
+            "choices": [{"message": {"content": '{"reusable_knowledge_candidate":'},
+                         "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 5773, "completion_tokens": 3072},
+        })
+
+    monkeypatch.setattr("runtime.providers.openai_compatible.urlopen", fake_urlopen)
+    result = engine.invoke(AgentRequest(
+        request_id="hardware-stage-b-length-exhausted",
+        agent_id="hardware_case.r1_reuse_derive",
+        input={"synthetic": True},
+    ))
+    assert result.status != RuntimeStatus.COMPLETED
+    assert result.data is None
+    assert result.error is not None
+    assert result.error.code == "OUTPUT_TRUNCATED"
+    assert result.error.details["finish_reason"] == "length"
+    assert result.error.details["completion_tokens"] == 3072
+    assert result.error.details["max_tokens"] == 3072
+    assert result.execution.provider_calls == 2
+    assert count == [3072, 3072]
