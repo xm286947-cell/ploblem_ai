@@ -305,8 +305,10 @@ def test_reverse_quality_service_uses_runtime_and_preserves_result_contract(tmp_
                   "lifecycle_code":"","activity_code":"","questions":[]},
             model="mock-gpt",
         ))
-        with pytest.raises(ValueError, match="参与系统/设备只能引用结构化产品或设备字段"):
-            service._analyse_run(saved["input"],{"lifecycles":[],"activities":[]},"invalid-evidence","RQRUN-INVALID","PLC")
+        downgraded = service._analyse_run(saved["input"],{"lifecycles":[],"activities":[]},"invalid-evidence","RQRUN-INVALID","PLC")
+        assert downgraded["review"]["related_objects"]["value"] == ""
+        assert any(x["field_name"] == "related_objects" and x["status"] == "PENDING"
+                   for x in downgraded["missing_information"])
 
 
 def test_rcfg03_business_code_has_no_direct_provider_or_retry_path():
