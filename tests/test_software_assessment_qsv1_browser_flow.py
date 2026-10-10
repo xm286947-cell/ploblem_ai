@@ -203,8 +203,56 @@ def test_missing_product_category_does_not_guess_from_product_model(tmp_path):
     task = flow.start([assessment_id], "HIGH_PERCEPTION", "客户问题影响关键数据")
     flow.run_task(task["task_id"])
     item = flow.get_task(task["task_id"])["items"][0]
-    assert item["state"] == "INFORMATION_REQUIRED"
-    assert item["error"] == "BUNDLE_PRODUCT_CODE_REQUIRED"
+    # First call is the intentional mocked Provider failure; classification
+    # must no longer stop execution before the Provider is invoked.
+    assert item["state"] == "PROVIDER_FAILED"
+    retry = flow.retry(task["task_id"])
+    flow.run_task(retry["task_id"])
+    item = flow.get_task(retry["task_id"])["items"][0]
+    assert item["state"] == "CANDIDATE_CREATED", item
+    candidate = item["scenario"]
+    assert candidate["product_code"] == ""
+    assert "PRODUCT_TYPE_CONFIRMATION_REQUIRED" in candidate["blockers"]
+    assert "TAXONOMY_MAPPING_REQUIRED" in candidate["blockers"]
+    assert candidate["lifecycle_stage_code"] == ""
+    assert candidate["business_activity_code"] == ""
+    assert candidate["source_problem_refs"] and candidate["evidence_refs"]
+    assert candidate["status"] == "CANDIDATE"
+    # No product classification was fabricated from the PLC-X model name.
+    assert not candidate["confirmation"]["quality_confirmed_by"]
+    from quality_knowledge.quality_scenario_v1 import QualityScenarioV1
+    import pytest
+    with pytest.raises(ValueError, match="SCENARIO_FORMAL_FIELD_REQUIRED:product_code"):
+        QualityScenarioV1.model_validate(candidate).assert_formal_ready()
+
+
+def test_product_with_no_active_taxonomy_can_generate_unclassified_candidate(tmp_path):
+    flow, assessment_id = _setup_flow(tmp_path, explicit_product_type="CNC")
+    with sqlite3.connect(flow.generation.materials.db_path) as connection:
+        connection.execute("UPDATE quality_issue SET business_type='' WHERE knowledge_id='QK-W4-41001'")
+    # The authoritative source says CNC, but there is no CNC taxonomy.
+    flow.scenarios.taxonomy_active = lambda _code: None
+    preview = flow.preview([assessment_id], "RND_VALUE", "研发建议")
+    assert preview["items"][0]["state"] == "READY"
+    assert preview["items"][0]["bundle"]["selected_issue"]["product_code"] == "CNC"
+    task = flow.start([assessment_id], "RND_VALUE", "研发建议")
+    assert task["items"][0]["state"] == "ANALYZING"
+    flow.run_task(task["task_id"])
+    assert flow.get_task(task["task_id"])["items"][0]["state"] == "PROVIDER_FAILED"
+    retry = flow.retry(task["task_id"])
+    flow.run_task(retry["task_id"])
+    item = flow.get_task(retry["task_id"])["items"][0]
+    assert item["state"] == "CANDIDATE_CREATED", item
+    scenario = item["scenario"]
+    assert scenario["product_code"] == "CNC"
+    assert "TAXONOMY_MAPPING_REQUIRED" in scenario["blockers"]
+    assert "PRODUCT_TYPE_CONFIRMATION_REQUIRED" not in scenario["blockers"]
+    assert not scenario["lifecycle_stage_code"] and not scenario["business_activity_code"]
+    assert scenario["status"] == "CANDIDATE"
+    from quality_knowledge.quality_scenario_v1 import QualityScenarioV1
+    import pytest
+    with pytest.raises(ValueError, match="SCENARIO_FORMAL_FIELD_REQUIRED"):
+        QualityScenarioV1.model_validate(scenario).assert_formal_ready()
 
 
 def test_software_assessment_page_mounts_w4_controls_and_reuses_qsv1_routes(tmp_path, monkeypatch):
