@@ -27,6 +27,17 @@ def _same_bundle_lineage(previous: dict[str, Any], provenance: dict[str, Any]) -
     )
 
 
+# This is an analysis-only empty vocabulary, NOT a product or published
+# taxonomy. The existing RQ agent may extract evidence-backed text but cannot
+# assign a lifecycle/activity code without an activated product taxonomy.
+UNCLASSIFIED_ANALYSIS_VERSION = "UNCLASSIFIED_ANALYSIS_V1"
+
+
+def unclassified_analysis_taxonomy() -> dict[str, Any]:
+    return {"version_id": UNCLASSIFIED_ANALYSIS_VERSION, "lifecycles": [],
+            "activities": [], "unclassified_analysis": True}
+
+
 class ReverseQualityBundleBridge:
     """Use mature analysis semantics without invoking its legacy source lookup."""
 
@@ -49,12 +60,17 @@ class ReverseQualityBundleBridge:
         if frozen != bundle:
             raise ValueError("SCENARIO_SOURCE_BUNDLE_SNAPSHOT_MISMATCH")
         product_code = str(selected.get("product_code") or "").strip()
-        if not product_code:
-            raise ValueError("BUNDLE_PRODUCT_CODE_REQUIRED")
-        if taxonomy is None:
+        if taxonomy is None and product_code:
             taxonomy = self.service.scenarios.taxonomy_active(product_code)
-        if not taxonomy:
-            raise ValueError("REVERSE_QUALITY_TAXONOMY_NOT_FOUND")
+        if taxonomy is None:
+            # A missing classification cannot erase trusted problem evidence.
+            # Keep an explicit unresolved taxonomy; downstream Candidate must
+            # retain its classification blockers until human resolution.
+            taxonomy = unclassified_analysis_taxonomy()
+        if taxonomy.get("unclassified_analysis") and (
+            taxonomy.get("lifecycles") or taxonomy.get("activities")
+        ):
+            raise ValueError("UNCLASSIFIED_ANALYSIS_TAXONOMY_MUST_BE_EMPTY")
 
         canonical = facts["canonical_itr"]
         provenance = facts["bundle_provenance"]
