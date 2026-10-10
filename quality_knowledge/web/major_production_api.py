@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from starlette.concurrency import run_in_threadpool
@@ -91,8 +91,8 @@ def create_major_production_router(
 
     @router.post("/excel/preview")
     async def excel_preview(
+        request: Request,
         file: UploadFile = File(...),
-        materials: list[UploadFile] = File(default=[]),
         group_code: str = Form("MAJOR"),
         domain: str = Form("QUALITY"),
         actor: str = Form("web-user"),
@@ -108,10 +108,14 @@ def create_major_production_router(
         if not excel_content:
             raise HTTPException(400, "MAJOR_EXCEL_EMPTY")
         material_payload: list[tuple[str, bytes]] = []
-        for material in materials:
-            # A native browser FormData may send a blank UploadFile when the
-            # optional multiple-file control has no selected files. An empty
-            # filename + empty body is *no material*, not an unsupported type.
+        # The multipart parser represents an unselected optional file input
+        # as an empty *string*, not an UploadFile. FastAPI's typed
+        # list[UploadFile] rejects this before the handler with HTTP 422.
+        for material in (await request.form()).getlist("materials"):
+            if isinstance(material, str):
+                if not material.strip():
+                    continue
+                raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
             content = await material.read()
             name = (material.filename or "").strip()
             if not name and not content:
