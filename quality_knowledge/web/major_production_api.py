@@ -109,10 +109,17 @@ def create_major_production_router(
             raise HTTPException(400, "MAJOR_EXCEL_EMPTY")
         material_payload: list[tuple[str, bytes]] = []
         for material in materials:
-            material_suffix = Path(material.filename or "").suffix.lower()
+            # A native browser FormData may send a blank UploadFile when the
+            # optional multiple-file control has no selected files. An empty
+            # filename + empty body is *no material*, not an unsupported type.
+            content = await material.read()
+            name = (material.filename or "").strip()
+            if not name and not content:
+                continue
+            material_suffix = Path(name).suffix.lower()
             if material_suffix not in {".pdf", ".docx"}:
                 raise HTTPException(400, "MAJOR_REVIEW_MATERIAL_TYPE_UNSUPPORTED")
-            material_payload.append((material.filename or "material.bin", await material.read()))
+            material_payload.append((name, content))
         logger.info(
             "MAJOR_EXCEL_PREVIEW_UPLOAD_COMPLETE request_id=%s excel_bytes=%d material_count=%d",
             request_id, len(excel_content), len(material_payload),
