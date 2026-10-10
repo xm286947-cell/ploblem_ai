@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           git fetch origin main --depth=1
-          git diff --name-only origin/main...HEAD > changed.txt
+          git diff --name-only origin/main HEAD > changed.txt
           cat changed.txt
           python - <<'PY'
           from pathlib import Path
