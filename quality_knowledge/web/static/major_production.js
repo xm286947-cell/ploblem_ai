@@ -162,6 +162,7 @@
   };
 
   const draftForms = [excelForm, root.querySelector('[data-major-intake]')];
+  let unsavedText = false;
   function saveDraft() {
     const draft = {};
     draftForms.forEach((form, i) => {
@@ -182,14 +183,14 @@
       form.querySelectorAll('input:not([type=file])').forEach(input => {
         if (input.name && typeof fields[input.name] === 'string') input.value = fields[input.name];
       });
-      form.addEventListener('input', saveDraft);
-      form.addEventListener('change', saveDraft);
+      form.addEventListener('input', () => { unsavedText = true; saveDraft(); });
+      form.addEventListener('change', () => { unsavedText = true; saveDraft(); });
     });
   }
   const hasSelectedFiles = () => draftForms.some(form => form && [...form.querySelectorAll('input[type=file]')]
     .some(input => input.files && input.files.length));
   window.addEventListener('beforeunload', event => {
-    if (!hasSelectedFiles()) return;
+    if (!hasSelectedFiles() && !unsavedText) return;
     event.preventDefault();
     event.returnValue = '';
   });
@@ -470,10 +471,13 @@
             const detail = await read(await fetch(api + '/cases/' + encodeURIComponent(state.caseId)));
             const events = detail.events || [];
             state.eventId = events.length === 1 ? events[0].event_id : null;
+            saveContext();
+            unsavedText = false;
             root.querySelector('[data-major-workflow]').hidden = false;
             root.querySelector('[data-major-identity]').textContent = 'Excel Batch ' + data.batch_id +
               ' · Case ' + state.caseId + (events.length ? ' · ' + events.length + ' Event(s)' : '');
             root.querySelector('[data-major-state]').textContent = 'IMPORTED';
+            await restoreCase(state.caseId, state.eventId);
             const sourceFactVerified = await showExcelProvenance(state.caseId);
             setExcelStatus(sourceFactVerified ? 'Excel 已导入，Structured Source Fact 已持久化并关联；可继续 AI Analysis → Human Review → Publish。' : 'Excel 已导入，但 Structured Source Fact 尚未完成核验，请查看来源证据面板。', !sourceFactVerified);
           } catch (error) {
@@ -502,6 +506,7 @@
       state.eventId = data.event.event_id;
       saveContext();
       clearSelectedFiles(event.currentTarget);
+      unsavedText = false;
       root.querySelector('[data-major-workflow]').hidden = false;
       root.querySelector('[data-major-identity]').textContent = 'ITR ' + data.event.standard_itr +
         ' · Source ' + data.document.original_filename + ' · Version ' + data.document.version_no;
