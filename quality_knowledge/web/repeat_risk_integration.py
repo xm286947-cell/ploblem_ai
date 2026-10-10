@@ -10,6 +10,7 @@ from quality_knowledge.repeat_risk import (
     RepeatQueryTraceRepository,
     RepeatResultService,
 )
+from quality_knowledge.repeat_risk.agent_analysis import RepeatAgentAnalysisService
 from repositories import JsonArtifactRepository
 from services.historical_case_contract import (
     HistoricalCaseConsumerService,
@@ -117,6 +118,18 @@ class P0ITRSubjectSource:
         )
         effective_values = _mapping((effective or {}).get("values"))
 
+        def context_value(*keys: str) -> Any:
+            key_set = set(keys)
+            for source in (fact, product_context, normalized, raw):
+                direct = _first(source, *keys)
+                if direct not in (None, "", [], {}):
+                    return direct
+                nested = _find_recursive(source, key_set)
+                if nested not in (None, "", [], {}):
+                    return nested
+            return None
+
+
         existing_context = {
             "root_cause": _first(
                 fact,
@@ -197,6 +210,26 @@ class P0ITRSubjectSource:
                 "scenario",
                 "lifecycle_scene",
             ),
+            "ipmt": context_value("ipmt", "IPMT", "责任IPMT", "产品IPMT"),
+            "spdt": context_value("spdt", "SPDT", "责任SPDT", "产品SPDT"),
+            "responsible_department_level2": context_value(
+                "responsible_department_level2",
+                "责任部门二级",
+                "二级责任部门",
+                "责任部门",
+            ),
+            "cause_level1": context_value(
+                "cause_level1",
+                "cause_level_1",
+                "原因一级分类",
+                "一级原因分类",
+            ),
+            "cause_level2": context_value(
+                "cause_level2",
+                "cause_level_2",
+                "原因二级分类",
+                "二级原因分类",
+            ),
             "existing_context": existing_context,
             "itr_version": issue.get("issue_version_id") or issue.get("version_no"),
         }
@@ -265,7 +298,9 @@ class RepeatWebFacade:
         issue_repository: Any,
         repeat_repository: RepeatQueryTraceRepository,
         case_service: HistoricalCaseConsumerService,
+        agent_analysis: RepeatAgentAnalysisService | None = None,
     ) -> None:
+        self.agent_analysis = agent_analysis
         self.issue_repository = issue_repository
         self.source = P0ITRSubjectSource(issue_repository)
         self.repeat_repository = repeat_repository
@@ -285,6 +320,7 @@ class RepeatWebFacade:
         repeat_db_path: str | Path,
         project_root: str | Path,
         case_service: HistoricalCaseConsumerService | None = None,
+        runtime_model_config: str | Path | None = None,
     ) -> "RepeatWebFacade":
         repeat_repository = RepeatQueryTraceRepository(repeat_db_path)
         if case_service is None:
@@ -298,6 +334,9 @@ class RepeatWebFacade:
             issue_repository=issue_repository,
             repeat_repository=repeat_repository,
             case_service=case_service,
+            agent_analysis=RepeatAgentAnalysisService(
+                project_root, model_config_path=runtime_model_config,
+            ),
         )
 
     def _itr_ref_for_issue(self, knowledge_id: str) -> str:
@@ -332,6 +371,10 @@ class RepeatWebFacade:
             include_missed_test=include_missed_test,
         )
         search_result = self.search.search(query["query_id"], top_k=top_k)
+        if self.agent_analysis is not None:
+            search_result = self.agent_analysis.analyze(
+                query.get("trace") or {}, search_result
+            )
         result = self.results.build(search_result)
         return {
             "query": query,
@@ -349,6 +392,14 @@ class RepeatWebFacade:
             "query": latest,
             "result": result,
         }
+
+    def report(self, query_id: str, *, format: str = "markdown") -> dict[str, str]:
+        if self.agent_analysis is None:
+            raise ValueError("REPEAT_REPORT_NOT_FOUND")
+        try:
+            return self.agent_analysis.read_report(query_id, format=format)
+        except KeyError as exc:
+            raise ValueError("REPEAT_REPORT_NOT_FOUND") from exc
 
     def decide(
         self,
