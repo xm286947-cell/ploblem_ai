@@ -1,0 +1,136 @@
+name: Major V1.1 Linux Full Candidate and Agent Gate 614
+on:
+  push:
+    branches:
+      - feature/major-v11-linux-full-agent-e2e-614
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-full-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact DUT source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install candidate and test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-major-mvp-product.txt
+          python -m pip install --disable-pip-version-check pytest==8.4.2 xlrd==2.0.2
+      - name: Prior Agent capability and Major regression
+        run: |
+          python -m pytest -q \
+            tests/test_repeat_agent_capability_restore.py \
+            tests/test_repeat_web_mvp.py \
+            tests/test_repeat_search_contract.py \
+            tests/test_repeat_result_contract.py \
+            tests/test_major_ai_source_diagnostics_611.py \
+            tests/test_major_provider_wiring.py \
+            tests/test_major_refresh_recovery_605.py \
+            tests/test_major_batch_visibility_607.py
+          echo 'LEGACY_AGENT_REGRESSION_GATE=PASS'
+      - name: Build complete immutable Linux candidate
+        run: |
+          mkdir -p "$RUNNER_TEMP/major614"
+          python scripts/build_major_mvp_product_candidate.py --output-dir "$RUNNER_TEMP/major614"
+          ls -l "$RUNNER_TEMP"/major614/*.zip
+          echo 'LINUX_FULL_PACKAGE_BUILD=PASS'
+      - name: Fresh extract and independent Linux start
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/major614/extracted"
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, hashlib, zipfile
+          folder = Path(os.environ["RUNNER_TEMP"])/"major614"
+          archive = next(folder.glob("*.zip"))
+          with zipfile.ZipFile(archive) as zf:
+              assert zf.testzip() is None
+              zf.extractall(folder/"extracted")
+          dut = next((folder/"extracted").iterdir())
+          m = json.loads((dut/"PACKAGE_MANIFEST.json").read_text(encoding="utf-8"))
+          assert m["source_commit"] == os.environ["GITHUB_SHA"]
+          required = (
+            "START_MAJOR_MVP.sh",
+            "scripts/major_mvp_product_start.py",
+            "quality_knowledge/repeat_risk/agent_analysis.py",
+            "config/runtime/agents/major_issue.repeat_similarity.yaml",
+            "config/runtime/agents/major_issue.repeat_solution.yaml",
+            "config/runtime/agents/major_issue.repeat_case.yaml",
+            "quality_knowledge/major_cases/runtime_provider.py",
+            "quality_knowledge/web/static/major_production.js",
+            "services/major_case_production.py",
+            "runtime/__init__.py",
+            "prompts/similarity_analyzer.md",
+            "prompts/solution_analyzer.md",
+            "prompts/repeat_decision.md",
+          )
+          for rel in required:
+              assert (dut/rel).is_file(), "MISSING_FULL_PACKAGE_FILE=" + rel
+              assert m["file_sha256"][rel] == hashlib.sha256((dut/rel).read_bytes()).hexdigest()
+          assert not list(dut.rglob("*.db"))
+          assert not list(dut.rglob("*.env"))
+          assert not list(dut.rglob("*.sqlite3"))
+          assert not list(dut.rglob("*.pem"))
+          (folder/"DUT_PATH").write_text(str(dut), encoding="utf-8")
+          h=hashlib.sha256(archive.read_bytes()).hexdigest()
+          (folder/"FULL_PACKAGE_SHA256").write_text(h,encoding="ascii")
+          print("DUT="+str(dut))
+          print("FULL_PACKAGE_SHA256="+h)
+          print("FULL_MANIFEST_AND_EXTRACT=PASS")
+          PY
+          DUT="$(cat "$RUNNER_TEMP/major614/DUT_PATH")"
+          cd "$DUT"
+          env -u PYTHONPATH python scripts/major_mvp_product_start.py --check
+          echo 'FRESH_EXTRACT_LINUX_START_CHECK=PASS'
+      - name: Run Chromium real DOM click from extracted package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check playwright==1.56.0
+          python -m playwright install --with-deps chromium
+          DUT="$(cat "$RUNNER_TEMP/major614/DUT_PATH")"
+          cd "$DUT"
+          python scripts/major_mvp_product_start.py --data-root "$RUNNER_TEMP/major614/data" --host 127.0.0.1 --port 18080 > "$RUNNER_TEMP/major614/server.log" 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18080/p0/major-production >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/p0/major-production >/dev/null
+          cd "$GITHUB_WORKSPACE"
+          python -m pytest -q tests/e2e/test_major_linux_full_click_614.py
+          echo 'LINUX_CHROMIUM_REAL_DOM_GATE=PASS'
+      - name: Explicit Provider status
+        if: always()
+        run: |
+          echo 'REAL_PROVIDER_D01_CALLED=NO'
+          echo 'REAL_PROVIDER_REPEAT_CALLED=NO'
+          echo 'LINUX_REAL_PROVIDER_E2E_GATE=BLOCKED_PROVIDER_CONFIG'
+          echo 'WINDOWS_FIELD_GATE=NOT_RUN'
+          echo 'READY_FOR_MANUAL_VALIDATION=NO'
+      - name: Stage evidence for archive
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p linux614-artifacts
+          cp -f "$RUNNER_TEMP"/major614/*.zip linux614-artifacts/ 2>/dev/null || true
+          cp -f "$RUNNER_TEMP"/major614/*.sha256 linux614-artifacts/ 2>/dev/null || true
+          cp -f "$RUNNER_TEMP"/major614/FULL_PACKAGE_SHA256 linux614-artifacts/ 2>/dev/null || true
+      - name: Upload full Linux candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-v11-linux-full-candidate-614
+          path: linux614-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
