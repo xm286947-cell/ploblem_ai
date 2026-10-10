@@ -86,3 +86,23 @@ def test_r2_query_and_engineering_consumer_runtime_assets_ship_in_native_package
         assert (package_builder.ROOT / relative).is_file(), relative
     assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES
     assert all(package_builder.allowed(Path(path)) for path in required)
+
+
+def test_windows_package_batch_line_endings_are_crlf_and_byte_preserving(tmp_path: Path):
+    """Protect CMD parsing: LF-only .bat can drop the first command character."""
+    launcher = tmp_path / "START_HARDWARE_CASE.bat"
+    precheck = tmp_path / "CHECK_ENV.bat"
+    untouched = tmp_path / "README.txt"
+    launcher_source = b"@echo off\nsetlocal\ncall CHECK_ENV.bat web\nif errorlevel 1 exit /b 2\n"
+    precheck_source = b"@echo off\r\nsetlocal\ncall INIT_LOCAL_CONFIG.bat\r\n"
+    launcher.write_bytes(launcher_source)
+    precheck.write_bytes(precheck_source)
+    untouched.write_bytes(b"this file stays LF-only\n")
+
+    normalized = package_builder.normalize_windows_batch_line_endings(tmp_path)
+
+    assert normalized == ["CHECK_ENV.bat", "START_HARDWARE_CASE.bat"]
+    assert launcher.read_bytes() == launcher_source.replace(b"\n", b"\r\n")
+    assert precheck.read_bytes() == b"@echo off\r\nsetlocal\r\ncall INIT_LOCAL_CONFIG.bat\r\n"
+    assert untouched.read_bytes() == b"this file stays LF-only\n"
+    assert package_builder.normalize_windows_batch_line_endings(tmp_path) == []
