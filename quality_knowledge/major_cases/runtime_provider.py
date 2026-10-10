@@ -257,6 +257,12 @@ def build_major_d01_provider(
         configured_context["runtime"] = runtime_context
         return bridge(provider_input, pending_specs, configured_context)
 
+    # Public metadata intentionally excludes endpoints, secrets and prompt/source text.
+    configured_provider.major_public_status = {
+        "model_ref": resolved.provider.profile_ref,
+        "model": resolved.provider.model,
+        "provider_type": resolved.provider.type,
+    }
     return configured_provider
 
 
