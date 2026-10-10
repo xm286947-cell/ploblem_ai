@@ -74,6 +74,8 @@ INCLUDE_FILES = [
     "config/runtime/agents/hardware_case.r1_case_extract.yaml",
     "config/runtime/agents/hardware_case.r1_reuse_derive.yaml",
     "config/runtime/agents/hardware_retrieval.tag.yaml",
+    "config/runtime/agents/hardware_retrieval.query_understand.yaml",
+    "config/runtime/agents/hardware_retrieval.engineering_consumption.yaml",
     "config/hardware_case_real_validation.local.example.json",
     "config/hardware_search.example.yaml",
     "prompts/runtime/hardware_case/structure_v1.md",
@@ -81,8 +83,11 @@ INCLUDE_FILES = [
     "prompts/runtime/hardware_case/r1_case_extract_v1.md",
     "prompts/runtime/hardware_case/r1_reuse_derive_v1.md",
     "prompts/runtime/hardware_retrieval/tagger_v1.md",
+    "prompts/runtime/hardware_retrieval/query_understand_v1.md",
+    "prompts/runtime/hardware_retrieval/engineering_consumption_v1.md",
     "tools/hardware_case_real_validation.py",
     "tools/hardware_retrieval_demo_seed.py",
+    "tools/hardware_r2_real_gate_probe.py",
     "scripts/hardware_case_mvp_smoke.py",
     "scripts/hardware_case_product_test_smoke.py",
     "scripts/hardware_case_precheck.py",
@@ -107,6 +112,7 @@ INCLUDE_FILES = [
     "run_hardware_case_mvp_smoke.bat",
     "run_hardware_case_mvp_smoke.sh",
     "docs/product/HARDWARE_CASE_PRODUCT_TEST_FULL_V0.1.md",
+    "docs/product/HARDWARE_R2_INTERNAL_AGENT_SECURITY_AND_TRIAL.md",
 ]
 
 # These are the executable Product Test entrypoints.  The closure scanner
