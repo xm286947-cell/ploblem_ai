@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import json
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -53,6 +54,20 @@ class MajorCaseProductionService:
         self.provider = provider
         self.store = SqliteTaskStore(runtime_db_path)
         self.runtime = LightweightExecutionEngine(self.store)
+        # Write only explicitly sanitized Major diagnostics to the per-user data directory.
+        self.diagnostic_log_path = Path(self.store.db_path).parent / "diagnostics" / "major_analysis.log"
+        self.diagnostic_log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_target = str(self.diagnostic_log_path.resolve())
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", "") == log_target
+            for handler in logger.handlers
+        ):
+            handler = logging.FileHandler(log_target, encoding="utf-8")
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
     def intake_source(
         self,
@@ -338,6 +353,71 @@ class MajorCaseProductionService:
                 analysis_metadata={"runtime_task_id": outcome.task_id, "provider_calls": outcome.provider_calls},
             ))
         return {"case_id": case_id, "event_id": event["event_id"], "runtime_task_id": outcome.task_id, "candidates": created}
+
+    def analysis_diagnostics(self, case_id: str) -> dict[str, Any]:
+        """Read-only sanitized statuses, never raw requests, prompts, outputs or keys."""
+        if not self.repository.case_detail(case_id):
+            raise MajorProductionError("MAJOR_CASE_NOT_FOUND")
+        recent: list[dict[str, Any]] = []
+        with self.store._connect() as connection:
+            rows = connection.execute(
+                "SELECT task_id,request_json FROM runtime_task ORDER BY rowid DESC LIMIT 200"
+            ).fetchall()
+        for row in rows:
+            if len(recent) >= 5:
+                break
+            try:
+                request_data = json.loads(row["request_json"] or "{}")
+            except (ValueError, TypeError):
+                continue
+            metadata = request_data.get("metadata") or {}
+            if metadata.get("business_domain") != "MAJOR_CASE" or metadata.get("business_id") != case_id:
+                continue
+            task_id = str(row["task_id"])
+            snapshot = self.store.get_task_snapshot(task_id)
+            expected = [
+                str(obj.get("object_id"))
+                for obj in (request_data.get("input") or {}).get("expected_objects") or []
+                if isinstance(obj, dict)
+            ]
+            committed = {
+                str(partial.metadata.get("object_id") or "")
+                for partial in self.store.list_partial_results(task_id)
+            }
+            failures: list[dict[str, str]] = []
+            for run in self.store.list_runs(task_id):
+                for step in self.store.list_step_runs(run.run_id):
+                    if step.error:
+                        failures.append({"layer": "step", "code": step.error.code})
+                    for attempt in self.store.list_attempts(step.step_run_id):
+                        if attempt.error:
+                            failures.append({"layer": "attempt", "code": attempt.error.code})
+                if run.error:
+                    failures.append({"layer": "run", "code": run.error.code})
+            if snapshot.error:
+                failures.append({"layer": "task", "code": snapshot.error.code})
+            failures = [
+                record for record in failures
+                if 0 < len(record["code"]) <= 100
+                and all(ch.isalnum() or ch in "_-." for ch in record["code"])
+            ]
+            recent.append({
+                "task_id": task_id,
+                "run_id": snapshot.current_run_id,
+                "status": snapshot.status.value,
+                "provider_calls": self.store.count_task_provider_calls(task_id),
+                "expected_objects": len(expected),
+                "committed_objects": len(committed),
+                "missing_types": [obj.rsplit(":", 1)[-1] for obj in expected if obj not in committed],
+                "failure_codes": failures[-15:],
+                "created_at": snapshot.created_at.isoformat(),
+            })
+        return {
+            "case_id": case_id,
+            "tasks": recent,
+            "diagnostic_log": str(self.diagnostic_log_path),
+            "note": "read-only Runtime status; no source text, prompt, model output or secrets",
+        }
 
     def confirm_entry(self, entry_id: str, *, reviewer: str, content: str = "", reason: str = "") -> dict[str, Any]:
         entry = self.repository.entry(entry_id)
