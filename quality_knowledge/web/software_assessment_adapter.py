@@ -45,19 +45,6 @@ _DEPARTMENT_ALIASES = (
     "部门",
     "归属部门",
 )
-_SCORE_ALIASES = (
-    "考核信息_考核分",
-    "考核信息_考核得分",
-    "考核信息_扣分",
-    "考核信息_评分",
-    "考核信息_分值",
-    "考核分",
-    "考核得分",
-    "扣分",
-    "评分",
-    "分值",
-)
-
 
 def _key(value: Any) -> str:
     text = str(value or "").strip().lower()
@@ -83,7 +70,7 @@ def build_software_assessment_rows(
     """Project imported software-operation facts into the restored assessment entry.
 
     This is deliberately a read-only Existing Capability mount.  It does not
-    invent an assessment workflow, state machine, score, owner or transition
+    invent an assessment workflow, state machine, owner or transition
     when those fields are absent from the source material.
     """
     query = str(q or "").strip().lower()
@@ -99,7 +86,6 @@ def build_software_assessment_rows(
             "assessment_result": _pick(raw, _RESULT_ALIASES),
             "assessment_owner": _pick(raw, _OWNER_ALIASES),
             "assessment_department": _pick(raw, _DEPARTMENT_ALIASES),
-            "assessment_score": _pick(raw, _SCORE_ALIASES),
             "action_binding_status": "SOURCE_ACTION_BINDING_PENDING",
             "ownership": "SOURCE_OWNED_READ_ONLY",
         }
@@ -114,7 +100,6 @@ def build_software_assessment_rows(
                 row.get("assessment_result"),
                 row.get("assessment_owner"),
                 row.get("assessment_department"),
-                row.get("assessment_score"),
                 row.get("source_file"),
             )
         ).lower()
