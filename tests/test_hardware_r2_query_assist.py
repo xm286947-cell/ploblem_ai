@@ -57,3 +57,18 @@ def test_direct_ids_symptom_synonym_and_negative_query():
     assert [x["business_case_id"] for x in ui.search("A0207")["results"]] == ["A0207"]
     assert [x["business_case_id"] for x in ui.search("", interface="串口")["results"]] == ["A0152"]
     assert ui.search("复位问题")["results"] == []
+
+
+def test_long_design_question_has_grounded_fallback_when_provider_unavailable():
+    class WithStore(Consumption):
+        class Store:
+            @staticmethod
+            def list_all():
+                return ROWS
+        store = Store()
+
+    svc = HardwareCaseAIRetrievalService(CaseStore(), consumption_service=WithStore())
+    answer = svc.search_cases("设计模拟量电路时，有什么经验可以借鉴？")
+    assert [row["case_id"] for row in answer["results"]] == ["A0207"]
+    assert answer["retrieval"]["query_agent"]["status"] == "NOT_CONFIGURED"
+    assert answer["results"][0]["retrieval"]["why_hit"]["query_expansion"]["policy"] == "FORMAL_TITLE_OVERLAP"
