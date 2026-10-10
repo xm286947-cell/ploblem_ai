@@ -519,5 +519,5 @@
       say('已创建正式 Historical Case：' + data.case_id + '。可在案例库检索和复用。');
     } catch (error) { say(error.message, true); }
   });
-}  resumeOnLoad();
+  resumeOnLoad();
 })();
