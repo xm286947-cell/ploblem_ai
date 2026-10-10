@@ -34,8 +34,27 @@ def create_major_production_router(
     service: MajorCaseProductionService,
     *,
     restore_service: Any | None = None,
+    provider_status: dict[str, Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2/major-production", tags=["major-production"])
+
+    @router.get("/provider/status")
+    def major_provider_readiness() -> dict[str, Any]:
+        """Read-only, secret-free readiness; not a claim of live model E2E."""
+        available = service.provider is not None
+        info = getattr(service.provider, "major_public_status", {}) or {}
+        bootstrap = provider_status or {}
+        return {
+            "configured": available,
+            "source": str(bootstrap.get("source") or "UNKNOWN"),
+            "model_ref": info.get("model_ref"),
+            "model": info.get("model"),
+            "provider_type": info.get("provider_type"),
+            "diagnostic": str(bootstrap.get("diagnostic") or (
+                "CONFIG_LOADED_CALL_NOT_VERIFIED" if available else "PROVIDER_NOT_CONFIGURED"
+            )),
+            "real_provider_verified": False,
+        }
 
     @router.get("/excel/template")
     def excel_template() -> StreamingResponse:
