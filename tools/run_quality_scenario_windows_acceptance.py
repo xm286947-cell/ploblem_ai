@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import sqlite3
+import yaml
 import os
 import re
 import signal
@@ -24,6 +27,44 @@ FIXTURE_QSV1_DB = VALIDATION_DIR / "quality_scenario_v1_windows.db"
 ORIGINAL_DB_COPY = VALIDATION_DIR / "original_quality_db_copy.db"
 APP_LOG = VALIDATION_DIR / "mature_app.log"
 MOCK_LOG = VALIDATION_DIR / "provider_mock.log"
+
+def safe_sqlite_snapshot(source: Path, destination: Path) -> None:
+    """Make a transactionally consistent copy of a live SQLite/WAL database."""
+    tmp = destination.with_name(destination.name + ".incoming")
+    tmp.unlink(missing_ok=True)
+    try:
+        with sqlite3.connect(f"file:{source.as_posix()}?mode=ro", uri=True, timeout=30) as src:
+            with sqlite3.connect(tmp) as dst:
+                src.backup(dst, pages=1000, sleep=0.05)
+        os.replace(tmp, destination)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def require_real_provider_config(path: Path) -> Path:
+    """Reject the controlled Mock and unconfigured real model without printing secrets."""
+    if not path.is_file():
+        raise ValueError("REAL_PROVIDER_MODEL_CONFIG_NOT_FOUND")
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError("REAL_PROVIDER_MODEL_CONFIG_INVALID")
+    models = config.get("models") or {}
+    active = str(config.get("active_model") or "").strip()
+    model = models.get(active) if isinstance(models, dict) else None
+    if not isinstance(model, dict):
+        raise ValueError("REAL_PROVIDER_ACTIVE_MODEL_NOT_CONFIGURED")
+    url = str(model.get("base_url") or "").lower()
+    if "18090" in url or "mock" in str(model.get("model") or "").lower():
+        raise ValueError("REFUSE_CONTROLLED_MOCK_FOR_REAL_PROVIDER")
+    key_env = str(model.get("api_key_env") or "")
+    url_env = str(model.get("base_url_env") or "")
+    if key_env and not os.environ.get(key_env):
+        raise ValueError("REAL_PROVIDER_CREDENTIAL_ENV_MISSING:" + key_env)
+    if url_env and not os.environ.get(url_env):
+        raise ValueError("REAL_PROVIDER_ENDPOINT_ENV_MISSING:" + url_env)
+    if not (model.get("base_url") or (url_env and os.environ.get(url_env))):
+        raise ValueError("REAL_PROVIDER_ENDPOINT_NOT_CONFIGURED")
+    return path.resolve()
 
 
 def wait_http(url: str, timeout: float = 30.0) -> None:
@@ -90,6 +131,10 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--smoke-only", action="store_true")
+    parser.add_argument("--real-provider", action="store_true",
+                        help="Isolated real business evaluation: no Mock Provider")
+    parser.add_argument("--model-config", default="",
+                        help="Existing authorized real model YAML; credentials stay in local environment")
     parser.add_argument(
         "--source-db",
         default="",
@@ -102,6 +147,18 @@ def main() -> int:
     from tools.build_quality_scenario_test_fixture import build_fixture
     from tools.quality_scenario_functional_provider import configure
 
+    if args.real_provider and not args.source_db:
+        raise SystemExit("REAL_PROVIDER_REQUIRES_EXISTING_SOURCE_DB")
+    model_config = None
+    if args.real_provider:
+        config_path = Path(args.model_config) if args.model_config else Path(
+            os.environ.get("REVERSE_QUALITY_MODEL_CONFIG") or ROOT / "config/runtime/model.yaml"
+        )
+        try:
+            model_config = require_real_provider_config(config_path)
+        except (ValueError, OSError, yaml.YAMLError) as exc:
+            raise SystemExit(f"REAL_PROVIDER_PREFLIGHT_FAIL:{type(exc).__name__}:{exc}") from None
+
     source_mode = "CONTROLLED_FIXTURE"
     source_db = FIXTURE_SOURCE_DB
     qsv1_db = FIXTURE_QSV1_DB
@@ -110,21 +167,24 @@ def main() -> int:
         original = Path(args.source_db).expanduser().resolve()
         if not original.is_file():
             raise SystemExit(f"ORIGINAL_DB_NOT_FOUND:{original}")
-        for suffix in ("", "-wal", "-shm"):
+        for suffix in ("-wal", "-shm"):
             Path(str(ORIGINAL_DB_COPY) + suffix).unlink(missing_ok=True)
-        shutil.copy2(original, ORIGINAL_DB_COPY)
-        source_mode = "ORIGINAL_DB_COPY"
+        if args.real_provider:
+            safe_sqlite_snapshot(original, ORIGINAL_DB_COPY)
+        else:
+            # Preserve the existing controlled negative startup diagnostic gate.
+            shutil.copy2(original, ORIGINAL_DB_COPY)
+        source_mode = "ORIGINAL_DB_COPY_REAL_PROVIDER" if args.real_provider else "ORIGINAL_DB_COPY"
         source_db = ORIGINAL_DB_COPY
-        # Original-DB mode is intentionally simple: do not inject controlled
-        # fixtures into the user's mature data. QSV1 lifecycle writes go to a
-        # separate Windows acceptance DB.
-        qsv1_db = FIXTURE_QSV1_DB
-        for path in (
-            qsv1_db,
-            Path(str(qsv1_db) + "-wal"),
-            Path(str(qsv1_db) + "-shm"),
-        ):
-            path.unlink(missing_ok=True)
+        # Real-provider runs keep an isolated durable QSV1 store; Mock runs
+        # reset only their disposable acceptance store.
+        if args.real_provider:
+            db_fingerprint = hashlib.sha256(str(original).encode("utf-8")).hexdigest()[:12]
+            qsv1_db = VALIDATION_DIR / f"quality_scenario_v1_real_{db_fingerprint}.db"
+        else:
+            qsv1_db = FIXTURE_QSV1_DB
+            for path in (qsv1_db, Path(str(qsv1_db) + "-wal"), Path(str(qsv1_db) + "-shm")):
+                path.unlink(missing_ok=True)
     else:
         manifest_path = FIXTURE_SOURCE_DB.with_suffix(FIXTURE_SOURCE_DB.suffix + ".fixture.json")
         if FIXTURE_SOURCE_DB.exists():
@@ -146,27 +206,26 @@ def main() -> int:
     mock_handle = MOCK_LOG.open("w", encoding="utf-8")
     app_handle = APP_LOG.open("w", encoding="utf-8")
     try:
-        mock = subprocess.Popen(
-            [
-                sys.executable,
-                str(ROOT / "tools" / "openai_mock" / "server.py"),
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "18090",
-            ],
-            cwd=ROOT,
-            stdout=mock_handle,
-            stderr=subprocess.STDOUT,
-        )
-        configure("127.0.0.1", 18090)
+        if not args.real_provider:
+            mock = subprocess.Popen(
+                [sys.executable, str(ROOT / "tools" / "openai_mock" / "server.py"),
+                 "--host", "127.0.0.1", "--port", "18090"],
+                cwd=ROOT, stdout=mock_handle, stderr=subprocess.STDOUT,
+            )
+            configure("127.0.0.1", 18090)
 
         env = os.environ.copy()
         env["LEGACY_QUALITY_ISSUE_DB_PATH"] = str(source_db)
         env["QUALITY_SCENARIO_V1_DB_PATH"] = str(qsv1_db)
-        env["REVERSE_QUALITY_MODEL_CONFIG"] = str(ROOT / "config" / "runtime" / "model.w4-functional.yaml")
-        env["W4_FUNCTIONAL_MOCK_API_KEY"] = "test-only-controlled-provider"
-        env["W4_FUNCTIONAL_FIXTURE"] = "1"
+        env["REVERSE_QUALITY_MODEL_CONFIG"] = str(
+            model_config if args.real_provider else ROOT / "config/runtime/model.w4-functional.yaml"
+        )
+        if args.real_provider:
+            env.pop("W4_FUNCTIONAL_MOCK_API_KEY", None)
+            env.pop("W4_FUNCTIONAL_FIXTURE", None)
+        else:
+            env["W4_FUNCTIONAL_MOCK_API_KEY"] = "test-only-controlled-provider"
+            env["W4_FUNCTIONAL_FIXTURE"] = "1"
 
         app = subprocess.Popen(
             [
@@ -253,8 +312,8 @@ def main() -> int:
         print("PRODUCT_ENTRY=/software-assessment#quality-scenario-production")
         print("DIRECT_QSV1_CANDIDATE_WRITE=NO")
         print("DIRECT_QSV1_PUBLISH_WRITE=NO")
-        print("PROVIDER=CONTROLLED_OPENAI_COMPATIBLE_MOCK")
-        print("REAL_PROVIDER_SEMANTIC_GATE=OUT_OF_SCOPE")
+        print("PROVIDER=" + ("REAL_CONFIGURED" if args.real_provider else "CONTROLLED_OPENAI_COMPATIBLE_MOCK"))
+        print("REAL_PROVIDER_SEMANTIC_GATE=" + ("PENDING_USER_CASE_ACCEPTANCE" if args.real_provider else "OUT_OF_SCOPE"))
         print(f"SOURCE_DB={source_db}")
         print(f"QSV1_DB={qsv1_db}")
         print(
