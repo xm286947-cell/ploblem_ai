@@ -54,6 +54,8 @@ jobs:
           python -m pytest -q
           tests/test_runtime_provider_adapter.py::test_hardware_stage_b_inherits_runtime_json_recovery
           tests/test_runtime_provider_adapter.py::test_hardware_stage_b_incomplete_json_remains_blocked
+          tests/test_runtime_provider_adapter.py::test_hardware_stage_b_recovers_after_length_then_valid_json
+          tests/test_runtime_provider_adapter.py::test_hardware_stage_b_exhausted_length_fails_closed
       - name: Hardware JavaScript syntax and retry UX gate
         run: |
           node --check quality_knowledge/web/static/hardware_case_knowledge_consumption.js
