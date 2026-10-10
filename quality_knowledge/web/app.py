@@ -1107,6 +1107,20 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
             raise HTTPException(404, 'NOT_FOUND')
         return FileResponse(asset)
 
+    if initialize_schema:
+        # Restore original mature RC1 scenarios without changing /issues,
+        # import, analysis or any other domain. Overall composition (false)
+        # remains unchanged.
+        from .legacy_scenario_rc1_routes import create_legacy_scenario_router
+        from .scenario_asset_pages import create_asset_router
+        old_routes, old_repo, old_generation = create_legacy_scenario_router(
+            db_path, svc, product_repo, tpl
+        )
+        app.include_router(old_routes)
+        app.include_router(create_asset_router(old_repo, tpl, old_generation))
+        state.scenario_repository = old_repo
+        state.scenario_generation_service = old_generation
+
     return app, state
 
 
