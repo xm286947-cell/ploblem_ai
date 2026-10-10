@@ -30,19 +30,28 @@ class DeliveryService:
         self.builder = builder or ReportBuilder()
         self.repository = FileReportRepository(self.output_root)
 
-    def deliver(self, analysis: AnalysisResult | Mapping[str, Any]) -> dict[str, Any]:
+    def deliver(
+        self,
+        analysis: AnalysisResult | Mapping[str, Any],
+        *,
+        source_artifact: str | None = None,
+    ) -> dict[str, Any]:
         result = analysis if isinstance(analysis, AnalysisResult) else AnalysisResult.from_mapping(analysis)
         if not result.query_id:
             raise ValueError("repeat_analysis缺少metadata.query_id")
 
         report = self.builder.build(result)
+        source_ref = source_artifact or (
+            f"knowledge/repeat_analysis/{result.query_id}/repeat_analysis.json"
+        )
         report.metadata.update({
             "delivery_contract_name": DELIVERY_CONTRACT_NAME,
             "delivery_contract_version": DELIVERY_CONTRACT_VERSION,
             "delivery_generated_at": _now(),
-            "source_artifact": f"knowledge/repeat_analysis/{result.query_id}/repeat_analysis.json",
+            "source_artifact": source_ref,
         })
         report.traceability.update({
+            "source_artifact": source_ref,
             "delivery_contract": DELIVERY_CONTRACT_NAME,
             "delivery_contract_version": DELIVERY_CONTRACT_VERSION,
         })
