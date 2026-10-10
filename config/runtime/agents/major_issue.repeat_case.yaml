@@ -26,4 +26,5 @@ metadata:
   business_domain: MAJOR_CASE
   analysis_stage: repeat_decision
   provider_response_shape: json_object
+  model_selection: ACTIVE_MODEL
   what_how_boundary: RUNTIME_EXECUTION_ONLY
