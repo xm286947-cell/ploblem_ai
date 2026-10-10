@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block breadcrumb %}软件考核工作台{% endblock %}
+{% block body %}
+<div class="page-header">
+  <div>
+    <span class="eyebrow">SOFTWARE ASSESSMENT · EXISTING CAPABILITY</span>
+    <h1>软件考核工作台</h1>
+    <p>恢复原有用户入口。当前 R2 只承接已导入的软件运营 / 考核 Source Fact 与现有问题关联；原页面状态机、保存、提交和流转动作在权威实现绑定前不由 Overall 重建。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-secondary" href="/issues">返回问题工作台</a>
+    <a class="btn btn-secondary" href="/materials/software-operations">软件运营数据导入</a>
+  </div>
+</div>
+
+<div class="metric-grid task-metrics">
+  <div class="metric-card"><span>软件考核来源</span><strong>{{ total }}</strong><small>当前筛选后的 Source Fact</small></div>
+  <div class="metric-card info-soft"><span>已关联问题</span><strong>{{ linked }}</strong><small>只使用唯一匹配的现有问题</small></div>
+  <div class="metric-card warning-soft"><span>待关联</span><strong>{{ unlinked }}</strong><small>不猜测关联</small></div>
+  <div class="metric-card"><span>含源考核状态 / 结果</span><strong>{{ source_state }}</strong><small>仅展示 Source 明确提供字段</small></div>
+</div>
+
+<div class="data-card">
+  <div class="compact-card">
+    <strong>Existing Capability Binding</strong>
+    <p>ENTRY_RESTORED · SOURCE_OWNED_READ_ONLY · SOURCE_ACTION_BINDING_PENDING · NO_SECOND_ASSESSMENT_STATE_MACHINE</p>
+  </div>
+</div>
+
+<form class="filter-bar" method="get" action="/software-assessment">
+  <div class="search-field">
+    <span>⌕</span>
+    <input name="q" value="{{ q or '' }}" placeholder="ITR、问题、部门、责任人、考核状态、考核结果">
+  </div>
+  <button class="btn btn-primary">筛选</button>
+  <a class="btn btn-ghost" href="/software-assessment">清空</a>
+</form>
+
+<div class="data-card">
+  <div class="table-wrap">
+    <table class="data-table issue-table">
+      <thead>
+        <tr>
+          <th>考核来源 / ITR</th>
+          <th>问题</th>
+          <th>责任部门 / 人</th>
+          <th>考核状态</th>
+          <th>考核结果</th>
+          <th>分值</th>
+          <th>Source</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in items %}
+        <tr>
+          <td>
+            <strong>{{ item.business_key }}</strong>
+            <small>{{ item.linked_issue_id or '未匹配现有问题' }} · {{ item.link_status }}</small>
+          </td>
+          <td>{{ item.problem_description or 'Source 未提供' }}</td>
+          <td>{{ item.assessment_department or '-' }} / {{ item.assessment_owner or '-' }}</td>
+          <td>{{ item.assessment_status or 'Source 未提供' }}<small>{{ item.action_binding_status }}</small></td>
+          <td>{{ item.assessment_result or 'Source 未提供' }}</td>
+          <td>{{ item.assessment_score or '-' }}</td>
+          <td>{{ item.source_file or '-' }}<small>{{ item.sheet_name or '' }} · Row {{ item.row_number or '-' }} · V{{ item.version_no }}</small></td>
+          <td>
+            {% if item.detail_url %}
+              <a class="btn btn-secondary" href="{{ item.detail_url }}">打开关联问题</a>
+            {% else %}
+              <span>先核对问题关联</span>
+            {% endif %}
+            <details><summary>查看全部 Source 字段</summary><dl class="source-fields">{% for key, value in item.raw.items() %}<dt>{{ key }}</dt><dd>{{ value if value is not none else '-' }}</dd>{% endfor %}</dl></details>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8"><div class="empty-state"><b>当前没有软件考核 Source Fact</b><span>入口已恢复；系统不会因为 Source 缺失而补造考核状态、责任人或分值。</span><a class="btn btn-primary" href="/materials/software-operations">导入软件运营数据</a></div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="muted">用户入口按 Existing Capability 基线恢复；原历史 Route / 状态机仍以 Targeted Verification 绑定，不在 R2 猜测。</p>
+{% endblock %}

@@ -6,7 +6,7 @@ import json
 import logging
 import tempfile
 from types import SimpleNamespace
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -32,6 +32,11 @@ from quality_knowledge.model_config import list_quality_issue_agents
 from .statistics_presenter import present_statistics, present_common_gaps, zh_value
 from quality_knowledge.product_report.legacy_service import LegacyProductQualityReportService
 from quality_knowledge.product_report.service import ProductReportError
+from quality_knowledge.materials import MaterialRepository, MaterialImportService
+from .missed_test_adapter import build_missed_test_rows
+from .itr_recovery_adapter import build_itr_recovery_rows
+from .itr_resolution_adapter import build_itr_resolution_rows
+from .software_assessment_adapter import build_software_assessment_rows
 
 BASE = Path(__file__).parent
 ALLOWED = {'.xlsx', '.xlsm'}
@@ -168,6 +173,28 @@ def _build_issue_view(svc: KnowledgeIssueService, knowledge_id: str, capability_
     }
 
 
+def _safe_issue_return_context(raw: str | None) -> str:
+    value = str(raw or '').strip()
+    if not value:
+        return ''
+    if len(value) > 4096 or '\r' in value or '\n' in value:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    if parsed.path not in {
+        '/itr/resolution-workbench',
+        '/itr/recovery-workbench',
+        '/missed-test-analysis',
+        '/software-assessment',
+        '/p0/itr-resolution',
+        '/p0/itr-recovery',
+        '/p0/missed-test-analysis',
+        '/p0/software-assessment',
+    }:
+        raise HTTPException(400, 'INVALID_ISSUE_RETURN_CONTEXT')
+    return parsed.path + (('?' + parsed.query) if parsed.query else '')
+
 def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     """Build legacy routes and services without creating a Web application.
 
@@ -209,6 +236,11 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     state.product_config_repository = product_repo
     intake_svc = IntakeSessionService()
     state.intake_session_service = intake_svc
+    # Reuse source material storage; no second issue master.
+    material_repo = MaterialRepository(db_path)
+    material_svc = MaterialImportService(material_repo)
+    state.material_repository = material_repo
+    state.material_import_service = material_svc
     tpl = Jinja2Templates(directory=BASE / 'templates')
     tpl.env.globals['ev'] = _ev
     tpl.env.globals['confidence'] = _confidence
@@ -231,6 +263,186 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
     @app.get('/import', response_class=HTMLResponse, include_in_schema=False)
     def import_page(request: Request):
         return tpl.TemplateResponse(request, 'import.html', {'products': product_repo.list()})
+
+    material_workbenches = {
+        'itr': {
+            'group_code': 'ITR',
+            'title': 'ITR 材料导入',
+            'description': '导入与浏览 ITR 来源材料；本页不承担现场业务处理。',
+            'scope': '软件 / 硬件 / 机械 / 跨领域',
+        },
+        'cs': {
+            'group_code': 'ITR-CS',
+            'title': '彻底解决单材料导入',
+            'description': '导入与浏览彻底解决单来源材料。',
+            'scope': '软件 / 硬件 / 机械 / 跨领域',
+        },
+        'software-operations': {
+            'group_code': 'SW-OPS',
+            'title': '软件运营数据导入',
+            'description': '导入与浏览软件问题运营及考核数据。',
+            'scope': '仅软件',
+        },
+    }
+
+    @app.get('/materials', include_in_schema=False)
+    def materials_root():
+        return RedirectResponse('/materials/itr', 303)
+
+    @app.get('/materials/{workbench}', response_class=HTMLResponse, include_in_schema=False)
+    def materials_page(request: Request, workbench: str):
+        workspace = material_workbenches.get(workbench)
+        if not workspace:
+            raise HTTPException(404, 'MATERIAL_WORKBENCH_NOT_FOUND')
+        return tpl.TemplateResponse(request, 'materials.html', {
+            'groups': material_repo.groups(False),
+            'items': material_repo.list_materials(workspace['group_code']),
+            'group_code': workspace['group_code'],
+            'result': None,
+            'workbench': workbench,
+            'workspace': workspace,
+        })
+
+    @app.get('/itr/resolution-workbench', response_class=HTMLResponse, include_in_schema=False)
+    def itr_resolution_workbench(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_itr_resolution_rows(
+            material_repo,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/itr/resolution-workbench',
+        )
+        linked_count = sum(1 for row in rows if row.get('knowledge_id'))
+        source_state_count = sum(1 for row in rows if row.get('business_status'))
+        return tpl.TemplateResponse(request, 'itr_resolution_workbench.html', {
+            'items': rows,
+            'total': len(rows),
+            'linked': linked_count,
+            'unlinked': len(rows) - linked_count,
+            'source_state_count': source_state_count,
+            'q': q,
+        })
+
+    @app.get('/itr/recovery-workbench', response_class=HTMLResponse, include_in_schema=False)
+    def itr_recovery_workbench(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_itr_recovery_rows(
+            svc,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/itr/recovery-workbench',
+        )
+        with_recovery = sum(
+            1 for row in rows
+            if row.get('source_fact_status') == 'SOURCE_FACT_PRESENT'
+        )
+        return tpl.TemplateResponse(request, 'itr_recovery_workbench.html', {
+            'items': rows,
+            'total': len(rows),
+            'with_recovery': with_recovery,
+            'q': q,
+        })
+
+    @app.get('/missed-test-analysis', response_class=HTMLResponse, include_in_schema=False)
+    def missed_test_analysis(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        analysis_status = (request.query_params.get('analysis_status') or '').strip().upper()
+        rows = build_missed_test_rows(
+            svc,
+            q=q,
+            analysis_status=analysis_status,
+            detail_prefix='/issues',
+            return_path='/missed-test-analysis',
+            detail_anchor='causes',
+        )
+        return tpl.TemplateResponse(request, 'missed_test_analysis.html', {
+            'items': rows,
+            'total': len(rows),
+            'q': q,
+            'analysis_status': analysis_status,
+        })
+
+    @app.get('/software-assessment', response_class=HTMLResponse, include_in_schema=False)
+    def software_assessment(request: Request):
+        q = (request.query_params.get('q') or '').strip()
+        rows = build_software_assessment_rows(
+            material_repo,
+            q=q,
+            detail_prefix='/issues',
+            return_path='/software-assessment',
+        )
+        linked = sum(1 for row in rows if row.get('knowledge_id'))
+        source_state = sum(
+            1 for row in rows
+            if row.get('assessment_status') or row.get('assessment_result')
+        )
+        return tpl.TemplateResponse(request, 'software_assessment_workbench.html', {
+            'items': rows,
+            'total': len(rows),
+            'linked': linked,
+            'unlinked': len(rows) - linked,
+            'source_state': source_state,
+            'q': q,
+        })
+
+    @app.post('/materials/import', response_class=HTMLResponse, include_in_schema=False)
+    def materials_import(
+        request: Request,
+        file: UploadFile = File(...),
+        group_code: str = Form(...),
+        header_rows: int = Form(2),
+        workbench: str = Form(...),
+    ):
+        workspace = material_workbenches.get(workbench)
+        if not workspace or workspace['group_code'] != group_code:
+            raise HTTPException(400, 'WORKBENCH_GROUP_MISMATCH')
+        if Path(file.filename or '').suffix.lower() not in {'.xlsx', '.xlsm'}:
+            raise HTTPException(400, '仅支持 .xlsx / .xlsm')
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td) / Path(file.filename or 'materials.xlsx').name
+            source.write_bytes(file.file.read())
+            try:
+                result = material_svc.import_file(source, group_code, header_rows)
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from error
+        return tpl.TemplateResponse(request, 'materials.html', {
+            'groups': material_repo.groups(False),
+            'items': material_repo.list_materials(group_code),
+            'group_code': group_code,
+            'result': result,
+            'workbench': workbench,
+            'workspace': workspace,
+        })
+
+    @app.get('/settings/associations', response_class=HTMLResponse, include_in_schema=False)
+    def association_settings(request: Request):
+        return tpl.TemplateResponse(request, 'association_settings.html', {
+            'rules': material_repo.rules(),
+            'preview': material_repo.link_preview(),
+        })
+
+    @app.post('/settings/associations/{rule_id}', include_in_schema=False)
+    def association_rule_save(
+        rule_id: str,
+        source_field: str = Form(...),
+        target_field: str = Form(...),
+        transform: str = Form(...),
+        status: str = Form(...),
+    ):
+        try:
+            material_repo.update_rule(
+                rule_id,
+                source_field=source_field,
+                target_field=target_field,
+                transform=transform,
+                status=status,
+            )
+        except KeyError as error:
+            raise HTTPException(404, 'RULE_NOT_FOUND') from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        material_repo.refresh_links()
+        return RedirectResponse('/settings/associations', 303)
 
     def _mapping_contract_error(error: RuntimeError, business_type: str = '') -> HTTPException | None:
         message = str(error)
@@ -431,6 +643,7 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
 
     @app.get('/issues/{knowledge_id}', response_class=HTMLResponse, include_in_schema=False)
     def issue_detail(request: Request, knowledge_id: str):
+        return_to = _safe_issue_return_context(request.query_params.get('return_to'))
         vm = _build_issue_view(svc, knowledge_id, capability_extension)
         if not vm:
             raise HTTPException(404, 'NOT_FOUND')
@@ -443,6 +656,13 @@ def create_legacy_quality_issue_router(db_path, *, initialize_schema=False):
         vm['issue_total'] = len(sequence)
         vm['human_fields'] = human_svc.list_field_definitions(True)
         vm['human_analysis'] = human_svc.get_analysis(knowledge_id, issue['issue_version_id']) if issue else None
+        vm['return_to'] = return_to
+        vm['return_label'] = {
+            '/itr/recovery-workbench': '返回 ITR 工作台',
+            '/itr/resolution-workbench': '返回彻底解决工作台',
+            '/software-assessment': '返回软件考核工作台',
+            '/missed-test-analysis': '返回漏测分析',
+        }.get(urlsplit(return_to).path if return_to else '', '返回来源工作台')
         vm.update({'analysis_agents':list_quality_issue_agents(BASE.parent.parent),'domain_profiles': DOMAIN_PROFILES, 'domain_labels': DOMAIN_LABELS, 'issue_types': ISSUE_TYPES, 'issue_type_labels': ISSUE_TYPE_LABELS, 'lifecycle_phases': LIFECYCLE_PHASES, 'lifecycle_labels': LIFECYCLE_LABELS})
         return tpl.TemplateResponse(request, 'issue_detail.html', vm)
 

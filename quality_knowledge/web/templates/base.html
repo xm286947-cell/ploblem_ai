@@ -19,10 +19,15 @@
     <a class="nav-item {% if request.url.path.startswith('/product-reports') %}active{% endif %}" href="/product-reports">产品综合报告</a>
     <a class="nav-item {% if request.url.path.startswith('/quality-scenarios') %}active{% endif %}" href="/quality-scenarios">质量场景库</a>
     <a class="nav-item {% if request.url.path.startswith('/quality-scenario-assets') %}active{% endif %}" href="/quality-scenario-assets">场景资产与画像</a>
+    <a class="nav-item {% if request.url.path.startswith('/itr/recovery-workbench') %}active{% endif %}" href="/itr/recovery-workbench">ITR工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/itr/resolution-workbench') %}active{% endif %}" href="/itr/resolution-workbench">彻底解决工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/software-assessment') %}active{% endif %}" href="/software-assessment">软件考核工作台</a>
+    <a class="nav-item {% if request.url.path.startswith('/missed-test-analysis') %}active{% endif %}" href="/missed-test-analysis">漏测分析</a>
     <a class="nav-item {% if request.url.path.startswith('/import') or request.url.path.startswith('/imports') %}active{% endif %}" href="/import">数据接入</a>
     <div class="nav-divider"></div>
     <div class="nav-label">管理</div>
     <a class="nav-item {% if request.url.path.startswith('/settings/mapping') %}active{% endif %}" href="/settings/mapping">字段映射配置</a>
+    <a class="nav-item {% if request.url.path.startswith('/settings/associations') %}active{% endif %}" href="/settings/associations">数据关联配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/products') %}active{% endif %}" href="/settings/products">产品配置</a>
     <a class="nav-item {% if request.url.path.startswith('/settings/human-analysis') %}active{% endif %}" href="/settings/human-analysis">系统配置</a>
   </nav>
