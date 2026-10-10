@@ -1126,7 +1126,7 @@ def test_v15_source_grounded_topology_contract_and_cache_identity():
     assert stage_a.prompt.version == "HC-R1-CASE-EXTRACT-V1.5.0"
     assert stage_a.output_schema.version == "v1"
     assert stage_a.config_hash == (
-        "453ef92d14b9bf4d946dbd08e71e646a4467e944cea56ef36381137c62299ca6"
+        "a9e8aad44b3dc03c9d73a8b0b246936a320369bfed50a06632018b7e15a66952"
     )
 
     assert stage_b.definition.version == "v1.5.1"
@@ -1420,7 +1420,7 @@ def test_v15_timeout_headroom_and_call_caps_are_frozen():
         root / "config/runtime/agents/hardware_case.r1_reuse_derive.yaml"
     ).read_text(encoding="utf-8")
 
-    assert "timeout_seconds: 150" in stage_a
+    assert "timeout_seconds: 300" in stage_a
     assert "timeout_seconds: 120" in stage_b
     assert stage_a.count("max_provider_calls_per_step: 2") == 1
     assert stage_b.count("max_provider_calls_per_step: 2") == 1

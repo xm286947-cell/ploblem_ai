@@ -40,6 +40,18 @@ class HardwareR1WorkbenchError(RuntimeError):
         super().__init__(code)
 
 
+def _safe_candidate_commit_failure_code(error: Exception) -> str:
+    """Only expose stable internal codes; never persist raw exception/SQL/path text."""
+    if isinstance(error, (CandidateAssetRepositoryError, HardwareR1WorkbenchError)):
+        code = str(error.code or "")
+        if code.startswith(("CANDIDATE_", "ACTIVE_SOURCE_", "PIPELINE_", "EVIDENCE_", "KNOWLEDGE_")):
+            return code
+        return "CANDIDATE_COMMIT_VALIDATION_FAILED"
+    if isinstance(error, (OSError, sqlite3.Error)):
+        return "CANDIDATE_STORAGE_IO_ERROR"
+    return "CANDIDATE_COMMIT_UNEXPECTED_ERROR"
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -495,6 +507,11 @@ class HardwareR1WorkbenchStore:
             "orchestration_status": orchestration_status,
             "failed_stage": bound["failed_stage"],
             "error_code": bound["error_code"],
+            "candidate_commit_failure_code": (
+                (result or {}).get("candidate_commit_failure_code")
+                if bound["error_code"] == "CANDIDATE_ASSET_COMMIT_FAILED"
+                else None
+            ),
             "parse": bound["parse"],
             "stage_a": bound["stage_a"],
             "stage_b": bound["stage_b"],
@@ -1206,13 +1223,20 @@ class HardwareR1WorkbenchService:
                         == "REQUIRED"
                         else "CANDIDATE_READY"
                     )
-                except Exception:
+                except Exception as error:
+                    # Keep the Pipeline/Stage A/B results for safe cache-backed
+                    # retry, but expose the specific allowlisted commit failure.
+                    # Never surface arbitrary exception text, SQL or credentials.
+                    failed_result = {
+                        **result,
+                        "candidate_commit_failure_code": _safe_candidate_commit_failure_code(error),
+                    }
                     self.store.update_item(
                         item["item_id"],
                         orchestration_status="FAILED",
                         failed_stage="CANDIDATE_ASSET_COMMIT",
                         error_code="CANDIDATE_ASSET_COMMIT_FAILED",
-                        result=result,
+                        result=failed_result,
                     )
                     return
 

@@ -11,7 +11,7 @@ output_schema:
   version: v1
 
 execution:
-  timeout_seconds: 150
+  timeout_seconds: 300
   retry:
     transport_attempts: 2
     validation_attempts: 2

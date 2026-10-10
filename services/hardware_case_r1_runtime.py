@@ -860,7 +860,7 @@ def _attempt_result_class(record: dict[str, Any]) -> tuple[str, str | None, Any]
     if category == "VALIDATION":
         return "VALIDATION_ERROR", raw_error_code, http_status
     if category == "TRANSPORT":
-        if "timeout" in timeout_material or "timed out" in timeout_material:
+        if details.get("is_timeout") is True or "timeout" in timeout_material or "timed out" in timeout_material:
             return "TIMEOUT", raw_error_code, http_status
         return "TRANSPORT_ERROR", raw_error_code, http_status
     return "UNKNOWN", raw_error_code, http_status
@@ -924,6 +924,8 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
             initial_call_count += 1
 
         result_class, raw_error_code, http_status = _attempt_result_class(record)
+        error = record.get("error") if isinstance(record.get("error"), dict) else {}
+        diagnostics = error.get("details") if isinstance(error.get("details"), dict) else {}
         provider_attempts.append(
             {
                 "provider_call_seq": int(
@@ -938,6 +940,13 @@ def _attempt_metrics(runtime_db: Path, task_id: str) -> dict[str, Any]:
                 "transport_attempt_no": transport_attempt,
                 "raw_error_code": raw_error_code,
                 "http_status": http_status,
+                "request_phase": diagnostics.get("request_phase"),
+                "response_headers_observed": diagnostics.get("response_headers_observed"),
+                "effective_timeout_seconds": diagnostics.get("effective_timeout_seconds"),
+                "elapsed_ms": diagnostics.get("elapsed_ms"),
+                "exception_type": diagnostics.get("exception_type"),
+                "is_timeout": diagnostics.get("is_timeout"),
+                "provider_request_id": diagnostics.get("provider_request_id"),
             }
         )
 

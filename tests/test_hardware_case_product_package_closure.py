@@ -69,3 +69,40 @@ def test_ai_retrieval_definition_is_packaged_but_provider_config_is_preserved():
     )
     assert "config/hardware_search.example.yaml" in package_builder.INCLUDE_FILES
     assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES
+
+
+def test_r2_query_and_engineering_consumer_runtime_assets_ship_in_native_package():
+    """Do not claim R2 real-provider readiness with missing packaged agents."""
+    required = {
+        "config/runtime/agents/hardware_retrieval.query_understand.yaml",
+        "config/runtime/agents/hardware_retrieval.engineering_consumption.yaml",
+        "prompts/runtime/hardware_retrieval/query_understand_v1.md",
+        "prompts/runtime/hardware_retrieval/engineering_consumption_v1.md",
+        "tools/hardware_r2_real_gate_probe.py",
+        "docs/product/HARDWARE_R2_INTERNAL_AGENT_SECURITY_AND_TRIAL.md",
+    }
+    assert required.issubset(set(package_builder.INCLUDE_FILES))
+    for relative in required:
+        assert (package_builder.ROOT / relative).is_file(), relative
+    assert "config/runtime/model.local.yaml" not in package_builder.INCLUDE_FILES
+    assert all(package_builder.allowed(Path(path)) for path in required)
+
+
+def test_windows_package_batch_line_endings_are_crlf_and_byte_preserving(tmp_path: Path):
+    """Protect CMD parsing: LF-only .bat can drop the first command character."""
+    launcher = tmp_path / "START_HARDWARE_CASE.bat"
+    precheck = tmp_path / "CHECK_ENV.bat"
+    untouched = tmp_path / "README.txt"
+    launcher_source = b"@echo off\nsetlocal\ncall CHECK_ENV.bat web\nif errorlevel 1 exit /b 2\n"
+    precheck_source = b"@echo off\r\nsetlocal\ncall INIT_LOCAL_CONFIG.bat\r\n"
+    launcher.write_bytes(launcher_source)
+    precheck.write_bytes(precheck_source)
+    untouched.write_bytes(b"this file stays LF-only\n")
+
+    normalized = package_builder.normalize_windows_batch_line_endings(tmp_path)
+
+    assert normalized == ["CHECK_ENV.bat", "START_HARDWARE_CASE.bat"]
+    assert launcher.read_bytes() == launcher_source.replace(b"\n", b"\r\n")
+    assert precheck.read_bytes() == b"@echo off\r\nsetlocal\r\ncall INIT_LOCAL_CONFIG.bat\r\n"
+    assert untouched.read_bytes() == b"this file stays LF-only\n"
+    assert package_builder.normalize_windows_batch_line_endings(tmp_path) == []
