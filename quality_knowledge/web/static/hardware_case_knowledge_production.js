@@ -164,8 +164,19 @@
     return item.result || item.orchestration_status || 'QUEUED';
   }
 
+  function hasDurableCandidate(item) {
+    return Boolean(
+      item?.candidate_id &&
+      item?.candidate_asset?.candidate_id === item.candidate_id &&
+      item?.candidate_asset?.asset_status === 'ACTIVE' &&
+      item?.candidate &&
+      ['CANDIDATE_READY', 'REVIEW'].includes(displayResult(item))
+    );
+  }
+
   function candidateForItem(item) {
-    return item.candidate || item.pipeline_result?.knowledge_object || null;
+    // Cached Pipeline output is only a preview, not a persisted Candidate.
+    return hasDurableCandidate(item) ? item.candidate : null;
   }
 
   function openReviewConflicts(item) {
@@ -250,6 +261,11 @@
     if (item.error_code === 'PROVIDER_TIMEOUT' &&
         ['STAGE_A', 'STAGE_B'].includes(item.failed_stage)) {
       return 'AI 服务响应超时：建议使用“重试失败环节”，只重试失败步骤；不要直接“强制完整重跑”。';
+    }
+    if (item.error_code === 'CANDIDATE_ASSET_COMMIT_FAILED') {
+      const safeCode = item.candidate_commit_failure_code || '待诊断';
+      return 'AI 分析已完成，但 Candidate 持久化失败（' + safeCode +
+        '）；当前仅能查看分析结果，不能人工确认或发布。请先核对失败原因，再选择“继续/恢复处理”；不需要强制重跑 AI。';
     }
     if (item.error_code) {
       return '失败原因：' + item.error_code + '。可先查看“诊断信息（高级）”，再按失败环节选择性重试。';
@@ -771,6 +787,10 @@
 
   async function humanReviewAction(decision) {
     if (!state.item) return;
+    if (!hasDurableCandidate(state.item)) {
+      setMessage('Candidate 尚未持久化成功，禁止人工确认。请先修复提交失败并选择“继续/恢复处理”。', true);
+      return;
+    }
     const reviewer = q('[data-human-reviewer]').value.trim();
     const reason = q('[data-human-review-reason]').value.trim();
     const reviewMessage = q('[data-human-review-message]');
