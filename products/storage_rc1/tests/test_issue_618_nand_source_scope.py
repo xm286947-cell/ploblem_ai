@@ -143,3 +143,33 @@ def test_confirmed_part_number_values_cannot_be_exposed_as_family_device_fact(mo
     assert result["slots"][0]["status"] == "AMBIGUOUS"
     assert result["slots"][0]["value"] is None
     assert result["device_facts"] == []
+
+
+def test_multi_part_family_cannot_become_formal_ready_even_after_all_rows_confirmed(monkeypatch):
+    from storage_life import core
+
+    class Connection:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def execute(self, *_args):
+            return self
+        def fetchone(self):
+            return {"device_type": "NAND Flash"}
+
+    monkeypatch.setattr(core, "connect", lambda: Connection())
+    monkeypatch.setattr(core, "_critical_fields_for", lambda _type, _items: [])
+    monkeypatch.setattr(core, "get_extraction_run", lambda _id: None)
+    monkeypatch.setattr(core, "get_final_review", lambda _id: None)
+    specs = [{
+        "canonical_name": "page_size", "value": value, "unit": "bytes",
+        "scope": part, "priority": "P0", "review_status": "confirmed",
+        "evidence": [{"extraction_method": "source_table_part_number", "scope": part}]
+    } for part, value in (
+        ("TC58NVG0S3HBAI4", "2048"), ("TC58NVG2S0HBAI4", "4096")
+    )]
+    result = core.specification_workflow_status("family", specs=specs)
+    assert result["formal_ready"] is False
+    assert result["status"] == "attention_required"
+    assert result["part_number_scope_required_fields"]
