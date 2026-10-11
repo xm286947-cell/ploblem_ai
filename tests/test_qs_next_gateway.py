@@ -115,10 +115,14 @@ class TestLegacyMaterialReadGateway(unittest.TestCase):
         self.assertEqual("FORMAL_SOURCE_REQUIRED",r.json()["status"])
         self.assertEqual("NONE",r.json()["source_coverage"])
 
-    def test_hardware_only_cs_not_promoted_by_assessment(self):
+    def test_assessment_can_use_software_missed_test_but_not_hardware_cs(self):
         r=self.get("software-assessment","AS-HW")
         self.assertEqual(200,r.status_code)
-        self.assertEqual("FORMAL_SOURCE_REQUIRED",r.json()["status"])
+        self.assertEqual("READY_FOR_SOURCE_READ",r.json()["status"])
+        self.assertEqual("PARTIAL",r.json()["source_coverage"])
+        self.assertEqual(["MISSED_TEST_ANALYSIS"],
+                         [s["formal_source_type"] for s in r.json()["formal_source_reads"]])
+        self.assertEqual(["SOFTWARE"],r.json()["domains"])
 
     def test_software_missed_test_cannot_cover_hardware_only_cs(self):
         r=self.get("cs","CS-HW")
