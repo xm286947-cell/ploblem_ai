@@ -2037,6 +2037,26 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
             src_pages, source_id=sid, vendor=vendor, device_type=dtype
         ))
     if len(matrix_rows) >= 2:
+        # The existing Family/Model matrix consumes document_models, not merely
+        # Candidate.scope. Persist source-backed orderable models as PENDING
+        # identities so per-part parameters are visible and not "unbound".
+        # A model name alone is not an approved fact, and does not make this
+        # Product Brief formal-ready.
+        existing_models = {
+            (str(x.get("value") or "").strip().upper(),
+             str(x.get("scope") or "").strip().upper())
+            for x in adapted.get("models") or []
+        }
+        for row in matrix_rows:
+            model_key = (row["part"], row["part"])
+            if model_key in existing_models:
+                continue
+            adapted["models"].append({
+                "value": row["part"], "scope": row["part"],
+                "page": row["source_page"], "quote": row["source_text"],
+                "confidence": 0.95,
+            })
+            existing_models.add(model_key)
         scoped = part_number_matrix.scoped_candidates(matrix_rows, field_labels=labels)
         if scoped:
             # Drop the structurally unsafe family-wide values for these fields.
