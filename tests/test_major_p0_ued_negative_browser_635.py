@@ -44,10 +44,10 @@ def _page(browser, *, case_id=None, batch_id=None, scenario="normal"):
     ))
     page.goto("https://major-ued.mock/p0/major-production", wait_until="domcontentloaded")
     if case_id or batch_id:
-        page.evaluate("""([c,b]) => localStorage.setItem(
+        page.evaluate("""([c,b,scenario]) => localStorage.setItem(
           'major-v11-context:/p0/major-production',
-          JSON.stringify({caseId:c,eventId:c?'EVT-UE-635':null,batchId:b}))""",
-          [case_id, batch_id])
+          JSON.stringify({caseId:c,eventId:c&&scenario!=='multi_event'?'EVT-UE-635':null,batchId:b}))""",
+          [case_id, batch_id, scenario])
     page.evaluate("""(scenario) => {
       const CASE='KCASE-UE-635', EVENT='EVT-UE-635', BATCH='MIMP-UE-635';
       const entries=['ISSUE_FACT','ROOT_CAUSE','ACTION','VERIFICATION'].map((t,i)=>({
