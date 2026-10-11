@@ -50,6 +50,7 @@ def build_app(data_root: str | Path):
         major_attachment_root=major_root / "attachments",
         major_artifact_root=historical_root,
         portrait_db_path=quality_root / "db" / "portrait.db",
+        repeat_runtime_data_root=root,
         enabled_domains={"QUALITY_ISSUE", "REPEAT_RISK"},
     )
 
