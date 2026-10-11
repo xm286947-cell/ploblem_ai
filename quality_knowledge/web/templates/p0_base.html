@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/p0/static/p0_ued_bridge.css?v=p1-rc4">
   {% if request.url.path.startswith('/p0/hardware-cases') %}<link rel="stylesheet" href="/p0/static/hardware_case_ued.css?v=ued-three-entry-20261011">{% endif %}
 </head>
-<body class="p0-page">
+<body class="p0-page{% if request.url.path.startswith('/p0/hardware-cases') %} hardware-ued-page{% endif %}">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
     <a class="brand" href="/p0/issues"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
