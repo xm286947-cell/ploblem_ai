@@ -197,5 +197,11 @@
     delete detail.dataset.knowledgeId;
     delete detail.dataset.businessCaseId;
   });
+  // Carry the same user query into formal knowledge without an initial empty request.
+  const initialText = new URLSearchParams(location.search).get('q');
+  if (initialText) {
+    q('[data-knowledge-text]').value = initialText;
+    query.text = initialText;
+  }
   runSearch();
 })();
