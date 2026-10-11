@@ -38,7 +38,7 @@ jobs:
         run: python -m pytest -q tests/test_major_p0_ued_focus_mock.py
       - name: Install browser Mock test tools
         run: |
-          python -m pip install --disable-pip-version-check playwright==1.56.0
+          python -m pip install --disable-pip-version-check playwright==1.56.0 beautifulsoup4==4.14.3
           python -m playwright install chromium
       - name: Execute Major browser negative and recovery gates
         run: python -m pytest -q tests/test_major_p0_ued_negative_browser_635.py
