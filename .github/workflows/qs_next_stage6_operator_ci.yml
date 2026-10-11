@@ -1,0 +1,39 @@
+name: QS Next Stage6 Operator and Original Taxonomy
+
+on:
+  push:
+    branches:
+      - feature/qs-next-stage6-taxonomy-operator-ui-20261011
+  pull_request:
+    paths:
+      - 'quality_knowledge/qs_next_taxonomy_gate.py'
+      - 'quality_knowledge/qs_next_operator_app.py'
+      - 'tests/test_qs_next_stage6_operator.py'
+      - '.github/workflows/qs_next_stage6_operator_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stage6-web-and-taxonomy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install opt-in API test dependencies
+        run: python -m pip install 'fastapi>=0.110,<1' 'httpx>=0.27,<1'
+      - name: Compile Stage6 and preceding modules
+        run: python -m compileall -q quality_knowledge/qs_next_taxonomy_gate.py quality_knowledge/qs_next_operator_app.py tests/test_qs_next_stage6_operator.py
+      - name: Stage3 gateway contract regression
+        run: python -m unittest discover -s tests -p test_qs_next_gateway.py -v
+      - name: Stage4 source and candidate regression
+        run: python -m unittest discover -s tests -p test_qs_next_candidate_preview.py -v
+      - name: Stage5 human review and audit regression
+        run: python -m unittest discover -s tests -p test_qs_next_review.py -v
+      - name: Stage5 aggregation regression
+        run: python -m unittest discover -s tests -p test_qs_next_aggregation.py -v
+      - name: Stage6 real taxonomy and operator security E2E
+        run: python -m unittest discover -s tests -p test_qs_next_stage6_operator.py -v
