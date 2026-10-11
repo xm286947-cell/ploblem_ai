@@ -182,6 +182,88 @@ def main() -> int:
                     page.locator("[data-knowledge-text]").input_value() == "MCU"
                     or (_ for _ in ()).throw(AssertionError("formal query not retained")),
                 ))
+                # Formal search: HTTP failures are not empty hits, and retry uses the same URL/data.
+                page.route(
+                    re.compile(r"/api/hardware-query/v1/search"),
+                    lambda route: route.fulfill(
+                        status=500, content_type="application/json",
+                        body='{"detail":"MOCK_FORMAL_TEMPORARY_FAILURE"}'
+                    ),
+                    times=1,
+                )
+                check("正式知识服务故障明确提示重试而非空结果", lambda: (
+                    page.locator("[data-knowledge-form] button[type=submit]").click(),
+                    page.locator("[data-knowledge-unavailable-title]").get_by_text("正式知识检索暂时失败").wait_for(),
+                    page.locator("[data-knowledge-production]").is_hidden()
+                    or (_ for _ in ()).throw(AssertionError("Transient 500 linked to knowledge production")),
+                ))
+                check("正式知识检索故障恢复后可重试", lambda: (
+                    page.locator("[data-knowledge-retry]").click(),
+                    page.locator("[data-knowledge-unavailable]").wait_for(state="hidden"),
+                    page.locator("[data-knowledge-summary]").get_by_text(re.compile(r"0 条正式知识")).wait_for(),
+                ))
+                page.route(
+                    re.compile(r"/api/hardware-query/v1/search"),
+                    lambda route: route.fulfill(
+                        status=503, content_type="application/json",
+                        body='{"detail":"MOCK_FORMAL_INDEX_UNAVAILABLE"}'
+                    ),
+                    times=1,
+                )
+                check("正式知识 503 索引提示与普通故障区分", lambda: (
+                    page.locator("[data-knowledge-form] button[type=submit]").click(),
+                    page.locator("[data-knowledge-unavailable-title]").get_by_text("正式知识检索数据尚未生成").wait_for(),
+                    page.locator("[data-knowledge-production]").is_visible()
+                    or (_ for _ in ()).throw(AssertionError("Index 503 missing original maintenance link")),
+                    page.locator("[data-knowledge-retry]").click(),
+                    page.locator("[data-knowledge-unavailable]").wait_for(state="hidden"),
+                ))
+                check("正式知识搜索词写入 URL 和跨来源链接", lambda: (
+                    page.locator("[data-knowledge-text]").fill("单片机"),
+                    page.locator("[data-knowledge-form] button[type=submit]").click(),
+                    page.wait_for_url(re.compile(r"q=%E5%8D%95%E7%89%87%E6%9C%BA")),
+                    "q=%E5%8D%95%E7%89%87%E6%9C%BA" in page.locator("[data-hc-ued-back-query]").get_attribute("href")
+                    or (_ for _ in ()).throw(AssertionError("back link lost formal query")),
+                ))
+                # Simulate two actual overlapping browser fetches: old slow response must not replace new.
+                page.evaluate("""() => {
+                    const original = window.fetch.bind(window);
+                    window.fetch = (input, options) => {
+                        const url = String(input);
+                        if (url.includes('/api/hardware-query/v1/search')) {
+                            const term = new URL(url, location.origin).searchParams.get('text');
+                            if (term === '慢查询' || term === '快查询') {
+                                const slow = term === '慢查询';
+                                return new Promise(resolve => setTimeout(() => resolve(new Response(
+                                    JSON.stringify({ results: [{
+                                        knowledge_id: slow ? 'OLD-MOCK' : 'NEW-MOCK',
+                                        business_case_id: 'A-MOCK', title: slow ? '旧结果不应出现' : '新结果应当保留',
+                                        evidence_refs: [], match_score: 1
+                                    }], retrieval: { query_agent: { status: 'FAST_PATH' } } }),
+                                    { status: 200, headers: { 'Content-Type': 'application/json' } }
+                                )), slow ? 350 : 20));
+                            }
+                        }
+                        return original(input, options);
+                    };
+                    const form = document.querySelector('[data-knowledge-form]');
+                    const field = document.querySelector('[data-knowledge-text]');
+                    field.value = '慢查询';
+                    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                    field.value = '快查询';
+                    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }""")
+                page.get_by_text("新结果应当保留").first.wait_for()
+                page.wait_for_timeout(450)
+                check("正式知识慢旧请求不能覆盖新查询", lambda: (
+                    page.get_by_text("新结果应当保留").first.is_visible()
+                    or (_ for _ in ()).throw(AssertionError("new result lost")),
+                    page.get_by_text("旧结果不应出现").count() == 0
+                    or (_ for _ in ()).throw(AssertionError("stale result overwrote current query")),
+                ))
+                page.locator("[data-knowledge-text]").fill("MCU")
+                page.locator("[data-knowledge-form] button[type=submit]").click()
+                page.wait_for_url(re.compile(r"/p0/hardware-cases/knowledge\?q=MCU"))
                 check("正式知识回案例视图保留检索词", lambda: (
                     page.locator("[data-hc-ued-back-query]").click(),
                     page.wait_for_url(re.compile(r"/p0/hardware-cases/search\?q=MCU")),
