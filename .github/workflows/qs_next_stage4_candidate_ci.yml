@@ -1,0 +1,34 @@
+name: QS Next Stage4 Five Dimension Preview
+
+on:
+  push:
+    branches:
+      - feature/qs-next-stage4-five-dimension-candidate-20261011
+  pull_request:
+    paths:
+      - 'quality_knowledge/qs_next_gateway.py'
+      - 'quality_knowledge/qs_next_candidate_preview.py'
+      - 'tests/test_qs_next_gateway.py'
+      - 'tests/test_qs_next_candidate_preview.py'
+      - '.github/workflows/qs_next_stage4_candidate_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-and-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standalone HTTP test dependencies
+        run: python -m pip install 'fastapi>=0.110,<1' 'httpx>=0.27,<1'
+      - name: Compile changed modules
+        run: python -m compileall -q quality_knowledge/qs_next_gateway.py quality_knowledge/qs_next_candidate_preview.py tests/test_qs_next_gateway.py tests/test_qs_next_candidate_preview.py
+      - name: Stage3 gateway regression
+        run: python -m unittest discover -s tests -p test_qs_next_gateway.py -v
+      - name: Stage4 evidence and candidate HTTP tests
+        run: python -m unittest discover -s tests -p test_qs_next_candidate_preview.py -v
