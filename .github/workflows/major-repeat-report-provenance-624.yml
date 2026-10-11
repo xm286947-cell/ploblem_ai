@@ -24,6 +24,7 @@ jobs:
         with:
           ref: fix/major-repeat-report-provenance-624
           persist-credentials: false
+          fetch-depth: 0  # Candidate builder validates frozen 55aaf923 ancestor
       - name: Python 3.11
         uses: actions/setup-python@v5
         with:
