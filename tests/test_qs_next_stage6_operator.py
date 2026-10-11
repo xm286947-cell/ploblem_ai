@@ -83,7 +83,7 @@ class TestStage6Operator(unittest.TestCase):
         for name in ("彻底解决问题","漏测分析问题","软件问题考核"):
             self.assertIn(name,result.text)
         self.assertIn("进入人工审核",c.get("/qs-next/entry/cs/CS-1").text)
-        self.assertIn("五维字段",c.get("/qs-next/review/DOES-NOT-EXIST").text if False else "五维字段")
+        self.assertIn("质量场景 · 三入口",result.text)
 
     def test_candidate_page_shows_traceable_original_field(self):
         c=self.make_client()
@@ -92,7 +92,7 @@ class TestStage6Operator(unittest.TestCase):
         self.assertIn("任务周期异常",r.text)
         self.assertIn("技术根因分析与纠正_产品层级软件失效模式",r.text)
         self.assertIn("CS-1",r.text)
-        self.assertIn("来源冲突",r.text)
+        self.assertIn("冲突待确认",r.text)
 
     def test_unknown_formal_source_is_shown_blocked(self):
         c=self.make_client()
