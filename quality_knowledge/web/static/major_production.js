@@ -591,14 +591,16 @@
 
   root.querySelector('[data-major-intake]').addEventListener('submit', async event => {
     event.preventDefault();
+    // event.currentTarget is cleared after await; keep the original form node.
+    const intakeForm = event.currentTarget;
     try {
       say('正在导入单份 Major Source，此操作不会自动运行 AI 分析…');
       if (sourceStatus) sourceStatus.textContent = '正在导入、解析并建立来源证据…';
-      const data = await read(await fetch(api + '/sources', { method: 'POST', body: new FormData(event.currentTarget) }));
+      const data = await read(await fetch(api + '/sources', { method: 'POST', body: new FormData(intakeForm) }));
       state.caseId = data.case.case_id;
       state.eventId = data.event.event_id;
       saveContext();
-      clearSelectedFiles(event.currentTarget);
+      clearSelectedFiles(intakeForm);
       unsavedText = false;
       root.querySelector('[data-major-workflow]').hidden = false;
       root.querySelector('[data-major-identity]').textContent = 'ITR ' + data.event.standard_itr +
@@ -708,12 +710,17 @@
         ' · CONFIRMED · revision ' + data.revision_no;
       button.disabled = true;
       button.textContent = '已确认';
-      const all = [...root.querySelectorAll('[data-entry]')].every(item => item.disabled);
-      if (all) {
-        root.querySelector('[data-major-publish]').disabled = false;
-        setStage('READY_TO_PUBLISH');
+      // Do not infer the four required types from disabled DOM buttons.
+      // Restore server-authoritative Case/Event states before enabling publish.
+      const publishButton = root.querySelector('[data-major-publish]');
+      publishButton.disabled = true;
+      try {
+        await restoreCase(state.caseId, state.eventId);
+        say('人工确认已保存，已从服务端复核审核进度。');
+      } catch (error) {
+        publishButton.disabled = true;
+        say('人工确认已保存，但无法复核服务端四项完整状态；请恢复案例后再发布：' + error.message, true);
       }
-      say('已创建人工确认修订。');
     } catch (error) {
       button.disabled = false;
       button.textContent = originalLabel;
@@ -732,9 +739,15 @@
       button.textContent = '已发布';
       say('已创建正式 Historical Case：' + data.case_id + '。可在案例库检索和复用。');
     } catch (error) {
-      button.disabled = false;
-      button.textContent = '正式发布';
-      say('发布失败：' + error.message, true);
+      // The server may have committed even if this response was lost.
+      // Do not permit blind retries of this side-effecting request.
+      button.disabled = true;
+      button.textContent = '发布状态待核实';
+      try { await restoreCase(state.caseId, state.eventId); }
+      catch (_) { /* manual server-side recovery remains available */ }
+      button.disabled = true;
+      say('发布结果未核实：' + error.message +
+        '。请从服务端恢复 Case/Event 核对后再操作，避免重复发布。', true);
     }
   });
   resumeOnLoad();
