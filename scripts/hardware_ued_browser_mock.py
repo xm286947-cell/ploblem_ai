@@ -172,6 +172,18 @@ def main() -> int:
                     page.locator("[data-ued-primary]").count() == 3 or (_ for _ in ()).throw(AssertionError("nav!=3")),
                     page.get_by_role("link", name="找知识", exact=True).is_visible() or (_ for _ in ()).throw(AssertionError("find missing")),
                 ))
+                check("硬件桌面视图不再保留 220px 空侧栏", lambda: (
+                    page.locator(".app-main").bounding_box()["x"] < 2
+                    or (_ for _ in ()).throw(AssertionError("hardware main still offset by platform sidebar")),
+                    page.locator(".side-nav").bounding_box()["height"] < 90
+                    or (_ for _ in ()).throw(AssertionError("collapsed platform navigation still consumes viewport height")),
+                ))
+                check("其他平台原链接仍可由顶部菜单展开", lambda: (
+                    page.locator(".hc-platform-drawer > summary").click(),
+                    page.locator('.hc-platform-drawer .main-nav a[href="/p0/issues"]').is_visible()
+                    or (_ for _ in ()).throw(AssertionError("platform links inaccessible")),
+                    page.locator(".hc-platform-drawer > summary").click(),
+                ))
                 page.get_by_text("MCU 串口异常（MOCK ONLY）").first.wait_for()
                 results.append({"test": "实际案例搜索 JS + Mock API", "result": "PASS"})
                 page.screenshot(path=str(out / "01_actual_search_mock_api.png"), full_page=True)
@@ -351,6 +363,10 @@ def main() -> int:
                 mobile.route(re.compile(r"/api/(?:v2/hardware-cases|hardware-query/v1/search)"), lambda route: mock_response(route, items, calls))
                 mobile.goto(base + "/p0/hardware-cases/search?q=MCU")
                 mobile.locator("[data-ued-primary]").first.wait_for()
+                check("390px 平台切换入口仍可见", lambda: (
+                    mobile.locator(".hc-platform-drawer > summary").is_visible()
+                    or (_ for _ in ()).throw(AssertionError("mobile platform entry hidden")),
+                ))
                 check("390px 原生页面不横向溢出", lambda: (
                     mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                     or (_ for _ in ()).throw(AssertionError("390px horizontal overflow")),
