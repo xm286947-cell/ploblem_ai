@@ -179,3 +179,57 @@ def test_multi_part_family_cannot_become_formal_ready_even_after_all_rows_confir
     assert result["formal_ready"] is False
     assert result["status"] == "attention_required"
     assert result["part_number_scope_required_fields"]
+
+
+def test_existing_family_matrix_binds_scoped_candidates_to_exact_orderable_models(monkeypatch):
+    from storage_life import core
+
+    class Connection:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def execute(self, *_args):
+            return self
+        def fetchone(self):
+            return {"id": "family", "vendor": "KIOXIA",
+                    "model": "SLC NAND", "device_type": "NAND Flash"}
+
+    monkeypatch.setattr(core, "connect", lambda: Connection())
+    rows = part_number_matrix.source_scoped_nand_rows(
+        [(2, PAGE2, "text")], source_id="source-kioxia", vendor="KIOXIA",
+        device_type="NAND Flash",
+    )
+    candidates = part_number_matrix.scoped_candidates(
+        rows, field_labels=templates.fields_for("NAND Flash")
+    )
+    for i, candidate in enumerate(candidates):
+        candidate.update({
+            "id": "candidate-" + str(i), "verify_status": "pending",
+            "final_value": None, "final_unit": None,
+        })
+    models = [
+        {"id": "model-" + str(i), "ai_model": row["part"],
+         "scope": row["part"], "verify_status": "pending"}
+        for i, row in enumerate(rows)
+    ]
+    monkeypatch.setattr(core, "list_models", lambda _id: models)
+    monkeypatch.setattr(core, "list_candidates", lambda _id: candidates)
+    monkeypatch.setattr(core, "get_document_identity", lambda _id: None)
+    monkeypatch.setattr(core, "get_extraction_run", lambda _id: None)
+    monkeypatch.setattr(core, "get_device_conclusion", lambda _id: None)
+    monkeypatch.setattr(core, "specification_workflow_status", lambda _id: {
+        "status": "pending_confirmation", "formal_ready": False,
+    })
+    view = core.family_view("family")
+    assert view["counts"]["models"] == 2
+    assert view["counts"]["variant_specs"] == 4
+    assert view["counts"]["unbound_specs"] == 0
+    assert view["counts"]["common_specs"] == 0
+    models_by_part = {x["model"]: x["id"] for x in view["models"]}
+    page_row = next(row for row in view["matrix_rows"]
+                    if row["canonical_name"] == "page_size")
+    assert page_row["cells"][models_by_part["TC58NVG0S3HBAI4"]][0]["value"] == "2048"
+    assert page_row["cells"][models_by_part["TC58NVG2S0HBAI4"]][0]["value"] == "4096"
+    assert all(cell[0]["verify_status"] == "pending"
+               for cell in page_row["cells"].values())
