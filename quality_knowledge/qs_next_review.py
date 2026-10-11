@@ -6,6 +6,8 @@ confirmation is not the same as publication to historical ScenarioAssets.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import hashlib
 import json
 from pathlib import Path
@@ -15,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from quality_knowledge.qs_next_candidate_preview import (
-    FIELD_ALIASES, preview_one_issue,
+    FIELD_ALIASES, DOMAIN_FIELDS, preview_one_issue,
 )
 from quality_knowledge.qs_next_gateway import EntryGateError
 
@@ -99,12 +101,20 @@ class ReviewStore:
                 );
             """)
 
+    @contextmanager
     def _db(self):
         conn = sqlite3.connect(self.review_db, timeout=5)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     @staticmethod
     def _record(db, rid: str) -> dict[str, Any]:
@@ -212,6 +222,13 @@ class ReviewStore:
             if row["revision"]!=expected_revision:
                 raise ReviewError("REVIEW_REVISION_CONFLICT")
             original=json.loads(row["original_json"])
+            domains=set(original["problem_domains"])
+            for field in clean_changes:
+                required_domain=DOMAIN_FIELDS.get(field)
+                if (required_domain and required_domain not in domains) or (
+                    field=="escape_reason" and "SOFTWARE" not in domains
+                ):
+                    raise ReviewError("REVIEW_FIELD_DOMAIN_MISMATCH",400)
             allowed={x["field"] for x in original["conflicts"]}
             if any(key not in allowed for key in resolutions):
                 raise ReviewError("INVALID_CONFLICT_RESOLUTION_FIELD",400)
@@ -243,6 +260,8 @@ class ReviewStore:
         reason=_clean(reason,"REVIEW_REASON_REQUIRED",500)
         if decision not in ("CONFIRM","REJECT"):
             raise ReviewError("INVALID_REVIEW_DECISION",400)
+        if not isinstance(expected_revision,int) or isinstance(expected_revision,bool):
+            raise ReviewError("REVISION_REQUIRED",400)
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             row=self._record(db,rid)
