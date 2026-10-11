@@ -9,7 +9,7 @@ from collections import defaultdict
 from typing import Any, Callable
 from fastapi import APIRouter, HTTPException, Request
 
-from quality_knowledge.qs_next_review import ReviewStore
+from quality_knowledge.qs_next_review import ReviewStore, ReviewError
 
 CONTRACT_VERSION = "qs-aggregation-suggestion/v1"
 FAILURE_KEY_BY_DOMAIN = {
@@ -39,7 +39,7 @@ def suggest_pairs(store: ReviewStore) -> dict[str, Any]:
     for row in rows:
         try:
             store._ensure_current(row)
-        except Exception:
+        except ReviewError:
             skipped_stale += 1
             continue
         record = store._view(row)
