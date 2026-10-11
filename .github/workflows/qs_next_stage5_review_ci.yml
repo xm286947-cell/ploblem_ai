@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'quality_knowledge/qs_next_review.py'
+      - 'quality_knowledge/qs_next_aggregation.py'
+      - 'tests/test_qs_next_aggregation.py'
       - 'tests/test_qs_next_review.py'
       - 'quality_knowledge/qs_next_candidate_preview.py'
       - '.github/workflows/qs_next_stage5_review_ci.yml'
@@ -33,3 +35,5 @@ jobs:
         run: python -m unittest discover -s tests -p test_qs_next_candidate_preview.py -v
       - name: Stage5 human review/audit contract
         run: python -m unittest discover -s tests -p test_qs_next_review.py -v
+      - name: Stage5 conservative multi-problem suggestion contract
+        run: python -m unittest discover -s tests -p test_qs_next_aggregation.py -v
