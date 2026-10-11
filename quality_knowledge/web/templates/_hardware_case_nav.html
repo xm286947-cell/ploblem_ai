@@ -20,7 +20,7 @@
 {% if hardware_active in ['search', 'knowledge'] %}
 <div class="hc-ued-context-nav" aria-label="找知识的结果范围">
   <span class="hc-ued-context-title">找知识</span>
-  <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例与问题</a>
+  <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}" data-hc-ued-back-query>案例与问题</a>
   <a class="{% if hardware_active == 'knowledge' %}active{% endif %}" href="/p0/hardware-cases/knowledge" data-hc-ued-forward-query>已发布工程知识</a>
   <span class="hc-ued-context-note">结果来源不同；详情均需核对原文证据。</span>
 </div>
