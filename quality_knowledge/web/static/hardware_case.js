@@ -213,6 +213,11 @@
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
+    // Preserve what the engineer searched for when following a case and returning.
+    const url=new URL(location.href);
+    if(q)url.searchParams.set('q',q);
+    else url.searchParams.delete('q');
+    history.replaceState(null,'',url.pathname+url.search);
     const payload=await safe('?q='+encodeURIComponent(q||''),{},'CONSUMER');
     searchItems=(payload&&payload.results)||[];
     searchMeta=(payload&&payload.retrieval)||{};
