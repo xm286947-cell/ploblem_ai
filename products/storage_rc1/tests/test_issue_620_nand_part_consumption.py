@@ -148,6 +148,183 @@ def test_confirmed_composite_model_identity_is_rejected(monkeypatch):
         raise AssertionError("composite part identity must not be consumed as one orderable part")
 
 
+def test_scope_classifier_requires_exact_identity_or_fully_enumerated_part_set():
+    known = [PART_A, PART_B]
+    exact = core.classify_part_number_scope(PART_A, known)
+    explicit = core.classify_part_number_scope(f"{PART_A} | {PART_B}", known)
+    assert exact == {"scope_kind": "EXACT_PART", "members": [PART_A], "matched": True}
+    assert explicit["scope_kind"] == "EXPLICIT_PART_SET"
+    assert set(explicit["members"]) == set(known)
+    assert explicit["matched"] is True
+    assert core.classify_part_number_scope(PART_A[:-2], known)["scope_kind"] == "AMBIGUOUS_SCOPE"
+    assert core.classify_part_number_scope("SLC NAND family", known)["scope_kind"] == "AMBIGUOUS_SCOPE"
+    family = core.classify_part_number_scope("all models", known)
+    assert family["scope_kind"] == "FAMILY_DECLARED"
+    assert set(family["members"]) == set(known)
+    identity = core.candidate_scope_identity({
+        "scope": PART_A, "orderable_parts": known, "canonical_name": "page_size",
+        "ai_unit": "bytes", "condition": "ECC enabled", "source_page": 2,
+    }, source_id="source", revision="Rev.1.2", source_locator="p2/table1/row1")
+    assert identity == ("source", "Rev.1.2", "page_size", "bytes", "ecc enabled",
+                        "EXACT_PART", (core._part_number_key(PART_A),), "p2/table1/row1")
+
+
+def test_scope_overlap_conflict_requires_same_condition_and_compares_value_unit():
+    claims = [{
+        "id": "range", "scope": FAMILY_LIST, "condition": "ECC enabled",
+        "final_value": "4096", "final_unit": "bytes", "verify_status": "confirmed",
+    }]
+    conflict = core.scope_overlap_conflicts(
+        PART_A, "2048", "bytes", "ECC enabled", claims, [PART_A, PART_B]
+    )
+    assert conflict == [{"candidate_id": "range", "scope": FAMILY_LIST}]
+    assert core.scope_overlap_conflicts(
+        PART_A, "2048", "bytes", "ECC disabled", claims, [PART_A, PART_B]
+    ) == []
+    assert core.scope_overlap_conflicts(
+        PART_A, "2048", "bytes", "ECC enabled", [dict(claims[0], final_value="2048")], [PART_A, PART_B]
+    ) == []
+
+
+def test_confirm_rejects_conflicting_overlap_with_an_already_confirmed_range(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "DATA", tmp_path)
+    monkeypatch.setattr(core, "DB", tmp_path / "scope-overlap.sqlite3")
+    with core.connect() as con:
+        con.execute("INSERT INTO sources VALUES (?,?,?,?,?,?,?,?)",
+                    ("source", "brief.pdf", "sha", "", "", "", 2, "now"))
+        con.execute("INSERT INTO devices VALUES (?,?,?,?,?)",
+                    ("nand", "KIOXIA", "SLC NAND", "NAND Flash", "source"))
+        for index, part in enumerate((PART_A, PART_B), 1):
+            con.execute("""INSERT INTO document_models
+                (id,source_id,device_id,ai_model,final_model,scope,source_page,source_text,confidence,verify_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (f"model-{index}", "source", "nand", part, None, part, 2, part, .95, "pending"))
+        con.execute("""INSERT INTO candidates
+            (id,device_id,canonical_name,parameter_name,ai_value,ai_unit,final_value,final_unit,
+             condition,scope,source_page,source_text,confidence,extraction_method,verify_status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("range", "nand", "page_size", "Page Size", "4096", "bytes", "4096", "bytes",
+             "ECC enabled", FAMILY_LIST, 2, "explicit part set", .95, "agent_text", "confirmed"))
+        con.execute("""INSERT INTO candidates
+            (id,device_id,canonical_name,parameter_name,ai_value,ai_unit,condition,scope,
+             source_page,source_text,confidence,extraction_method)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("exact", "nand", "page_size", "Page Size", "2048", "bytes", "ECC enabled", PART_A,
+             2, PART_A, .95, "source_table_part_number"))
+    monkeypatch.setattr(core, "rebuild_reviewed_specifications", lambda _device_id: None)
+
+    with pytest.raises(core.ConfirmationConflict, match="重叠冲突"):
+        core.verify("exact", "confirmed", "2048", "bytes", "authorized-reviewer", "ECC enabled", PART_A)
+
+    assert next(item for item in core.list_candidates("nand") if item["id"] == "exact")["verify_status"] == "pending"
+
+
+def test_selected_part_overlap_conflict_blocks_formal_consumption(monkeypatch):
+    models, candidates = _fixture(monkeypatch)
+    models[0]["verify_status"] = "confirmed"
+    models[0]["final_model"] = PART_A
+    candidates[0].update({"verify_status": "confirmed", "final_value": "2048", "final_unit": "bytes"})
+    candidates[0]["condition"] = "ECC enabled"
+    candidates.append({
+        "id": "candidate-range", "device_id": "nand", "canonical_name": "page_size",
+        "parameter_name": "Page Size", "ai_value": "4096", "ai_unit": "bytes",
+        "final_value": None, "final_unit": None, "condition": "ECC enabled",
+        "scope": FAMILY_LIST, "source_page": 2, "verify_status": "pending",
+        "extraction_method": "agent_text",
+        "evidence": _evidence(PART_A, "4096", 2),
+    })
+
+    result = product_api.part_number_facts("nand", "model-a")
+    page = next(item for item in result["facts"] if item["canonical_name"] == "page_size")
+    assert result["status"] == "SCOPE_OVERLAP_CONFLICT"
+    assert result["can_consume"] is False
+    assert page["status"] == "SCOPE_OVERLAP_CONFLICT"
+    assert page["value"] is None
+    assert page["candidate_value"] is None
+    assert page["scope_conflicts"][0]["range_candidate_id"] == "candidate-range"
+    assert {item["evidence_id"] for item in page["evidence"]} == {f"ev-{PART_A}"}
+    compared = product_api.compare_part_selections([
+        {"device_id": "nand", "model_id": "model-a"},
+        {"device_id": "nand", "model_id": "model-b"},
+    ])
+    assert compared["status"] == "PART_NUMBER_REVIEW_REQUIRED"
+    compare_page = next(item for item in compared["rows"] if item["canonical_name"] == "page_size")
+    assert compare_page["cells"]["nand:model-a"]["status"] == "SCOPE_OVERLAP_CONFLICT"
+    assert compare_page["cells"]["nand:model-a"]["value"] is None
+
+
+def test_compatible_multi_part_scope_does_not_replace_exact_confirmed_fact(monkeypatch):
+    models, candidates = _fixture(monkeypatch)
+    models[0]["verify_status"] = "confirmed"
+    models[0]["final_model"] = PART_A
+    candidates[0].update({"verify_status": "confirmed", "final_value": "2048", "final_unit": "bytes"})
+    candidates.append({
+        "id": "candidate-range", "device_id": "nand", "canonical_name": "page_size",
+        "parameter_name": "Page Size", "ai_value": "2048", "ai_unit": "bytes",
+        "final_value": None, "final_unit": None, "condition": "spare=128 bytes",
+        "scope": FAMILY_LIST, "source_page": 2, "verify_status": "pending",
+        "extraction_method": "agent_text", "evidence": _evidence(PART_A, "2048", 2),
+    })
+    result = product_api.part_number_facts("nand", "model-a")
+    page = next(item for item in result["facts"] if item["canonical_name"] == "page_size")
+    assert page["status"] == "CONFIRMED"
+    assert page["value"] == "2048"
+    assert page["candidate_ids"] == ["candidate-a"]
+    assert page["scope_conflicts"] == []
+
+
+def test_multi_part_candidate_is_visible_with_evidence_but_never_consumed_as_exact_fact(monkeypatch):
+    models, candidates = _fixture(monkeypatch)
+    models[0]["verify_status"] = "confirmed"
+    models[0]["final_model"] = PART_A
+    candidates[:] = [{
+        "id": "candidate-range", "device_id": "nand", "canonical_name": "page_size",
+        "parameter_name": "Page Size", "ai_value": "2048", "ai_unit": "bytes",
+        "final_value": None, "final_unit": None, "condition": "spare=128 bytes",
+        "scope": FAMILY_LIST, "source_page": 2, "verify_status": "pending",
+        "extraction_method": "agent_text", "evidence": _evidence(PART_A, "2048", 2),
+    }]
+    result = product_api.part_number_facts("nand", "model-a")
+    page = next(item for item in result["facts"] if item["canonical_name"] == "page_size")
+    assert page["status"] == "PART_SCOPE_REVIEW_REQUIRED"
+    assert page["scope_kind"] == "EXPLICIT_PART_SET"
+    assert page["value"] is None
+    assert page["candidate_value"] == "2048"
+    assert page["candidate_ids"] == ["candidate-range"]
+    assert page["evidence"][0]["source_page"] == 2
+    assert all(fact["canonical_name"] != "page_size" for fact in result["confirmed_facts"])
+
+
+def test_review_workbench_shows_scope_kind_and_only_one_review_row_per_candidate(monkeypatch):
+    candidate = {
+        "id": "candidate-a", "canonical_name": "page_size", "parameter_name": "Page Size",
+        "ai_value": "2048", "ai_unit": "bytes", "final_value": None, "final_unit": None,
+        "condition": "", "scope": PART_A, "scope_kind": "EXACT_PART", "verify_status": "pending",
+        "evidence": _evidence(PART_A, "2048", 2),
+    }
+    monkeypatch.setattr(core, "list_devices", lambda: [{
+        "id": "nand", "vendor": "KIOXIA", "model": "SLC NAND", "device_type": "NAND Flash"
+    }])
+    monkeypatch.setattr(product_api, "_coverage_states", lambda _id: {})
+    monkeypatch.setattr(product_api, "_candidate_map", lambda _id: {
+        "page_size": [candidate], "page_size_alias": [candidate]
+    })
+    monkeypatch.setattr(parameter_baseline, "product_fields", lambda *_args: [
+        {"canonical_name": "page_size", "parameter_name": "Page Size",
+         "aliases": ["page_size", "page_size_alias"]},
+        {"canonical_name": "page_size_alias", "parameter_name": "Page Size alias",
+         "aliases": ["page_size_alias"]},
+    ])
+    monkeypatch.setattr(core, "list_candidate_review_history", lambda _id: [])
+    monkeypatch.setattr(core, "specification_workflow_status", lambda _id: {"formal_ready": False})
+
+    result = product_api.review_workbench("nand")
+    candidate_rows = [row for row in result["rows"] if row["candidate_id"] == "candidate-a"]
+    assert len(candidate_rows) == 1
+    assert candidate_rows[0]["scope_kind"] == "EXACT_PART"
+    assert candidate_rows[0]["scope_label"] == "精确料号"
+
+
 def test_family_matrix_uses_source_bound_single_part_while_model_is_pending(monkeypatch):
     class Query:
         def fetchone(self):

@@ -724,26 +724,102 @@ def _scope_tokens(text):
 def _is_common_scope(scope, product_family):
     raw = str(scope or "").strip()
     if not raw:
-        return True
+        return False
     compact = re.sub(r"[^a-z0-9]+", "", raw.lower())
-    family = re.sub(r"[^a-z0-9]+", "", str(product_family or "").lower())
-    if compact in {"all", "allmodels", "allparts", "productfamily", "familywide", "common"}:
+    if compact in {"allmodels", "allparts", "familywide"}:
         return True
-    return bool(family and (compact == family or family in compact))
+    # A family name or document title is not proof that every extracted fact
+    # applies to every orderable part. Require explicit all-family wording.
+    return bool(re.search(
+        r"\b(?:applies to all (?:models|parts|devices)|all (?:models|parts|devices)|"
+        r"throughout the (?:product )?family|family[- ]wide)\b", raw, re.I
+    ))
+
+
+def _part_number_key(value):
+    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+
+def classify_part_number_scope(scope, orderable_parts, *, declared_scope_kind=None, source_text=""):
+    """Resolve only exact or explicitly enumerated part-number scopes.
+
+    Similarity, prefixes, family names and shared tokens are deliberately not
+    membership evidence. Unknown/underspecified text is AMBIGUOUS_SCOPE.
+    """
+    raw = str(scope or "").strip()
+    known = {_part_number_key(part): str(part).strip() for part in (orderable_parts or []) if str(part or "").strip()}
+    scope_key = _part_number_key(raw)
+    if scope_key and scope_key in known:
+        return {"scope_kind": "EXACT_PART", "members": [known[scope_key]], "matched": True}
+
+    parts = [item.strip() for item in re.split(r"\s*(?:\||;|,|\n|\r|\s+and\s+)\s*", raw, flags=re.I) if item.strip()]
+    keys = [_part_number_key(item) for item in parts]
+    if len(parts) > 1 and all(key and key in known for key in keys) and len(set(keys)) == len(keys):
+        members = [known[key] for key in keys]
+        return {"scope_kind": "EXPLICIT_PART_SET", "members": members, "matched": bool(scope_key)}
+
+    family_statement = bool(re.search(
+        r"\b(?:applies to all (?:models|parts|devices)|all (?:models|parts|devices)|"
+        r"throughout the (?:product )?family|family[- ]wide)\b",
+        f"{raw} {source_text or ''}", re.I
+    ))
+    if family_statement and (declared_scope_kind in {None, "FAMILY_DECLARED"}):
+        return {"scope_kind": "FAMILY_DECLARED", "members": sorted(set(known.values())), "matched": True}
+    return {"scope_kind": "AMBIGUOUS_SCOPE", "members": [], "matched": False}
+
+
+def candidate_scope_identity(candidate, *, source_id=None, revision=None, source_locator=None):
+    """Build a stable, non-persistent identity tuple for a scoped declaration."""
+    resolution = classify_part_number_scope(
+        candidate.get("scope"), candidate.get("orderable_parts") or [],
+        declared_scope_kind=candidate.get("scope_kind"),
+        source_text=candidate.get("source_text") or "",
+    )
+    return (
+        str(source_id or candidate.get("source_id") or ""),
+        str(revision or candidate.get("document_revision") or ""),
+        str(candidate.get("canonical_name") or ""),
+        str(candidate.get("unit") or candidate.get("ai_unit") or ""),
+        " ".join(str(candidate.get("condition") or "").casefold().split()),
+        resolution["scope_kind"],
+        tuple(sorted(_part_number_key(item) for item in resolution["members"])),
+        str(source_locator or candidate.get("source_locator") or candidate.get("source_page") or ""),
+    )
+
+
+def scope_overlap_conflicts(scope, value, unit, condition, other_claims, orderable_parts):
+    """Find same-condition, overlapping exact/range claims with different values."""
+    current = classify_part_number_scope(scope, orderable_parts)
+    current_members = {_part_number_key(item) for item in current["members"]}
+    if current["scope_kind"] not in {"EXACT_PART", "EXPLICIT_PART_SET"}:
+        return []
+    normalized_condition = " ".join(str(condition or "").casefold().split())
+    conflicts = []
+    for other in other_claims or []:
+        if other.get("verify_status") != "confirmed":
+            continue
+        if " ".join(str(other.get("condition") or "").casefold().split()) != normalized_condition:
+            continue
+        resolution = classify_part_number_scope(other.get("scope"), orderable_parts)
+        if resolution["scope_kind"] not in {"EXACT_PART", "EXPLICIT_PART_SET"}:
+            continue
+        if not current_members.intersection(_part_number_key(item) for item in resolution["members"]):
+            continue
+        other_value = other.get("final_value") if other.get("final_value") is not None else other.get("ai_value")
+        other_unit = other.get("final_unit") if other.get("final_unit") is not None else other.get("ai_unit")
+        if (str(value or "").strip(), str(unit or "").strip()) != (
+            str(other_value or "").strip(), str(other_unit or "").strip()
+        ):
+            conflicts.append({"candidate_id": other.get("id"), "scope": other.get("scope") or ""})
+    return conflicts
 
 
 def _model_matches_scope(scope, model):
-    scope_raw = str(scope or "")
-    model_name = str(model.get("final_model") or model.get("ai_model") or "")
-    model_scope = str(model.get("scope") or "")
-    ns = re.sub(r"[^a-z0-9]+", "", scope_raw.lower())
-    nm = re.sub(r"[^a-z0-9]+", "", model_name.lower())
-    if ns and nm and (nm in ns or ns in nm):
-        return True
-    st = _scope_tokens(scope_raw)
-    mt = _scope_tokens(model_scope)
-    # Shared discriminators such as 3.3V / 1.8V / I/J grade are useful when the scope names a variant rather than a full PN.
-    return bool(st and mt and st.intersection(mt))
+    model_name = str(model.get("final_model") or model.get("ai_model") or "").strip()
+    if not model_name or any(separator in model_name for separator in ("|", ";", ",", "\n", "\r")):
+        return False
+    resolution = classify_part_number_scope(scope, [model_name])
+    return resolution["scope_kind"] == "EXACT_PART"
 
 
 def _collapse_family_specs(items):
@@ -757,8 +833,10 @@ def _collapse_family_specs(items):
         key = (
             item.get("canonical_name") or "",
             re.sub(r"\s+", " ", str(item.get("display_value") or "").strip().lower()),
+            re.sub(r"\s+", " ", str(item.get("unit") or "").strip().lower()),
             re.sub(r"\s+", " ", str(item.get("display_condition") or "").strip().lower()),
             re.sub(r"\s+", " ", str(item.get("display_scope") or "").strip().lower()),
+            item.get("scope_kind") or "AMBIGUOUS_SCOPE",
         )
         bucket = groups.setdefault(key, [])
         bucket.append(item)
@@ -1083,6 +1161,16 @@ def specification_workflow_status(device_id, specs=None):
         raise KeyError(device_id)
     items = list(specs) if specs is not None else list_reviewed_specifications(device_id)
     dtype = templates.normalize_device_type(device["device_type"])
+    model_rows = list_models(device_id)
+    orderable_parts = []
+    for model in model_rows:
+        if model.get("verify_status") == "rejected":
+            continue
+        part = str((model.get("final_model") if model.get("verify_status") == "confirmed" else model.get("ai_model")) or "").strip()
+        if part and not any(separator in part for separator in ("|", ";", ",", "\n", "\r")):
+            orderable_parts.append(part)
+    orderable_parts = list(dict.fromkeys(orderable_parts))
+    orderable_part_selection_required = dtype == "NAND Flash" and len(orderable_parts) > 1
     confirmed = [x for x in items if x.get("review_status") == "confirmed"]
     pending = [x for x in items if x.get("review_status") != "confirmed"]
     critical = _critical_fields_for(dtype, items)
@@ -1098,18 +1186,21 @@ def specification_workflow_status(device_id, specs=None):
         if field and field not in pending_key:
             pending_key.append(field)
 
-    # A multi-part Product Brief can contain incompatible geometries under
-    # the same canonical field. Even if all rows are reviewed, the FAMILY is
-    # not an engineering-selectable Device until an orderable part is chosen.
-    # The current lifecycle has no selected-part key, so fail closed here.
+    # A multi-part Product Brief cannot become an engineering-selectable family
+    # Device until an orderable part is selected. This lifecycle has no
+    # selected-part key, so even compatible reviewed rows remain fail-closed.
     scoped_values = {}
     for spec in items:
-        if any(
-            isinstance(ev, dict) and ev.get("extraction_method") == "source_table_part_number"
-            for ev in (spec.get("evidence") or [])
-        ):
+        evidence_text = "\n".join(str(ev.get("source_text") or "")
+                                   for ev in (spec.get("evidence") or []) if isinstance(ev, dict))
+        resolution = classify_part_number_scope(
+            spec.get("scope"), orderable_parts,
+            declared_scope_kind=spec.get("scope_kind"), source_text=evidence_text,
+        )
+        if resolution["scope_kind"] in {"EXACT_PART", "EXPLICIT_PART_SET", "FAMILY_DECLARED"}:
             scoped_values.setdefault(str(spec.get("canonical_name") or ""), set()).add(
-                (str(spec.get("value") or ""), str(spec.get("unit") or ""))
+                (str(spec.get("value") or ""), str(spec.get("unit") or ""),
+                 " ".join(str(spec.get("condition") or "").casefold().split()))
             )
     scope_selection_required = sorted(
         key for key, values in scoped_values.items() if key and len(values) > 1
@@ -1120,9 +1211,10 @@ def specification_workflow_status(device_id, specs=None):
     gate_resolved = not gate_required or bool(final_review and final_review.get("overall_status") == "ready_for_human_review")
     review_attention = gate_required and not gate_resolved
     formal_ready = (bool(items) and not review_attention and not missing_critical
-                    and not pending_key and not scope_selection_required)
+                    and not pending_key and not scope_selection_required
+                    and not orderable_part_selection_required)
 
-    if review_attention or scope_selection_required:
+    if review_attention or scope_selection_required or orderable_part_selection_required:
         status = "attention_required"
     elif formal_ready:
         status = "confirmed"
@@ -1144,6 +1236,8 @@ def specification_workflow_status(device_id, specs=None):
         "pending_critical_fields": [label(f) for f in pending_critical],
         "pending_key_fields": [label(f) for f in pending_key],
         "part_number_scope_required_fields": [label(f) for f in scope_selection_required],
+        "orderable_part_selection_required": orderable_part_selection_required,
+        "orderable_part_numbers": orderable_parts,
         "review_gate_required": gate_required,
         "review_gate_resolved": gate_resolved,
         "final_review_status": (final_review or {}).get("overall_status", "not_run"),
@@ -1470,6 +1564,7 @@ def family_view(device_id):
         })
     common, variants, unbound = [], [], []
     field_labels = templates.fields_for(device["device_type"])
+    orderable_parts = [m["model"] for m in model_items if m.get("model")]
     for c in candidates:
         value = c["final_value"] if c["final_value"] is not None else c["ai_value"]
         unit = c["final_unit"] if c["final_unit"] is not None else c["ai_unit"]
@@ -1485,11 +1580,20 @@ def family_view(device_id):
             "source_section": c.get("source_section") or "", "source_text": c.get("source_text") or "",
             "evidence": c.get("evidence") or [], "review_adjusted": c["final_value"] is not None and c.get("verify_status") == "pending"
         }
-        if _is_common_scope(item["scope"], device["model"]):
+        source_text = "\n".join(
+            str(ev.get("source_text") or "") for ev in item["evidence"] if isinstance(ev, dict)
+        ) or item["source_text"]
+        resolution = classify_part_number_scope(
+            item["scope"], orderable_parts,
+            declared_scope_kind=c.get("scope_kind"), source_text=source_text,
+        )
+        item["scope_kind"] = resolution["scope_kind"]
+        if resolution["scope_kind"] == "FAMILY_DECLARED":
             item["model_ids"] = []
             common.append(item)
             continue
-        matched = [m["id"] for m in model_items if _model_matches_scope(item["scope"], m)]
+        member_keys = {_part_number_key(part) for part in resolution["members"]}
+        matched = [m["id"] for m in model_items if _part_number_key(m["model"]) in member_keys]
         item["model_ids"] = matched
         if matched:
             variants.append(item)
@@ -1665,6 +1769,14 @@ def list_candidates(device_id):
         device = con.execute("SELECT device_type FROM devices WHERE id=?", (device_id,)).fetchone()
         if not device:
             return []
+        model_rows = rows(con, "SELECT ai_model,final_model,verify_status FROM document_models WHERE device_id=?", (device_id,))
+        orderable_parts = [
+            str((m["final_model"] if m.get("verify_status") == "confirmed" else m["ai_model"]) or "").strip()
+            for m in model_rows
+        ]
+        orderable_parts = [part for part in orderable_parts if part and not any(
+            separator in part for separator in ("|", ";", ",", "\n", "\r")
+        )]
         items = rows(con, """SELECT c.*,s.filename,s.original_url,s.publisher FROM candidates c
         JOIN devices d ON d.id=c.device_id JOIN sources s ON s.id=d.source_id
         WHERE c.device_id=? ORDER BY c.source_page,c.canonical_name""", (device_id,))
@@ -1673,6 +1785,12 @@ def list_candidates(device_id):
             item["evidence"] = rows(con, """SELECT p.source_id,e.source_page,e.source_section,e.source_text,e.confidence,e.extraction_method,e.scope
               FROM candidate_evidence e LEFT JOIN candidate_evidence_provenance p ON p.evidence_id=e.id
               WHERE e.candidate_id=? ORDER BY e.source_page,e.id""", (item["id"],))
+            item["scope_resolution"] = classify_part_number_scope(
+                item.get("scope"), orderable_parts,
+                declared_scope_kind=item.get("scope_kind"),
+                source_text="\n".join(str(ev.get("source_text") or "") for ev in item["evidence"]),
+            )
+            item["scope_kind"] = item["scope_resolution"]["scope_kind"]
             out.append(_decorate_candidate_for_display(item, device["device_type"]))
         return out
 
@@ -1704,6 +1822,26 @@ def verify(candidate_id, status, value, unit, by, condition=None, scope=None):
                 (candidate["device_id"], candidate["canonical_name"], final_condition, final_scope, candidate_id)).fetchone()
             if other:
                 raise ConfirmationConflict("同一器件、字段、条件和适用范围已有已确认规格；请先驳回或更正原记录")
+            model_rows = rows(con, "SELECT ai_model,final_model,verify_status FROM document_models WHERE device_id=?",
+                              (candidate["device_id"],))
+            orderable_parts = [
+                str((m["final_model"] if m.get("verify_status") == "confirmed" else m["ai_model"]) or "").strip()
+                for m in model_rows
+            ]
+            orderable_parts = [part for part in orderable_parts if part and not any(
+                separator in part for separator in ("|", ";", ",", "\n", "\r")
+            )]
+            other_claims = rows(con, """SELECT id,scope,condition,ai_value,ai_unit,final_value,final_unit,verify_status
+                FROM candidates WHERE device_id=? AND canonical_name=? AND id<>? AND verify_status='confirmed'""",
+                (candidate["device_id"], candidate["canonical_name"], candidate_id))
+            overlaps = scope_overlap_conflicts(
+                final_scope, final_value, final_unit, final_condition, other_claims, orderable_parts
+            )
+            if overlaps:
+                raise ConfirmationConflict(
+                    "精确料号与已确认多料号范围存在同条件、不同值/单位的重叠冲突；"
+                    "请先更正范围或驳回冲突候选，不能静默确认"
+                )
 
         old_value = candidate["final_value"] if candidate["final_value"] is not None else candidate["ai_value"]
         old_unit = candidate["final_unit"] if candidate["final_unit"] is not None else candidate["ai_unit"]

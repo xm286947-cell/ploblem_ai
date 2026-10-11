@@ -313,6 +313,7 @@ def review_workbench(device_id: str) -> dict[str, Any]:
     candidates = _candidate_map(device_id)
     fields = parameter_baseline.product_fields(device["device_type"], ai.expected_fields(device["device_type"]))
     rows_out = []
+    seen_candidate_ids = set()
     for field in fields:
         key = field["canonical_name"]
         aliases = field.get("aliases") or [key]
@@ -331,6 +332,9 @@ def review_workbench(device_id: str) -> dict[str, Any]:
             })
             continue
         for item in items:
+            if item.get("id") in seen_candidate_ids:
+                continue
+            seen_candidate_ids.add(item.get("id"))
             evidence = item.get("evidence") or [{
                 "source_page": item.get("source_page"), "source_section": item.get("source_section"),
                 "source_text": item.get("source_text"), "confidence": item.get("confidence"),
@@ -347,6 +351,11 @@ def review_workbench(device_id: str) -> dict[str, Any]:
                 "candidate_id": item.get("id"), "ai_value": item.get("ai_value"), "ai_unit": item.get("ai_unit"),
                 "human_value": item.get("final_value"), "human_unit": item.get("final_unit"),
                 "condition": item.get("condition") or "", "scope": item.get("scope") or "",
+                "scope_kind": item.get("scope_kind") or "AMBIGUOUS_SCOPE",
+                "scope_label": {
+                    "EXACT_PART": "精确料号", "EXPLICIT_PART_SET": "多料号范围",
+                    "FAMILY_DECLARED": "原文明确的家族范围", "AMBIGUOUS_SCOPE": "范围待核实",
+                }.get(item.get("scope_kind"), "范围待核实"),
                 "coverage_status": cov_status, "coverage_reason": coverage_item.get("reason") or "",
                 "review_status": {"pending": "UNREVIEWED", "confirmed": "CONFIRMED", "rejected": "REJECTED"}.get(item.get("verify_status"), "UNREVIEWED"),
                 "evidence": _enrich_evidence(device, evidence), "verified_by": item.get("verified_by"),
@@ -388,37 +397,45 @@ def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
         raise ValueError("PART_NUMBER_IDENTITY_AMBIGUOUS")
 
     candidates = core.list_candidates(device_id)
+    orderable_parts = [
+        str((item.get("final_model") if item.get("verify_status") == "confirmed" else item.get("ai_model")) or "").strip()
+        for item in core.list_models(device_id)
+    ]
+    orderable_parts = [part for part in orderable_parts if part and not any(
+        separator in part for separator in ("|", ";", ",", "\n", "\r")
+    )]
     fields = parameter_baseline.product_fields(
         device["device_type"], ai.expected_fields(device["device_type"])
     )
     model_confirmed = model.get("verify_status") == "confirmed"
     out = []
     confirmed_facts = []
+    has_scope_conflict = False
     for field in fields:
         canonical = field["canonical_name"]
         aliases = set(field.get("aliases") or [canonical])
         related = [item for item in candidates if item.get("canonical_name") in aliases]
-        part_rows = [item for item in related if item.get("extraction_method") == "source_table_part_number"]
-        direct = [item for item in part_rows if _part_key(item.get("scope")) == _part_key(part_number)]
-
-        if direct:
-            applicable = direct
-        elif part_rows:
-            # A value explicitly scoped to another orderable part must never
-            # fall back into the selected part's comparison cell.
-            applicable = []
-        else:
-            applicable = []
-            for item in related:
-                scope = str(item.get("scope") or "").strip()
-                if item.get("verify_status") != "confirmed":
-                    continue
-                if not scope or core._is_common_scope(scope, device.get("model")):
-                    applicable.append(item)
-                elif _part_key(scope) == _part_key(part_number):
-                    applicable.append(item)
-                elif core._model_matches_scope(scope, model):
-                    applicable.append(item)
+        resolutions = {
+            item["id"]: core.classify_part_number_scope(
+                item.get("scope"), orderable_parts,
+                declared_scope_kind=item.get("scope_kind"),
+                source_text="\n".join(str(ev.get("source_text") or "")
+                                      for ev in (item.get("evidence") or []) if isinstance(ev, dict)),
+            )
+            for item in related
+        }
+        selected_key = _part_key(part_number)
+        exact = [item for item in related
+                 if resolutions[item["id"]]["scope_kind"] == "EXACT_PART"
+                 and _part_key(item.get("scope")) == selected_key]
+        overlapping_sets = [item for item in related
+                            if resolutions[item["id"]]["scope_kind"] == "EXPLICIT_PART_SET"
+                            and selected_key in {_part_key(x) for x in resolutions[item["id"]]["members"]}]
+        family_claims = [item for item in related
+                         if resolutions[item["id"]]["scope_kind"] == "FAMILY_DECLARED"]
+        # Family and multi-part claims are never silently inherited as an exact
+        # part fact. They are inspected only for an explicit overlap conflict.
+        applicable = exact
 
         confirmed = [item for item in applicable if item.get("verify_status") == "confirmed"]
         pending = [item for item in applicable if item.get("verify_status") == "pending"]
@@ -429,13 +446,53 @@ def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
         def effective_unit(item):
             raw = item.get("final_unit") if item.get("verify_status") == "confirmed" else item.get("ai_unit")
             return str(raw or "")
+        def normalized_condition(item):
+            return " ".join(str(item.get("condition") or "").casefold().split())
+
+        scope_claims = [item for item in [*exact, *overlapping_sets, *family_claims]
+                        if item.get("verify_status") != "rejected"]
+        scope_conflicts = []
+        for index, left in enumerate(scope_claims):
+            left_scope = resolutions[left["id"]]
+            left_members = {_part_key(x) for x in left_scope["members"]}
+            for right in scope_claims[index + 1:]:
+                right_scope = resolutions[right["id"]]
+                if not left_members.intersection(_part_key(x) for x in right_scope["members"]):
+                    continue
+                if normalized_condition(left) != normalized_condition(right):
+                    continue
+                if (effective_value(left), effective_unit(left)) == (
+                    effective_value(right), effective_unit(right)
+                ):
+                    continue
+                exact_item = left if left_scope["scope_kind"] == "EXACT_PART" else (
+                    right if right_scope["scope_kind"] == "EXACT_PART" else None
+                )
+                range_item = right if exact_item is left else left
+                scope_conflicts.append({
+                    "exact_candidate_id": exact_item.get("id") if exact_item else None,
+                    "range_candidate_id": range_item.get("id"),
+                    "candidate_ids": [left.get("id"), right.get("id")],
+                    "left_scope": left.get("scope") or "",
+                    "right_scope": right.get("scope") or "",
+                    "condition": left.get("condition") or "",
+                })
+        scope_conflicts = list({
+            tuple(sorted(item["candidate_ids"])): item for item in scope_conflicts
+        }.values())
+        scope_conflict = bool(scope_conflicts)
+        has_scope_conflict = has_scope_conflict or scope_conflict
         reviewable_values = {
-            (effective_value(item), effective_unit(item))
+            (effective_value(item), effective_unit(item), normalized_condition(item))
             for item in [*confirmed, *pending]
         }
         ambiguous = len(reviewable_values) > 1
-        chosen = None if ambiguous else (confirmed or pending or rejected or [None])[0]
-        if ambiguous:
+        display_candidates = applicable or [item for item in [*overlapping_sets, *family_claims]
+                                            if item.get("verify_status") != "rejected"]
+        chosen = None if ambiguous else (confirmed or pending or rejected or display_candidates or [None])[0]
+        if scope_conflict:
+            status = "SCOPE_OVERLAP_CONFLICT"
+        elif ambiguous:
             status = "AMBIGUOUS"
         elif not model_confirmed:
             status = "PART_NUMBER_UNREVIEWED"
@@ -445,18 +502,26 @@ def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
             status = "UNREVIEWED"
         elif rejected:
             status = "REJECTED"
-        elif part_rows:
+        elif overlapping_sets or family_claims:
+            status = "PART_SCOPE_REVIEW_REQUIRED"
+        elif any(resolutions[item["id"]]["scope_kind"] == "AMBIGUOUS_SCOPE" for item in related):
+            status = "AMBIGUOUS_SCOPE"
+        elif related:
             status = "NOT_SPECIFIED_FOR_SELECTED_PART"
         else:
             status = "UNKNOWN"
 
         evidence_candidates = []
-        if chosen:
+        if scope_conflict:
+            conflict_ids = {candidate_id for conflict in scope_conflicts for candidate_id in conflict["candidate_ids"]}
+            evidence_candidates = [item for item in scope_claims if item.get("id") in conflict_ids]
+        elif chosen:
             chosen_value = effective_value(chosen)
             chosen_unit = effective_unit(chosen)
             evidence_candidates = [
-                item for item in ([*confirmed, *pending] if not ambiguous else [chosen])
+                item for item in (display_candidates if not ambiguous else [chosen])
                 if effective_value(item) == chosen_value and effective_unit(item) == chosen_unit
+                and normalized_condition(item) == normalized_condition(chosen)
             ]
         evidence = _enrich_evidence(
             device,
@@ -473,18 +538,20 @@ def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
             "parameter_name": field.get("parameter_name") or canonical,
             "status": status,
             "review_status": status,
-            "value": formal_value,
-            "unit": formal_unit or "",
-            "candidate_value": chosen.get("ai_value") if chosen and chosen.get("verify_status") != "rejected" else None,
-            "candidate_unit": chosen.get("ai_unit") if chosen and chosen.get("verify_status") != "rejected" else "",
+            "value": None if scope_conflict else formal_value,
+            "unit": "" if scope_conflict else formal_unit or "",
+            "candidate_value": chosen.get("ai_value") if chosen and chosen.get("verify_status") != "rejected" and not scope_conflict else None,
+            "candidate_unit": chosen.get("ai_unit") if chosen and chosen.get("verify_status") != "rejected" and not scope_conflict else "",
             "condition": chosen.get("condition") or "" if chosen else "",
             "scope": chosen.get("scope") or "" if chosen else "",
             "candidate_id": chosen.get("id") if chosen else None,
             "candidate_ids": [item.get("id") for item in evidence_candidates if item.get("id")],
             "evidence": evidence,
+            "scope_conflicts": scope_conflicts,
+            "scope_kind": resolutions[chosen["id"]]["scope_kind"] if chosen else None,
         }
         out.append(item_out)
-        if status == "CONFIRMED" and formal_value is not None:
+        if status == "CONFIRMED" and formal_value is not None and not scope_conflict:
             confirmed_facts.append({key: item_out.get(key) for key in (
                 "canonical_name", "parameter_name", "value", "unit", "condition", "scope",
                 "candidate_id", "evidence"
@@ -498,8 +565,10 @@ def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
             "verified_by": model.get("verified_by"), "verified_at": model.get("verified_at"),
             "source_page": model.get("source_page"), "source_text": model.get("source_text") or "",
         },
-        "status": "READY" if model_confirmed else "PART_NUMBER_REVIEW_REQUIRED",
-        "can_consume": model_confirmed,
+        "status": "READY" if model_confirmed and not has_scope_conflict else (
+            "SCOPE_OVERLAP_CONFLICT" if has_scope_conflict else "PART_NUMBER_REVIEW_REQUIRED"
+        ),
+        "can_consume": model_confirmed and not has_scope_conflict,
         "facts": out,
         "confirmed_facts": confirmed_facts if model_confirmed else [],
     }
@@ -563,7 +632,10 @@ def compare_part_selections(selections: list[dict[str, str]]) -> dict[str, Any]:
         })
     ready = (
         all(item["status"] == "READY" for item in selection_items)
-        and all(cell["status"] not in {"UNREVIEWED", "PART_NUMBER_UNREVIEWED", "AMBIGUOUS"}
+        and all(cell["status"] not in {
+                    "UNREVIEWED", "PART_NUMBER_UNREVIEWED", "AMBIGUOUS",
+                    "SCOPE_OVERLAP_CONFLICT", "PART_SCOPE_REVIEW_REQUIRED", "AMBIGUOUS_SCOPE",
+                }
                 for row in rows_out for cell in row["cells"].values())
     )
     return {

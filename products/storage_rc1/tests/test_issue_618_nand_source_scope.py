@@ -189,6 +189,11 @@ def test_multi_part_family_cannot_become_formal_ready_even_after_all_rows_confir
             return self
         def fetchone(self):
             return {"device_type": "NAND Flash"}
+        def fetchall(self):
+            return [
+                {"ai_model": "TC58NVG0S3HBAI4", "final_model": None, "verify_status": "pending"},
+                {"ai_model": "TC58NVG2S0HBAI4", "final_model": None, "verify_status": "pending"},
+            ]
 
     monkeypatch.setattr(core, "connect", lambda: Connection())
     monkeypatch.setattr(core, "_critical_fields_for", lambda _type, _items: [])
@@ -205,6 +210,11 @@ def test_multi_part_family_cannot_become_formal_ready_even_after_all_rows_confir
     assert result["formal_ready"] is False
     assert result["status"] == "attention_required"
     assert result["part_number_scope_required_fields"]
+    for item in specs:
+        item["value"] = "2048"
+    compatible = core.specification_workflow_status("family", specs=specs)
+    assert compatible["formal_ready"] is False
+    assert compatible["orderable_part_selection_required"] is True
 
 
 def test_existing_family_matrix_binds_scoped_candidates_to_exact_orderable_models(monkeypatch):
