@@ -35,10 +35,11 @@
     <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">hardware-knowledge-consumption/v1</span></div>
     <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>
       <div>
-        <strong>正式知识检索数据尚未生成</strong>
+        <strong data-knowledge-unavailable-title>正式知识检索数据尚未生成</strong>
         <p data-knowledge-unavailable-message>请先到知识生产工作台，对已发布案例执行“生成检索数据”。</p>
       </div>
-      <a class="hc-button primary" href="/p0/hardware-cases/knowledge-production">返回知识生产工作台</a>
+      <button type="button" class="hc-button secondary" data-knowledge-retry>重新检索</button>
+      <a class="hc-button primary" data-knowledge-production href="/p0/hardware-cases/knowledge-production">返回知识生产工作台</a>
     </div>
     <div class="hc-knowledge-results" data-knowledge-results><div class="hc-empty">请输入关键词或结构化筛选条件。</div></div>
   </section>
