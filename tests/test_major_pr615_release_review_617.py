@@ -31,11 +31,19 @@ def test_m84_external_config_controls_optional_switch(tmp_path: Path) -> None:
 
     external = tmp_path / "approved-runtime.yaml"
     external.write_text("repeat_decision_ai:\n  enabled: true\n", encoding="utf-8")
+    malformed = tmp_path / "malformed-runtime.yaml"
+    malformed.write_text(
+        "repeat_decision_ai:\n  enabled: 'true'\n", encoding="utf-8"
+    )
 
     default_service = RepeatAgentAnalysisService(project)
     enabled_service = RepeatAgentAnalysisService(project, model_config_path=external)
+    malformed_service = RepeatAgentAnalysisService(
+        project, model_config_path=malformed
+    )
     assert default_service.decision_enabled is False
     assert enabled_service.decision_enabled is True
+    assert malformed_service.decision_enabled is False
 
 
 def test_repeat_facade_accepts_runtime_data_root_contract() -> None:

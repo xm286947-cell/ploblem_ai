@@ -208,7 +208,7 @@ class RepeatAgentAnalysisService:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception:
             return False
-        return bool((raw.get("repeat_decision_ai") or {}).get("enabled", False))
+        return (raw.get("repeat_decision_ai") or {}).get("enabled", False) is True
 
     def _solution_policy(self) -> tuple[int, float]:
         """Reuse the historical M8.3 candidate selection policy unchanged."""
