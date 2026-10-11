@@ -62,7 +62,7 @@ def test_import_paths_are_progressive_without_changing_form_contract():
 
 def test_only_one_semantic_main_and_chinese_business_steps():
     page = _render("major_production.html", "/p0/major-production")
-    assert len(re.findall(r"<main(?:\\s|>)", page)) == 1
+    assert page.count('<main class="') == 1
     assert "导入问题、AI 分析、审核发布" in page
     assert "AI Analysis → Human Review → Publish" not in page
     assert "标准 ITR 编号" in page
