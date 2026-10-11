@@ -1,0 +1,30 @@
+name: QS Next Formal Sources Contract
+
+on:
+  push:
+    branches:
+      - feature/qs-next-formal-source-adapter-20261011
+  pull_request:
+    paths:
+      - 'quality_knowledge/qs_next_formal_sources.py'
+      - 'tests/test_qs_next_formal_sources.py'
+      - '.github/workflows/qs_next_formal_sources_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  formal-source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+      - name: Select controlled Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile isolated code
+        run: python -m compileall -q quality_knowledge/qs_next_formal_sources.py tests/test_qs_next_formal_sources.py
+      - name: Execute no-provider, no-db regression
+        run: python -m unittest discover -s tests -p test_qs_next_formal_sources.py -v
