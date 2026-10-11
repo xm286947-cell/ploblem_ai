@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from quality_knowledge.qs_next_candidate_preview import (
-    FIELD_ALIASES, DOMAIN_FIELDS, preview_one_issue,
+    FIELD_ALIASES, DIMENSIONS, DOMAIN_FIELDS, preview_one_issue,
 )
 from quality_knowledge.qs_next_gateway import EntryGateError
 
@@ -142,7 +142,10 @@ class ReviewStore:
             "problem_ref_context": original["problem_ref_context"],
             "problem_domains": original["problem_domains"],
             "source_refs": original["source_refs"],
-            "five_dimensions": original["dimensions"],
+            "five_dimensions": {
+                dimension: {field: fields[field] for field in names if field in fields}
+                for dimension, names in DIMENSIONS.items()
+            },
             "effective_fields": fields, "human_edits": edits,
             "original_field_evidence": original["all_field_evidence"],
             "source_conflicts": original["conflicts"],
