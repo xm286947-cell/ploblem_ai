@@ -178,8 +178,13 @@
     await loadTree(treeState.type);
   }
 
-  let searchItems=[];let searchMeta={};
+  let searchItems=[];let searchMeta={};let searchError='';let searchRequestSeq=0;
   function applySearchFilters(){
+    if(searchError){
+      qs('[data-search-summary]').textContent='查询失败 · 尚未得到可靠检索结果';
+      qs('[data-search-results]').innerHTML='<div class="hc-error" role="alert"><strong>暂时无法查询案例</strong><p>'+esc(searchError)+'</p><button type="button" class="hc-button secondary" data-search-retry>重新查询</button></div>';
+      return;
+    }
     const product=(qs('[data-filter-product]').value||'').trim().toLowerCase();
     const circuit=(qs('[data-filter-circuit]').value||'').trim().toLowerCase();
     const material=(qs('[data-filter-material]').value||'').trim().toLowerCase();
@@ -213,15 +218,33 @@
     qs('[data-search-results]').innerHTML=filtered.length?filtered.map(x=>caseCard(x)).join(''):'<div class="hc-empty">未找到匹配案例。可清空筛选或切换双树导航。</div>';
   }
   async function runSearch(q){
-    const payload=await safe('?q='+encodeURIComponent(q||''),{},'CONSUMER');
-    searchItems=(payload&&payload.results)||[];
-    searchMeta=(payload&&payload.retrieval)||{};
-    applySearchFilters();
+    // Preserve what the engineer searched for when following a case and returning.
+    const url=new URL(location.href);
+    if(q)url.searchParams.set('q',q);
+    else url.searchParams.delete('q');
+    history.replaceState(null,'',url.pathname+url.search);
+    const seq=++searchRequestSeq;
+    searchError='';
+    qs('[data-search-summary]').textContent='正在检索案例…';
+    try{
+      const payload=await request('?q='+encodeURIComponent(q||''),{},'CONSUMER');
+      if(seq!==searchRequestSeq)return;
+      searchItems=(payload&&payload.results)||[];
+      searchMeta=(payload&&payload.retrieval)||{};
+      applySearchFilters();
+    }catch(error){
+      if(seq!==searchRequestSeq)return;
+      searchItems=[];searchMeta={};searchError=error.message||'检索服务暂不可用，请稍后重试。';
+      applySearchFilters();
+    }
   }
   async function initSearch(){
     const params=new URLSearchParams(location.search);const initial=params.get('q')||'';
     qs('[data-search-query]').value=initial;
     qs('[data-search-form]').addEventListener('submit',e=>{e.preventDefault();runSearch(qs('[data-search-query]').value.trim())});
+    qs('[data-search-results]').addEventListener('click',e=>{
+      if(e.target.closest('[data-search-retry]'))runSearch(qs('[data-search-query]').value.trim());
+    });
     qsa('[data-filter-product],[data-filter-circuit],[data-filter-material]').forEach(el=>el.addEventListener('input',applySearchFilters));
     qs('[data-clear-filters]').addEventListener('click',()=>{qsa('[data-filter-product],[data-filter-circuit],[data-filter-material]').forEach(x=>x.value='');applySearchFilters()});
     await runSearch(initial);

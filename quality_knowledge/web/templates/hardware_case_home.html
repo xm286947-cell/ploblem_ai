@@ -9,9 +9,9 @@
 <main class="hc-page" data-hc-page="home" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
   <section class="hc-hero">
     <div>
-      <span class="hc-kicker">HARDWARE CASE · P01</span>
-      <h1>硬件案例库</h1>
-      <p>从电路 / 特性或物料 / 器件出发，快速复用历史硬件问题、根因、措施与 Evidence。</p>
+      <span class="hc-kicker" data-legacy-view="HARDWARE CASE · P01">工程知识库 · 首页</span>
+      <h1>从工程问题找到可追溯的经验</h1>
+      <p>描述工程问题，查看历史案例、原因与措施，必要时追溯 Word 原始证据。</p>
     </div>
     <form class="hc-search-hero" data-home-search>
       <input type="search" placeholder="搜索问题现象 / 器件 / 型号 / 电路 / 特性 / 案例标题" data-home-query>
@@ -19,6 +19,12 @@
     </form>
   </section>
 
+  <section class="hc-ued-three-choices" aria-label="从这里开始">
+    <a class="hc-ued-choice" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}"><b>找知识</b><span>描述现象或输入器件名，查看已有案例与正式工程知识。</span><small>查询 → 案例 → 证据</small></a>
+    <a class="hc-ued-choice" href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}"><b>看资产</b><span>按电路／特性树或物料／器件树浏览已关联的历史问题。</span><small>分类 → 节点 → 关联案例</small></a>
+    <a class="hc-ued-choice" href="/p0/hardware-cases/intake"><b>知识维护</b><span>维护人员上传 Word、核对候选及原文证据，再进入人工审核。</span><small>导入 → 候选 → 审核；需相应权限</small></a>
+  </section>
+  <details class="hc-ued-legacy-link" style="margin-bottom:14px;font-size:12px;color:#617389"><summary>旧版单份 Word 解析工具（高级）</summary><p><a href="/p0/hardware-cases/word-import">案例 Word 导入（高级解析）</a> · 本工具不替代知识维护的正式流程。</p></details>
   <section class="hc-tree-entry-grid">
     <a class="hc-tree-entry" href="/p0/hardware-cases/tree?type=CIRCUIT_FEATURE{% if hardware_role == 'MAINTAINER' %}&role=maintainer{% endif %}" data-home-tree="CIRCUIT_FEATURE">
       <span class="hc-tree-type">CIRCUIT / FEATURE</span>
@@ -36,24 +42,14 @@
     </a>
   </section>
 
-  <section class="hc-card hc-import-entry">
-    <div class="hc-card-head"><div><h2>R1 案例 Word 导入</h2><p>上传 DOCX 后直接检查 business_case_id、SHA256、Heading / Section、Paragraph、Table、Image 与 Source Locator；不调用 Agent。</p></div></div>
-    <a class="hc-button primary" href="/p0/hardware-cases/word-import">案例 Word 导入</a>
-  </section>
-
   {% if hardware_role == 'MAINTAINER' %}
-  <section class="hc-card hc-import-entry">
-    <div class="hc-card-head"><div><h2>知识导入</h2><p>先导入两棵基础树，再上传历史案例 Word，查看 Candidate 与 Evidence，进入人工确认。</p></div></div>
-    <p data-tree-prerequisite hidden>请先导入基础树：两棵树均需 Apply 为 ACTIVE Version。</p>
-    <a class="hc-button secondary" href="/p0/hardware-cases/base-data">基础数据管理</a>
-    <a class="hc-button secondary" href="/p0/hardware-cases/intake">完整知识导入</a>
-  </section>
   <section class="hc-maintenance-strip" data-maintenance-strip>
     <div><span>待确认</span><strong data-pending-review>—</strong></div>
     <div><span>待挂接</span><strong data-pending-mapping>—</strong></div>
     <div><span>Evidence 异常</span><strong data-evidence-anomaly>—</strong></div>
     <a href="/p0/hardware-cases/review">进入案例确认 →</a>
   </section>
+  <details class="hc-card" style="padding:12px 16px"><summary>高级维护工具</summary><p><a href="/p0/hardware-cases/base-data">基础数据管理</a>（保留原有 URL、版本与 Apply 规则）</p></details>
   {% endif %}
 
   <section class="hc-card">

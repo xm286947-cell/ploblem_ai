@@ -32,6 +32,9 @@
   let activeScenario = 'research';
   let results = [];
   let query = { text: '', interface: '', signal: '', device: '' };
+  // A slower previous query must never overwrite a later search or reopen a closed detail.
+  let searchRequestSeq = 0;
+  let detailRequestSeq = 0;
 
   function valueText(value) {
     if (value === null || value === undefined || value === '') return '—';
@@ -88,11 +91,13 @@
     }).join('');
   }
 
-  function setUnavailable(message = '请先到知识生产工作台，对已发布案例执行“生成检索数据”。') {
+  function setUnavailable(message = '请先到知识生产工作台，对已发布案例执行“生成检索数据”。', { indexUnavailable = false } = {}) {
     q('[data-knowledge-unavailable]').hidden = false;
+    q('[data-knowledge-unavailable-title]').textContent = indexUnavailable ? '正式知识检索数据尚未生成' : '正式知识检索暂时失败';
+    q('[data-knowledge-production]').hidden = !indexUnavailable;
     q('[data-knowledge-unavailable-message]').textContent = message;
     q('[data-knowledge-results]').innerHTML = '';
-    q('[data-knowledge-summary]').textContent = '正式知识检索数据尚未生成';
+    q('[data-knowledge-summary]').textContent = indexUnavailable ? '检索数据尚未生成' : '请求失败，并非检索结果为零';
   }
 
   async function fetchJson(path) {
@@ -114,19 +119,33 @@
     return `?${params.toString()}`;
   }
 
+  function syncQueryUrl() {
+    const url = new URL(location.href);
+    if (query.text) url.searchParams.set('q', query.text);
+    else url.searchParams.delete('q');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }
+
   async function runSearch() {
+    const seq = ++searchRequestSeq;
+    const endpoint = '/api/hardware-query/v1/search' + searchParams();
     q('[data-knowledge-unavailable]').hidden = true;
+    q('[data-knowledge-results]').setAttribute('aria-busy', 'true');
     q('[data-knowledge-summary]').textContent = '正在检索正式知识…';
     try {
-      const payload = await fetchJson('/api/hardware-query/v1/search' + searchParams());
+      const payload = await fetchJson(endpoint);
+      if (seq !== searchRequestSeq) return;
       results = Array.isArray(payload.results) ? payload.results : [];
       renderResults();
       const status = payload.retrieval && payload.retrieval.query_agent ? payload.retrieval.query_agent.status : 'FAST_PATH';
       if (status === 'BLOCKED' || status === 'NOT_CONFIGURED') q('[data-knowledge-summary]').textContent += ' · 规则检索（Agent 未就绪）';
     } catch (error) {
+      if (seq !== searchRequestSeq) return;
       results = [];
-      if (error.status === 503) setUnavailable();
-      else setUnavailable(`正式知识检索请求失败：${error.message}`);
+      if (error.status === 503) setUnavailable(undefined, { indexUnavailable: true });
+      else setUnavailable(`正式知识检索请求失败：${error.message}。请检查连接并重试。`);
+    } finally {
+      if (seq === searchRequestSeq) q('[data-knowledge-results]').setAttribute('aria-busy', 'false');
     }
   }
 
@@ -150,14 +169,18 @@
   }
 
   async function openDetail(knowledgeId) {
+    const seq = ++detailRequestSeq;
     q('[data-detail-title]').textContent = '正在读取正式知识…';
     q('[data-detail-subtitle]').textContent = knowledgeId;
     q('[data-detail-body]').innerHTML = '<div class="hc-knowledge-empty">正在读取…</div>';
     q('[data-knowledge-detail]').hidden = false;
     try {
-      renderDetail(await fetchJson('/objects/' + encodeURIComponent(knowledgeId)));
+      const item = await fetchJson('/objects/' + encodeURIComponent(knowledgeId));
+      if (seq !== detailRequestSeq) return;
+      renderDetail(item);
     } catch (error) {
-      if (error.status === 503) setUnavailable();
+      if (seq !== detailRequestSeq) return;
+      if (error.status === 503) setUnavailable(undefined, { indexUnavailable: true });
       q('[data-detail-body]').innerHTML = `<div class="hc-error">${esc(error.status === 503 ? '正式知识检索数据尚未生成，请返回知识生产工作台执行“生成检索数据”。' : `正式知识详情读取失败：${error.message}`)}</div>`;
     }
   }
@@ -179,23 +202,33 @@
       signal: q('[data-knowledge-filter="signal"]').value.trim(),
       device: q('[data-knowledge-filter="device"]').value.trim()
     };
+    syncQueryUrl();
     runSearch();
   });
   q('[data-knowledge-clear]').addEventListener('click', () => {
     q('[data-knowledge-text]').value = '';
     qa('[data-knowledge-filter]').forEach(input => { input.value = ''; });
     query = { text: '', interface: '', signal: '', device: '' };
+    syncQueryUrl();
     runSearch();
   });
+  q('[data-knowledge-retry]').addEventListener('click', () => runSearch());
   q('[data-knowledge-results]').addEventListener('click', event => {
     const button = event.target.closest('[data-open-knowledge]');
     if (button) openDetail(button.dataset.openKnowledge);
   });
   q('[data-detail-close]').addEventListener('click', () => {
+    ++detailRequestSeq;
     const detail = q('[data-knowledge-detail]');
     detail.hidden = true;
     delete detail.dataset.knowledgeId;
     delete detail.dataset.businessCaseId;
   });
+  // Carry the same user query into formal knowledge without an initial empty request.
+  const initialText = new URLSearchParams(location.search).get('q');
+  if (initialText) {
+    q('[data-knowledge-text]').value = initialText;
+    query.text = initialText;
+  }
   runSearch();
 })();

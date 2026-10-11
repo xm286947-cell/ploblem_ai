@@ -1,22 +1,46 @@
-<div class="hc-product-bar" data-hc-product-bar>
+{# #575 UED: only three primary task entrances. Legacy paths remain routable. #}
+{% set hc_in_find = hardware_active in ['home', 'search', 'knowledge', 'detail', ''] %}
+{% set hc_in_assets = hardware_active == 'tree' %}
+{% set hc_in_maintain = hardware_active in ['intake', 'word-import', 'knowledge-production', 'review', 'base-data', 'e2e'] %}
+<div class="hc-product-bar hc-ued-product-bar" data-hc-product-bar>
   <div class="hc-product-id">
-    <span class="hc-product-kicker">HARDWARE CASE LIBRARY</span>
-    <strong>硬件案例库</strong>
+    <span class="hc-product-kicker">硬件知识库</span>
+    <strong>工程知识与案例</strong>
   </div>
-  <nav class="hc-local-nav" aria-label="硬件案例库导航">
-    <a class="{% if hardware_active == 'e2e' %}active{% endif %}" href="/p0/hardware-cases/e2e">R1 端到端验证</a>
-    <a href="/p0/overall">返回总体工作台</a>
-    <a class="{% if hardware_active == 'home' %}active{% endif %}" href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例首页</a>
-    <a class="{% if hardware_active == 'tree' %}active{% endif %}" href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">双树导航</a>
-    <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">案例搜索</a>
-    <a class="{% if hardware_active == 'knowledge' %}active{% endif %}" href="/p0/hardware-cases/knowledge">正式知识消费</a>
-    <a class="{% if hardware_active == 'word-import' %}active{% endif %}" href="/p0/hardware-cases/word-import">案例 Word 导入</a>
-    {% if hardware_role == 'MAINTAINER' %}
-    <a class="{% if hardware_active == 'knowledge-production' %}active{% endif %}" href="/p0/hardware-cases/knowledge-production">知识生产</a>
-    <a class="{% if hardware_active == 'intake' %}active{% endif %}" href="/p0/hardware-cases/intake">知识导入</a>
-    <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review">案例确认</a>
-    <a class="{% if hardware_active == 'base-data' %}active{% endif %}" href="/p0/hardware-cases/base-data">基础数据管理</a>
-    {% endif %}
+  <nav class="hc-ued-primary" aria-label="硬件知识库三个主入口" data-hc-ued-primary>
+    <a data-ued-primary="find" title="案例搜索" class="{% if hc_in_find %}active{% endif %}" {% if hc_in_find %}aria-current="page"{% endif %} href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">找知识</a>
+    <a data-ued-primary="assets" title="双树导航" class="{% if hc_in_assets %}active{% endif %}" {% if hc_in_assets %}aria-current="page"{% endif %} href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">看资产</a>
+    <a data-ued-primary="maintain" class="{% if hc_in_maintain %}active{% endif %}" {% if hc_in_maintain %}aria-current="page"{% endif %} href="/p0/hardware-cases/intake">知识维护</a>
   </nav>
-  <div class="hc-role-pill">{{ "维护视图" if hardware_role == "MAINTAINER" else "研发视图" }}</div>
+  <div class="hc-ued-utilities">
+    <span class="hc-role-pill">{{ "维护视图" if hardware_role == "MAINTAINER" else "研发视图" }}</span>
+    <a href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}" title="案例首页">概览</a>
+  </div>
 </div>
+{% if hardware_active in ['search', 'knowledge'] %}
+<div class="hc-ued-context-nav" aria-label="找知识的结果范围">
+  <span class="hc-ued-context-title">找知识</span>
+  <a class="{% if hardware_active == 'search' %}active{% endif %}" href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}" data-hc-ued-back-query>案例与问题</a>
+  <a class="{% if hardware_active == 'knowledge' %}active{% endif %}" href="/p0/hardware-cases/knowledge" data-hc-ued-forward-query>已发布工程知识</a>
+  <span class="hc-ued-context-note">结果来源不同；详情均需核对原文证据。</span>
+</div>
+{% endif %}
+{% if hc_in_maintain %}
+<div class="hc-ued-journey" aria-label="知识维护流程">
+  <span class="hc-ued-context-title">维护流程</span>
+  <a class="{% if hardware_active == 'intake' %}active{% endif %}" href="/p0/hardware-cases/intake">1 上传 Word</a>
+  <span class="hc-ued-chevron" aria-hidden="true">→</span>
+  <a class="{% if hardware_active == 'knowledge-production' %}active{% endif %}" href="/p0/hardware-cases/knowledge-production">2 处理与候选</a>
+  <span class="hc-ued-chevron" aria-hidden="true">→</span>
+  <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review" title="案例确认">3 人工确认</a>
+  <span class="hc-ued-gate">候选不等于已审核；发布仍受原有权限与 Gate 约束</span>
+  <details class="hc-ued-more">
+    <summary>辅助工具</summary>
+    <div>
+      <a href="/p0/hardware-cases/base-data">基础数据管理</a>
+      <a href="/p0/hardware-cases/word-import">单份 Word 解析 / 诊断</a>
+      <a href="/p0/hardware-cases/e2e">R1 测试（内部）</a>
+    </div>
+  </details>
+</div>
+{% endif %}

@@ -3,15 +3,15 @@
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-m3-v1"><link rel="stylesheet" href="/p0/static/hardware_case_knowledge_consumption.css?v=wave3b-v2">{% endblock %}
-{% block breadcrumb %}正式知识消费{% endblock %}
+{% block breadcrumb %}找知识 / 已发布工程知识{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page hc-knowledge-page" data-hc-page="knowledge-consumption" data-api="{{ hardware_knowledge_api_prefix }}">
   <header class="hc-page-head">
     <div>
       <span class="hc-kicker">正式硬件知识 · 检索与复用</span>
-      <h1>正式硬件知识消费</h1>
-      <p>面向研发复用、器件风险和市场应用问题的只读正式知识检索。</p>
+      <h1>找知识 · 已发布工程知识</h1>
+      <p>按正式字段检索已发布知识；结果与原文证据需逐条核对。</p>
     </div>
     <span class="hc-status ok">正式知识 · 只读</span>
   </header>
@@ -35,10 +35,11 @@
     <div class="hc-card-head"><div><h2>检索结果</h2><p data-knowledge-summary>尚未检索</p></div><span class="hc-knowledge-contract">hardware-knowledge-consumption/v1</span></div>
     <div class="hc-knowledge-unavailable" data-knowledge-unavailable hidden>
       <div>
-        <strong>正式知识检索数据尚未生成</strong>
+        <strong data-knowledge-unavailable-title>正式知识检索数据尚未生成</strong>
         <p data-knowledge-unavailable-message>请先到知识生产工作台，对已发布案例执行“生成检索数据”。</p>
       </div>
-      <a class="hc-button primary" href="/p0/hardware-cases/knowledge-production">返回知识生产工作台</a>
+      <button type="button" class="hc-button secondary" data-knowledge-retry>重新检索</button>
+      <a class="hc-button primary" data-knowledge-production href="/p0/hardware-cases/knowledge-production">返回知识生产工作台</a>
     </div>
     <div class="hc-knowledge-results" data-knowledge-results><div class="hc-empty">请输入关键词或结构化筛选条件。</div></div>
   </section>
