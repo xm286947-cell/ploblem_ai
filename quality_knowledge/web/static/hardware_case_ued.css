@@ -58,3 +58,39 @@
 .hc-ued-file-picker>input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 .hc-ued-file-picker:focus-within .hc-button{outline:2px solid #1677c8;outline-offset:-2px}
 [data-intake-selected-files]{font-size:12px;color:#5b6e80;overflow-wrap:anywhere;flex:1 1 160px;min-width:0}
+
+/* Hardware-only shell: the old platform sidebar contained one collapsed switch
+ * but still consumed 220px. Keep every original platform link in its drawer,
+ * while giving the engineering content the full viewport width. */
+.hardware-ued-page .side-nav{
+  position:relative!important;inset:auto!important;top:auto!important;left:auto!important;bottom:auto!important;
+  width:100%!important;height:auto!important;min-height:56px;overflow:visible!important;
+  padding:9px 24px!important;display:flex!important;flex-direction:row!important;
+  align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 14px;
+  z-index:60!important
+}
+.hardware-ued-page .app-main{margin-left:0!important;width:100%!important}
+.hardware-ued-page .side-nav .brand{padding:0!important;gap:8px;min-width:0}
+.hardware-ued-page .side-nav .brand strong{font-size:15px}
+.hardware-ued-page .side-nav .brand small{font-size:11px}
+.hardware-ued-page .hc-platform-drawer{margin:0;position:relative;min-width:0}
+.hardware-ued-page .hc-platform-drawer>summary{color:#e0eaf6;border-color:#496783;white-space:nowrap}
+.hardware-ued-page .hc-platform-drawer>summary:hover,.hardware-ued-page .hc-platform-drawer>summary:focus-visible{background:#193f65;color:#fff}
+.hardware-ued-page .hc-platform-drawer[open]>.main-nav{
+  position:absolute;top:calc(100% + 9px);right:0;z-index:110;
+  width:260px;max-width:calc(100vw - 24px);max-height:min(75vh,650px);overflow-y:auto;
+  background:#0c2746;border:1px solid #365575;border-radius:9px;
+  box-shadow:0 12px 34px #0b253d4d;padding:10px
+}
+@media(max-width:980px){
+  .hardware-ued-page .side-nav{display:flex!important;padding:8px 16px!important}
+  .hardware-ued-page .side-nav .brand small{display:block!important;font-size:11px!important}
+  .hardware-ued-page .side-nav .brand strong{font-size:14px!important}
+  .hardware-ued-page .app-main{margin-left:0!important;width:100%!important}
+}
+@media(max-width:480px){
+  .hardware-ued-page .side-nav{padding:8px 12px!important;gap:5px}
+  .hardware-ued-page .side-nav .brand strong{font-size:13px!important}
+  .hardware-ued-page .side-nav .brand small{font-size:10px!important}
+  .hardware-ued-page .hc-platform-drawer>summary{font-size:11px;padding:7px}
+}
