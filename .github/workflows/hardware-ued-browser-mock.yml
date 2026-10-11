@@ -22,6 +22,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install Chinese font for faithful UI screenshots
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+          fc-list :lang=zh family | grep -q 'Noto Sans CJK'
       - name: Install isolated web test requirements
         run: |
           python -m pip install -r requirements.txt -r requirements-runtime-p0-test.txt
