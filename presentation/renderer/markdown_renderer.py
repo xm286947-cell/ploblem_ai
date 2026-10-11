@@ -212,13 +212,24 @@ class MarkdownRenderer:
         if len(cases) <= 1:
             lines.extend(["无其他候选案例。", ""])
             return
+        m84_missing = self._text(report.repeat_decision.get("recommendation_status")) in {
+            "DISABLED", "FAILED", "UNAVAILABLE"
+        }
         for case in cases[1:]:
+            candidate_decision = (
+                "未执行 M8.4（人工待确认）" if m84_missing
+                else self.DECISION_LABELS.get(
+                    self._text(case.get("decision")),
+                    self._text(case.get("decision")) or "未知",
+                )
+            )
+            confidence_label = "辅助分析置信度" if m84_missing else "判断置信度"
             lines.extend([
                 f"### {self._heading(case.get('case_id') or '未命名案例')}",
                 "",
-                f"- 候选判断：{self.DECISION_LABELS.get(self._text(case.get('decision')), self._text(case.get('decision')) or '未知')}",
+                f"- 候选判断：{candidate_decision}",
                 f"- 综合相似度：{self._score(case.get('similarity_score'))}",
-                f"- 判断置信度：{self._percent(case.get('confidence'))}",
+                f"- {confidence_label}：{self._percent(case.get('confidence'))}",
                 f"- 组织适用性：{self._display((case.get('context_applicability') or {}).get('level')) or '未知'}",
                 f"- 推荐等级：{self._display(case.get('recommendation_level')) or '未评级'}",
                 f"- 判断说明：{self._display(case.get('decision_reason')) or '未提供'}",
