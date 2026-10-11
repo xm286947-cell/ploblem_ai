@@ -231,13 +231,27 @@ class RepeatAgentAnalysisService:
 
     def _ensure_runtime(self) -> ConfiguredAgentRuntime:
         if self.runtime is None:
-            model_config = resolve_major_runtime_model_config(
+            model_config_path = resolve_major_runtime_model_config(
                 self.project_root,
                 self.model_config_path,
             )
+            model_config = yaml.safe_load(
+                model_config_path.read_text(encoding="utf-8")
+            ) or {}
+            if not isinstance(model_config, dict):
+                raise ValueError("MAJOR_MODEL_CONFIG_INVALID")
+            # This application-level opt-in shares the approved external
+            # config file with Runtime model profiles, but is not itself a
+            # provider profile. Preserve strict validation for every other
+            # field by removing only this known switch before loading Runtime.
+            model_profiles = {
+                key: value
+                for key, value in model_config.items()
+                if key != "repeat_decision_ai"
+            }
             loader = AgentConfigLoader(
                 root=self.project_root,
-                model_profiles=model_config,
+                model_profiles=model_profiles,
                 schemas={
                     "RepeatSimilarityDTO": RepeatSimilarityDTO,
                     "RepeatSolutionDTO": RepeatSolutionDTO,
