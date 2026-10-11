@@ -189,6 +189,18 @@ def device_slots(device_id: str) -> dict[str, Any]:
         review_status = _review_status(items)
         coverage_status = _coverage_status(coverage_item)
         status = _slot_status(items, coverage_item)
+        # Device Facts are family-level in this API. When an imported Product
+        # Brief provides different values by orderable part, even confirming one
+        # row does not authorize promoting that value to the entire family.
+        part_matrix_variants = [
+            item for item in items if item.get("extraction_method") == "source_table_part_number"
+        ]
+        part_scope_required = len({
+            (str(item.get("ai_value") or ""), str(item.get("ai_unit") or ""))
+            for item in part_matrix_variants
+        }) > 1
+        if part_scope_required:
+            status = "AMBIGUOUS"
         evidence = []
         if primary:
             evidence = primary.get("evidence") or [{
@@ -199,8 +211,8 @@ def device_slots(device_id: str) -> dict[str, Any]:
             }]
         evidence = _enrich_evidence(device, evidence)
         # ``value`` is the formal Device Fact surface: never expose an AI candidate here.
-        formal_value = (confirmed or {}).get("final_value") if confirmed else None
-        formal_unit = (confirmed or {}).get("final_unit") if confirmed else ""
+        formal_value = (confirmed or {}).get("final_value") if confirmed and not part_scope_required else None
+        formal_unit = (confirmed or {}).get("final_unit") if confirmed and not part_scope_required else ""
         slots.append({
             "canonical_name": key,
             "parameter_name": field.get("parameter_name") or key,
@@ -234,7 +246,7 @@ def device_slots(device_id: str) -> dict[str, Any]:
                     device["device_type"],
                     context="engineering meaning diagnostic lifetime",
                 )
-                if review_status == "CONFIRMED"
+                if review_status == "CONFIRMED" and not part_scope_required
                 else {
                     "status": "NOT_APPLICABLE",
                     "code": "DEVICE_FACT_NOT_CONFIRMED",
@@ -249,7 +261,9 @@ def device_slots(device_id: str) -> dict[str, Any]:
     coverage_known = sum(1 for x in slots if x["coverage_status"] in {"FOUND", "NOT_FOUND", "NOT_APPLICABLE"})
     facts = [
         {k: slot.get(k) for k in ("canonical_name", "parameter_name", "value", "unit", "condition", "scope", "evidence", "verified_by", "verified_at")}
-        for slot in slots if slot["review_status"] == "CONFIRMED"
+        for slot in slots
+        if slot["review_status"] == "CONFIRMED" and slot["status"] != "AMBIGUOUS"
+        and slot["value"] is not None
     ]
     return {
         "device": device,
