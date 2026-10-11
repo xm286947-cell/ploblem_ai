@@ -40,6 +40,20 @@ jobs:
             tests/test_major_repeat_report_provenance_624.py \
             tests/test_repeat_agent_capability_restore.py
           echo 'MAJOR_D01_SHARED_MODEL_MOCK_REGRESSION=PASS'
+      - name: Prepare pinned offline xlrd wheel for isolated ChatGPT container
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          mkdir -p "$RUNNER_TEMP/major-p1-wheels"
+          python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: xlrd==2.0.2 -d "$RUNNER_TEMP/major-p1-wheels"
+          sha256sum "$RUNNER_TEMP"/major-p1-wheels/*.whl
+      - name: Upload pinned offline xlrd wheel
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-p1-offline-xlrd-2-0-2-wheel
+          path: ${{ runner.temp }}/major-p1-wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserved strict runtime / no live Provider
         if: always()
         run: |
