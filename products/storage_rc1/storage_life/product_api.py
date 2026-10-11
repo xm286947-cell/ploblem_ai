@@ -265,10 +265,26 @@ def device_slots(device_id: str) -> dict[str, Any]:
         if slot["review_status"] == "CONFIRMED" and slot["status"] != "AMBIGUOUS"
         and slot["value"] is not None
     ]
+    orderable_part_candidates = []
+    if templates.normalize_device_type(device.get("device_type")) == "NAND Flash":
+        orderable_part_candidates = [
+            {
+                "id": item["id"],
+                "part_number": (
+                    item.get("final_model") if item.get("verify_status") == "confirmed"
+                    else item.get("ai_model")
+                ) or "",
+                "verify_status": item.get("verify_status") or "pending",
+                "source_page": item.get("source_page"),
+            }
+            for item in core.list_models(device_id)
+            if item.get("verify_status") != "rejected"
+        ]
     return {
         "device": device,
         "slots": slots,
         "device_facts": facts,
+        "orderable_part_candidates": orderable_part_candidates,
         "counts": counts,
         "coverage_ratio": round(coverage_known / len(slots), 4) if slots else 0,
         "workflow": core.specification_workflow_status(device_id),
@@ -342,6 +358,219 @@ def review_workbench(device_id: str) -> dict[str, Any]:
         "rows": rows_out,
         "counts": {state: sum(1 for x in rows_out if x["review_status"] == state) for state in ("UNREVIEWED", "CONFIRMED", "REJECTED", "NOT_REVIEWED")},
         "coverage_counts": {state: sum(1 for x in rows_out if x["coverage_status"] == state) for state in ("FOUND", "NOT_FOUND", "NOT_APPLICABLE", "NOT_CHECKED", "AMBIGUOUS")},
+    }
+
+
+def _part_key(value: Any) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+
+def part_number_facts(device_id: str, model_id: str) -> dict[str, Any]:
+    """Resolve one orderable part without promoting pending candidates to facts."""
+    devices = {item["id"]: item for item in core.list_devices()}
+    device = devices.get(device_id)
+    if not device:
+        raise KeyError(device_id)
+    model = next((item for item in core.list_models(device_id) if item.get("id") == model_id), None)
+    if not model or model.get("verify_status") == "rejected":
+        raise KeyError(model_id)
+    # Pending ``final_model`` values are not decisions. In historical imports this
+    # column can contain a family-level list, while ai_model is the source-bound
+    # single row currently under review.
+    part_number = str(
+        (model.get("final_model") if model.get("verify_status") == "confirmed" else model.get("ai_model"))
+        or ""
+    ).strip()
+    if not part_number:
+        raise ValueError("PART_NUMBER_IDENTITY_EMPTY")
+    if any(separator in part_number for separator in ("|", ";", "\n", "\r")):
+        raise ValueError("PART_NUMBER_IDENTITY_AMBIGUOUS")
+
+    candidates = core.list_candidates(device_id)
+    fields = parameter_baseline.product_fields(
+        device["device_type"], ai.expected_fields(device["device_type"])
+    )
+    model_confirmed = model.get("verify_status") == "confirmed"
+    out = []
+    confirmed_facts = []
+    for field in fields:
+        canonical = field["canonical_name"]
+        aliases = set(field.get("aliases") or [canonical])
+        related = [item for item in candidates if item.get("canonical_name") in aliases]
+        part_rows = [item for item in related if item.get("extraction_method") == "source_table_part_number"]
+        direct = [item for item in part_rows if _part_key(item.get("scope")) == _part_key(part_number)]
+
+        if direct:
+            applicable = direct
+        elif part_rows:
+            # A value explicitly scoped to another orderable part must never
+            # fall back into the selected part's comparison cell.
+            applicable = []
+        else:
+            applicable = []
+            for item in related:
+                scope = str(item.get("scope") or "").strip()
+                if item.get("verify_status") != "confirmed":
+                    continue
+                if not scope or core._is_common_scope(scope, device.get("model")):
+                    applicable.append(item)
+                elif _part_key(scope) == _part_key(part_number):
+                    applicable.append(item)
+                elif core._model_matches_scope(scope, model):
+                    applicable.append(item)
+
+        confirmed = [item for item in applicable if item.get("verify_status") == "confirmed"]
+        pending = [item for item in applicable if item.get("verify_status") == "pending"]
+        rejected = [item for item in applicable if item.get("verify_status") == "rejected"]
+        def effective_value(item):
+            raw = item.get("final_value") if item.get("verify_status") == "confirmed" else item.get("ai_value")
+            return str(raw or "")
+        def effective_unit(item):
+            raw = item.get("final_unit") if item.get("verify_status") == "confirmed" else item.get("ai_unit")
+            return str(raw or "")
+        reviewable_values = {
+            (effective_value(item), effective_unit(item))
+            for item in [*confirmed, *pending]
+        }
+        ambiguous = len(reviewable_values) > 1
+        chosen = None if ambiguous else (confirmed or pending or rejected or [None])[0]
+        if ambiguous:
+            status = "AMBIGUOUS"
+        elif not model_confirmed:
+            status = "PART_NUMBER_UNREVIEWED"
+        elif confirmed:
+            status = "CONFIRMED"
+        elif any(item.get("verify_status") == "pending" for item in applicable):
+            status = "UNREVIEWED"
+        elif rejected:
+            status = "REJECTED"
+        elif part_rows:
+            status = "NOT_SPECIFIED_FOR_SELECTED_PART"
+        else:
+            status = "UNKNOWN"
+
+        evidence_candidates = []
+        if chosen:
+            chosen_value = effective_value(chosen)
+            chosen_unit = effective_unit(chosen)
+            evidence_candidates = [
+                item for item in ([*confirmed, *pending] if not ambiguous else [chosen])
+                if effective_value(item) == chosen_value and effective_unit(item) == chosen_unit
+            ]
+        evidence = _enrich_evidence(
+            device,
+            [ev for item in evidence_candidates for ev in (item.get("evidence") or [])],
+        ) if evidence_candidates else []
+        formal_value = (
+            chosen.get("final_value") if model_confirmed and status == "CONFIRMED" else None
+        )
+        formal_unit = (
+            chosen.get("final_unit") if model_confirmed and status == "CONFIRMED" else ""
+        )
+        item_out = {
+            "canonical_name": canonical,
+            "parameter_name": field.get("parameter_name") or canonical,
+            "status": status,
+            "review_status": status,
+            "value": formal_value,
+            "unit": formal_unit or "",
+            "candidate_value": chosen.get("ai_value") if chosen and chosen.get("verify_status") != "rejected" else None,
+            "candidate_unit": chosen.get("ai_unit") if chosen and chosen.get("verify_status") != "rejected" else "",
+            "condition": chosen.get("condition") or "" if chosen else "",
+            "scope": chosen.get("scope") or "" if chosen else "",
+            "candidate_id": chosen.get("id") if chosen else None,
+            "candidate_ids": [item.get("id") for item in evidence_candidates if item.get("id")],
+            "evidence": evidence,
+        }
+        out.append(item_out)
+        if status == "CONFIRMED" and formal_value is not None:
+            confirmed_facts.append({key: item_out.get(key) for key in (
+                "canonical_name", "parameter_name", "value", "unit", "condition", "scope",
+                "candidate_id", "evidence"
+            )})
+
+    return {
+        "device": device,
+        "selected_part": {
+            "model_id": model["id"], "part_number": part_number,
+            "scope": model.get("scope") or "", "verify_status": model.get("verify_status") or "pending",
+            "verified_by": model.get("verified_by"), "verified_at": model.get("verified_at"),
+            "source_page": model.get("source_page"), "source_text": model.get("source_text") or "",
+        },
+        "status": "READY" if model_confirmed else "PART_NUMBER_REVIEW_REQUIRED",
+        "can_consume": model_confirmed,
+        "facts": out,
+        "confirmed_facts": confirmed_facts if model_confirmed else [],
+    }
+
+
+def compare_part_selections(selections: list[dict[str, str]]) -> dict[str, Any]:
+    if len(selections) < 2 or len(selections) > 4:
+        raise ValueError("请选择 2～4 个明确料号")
+    keys = [(str(item.get("device_id") or ""), str(item.get("model_id") or "")) for item in selections]
+    if any(not device_id or not model_id for device_id, model_id in keys):
+        raise ValueError("每个比较项都必须选择器件和具体料号")
+    if len(set(keys)) != len(keys):
+        raise ValueError("不能重复选择同一个料号")
+
+    resolved = [part_number_facts(device_id, model_id) for device_id, model_id in keys]
+    device_types = {templates.normalize_device_type(item["device"].get("device_type")) for item in resolved}
+    if device_types != {"NAND Flash"}:
+        raise ValueError("当前按料号比较仅支持 NAND Flash；不同器件类型不能混比")
+
+    selection_items = []
+    by_selection = {}
+    field_order = []
+    labels = {}
+    for index, item in enumerate(resolved):
+        selected = item["selected_part"]
+        key = f"{keys[index][0]}:{keys[index][1]}"
+        selection_items.append({
+            "selection_id": key, "device_id": keys[index][0], "model_id": keys[index][1],
+            "vendor": item["device"].get("vendor"), "product_family": item["device"].get("model"),
+            "device_type": item["device"].get("device_type"), "part_number": selected["part_number"],
+            "part_number_status": selected["verify_status"], "status": item["status"],
+        })
+        by_selection[key] = {fact["canonical_name"]: fact for fact in item["facts"]}
+        for fact in item["facts"]:
+            if fact["canonical_name"] not in field_order:
+                field_order.append(fact["canonical_name"])
+                labels[fact["canonical_name"]] = fact["parameter_name"]
+
+    rows_out = []
+    for canonical in field_order:
+        cells = {}
+        confirmed_values = set()
+        for selection in selection_items:
+            fact = by_selection[selection["selection_id"]].get(canonical)
+            if not fact:
+                fact = {"status": "UNKNOWN", "value": None, "unit": "", "evidence": []}
+            cells[selection["selection_id"]] = {
+                "status": fact.get("status") or "UNKNOWN",
+                "value": fact.get("value"), "unit": fact.get("unit") or "",
+                "candidate_value": fact.get("candidate_value"),
+                "candidate_unit": fact.get("candidate_unit") or "",
+                "condition": fact.get("condition") or "", "scope": fact.get("scope") or "",
+                "candidate_id": fact.get("candidate_id"), "evidence": fact.get("evidence") or [],
+            }
+            if fact.get("status") == "CONFIRMED" and fact.get("value") is not None:
+                confirmed_values.add((str(fact["value"]), str(fact.get("unit") or "")))
+        rows_out.append({
+            "canonical_name": canonical, "parameter_name": labels.get(canonical, canonical),
+            "cells": cells, "is_difference": len(confirmed_values) > 1,
+            "has_missing": any(cell["status"] != "CONFIRMED" for cell in cells.values()),
+        })
+    ready = (
+        all(item["status"] == "READY" for item in selection_items)
+        and all(cell["status"] not in {"UNREVIEWED", "PART_NUMBER_UNREVIEWED", "AMBIGUOUS"}
+                for row in rows_out for cell in row["cells"].values())
+    )
+    return {
+        "status": "PART_COMPARISON_READY" if ready else "PART_NUMBER_REVIEW_REQUIRED",
+        "selections": selection_items, "rows": rows_out,
+        "decision_boundary": "CONFIRMED_FACTS_ONLY_NO_AUTOMATIC_SUBSTITUTION_APPROVAL",
+        "unknowns": ["未确认的参数保持 UNKNOWN；型号差异不等于可直接替换。"],
     }
 
 def dashboard() -> dict[str, Any]:

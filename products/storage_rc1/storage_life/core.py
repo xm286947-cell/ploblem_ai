@@ -1456,8 +1456,17 @@ def family_view(device_id):
     model_items = []
     for m in models:
         model_items.append({
-            "id": m["id"], "model": m.get("final_model") or m.get("ai_model") or "",
-            "scope": m.get("scope") or "", "verify_status": m.get("verify_status") or "pending"
+            # A value in final_model is only authoritative after explicit review.
+            # Older runs may have stored a family-wide PN list there while the
+            # candidate itself is still pending; showing that as the selected
+            # orderable part would cross-bind every variant row.
+            "id": m["id"], "model": (
+                m.get("final_model") if m.get("verify_status") == "confirmed"
+                else m.get("ai_model")
+            ) or "",
+            "scope": m.get("scope") or "", "verify_status": m.get("verify_status") or "pending",
+            "source_page": m.get("source_page"), "source_text": m.get("source_text") or "",
+            "verified_by": m.get("verified_by"), "verified_at": m.get("verified_at"),
         })
     common, variants, unbound = [], [], []
     field_labels = templates.fields_for(device["device_type"])
@@ -1523,7 +1532,9 @@ def family_view(device_id):
                     cell.append({"candidate_id": c["id"], "candidate_ids": c.get("candidate_ids") or [c["id"]],
                                  "display": display, "value": c["value"], "unit": c["unit"],
                                  "condition": c["condition"], "scope": c["scope"], "inherited": False,
-                                 "reference_common": False, "verify_status": c["verify_status"]})
+                                 "reference_common": False, "verify_status": c["verify_status"],
+                                 "source_page": c.get("source_page"), "source_text": c.get("source_text") or "",
+                                 "evidence": c.get("evidence") or []})
                     values.append(display)
             elif has_common:
                 # Do not duplicate the public value into every PN column. One compact marker is enough.

@@ -23,7 +23,8 @@ def source_scoped_nand_rows(
     Never substitutes a family aggregate for a particular orderable part. Rows
     that cannot unambiguously match their page/part/layout are ignored.
     """
-    if device_type != "NAND Flash" or vendor.casefold().strip() != "kioxia":
+    vendor_key = re.sub(r"[^a-z0-9]", "", str(vendor or "").casefold())
+    if device_type != "NAND Flash" or vendor_key not in {"kioxia", "kioxiacorp", "kioxiacorporation"}:
         return []
     records: dict[tuple[str, str], dict] = {}
     for page, page_text, _method in pages:

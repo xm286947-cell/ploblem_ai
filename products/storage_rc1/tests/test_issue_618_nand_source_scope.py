@@ -79,6 +79,15 @@ def test_kioxia_rows_do_not_merge_2k_4k_across_part_numbers():
         assert item["extraction_method"] == "source_table_part_number"
 
 
+def test_canonical_kioxia_corporation_vendor_alias_keeps_source_table_adapter_enabled():
+    for vendor in ("KIOXIA", "KIOXIA Corp.", "KIOXIA Corporation"):
+        rows = part_number_matrix.source_scoped_nand_rows(
+            [(2, PAGE2, "text")], source_id="source-kioxia", vendor=vendor,
+            device_type="NAND Flash",
+        )
+        assert len(rows) == 2
+
+
 def test_part_row_without_exact_source_scope_or_with_conflicting_duplicate_fails_closed():
     body = """Part Number Capacity (bit) Page Size (bit)
 TC58NVG0S3HBAI4 1G (2048+128)x8

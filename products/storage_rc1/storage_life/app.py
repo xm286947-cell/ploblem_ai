@@ -91,6 +91,10 @@ class ProductCompareRequest(BaseModel):
     device_ids: list[str]
 
 
+class ProductPartCompareRequest(BaseModel):
+    selections: list[dict[str, str]]
+
+
 class KnowledgeReleaseBuildRequest(BaseModel):
     release_version: str
 
@@ -125,11 +129,31 @@ def product_review_workbench(device_id: str):
         raise HTTPException(404, "器件不存在")
 
 
+@app.get("/api/product/devices/{device_id}/parts/{model_id}", tags=["Storage Product MVP"])
+def product_part_facts(device_id: str, model_id: str):
+    try:
+        return product_api.part_number_facts(device_id, model_id)
+    except KeyError as exc:
+        raise HTTPException(404, "器件或料号候选不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/product/compare", tags=["Storage Product MVP"])
 def product_compare(body: ProductCompareRequest):
     try:
         return product_api.compare_devices(body.device_ids)
     except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/product/compare/parts", tags=["Storage Product MVP"])
+def product_part_compare(body: ProductPartCompareRequest):
+    try:
+        return product_api.compare_part_selections(body.selections)
+    except KeyError as exc:
+        raise HTTPException(404, "器件或料号候选不存在") from exc
+    except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
