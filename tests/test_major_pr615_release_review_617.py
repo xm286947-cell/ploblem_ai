@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import yaml
+import inspect
 
 from quality_knowledge.repeat_risk.agent_analysis import RepeatAgentAnalysisService
 from quality_knowledge.web.repeat_risk_integration import RepeatWebFacade
@@ -39,4 +38,4 @@ def test_m84_external_config_controls_optional_switch(tmp_path: Path) -> None:
 def test_repeat_facade_accepts_runtime_data_root_contract() -> None:
     # Keep this as a signature-level regression so product composition cannot
     # silently drop the writable root again.
-    assert "runtime_data_root" in RepeatWebFacade.from_project.__func__.__annotations__
+    assert "runtime_data_root" in inspect.signature(RepeatWebFacade.from_project).parameters
