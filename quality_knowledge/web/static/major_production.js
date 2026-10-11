@@ -28,6 +28,20 @@
       };
     } catch (_) { return {}; }
   }
+  const STAGE_LABELS = {
+    EVENT_SELECTION_REQUIRED: '请选择具体事件',
+    REVIEW_REQUIRED: '待人工审核',
+    READY_TO_PUBLISH: '审核完成 · 可发布',
+    INTAKED: '已导入 · 待分析',
+    PUBLISHED: '已发布'
+  };
+  const setStage = (code, extra) => {
+    const element = root.querySelector('[data-major-state]');
+    if (!element) return;
+    element.dataset.stageCode = code;
+    element.textContent = STAGE_LABELS[code] || code;
+    if (extra) element.textContent += ' · ' + extra;
+  };
   const message = root.querySelector('[data-major-message]');
   const say = (text, error) => {
     message.textContent = text;
@@ -245,7 +259,7 @@
   const recoveryPanel = document.createElement('section');
   recoveryPanel.className = 'case-card';
   recoveryPanel.innerHTML =
-    '<h2>继续上次工作</h2><p>刷新后从服务端恢复已保存的批次、案例和人工审核。' +
+    '<h2>继续上次工作（已有批次或案例）</h2><p>刷新后从服务端恢复已保存的批次、案例和人工审核。' +
     '文件选择不能由浏览器自动恢复；未上传的文件需重新选择。</p>' +
     '<form data-major-resume class="major-form">' +
     '<label>Case ID <input name="case_id" placeholder="KCASE-..."></label>' +
@@ -254,7 +268,7 @@
     '<button type="button" class="case-button secondary" data-major-recent>查看最近已保存操作</button>' +
     '<div data-major-recent-list class="major-candidates"></div>';
   recoveryPanel.appendChild(resumeStatus);
-  excelForm.closest('section').before(recoveryPanel);
+  root.querySelector('[data-major-single-source]').after(recoveryPanel);
   const resumeForm = recoveryPanel.querySelector('[data-major-resume]');
   const resumed = (message, isError) => {
     resumeStatus.textContent = message;
@@ -330,7 +344,7 @@
     const publishButton = root.querySelector('[data-major-publish]');
     publishButton.disabled = true;
     if (events.length > 1 && !selected) {
-      root.querySelector('[data-major-state]').textContent = 'EVENT_SELECTION_REQUIRED';
+      setStage('EVENT_SELECTION_REQUIRED');
       resumed('已恢复案例；请选择需要继续审核的 Event，不会自动混用其他 Event 的结果。');
       return detail;
     }
@@ -365,8 +379,7 @@
       reanalyze.disabled = pending;
       reanalyze.textContent = pending ? '已有待审核 AI 候选' : '运行 AI 分析';
     }
-    root.querySelector('[data-major-state]').textContent = pending ? 'REVIEW_REQUIRED' :
-      (fullyReviewed ? 'READY_TO_PUBLISH' : 'INTAKED');
+    setStage(pending ? 'REVIEW_REQUIRED' : (fullyReviewed ? 'READY_TO_PUBLISH' : 'INTAKED'));
     if ((detail.source_links || []).some(link => link.source_type === 'MAJOR_EXCEL_SOURCE_FACT')) {
       await showExcelProvenance(caseId);
     }
@@ -657,7 +670,7 @@
         setAnalyzeStatus('Provider 没有返回可审核候选；任务不能标记为成功。', true);
         return;
       }
-      root.querySelector('[data-major-state]').textContent = 'REVIEW_REQUIRED';
+      setStage('REVIEW_REQUIRED');
       analysisSucceeded = true;
       setAnalyzeStatus('AI 已生成 ' + data.candidates.length + ' 条候选，已从服务端恢复审核列表。');
     } catch (error) {
@@ -690,7 +703,7 @@
       const all = [...root.querySelectorAll('[data-entry]')].every(item => item.disabled);
       if (all) {
         root.querySelector('[data-major-publish]').disabled = false;
-        root.querySelector('[data-major-state]').textContent = 'READY_TO_PUBLISH';
+        setStage('READY_TO_PUBLISH');
       }
       say('已创建人工确认修订。');
     } catch (error) {
@@ -707,7 +720,7 @@
     button.textContent = '正在正式发布…';
     try {
       const data = await read(await fetch(api + '/events/' + encodeURIComponent(state.eventId) + '/publish', { method: 'POST' }));
-      root.querySelector('[data-major-state]').textContent = data.publication_status + ' · ' + data.status;
+      setStage(data.publication_status || 'PUBLISHED', data.status);
       button.textContent = '已发布';
       say('已创建正式 Historical Case：' + data.case_id + '。可在案例库检索和复用。');
     } catch (error) {
