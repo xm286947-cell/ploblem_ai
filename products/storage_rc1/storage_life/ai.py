@@ -1351,7 +1351,11 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
         evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else None
         resolved = None
         match_score = 0.0
-        if status == "found":
+        has_value = item.get("value") is not None and bool(str(item.get("value")).strip())
+        status_mismatch_candidate = status == "missing" and has_value and bool(evidence)
+        if status == "missing" and has_value and not evidence:
+            unresolved.append(key)
+        if status == "found" or status_mismatch_candidate:
             if not evidence:
                 unresolved.append(key)
             else:
@@ -1418,7 +1422,7 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
                                      "page": (resolved or {}).get("page", 0), "quote": (resolved or {}).get("quote", ""),
                                      "confidence": fact["confidence"]}
             continue
-        if key not in field_map or status != "found" or item.get("value") is None or not resolved:
+        if key not in field_map or status not in {"found", "missing"} or not has_value or not resolved:
             continue
         value = item.get("value")
         if isinstance(value, (list, dict)):
@@ -1428,10 +1432,12 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             "ai_unit": str(item.get("unit") or ""), "condition": str(item.get("condition") or "")[:300],
             "scope": _scope_text(item.get("scope_type"), item.get("scope_values"), product_family)[:600],
             "source_id": resolved["source_id"], "source_page": resolved["page"], "source_section": resolved.get("section", ""),
-            "source_text": resolved["quote"], "confidence": fact["confidence"], "extraction_method": "agent_single_pass",
+            "source_text": resolved["quote"], "confidence": fact["confidence"],
+            "extraction_method": "agent_single_pass_status_mismatch" if status == "missing" else "agent_single_pass",
             "evidence": [{"source_id": resolved["source_id"], "source_page": resolved["page"], "source_section": resolved.get("section", ""),
                           "source_text": resolved["quote"], "confidence": fact["confidence"],
-                          "extraction_method": "agent_single_pass", "scope": _scope_text(item.get("scope_type"), item.get("scope_values"), product_family)}],
+                          "extraction_method": "agent_single_pass_status_mismatch" if status == "missing" else "agent_single_pass",
+                          "scope": _scope_text(item.get("scope_type"), item.get("scope_values"), product_family)}],
         })
 
     # Deterministic representation normalization and duplicate-evidence grouping stay local.
@@ -1448,6 +1454,8 @@ def _adapt_single_pass(result, pages, device_type: str, vendor: str, product_fam
             if fact["status"] == "conflict":
                 entry["evidence"] = fact.get("resolved_conflict_evidence") or []
             review_queue.append(entry)
+        elif fact["status"] == "missing" and fact.get("value") is not None and bool(str(fact.get("value")).strip()):
+            review_queue.append({"type": "status_value_mismatch", "field_key": fact["field_key"]})
         elif fact["status"] == "missing" and fact["field_key"] in critical and fact["field_key"] in covered_fields:
             review_queue.append({"type": "critical_missing", "field_key": fact["field_key"], "source_coverage": True})
     for key in dict.fromkeys(unresolved):
