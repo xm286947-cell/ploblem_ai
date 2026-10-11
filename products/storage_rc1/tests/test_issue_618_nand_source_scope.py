@@ -111,6 +111,12 @@ def test_actual_single_pass_merge_replaces_family_values_with_scoped_pending_row
         assert state["state"] == "UNRESOLVED"
         assert state["reason"] == "part_number_variants_require_scope"
     assert adapted["part_number_matrix"]["status"] == "PENDING_PART_NUMBER_REVIEW"
+    # Family/Model UI reads the document_models table. Source-backed rows must
+    # register orderable models, not just produce candidate.scope strings.
+    discovered = {x["value"]: x for x in adapted["models"]}
+    assert set(discovered) == {"TC58NVG0S3HBAI4", "TC58NVG2S0HBAI4"}
+    assert all(x["scope"] == x["value"] and x["page"] == 2 and x["quote"]
+               for x in discovered.values())
     assert adapted["model_calls"] == 0
 
 
