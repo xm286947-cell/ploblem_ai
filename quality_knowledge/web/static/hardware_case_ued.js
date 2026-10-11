@@ -12,14 +12,4 @@
     source.addEventListener('input', update);
     update();
   }
-  const formal = document.querySelector('[data-hc-page="knowledge-consumption"]');
-  if (formal) {
-    const q = new URLSearchParams(location.search).get('q');
-    const input = formal.querySelector('[data-knowledge-text]');
-    const form = formal.querySelector('[data-knowledge-form]');
-    if (q && input && form) {
-      input.value = q;
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    }
-  }
 })();
