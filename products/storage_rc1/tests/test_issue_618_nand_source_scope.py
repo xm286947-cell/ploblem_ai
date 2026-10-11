@@ -112,3 +112,34 @@ def test_actual_single_pass_merge_replaces_family_values_with_scoped_pending_row
         assert state["reason"] == "part_number_variants_require_scope"
     assert adapted["part_number_matrix"]["status"] == "PENDING_PART_NUMBER_REVIEW"
     assert adapted["model_calls"] == 0
+
+
+def test_confirmed_part_number_values_cannot_be_exposed_as_family_device_fact(monkeypatch):
+    from storage_life import product_api
+    monkeypatch.setattr(product_api.core, "list_devices", lambda: [
+        {"id": "family", "vendor": "KIOXIA", "model": "SLC NAND", "device_type": "NAND Flash"}
+    ])
+    monkeypatch.setattr(product_api, "_coverage_states", lambda _id: {})
+    monkeypatch.setattr(product_api, "_candidate_map", lambda _id: {
+        "page_size": [
+            {"id": "a", "canonical_name": "page_size", "ai_value": "2048",
+             "final_value": "2048", "final_unit": "bytes", "ai_unit": "bytes",
+             "scope": "TC58NVG0S3HBAI4", "verify_status": "confirmed",
+             "extraction_method": "source_table_part_number", "evidence": []},
+            {"id": "b", "canonical_name": "page_size", "ai_value": "4096",
+             "final_value": "4096", "final_unit": "bytes", "ai_unit": "bytes",
+             "scope": "TC58NVG2S0HBAI4", "verify_status": "confirmed",
+             "extraction_method": "source_table_part_number", "evidence": []},
+        ]
+    })
+    monkeypatch.setattr(product_api.parameter_baseline, "product_fields", lambda *_: [
+        {"canonical_name": "page_size", "parameter_name": "Page Size"}
+    ])
+    monkeypatch.setattr(product_api, "_enrich_evidence", lambda _device, evidence: evidence)
+    monkeypatch.setattr(product_api, "_device_lifecycle", lambda _id: {})
+    monkeypatch.setattr(product_api.core, "specification_workflow_status", lambda _id: {})
+    monkeypatch.setattr(product_api.core, "get_device_conclusion", lambda _id: {})
+    result = product_api.device_slots("family")
+    assert result["slots"][0]["status"] == "AMBIGUOUS"
+    assert result["slots"][0]["value"] is None
+    assert result["device_facts"] == []
