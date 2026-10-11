@@ -1,0 +1,48 @@
+name: Major D01 shared model config P1 regression
+on:
+  push:
+    branches:
+      - fix/major-d01-shared-config-p1-gate
+  pull_request:
+    branches:
+      - fix/major-repeat-report-provenance-624
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  d01-shared-model-config:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout P1 exact branch source
+        uses: actions/checkout@v4
+        with:
+          ref: fix/major-d01-shared-config-p1-gate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Product runtime dependencies and pytest
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-major-mvp-product.txt
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+      - name: D01+M8.4 shared config, historical Agent and report regressions
+        run: |
+          python -m pytest -q \
+            tests/test_major_d01_shared_config_p1.py \
+            tests/test_major_pr615_release_review_617.py \
+            tests/test_major_repeat_report_provenance_624.py \
+            tests/test_repeat_agent_capability_restore.py
+          echo 'MAJOR_D01_SHARED_MODEL_MOCK_REGRESSION=PASS'
+      - name: Preserved strict runtime / no live Provider
+        if: always()
+        run: |
+          echo 'REAL_PROVIDER_CALLED=NO'
+          echo 'GOLDEN_XLS_PDF_HTTP_MOCK=SEPARATE_CONTAINER_EVIDENCE'
+          echo 'RELEASE_APPROVAL=HOLD'
