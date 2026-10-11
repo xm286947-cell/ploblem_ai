@@ -1,0 +1,172 @@
+name: Major Repeat report provenance 624 (macOS + Linux)
+on:
+  push:
+    branches:
+      - fix/major-repeat-report-provenance-624
+  pull_request:
+    branches:
+      - fix/major-v11-pr615-release-review-617
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  repeat-report-mock:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact P2 branch HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: fix/major-repeat-report-provenance-624
+          persist-credentials: false
+          fetch-depth: 0  # Candidate builder validates frozen 55aaf923 ancestor
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact product runtime and pytest
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-major-mvp-product.txt
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+      - name: Repeat report provenance + inherited regression
+        run: |
+          python -m pytest -q \
+            tests/test_major_repeat_report_provenance_624.py \
+            tests/test_major_pr615_release_review_617.py \
+            tests/test_repeat_agent_capability_restore.py \
+            tests/test_major_linux_repeat_report_614.py
+          echo 'REPEAT_REPORT_PROVENANCE_MOCK_GATE=PASS'
+      - name: Build exact-source immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/major624"
+          python scripts/build_major_mvp_product_candidate.py --output-dir "$RUNNER_TEMP/major624"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, subprocess, zipfile
+          root = Path(os.environ["RUNNER_TEMP"]) / "major624"
+          archives = list(root.glob("*.zip"))
+          assert len(archives) == 1, archives
+          archive = archives[0]
+          with zipfile.ZipFile(archive) as z:
+              assert z.testzip() is None
+              manifest_name = next(n for n in z.namelist() if n.endswith("/PACKAGE_MANIFEST.json"))
+              manifest = json.loads(z.read(manifest_name))
+              source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+              assert manifest["source_commit"] == source, (manifest["source_commit"], source)
+              names = set(z.namelist())
+              prefix = manifest_name.removesuffix("PACKAGE_MANIFEST.json")
+              for rel in (
+                  "quality_knowledge/repeat_risk/agent_analysis.py",
+                  "presentation/construction/report_builder.py",
+                  "presentation/renderer/markdown_renderer.py",
+                  "requirements-major-mvp-product.txt",
+                  "START_MAJOR_MVP.command",
+              ):
+                  assert prefix+rel in names, rel
+              assert b"xlrd==2.0.2" in z.read(prefix+"requirements-major-mvp-product.txt")
+          print("DUT_SOURCE_HEAD=" + source)
+          print("NEW_CANDIDATE_SHA256=" + hashlib.sha256(archive.read_bytes()).hexdigest())
+          print("FULL_PACKAGE_MANIFEST_GATE=PASS")
+          PY
+      - name: macOS Fresh Extract native launcher and real binary XLS
+        if: matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/major624/extracted"
+          ZIP="$(find "$RUNNER_TEMP/major624" -maxdepth 1 -name '*.zip' -print -quit)"
+          test -n "$ZIP"
+          ditto -x -k "$ZIP" "$RUNNER_TEMP/major624/extracted"
+          DUT="$(find "$RUNNER_TEMP/major624/extracted" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -f "$DUT/PACKAGE_MANIFEST.json"
+          test -x "$DUT/START_MAJOR_MVP.command"
+          echo "$DUT" > "$RUNNER_TEMP/major624/DUT_PATH"
+          cd "$DUT"
+          PYTHON=python3 ./START_MAJOR_MVP.command --check
+          "$DUT/.venv/bin/python" -c 'import xlrd; assert xlrd.__version__ == "2.0.2"'
+          "$DUT/.venv/bin/python" scripts/major_mvp_product_start.py --data-root "$RUNNER_TEMP/major624/isolated-data" --host 127.0.0.1 --port 18080 > "$RUNNER_TEMP/major624/macos-app.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/major624/SERVER_PID"
+          for i in $(seq 1 90); do
+            if curl --silent --fail http://127.0.0.1:18080/p0/major-production > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --silent --show-error --fail http://127.0.0.1:18080/p0/major-production > /dev/null
+          curl --silent --show-error --fail -X POST \
+            -F "group_code=MAJOR" -F "domain=QUALITY" \
+            -F "file=@$GITHUB_WORKSPACE/tests/fixtures/major_v5/cases.xls;type=application/vnd.ms-excel" \
+            http://127.0.0.1:18080/api/v2/major-production/excel/preview \
+            -o "$RUNNER_TEMP/major624/native-xls-preview.json"
+          "$DUT/.venv/bin/python" - "$RUNNER_TEMP/major624/native-xls-preview.json" <<'PY'
+          import json, sys
+          result=json.load(open(sys.argv[1], encoding="utf-8"))
+          assert result.get("batch_id") and result.get("rows"), result
+          print("MACOS_PACKAGE_REAL_BINARY_XLS_PREVIEW=PASS")
+          PY
+          echo 'MACOS_FRESH_EXTRACT_NATIVE_COMMAND_GATE=PASS'
+      - name: macOS isolated Chromium real DOM confirm and pagination
+        if: matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check playwright==1.56.0
+          python -m playwright install chromium
+          python -m pytest -q tests/e2e/test_major_linux_full_click_614.py
+          mkdir -p "$RUNNER_TEMP/major624/ui-evidence"
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          from playwright.sync_api import sync_playwright
+          dest=Path(os.environ["RUNNER_TEMP"])/"major624/ui-evidence"
+          with sync_playwright() as p:
+              b=p.chromium.launch(headless=True)
+              page=b.new_page(viewport={"width": 1440, "height": 1000})
+              for name,url in (
+                  ("major_workbench","http://127.0.0.1:18080/p0/major-production"),
+                  ("historical_cases","http://127.0.0.1:18080/p0/cases"),
+                  ("repeat_entry","http://127.0.0.1:18080/p0/issues"),
+              ):
+                  response=page.goto(url,wait_until="networkidle")
+                  assert response and response.status==200, (name,response.status if response else None)
+                  page.screenshot(path=str(dest/(name+".png")),full_page=True)
+              b.close()
+          print("MACOS_CHROMIUM_UI_SCREENSHOTS=3")
+          PY
+          echo 'MACOS_REAL_DOM_GATE=PASS'
+      - name: Stop isolated macOS product
+        if: always() && matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          if test -f "$RUNNER_TEMP/major624/SERVER_PID"; then
+            kill "$(cat "$RUNNER_TEMP/major624/SERVER_PID")" 2>/dev/null || true
+          fi
+      - name: Upload macOS UI screenshots
+        if: always() && matrix.os == 'macos-15'
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-624-macos-ui-smoke
+          path: ${{ runner.temp }}/major624/ui-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 21
+      - name: Gate separation
+        if: always()
+        run: |
+          echo 'REPEAT_REAL_PROVIDER=NOT_RUN'
+          echo 'MOCK_CANNOT_CERTIFY_MODEL_BUSINESS_PASS=YES'
+          echo 'QUALITY_SCENARIO_DOWNSTREAM=NOT_RUN'
+          echo 'WINDOWS_FIELD_GATE=NOT_RUN'
+          echo 'RELEASE_APPROVAL=HOLD'
+      - name: Upload exact candidate artifact
+        if: matrix.os == 'macos-15'
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-repeat-624-macos-source-candidate
+          path: ${{ runner.temp }}/major624/*.zip
+          if-no-files-found: warn
+          retention-days: 21

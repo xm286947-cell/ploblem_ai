@@ -36,6 +36,32 @@ class ReportBuilder:
 
         metadata = dict(result.metadata)
         metadata.update({"contract_name": self.CONTRACT_NAME, "contract_version": self.CONTRACT_VERSION})
+        m84_status = str(metadata.get("m84_recommendation_status") or "")
+        if m84_status == "DISABLED":
+            notice = (
+                "M8.4 决策 Agent 未启用；此处仅展示 M8.2/M8.3 辅助分析，"
+                "最终是否重复必须由人工判定。"
+            )
+        elif m84_status in {"FAILED", "UNAVAILABLE"}:
+            notice = (
+                "M8.4 决策 Agent 未成功完成；不得将分析置信度当作 AI 重复判定，"
+                "须由人工确认。"
+            )
+        else:
+            notice = "AI初步判断，仅用于辅助分析，最终是否重复需人工确认。"
+        provenance = (
+            {
+                "recommendation_status": m84_status,
+                "confidence_source": str(metadata.get("confidence_source") or "UNSPECIFIED"),
+                "decision_source": (
+                    "M8.4_RECOMMENDATION" if m84_status == "SUCCESS"
+                    else "NOT_EXECUTED" if m84_status == "DISABLED"
+                    else "UNAVAILABLE" if m84_status in {"FAILED", "UNAVAILABLE"}
+                    else "LEGACY_ANALYSIS"
+                ),
+            }
+            if m84_status else {}
+        )
         return Report(
             metadata=metadata,
             summary={
@@ -49,7 +75,8 @@ class ReportBuilder:
                 "decision": result.final_decision,
                 "confidence": overall_confidence,
                 "best_case": dict(result.best_case),
-                "notice": "AI初步判断，仅用于辅助分析，最终是否重复需人工确认。",
+                **provenance,
+                "notice": notice,
             },
             recommended_case=self._recommended_case(best_raw),
             comparison=comparison.to_dict(),

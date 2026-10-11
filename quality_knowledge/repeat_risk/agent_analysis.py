@@ -626,6 +626,29 @@ class RepeatAgentAnalysisService:
             similarity = candidate.get("agent_similarity") or {}
             solution = candidate.get("agent_solution") or {}
             sim_analysis = similarity.get("analysis") or {}
+            # Historical evidence is independent of the optional M8.4 Agent.
+            # Preserve source identities only, without raw document content.
+            source_evidence: list[dict[str, Any]] = []
+            for item in candidate.get("evidence") or candidate.get("evidence_refs") or []:
+                if not isinstance(item, dict):
+                    continue
+                reference = {
+                    key: deepcopy(item[key])
+                    for key in (
+                        "evidence_id", "source_version", "source_ref",
+                        "source_id", "file_name", "section", "page",
+                    )
+                    if item.get(key) not in (None, "")
+                }
+                if any(
+                    reference.get(key)
+                    for key in ("evidence_id", "source_ref", "source_id")
+                ) and reference not in source_evidence:
+                    source_evidence.append(reference)
+            evidence_chain = deepcopy(recommendation.get("evidence_chain") or [])
+            for reference in source_evidence:
+                if reference not in evidence_chain:
+                    evidence_chain.append(reference)
             confidence = (
                 recommendation.get("confidence")
                 if recommendation.get("status") == "SUCCESS"
@@ -639,9 +662,7 @@ class RepeatAgentAnalysisService:
                 or "INSUFFICIENT_EVIDENCE",
                 "confidence": float(confidence or 0.0),
                 "decision_reason": recommendation.get("decision_reason") or "",
-                "evidence_chain": deepcopy(
-                    recommendation.get("evidence_chain") or []
-                ),
+                "evidence_chain": evidence_chain,
                 "key_differences": deepcopy(
                     recommendation.get("key_differences")
                     or sim_analysis.get("key_differences")
@@ -662,10 +683,23 @@ class RepeatAgentAnalysisService:
             })
 
         best = report_candidates[0] if report_candidates else {}
+        best_input = candidates[0] if candidates else {}
+        best_recommendation = best_input.get("ai_recommendation") or {}
+        m84_status = str(best_recommendation.get("status") or "")
+        m82_confidence = (
+            (best_input.get("agent_similarity") or {}).get("analysis") or {}
+        ).get("confidence")
+        confidence_source = (
+            "M8.4_RECOMMENDATION" if m84_status == "SUCCESS"
+            else "M8.2_SIMILARITY" if m82_confidence is not None
+            else "UNSPECIFIED"
+        )
         return {
             "metadata": {
                 "query_id": query_id,
                 "decision_version": "M8.4-OPTIONAL-AI-RECOMMENDATION",
+                "m84_recommendation_status": m84_status,
+                "confidence_source": confidence_source,
             },
             "final_decision": best.get("decision") or "INSUFFICIENT_EVIDENCE",
             "overall_confidence": float(best.get("confidence") or 0.0),
