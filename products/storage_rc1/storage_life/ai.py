@@ -1507,6 +1507,7 @@ def _targeted_supplement_plan(sources, device_type: str, vendor: str, field_keys
     selected_by_source = {}
     sections = []
     searched_fields = defaultdict(set)
+    incomplete_fields = set()
     remaining = max_chars
     for source in sources:
         sid = str(source.get("source_id") or "").strip()
@@ -1549,11 +1550,23 @@ def _targeted_supplement_plan(sources, device_type: str, vendor: str, field_keys
                              "search_phase": "targeted_supplement"})
         if picked:
             selected_by_source[sid] = picked
+    from .coverage import build_search_scope
+    for source in sources:
+        sid = str(source.get("source_id") or "").strip()
+        if not sid:
+            continue
+        initially_selected = {int(page[0]) for page in _single_pass_pages(source.get("pages") or [], device_type, vendor)}
+        supplement_selected = {int(page[0]) for page in selected_by_source.get(sid, [])}
+        scope = build_search_scope(
+            source.get("pages") or [], initially_selected | supplement_selected, device_type, vendor
+        )
+        incomplete_fields.update(scope.get("incomplete_fields") or [])
     return {
         "sources": selected_by_source,
         "searched_pages": sorted({page for pages in selected_by_source.values() for page, _, _ in pages}),
         "searched_sections": sections,
         "searched_fields": {key: sorted(value) for key, value in sorted(searched_fields.items())},
+        "incomplete_fields": sorted(incomplete_fields),
     }
 
 
@@ -1588,6 +1601,7 @@ def _merge_supplement_result(base, supplement, plan, device_type: str):
         facts=merged_facts,
         searched_pages=searched_pages,
         searched_fields=searched_fields_json,
+        incomplete_fields=plan.get("incomplete_fields") or [],
         expected_fields=base.get("expected_fields") or [],
     )
     base["facts"] = merged_facts
@@ -2094,6 +2108,7 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
     searched_pages = set()
     searched_sections = []
     searched_fields = {}
+    incomplete_fields = set()
     for source in sources:
         sid = str(source.get("source_id") or "").strip()
         if sid not in prepared:
@@ -2106,6 +2121,7 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
         )
         searched_pages.update(scope["searched_pages"])
         searched_sections.extend({"source_id": sid, **item} for item in scope["searched_sections"])
+        incomplete_fields.update(scope.get("incomplete_fields") or [])
         for field, field_pages in scope["searched_fields"].items():
             searched_fields.setdefault(field, set()).update(field_pages)
     searched_fields_json = {key: sorted(value) for key, value in sorted(searched_fields.items())}
@@ -2114,6 +2130,7 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
         facts=adapted["facts"],
         searched_pages=sorted(searched_pages),
         searched_fields=searched_fields_json,
+        incomplete_fields=incomplete_fields,
         expected_fields=adapted["expected_fields"],
     )
     adapted["searched_pages"] = sorted(searched_pages)

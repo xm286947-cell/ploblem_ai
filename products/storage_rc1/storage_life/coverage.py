@@ -94,14 +94,16 @@ def build_search_scope(
     plan = templates.build_read_plan(page_list, dtype, vendor)
     sections: list[dict[str, Any]] = []
     searched_fields: dict[str, set[int]] = defaultdict(set)
+    incomplete_fields: set[str] = set()
     covered_pages = set()
     for entry in plan:
         page = int(entry.get("page") or 0)
-        if page not in selected:
-            continue
-        covered_pages.add(page)
         section = str(entry.get("section") or "unmapped")
         fields = [str(x) for x in entry.get("target_fields") or []]
+        if page not in selected:
+            incomplete_fields.update(field for field in fields if field not in IDENTITY_FIELDS)
+            continue
+        covered_pages.add(page)
         sections.append({"page": page, "section": section, "target_fields": fields})
         for field in fields:
             searched_fields[field].add(page)
@@ -133,6 +135,7 @@ def build_search_scope(
         "searched_pages": sorted(selected),
         "searched_sections": sections,
         "searched_fields": {key: sorted(value) for key, value in sorted(searched_fields.items())},
+        "incomplete_fields": sorted(incomplete_fields),
     }
 
 
@@ -159,6 +162,7 @@ def compute_coverage(
     facts: Iterable[dict[str, Any]],
     searched_pages: Iterable[int],
     searched_fields: dict[str, Iterable[int]] | None = None,
+    incomplete_fields: Iterable[str] | None = None,
     expected_fields: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Compute four-state, layered Coverage from validated facts and search scope."""
@@ -169,6 +173,7 @@ def compute_coverage(
     universe = list(dict.fromkeys([*IDENTITY_FIELDS, *all_profile_fields(), *applicable]))
     pages = {int(x) for x in searched_pages}
     searched = {str(key): {int(x) for x in values} for key, values in (searched_fields or {}).items()}
+    incomplete = {str(x) for x in (incomplete_fields or [])}
     by_key = {str(item.get("field_key") or ""): item for item in facts if isinstance(item, dict)}
 
     items: list[dict[str, Any]] = []
@@ -202,6 +207,9 @@ def compute_coverage(
             # absent. Keep it open for review rather than closing coverage.
             state = UNRESOLVED
             reason = "missing_status_has_value_or_evidence"
+        elif field in incomplete:
+            state = UNRESOLVED
+            reason = "relevant_sections_not_fully_searched"
         elif field in searched and bool(searched[field] & pages):
             state = NOT_SPECIFIED
             reason = "relevant_section_searched_without_supported_value"

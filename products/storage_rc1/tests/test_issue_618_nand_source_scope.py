@@ -22,19 +22,36 @@ Description Requirement
 Minimum number of valid blocks (NVB) 1004
 Total available blocks per die 1024
 """
+P49 = """12.5 Block Protection
+When an ERASE command is issued to a locked block, the erase failure status bit E_FAIL is set to 1.
+When a PROGRAM command is issued to a locked block, the program failure status bit P_FAIL is set to 1.
+"""
+P43 = """Table 12-2. Status Register Bit Descriptions
+ECC is enabled by default when device powered on.
+"""
+P46 = """Table 12-3. ECC Error Bits Descriptions
+The NAND Flash device has an 8-bit status register.
+No bit errors were detected during the previous read algorithm.
+"""
 
 
 def test_nand_critical_page_navigation_is_not_lost_to_56k_budget():
     pages = [(i, f"Unrelated source page {i} " + ("pad " * 1700), "markdown_pdf")
              for i in range(1, 52)]
     pages[9] = (10, P10, "markdown_pdf")
+    pages[42] = (43, P43, "markdown_pdf")
+    pages[45] = (46, P46, "markdown_pdf")
     pages[47] = (48, P48, "markdown_pdf")
+    pages[48] = (49, P49, "markdown_pdf")
     picked = ai._single_pass_pages(pages, "NAND Flash", "GigaDevice", max_chars=56000)
     picked_numbers = {page for page, _text, _method in picked}
-    assert {10, 48} <= picked_numbers
+    assert {10, 43, 46, 48, 49} <= picked_numbers
     plan = {entry["page"]: entry for entry in templates.build_read_plan(pages, "NAND Flash", "GigaDevice")}
     assert "pages_per_block" in plan[10]["target_fields"]
     assert "minimum_valid_blocks" in plan[48]["target_fields"]
+    assert {"erase_fail", "program_fail"} <= set(plan[49]["target_fields"])
+    assert "internal_ecc" in plan[43]["target_fields"]
+    assert {"ecc_status", "status_register"} <= set(plan[46]["target_fields"])
 
 
 def test_kioxia_rows_do_not_merge_2k_4k_across_part_numbers():

@@ -255,6 +255,16 @@ def build_read_plan(pages, device_type: str, vendor: str = ""):
             if ("array organization" in lower[:1200] and
                     ("each block has" in lower or "1 block =" in lower)):
                 critical.update(("pages_per_block", "page_size", "block_count"))
+            if "e_fail" in lower or "erase failure" in lower:
+                critical.add("erase_fail")
+            if "p_fail" in lower or "program failure" in lower:
+                critical.add("program_fail")
+            if "status register bit descriptions" in lower or "8-bit status register" in lower:
+                critical.add("status_register")
+            if "ecc is enabled by default" in lower:
+                critical.add("internal_ecc")
+            if "no bit errors were detected" in lower or "corrected 1-4 bits" in lower:
+                critical.add("ecc_status")
             if not critical:
                 continue
             entry = planned.setdefault(

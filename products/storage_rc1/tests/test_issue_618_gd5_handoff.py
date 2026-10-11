@@ -104,6 +104,47 @@ def test_missing_status_with_value_but_no_locator_is_reported_as_evidence_gap():
     assert {"type": "evidence_unresolved", "field_key": "pe_cycles"} in adapted["review_queue"]
 
 
+def test_unread_relevant_page_keeps_missing_field_unresolved():
+    pages = [
+        (1, "GD5F1GQ5 DATASHEET\nFEATURES", "text"),
+        (10, "ARRAY ORGANIZATION\n64 pages per block", "text"),
+    ]
+    scope = coverage.build_search_scope(pages, [1], "NAND Flash", "GigaDevice")
+    assert "pages_per_block" in scope["incomplete_fields"]
+
+    state = coverage.compute_coverage(
+        device_type="NAND Flash",
+        facts=[_missing_field("pages_per_block")],
+        searched_pages=scope["searched_pages"],
+        searched_fields=scope["searched_fields"],
+        incomplete_fields=scope["incomplete_fields"],
+        expected_fields=["pages_per_block"],
+    )
+    item = next(x for x in state["states"] if x["field_key"] == "pages_per_block")
+    assert item["state"] == coverage.UNRESOLVED
+    assert item["reason"] == "relevant_sections_not_fully_searched"
+
+
+def test_complete_relevant_search_can_close_absence():
+    pages = [
+        (1, "GD5F1GQ5 DATASHEET\nFEATURES", "text"),
+        (10, "ARRAY ORGANIZATION\nOrganization details", "text"),
+    ]
+    scope = coverage.build_search_scope(pages, [1, 10], "NAND Flash", "GigaDevice")
+    assert "pages_per_block" not in scope["incomplete_fields"]
+
+    state = coverage.compute_coverage(
+        device_type="NAND Flash",
+        facts=[_missing_field("pages_per_block")],
+        searched_pages=scope["searched_pages"],
+        searched_fields=scope["searched_fields"],
+        incomplete_fields=scope["incomplete_fields"],
+        expected_fields=["pages_per_block"],
+    )
+    item = next(x for x in state["states"] if x["field_key"] == "pages_per_block")
+    assert item["state"] == coverage.NOT_SPECIFIED
+
+
 def test_status_mismatch_candidates_are_persisted_pending_with_evidence(tmp_path, monkeypatch):
     source_text = "P/E cycles with ECC: 100K\n4bits /528byte"
     monkeypatch.setattr(core, "DATA", tmp_path)
