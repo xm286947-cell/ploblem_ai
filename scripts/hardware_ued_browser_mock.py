@@ -193,6 +193,25 @@ def main() -> int:
                     page.locator("[data-search-form] button").click(),
                     page.wait_for_url(re.compile(r"q=%E6%A8%A1%E6%8B%9F%E9%87%8F")),
                 ))
+                # Search service failures must not be presented as genuine empty knowledge.
+                page.route(
+                    re.compile(r"/api/v2/hardware-cases(?:\\?|$)"),
+                    lambda route: route.fulfill(
+                        status=503, content_type="application/json",
+                        body='{"detail":"MOCK_SEARCH_UNAVAILABLE"}'
+                    ),
+                    times=1,
+                )
+                check("检索故障不是 0 条案例", lambda: (
+                    page.locator("[data-search-form] button").click(),
+                    page.locator("[data-search-results] [data-search-retry]").wait_for(),
+                    "查询失败" in page.locator("[data-search-summary]").inner_text()
+                    or (_ for _ in ()).throw(AssertionError("failure displayed as no hits")),
+                ))
+                check("恢复后可点击重新查询", lambda: (
+                    page.locator("[data-search-retry]").click(),
+                    page.get_by_text("MCU 串口异常（MOCK ONLY）").first.wait_for(),
+                ))
                 check("实际结果→案例详情", lambda: (
                     page.locator(".hc-case-item h3 a").first.click(),
                     page.wait_for_url(re.compile(r"/p0/hardware-cases/A0152")),
