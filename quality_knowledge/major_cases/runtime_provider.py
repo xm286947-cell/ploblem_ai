@@ -9,6 +9,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from pydantic import BaseModel, Field
 
 from runtime.config import AgentConfigLoader
@@ -217,9 +219,23 @@ def build_major_d01_provider(
         root,
         model_config_path,
     )
+    # Product-level Repeat M8.4 opt-in shares the approved external YAML
+    # with D01. It is not a Runtime model profile, so remove ONLY this
+    # recognized application switch; leave every other key to the strict
+    # AgentConfigLoader validation (fail closed for unknown config).
+    model_config = yaml.safe_load(
+        resolved_model_config.read_text(encoding="utf-8")
+    ) or {}
+    if not isinstance(model_config, dict):
+        raise ConfigValidationError("Major D01 model profile configuration must be a mapping")
+    runtime_profiles = {
+        key: value
+        for key, value in model_config.items()
+        if key != "repeat_decision_ai"
+    }
     loader = AgentConfigLoader(
         root=root,
-        model_profiles=resolved_model_config,
+        model_profiles=runtime_profiles,
         schemas={"MajorD01ProviderObject": MajorD01ProviderObject},
     )
     resolved = loader.load(MAJOR_D01_AGENT_CONFIG)

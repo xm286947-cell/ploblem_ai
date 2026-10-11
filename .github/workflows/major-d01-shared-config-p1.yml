@@ -1,0 +1,101 @@
+name: Major D01 shared model config P1 regression
+on:
+  push:
+    branches:
+      - fix/major-d01-shared-config-p1-gate
+  pull_request:
+    branches:
+      - fix/major-repeat-report-provenance-624
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  d01-shared-model-config:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout P1 exact branch source
+        uses: actions/checkout@v4
+        with:
+          ref: fix/major-d01-shared-config-p1-gate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Product runtime dependencies and pytest
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-major-mvp-product.txt
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+      - name: D01+M8.4 shared config, historical Agent and report regressions
+        run: |
+          python -m pytest -q \
+            tests/test_major_d01_shared_config_p1.py \
+            tests/test_major_pr615_release_review_617.py \
+            tests/test_major_repeat_report_provenance_624.py \
+            tests/test_repeat_agent_capability_restore.py
+          echo 'MAJOR_D01_SHARED_MODEL_MOCK_REGRESSION=PASS'
+      - name: Prepare pinned offline xlrd wheel for isolated ChatGPT container
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          mkdir -p "$RUNNER_TEMP/major-p1-wheels"
+          python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: xlrd==2.0.2 -d "$RUNNER_TEMP/major-p1-wheels"
+          sha256sum "$RUNNER_TEMP"/major-p1-wheels/*.whl
+      - name: Upload pinned offline xlrd wheel
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-p1-offline-xlrd-2-0-2-wheel
+          path: ${{ runner.temp }}/major-p1-wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
+      - name: macOS source-exact cross-platform Candidate build
+        if: matrix.os == 'macos-15'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/major-p1-candidate"
+          python scripts/build_major_mvp_product_candidate.py --output-dir "$RUNNER_TEMP/major-p1-candidate"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,zipfile,subprocess
+          root=Path(os.environ["RUNNER_TEMP"])/"major-p1-candidate"
+          zip_files=list(root.glob("*.zip"))
+          assert len(zip_files)==1, zip_files
+          zippath=zip_files[0]
+          with zipfile.ZipFile(zippath) as z:
+              assert z.testzip() is None
+              manifest_name=next(n for n in z.namelist() if n.endswith("/PACKAGE_MANIFEST.json"))
+              manifest=json.loads(z.read(manifest_name))
+              current=subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()
+              assert manifest["source_commit"]==current,(manifest["source_commit"],current)
+              required=["quality_knowledge/major_cases/runtime_provider.py",
+                        "quality_knowledge/repeat_risk/agent_analysis.py",
+                        "scripts/major_mvp_product_start.py","requirements-major-mvp-product.txt"]
+              prefix=manifest_name.removesuffix("PACKAGE_MANIFEST.json")
+              for path in required:
+                  assert prefix+path in z.namelist(),path
+                  assert manifest["file_sha256"][path]==hashlib.sha256(z.read(prefix+path)).hexdigest(),path
+          print("SOURCE_HEAD="+current)
+          print("PACKAGE_SHA256="+hashlib.sha256(zippath.read_bytes()).hexdigest())
+          print("ZIP_CRC_MANIFEST_EXACT=PASS")
+          PY
+      - name: Upload precise macOS-built Candidate
+        if: matrix.os == 'macos-15'
+        uses: actions/upload-artifact@v4
+        with:
+          name: major-p1-d01-shared-config-candidate
+          path: ${{ runner.temp }}/major-p1-candidate/*.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserved strict runtime / no live Provider
+        if: always()
+        run: |
+          echo 'REAL_PROVIDER_CALLED=NO'
+          echo 'GOLDEN_XLS_PDF_HTTP_MOCK=SEPARATE_CONTAINER_EVIDENCE'
+          echo 'RELEASE_APPROVAL=HOLD'
