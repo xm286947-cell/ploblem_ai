@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 import yaml
 
-from . import core, knowledge, case_adapter, templates
+from . import core, knowledge, case_adapter, templates, part_number_matrix
 from .runtime_domain_strategy import (
     EMMC_ANALYSIS_FIELDS, EMMC_FIELD_LABELS, EMMC_FIELD_ORDER,
     EMMC_IDENTITY_FIELDS, emmc_knowledge_type,
@@ -1061,8 +1061,12 @@ def _equivalence_value(canonical: str, value: str, unit: str):
 def _group_evidence(items):
     groups = {}
     for item in items:
+        # A table row tied to one orderable Part Number cannot be deduplicated
+        # into another part's scope merely because their values happen to match.
+        part_scope = (_normalize(item.get("scope", ""))
+                      if item.get("extraction_method") == "source_table_part_number" else "")
         key = (_equivalence_value(item["canonical_name"], item["ai_value"], item["ai_unit"]),
-               _normalize(item.get("condition", "")))
+               _normalize(item.get("condition", "")), part_scope)
         groups.setdefault(key, []).append(item)
     merged = []
     for group in groups.values():
@@ -2023,6 +2027,48 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
     )
     flat_primary = prepared[primary_source_id]
     adapted = _adapt_single_pass(result, flat_primary, dtype, vendor, product_family, primary_source_id, source_pages=prepared, covered_fields=covered_fields)
+    # One value per canonical field in the Agent response cannot represent a
+    # Product Brief with different page geometries for different part numbers.
+    # The source-backed row adapter supplies per-part PENDING candidates only
+    # when the native row contains the part number, capacity, data and spare.
+    matrix_rows = []
+    for sid, src_pages in prepared.items():
+        matrix_rows.extend(part_number_matrix.source_scoped_nand_rows(
+            src_pages, source_id=sid, vendor=vendor, device_type=dtype
+        ))
+    if len(matrix_rows) >= 2:
+        scoped = part_number_matrix.scoped_candidates(matrix_rows, field_labels=labels)
+        if scoped:
+            # Drop the structurally unsafe family-wide values for these fields.
+            # This does not mutate the Provider's raw fact/status or certify a
+            # correct Device Fact; the row facts stay pending human review.
+            scoped_fields = {item["canonical_name"] for item in scoped}
+            adapted["candidates"] = [
+                item for item in adapted["candidates"]
+                if item.get("canonical_name") not in scoped_fields
+            ] + scoped
+            variants = {
+                field: sorted({
+                    (item["ai_value"], item["ai_unit"])
+                    for item in scoped if item["canonical_name"] == field
+                })
+                for field in scoped_fields
+            }
+            for fact in adapted["facts"]:
+                if fact.get("field_key") in variants and len(variants[fact["field_key"]]) > 1:
+                    fact["scope_conflict"] = True
+            adapted["part_number_matrix"] = {
+                "status": "PENDING_PART_NUMBER_REVIEW",
+                "row_count": len(matrix_rows),
+                "source_ids": sorted({item["source_id"] for item in matrix_rows}),
+                "varying_fields": sorted(k for k, values in variants.items() if len(values) > 1),
+            }
+            adapted["review_queue"].append({
+                "type": "part_number_scope_review",
+                "fields": sorted(scoped_fields),
+                "row_count": len(matrix_rows),
+            })
+            adapted["review_required"] = True
     adapted["analyzed_sources"] = {sid: [p[0] for p in src_pages] for sid, src_pages in prepared.items()}
     from .coverage import build_search_scope, compute_coverage
     searched_pages = set()
@@ -2062,6 +2108,7 @@ def extract_specification_bundle_once(sources, device_type, vendor, product_fami
         "searched_pages": adapted["searched_pages"],
         "searched_sections": adapted["searched_sections"],
         "coverage": coverage,
+        "part_number_matrix": adapted.get("part_number_matrix") or {},
     }
     adapted["model_calls"] = primary_model_calls
     adapted["secondary_extraction"] = secondary_meta or {"status": "not_required"}
