@@ -94,3 +94,7 @@
   .hardware-ued-page .side-nav .brand small{font-size:10px!important}
   .hardware-ued-page .hc-platform-drawer>summary{font-size:11px;padding:7px}
 }
+
+/* Button utility classes use display:flex; preserve true hidden state on
+ * transient formal retrieval failures instead of presenting a wrong action. */
+.hardware-ued-page [data-knowledge-production][hidden]{display:none!important}
