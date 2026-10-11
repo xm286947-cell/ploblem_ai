@@ -126,6 +126,11 @@ class TestFormalSourceAdapter(unittest.TestCase):
         got = normalize_formal_sources([record])
         self.assertEqual(["operating_condition"], got["sources"][0]["fields_without_evidence"])
 
+    def test_missing_evidence_provenance_cannot_become_fact(self):
+        record = source()
+        del record["evidence"][0]["evidence_kind"]
+        self.assert_error("INVALID_EVIDENCE_KIND", [record])
+
     def test_evidence_confidence_is_bounded(self):
         record = source()
         record["evidence"][0]["confidence"] = 1.2
