@@ -8,13 +8,13 @@
     <strong>工程知识与案例</strong>
   </div>
   <nav class="hc-ued-primary" aria-label="硬件知识库三个主入口" data-hc-ued-primary>
-    <a data-ued-primary="find" class="{% if hc_in_find %}active{% endif %}" {% if hc_in_find %}aria-current="page"{% endif %} href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">找知识</a>
-    <a data-ued-primary="assets" class="{% if hc_in_assets %}active{% endif %}" {% if hc_in_assets %}aria-current="page"{% endif %} href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">看资产</a>
+    <a data-ued-primary="find" title="案例搜索" class="{% if hc_in_find %}active{% endif %}" {% if hc_in_find %}aria-current="page"{% endif %} href="/p0/hardware-cases/search{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">找知识</a>
+    <a data-ued-primary="assets" title="双树导航" class="{% if hc_in_assets %}active{% endif %}" {% if hc_in_assets %}aria-current="page"{% endif %} href="/p0/hardware-cases/tree{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">看资产</a>
     <a data-ued-primary="maintain" class="{% if hc_in_maintain %}active{% endif %}" {% if hc_in_maintain %}aria-current="page"{% endif %} href="/p0/hardware-cases/intake">知识维护</a>
   </nav>
   <div class="hc-ued-utilities">
     <span class="hc-role-pill">{{ "维护视图" if hardware_role == "MAINTAINER" else "研发视图" }}</span>
-    <a href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}">概览</a>
+    <a href="/p0/hardware-cases{% if hardware_role == 'MAINTAINER' %}?role=maintainer{% endif %}" title="案例首页">概览</a>
   </div>
 </div>
 {% if hardware_active in ['search', 'knowledge'] %}
@@ -32,7 +32,7 @@
   <span class="hc-ued-chevron" aria-hidden="true">→</span>
   <a class="{% if hardware_active == 'knowledge-production' %}active{% endif %}" href="/p0/hardware-cases/knowledge-production">2 处理与候选</a>
   <span class="hc-ued-chevron" aria-hidden="true">→</span>
-  <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review">3 人工确认</a>
+  <a class="{% if hardware_active == 'review' %}active{% endif %}" href="/p0/hardware-cases/review" title="案例确认">3 人工确认</a>
   <span class="hc-ued-gate">候选不等于已审核；发布仍受原有权限与 Gate 约束</span>
   <details class="hc-ued-more">
     <summary>辅助工具</summary>
