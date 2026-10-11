@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Native Chromium Mock E2E against the *actual FastAPI hardware product pages*.
+
+Only the browser's /api/v2/hardware-cases and /api/hardware-query/v1/search
+requests are fulfilled from clearly marked synthetic fixtures. No provider,
+database writes, reviewer approval, or Publish endpoints are exercised.
+"""
+from __future__ import annotations
+
+import json
+import re
+import socket
+import tempfile
+import threading
+import time
+from pathlib import Path
+from urllib.parse import urlparse
+
+import uvicorn
+from playwright.sync_api import sync_playwright
+from quality_knowledge.p0.initializer import P0Initializer
+from quality_knowledge.web.p0_app import create_p0_app
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "artifacts" / "hardware_ued_browser_mock"
+CASE = {
+    "case_id": "A0152",
+    "title": "MCU 串口异常（MOCK ONLY）",
+    "case_status": "PUBLISHED",
+    "evidence_health": "AVAILABLE",
+    "product_context": {"product": "模拟产品"},
+    "facts": {
+        "symptom": {"confirmed_value": "串口通信偶发乱码（模拟）", "evidence_refs": ["EV-MOCK-001"]},
+        "root_cause": {"confirmed_value": "供电波动（模拟）", "evidence_refs": ["EV-MOCK-001"]},
+    },
+    "mapping_paths": {"CIRCUIT_FEATURE": ["接口/串口"], "MATERIAL_DEVICE": ["MCU/控制器"]},
+}
+EVIDENCE = {
+    "evidence_id": "EV-MOCK-001", "evidence_type": "WORD",
+    "evidence_status": "AVAILABLE", "source_ref": "word:MOCK_A0152.docx",
+    "excerpt_or_caption": "MCU 串口异常定位说明（模拟原文，不可当作工程事实）",
+    "locator": {"section": "模拟章节", "block_id": "mock-p1"},
+}
+CANDIDATE = {
+    "title": "模拟导入候选，不代表真实知识",
+    "facts": {"symptom": "模拟现象", "root_cause": "模拟根因", "actions": "等待人工核对"},
+    "evidence": [EVIDENCE], "mappings": [],
+}
+
+
+def app_for_isolated_data(root: Path):
+    p0_db = root / "p0.db"
+    P0Initializer(
+        manifest_path=ROOT / "quality_knowledge/config/p0_seed_manifest.json",
+        plc_seed_path=ROOT / "quality_knowledge/config/plc_fields.yaml",
+    ).initialize(p0_db)
+    return create_p0_app(
+        p0_db,
+        stage_runner=object(),
+        hardware_case_db_path=root / "hardware.db",
+        hardware_tree_upload_dir=root / "tree_uploads",
+        hardware_case_source_root=root / "sources",
+    )
+
+
+def mock_response(route, items: list[dict], calls: list[dict]):
+    request = route.request
+    parsed = urlparse(request.url)
+    path, method = parsed.path, request.method
+    calls.append({"method": method, "path": path, "query": parsed.query})
+    if path.startswith("/api/hardware-query/v1/search"):
+        payload = {"results": [], "retrieval": {"query_agent": {"status": "FAST_PATH"}}}
+    elif path.startswith("/api/v2/hardware-cases"):
+        tail = path[len("/api/v2/hardware-cases"):].strip("/")
+        if tail == "":
+            payload = {"results": [CASE] if method == "GET" else [], "retrieval": {"mode": "SQLITE_FORMAL", "query_agent": {"status": "FAST_PATH"}}}
+        elif tail == "intakes":
+            if method == "POST":
+                items[:] = [{
+                    "intake_id": "I-MOCK-001", "filename": "A9999_UED_mock.docx",
+                    "case_id": "A9999", "status": "UPLOADED", "source_ref": "MOCK_SOURCE_ONLY",
+                }]
+                payload = items[0]
+            else:
+                payload = {"items": items}
+        elif tail.endswith("/process") and method == "POST":
+            items[0]["status"] = "CANDIDATE_READY"
+            payload = items[0]
+        elif tail == "intakes/I-MOCK-001":
+            payload = {**items[0], "candidate": CANDIDATE}
+        elif tail.startswith("tree-imports/active-version"):
+            payload = {"active_version": "MOCK_TREE_VERSION"}
+        elif tail.startswith("trees/"):
+            typ = tail.split("/")[-1]
+            node = {"node_id": "N-MOCK-001", "name": "模拟接口", "description": "Mock tree node",
+                    "path": ["模拟资产", "模拟接口"], "tree_type": typ}
+            payload = {"nodes": [node]}
+        elif tail.startswith("tree-nodes/"):
+            payload = {"results": [CASE]}
+        elif tail == "A0152":
+            payload = CASE
+        elif tail == "A0152/mappings":
+            payload = {"mappings": []}
+        elif tail == "A0152/evidence":
+            payload = {"evidence": [EVIDENCE]}
+        elif tail.endswith("/source-preview"):
+            payload = {"preview_status": "AVAILABLE", "blocks": [
+                {"block_type": "PARAGRAPH", "text": "这只是一段模拟 Word 原文，未读取任何正式文件。",
+                 "matched": True, "section_path": ["Mock"], "source_locator": {"block_id": "mock-p1"}}
+            ]}
+        elif tail == "maintenance/anomalies":
+            payload = {"total": 0}
+        else:
+            payload = {"results": [], "mappings": [], "evidence": []}
+    else:
+        raise AssertionError("Unexpected mock route: " + path)
+    route.fulfill(status=200, content_type="application/json; charset=utf-8", body=json.dumps(payload, ensure_ascii=False))
+
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", type=Path, default=OUT)
+    args = parser.parse_args()
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    results, calls, errors = [], [], []
+    with tempfile.TemporaryDirectory(prefix="hardware-ued-real-pages-mock-") as tmp:
+        app = app_for_isolated_data(Path(tmp))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, access_log=False, log_level="warning"))
+        runner = threading.Thread(target=server.run, daemon=True)
+        runner.start()
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.1)
+        if not server.started:
+            raise RuntimeError("Isolated real FastAPI server failed to start")
+        try:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+                context = browser.new_context(viewport={"width": 1366, "height": 768}, device_scale_factor=1, accept_downloads=True)
+                page = context.new_page()
+                page.on("pageerror", lambda exc: errors.append(str(exc)))
+                items = []
+                page.route(re.compile(r"/api/(?:v2/hardware-cases|hardware-query/v1/search)"), lambda route: mock_response(route, items, calls))
+                base = f"http://127.0.0.1:{port}"
+                def check(label, fn):
+                    fn()
+                    results.append({"test": label, "result": "PASS"})
+
+                check("真实 FastAPI 三主入口导航", lambda: (
+                    page.goto(base + "/p0/hardware-cases/search?q=MCU"),
+                    page.locator("[data-ued-primary]").count() == 3 or (_ for _ in ()).throw(AssertionError("nav!=3")),
+                    page.get_by_role("link", name="找知识", exact=True).is_visible() or (_ for _ in ()).throw(AssertionError("find missing")),
+                ))
+                page.get_by_text("MCU 串口异常（MOCK ONLY）").first.wait_for()
+                results.append({"test": "实际案例搜索 JS + Mock API", "result": "PASS"})
+                page.screenshot(path=str(out / "01_actual_search_mock_api.png"), full_page=True)
+                check("实际结果→案例详情", lambda: (
+                    page.locator(".hc-case-item h3 a").first.click(),
+                    page.wait_for_url(re.compile(r"/p0/hardware-cases/A0152")),
+                    page.get_by_text("串口通信偶发乱码（模拟）").first.wait_for(),
+                ))
+                check("实际案例 Evidence 抽屉→Mock 来源", lambda: (
+                    page.locator("[data-evidence-id]").first.click(),
+                    page.get_by_text("这只是一段模拟 Word 原文").first.wait_for(),
+                ))
+                page.screenshot(path=str(out / "02_actual_evidence_mock_api.png"), full_page=True)
+                check("实际来源抽屉可关闭", lambda: (
+                    page.locator("[data-close-evidence]").first.click(),
+                    page.locator("[data-evidence-drawer]").wait_for(state="hidden"),
+                ))
+                check("实际双树切换", lambda: (
+                    page.goto(base + "/p0/hardware-cases/tree"),
+                    page.locator('[data-tree-type="MATERIAL_DEVICE"]').click(),
+                    page.locator('[data-tree-type="MATERIAL_DEVICE"].active').wait_for(),
+                ))
+                page.screenshot(path=str(out / "03_actual_assets_mock_api.png"), full_page=True)
+                check("实际 Word 表单→隔离 Mock Candidate", lambda: (
+                    page.goto(base + "/p0/hardware-cases/intake"),
+                    page.locator("[data-intake-files]").set_input_files({
+                        "name": "A9999_UED_mock.docx",
+                        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "buffer": b"MOCK ONLY - intercepted before backend",
+                    }),
+                    page.locator("[data-intake-upload] button").click(),
+                    page.locator('[data-process-intake="I-MOCK-001"]').wait_for(),
+                    page.locator('[data-process-intake="I-MOCK-001"]').click(),
+                    page.locator("[data-intake-detail]").wait_for(state="visible"),
+                    page.get_by_text("模拟导入候选，不代表真实知识").first.wait_for(),
+                ))
+                page.screenshot(path=str(out / "04_actual_candidate_mock_api.png"), full_page=True)
+                check("候选流转至实际审核页面", lambda: (
+                    page.locator("[data-intake-review]").click(),
+                    page.wait_for_url(re.compile(r"/p0/hardware-cases/A9999/review")),
+                    page.locator("[data-hc-page='review']").wait_for(),
+                ))
+                page.screenshot(path=str(out / "05_actual_review_mock_api.png"), full_page=True)
+                assert not any(call["path"].endswith("/publish") for call in calls), "No publish permitted"
+                mobile = context.browser.new_page(viewport={"width": 390, "height": 844})
+                mobile.route(re.compile(r"/api/(?:v2/hardware-cases|hardware-query/v1/search)"), lambda route: mock_response(route, items, calls))
+                mobile.goto(base + "/p0/hardware-cases/search?q=MCU")
+                mobile.locator("[data-ued-primary]").first.wait_for()
+                mobile.screenshot(path=str(out / "06_actual_mobile_mock_api.png"), full_page=True)
+                results.append({"test": "真实产品页面 390px 截图", "result": "PASS"})
+                browser.close()
+        finally:
+            server.should_exit = True
+            runner.join(timeout=15)
+    report = {
+        "scope": "Actual FastAPI product served on loopback, Chrome, browser-intercepted synthetic API responses",
+        "tests": results, "javascript_errors": errors, "mock_api_calls": calls,
+        "real_provider_calls": 0, "formal_data_mutations": 0, "publish_calls": 0,
+    }
+    (out / "RESULT.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if errors:
+        raise AssertionError("Browser JS page errors: " + str(errors))
+    print(json.dumps({"test_count": len(results), "result": "PASS", "screenshots": 6}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
