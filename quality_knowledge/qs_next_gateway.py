@@ -141,6 +141,8 @@ def resolve_entry(db_path: str | Path, workbench: str, material_id: str) -> dict
                 ):
                     raise EntryGateError("SOURCE_CONTEXT_MISMATCH")
                 related_domains = _explicit_cs_domains(src["raw"]) if src["material_type"] == "ITR_CS" else ["SOFTWARE"]
+                if src["material_type"] == "ESCAPE_ANALYSIS" and "SOFTWARE" not in domains:
+                    continue  # missed-test is software-only, never coverage for hardware/mechanical
                 if workbench != "cs" and related_domains and "SOFTWARE" not in related_domains:
                     continue  # not a valid formal input for this software-only entry
                 sources.append(_source_ref(src, relation=item["link_status"]))
