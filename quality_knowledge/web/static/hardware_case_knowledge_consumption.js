@@ -94,7 +94,7 @@
   function setUnavailable(message = '请先到知识生产工作台，对已发布案例执行“生成检索数据”。', { indexUnavailable = false } = {}) {
     q('[data-knowledge-unavailable]').hidden = false;
     q('[data-knowledge-unavailable-title]').textContent = indexUnavailable ? '正式知识检索数据尚未生成' : '正式知识检索暂时失败';
-    q('[data-knowledge-unavailable-production]').hidden = !indexUnavailable;
+    q('[data-knowledge-production]').hidden = !indexUnavailable;
     q('[data-knowledge-unavailable-message]').textContent = message;
     q('[data-knowledge-results]').innerHTML = '';
     q('[data-knowledge-summary]').textContent = indexUnavailable ? '检索数据尚未生成' : '请求失败，并非检索结果为零';
