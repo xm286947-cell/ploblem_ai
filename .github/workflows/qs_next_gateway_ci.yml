@@ -1,0 +1,32 @@
+name: QS Next Legacy Material Gateway
+
+on:
+  push:
+    branches:
+      - feature/qs-next-isolated-runtime-entry-gateway-20261011
+  pull_request:
+    paths:
+      - 'quality_knowledge/qs_next_gateway.py'
+      - 'tests/test_qs_next_gateway.py'
+      - '.github/workflows/qs_next_gateway_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  material-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout independent feature
+        uses: actions/checkout@v4
+      - name: Setup controlled Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install standalone HTTP test dependencies
+        run: python -m pip install 'fastapi>=0.110,<1' 'httpx>=0.27,<1'
+      - name: Compile standalone entry gateway
+        run: python -m compileall -q quality_knowledge/qs_next_gateway.py tests/test_qs_next_gateway.py
+      - name: Verify source identity, domain gates, and readonly SQLite HTTP
+        run: python -m unittest discover -s tests -p test_qs_next_gateway.py -v
