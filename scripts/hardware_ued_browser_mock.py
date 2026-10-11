@@ -165,10 +165,32 @@ def main() -> int:
                 page.get_by_text("MCU 串口异常（MOCK ONLY）").first.wait_for()
                 results.append({"test": "实际案例搜索 JS + Mock API", "result": "PASS"})
                 page.screenshot(path=str(out / "01_actual_search_mock_api.png"), full_page=True)
+                # No new search engine; the existing two read-only screens share the user's query.
+                check("搜索词从案例视图传递到正式知识视图", lambda: (
+                    page.locator("[data-hc-ued-forward-query]").click(),
+                    page.wait_for_url(re.compile(r"/p0/hardware-cases/knowledge\?q=MCU")),
+                    page.locator("[data-knowledge-text]").input_value() == "MCU"
+                    or (_ for _ in ()).throw(AssertionError("formal query not retained")),
+                ))
+                check("正式知识回案例视图保留检索词", lambda: (
+                    page.locator("[data-hc-ued-back-query]").click(),
+                    page.wait_for_url(re.compile(r"/p0/hardware-cases/search\?q=MCU")),
+                    page.locator("[data-search-query]").input_value() == "MCU"
+                    or (_ for _ in ()).throw(AssertionError("case query not retained")),
+                ))
+                check("手动更改搜索词会同步 URL", lambda: (
+                    page.locator("[data-search-query]").fill("模拟量"),
+                    page.locator("[data-search-form] button").click(),
+                    page.wait_for_url(re.compile(r"q=%E6%A8%A1%E6%8B%9F%E9%87%8F")),
+                ))
                 check("实际结果→案例详情", lambda: (
                     page.locator(".hc-case-item h3 a").first.click(),
                     page.wait_for_url(re.compile(r"/p0/hardware-cases/A0152")),
                     page.get_by_text("串口通信偶发乱码（模拟）").first.wait_for(),
+                ))
+                check("详情返回链接保留搜索词", lambda: (
+                    "q=%E6%A8%A1%E6%8B%9F%E9%87%8F" in page.locator("[data-hc-ued-return-results]").get_attribute("href")
+                    or (_ for _ in ()).throw(AssertionError("return link lost query")),
                 ))
                 check("实际案例 Evidence 抽屉→Mock 来源", lambda: (
                     page.locator("[data-evidence-id]").first.click(),
