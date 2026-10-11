@@ -9,7 +9,7 @@
 <main class="hc-page" data-hc-page="home" data-api="{{ hardware_api_prefix }}" data-role="{{ hardware_role }}">
   <section class="hc-hero">
     <div>
-      <span class="hc-kicker">工程知识库 · 首页</span>
+      <span class="hc-kicker" data-legacy-view="HARDWARE CASE · P01">工程知识库 · 首页</span>
       <h1>从工程问题找到可追溯的经验</h1>
       <p>描述工程问题，查看历史案例、原因与措施，必要时追溯 Word 原始证据。</p>
     </div>
@@ -48,6 +48,7 @@
     <div><span>Evidence 异常</span><strong data-evidence-anomaly>—</strong></div>
     <a href="/p0/hardware-cases/review">进入案例确认 →</a>
   </section>
+  <details class="hc-card" style="padding:12px 16px"><summary>高级维护工具</summary><p><a href="/p0/hardware-cases/base-data">基础数据管理</a>（保留原有 URL、版本与 Apply 规则）</p></details>
   {% endif %}
 
   <section class="hc-card">
