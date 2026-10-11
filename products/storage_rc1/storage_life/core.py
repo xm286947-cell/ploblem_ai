@@ -1098,14 +1098,31 @@ def specification_workflow_status(device_id, specs=None):
         if field and field not in pending_key:
             pending_key.append(field)
 
+    # A multi-part Product Brief can contain incompatible geometries under
+    # the same canonical field. Even if all rows are reviewed, the FAMILY is
+    # not an engineering-selectable Device until an orderable part is chosen.
+    # The current lifecycle has no selected-part key, so fail closed here.
+    scoped_values = {}
+    for spec in items:
+        if any(
+            isinstance(ev, dict) and ev.get("extraction_method") == "source_table_part_number"
+            for ev in (spec.get("evidence") or [])
+        ):
+            scoped_values.setdefault(str(spec.get("canonical_name") or ""), set()).add(
+                (str(spec.get("value") or ""), str(spec.get("unit") or ""))
+            )
+    scope_selection_required = sorted(
+        key for key, values in scoped_values.items() if key and len(values) > 1
+    )
     extraction = get_extraction_run(device_id)
     final_review = get_final_review(device_id)
     gate_required = bool(extraction and extraction.get("review_required"))
     gate_resolved = not gate_required or bool(final_review and final_review.get("overall_status") == "ready_for_human_review")
     review_attention = gate_required and not gate_resolved
-    formal_ready = bool(items) and not review_attention and not missing_critical and not pending_key
+    formal_ready = (bool(items) and not review_attention and not missing_critical
+                    and not pending_key and not scope_selection_required)
 
-    if review_attention:
+    if review_attention or scope_selection_required:
         status = "attention_required"
     elif formal_ready:
         status = "confirmed"
@@ -1126,6 +1143,7 @@ def specification_workflow_status(device_id, specs=None):
         "missing_critical_fields": [label(f) for f in missing_critical],
         "pending_critical_fields": [label(f) for f in pending_critical],
         "pending_key_fields": [label(f) for f in pending_key],
+        "part_number_scope_required_fields": [label(f) for f in scope_selection_required],
         "review_gate_required": gate_required,
         "review_gate_resolved": gate_resolved,
         "final_review_status": (final_review or {}).get("overall_status", "not_run"),
