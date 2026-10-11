@@ -253,7 +253,22 @@ def test_real_kioxia_pdf_source_replay_reaches_pending_candidate_review(monkeypa
         {"device_id": imported["device_id"], "model_id": model_ids_by_pn[PART_B]},
     ]})
     assert compare.status_code == 200
-    assert compare.json()["status"] == "PART_NUMBER_REVIEW_REQUIRED"
+    compared = compare.json()
+    assert compared["status"] == "PART_NUMBER_REVIEW_REQUIRED"
+    page_row = next(item for item in compared["rows"] if item["canonical_name"] == "page_size")
+    capacity_row = next(item for item in compared["rows"] if item["canonical_name"] == "capacity")
+    by_part = {item["part_number"]: item for item in compared["selections"]}
+    for part, page_bytes, capacity_gbit in ((PART_A, "2048", "1"), (PART_B, "4096", "4")):
+        selection_id = by_part[part]["selection_id"]
+        page_cell = page_row["cells"][selection_id]
+        capacity_cell = capacity_row["cells"][selection_id]
+        assert page_cell["status"] == "PART_NUMBER_UNREVIEWED"
+        assert page_cell["candidate_value"] == page_bytes
+        assert page_cell["scope"] == part
+        assert page_cell["evidence"]
+        assert part in page_cell["evidence"][0]["source_text"]
+        assert capacity_cell["candidate_value"] == capacity_gbit
+        assert capacity_cell["scope"] == part
     assert imported["model_calls"] == 0
 
 
@@ -334,6 +349,7 @@ def test_real_gd5_pdf_replay_persists_pe_ecc_and_nvb_with_original_pages(monkeyp
     for key, (_value, _unit, _condition, page, quote) in facts.items():
         review_key = "ecc_requirement" if key == "ecc_capability" else key
         assert review_rows[review_key]["review_status"] == "UNREVIEWED"
+        assert review_rows[review_key]["ai_value"] == _value
         assert review_rows[review_key]["evidence"][0]["source_page"] == page
         assert quote in review_rows[review_key]["evidence"][0]["source_text"]
     assert review_rows["ecc_observability"]["review_status"] == "NOT_REVIEWED"
