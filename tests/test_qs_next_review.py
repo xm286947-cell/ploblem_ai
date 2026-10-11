@@ -141,6 +141,8 @@ class TestStage5Review(unittest.TestCase):
         self.assertEqual([],patched.json()["unresolved_conflicts"])
         self.assertEqual("HUMAN_CONFIRMED",
                          patched.json()["human_edits"]["validation_direction"]["provenance"])
+        self.assertEqual("现场确认采用双场景验证",
+                         patched.json()["five_dimensions"]["quality_and_validation"]["validation_direction"])
         final=self.decide(c,rid,3)
         self.assertEqual(200,final.status_code,final.text)
         self.assertEqual("CONFIRMED",final.json()["status"])
@@ -236,6 +238,13 @@ class TestStage5Review(unittest.TestCase):
         self.assertEqual("UNKNOWN_REVIEW_FIELD",r.json()["detail"])
         r=self.revise(c,rid,1,{"user_type":"假冒"},reason="")
         self.assertEqual(400,r.status_code)
+
+    def test_human_edits_cannot_cross_problem_domain(self):
+        c=self.client()
+        rid=self.start(c,"cs","CS-M").json()["review_id"]
+        invalid=self.revise(c,rid,1,{"software_failure_mode":"不可覆盖机械问题"})
+        self.assertEqual(400,invalid.status_code)
+        self.assertEqual("REVIEW_FIELD_DOMAIN_MISMATCH",invalid.json()["detail"])
 
     def test_software_assessment_does_not_store_kpi_as_fact(self):
         c=self.client()
