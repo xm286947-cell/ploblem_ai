@@ -249,6 +249,14 @@ def main() -> int:
                     page.locator("[data-intake-detail]").wait_for(state="visible"),
                     page.get_by_text("模拟导入候选，不代表真实知识").first.wait_for(),
                 ))
+                check("维护页中文候选状态与事实字段", lambda: (
+                    "已生成候选" in page.locator("[data-intake-case-id]").inner_text()
+                    or (_ for _ in ()).throw(AssertionError("raw candidate status exposed")),
+                    page.locator("[data-intake-facts]").get_by_text("问题现象").wait_for(),
+                    page.locator("[data-intake-facts]").get_by_text("根因").wait_for(),
+                    page.locator("[data-intake-facts]").get_by_text("处置措施").wait_for(),
+                    page.get_by_text("选择 Word 文件").first.wait_for(),
+                ))
                 page.screenshot(path=str(out / "04_actual_candidate_mock_api.png"), full_page=True)
                 check("候选流转至实际审核页面", lambda: (
                     page.locator("[data-intake-review]").click(),
