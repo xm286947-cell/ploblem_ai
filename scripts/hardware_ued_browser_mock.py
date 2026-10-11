@@ -115,8 +115,18 @@ def mock_response(route, items: list[dict], calls: list[dict]):
             ]}
         elif tail == "maintenance/anomalies":
             payload = {"total": 0}
+        elif tail == "A9999":
+            payload = {"case_id": "A9999", "title": CANDIDATE["title"],
+                       "case_status": "CANDIDATE", "evidence_health": "AVAILABLE",
+                       "facts": CANDIDATE["facts"], "product_context": {}}
+        elif tail == "A9999/mappings":
+            payload = {"mappings": []}
+        elif tail == "A9999/evidence":
+            payload = {"evidence": [EVIDENCE]}
+        elif tail == "A9999/publish-gate":
+            payload = {"allowed": False, "can_publish": False, "blocking_reasons": ["MOCK_ONLY"]}
         else:
-            payload = {"results": [], "mappings": [], "evidence": []}
+            raise AssertionError("Unregistered Mock endpoint: " + method + " " + path)
     else:
         raise AssertionError("Unexpected mock route: " + path)
     route.fulfill(status=200, content_type="application/json; charset=utf-8", body=json.dumps(payload, ensure_ascii=False))
@@ -232,6 +242,10 @@ def main() -> int:
                 mobile.route(re.compile(r"/api/(?:v2/hardware-cases|hardware-query/v1/search)"), lambda route: mock_response(route, items, calls))
                 mobile.goto(base + "/p0/hardware-cases/search?q=MCU")
                 mobile.locator("[data-ued-primary]").first.wait_for()
+                check("390px 原生页面不横向溢出", lambda: (
+                    mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                    or (_ for _ in ()).throw(AssertionError("390px horizontal overflow")),
+                ))
                 mobile.screenshot(path=str(out / "06_actual_mobile_mock_api.png"), full_page=True)
                 results.append({"test": "真实产品页面 390px 截图", "result": "PASS"})
                 browser.close()
