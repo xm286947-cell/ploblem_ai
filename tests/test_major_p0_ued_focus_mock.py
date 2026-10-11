@@ -92,7 +92,7 @@ def test_localized_stages_and_recovery_without_api_changes():
         "REVIEW_REQUIRED: '待人工审核'",
         "READY_TO_PUBLISH: '审核完成 · 可发布'",
         "INTAKED: '已导入 · 待分析'",
-        "setStage('READY_TO_PUBLISH');",
+        "await restoreCase(state.caseId, state.eventId);",
         "root.querySelector('[data-major-single-source]').after(recoveryPanel);",
     ]:
         assert token in script
@@ -101,3 +101,8 @@ def test_localized_stages_and_recovery_without_api_changes():
     assert "renderPagedRows(" in script
     assert "'/excel/confirm'" in script
     assert "'/cases/'" in script
+    # Review completion is checked against persisted Case/Event records.
+    assert "publishButton.disabled = true;" in script
+    assert "无法复核服务端四项完整状态" in script
+    assert "发布结果未核实" in script
+    assert "避免重复发布" in script
