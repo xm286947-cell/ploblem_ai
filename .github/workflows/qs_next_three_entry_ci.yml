@@ -1,0 +1,30 @@
+name: QS Next Three Entry Domain Contract
+
+on:
+  push:
+    branches:
+      - feature/qs-next-three-entry-domain-contract-20261011
+  pull_request:
+    paths:
+      - 'quality_knowledge/qs_next_entry_routing.py'
+      - 'tests/test_qs_next_entry_routing.py'
+      - '.github/workflows/qs_next_three_entry_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  three-entry-domain-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout independent feature branch
+        uses: actions/checkout@v4
+      - name: Controlled Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile standalone contract and tests
+        run: python -m compileall -q quality_knowledge/qs_next_entry_routing.py tests/test_qs_next_entry_routing.py
+      - name: Test CS / missed-test / assessment entry and domain matrix
+        run: python -m unittest discover -s tests -p test_qs_next_entry_routing.py -v
