@@ -49,10 +49,11 @@ class TestLegacyMaterialReadGateway(unittest.TestCase):
         self.insert("AS-ONLY", "SOFTWARE_OPERATION", "ITR-ONLY", {})
         self.insert("MT-WRONG", "ESCAPE_ANALYSIS", "ITR-WRONG", {"问题领域": "机械"})
         self.insert("AS-HW", "SOFTWARE_OPERATION", "ITR-HW", {})
+        self.insert("MT-HW", "ESCAPE_ANALYSIS", "ITR-HW", {"问题领域": "软件"})
         self.insert("CS-OLD", "ITR_CS", "ITR-REV", {"问题领域": "软件"}, business_key="REV-1", version=1)
         self.insert("CS-NEW", "ITR_CS", "ITR-REV", {"问题领域": "软件"}, business_key="REV-1", version=2)
         for mid, ref in (("CS-SW","K-SW"),("MT-SW","K-SW"),("AS-SW","K-SW"),
-                         ("CS-HW","K-HW"),("AS-HW","K-HW")):
+                         ("CS-HW","K-HW"),("AS-HW","K-HW"),("MT-HW","K-HW")):
             conn.execute("INSERT INTO issue_material_link VALUES(?,?,?,?)",
                          ("LNK-"+mid, ref, mid, "LINKED"))
         conn.commit()
@@ -118,6 +119,14 @@ class TestLegacyMaterialReadGateway(unittest.TestCase):
         r=self.get("software-assessment","AS-HW")
         self.assertEqual(200,r.status_code)
         self.assertEqual("FORMAL_SOURCE_REQUIRED",r.json()["status"])
+
+    def test_software_missed_test_cannot_cover_hardware_only_cs(self):
+        r=self.get("cs","CS-HW")
+        self.assertEqual(200,r.status_code)
+        self.assertEqual("PARTIAL",r.json()["source_coverage"])
+        self.assertEqual(["THOROUGH_SOLUTION_ORDER"],
+                         [s["formal_source_type"] for s in r.json()["formal_source_reads"]])
+        self.assertEqual("HARDWARE",r.json()["domains"][0])
 
     def test_missed_test_rejects_hardware_mechanical(self):
         r=self.get("missed-test","MT-WRONG")
