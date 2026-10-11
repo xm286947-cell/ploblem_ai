@@ -195,7 +195,7 @@ def main() -> int:
                 ))
                 # Search service failures must not be presented as genuine empty knowledge.
                 page.route(
-                    re.compile(r"/api/v2/hardware-cases(?:\\?|$)"),
+                    re.compile(r"/api/v2/hardware-cases(?:\?|$)"),
                     lambda route: route.fulfill(
                         status=503, content_type="application/json",
                         body='{"detail":"MOCK_SEARCH_UNAVAILABLE"}'
