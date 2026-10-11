@@ -394,7 +394,13 @@ def test_agent_analysis_is_additive_keeps_retrieval_rank_and_delivers_report(
     report = json.loads(report_json.read_text(encoding="utf-8"))
     assert report["metadata"]["source_artifact"] == "repeat-result/v1:RQ-1"
     assert report["traceability"]["source_artifact"] == "repeat-result/v1:RQ-1"
-    assert "AI初步判断" in report["repeat_decision"]["notice"]
+    # #624 intentionally fixes the old misleading presentation expectation:
+    # M8.4 was disabled above, so this cannot be labelled an AI decision.
+    # Historical Golden inputs/Expected fixtures are not modified.
+    assert "M8.4 决策 Agent 未启用" in report["repeat_decision"]["notice"]
+    assert report["repeat_decision"]["decision_source"] == "NOT_EXECUTED"
+    assert report["repeat_decision"]["confidence_source"] == "M8.2_SIMILARITY"
+    assert "AI初步判断" not in report["repeat_decision"]["notice"]
 
 
 def test_typed_semantic_and_exact_evidence_are_agent_inputs(
