@@ -68,9 +68,9 @@ def test_runtime_bridge_exposes_exact_storage_agent_config_paths():
     assert 'Runtime import source 不匹配' in text
 
 
-def test_default_real_provider_is_internal_openai_compatible():
+def test_example_real_provider_is_internal_openai_compatible():
     root = Path(__file__).resolve().parents[1]
-    text = (root / "config" / "model.local.yaml").read_text(encoding="utf-8")
+    text = (root / "config" / "model.windows.real.yaml").read_text(encoding="utf-8")
     assert "base_url: http://127.0.0.1:8000/v1" in text
 
 

@@ -69,7 +69,7 @@ jobs:
           test -x "$PKG/run_server_test.sh"
           test -x "$PKG/selfcheck.sh"
           test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
-          test "$(tr -d '\r\n ' < "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          test "$(tr -d '\r\n ' < "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
           echo "MACOS_LAUNCHER_EXECUTABLE=PASS"
           echo "RUNTIME_VENDOR_MARKER=PASS"
 

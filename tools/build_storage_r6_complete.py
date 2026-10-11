@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "products" / "storage_rc1"
 DIST = ROOT / "dist"
 PACKAGE_ROOT_NAME = "STORAGE_PRODUCT_MVP_RC1"
-RUNTIME_EXPECTED_COMMIT = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+RUNTIME_EXPECTED_COMMIT = "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
 
 
 def sha256(path: Path) -> str:
@@ -38,17 +38,34 @@ def source_commit() -> str:
     ).strip()
 
 
-def copy_tree(source: Path, target: Path) -> None:
+def base_commit() -> str:
+    configured = os.environ.get("STORAGE_BASE_COMMIT", "").strip()
+    if configured:
+        return configured
+    try:
+        return subprocess.check_output(
+            ["git", "merge-base", "HEAD", "origin/main"], cwd=ROOT, text=True
+        ).strip()
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit("PACKAGE_BASE_COMMIT_UNRESOLVED: set STORAGE_BASE_COMMIT explicitly") from exc
+
+
+def copy_tree(source: Path, target: Path, *, exclude_local_state: bool = False) -> None:
     if not source.exists():
         raise SystemExit(f"missing package dependency: {source}")
     if target.exists():
         shutil.rmtree(target)
+    ignored = ["__pycache__", "*.pyc", ".pytest_cache", ".DS_Store"]
+    if exclude_local_state:
+        # Real test databases and machine-local credentials/configuration are
+        # external runtime state; never copy them into a distributable package.
+        ignored.extend(
+            ["*.sqlite", "*.sqlite3", "*.db", "*.env", "model.local.yaml", "knowledge_service.local.json"]
+        )
     shutil.copytree(
         source,
         target,
-        ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc", ".pytest_cache", ".DS_Store"
-        ),
+        ignore=shutil.ignore_patterns(*ignored),
     )
 
 
@@ -66,6 +83,9 @@ def runtime_vendor_closure_gate(runtime_root: Path) -> None:
         "config/runtime/model.yaml",
         "tools/openai_mock/server.py",
         "runtime/__init__.py",
+        "runtime/observation.py",
+        "runtime/store/observation.py",
+        "runtime/adapters/observation.py",
         "runtime/providers/openai_compatible.py",
     ]
     missing = [rel for rel in required if not (runtime_root / rel).is_file()]
@@ -141,13 +161,20 @@ def build() -> tuple[Path, Path, Path]:
     if work.exists():
         shutil.rmtree(work)
     package_root = work / PACKAGE_ROOT_NAME
-    copy_tree(PRODUCT, package_root)
+    copy_tree(PRODUCT, package_root, exclude_local_state=True)
 
     # Unified Knowledge Production is packaged as the shared capability, not copied
     # into Storage domain code. Storage only adds the product bridge/consumer.
     copy_tree(ROOT / "knowledge_production", package_root / "knowledge_production")
     copy_tree(ROOT / "repositories", package_root / "repositories")
     copy_tree(ROOT / "parser", package_root / "parser")
+    copy_tree(ROOT / "services", package_root / "services")
+    copy_tree(ROOT / "quality_knowledge", package_root / "quality_knowledge")
+    copy_tree(ROOT / "builder", package_root / "builder")
+    copy_tree(ROOT / "models", package_root / "models")
+    copy_tree(ROOT / "common", package_root / "common")
+    copy_tree(ROOT / "compatibility", package_root / "compatibility")
+    copy_tree(ROOT / "contracts", package_root / "contracts")
 
     # Preserve the existing launcher contract and provenance: the bundled Runtime
     # must be the exact pinned public Runtime snapshot, not the current assembly HEAD.
@@ -157,7 +184,7 @@ def build() -> tuple[Path, Path, Path]:
         shutil.rmtree(runtime_source)
     subprocess.run(
         [
-            "git", "archive", "--format=tar",
+            "git", "-c", "http.proxy=", "-c", "https.proxy=", "archive", "--format=tar",
             f"--prefix={runtime_source.name}/",
             RUNTIME_EXPECTED_COMMIT,
             "runtime",
@@ -214,15 +241,15 @@ def build() -> tuple[Path, Path, Path]:
         "package_id": package_id,
         "package_type": "PRODUCT_TEST_CANDIDATE",
         "product": "Storage RC1",
-        "assembly": "Golden A + Golden B + Golden C",
+        "assembly": "GD5 NAND A13 role knowledge-consumption validation",
         "source_commit": commit,
-        "base_commit": "cb4e7e3d0e245d56ed507f54d86110f1322884f7",
+        "base_commit": base_commit(),
         "runtime_expected_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_snapshot_commit": RUNTIME_EXPECTED_COMMIT,
         "runtime_provenance_source": "RUNTIME_COMMIT",
         "runtime_vendor_closure": "PASS",
-        "supersedes": "STORAGE-RC1-R6-COMPLETE-TEST-CANDIDATE-20260925",
-        "supersede_reason": "RUNTIME_VENDOR_CLOSURE_AND_PROVENANCE_DEFECT",
+        "supersedes": None,
+        "supersede_reason": None,
         "knowledge_release_version": release.get("knowledge_release_version"),
         "knowledge_snapshot_hash": release.get("snapshot_hash"),
         "knowledge_product_packaged": True,

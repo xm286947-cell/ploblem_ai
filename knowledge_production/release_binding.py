@@ -69,3 +69,8 @@ def validate_release_binding(
         raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", "query contract")
     if release_manifest.get("object_contract_version") != REQUIRED_BINDING["knowledge_object_contract_version"]:
         raise ReleaseBindingError("RELEASE_VERSION_MISMATCH", "object contract")
+    pinned_snapshot = binding.get("knowledge_release_snapshot_hash")
+    if pinned_snapshot is not None:
+        actual_snapshot = str(release_manifest.get("snapshot_hash") or "")
+        if not isinstance(pinned_snapshot, str) or pinned_snapshot != actual_snapshot:
+            raise ReleaseBindingError("RELEASE_SNAPSHOT_HASH_MISMATCH")

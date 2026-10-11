@@ -73,7 +73,7 @@ jobs:
           unzip -q dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip -d /tmp/storage-r6-fe01
           PKG=/tmp/storage-r6-fe01/STORAGE_PRODUCT_MVP_RC1
           test -f "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT"
-          test "$(cat "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          test "$(cat "$PKG/vendor/unified_agent_runtime/RUNTIME_COMMIT")" = "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
           test -f "$PKG/vendor/unified_agent_runtime/requirements-runtime-p0-test.txt"
           test -f "$PKG/vendor/unified_agent_runtime/config/runtime/model.yaml"
           test -f "$PKG/vendor/unified_agent_runtime/tools/openai_mock/server.py"
@@ -127,7 +127,7 @@ jobs:
           git add PARENT.txt
           git commit -qm "fake parent head"
           PARENT_HEAD=$(git rev-parse HEAD)
-          test "$PARENT_HEAD" != "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          test "$PARENT_HEAD" != "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
           mkdir package
           unzip -q "$GITHUB_WORKSPACE/dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip" -d package
           PKG=/tmp/fake-parent/package/STORAGE_PRODUCT_MVP_RC1
@@ -135,8 +135,8 @@ jobs:
           export PYTHONPATH="$PKG:$PKG/vendor/unified_agent_runtime"
           cd "$PKG"
           python scripts/preflight.py --runtime-root "$UNIFIED_AGENT_RUNTIME_ROOT" --mode mock | tee /tmp/fe02.log
-          grep -F "EXPECTED_RUNTIME=f9ca45f82960b3ce380273cf26868bc842a72b7f" /tmp/fe02.log
-          grep -F "ACTUAL_RUNTIME=f9ca45f82960b3ce380273cf26868bc842a72b7f" /tmp/fe02.log
+          grep -F "EXPECTED_RUNTIME=de8bbd6de1513b9bdceb9a0336b163d5595244cb" /tmp/fe02.log
+          grep -F "ACTUAL_RUNTIME=de8bbd6de1513b9bdceb9a0336b163d5595244cb" /tmp/fe02.log
           grep -F "PROVENANCE_SOURCE=RUNTIME_COMMIT" /tmp/fe02.log
           grep -F "PARENT_GIT_HEAD_IGNORED=YES" /tmp/fe02.log
           ! grep -F "$PARENT_HEAD" /tmp/fe02.log
@@ -165,7 +165,7 @@ jobs:
           z=Path("dist/STORAGE_PRODUCT_MVP_RC1_R6_COMPLETE_TEST_CANDIDATE_R1_20260925.zip")
           with zipfile.ZipFile(z) as f:
               m=json.loads(f.read("STORAGE_PRODUCT_MVP_RC1/PACKAGE_MANIFEST.json"))
-          assert m["runtime_expected_commit"] == "f9ca45f82960b3ce380273cf26868bc842a72b7f"
+          assert m["runtime_expected_commit"] == "de8bbd6de1513b9bdceb9a0336b163d5595244cb"
           assert m["runtime_snapshot_commit"] == m["runtime_expected_commit"]
           assert m["runtime_provenance_source"] == "RUNTIME_COMMIT"
           assert m["runtime_vendor_closure"] == "PASS"

@@ -187,6 +187,16 @@ def compute_coverage(
         elif str(fact.get("status") or "").lower() in {"ambiguous", "conflict"}:
             state = UNRESOLVED
             reason = "ambiguous_or_conflict"
+        elif str(fact.get("status") or "").lower() == "missing" and (
+            fact.get("value") is not None and bool(str(fact.get("value")).strip())
+            or fact.get("declared_evidence")
+            or fact.get("resolved_evidence")
+            or fact.get("evidence")
+        ):
+            # Contradictory extraction handoff is not proof that a field is
+            # absent. Keep it open for review rather than closing coverage.
+            state = UNRESOLVED
+            reason = "missing_status_has_value_or_evidence"
         elif field in searched and bool(searched[field] & pages):
             state = NOT_SPECIFIED
             reason = "relevant_section_searched_without_supported_value"

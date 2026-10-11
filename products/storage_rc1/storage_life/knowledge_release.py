@@ -26,13 +26,13 @@ def _root() -> Path:
 
 
 def _binding_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[3]
-        / "contracts"
-        / "release_binding"
-        / "v1"
-        / "release_binding.json"
-    )
+    module_path = Path(__file__).resolve()
+    relative = Path("contracts") / "release_binding" / "v1" / "release_binding.json"
+    # Source checkout layout: repo/products/storage_rc1/storage_life/module.py.
+    # Fresh package layout: package_root/storage_life/module.py. Prefer the
+    # package-local contract, then retain the source-checkout location.
+    candidates = (module_path.parents[1] / relative, module_path.parents[3] / relative)
+    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
 
 
 def _json(path: Path) -> Any:
@@ -77,9 +77,26 @@ class KnowledgeReleaseConsumer:
             manifest = self._validated_manifest()
         except KnowledgeReleaseError as exc:
             return {"available": False, "status": "INVALID", "code": str(exc), "release_dir": str(self.root)}
+        binding_status = "NOT_PRESENT"
+        release_class = "UNCLASSIFIED"
+        qualification_state = "NOT_ASSERTED"
+        binding_path = _binding_path()
+        if binding_path.is_file():
+            try:
+                binding = _json(binding_path)
+                validate_release_binding(binding, release_manifest=manifest)
+            except (KnowledgeReleaseError, ReleaseBindingError, TypeError):
+                binding_status = "INVALID"
+            else:
+                binding_status = "PASS"
+                release_class = str(binding.get("release_class") or "UNCLASSIFIED")
+                qualification_state = str(binding.get("qualification_state") or "NOT_ASSERTED")
         return {
             "available": True,
             "status": "READY",
+            "binding_status": binding_status,
+            "release_class": release_class,
+            "qualification_state": qualification_state,
             "knowledge_release_version": manifest.get("knowledge_release_version", ""),
             "contract_version": manifest.get("contract_version", "knowledge-query/v1"),
             "object_count": manifest.get("object_count", 0),
@@ -118,6 +135,20 @@ class KnowledgeReleaseConsumer:
             entry = entries.get(name)
             if entry and entry.get("sha256") and _sha256(self.root / name) != entry["sha256"]:
                 raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_HASH_MISMATCH")
+        objects = _json(self.root / "knowledge_objects.json").get("objects", [])
+        evidences = _json(self.root / "evidences.json").get("evidences", [])
+        sources = _json(self.root / "source_references.json").get("source_references", [])
+        snapshot_material = {
+            "knowledge_release_version": manifest["knowledge_release_version"],
+            "objects": objects,
+            "evidences": evidences,
+            "source_references": sources,
+        }
+        snapshot_bytes = json.dumps(
+            snapshot_material, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if hashlib.sha256(snapshot_bytes).hexdigest() != manifest.get("snapshot_hash"):
+            raise KnowledgeReleaseError("KNOWLEDGE_RELEASE_SNAPSHOT_HASH_MISMATCH")
         return manifest
 
     def _payload(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
