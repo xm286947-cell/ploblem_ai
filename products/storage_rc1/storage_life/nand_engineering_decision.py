@@ -246,10 +246,27 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
     if device_type != "NAND Flash":
         raise ValueError(f"NAND_ENGINEERING_DECISION_REQUIRES_NAND:{device_type}")
 
+    part_number_model_id = str(payload.get("part_number_model_id") or "").strip()
+    available_part_models = [
+        item for item in (detail.get("orderable_part_candidates") or [])
+        if item.get("verify_status") != "rejected"
+    ]
+    if available_part_models and not part_number_model_id:
+        raise ValueError("PART_NUMBER_SELECTION_REQUIRED")
+    part_selection = None
+    if part_number_model_id:
+        part_selection = product_api.part_number_facts(device_id, part_number_model_id)
+        if not part_selection.get("can_consume"):
+            raise ValueError("PART_NUMBER_REVIEW_REQUIRED")
+
     mission = dict(payload.get("mission_profile") or {})
     workload = dict(payload.get("workload_profile") or {})
     profile = _profile(device_id, mission, workload)
-    facts = list(detail.get("device_facts") or [])
+    facts = list(
+        part_selection.get("confirmed_facts") if part_selection
+        else detail.get("device_facts") or []
+    )
+    part_number = (part_selection or {}).get("selected_part", {}).get("part_number")
     fact_evidence = sorted({
         str(ev.get("evidence_id"))
         for fact in facts for ev in (fact.get("evidence") or [])
@@ -295,6 +312,27 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             row for row in returned_rows
             if not row.get("storage_domain") or str(row.get("storage_domain")).upper() == domain
         ]
+        if part_number:
+            # A family/device-domain Knowledge hit is not proof that a rating
+            # applies to the selected orderable part. Require an explicit exact
+            # part reference before using it for a part-scoped engineering screen.
+            needle = re.sub(r"[^a-z0-9]", "", part_number.casefold())
+            part_rows = []
+            for row in scoped_rows:
+                declared = [
+                    row.get(key) for key in
+                    ("part_number", "part_numbers", "scope", "scope_values", "applicability")
+                ]
+                declared_text = " ".join(
+                    str(value) for value in declared if value is not None
+                )
+                text = " ".join(
+                    str(row.get(key) or "") for key in ("title", "summary", "content", "conditions")
+                )
+                haystack = re.sub(r"[^a-z0-9]", "", f"{declared_text} {text}".casefold())
+                if needle and needle in haystack:
+                    part_rows.append(row)
+            scoped_rows = part_rows
         # A release result without row-level evidence is not a consumable fact.
         rows = [row for row in scoped_rows if _evidence_ids(row)]
         domain_objects[domain] = rows
@@ -310,7 +348,9 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             )
         })
         domain_code = result.get("code")
-        if returned_rows and scoped_rows and not rows:
+        if part_number and returned_rows and not scoped_rows:
+            domain_code = "PART_NUMBER_APPLICABILITY_NOT_ESTABLISHED"
+        elif returned_rows and scoped_rows and not rows:
             domain_code = "FORMAL_EVIDENCE_REQUIRED"
         elif returned_rows and not scoped_rows:
             domain_code = "KNOWLEDGE_DOMAIN_SCOPE_MISMATCH"
@@ -357,9 +397,24 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "target_service_life_years": mission.get("target_service_life_years"),
             "required_retention_years": mission.get("required_retention_years"),
         },
-        "device": {key: device.get(key) for key in ("id", "device_type", "vendor", "model") if key in device},
+        "device": {
+            **{key: device.get(key) for key in ("id", "device_type", "vendor", "model") if key in device},
+            **({"orderable_part_number": part_number,
+                "part_number_model_id": part_number_model_id,
+                "part_number_review_status": (part_selection or {}).get("selected_part", {}).get("verify_status")}
+               if part_selection else {}),
+        },
         "source_facts": facts,
         "source_fact_evidence_refs": fact_evidence,
+        "source_fact_evidence": [
+            {
+                "candidate_id": fact.get("candidate_id"),
+                "canonical_name": fact.get("canonical_name"),
+                "scope": fact.get("scope"),
+                "evidence": fact.get("evidence") or [],
+            }
+            for fact in facts
+        ],
         "formal_knowledge": {
             "status": "READY" if formal_ready else "UNKNOWN",
             "release_identity": {
@@ -533,6 +588,7 @@ def build_nand_engineering_decision(device_id: str, payload: dict[str, Any]) -> 
             "formal_publish_performed": False,
             "provider_call_performed": False,
             "test_output_is_human_approval": False,
+            "selected_part_required_for_part_scoped_consumption": True,
         },
     }
 

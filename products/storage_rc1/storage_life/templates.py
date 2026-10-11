@@ -241,6 +241,39 @@ def build_read_plan(pages, device_type: str, vendor: str = ""):
                 nxt["fields"].update(f for f in group.get("fields") or [] if f in fields)
                 nxt["priority"] = min(nxt["priority"], rank + 20 + offset)
 
+    # NAND critical-field navigation reads *section labels* in the source pages;
+    # it never extracts a value, guesses a physical page, or fills a missing fact.
+    # Tables can occur long after the opening section headings (e.g. valid-block
+    # specifications in Bad Block Management), so ordinary rank/character budgets
+    # must not starve them of a chance to reach the Agent.
+    if dtype == "NAND Flash":
+        for page, text, method in page_map.values():
+            lower = text.casefold()
+            critical = set()
+            if "minimum number of valid blocks" in lower or "valid blocks (nvb)" in lower:
+                critical.add("minimum_valid_blocks")
+            if ("array organization" in lower[:1200] and
+                    ("each block has" in lower or "1 block =" in lower)):
+                critical.update(("pages_per_block", "page_size", "block_count"))
+            if "e_fail" in lower or "erase failure" in lower:
+                critical.add("erase_fail")
+            if "p_fail" in lower or "program failure" in lower:
+                critical.add("program_fail")
+            if "status register bit descriptions" in lower or "8-bit status register" in lower:
+                critical.add("status_register")
+            if "ecc is enabled by default" in lower:
+                critical.add("internal_ecc")
+            if "no bit errors were detected" in lower or "corrected 1-4 bits" in lower:
+                critical.add("ecc_status")
+            if not critical:
+                continue
+            entry = planned.setdefault(
+                page, {"page": page, "method": method, "sections": [], "fields": set(), "priority": 999}
+            )
+            entry["sections"].append("critical_source_section_navigation")
+            entry["fields"].update(critical & set(fields))
+            entry["priority"] = min(entry["priority"], -50)
+
     # Always keep the first six text pages as overview/identity evidence, but target only overview-style fields.
     overview_fields = [f for f in ("capacity", "cell_type", "nand_type", "pe_cycles", "retention", "life_time_a", "life_time_b", "pre_eol", "smart_health") if f in fields]
     for page in sorted(page_map)[:6]:
