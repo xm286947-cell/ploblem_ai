@@ -12,3 +12,7 @@
 .major-production .major-alternative .case-card{margin:0;border:0;box-shadow:none}
 .major-production [data-major-state]{white-space:normal;text-align:center}
 @media(max-width:640px){.major-production .major-journey{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.major-production .major-journey a{text-align:center}}
+
+.major-production .major-recovery summary{font-size:15px;font-weight:650;padding:15px 18px;cursor:pointer}
+.major-production .major-recovery[open] summary{border-bottom:1px solid var(--case-line,#e2e8f0)}
+.major-production .major-recovery>p{padding:0 18px}
