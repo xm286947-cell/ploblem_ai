@@ -105,7 +105,7 @@ ai:
   timeout_seconds: 120
   max_retries: 2
 quality_issue_agents: {}
-embedding:
+# Optional Repeat M8.4 recommendation remains disabled unless an approved\n# external model config explicitly enables it. Human Decision remains final.\nrepeat_decision_ai:\n  enabled: false\nembedding:
   enabled: false
   provider: local_hash
   model: local-hash-v1
