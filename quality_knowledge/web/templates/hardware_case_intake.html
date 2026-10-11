@@ -3,11 +3,11 @@
 {% block brand_subtitle %}Hardware Knowledge{% endblock %}
 {% block shell_product %}硬件案例库{% endblock %}
 {% block page_styles %}<link rel="stylesheet" href="/p0/static/hardware_case.css?v=hc-import-v1">{% endblock %}
-{% block breadcrumb %}知识导入{% endblock %}
+{% block breadcrumb %}知识维护 / 上传 Word{% endblock %}
 {% block body %}
 {% include "_hardware_case_nav.html" %}
 <main class="hc-page" data-hc-intake data-api="{{ hardware_api_prefix }}">
-  <section class="hc-hero"><div><span class="hc-kicker">HARDWARE CASE · KNOWLEDGE IMPORT</span><h1>知识导入</h1><p>上传 Word，形成 Case Candidate、原文 Evidence 与双树建议挂接，再由人工确认和发布。</p></div></section>
+  <section class="hc-hero"><div><span class="hc-kicker">HARDWARE CASE · KNOWLEDGE IMPORT</span><h1>知识维护 · 上传 Word</h1><p>第一步上传 Word；处理后在本页查看候选知识、原文证据和建议挂接，最后进入人工确认。候选不会自动发布。</p></div></section>
   <section class="hc-card">
     <div class="hc-card-head"><div><h2>1 · 基础树</h2><p>电路 / 特性树和物料 / 器件树各自导入并 Apply 后，才可处理 Word。</p></div><a class="hc-button secondary" href="/p0/hardware-cases/base-data">基础数据管理</a></div>
     <p data-intake-tree-status>正在检查 ACTIVE Version…</p>
