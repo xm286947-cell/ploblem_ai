@@ -103,7 +103,10 @@ def _page(browser, *, case_id=None, batch_id=None, scenario="normal"):
             revision_no:1});
         }
         if(path.includes('/events/')&&path.endsWith('/publish')&&method==='POST'){
-          M.published=true;return reply({publication_status:'PUBLISHED',status:'ACTIVE',case_id:CASE});
+          M.published=true;
+          if(scenario==='publish_response_lost')
+            throw new TypeError('模拟响应丢失；服务端可能已经提交');
+          return reply({publication_status:'PUBLISHED',status:'ACTIVE',case_id:CASE});
         }
         return reply({detail:'UNEXPECTED_MOCK_ROUTE:'+path},404);
       };
@@ -180,5 +183,26 @@ def test_multi_event_requires_explicit_event_selection_before_analysis():
         page.locator('[data-major-analyze]').click()
         assert page.evaluate('window.__mock.attempts')==0
         assert page.locator('[data-major-publish]').is_disabled()
+        assert not errors,errors
+        context.close();browser.close()
+
+
+def test_uncertain_publish_response_cannot_be_blindly_retried():
+    with sync_playwright() as pw:
+        browser=pw.chromium.launch(headless=True)
+        page,context,errors=_page(browser,case_id=CASE,scenario="publish_response_lost")
+        page.wait_for_function("document.querySelector('[data-major-identity]')?.textContent.includes('KCASE-UE-635')")
+        page.locator('[data-major-analyze]').click()
+        page.wait_for_function("document.querySelectorAll('[data-entry]').length===4")
+        for index in range(4):
+            page.locator(f'[data-entry="ENT-{index}"]').click()
+            page.wait_for_function(f"window.__mock.confirmed.includes('ENT-{index}')")
+        page.wait_for_function("document.querySelector('[data-major-publish]').disabled===false")
+        page.locator('[data-major-publish]').click()
+        page.wait_for_function("document.querySelector('[data-major-publish]')?.textContent.includes('发布状态待核实')")
+        assert page.locator('[data-major-publish]').is_disabled()
+        assert '避免重复发布' in page.locator('[data-major-message]').inner_text()
+        attempted=page.evaluate("window.__mock.calls.filter(c=>c.path.endsWith('/publish') && c.method==='POST').length")
+        assert attempted==1,attempted
         assert not errors,errors
         context.close();browser.close()
