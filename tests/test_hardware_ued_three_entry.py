@@ -50,6 +50,7 @@ def test_three_primary_entries_on_real_product_templates(tmp_path: Path):
         assert 'href="/p0/hardware-cases/tree' in html, route
         assert 'href="/p0/hardware-cases/intake"' in html, route
         assert 'hc-platform-drawer' in html, route
+        assert 'class="p0-page hardware-ued-page"' in html, route
         assert 'hardware_case_ued.css' in html, route
         assert 'hardware_case_ued.js' in html, route
 
@@ -89,6 +90,7 @@ def test_legacy_urls_still_exist_and_other_platform_nav_unchanged(tmp_path: Path
     platform = client.get("/p0/issues").text
     assert 'href="/p0/hardware-cases">硬件案例库</a>' in platform
     assert 'hc-platform-drawer' not in platform
+    assert 'hardware-ued-page' not in platform
     assert 'href="/p0/batch-analysis"' in platform
 
 
@@ -99,6 +101,8 @@ def test_ued_assets_and_query_handoff(tmp_path: Path):
     formal_js = client.get("/p0/static/hardware_case_knowledge_consumption.js")
     assert css.status_code == js.status_code == formal_js.status_code == 200
     assert "@media(max-width:700px)" in css.text
+    assert ".hardware-ued-page .app-main" in css.text
+    assert ".hardware-ued-page .hc-platform-drawer[open]>.main-nav" in css.text
     assert "encodeURIComponent" in js.text
     assert "initialText = new URLSearchParams(location.search).get('q')" in formal_js.text
     # No second Provider API, review action, or publish side effect in the UED helper.
