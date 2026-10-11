@@ -178,6 +178,11 @@ def compute_coverage(
         if field not in applicable_set:
             state = NOT_APPLICABLE
             reason = "outside_device_profile"
+        elif fact.get("scope_conflict"):
+            # A Product Brief describes multiple part numbers with different
+            # values. Source-backed rows are reviewable, not a family-wide fact.
+            state = UNRESOLVED
+            reason = "part_number_variants_require_scope"
         elif _valid_found(fact, pages):
             state = FOUND
             reason = "value_and_evidence_valid"
