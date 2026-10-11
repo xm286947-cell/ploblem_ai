@@ -35,12 +35,17 @@
     INTAKED: '已导入 · 待分析',
     PUBLISHED: '已发布'
   };
+  const DISPLAY_STATUS = {
+    ACTIVE: '已生效', PREVIEW: '待确认', COMPLETED: '已完成',
+    PARTIAL: '部分完成', FAILED: '失败', IMPORTABLE: '可导入',
+    BLOCKED: '不可导入', EXACT: '精确匹配'
+  };
   const setStage = (code, extra) => {
     const element = root.querySelector('[data-major-state]');
     if (!element) return;
     element.dataset.stageCode = code;
     element.textContent = STAGE_LABELS[code] || code;
-    if (extra) element.textContent += ' · ' + extra;
+    if (extra) element.textContent += ' · ' + (DISPLAY_STATUS[extra] || extra);
   };
   const message = root.querySelector('[data-major-message]');
   const say = (text, error) => {
@@ -218,9 +223,9 @@
         PRECHECK_LABELS[code] || code).join('；');
       return '<tr><td>' + esc(row.excel_row) + '</td><td>' +
         esc((row.itrs || []).join(' / ')) + '</td><td>' + esc(row.title) +
-        '</td><td>' + esc(row.completeness && row.completeness.importable ? 'IMPORTABLE' : 'BLOCKED') +
+        '</td><td>' + esc(row.completeness && row.completeness.importable ? DISPLAY_STATUS.IMPORTABLE : DISPLAY_STATUS.BLOCKED) +
         '</td><td>' + esc(match.report_filename || '') + '</td><td>' +
-        esc(match.match_status || match.match_type || 'NOT_FOUND') +
+        esc(DISPLAY_STATUS[match.match_status || match.match_type] || match.match_status || match.match_type || '未匹配') +
         (resolution.standard_itr ? ' · Event ' + esc(resolution.standard_itr) : '') +
         '</td><td>' + esc(problems || '—') + '</td></tr>';
     }, '<tr><th>Excel 行</th><th>ITR</th><th>标题</th><th>导入条件</th>' +
@@ -259,14 +264,15 @@
   const recoveryPanel = document.createElement('section');
   recoveryPanel.className = 'case-card';
   recoveryPanel.innerHTML =
-    '<h2>继续上次工作（已有批次或案例）</h2><p>刷新后从服务端恢复已保存的批次、案例和人工审核。' +
+    '<details class="major-recovery" data-major-recovery><summary>继续上次工作（已有批次或案例）</summary>' +
+    '<p>刷新后从服务端恢复已保存的批次、案例和人工审核。' +
     '文件选择不能由浏览器自动恢复；未上传的文件需重新选择。</p>' +
     '<form data-major-resume class="major-form">' +
     '<label>Case ID <input name="case_id" placeholder="KCASE-..."></label>' +
     '<label>Batch ID <input name="batch_id" placeholder="MIMP-..."></label>' +
     '<button type="submit" class="case-button secondary">恢复已有记录（不重新导入）</button></form>' +
     '<button type="button" class="case-button secondary" data-major-recent>查看最近已保存操作</button>' +
-    '<div data-major-recent-list class="major-candidates"></div>';
+    '<div data-major-recent-list class="major-candidates"></div></details>';
   recoveryPanel.appendChild(resumeStatus);
   root.querySelector('[data-major-single-source]').after(recoveryPanel);
   const resumeForm = recoveryPanel.querySelector('[data-major-resume]');
@@ -522,6 +528,8 @@
   async function resumeOnLoad() {
     restoreDraft();
     const previous = loadContext();
+    const details = recoveryPanel.querySelector('[data-major-recovery]');
+    if (details && (previous.caseId || previous.batchId)) details.open = true;
     resumeForm.elements.namedItem('case_id').value = previous.caseId || '';
     resumeForm.elements.namedItem('batch_id').value = previous.batchId || '';
     if (!previous.caseId && !previous.batchId) {
