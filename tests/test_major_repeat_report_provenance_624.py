@@ -112,3 +112,34 @@ def test_source_ref_fallback_without_raw_source_document(tmp_path):
     assert len(report["evidence"]) == 1
     assert report["evidence"][0]["evidence"]["source_id"] == "ITR-SYN"
     assert "ITR-SYN" in markdown
+
+
+def test_generic_legacy_report_contract_is_additively_unchanged(tmp_path):
+    from presentation.construction.report_builder import ReportBuilder
+    report = ReportBuilder().build({
+        "metadata": {"query_id": "RQ-LEGACY-624"},
+        "final_decision": "INSUFFICIENT_EVIDENCE",
+        "candidates": [],
+    })
+    decision = report.to_dict()["repeat_decision"]
+    assert "recommendation_status" not in decision
+    assert "decision_source" not in decision
+    assert "confidence_source" not in decision
+
+
+def test_m84_off_multiple_cases_stay_auxiliary(tmp_path):
+    candidates = [
+        {
+            "case_id": f"HCASE-SYN-{index}",
+            "rank": index,
+            "ai_recommendation": {"status": "DISABLED"},
+            "agent_similarity": {"analysis": {"confidence": 0.64}},
+        }
+        for index in (1, 2)
+    ]
+    report, markdown = _render(tmp_path, candidates)
+    assert report["repeat_decision"]["recommendation_status"] == "DISABLED"
+    assert "## 8. 其他候选案例" in markdown
+    assert "辅助分析置信度" in markdown
+    assert "未执行 M8.4（人工待确认）" in markdown
+    assert "## 1. AI初步判断" not in markdown
