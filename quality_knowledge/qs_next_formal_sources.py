@@ -123,7 +123,7 @@ def _parse_evidence(
         if any(name not in facts for name in names):
             raise FormalSourceError("EVIDENCE_SUPPORTS_UNKNOWN_FACT")
         try:
-            evidence_kind = EvidenceKind(row.get("evidence_kind", "FACT"))
+            evidence_kind = EvidenceKind(row.get("evidence_kind"))
         except (ValueError, TypeError):
             raise FormalSourceError("INVALID_EVIDENCE_KIND") from None
         confidence = row.get("confidence")
