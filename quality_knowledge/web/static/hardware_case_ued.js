@@ -2,6 +2,15 @@
 (() => {
   const active = document.querySelector('[data-hc-ued-primary]');
   if (!active) return;
+  const returnLink = document.querySelector('[data-hc-ued-return-results]');
+  if (returnLink && document.referrer) {
+    try {
+      const previous = new URL(document.referrer);
+      if (previous.origin === location.origin && previous.pathname === '/p0/hardware-cases/search') {
+        returnLink.href = previous.pathname + previous.search;
+      }
+    } catch (_) { /* Direct detail entry keeps a safe default link. */ }
+  }
   const source = document.querySelector('[data-search-query]');
   const formalInput = document.querySelector('[data-knowledge-text]');
   const casesLink = document.querySelector('[data-hc-ued-back-query]');
