@@ -91,6 +91,7 @@ def create_p0_app(
     testability_token: str | None = None,
     testability_state_root: str | Path | None = None,
     legacy_quality_issue_db_path: str | Path | None = None,
+    repeat_runtime_data_root: str | Path | None = None,
 ) -> FastAPI:
     """Build the shared Web host with explicit domain composition.
 
@@ -450,6 +451,8 @@ def create_p0_app(
                 repeat_db_path=repeat_db,
                 project_root=root,
                 case_service=historical_case_service,
+                runtime_model_config=runtime_model_config,
+                runtime_data_root=repeat_runtime_data_root,
             )
         app.state.repeat_risk_service = repeat_web
     else:

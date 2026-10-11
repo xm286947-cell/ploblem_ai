@@ -165,20 +165,26 @@ class RepeatAgentAnalysisService:
         model_config_path: str | Path | None = None,
         runtime: ConfiguredAgentRuntime | None = None,
         report_root: str | Path | None = None,
+        runtime_data_root: str | Path | None = None,
         decision_enabled: bool | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.model_config_path = model_config_path
         self.runtime = runtime
+        self.runtime_data_root = (
+            Path(runtime_data_root).expanduser().resolve()
+            if runtime_data_root is not None
+            else (self.project_root / "data").resolve()
+        )
         self._agents_loaded = False
         self._resolved: dict[str, Any] = {}
         self.report_root = (
             Path(report_root)
             if report_root is not None
-            else self.project_root / "data/repeat_reports"
+            else self.runtime_data_root / "repeat_reports"
         )
         if not self.report_root.is_absolute():
-            self.report_root = self.project_root / self.report_root
+            self.report_root = self.runtime_data_root / self.report_root
         self.report_root = self.report_root.resolve()
         self.decision_enabled = (
             self._legacy_decision_enabled()
@@ -187,12 +193,22 @@ class RepeatAgentAnalysisService:
         )
 
     def _legacy_decision_enabled(self) -> bool:
-        path = self.project_root / "config/model.yaml"
+        """Resolve the optional M8.4 switch without coupling it to credentials.
+
+        An explicitly supplied model config is authoritative.  Otherwise keep
+        the historical project config behavior.  The packaged safe config has
+        the flag disabled by default, so immutable Candidates remain fail-safe.
+        """
+        path = (
+            Path(self.model_config_path).expanduser().resolve()
+            if self.model_config_path is not None
+            else self.project_root / "config/model.yaml"
+        )
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception:
             return False
-        return bool((raw.get("repeat_decision_ai") or {}).get("enabled", False))
+        return (raw.get("repeat_decision_ai") or {}).get("enabled", False) is True
 
     def _solution_policy(self) -> tuple[int, float]:
         """Reuse the historical M8.3 candidate selection policy unchanged."""
@@ -215,20 +231,34 @@ class RepeatAgentAnalysisService:
 
     def _ensure_runtime(self) -> ConfiguredAgentRuntime:
         if self.runtime is None:
-            model_config = resolve_major_runtime_model_config(
+            model_config_path = resolve_major_runtime_model_config(
                 self.project_root,
                 self.model_config_path,
             )
+            model_config = yaml.safe_load(
+                model_config_path.read_text(encoding="utf-8")
+            ) or {}
+            if not isinstance(model_config, dict):
+                raise ValueError("MAJOR_MODEL_CONFIG_INVALID")
+            # This application-level opt-in shares the approved external
+            # config file with Runtime model profiles, but is not itself a
+            # provider profile. Preserve strict validation for every other
+            # field by removing only this known switch before loading Runtime.
+            model_profiles = {
+                key: value
+                for key, value in model_config.items()
+                if key != "repeat_decision_ai"
+            }
             loader = AgentConfigLoader(
                 root=self.project_root,
-                model_profiles=model_config,
+                model_profiles=model_profiles,
                 schemas={
                     "RepeatSimilarityDTO": RepeatSimilarityDTO,
                     "RepeatSolutionDTO": RepeatSolutionDTO,
                     "RepeatDecisionDTO": RepeatDecisionDTO,
                 },
             )
-            runtime_db = self.project_root / "data/runtime/repeat_analysis.sqlite3"
+            runtime_db = self.runtime_data_root / "runtime/repeat_analysis.sqlite3"
             runtime_db.parent.mkdir(parents=True, exist_ok=True)
             self.runtime = ConfiguredAgentRuntime(
                 SqliteTaskStore(runtime_db),

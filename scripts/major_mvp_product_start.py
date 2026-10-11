@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 def build_app(data_root: str | Path):
     """Initialize candidate-owned data and compose the existing product host."""
     from quality_knowledge.p0.initializer import P0Initializer
+    from quality_knowledge.runtime_model_config import resolve_major_runtime_model_config
     from quality_knowledge.web.p0_app import create_p0_app
 
     root = Path(data_root).expanduser().resolve()
@@ -43,6 +44,12 @@ def build_app(data_root: str | Path):
         initializer.initialize(p0_db)
 
     major_db = major_root / "db" / "major_case.db"
+    configured_model_path = os.getenv("MAJOR_MODEL_CONFIG", "").strip()
+    runtime_model_config = (
+        resolve_major_runtime_model_config(ROOT, configured_model_path)
+        if configured_model_path
+        else None
+    )
     return create_p0_app(
         p0_db,
         project_root=ROOT,
@@ -50,6 +57,8 @@ def build_app(data_root: str | Path):
         major_attachment_root=major_root / "attachments",
         major_artifact_root=historical_root,
         portrait_db_path=quality_root / "db" / "portrait.db",
+        repeat_runtime_data_root=root,
+        runtime_model_config=runtime_model_config,
         enabled_domains={"QUALITY_ISSUE", "REPEAT_RISK"},
     )
 

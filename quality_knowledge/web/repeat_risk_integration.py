@@ -321,6 +321,7 @@ class RepeatWebFacade:
         project_root: str | Path,
         case_service: HistoricalCaseConsumerService | None = None,
         runtime_model_config: str | Path | None = None,
+        runtime_data_root: str | Path | None = None,
     ) -> "RepeatWebFacade":
         repeat_repository = RepeatQueryTraceRepository(repeat_db_path)
         if case_service is None:
@@ -335,7 +336,9 @@ class RepeatWebFacade:
             repeat_repository=repeat_repository,
             case_service=case_service,
             agent_analysis=RepeatAgentAnalysisService(
-                project_root, model_config_path=runtime_model_config,
+                project_root,
+                model_config_path=runtime_model_config,
+                runtime_data_root=runtime_data_root,
             ),
         )
 
