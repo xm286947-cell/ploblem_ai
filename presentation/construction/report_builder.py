@@ -49,6 +49,19 @@ class ReportBuilder:
             )
         else:
             notice = "AI初步判断，仅用于辅助分析，最终是否重复需人工确认。"
+        provenance = (
+            {
+                "recommendation_status": m84_status,
+                "confidence_source": str(metadata.get("confidence_source") or "UNSPECIFIED"),
+                "decision_source": (
+                    "M8.4_RECOMMENDATION" if m84_status == "SUCCESS"
+                    else "NOT_EXECUTED" if m84_status == "DISABLED"
+                    else "UNAVAILABLE" if m84_status in {"FAILED", "UNAVAILABLE"}
+                    else "LEGACY_ANALYSIS"
+                ),
+            }
+            if m84_status else {}
+        )
         return Report(
             metadata=metadata,
             summary={
@@ -62,14 +75,7 @@ class ReportBuilder:
                 "decision": result.final_decision,
                 "confidence": overall_confidence,
                 "best_case": dict(result.best_case),
-                "recommendation_status": m84_status or "UNSPECIFIED",
-                "confidence_source": str(metadata.get("confidence_source") or "UNSPECIFIED"),
-                "decision_source": (
-                    "M8.4_RECOMMENDATION" if m84_status == "SUCCESS"
-                    else "NOT_EXECUTED" if m84_status == "DISABLED"
-                    else "UNAVAILABLE" if m84_status in {"FAILED", "UNAVAILABLE"}
-                    else "LEGACY_ANALYSIS"
-                ),
+                **provenance,
                 "notice": notice,
             },
             recommended_case=self._recommended_case(best_raw),
