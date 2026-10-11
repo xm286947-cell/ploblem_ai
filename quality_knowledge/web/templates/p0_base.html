@@ -10,11 +10,18 @@
   <link rel="stylesheet" href="/p0/static/p0_ued_bridge.css?v=p1-rc4">
   <link rel="stylesheet" href="/p0/static/overall_navigation.css?v={{ overall_navigation_asset_version|default('r2-w3-v1') }}">
 </head>
-<body class="p0-page">
+{% set major_focus = request.url.path.startswith('/p0/major-production') and not request.app.state.mature_quality_host|default(false) %}
+<body class="p0-page{% if major_focus %} major-focus-shell{% endif %}">
 <div class="app-shell">
   <aside class="side-nav" aria-label="主导航">
     <a class="brand" href="{{ '/issues' if request.app.state.mature_quality_host|default(false) else ('/p0/overall' if request.app.state.overall_shell_enabled|default(false) else '/p0/issues') }}"><strong>INOVANCE</strong><small>{% block brand_subtitle %}Quality Issue Analysis{% endblock %}</small></a>
-    <nav class="main-nav">
+    <nav class="main-nav" aria-label="工作台导航">
+      {% if major_focus %}
+      <a class="nav-item active" aria-current="page" href="/p0/major-production">重大问题生产</a>
+      <a class="nav-item" href="/p0/cases">重大问题案例库</a>
+      <a class="nav-item" href="{{ '/p0/overall' if request.app.state.overall_shell_enabled|default(false) else '/p0/issues' }}">返回工作台</a>
+      <details class="major-other-workbenches"><summary>其他工作台（展开）</summary><div class="major-other-links">
+      {% endif %}
       {% if request.app.state.mature_quality_host|default(false) %}
       <a class="nav-item {% if request.url.path.startswith('/issues') %}active{% endif %}" href="/issues">问题工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/analysis') %}active{% endif %}" href="/analysis">问题分析</a>
@@ -50,8 +57,10 @@
       <a class="nav-item {% if request.url.path.startswith('/p0/itr-resolution') %}active{% endif %}" href="/p0/itr-resolution">彻底解决工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/software-assessment') %}active{% endif %}" href="/p0/software-assessment">软件考核工作台</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/missed-test-analysis') %}active{% endif %}" href="/p0/missed-test-analysis">漏测分析</a>
+      {% if not major_focus %}
       <a class="nav-item {% if request.url.path.startswith('/p0/cases') %}active{% endif %}" href="/p0/cases">重大问题案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/major-production') %}active{% endif %}" href="/p0/major-production">重大问题知识生产</a>
+      {% endif %}
       <a class="nav-item {% if request.url.path.startswith('/p0/hardware-cases') %}active{% endif %}" href="/p0/hardware-cases">硬件案例库</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/batch-analysis') %}active{% endif %}" href="/p0/batch-analysis">批量 AI 分析</a>
       <a class="nav-item {% if request.url.path.startswith('/p0/insights') %}active{% endif %}" href="/p0/insights">质量洞察</a>
@@ -71,7 +80,9 @@
       <a class="nav-item {% if request.url.path.startswith('/p0/settings') %}active{% endif %}" href="/p0/settings">字段映射与产品</a>
       <a class="nav-item {% if request.url.path.startswith('/p1/risk-assessment') %}active{% endif %}" href="/p1/risk-assessment">正向风险评估</a>
       {% endif %}
+      {% if major_focus %}</div></details>{% endif %}
     </nav>
+    {% if not major_focus %}
     <div class="side-foot">
       {% if request.app.state.mature_quality_host|default(false) %}
       <a href="/analysis">批量 AI 分析</a><a href="/export">数据导出</a>
@@ -79,10 +90,12 @@
       <a href="/p0/batch-analysis">批量 AI 分析</a><a href="/p0/data-intake">导入数据</a>
       {% endif %}
     </div>
+    {% endif %}
   </aside>
   <div class="app-main">
     <header class="top-bar">
       <div class="breadcrumb">{% block shell_product %}质量问题分析{% endblock %} <span>/</span> <b>{% block breadcrumb %}工作台{% endblock %}</b></div>
+      {% if not major_focus %}
       <div class="top-actions">
         {% if request.app.state.mature_quality_host|default(false) %}
         <a href="/import">导入数据</a><a href="/settings/scenario-taxonomy">场景配置</a>
@@ -90,6 +103,7 @@
         <a href="/p0/data-intake">导入数据</a><a href="{{ '/p0/overall/areas/management' if request.app.state.overall_shell_enabled|default(false) else '/p0/settings' }}">系统配置</a>
         {% endif %}
       </div>
+      {% endif %}
     </header>
     <main class="content">{% block body %}{% endblock %}</main>
   </div>

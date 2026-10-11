@@ -1,27 +1,30 @@
 {% extends "p0_base.html" %}
 {% block title %}{{page_title}}{% endblock %}
-{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_cases.css?v=major-production-progress599-v1"><link rel="stylesheet" href="/p0/static/major_production.css?v=major-production-v1">{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="/p0/static/p0_cases.css?v=major-production-progress599-v1"><link rel="stylesheet" href="/p0/static/major_production.css?v=major-production-ue-focus-v2">{% endblock %}
 {% block breadcrumb %}重大问题知识生产{% endblock %}
 {% block body %}
-<main class="case-page major-production" data-major-production data-api-prefix="{{api_prefix}}">
-  <header class="case-head"><div><span class="case-kicker">MAJOR KNOWLEDGE PRODUCTION</span><h1>从 Major Source 到正式 Historical Case</h1><p>AI 只生成待审核候选；人工确认修订后才可发布。</p></div><a class="case-button secondary" href="/p0/cases">查看案例库</a></header>
-  <section class="case-card"><div class="case-card-head"><div><h2>1A. Excel 批量导入</h2><p>复用既有 ExcelParser + field_mapping：Upload → Preview / Mapping → Confirm → Import。</p></div><a class="case-button secondary" href="{{api_prefix}}/major-production/excel/template">下载正式 Excel 模板</a></div>
+<div class="case-page major-production" data-major-production data-api-prefix="{{api_prefix}}">
+  <header class="case-head"><div><span class="case-kicker">重大问题 · 知识生产</span><h1>导入问题、AI 分析、审核发布</h1><p>默认从 Excel 开始，支持同时关联复盘 PDF。AI 只生成候选，必须人工逐项确认后才能发布。</p></div><a class="case-button secondary" href="/p0/cases">查看案例库</a></header>
+  <nav class="major-journey" aria-label="重大问题业务步骤"><a href="#major-excel">① 导入与预检</a><a href="#major-excel">② 确认导入</a><a href="#major-workflow">③ AI 分析与审核</a><a href="#major-workflow">④ 发布与回查</a></nav>
+  <section id="major-excel" class="case-card"><div class="case-card-head"><div><h2>第一步 · 导入 Excel 与复盘材料</h2><p>上传重大问题维护表，可同时选择 PDF/DOCX 复盘材料；先预览及检查字段匹配，确认后才写入案例。单份材料导入见下方“其他导入方式”。</p></div><a class="case-button secondary" href="{{api_prefix}}/major-production/excel/template">下载正式 Excel 模板</a></div>
     <form data-major-excel class="major-form">
       <label class="major-file">重大问题维护表<input name="file" type="file" accept=".xls,.xlsx,.xlsm" required></label>
-      <label>Group Code<input name="group_code" value="MAJOR" required></label>
+      <label>问题组代码<input name="group_code" value="MAJOR" required></label>
       <label>领域<input name="domain" value="QUALITY"></label>
       <label class="major-file">复盘材料（可选，多选）<input name="materials" type="file" accept=".pdf,.docx" multiple></label>
-      <button class="case-button primary" type="submit">预检并查看 Mapping</button>
+      <button class="case-button primary" type="submit">上传并预览（不立即导入）</button>
     </form>
     <p data-major-excel-status class="major-message" role="status" aria-live="polite">请选择 Excel 与复盘材料后开始预检。</p>
     <div data-major-excel-preview hidden class="major-candidates"></div>
   </section>
-  <section class="case-card"><div class="case-card-head"><div><h2>1B. 单份 Major Source Intake 与 ITR 身份</h2><p>保留现有 PDF / DOCX / DOC 入口，建立 Event、ITR 与版本化 Source。</p></div></div>
-    <form data-major-intake class="major-form"><label>案例标题<input name="title" required></label><label>Group Code<input name="group_code" value="MAJOR" required></label><label>Standard ITR<input name="standard_itr" required></label><label>领域<input name="domain" value="QUALITY"></label><label class="major-file">Major Source（PDF / DOCX / DOC）<input name="file" type="file" accept=".pdf,.docx,.doc" required></label><button class="case-button primary" type="submit">导入并建立候选上下文</button></form>
-    <p data-major-source-status class="major-message" role="status" aria-live="polite"></p>
-  </section>
-  <section class="case-card" data-major-workflow hidden><div class="case-card-head"><div><h2>2. AI Analysis → Human Review → Publish</h2><p data-major-identity></p></div><span class="case-status" data-major-state>INTAKED</span></div><div class="major-candidates" data-major-provenance hidden aria-live="polite"></div><div class="major-actions"><button class="case-button primary" data-major-analyze>运行 AI 分析</button><button class="case-button secondary" data-major-publish disabled>正式发布</button></div><div data-major-candidates class="major-candidates"></div></section>
+  <details class="major-alternative" data-major-single-source><summary>其他导入方式 · 只有单份复盘材料、没有 Excel 时使用</summary>
+    <section class="case-card"><div class="case-card-head"><div><h2>单份 PDF / Word 导入</h2><p>没有维护表时，填写案例身份并上传一份复盘材料。此操作不会自动运行 AI；原有 Case、Event 与 Source 版本机制保持不变。</p></div></div>
+      <form data-major-intake class="major-form"><label>案例标题<input name="title" required></label><label>问题组代码<input name="group_code" value="MAJOR" required></label><label>标准 ITR 编号<input name="standard_itr" required></label><label>领域<input name="domain" value="QUALITY"></label><label class="major-file">复盘文件（PDF / Word）<input name="file" type="file" accept=".pdf,.docx,.doc" required></label><button class="case-button primary" type="submit">导入单份来源</button></form>
+      <p data-major-source-status class="major-message" role="status" aria-live="polite"></p>
+    </section>
+  </details>
+  <section id="major-workflow" class="case-card" data-major-workflow hidden><div class="case-card-head"><div><h2>第三、四步 · AI 分析 → 人工审核 → 正式发布</h2><p data-major-identity></p></div><span class="case-status" data-major-state>已导入</span></div><div class="major-candidates" data-major-provenance hidden aria-live="polite"></div><div class="major-actions"><button class="case-button primary" data-major-analyze>运行 AI 分析</button><button class="case-button secondary" data-major-publish disabled>正式发布</button></div><div data-major-candidates class="major-candidates"></div></section>
   <p data-major-message class="major-message" role="status"></p>
-</main>
+</div>
 {% endblock %}
-{% block page_scripts %}<script>window.P0_MAJOR_API={{api_prefix|tojson}};</script><script src="/p0/static/major_production.js?v=major-batch607-v1-major-ai611-v1" defer></script>{% endblock %}
+{% block page_scripts %}<script>window.P0_MAJOR_API={{api_prefix|tojson}};</script><script src="/p0/static/major_production.js?v=major-batch607-v1-major-ai611-v1-ue-focus-v2" defer></script>{% endblock %}
